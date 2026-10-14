@@ -266,9 +266,9 @@ decisions:
       - "Transcription in the consuming repo's skills: a skill can't run a GPU model by itself."
   - id: DR-0105
     title: Meetings come from the calendar, keyed by the event's own id
-    status: proposed
+    status: decided
     at: "2026-10-14"
-    by: Claude
+    by: Soma Osvay
     cost: medium
     sources: ["#28"]
     description: The calendar source's profile turns events into the ledger's meeting ops, keyed by the event's own id (its iCalUId, or the provider's id where there is none). A meeting that moves, is renamed or is cancelled updates the same meeting, so its prep, points and outcomes stay with it. Recordings and chats still link to meetings by time.
@@ -280,9 +280,9 @@ decisions:
       - "Matching meetings on start time plus subject: a moved or renamed meeting would split in two."
   - id: DR-0106
     title: Each stream's status file is rendered from the ledger
-    status: proposed
+    status: decided
     at: "2026-10-14"
-    by: Claude
+    by: Soma Osvay
     cost: one-way
     sources: ["#28"]
     description: Streams live in the ledger. Docket renders a status file per stream into the consuming repo, at a path set per stream in vault.yaml (optional), with frontmatter where, next, deadline and updated. It works the way the people directory and the glossary are rendered from the entities after import, so the ledger stays the one place a stream's state is kept.
@@ -292,9 +292,9 @@ decisions:
       - Docket writes the file but commits only the vault's paths (DR-0102), so a status file outside the vault is committed by the user's own git flow.
   - id: DR-0107
     title: Personal source notes live in the vault; the plugin's source skills stay generic
-    status: proposed
+    status: decided
     at: "2026-10-14"
-    by: Claude
+    by: Soma Osvay
     cost: one-way
     sources: ["#28"]
     description: "Each source skill reads sources/<source>.md in the vault before it harvests: the user's own route, quirks and gotchas for that source. It appends what it learned there. The plugin's skills stay generic and public, and what is particular to one user stays private with their data."
