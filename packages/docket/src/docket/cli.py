@@ -244,7 +244,9 @@ def staging_promote(source: SourceOption = None, vault: VaultOption = None) -> N
         typer.echo(f"held      {held.key[:12]} ({held.source}): {held.problem}")
     if result.dropped:
         typer.echo("dropped   " + ", ".join(f"{reason} {n}" for reason, n in sorted(result.dropped.items())))
-    if not result.runs and not result.held:
+    if result.on_hold:
+        typer.echo(f"on hold   {result.on_hold} (left in staging until the hold is released)")
+    if not result.runs and not result.held and not result.on_hold:
         typer.echo("nothing ready")
 
 
