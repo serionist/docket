@@ -179,3 +179,61 @@ def test_the_harness_step_refuses_hooks_without_the_executable_bit(repo: Path, g
     git(repo, "update-index", "--chmod=+x", ".githooks/pre-push")
     out = gate.step_harness(gate.Ctx(root=repo, lane="quick", ci=False, base=None, pr=None))
     assert not any("executable bit" in d for d in out.detail)
+
+
+def test_the_board_helper_retries_github_s_transient_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess
+
+    from devkit import cli
+
+    answers = [
+        subprocess.CompletedProcess([], 1, "", "GraphQL: Something went wrong while executing your query on ..."),
+        subprocess.CompletedProcess([], 0, "ok\n", ""),
+    ]
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        return answers.pop(0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr("time.sleep", lambda _: None)
+    assert cli._gh("project", "view", "3") == "ok\n"
+    assert len(calls) == 2
+
+
+def test_the_board_helper_gives_up_on_other_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess
+
+    from devkit import cli
+    from devkit.repo import KitError
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 1, "", "HTTP 404: Not Found")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr("time.sleep", lambda _: pytest.fail("slept before giving up on a lasting error"))
+    with pytest.raises(KitError, match="404"):
+        cli._gh("issue", "view", "999")
+    assert len(calls) == 1
+
+
+def test_the_board_helper_stops_retrying_after_its_last_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess
+
+    from devkit import cli
+    from devkit.repo import KitError
+
+    sleeps: list[float] = []
+
+    def fake_run(cmd: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(cmd, 1, "", "GraphQL: Something went wrong while executing your query")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr("time.sleep", sleeps.append)
+    with pytest.raises(KitError, match="Something went wrong"):
+        cli._gh("project", "view", "3")
+    assert sleeps == [2.0, 5.0, 10.0]

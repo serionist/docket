@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -52,13 +53,23 @@ def cmd_commit_msg(args: argparse.Namespace) -> int:
     return 0
 
 
+# GitHub's Projects API answers this now and then and succeeds on the next try.
+TRANSIENT = ("Something went wrong while executing your query", "502 Bad Gateway", "secondary rate limit")
+RETRY_WAITS = (2.0, 5.0, 10.0)
+
+
 def _gh(*args: str) -> str:
-    proc = subprocess.run(
-        ["gh", *args], capture_output=True, text=True, encoding="utf-8", errors="replace", check=False
-    )
-    if proc.returncode != 0:
-        raise KitError(f"gh {' '.join(args[:3])}: {proc.stderr.strip() or proc.stdout.strip()}")
-    return proc.stdout
+    for wait in (*RETRY_WAITS, None):
+        proc = subprocess.run(
+            ["gh", *args], capture_output=True, text=True, encoding="utf-8", errors="replace", check=False
+        )
+        if proc.returncode == 0:
+            return proc.stdout
+        message = proc.stderr.strip() or proc.stdout.strip()
+        if wait is None or not any(t in message for t in TRANSIENT):
+            raise KitError(f"gh {' '.join(args[:3])}: {message}")
+        time.sleep(wait)
+    raise AssertionError("unreachable")  # pragma: no cover
 
 
 def cmd_board(args: argparse.Namespace) -> int:
