@@ -2,7 +2,7 @@
 
 A transcript's segments are a field of its raw record, in the core's shape (`Segment`: start and end in milliseconds
 from the record's start, speaker, text), filled by the source's mapper. Nothing reads them from `native`, and the core
-keeps no per-source code. This is a one-way door (DR-0110).
+keeps no per-source code. This is a one-way door (DR-0111).
 """
 
 from __future__ import annotations

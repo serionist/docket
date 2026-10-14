@@ -12,7 +12,7 @@ from pathlib import Path
 
 from docket.errors import DocketError
 
-# A processed doc's rev is the commit whose message has this line, in its subject or its body (DR-0111).
+# A processed doc's rev is the commit whose message has this line, in its subject or its body (DR-0112).
 DOC_LINE = re.compile(r"^Doc: (\S+) rev ([1-9]\d*)(?: \(edited by hand\))?$")
 
 

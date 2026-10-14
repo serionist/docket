@@ -10,7 +10,7 @@ A content line ends with its anchors, separated by spaces or tabs:
 Times are offsets from the record's start in whole seconds: `m:ss` or `mm:ss` (minutes up to 99), or `h:mm:ss`. In an
 anchor a rid is written with `%` as `%25` and `]` as `%5D`, and its last `@` or `#` as `%40` or `%23` only when the
 rid's own tail would read as a position; the parser splits at the last `@` or `#` whose rest is a whole position, then
-decodes those four codes and nothing else. Docs in users' vaults depend on all of this: it is a one-way door (DR-0109).
+decodes those four codes and nothing else. Docs in users' vaults depend on all of this: it is a one-way door (DR-0110).
 
 Lines and paragraphs are counted the same way for a doc and a record: CRLF and a lone CR read as LF, a line is the text
 between two LFs, a blank line holds only spaces, tabs and no-break spaces, and a paragraph is a run of non-blank lines.

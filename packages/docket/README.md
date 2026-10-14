@@ -40,5 +40,6 @@ Every record reaches the raw log through the gate. It reads `vault.yaml` on ever
 ## Processed docs
 
 A processed doc's lines end with anchors: `@12:08` in a doc covering one record, `[r:<rid>@12:08]`, `[r:<rid>#2]` or
-`[r:<rid>]` across records (DR-0109). A locator is a doc's id or path, `r:<rid>@12:08`, or a rid. The same three
-operations are `docket.recall.doc_put`, `read` and `verify` in Python.
+`[r:<rid>]` across records (DR-0110). A locator is a doc's id or path, `r:<rid>@12:08`, or a rid. The same three
+operations are `docket.recall.doc_put`, `read` and `verify` in Python. A time resolves against the record's `segments`
+field, which the source's mapper fills (DR-0111); a record without segments takes paragraph and whole-record anchors.

@@ -3,7 +3,7 @@
 A rev is the commit that wrote it: a line `Doc: <id> rev <n>` in the commit's message, in its subject or its body (an
 import commits many docs at once, one line each). The `rev:` line in a doc is a copy for the reader, so a hand commit
 that keeps it never makes a second rev with the same number, and a doc deleted by hand goes on from its last rev
-(DR-0111).
+(DR-0112).
 
 A put checks what the raw log decides without the lock (raw records are written once), then, inside
 `Vault.writing()`, what the stored docs decide: a hand edit is taken in as the next rev first, then the rev the put

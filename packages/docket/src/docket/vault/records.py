@@ -32,7 +32,7 @@ class Attachment(BaseModel):
 
 class Segment(BaseModel):
     """One utterance of a transcript: where it starts and ends in whole milliseconds from the record's start, who
-    spoke, and what was said. A source's mapper fills a record's segments in this shape (DR-0110)."""
+    spoke, and what was said. A source's mapper fills a record's segments in this shape (DR-0111)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 

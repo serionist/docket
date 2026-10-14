@@ -97,8 +97,8 @@ agrees in the issue:
 
 - the names: the `docket` package and command, the plugin's and the marketplace's name `docket`;
 - the vault's format: its layout and run-file names (DR-0019), the raw record's version (DR-0020), `vault.yaml`
-  (DR-0021), staging's files and states (DR-0024), the processed doc's format (DR-0108), the anchor grammar (DR-0109),
-  the transcript segment contract (DR-0110), doc revisions as the commits that wrote them (DR-0111);
+  (DR-0021), staging's files and states (DR-0024), the processed doc's format (DR-0109), the anchor grammar (DR-0110),
+  a transcript's segments as a record field (DR-0111), doc revisions as the commits that wrote them (DR-0112);
 - the MCP tools' names and parameters, and the plugin's skill and hook names, once they land.
 
 Each lands with its decision in `index.yaml`, marked `cost: one-way`.
