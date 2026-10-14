@@ -40,6 +40,8 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # The dev kit's whole job is running git, uv and the checkers.
 "tools/devkit/src/**" = ["S603", "S607"]
+# The app runs git (and gh in the setup wizard) with argument lists, never a shell.
+"packages/docket/src/docket/vault/**" = ["S603", "S607"]
 "**/tests/**" = ["S101", "S603", "S607", "PLC0415"]
 
 [tool.ruff.lint.isort]
@@ -55,9 +57,12 @@ pythonVersion = "3.12"
 typeCheckingMode = "standard"
 strict = ["packages/*/src", "tools/devkit/src"]
 reportMissingTypeStubs = false
+extraPaths = ["packages/docket/tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["packages", "tools/devkit/tests"]
+# The app tests' shared builders (docket_testkit) import by name; test folders are not packages.
+pythonpath = ["packages/docket/tests"]
 addopts = ["--import-mode=importlib", "-ra", "--strict-markers"]
 xfail_strict = true
 filterwarnings = ["error"]

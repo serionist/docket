@@ -96,7 +96,8 @@ Users and their stored data depend on these. Change one only in a PR that names 
 agrees in the issue:
 
 - the names: the `docket` package and command, the plugin's and the marketplace's name `docket`;
-- the vault's format once it lands: its layout, `vault.yaml`, the raw record's fields;
+- the vault's format: its layout and run-file names (DR-0019), the raw record's version (DR-0020), `vault.yaml`
+  (DR-0021);
 - the MCP tools' names and parameters, and the plugin's skill and hook names, once they land.
 
 Each lands with its decision in `index.yaml`, marked `cost: one-way`.

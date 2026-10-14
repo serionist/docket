@@ -6,7 +6,15 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Soma Osvay" }]
-dependencies = []
+dependencies = [
+  "filelock>=4.0.7",
+  "platformdirs>=4.12.2",
+  "pydantic>=2.13.5",
+  "PyYAML>=6.0.3",
+  "typer>=0.27.2",
+  "tzdata>=2026.4",
+  "tzlocal>=5.4.4",
+]
 
 [project.scripts]
 docket = "docket.cli:main"
