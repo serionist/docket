@@ -200,7 +200,8 @@ flowchart TB
   starts per job and ends, freeing its VRAM, and its CUDA libraries never share a process with PyTorch's.
 - Security on localhost: bound to 127.0.0.1; the browser gets a session cookie from a one-time link the CLI opens
   (SameSite=Strict); every write checks Origin and Sec-Fetch-Site; the API and MCP take a bearer token from the
-  keychain; the MCP endpoint uses the MCP SDK's DNS-rebinding protection.
+  keychain; the MCP endpoint uses the MCP SDK's DNS-rebinding protection. The service runs the consuming repo's
+  mappers, never code from the vault, a downloads folder or a drop folder.
 - Any number of machines; git is the source of truth. Each machine's index is a cache, rebuilt from the repo. Raw
   run files carry the machine's name, cursors are kept per machine, the machine that harvested a record processes it,
   and a record seen twice is dropped by id and content hash. Ledger ids are ULIDs (with short numbers handed out when
@@ -276,9 +277,13 @@ vault/
   `fidelity: derived`, and a crosswalk links it to the real id once a better route has it.
 - Versions are content hashes of the normalized fields (text, author, attachments), computed by the core and never by
   a mapper; volatile fields such as reactions or reply counts are left out.
-- Redaction and cuts apply to `native` too: `fidelity: verbatim` means not retyped by Claude, never unredacted.
-- A recording is one record with its segments in `native`. Each transcript is its own record (`kind: transcript`,
-  with its engine); a vendor's own summary is a `vendor-summary` record.
+- Redaction applies to `native` too: `fidelity: verbatim` means not retyped by Claude, never unredacted.
+- A record with a cut keeps no `native`: the core drops it and marks the record `fidelity: cut`, because `native`
+  would still hold the cut stretch.
+- A recording is one record. Each transcript is its own record (`kind: transcript`, with its engine) and carries its
+  utterances in a `segments` field, in the core's shape: a list of `start_ms`, `end_ms`, `speaker` and `text`. The
+  index, the gate's cuts, `verify` and rebuilds read that field, never `native`. A vendor's own summary is a
+  `vendor-summary` record.
 - `rid` is also the ledger's locator, so every ledger source resolves to a record. Older locators (a legacy note's
   path) resolve through the crosswalk.
 
@@ -442,11 +447,15 @@ change lands on whoever uses that vendor, while the core still checks every rid 
 | Part | Lives in | What it does |
 |---|---|---|
 | the skill | the consuming project, `.claude/skills/sources/<source>/SKILL.md` | reads the source with the user's own tools (Plaud's MCP, the Slack plugin, mail and chat in the browser); keeps the route's quirks (paging, rate limits, late summaries) in its own files, learned run by run; sends the run manifest |
-| the mapper | the consuming project, `mapper.py` and `tests/` next to the skill | code, never a prompt: turns a run's captures into normalized records; the service runs it in its own process from the path `vault.yaml` names for the source, and the CLI import uses the same one |
-| the contract | Docket | the record shapes; the rid rules (`<source>:<native id>`, checked on every record); versions computed from the normalized fields, never by a mapper; the ingest checks, holds and the gate; the capture hook and the run manifest |
+| the mapper | the consuming project, `mapper.py` and `tests/` next to the skill | code, never a prompt: turns a run's captures into records in the core's shape; the service runs it in its own process, with a time limit and an output cap, from the path `vault.yaml` names for the source, which must resolve under `.claude/skills/sources/<source>/`; the CLI import uses the same one |
+| the contract | Docket | the record shapes, a transcript's `segments` among them, which the index, cuts and `verify` read instead of `native`; the rid rules (`<source>:<native id>`, checked on every record); versions computed from the normalized fields, never by a mapper; the ingest checks, holds and the gate; the capture hook and the run manifest |
 
 - A PostToolUse hook in the plugin posts what the source's tools return to the service verbatim, so a long transcript
   never passes through Claude's output; Claude sends a manifest (the window, the counts, what it skipped).
+- The hook posts only while a run the skill opened is open, and only for the tools `vault.yaml` lists for the
+  source; each capture is tagged with its run, and nothing outside an open run is posted.
+- A mapper that runs past its time limit fails the run: its captures are dropped and fetched again, as for a run that
+  never closes.
 - `docket source new` scaffolds a skill, a mapper and its tests in the consuming repo; setup runs it for each source
   the user chooses.
 - Plaud is the reference source, under `examples/sources/plaud` and tested in CI: an example to copy, not a

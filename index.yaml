@@ -322,12 +322,19 @@ decisions:
     binds:
       - A source's skill, its mapper and its tests live in the consuming project, under .claude/skills/sources/<source>/ (SKILL.md, mapper.py, tests/); Docket's plugin ships none of them.
       - The route's quirks are learned run by run and kept in the skill's own files.
-      - "A mapper is code, never a prompt: it turns a run's captures into normalized records in the core's record shapes."
+      - "A mapper is code, never a prompt: it turns a run's captures into records in the core's shape."
+      - "A transcript record carries its utterances in a segments field, in the core's shape: a list of start_ms, end_ms, speaker and text."
+      - The index, the gate's cuts, verify and rebuilds read the segments field, never native.
+      - "A record with a cut keeps no native: the core drops it and marks the record fidelity: cut, because native would still hold the cut stretch."
       - A rid is <source>:<native id>, and the core checks every rid a mapper returns.
       - The core computes every version from the normalized fields, never a mapper.
       - Every record a mapper returns goes through the core's ingest checks, holds and the staging gate.
       - The service runs a source's mapper in a separate process, loaded from the path vault.yaml names for that source; the CLI import uses the same mapper.
+      - A mapper's path is relative to the consuming repo's root and must resolve, after symlinks, under .claude/skills/sources/<source>/; any other path is refused.
+      - A mapper's process has a time limit and an output cap. A timeout fails the run, and its captures are dropped and fetched again, as for a run that never closes.
+      - The service runs only the consuming repo's mappers, never code from the vault, a downloads folder or a drop folder.
       - The plugin's PostToolUse hook posts a source tool's output to the service verbatim, and Claude sends only the run manifest.
+      - The hook posts only while a run the skill opened is open, and only for the tools vault.yaml lists for that source; each capture is tagged with its run, and nothing outside an open run is posted.
       - docket source new scaffolds a source's skill, mapper and tests in the consuming repo.
       - Plaud is the reference source, under examples/sources/plaud and tested in CI; it is an example, not a dependency.
       - media_put and the service's fetch take a local path only under a folder vault.yaml names (a downloads folder) or the plugin's own drop folder, and a URL only over https to a host vault.yaml lists for that source; private, loopback and link-local addresses are refused, at most a few redirects are followed and each is checked again, and a file over the size cap is refused.

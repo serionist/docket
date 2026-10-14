@@ -24,7 +24,7 @@ decisions:
     by: Claude (autonomy grant)
     cost: one-way
     sources: ["#4"]
-    description: "v is sha256 of kind, container, thread, ts in whole UTC seconds, author, to, title, text and the attachments (name, kind, ref) sorted, with empty and absent values left out, written as JSON by Docket's own function (sorted keys, no spaces, UTF-8). A new optional field, a library upgrade, attachment order or milliseconds never change a version; a golden test pins the hash. The projection is the same for every source: no source or mapper can register its own (DR-0108); records.register_projection goes with #10."
+    description: "v is sha256 of kind, container, thread, ts in whole UTC seconds, author, to, title, text, the attachments (name, kind, ref) sorted, and a transcript's segments (start_ms, end_ms, speaker, text) in their order, with empty and absent values left out, written as JSON by Docket's own function (sorted keys, no spaces, UTF-8). A new optional field, a library upgrade, attachment order or the milliseconds of ts never change a version; a golden test pins the hash. The projection is the same for every source: no source or mapper can register its own (DR-0108); records.register_projection goes with #10."
     binds: [Changing the projection or the JSON writer needs a migration of every vault.]
     not_chosen:
       - "Hashing every field except a few: any new field would change every version."
