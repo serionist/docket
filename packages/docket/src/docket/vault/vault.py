@@ -179,6 +179,11 @@ class Vault:
                 raise DocketError(f"a {what} is in progress in {self.root}; finish or undo it before Docket writes")
         if self.git.branch() == "HEAD":
             raise DocketError(f"{self.root} isn't on a branch (a detached HEAD); check out main before Docket writes")
+        # A conflict a stash pop or a merge --squash left leaves no *_HEAD file, only unmerged paths; committing then
+        # would take in the conflict markers and mark the conflict resolved.
+        unmerged = sorted({line.split("\t", 1)[-1] for line in self.git.out("ls-files", "-u").splitlines()})
+        if unmerged:
+            raise DocketError(f"{', '.join(unmerged)} in {self.root} has a conflict; resolve it before Docket writes")
 
     # -- checking ------------------------------------------------------------------------------------------------
 

@@ -178,6 +178,7 @@ decisions:
     binds:
       - read(rev=n) returns the doc as the commit that wrote rev n left it.
       - "An id with Doc: lines in its history exists even when its file is gone; a rebuilt doc goes on from its last rev."
+      - "sync doesn't rebase when this machine and the remote both wrote the same Doc: <id> rev <n> line; it stops and reports it like a conflict."
     not_chosen:
       - "A new file per version: briefs and digests rebuilt after every sync would fill their folders with stale copies."
       - "Last write wins: two sessions would overwrite each other silently."

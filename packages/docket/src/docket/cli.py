@@ -309,7 +309,7 @@ def doc_put(
     else:
         raise DocketError(f"no file {source}")
     try:
-        text = data.decode("utf-8").removeprefix("﻿")
+        text = data.decode("utf-8").removeprefix("\ufeff")
     except UnicodeDecodeError:
         raise DocketError(f"{source} isn't UTF-8") from None
     try:

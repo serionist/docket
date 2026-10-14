@@ -4,12 +4,16 @@ blocks a commit."""
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 from docket.errors import DocketError
+
+# A processed doc's rev is the commit whose message has this line, in its subject or its body (DR-0111).
+DOC_LINE = re.compile(r"^Doc: (\S+) rev ([1-9]\d*)(?: \(edited by hand\))?$")
 
 
 @dataclass(frozen=True)
@@ -106,8 +110,14 @@ class Git:
         return name in self.out("remote").split()
 
     def last_commit(self) -> str | None:
-        proc = self.run("log", "-1", "--format=%h %cs %s", check=False)
+        proc = self.run("log", "-1", "--no-show-signature", "--format=%h %cs %s", check=False)
         return proc.stdout.strip() or None
+
+    def doc_revs(self, commits: str) -> set[tuple[str, int]]:
+        """The (doc, rev) pairs the `Doc:` lines in a range of commits' messages name. A user's log.showSignature
+        would put signature lines into the output, so it is turned off."""
+        out = self.out("log", "--no-show-signature", "--format=%B", commits)
+        return {(m.group(1), int(m.group(2))) for line in out.splitlines() if (m := DOC_LINE.match(line.strip()))}
 
     def sync(self) -> SyncResult:
         """Fetch, and rebase local commits onto the remote branch when there is one. Never loses a local commit."""
@@ -119,6 +129,12 @@ class Git:
         upstream = f"origin/{self.branch()}"
         if self.run("rev-parse", "--verify", "--quiet", upstream, check=False).returncode != 0:
             return SyncResult(True, False, f"{upstream} doesn't exist yet")
+        # Two machines that both wrote the same rev of a doc, on lines far apart, would rebase cleanly into two
+        # commits claiming one rev and a merged text nobody checked; that is a conflict, whatever git thinks.
+        both = self.doc_revs(f"{upstream}..HEAD") & self.doc_revs(f"HEAD..{upstream}")
+        if both:
+            named = ", ".join(f"{doc} rev {rev}" for doc, rev in sorted(both))
+            return SyncResult(True, False, f"this machine and {upstream} both wrote {named}; resolve it by hand")
         # The marker says this rebase is Docket's own: one a killed sync leaves behind may be undone, a user's never.
         marker = sync_marker(self.root)
         marker.parent.mkdir(parents=True, exist_ok=True)

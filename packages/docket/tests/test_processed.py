@@ -3,8 +3,9 @@ from __future__ import annotations
 import logging
 
 import pytest
+import yaml
 
-from docket.vault.processed import DocProblem, DocRefusedError, doc_path, line_roles, parse_doc
+from docket.vault.processed import DocProblem, DocRefusedError, doc_path, double_quoted, line_roles, parse_doc
 
 NOTE = """\
 ---
@@ -48,8 +49,9 @@ def test_the_canonical_form_round_trips() -> None:
 
 def test_a_hand_written_frontmatter_comes_out_canonical() -> None:
     text = (
-        "﻿---\r\nid: brief:ben-sample\r\ntype: brief\r\ncovers: [calls:rec-0042, chat:C0TEST/1791000001.000100]\r\n"
-        "by: Ada Example\r\nsupersedes: null\r\nentities: [no, on, 2026]\r\n---\r\nBen's brief. @00:01\r\n\r\n\r\n"
+        "\ufeff---\r\nid: brief:ben-sample\r\ntype: brief\r\n"
+        "covers: [calls:rec-0042, chat:C0TEST/1791000001.000100]\r\nby: Ada Example\r\n"
+        "supersedes: null\r\nentities: [no, on, 2026]\r\n---\r\nBen's brief. @00:01\r\n\r\n\r\n"
     )
     parsed = parse_doc(text)
     assert parsed.meta.entities == ["no", "on", "2026"]
@@ -60,6 +62,25 @@ def test_a_hand_written_frontmatter_comes_out_canonical() -> None:
     assert 'entities: ["no", "on", "2026"]' in rendered
     assert rendered.endswith("---\nBen's brief. @00:01\n")
     assert parse_doc(rendered).meta == parsed.meta
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "mail:<a\x7fb@example.invalid>",
+        "chat:x\x9b\x80",
+        "chat:y" + chr(0xFFFE) + chr(0xFFFF),
+        'chat:q"b\\z',
+        chr(0x2028) + chr(0x2029) + chr(0x85) + chr(0x0B) + chr(9),
+        chr(0xE9) + chr(0x1F600),
+        "chat:\ud800",
+    ],
+)
+def test_a_double_quoted_value_reads_back_the_same_in_every_yaml_reader(value: str) -> None:
+    quoted = double_quoted(value)
+    assert yaml.safe_load(f"k: {quoted}") == {"k": value}
+    assert yaml.load(f"k: {quoted}", Loader=yaml.BaseLoader) == {"k": value}  # noqa: S506 - the base loader builds no objects
+    assert quoted.isprintable()
 
 
 def test_a_rid_with_a_comma_or_a_quote_survives() -> None:

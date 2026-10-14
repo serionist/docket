@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import shutil
+import subprocess
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -8,13 +10,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import MAIL, REC, THREAD, copy_vault, note, sh, template_vault
+from docket_testkit import MAIL, REC, THREAD, at, copy_vault, make_record, note, sh, template_vault
 
 from docket import recall
 from docket.errors import DocketError
+from docket.vault import processed
 from docket.vault.anchors import format_anchor
 from docket.vault.docstore import DocStore
-from docket.vault.processed import DocRefusedError
+from docket.vault.processed import DocRefusedError, double_quoted
 from docket.vault.vault import Vault
 
 NOTE_ID = "recording-note:2026-10-14-supplier-call"
@@ -394,3 +397,136 @@ def test_a_thread_summary_across_records(vault: Vault) -> None:
         ],
     )
     assert recall.doc_put(vault, summary).rev == 1
+
+
+# -- two machines -----------------------------------------------------------------------------------------------------
+
+
+def test_two_machines_that_wrote_the_same_rev_dont_rebase(vault: Vault, tmp_path: Path) -> None:
+    remote = tmp_path / "remote.git"
+    sh(tmp_path, "git", "init", "-q", "--bare", "-b", "main", str(remote))
+    lines = [f"- Point {i} about the consultant. @12:08" for i in range(1, 11)]
+    recall.doc_put(vault, note(lines=lines))
+    sh(vault.root, "git", "remote", "add", "origin", str(remote))
+    sh(vault.root, "git", "push", "-q", "-u", "origin", "main")
+    sh(tmp_path, "git", "clone", "-q", str(remote), str(tmp_path / "other"))
+    other = Vault.open(tmp_path / "other")
+
+    def edited(n: int, where: str) -> list[str]:
+        return [f"- Point {n}, corrected {where}. @12:08" if i == n else line for i, line in enumerate(lines, start=1)]
+
+    # Different revs of different docs rebase as before.
+    recall.doc_put(other, note("brief:ben-sample"))
+    recall.doc_put(vault, note(rev="1", lines=edited(2, "here")))
+    sh(vault.root, "git", "push", "-q", "origin", "main")
+    assert other.sync().rebased
+    assert [rev for rev, _ in DocStore(other).history(NOTE_ID)] == [2, 1]
+    # Both machines write rev 3 on lines far apart: git would rebase it cleanly, Docket doesn't.
+    recall.doc_put(vault, note(rev="2", lines=edited(3, "here")))
+    sh(vault.root, "git", "push", "-q", "origin", "main")
+    mine = recall.doc_put(other, note(rev="2", lines=edited(9, "there")))
+    result = other.sync()
+    assert (result.fetched, result.rebased) == (True, False)
+    assert f"both wrote {NOTE_ID} rev 3; resolve it by hand" in result.message
+    assert head(other) == mine.commit
+    assert not (other.root / ".git" / "rebase-merge").exists()
+    assert [rev for rev, _ in DocStore(other).history(NOTE_ID)] == [3, 2, 1]
+
+
+# -- what a vault can hold ------------------------------------------------------------------------------------------
+
+
+def test_a_rid_yaml_cant_hold_raw_is_written_escaped_and_reads_back(vault: Vault) -> None:
+    rid = "mail:<a\x7fb\x9b" + chr(0xFFFE) + "@example.invalid>"
+    vault.write_run("mail", [make_record(rid=rid, source="mail", kind="mail", text="junk offer")], run_at=at(12))
+    text = note(
+        "digest:2026-10-14-junk", covers=[double_quoted(rid)], lines=[f"- A junk offer arrived. {format_anchor(rid)}"]
+    )
+    recall.doc_put(vault, text)
+    stored = (vault.root / "processed/digest/2026/10/2026-10-14-junk.md").read_text(encoding="utf-8")
+    assert '"mail:<a\\u007fb\\u009b\\ufffe@example.invalid>"' in stored
+    got = recall.read(vault, "digest:2026-10-14-junk").doc
+    assert got is not None
+    assert got.covers == [rid]
+    again = note(
+        "digest:2026-10-14-junk", covers=[double_quoted(rid)], rev="1", lines=[f"- It came in. {format_anchor(rid)}"]
+    )
+    assert recall.doc_put(vault, again).rev == 2
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [lambda value, context: value, lambda value, context: double_quoted(value + "x")],
+    ids=["unquoted", "changed"],
+)
+def test_a_frontmatter_that_wouldnt_read_back_is_refused(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch, broken: Callable[[str, str], str]
+) -> None:
+    rid = "mail:<a\x7fb@example.invalid>"
+    vault.write_run("mail", [make_record(rid=rid, source="mail", kind="mail", text="junk")], run_at=at(12))
+    monkeypatch.setattr(processed, "_scalar", broken)
+    problems = refused(
+        vault, note("digest:2026-10-14-junk", covers=[double_quoted(rid)], lines=[f"- junk {format_anchor(rid)}"])
+    )
+    assert problems == [
+        "doc: the frontmatter can't be written so that it reads back the same; a value holds what YAML can't"
+    ]
+
+
+def test_doc_blobs_dont_go_through_git_show(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
+    real = vault.git.run
+
+    def run(*args: str, **kwargs: Any) -> Any:
+        if args and args[0] == "show":
+            raise DocketError("git show: the path is too long")  # what Windows says past 260 characters
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(vault.git, "run", run)
+    recall.doc_put(vault, note())
+    hand_edit(vault, "10 million forints", "ten million forints")
+    assert any("is at rev 2 now" in p for p in refused(vault, note(rev="1", lines=["- stale @12:08"])))
+    assert "10 million forints" in DocStore(vault).at_rev(NOTE_ID, 1).body
+
+
+def test_signed_commits_shown_with_their_signatures_dont_confuse_the_history(vault: Vault, tmp_path: Path) -> None:
+    keygen = shutil.which("ssh-keygen")
+    if keygen is None:
+        pytest.skip("no ssh-keygen to sign with")
+    key = tmp_path / "key"
+    subprocess.run([keygen, "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True, capture_output=True)
+    allowed = tmp_path / "allowed"
+    public = (tmp_path / "key.pub").read_text(encoding="utf-8").strip()
+    allowed.write_text(f"ada@example.invalid {public}\n", encoding="utf-8")
+    settings = {
+        "gpg.format": "ssh",
+        "gpg.ssh.allowedSignersFile": allowed.as_posix(),
+        "user.signingkey": key.as_posix(),
+        "commit.gpgsign": "true",
+        "log.showSignature": "true",
+    }
+    for name, value in settings.items():
+        sh(vault.root, "git", "config", name, value)
+    probe = ["git", "-c", "user.name=Ada", "-c", "user.email=ada@example.invalid", "commit", "-q", "--allow-empty"]
+    if subprocess.run([*probe, "-m", "probe"], cwd=vault.root, capture_output=True, check=False).returncode != 0:
+        pytest.skip("this git can't sign with ssh")
+    first = recall.doc_put(vault, note())
+    assert len(sh(vault.root, "git", "log", "-1", "--format=%H").splitlines()) > 1  # the signature shows
+    assert recall.doc_put(vault, note(rev="1", lines=["- signed again @12:08"])).rev == 2
+    assert DocStore(vault).history(NOTE_ID)[1] == (1, first.commit)
+    assert (vault.git.last_commit() or "").endswith(f"Doc: {NOTE_ID} rev 2")
+
+
+def test_a_put_during_a_stash_pop_conflict_is_refused_and_commits_nothing(vault: Vault) -> None:
+    recall.doc_put(vault, note())
+    hand_edit(vault, "10 million forints", "ten million forints, said Ada")
+    sh(vault.root, "git", "-c", "user.name=Ada", "-c", "user.email=ada@example.invalid", "stash", "-q")
+    recall.doc_put(vault, note(rev="1", lines=["- Ben put the consultant at 12 million forints. @12:08"]))
+    sh(vault.root, "git", "stash", "pop", check=False)
+    assert sh(vault.root, "git", "ls-files", "-u")
+    before = head(vault)
+    with pytest.raises(DocketError, match=f"{NOTE_PATH} in .* has a conflict; resolve it before Docket writes"):
+        recall.doc_put(vault, note(rev="2", lines=["- Ben put the consultant at 12 million. @12:08"]))
+    assert head(vault) == before
+    assert sh(vault.root, "git", "ls-files", "-u")
+    with pytest.raises(DocketError, match="has a conflict"):
+        vault.commit([], "anything")

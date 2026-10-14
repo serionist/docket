@@ -17,20 +17,29 @@ import logging
 import os
 import re
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel
 
 from docket.errors import DocketError
 from docket.vault.anchors import normalize_newlines, trailing_anchors
-from docket.vault.processed import DocMeta, DocProblem, DocRefusedError, ProcessedDoc, doc_path, key_line, parse_doc
+from docket.vault.git import DOC_LINE
+from docket.vault.processed import (
+    DocMeta,
+    DocProblem,
+    DocRefusedError,
+    ProcessedDoc,
+    doc_path,
+    id_problem,
+    key_line,
+    parse_doc,
+)
 from docket.vault.records import RawRecord
 from docket.vault.spans import RawLookup, problem
 from docket.vault.vault import Vault
 
 log = logging.getLogger(__name__)
 
-DOC_LINE = re.compile(r"^Doc: (\S+) rev ([1-9]\d*)(?: \(edited by hand\))?$")
 # On Windows another program holding the doc open makes the rename fail for a moment.
 REPLACE_TRIES = 5
 REPLACE_WAIT_SECONDS = 0.2
@@ -57,8 +66,17 @@ class DocStore:
 
     # -- reading ---------------------------------------------------------------------------------------------------
 
+    @staticmethod
+    def path(doc_id: str) -> PurePosixPath:
+        """A doc's path inside the vault. An id that isn't one is refused before any path is built from it: a slug
+        like `../../elsewhere` would otherwise reach files outside processed/ and outside the vault."""
+        why = id_problem(doc_id)
+        if why is not None:
+            raise DocketError(f"{doc_id!r} isn't a doc id: {why}")
+        return doc_path(doc_id)
+
     def file(self, doc_id: str) -> Path:
-        return self.root / doc_path(doc_id)
+        return self.root / self.path(doc_id)
 
     def read_file(self, path: Path) -> str:
         try:
@@ -73,7 +91,9 @@ class DocStore:
 
     def history(self, doc_id: str) -> list[tuple[int, str]]:
         """The doc's revs, newest commit first: (rev, commit) for every commit whose message has its `Doc:` line."""
-        out = self.vault.git.out("log", "--format=%H%x1f%B%x1e", "--", doc_path(doc_id).as_posix())
+        # Signature lines a user's log.showSignature adds would read as commit ids.
+        rel = self.path(doc_id).as_posix()
+        out = self.vault.git.out("log", "--no-show-signature", "--format=%H%x1f%B%x1e", "--", rel)
         revs: list[tuple[int, str]] = []
         for entry in out.split("\x1e"):
             sha, _, message = entry.strip("\n").partition("\x1f")
@@ -88,7 +108,8 @@ class DocStore:
         return self.file(doc_id).is_file() or bool(self.history(doc_id))
 
     def _blob(self, sha: str, doc_id: str) -> str:
-        return self.vault.git.out("show", f"{sha}:{doc_path(doc_id).as_posix()}")
+        # Not `git show`: it also tries its argument as a file path, which fails past 260 characters on Windows.
+        return self.vault.git.out("cat-file", "blob", f"{sha}:{self.path(doc_id).as_posix()}")
 
     def at_rev(self, doc_id: str, rev: int) -> ProcessedDoc:
         """The doc as the commit that wrote that rev left it."""
@@ -127,8 +148,11 @@ class DocStore:
     def put(self, text: str) -> PutResult:
         """Store a doc: refused with every problem when its frontmatter is wrong, an anchor doesn't resolve, or it was
         changed since the rev it carries; a no-op when nothing changed; else written as the next rev and committed."""
-        head = normalize_newlines(text.removeprefix("﻿")).split("\n")
+        head = normalize_newlines(text.removeprefix("\ufeff")).split("\n")
         doc = parse_doc(text)
+        if not _reads_back(doc):
+            message = "the frontmatter can't be written so that it reads back the same; a value holds what YAML can't"
+            raise DocRefusedError([DocProblem(None, message)])
         problems = self._against_raw(doc, head)
         if problems:
             raise DocRefusedError(problems)
@@ -293,6 +317,15 @@ class DocStore:
                     time.sleep(REPLACE_WAIT_SECONDS)
         finally:
             tmp.unlink(missing_ok=True)
+
+
+def _reads_back(doc: ProcessedDoc) -> bool:
+    """Whether the frontmatter Docket would write reads back as the same, so a stored doc can always be read again."""
+    try:
+        back = parse_doc(doc.render(rev=0)).meta
+    except DocRefusedError:
+        return False
+    return back == doc.meta.model_copy(update={"rev": 0})
 
 
 def _with_rev(text: str, rev: int) -> str:

@@ -18,7 +18,6 @@ format is a one-way door (DR-0108): docs in users' vaults depend on it.
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from dataclasses import dataclass, field
@@ -279,7 +278,33 @@ def _scalar(value: str, context: Literal["value", "item", "flow"]) -> str:
         )
     except yaml.YAMLError:
         plain = False
-    return value if plain else json.dumps(value, ensure_ascii=False)
+    return value if plain else double_quoted(value)
+
+
+def _printable(code: int) -> bool:
+    """YAML's printable set, less the characters it reads as line breaks inside a quoted scalar."""
+    return (
+        0x20 <= code <= 0x7E
+        or (0xA0 <= code <= 0xD7FF and code not in (0x2028, 0x2029))
+        or 0xE000 <= code <= 0xFFFD
+        or code >= 0x10000
+    )
+
+
+def double_quoted(value: str) -> str:
+    """A YAML double-quoted scalar any reader gives back as the same text: a character outside YAML's printable set
+    (DEL, C1 controls, U+FFFE, a lone surrogate) is written as an escape, since a reader refuses it raw."""
+    out = ['"']
+    for ch in value:
+        code = ord(ch)
+        if ch in ('"', "\\"):
+            out.append("\\" + ch)
+        elif _printable(code):
+            out.append(ch)
+        else:
+            out.append(f"\\u{code:04x}")
+    out.append('"')
+    return "".join(out)
 
 
 def key_line(head: list[str], key: str) -> int | None:
@@ -292,7 +317,7 @@ def key_line(head: list[str], key: str) -> int | None:
 
 def parse_doc(text: str, *, lenient: bool = False) -> ProcessedDoc:
     """Read a doc. Strict (for writing) refuses unknown keys and types; lenient (for reading) keeps them and warns."""
-    lines = normalize_newlines(text.removeprefix("﻿")).split("\n")
+    lines = normalize_newlines(text.removeprefix("\ufeff")).split("\n")
     if lines[0] != "---":
         raise DocRefusedError([DocProblem(1, "a doc starts with a --- line, then its frontmatter, then another ---")])
     try:

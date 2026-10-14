@@ -8,6 +8,7 @@ from docket_testkit import MAIL, REC, THREAD, at, copy_vault, make_record, note,
 from docket import recall
 from docket.errors import DocketError
 from docket.vault.anchors import format_anchor
+from docket.vault.docstore import DocStore
 from docket.vault.processed import doc_path
 from docket.vault.vault import Vault
 
@@ -232,6 +233,18 @@ def test_verify_a_legacy_note_has_nothing_to_check(vault: Vault) -> None:
 def test_verify_takes_a_doc(vault: Vault, doc: str, says: str) -> None:
     with pytest.raises(DocketError, match=says):
         recall.verify(vault, doc)
+
+
+@pytest.mark.parametrize("doc_id", ["brief:../../../elsewhere", "brief:..\\..\\..\\elsewhere"])
+def test_an_id_that_walks_out_of_processed_is_refused(vault: Vault, doc_id: str) -> None:
+    outside = vault.root.parent / "elsewhere.md"
+    outside.write_text("---\nid: brief:someone\ntype: brief\nby: me\n---\nprivate text\n", encoding="utf-8")
+    with pytest.raises(DocketError, match="isn't a doc id"):
+        recall.read(vault, doc_id)
+    with pytest.raises(DocketError, match="isn't a doc id"):
+        recall.verify(vault, doc_id)
+    with pytest.raises(DocketError, match="isn't a doc id"):
+        DocStore(vault).history(doc_id)
 
 
 def test_around_on_a_record_with_a_broken_transcript_counts_messages(vault: Vault) -> None:
