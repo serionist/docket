@@ -118,15 +118,14 @@ class Git:
         marker = sync_marker(self.root)
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text(upstream, encoding="utf-8")
-        try:
-            proc = self.run("rebase", "--autostash", "-q", upstream, check=False, identity=True)
-            if proc.returncode != 0:
-                self.run("rebase", "--abort", check=False)
-                return SyncResult(
-                    True, False, f"the rebase onto {upstream} conflicted and was undone; resolve it by hand"
-                )
-        finally:
+        # The marker is removed only once the rebase is over. Interrupted (Ctrl+C, a kill), it stays, so the next
+        # write knows the rebase left behind is Docket's and undoes it.
+        proc = self.run("rebase", "--autostash", "-q", upstream, check=False, identity=True)
+        if proc.returncode != 0:
+            self.run("rebase", "--abort", check=False)
             marker.unlink(missing_ok=True)
+            return SyncResult(True, False, f"the rebase onto {upstream} conflicted and was undone; resolve it by hand")
+        marker.unlink(missing_ok=True)
         return SyncResult(True, True, f"rebased onto {upstream}")
 
 

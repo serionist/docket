@@ -25,6 +25,9 @@ from docket.vault.records import RawRecord
 
 log = logging.getLogger(__name__)
 
+# How long after a sync writes its marker git starts the rebase: seconds in practice.
+SYNC_REBASE_WINDOW_SECONDS = 60
+
 # Folders every vault has from the start; git keeps an empty folder only with a file in it.
 FOLDERS = ["raw", "media", "processed", "entities", "ledger/ops", "state"]
 GITATTRIBUTES = """\
@@ -153,8 +156,9 @@ class Vault:
         sync of ours is running), and refuse to touch anything else git is in the middle of, which is the user's."""
         git_dir = self.root / ".git"
         marker = sync_marker(self.root)
-        rebasing = (git_dir / "rebase-merge").exists() or (git_dir / "rebase-apply").exists()
-        if rebasing and marker.exists():
+        state = next((git_dir / d for d in ("rebase-merge", "rebase-apply") if (git_dir / d).exists()), None)
+        rebasing = state is not None
+        if state is not None and marker.exists() and _started_with(state, marker):
             log.warning("undoing a rebase a stopped sync left in %s", self.root)
             self.git.run("rebase", "--abort")
             rebasing = False
@@ -211,6 +215,16 @@ class Vault:
         status.seen_in_several_runs = sum(1 for runs in runs_of.values() if len(runs) > 1)
         status.uncommitted_runs = [p for p in self.git.untracked("raw") if RUN_FILE.match(Path(p).name)]
         return status
+
+
+def _started_with(state: Path, marker: Path) -> bool:
+    """Whether the rebase in `state` is the one the sync that wrote `marker` began: git writes its head-name within
+    seconds of the marker. A stale marker must never make Docket undo a rebase the user started later."""
+    head = state / "head-name"
+    try:
+        return abs(head.stat().st_mtime - marker.stat().st_mtime) < SYNC_REBASE_WINDOW_SECONDS
+    except FileNotFoundError:
+        return False
 
 
 def _unlink_writable(path: Path) -> None:

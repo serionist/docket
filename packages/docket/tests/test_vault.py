@@ -453,3 +453,36 @@ def test_a_merge_in_progress_is_refused(tmp_path: Path, config: VaultConfig) -> 
     assert (vault.root / ".git" / "MERGE_HEAD").exists()
     with pytest.raises(DocketError, match="a merge is in progress"):
         vault.commit([], "x")
+
+
+def test_a_stale_marker_never_undoes_a_rebase_the_user_started_later(tmp_path: Path, config: VaultConfig) -> None:
+    vault = _conflicting_vault(tmp_path, config)
+    marker = sync_marker(vault.root)
+    marker.write_text("origin/main", encoding="utf-8")
+    hour_ago = time.time() - 3600
+    os.utime(marker, (hour_ago, hour_ago))
+    vault.git.run("rebase", "origin/main", check=False, identity=True)
+    with pytest.raises(DocketError, match="a rebase is in progress"):
+        vault.commit([], "x")
+    assert (vault.root / ".git" / "rebase-merge").exists() or (vault.root / ".git" / "rebase-apply").exists()
+
+
+def test_an_interrupted_sync_keeps_its_marker_and_the_next_write_undoes_it(
+    tmp_path: Path, config: VaultConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = _conflicting_vault(tmp_path, config)
+    real_run = vault.git.run
+
+    def interrupted(*args: str, **kwargs: object) -> object:
+        result = real_run(*args, **kwargs)  # type: ignore[arg-type]
+        if args[:2] == ("rebase", "--autostash"):
+            raise KeyboardInterrupt
+        return result
+
+    monkeypatch.setattr(vault.git, "run", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        vault.git.sync()
+    monkeypatch.undo()
+    assert sync_marker(vault.root).exists()
+    assert vault.write_run("chat", [make_record(1)], RUN_AT) is not None
+    assert vault.git.branch() == "main"
