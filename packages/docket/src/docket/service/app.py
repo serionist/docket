@@ -20,10 +20,11 @@ from pydantic import BaseModel
 from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from docket import __version__
+from docket import __version__, index
 from docket.errors import DocketError
 from docket.service.security import Guard
 from docket.service.sessions import CODE_SECONDS, COOKIE, Sessions, moving_on, safe_next
+from docket.service.writer import IndexUpdater, Writer
 from docket.vault.vault import Vault
 
 # How long a write of the service waits for another Docket process to let go of the vault: less than a client's
@@ -64,11 +65,13 @@ class SessionLink(BaseModel):
 
 
 class Service:
-    """What the routes share: the settings, the browser sessions, the vault."""
+    """What the routes and tools share: the settings, the browser sessions, the vault, the writer and the index."""
 
     def __init__(self, settings: Settings, sessions: Sessions | None = None) -> None:
         self.settings = settings
         self.sessions = sessions or Sessions()
+        self.writer = Writer()
+        self.updater = IndexUpdater(lambda: index.update(self.vault()))
 
     def vault(self) -> Vault:
         """The vault, opened for this call, so an edit to vault.yaml applies at once."""
@@ -174,7 +177,10 @@ def create_app(settings: Settings, *, sessions: Sessions | None = None) -> Servi
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-        async with AsyncExitStack():
+        async with AsyncExitStack() as stack:
+            stack.callback(service.writer.close)
+            # The index is brought up to date at start, and built when there is none; nobody waits for it here.
+            service.updater.poke()
             yield
 
     return ServiceApp(service, create_fastapi(service, lifespan))
