@@ -6,12 +6,14 @@ import os
 import re
 import sys
 from collections.abc import Sequence
+from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 import typer
 
-from docket import __version__, recall, userconfig
+from docket import __version__, index, recall, userconfig
 from docket.errors import DocketError
 from docket.vault import cuts
 from docket.vault.anchors import format_time
@@ -36,6 +38,8 @@ staging_app = typer.Typer(help="Records waiting for the gate: list, show, classi
 app.add_typer(staging_app, name="staging")
 doc_app = typer.Typer(help="Processed docs: put one with its anchors, read it, verify it.", no_args_is_help=True)
 app.add_typer(doc_app, name="doc")
+index_app = typer.Typer(help="The index: built from the vault on this machine, for search.", no_args_is_help=True)
+app.add_typer(index_app, name="index")
 
 VaultOption = Annotated[Path | None, typer.Option("--vault", help="The vault; default: DOCKET_VAULT, here, ./vault")]
 
@@ -86,7 +90,9 @@ def init(
     path: Annotated[Path | None, typer.Option(help="Where the vault goes.")] = None,
     owner: Annotated[str | None, typer.Option(help="Your name.")] = None,
     email: Annotated[list[str] | None, typer.Option(help="Your email addresses (repeat).")] = None,
-    language: Annotated[list[str] | None, typer.Option(help="Languages you work in (repeat).")] = None,
+    language: Annotated[
+        list[str] | None, typer.Option(help="Language codes you work in, such as en or hu (repeat).")
+    ] = None,
     time_zone: Annotated[str | None, typer.Option(help="An IANA time zone, such as Europe/Budapest.")] = None,
     machine: Annotated[str | None, typer.Option(help="This machine's name.")] = None,
     source: Annotated[
@@ -364,6 +370,130 @@ def doc_verify(
             say(f"        ! {problem}")
         for s in checked.spans:
             _span(s, "        ")
+
+
+def _report(report: index.BuildReport) -> None:
+    if report.rebuilt:
+        say(f"rebuilt{f' ({report.reason})' if report.reason else ''} in {report.seconds:.1f} s")
+    else:
+        entities = ", the entity files" if report.entities else ""
+        say(f"updated in {report.seconds:.1f} s: {report.runs} run file(s), {report.docs} doc(s){entities}")
+    say("  ".join(f"{table} {n}" for table, n in report.counts.items()))
+    for problem in report.problems:
+        say(f"! {problem}")
+    if report.problems:
+        say(f"{len(report.problems)} problem(s); the rest is indexed")
+
+
+@index_app.command("rebuild")
+def index_rebuild(vault: VaultOption = None) -> None:
+    """Build this machine's index from the vault, from scratch."""
+    _report(index.rebuild(find_vault(vault)))
+
+
+@index_app.command("update")
+def index_update(vault: VaultOption = None) -> None:
+    """Index what changed in the vault since the last build; rebuild when it has to."""
+    _report(index.update(find_vault(vault)))
+
+
+@index_app.command("status")
+def index_status(vault: VaultOption = None) -> None:
+    """Whether the index is there and current, its languages, counts and problems."""
+    st = index.status(find_vault(vault))
+    say(f"index      {st.path}")
+    if not st.exists:
+        say("no index yet; run docket index rebuild")
+        raise typer.Exit(1)
+    if st.stale is not None:
+        say(f"needs a rebuild: {st.stale}")
+        raise typer.Exit(1)
+    say(f"languages  {', '.join(st.languages)} (columns {', '.join(st.columns)})")
+    say("counts     " + "  ".join(f"{table} {n}" for table, n in st.counts.items()))
+    if st.new_runs or st.changed_docs or st.entities_changed:
+        entities = ", the entity files" if st.entities_changed else ""
+        say(f"new since  {st.new_runs} run file(s), {st.changed_docs} doc(s){entities}: docket index update")
+    for problem in st.problems:
+        say(f"! {problem}")
+    if st.changed_runs:
+        say(f"{st.changed_runs} indexed run file(s) changed or went: run docket index rebuild")
+        raise typer.Exit(1)
+
+
+def _when(text: str | None, what: str) -> date | datetime | None:
+    if text is None:
+        return None
+    try:
+        return date.fromisoformat(text) if len(text) == len("2026-10-14") else datetime.fromisoformat(text)
+    except ValueError:
+        raise DocketError(f"{what} is a date or a time, such as 2026-10-14 or 2026-10-14T09:30") from None
+
+
+@app.command("search")
+def search_command(
+    query: Annotated[list[str], typer.Argument(help='Words, "quoted phrases", names, and time words like last week.')],
+    *,
+    since: Annotated[str | None, typer.Option(help="From this date or time, such as 2026-10-01.")] = None,
+    until: Annotated[str | None, typer.Option(help="Up to this date (the whole day) or time.")] = None,
+    source: Annotated[list[str] | None, typer.Option("--source", help="Only this source (repeat).")] = None,
+    person: Annotated[list[str] | None, typer.Option("--person", help="Lift what this person said (repeat).")] = None,
+    entity: Annotated[list[str] | None, typer.Option("--entity", help="Lift what mentions this (repeat).")] = None,
+    k: Annotated[int, typer.Option("-k", help="How many hits, 1 to 100.")] = 20,
+    no_update: Annotated[bool, typer.Option("--no-update", help="Search the index as it is.")] = False,
+    vault: VaultOption = None,
+) -> None:
+    """Search everything kept: hits grouped by recording or thread, each with its locator for docket doc read."""
+    v = find_vault(vault)
+    if not no_update:
+        report = index.update(v)
+        if report.rebuilt:
+            say(f"(the index was rebuilt: {report.reason})")
+            for problem in report.problems:
+                if problem.startswith("vault.yaml"):
+                    say(f"! {problem}")
+    result = index.search(
+        v,
+        " ".join(query),
+        people=person or [],
+        entities=entity or [],
+        sources=source or [],
+        since=_when(since, "--since"),
+        until=_when(until, "--until"),
+        k=k,
+    )
+    tz = ZoneInfo(v.config.owner.time_zone)
+    reading = result.query
+    if reading.since is not None or reading.until is not None:
+        span = [
+            f"{word} {at.astimezone(tz):%Y-%m-%d %H:%M}"
+            for word, at in (("from", reading.since), ("to", reading.until))
+            if at is not None
+        ]
+        said = f" ({', '.join(reading.time_words)})" if reading.time_words else ""
+        say(" ".join(span) + said)
+    for found in reading.entities:
+        say(f"{found.words!r} is {found.id}")
+    if reading.unknown:
+        say(f"not found as a person or entity: {', '.join(reading.unknown)}")
+    if reading.left_out:
+        say(f"too common to search for: {', '.join(reading.left_out)}")
+    if not result.groups:
+        say("nothing found")
+    for group in result.groups:
+        when = f"  {group.first.astimezone(tz):%Y-%m-%d}" if group.first else ""
+        say(f"\n{group.kind}  {group.title}  ({group.source or 'docs'}{when})")
+        if group.summary is not None:
+            say(f"  summary  {group.summary.id} rev {group.summary.rev}: {group.summary.title}")
+        for hit in group.hits:
+            at = f"  {hit.ts.astimezone(tz):%Y-%m-%d %H:%M}" if hit.ts else ""
+            who = ", ".join(hit.speakers or hit.authors)
+            lines = f"  lines {hit.lines[0]}-{hit.lines[1]}" if hit.lines else ""
+            say(f"  {hit.rank:>3}. {hit.locator}{lines}{at}{f'  {who}' if who else ''}")
+            say(f"       {hit.snippet}")
+            for anchor in hit.anchors:
+                say(f"       -> {anchor}")
+            if hit.also:
+                say(f"       also {', '.join(hit.also)}")
 
 
 def utf8_console() -> None:

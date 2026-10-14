@@ -1,0 +1,246 @@
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import sqlite3
+import subprocess
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+from docket_testkit import CALL, INDEX_FIXTURE, PARENT, copy_vault, index_template, make_record
+
+from docket.errors import DocketError
+from docket.index import build, locate, matching, rebuild, status
+from docket.vault.vault import Vault
+
+
+@pytest.fixture(scope="module")
+def template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return index_template(tmp_path_factory)
+
+
+@pytest.fixture
+def vault(template: Path, tmp_path: Path) -> Vault:
+    return copy_vault(template, tmp_path)
+
+
+def rows(vault: Vault, sql: str, *args: object) -> list[tuple[object, ...]]:
+    conn = sqlite3.connect(build.db_path(vault))
+    try:
+        return conn.execute(sql, args).fetchall()
+    finally:
+        conn.close()
+
+
+def run_file(vault: Vault, name: str, lines: list[str]) -> Path:
+    path = vault.root / "raw" / "chat" / "2026" / "10" / name
+    path.write_text("".join(f"{line}\n" for line in lines), encoding="utf-8", newline="\n")
+    return path
+
+
+def test_a_rebuild_fills_every_table(vault: Vault) -> None:
+    report = rebuild(vault)
+    assert report.rebuilt and report.runs == 4 and report.docs == 7 and report.entities
+    assert report.counts["records"] == 22 and report.counts["docs"] == 7 and report.counts["entities"] == 6
+    assert report.counts["chunks"] > 30 and report.counts["mentions"] > 30
+    assert report.problems == [
+        "processed/digest/2026/10/2026-10-09-week.md: entities: no entity has the id 'no-such-entity'"
+    ]
+    assert rows(vault, "SELECT count(*) FROM segments WHERE rid = ?", CALL) == [(14,)]
+    assert rows(vault, "SELECT person FROM segments WHERE rid = ? AND ordinal = 1", CALL) == [("dora-minta",)]
+    assert rows(vault, "SELECT superseded_by FROM docs WHERE id = 'minutes:2026-10-13-fleet-review'") == [
+        ("recording-note:2026-10-13-fleet-review",)
+    ]
+    assert not list((vault.root / "index").glob("*.tmp"))
+    assert locate(vault, CALL) is not None and locate(vault, "calls:gone") is None
+
+
+def test_two_rebuilds_in_two_processes_give_the_same_database(vault: Vault, tmp_path: Path) -> None:
+    dumps: list[list[str]] = []
+    for seed in ("1", "2"):
+        env = {**os.environ, "PYTHONHASHSEED": seed, "PYTHONUTF8": "1"}
+        cmd = [sys.executable, "-m", "docket", "index", "rebuild", "--vault", str(vault.root)]
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", env=env, check=False)
+        assert proc.returncode == 0, proc.stderr
+        copy = tmp_path / f"seed-{seed}.sqlite"
+        shutil.copy(build.db_path(vault), copy)
+        conn = sqlite3.connect(copy)
+        dumps.append(list(conn.iterdump()))
+        conn.close()
+    assert dumps[0] == dumps[1]
+
+
+def test_only_the_latest_version_is_chunked_and_versions_are_counted(vault: Vault) -> None:
+    edited = make_record(
+        rid=f"{PARENT[:-17]}1791400300.000100", thread=PARENT, container="chat:C0OPS", author="U0DORA",
+        text="A határidő csütörtök lett.", ts=datetime(2026, 10, 8, 7, 9, tzinfo=UTC),
+    )  # fmt: skip
+    vault.write_run("chat", [edited], datetime(2026, 10, 14, 9, 0, tzinfo=UTC))
+    rebuild(vault)
+    rid = edited.rid
+    assert rows(vault, "SELECT versions, path FROM records WHERE rid = ?", rid) == [
+        (2, "raw/chat/2026/10/2026-10-14T0900-test-box.jsonl")
+    ]
+    assert rows(vault, "SELECT text FROM chunks WHERE owner = ?", f"r {rid}") == [("A határidő csütörtök lett.",)]
+
+
+def test_raw_lines_are_read_leniently(vault: Vault) -> None:
+    good = make_record(90, text="still indexed")
+    newer = json.loads(make_record(91, text="from a newer docket").to_json()) | {"mood": "new field"}
+    run_file(
+        vault,
+        "2026-10-14T1200-test-box.jsonl",
+        [good.to_json(), "{not json", "[1, 2]", json.dumps({"rid": "chat:x"}), json.dumps(newer), ""],
+    )
+    report = rebuild(vault)
+    place = "raw/chat/2026/10/2026-10-14T1200-test-box.jsonl"
+    assert f"{place}:2: not JSON: Expecting property name enclosed in double quotes" in report.problems
+    assert f"{place}:3: not a raw record: a JSON object per line" in report.problems
+    assert any(p.startswith(f"{place}:4: not a raw record: ") for p in report.problems)
+    assert f"{place}:5: fields this Docket doesn't know, left out: mood" in report.problems
+    texts = {r[0] for r in rows(vault, "SELECT text FROM chunks WHERE kind = 'message'")}
+    assert {"still indexed", "from a newer docket"} <= texts
+
+
+def test_malformed_segments_are_a_problem_and_the_text_is_indexed(vault: Vault) -> None:
+    broken = make_record(
+        rid="calls:broken", source="calls", kind="recording", container=None, text="Fallback text.",
+        native={"segments": [{"start_ms": 5, "end_ms": 1}]},
+    )  # fmt: skip
+    vault.write_run("calls", [broken], datetime(2026, 10, 14, 9, 0, tzinfo=UTC))
+    report = rebuild(vault)
+    assert any(p.startswith("calls:broken: calls:broken: segment 1") for p in report.problems)
+    assert rows(vault, "SELECT text, kind FROM chunks WHERE rid = 'calls:broken'") == [("Fallback text.", "record")]
+
+
+def test_docs_that_can_t_be_read_are_problems(vault: Vault) -> None:
+    folder = vault.root / "processed" / "digest"
+    (folder / "broken.md").write_text("no frontmatter\n", encoding="utf-8")
+    (folder / "latin1.md").write_bytes(b"---\nid: digest:x\n---\n\xe9\n")
+    misplaced = (INDEX_FIXTURE / "docs" / "07-legacy.md").read_text(encoding="utf-8")
+    (folder / "misplaced.md").write_text(misplaced, encoding="utf-8")
+    problems = rebuild(vault).problems
+    assert any(p.startswith("processed/digest/broken.md: the doc was refused") for p in problems)
+    assert "processed/digest/latin1.md: isn't UTF-8" in problems
+    assert any(p.startswith("processed/digest/misplaced.md: its id legacy-note:old-northwind-notes") for p in problems)
+
+
+def test_staging_is_never_read(vault: Vault) -> None:
+    staged = vault.root / "staging" / "chat" / "x.json"
+    staged.parent.mkdir(parents=True)
+    staged.write_text(json.dumps({"record": json.loads(make_record(77, text="staged secret").to_json())}), "utf-8")
+    rebuild(vault)
+    assert rows(vault, "SELECT count(*) FROM chunks WHERE text LIKE '%staged secret%'") == [(0,)]
+
+
+def test_a_failure_halfway_leaves_the_old_index(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
+    rebuild(vault)
+    before = build.db_path(vault).read_bytes()
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("halfway")
+
+    monkeypatch.setattr(matching, "refresh", boom)
+    with pytest.raises(RuntimeError, match="halfway"):
+        rebuild(vault)
+    assert build.db_path(vault).read_bytes() == before
+    assert not list((vault.root / "index").glob("*.tmp"))
+
+
+def test_a_hot_journal_beside_the_old_index_is_rolled_back_first(vault: Vault, tmp_path: Path) -> None:
+    rebuild(vault)
+    db = build.db_path(vault)
+    crashed = tmp_path / "crashed"
+    crashed.mkdir()
+    conn = sqlite3.connect(db, isolation_level=None)
+    conn.execute("PRAGMA cache_size = 1")
+    conn.execute("BEGIN")
+    conn.execute("UPDATE chunks SET text = text || ' and more words than fit in one page'")
+    journal = db.with_name(db.name + "-journal")
+    assert journal.exists()
+    shutil.copy(db, crashed / db.name)
+    shutil.copy(journal, crashed / journal.name)
+    conn.execute("ROLLBACK")
+    conn.close()
+    shutil.copy(crashed / db.name, db)
+    shutil.copy(crashed / journal.name, journal)
+    rebuild(vault)
+    assert not journal.exists()
+    check = sqlite3.connect(db)
+    assert check.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+    assert check.execute("SELECT count(*) FROM chunks WHERE text LIKE '%than fit in one page'").fetchone() == (0,)
+    check.close()
+
+
+def test_an_old_index_that_won_t_open_goes_with_its_journals(vault: Vault) -> None:
+    db = build.db_path(vault)
+    db.parent.mkdir(exist_ok=True)
+    db.write_bytes(b"not a database at all, just bytes" * 100)
+    db.with_name(db.name + "-journal").write_bytes(b"junk")
+    rebuild(vault)
+    assert not db.with_name(db.name + "-journal").exists()
+    assert status(vault).stale is None
+
+
+def test_a_replace_refused_while_open_is_retried_then_reported(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
+    real = Path.replace
+    refusals = {"left": 2}
+
+    def flaky(self: Path, target: Path) -> Path:
+        if refusals["left"]:
+            refusals["left"] -= 1
+            raise PermissionError("in use")
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "replace", flaky)
+    monkeypatch.setattr(build, "REPLACE_WAIT", 0)
+    rebuild(vault)
+    assert refusals["left"] == 0
+
+    def never(self: Path, target: Path) -> Path:
+        raise PermissionError("in use")
+
+    monkeypatch.setattr(Path, "replace", never)
+    monkeypatch.setattr(build, "REPLACE_SECONDS", 0)
+    with pytest.raises(DocketError, match="open in another process"):
+        rebuild(vault)
+    assert not list((vault.root / "index").glob("*.tmp"))
+
+
+def test_status_says_what_is_new_and_what_needs_a_rebuild(vault: Vault) -> None:
+    assert status(vault).exists is False
+    with pytest.raises(DocketError, match="no index yet"):
+        locate(vault, CALL)
+    rebuild(vault)
+    st = status(vault)
+    assert (st.stale, st.new_runs, st.changed_docs, st.entities_changed) == (None, 0, 0, False)
+    assert st.columns == ["folded", "stem_en", "stem_hu"] and st.counts["docs"] == 7
+    run_file(vault, "2026-10-14T1300-test-box.jsonl", [make_record(95).to_json()])
+    note = next((vault.root / "processed" / "legacy-note").glob("*.md"))
+    note.write_text(note.read_text(encoding="utf-8") + "More.\n", encoding="utf-8")
+    (vault.root / "entities" / "person" / "cleo-test.yaml").unlink()
+    st = status(vault)
+    assert (st.new_runs, st.changed_docs, st.entities_changed) == (1, 1, True)
+    first = sorted((vault.root / "raw" / "cal").rglob("*.jsonl"))[0]
+    first.write_text(first.read_text(encoding="utf-8") + "\n\n", encoding="utf-8")
+    assert status(vault).changed_runs == 1
+    vault.config.owner.languages = ["en", "de"]
+    assert "languages" in str(status(vault).stale)
+    with pytest.raises(DocketError, match="can't be used"):
+        locate(vault, CALL)
+
+
+def test_a_vault_without_processed_docs_or_entities_builds(tmp_path: Path) -> None:
+    from docket_testkit import index_config
+
+    vault = Vault.init(tmp_path / "empty", index_config(["en", "klingon"]), "test-box")
+    shutil.rmtree(vault.root / "processed")
+    shutil.rmtree(vault.root / "entities")
+    report = rebuild(vault)
+    assert report.counts["chunks"] == 0
+    assert any(p.startswith("vault.yaml: vault.yaml's language 'klingon' has no stemmer") for p in report.problems)
+    st = status(vault)
+    assert (st.changed_docs, st.entities_changed) == (0, False)

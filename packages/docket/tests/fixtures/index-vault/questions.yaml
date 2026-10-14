@@ -1,0 +1,20 @@
+# Invented questions over the index fixture, each with where its answer is: a locator the top five hits start with
+# (a hit's own locator or one collapsed under it), and the group it sits in when that matters. They seed the question
+# set `docket eval` runs (phase 1).
+- q: millió forint
+  expect: "r:calls:rec-0100"
+- q: hatarido
+  expect: "r:calls:rec-0100@02:30"
+- q: Nortwin
+  expect: "r:calls:rec-0100@01:50"
+- q: cold-rated model
+  expect: "r:chat:C0OPS/1791400800.000100"
+- q: day rate
+  expect: "r:mail:<offer-1@northwind.example>#"
+- q: deadline with Ben
+  expect: "recording-note:2026-10-07-supplier-call"
+  group: "calls:rec-0100"
+- q: múlt héten pallet labels
+  expect: "r:chat:C0OPS/1791400000.000100"
+- q: fleet dashboard battery
+  expect: "r:calls:rec-0101@"
