@@ -112,9 +112,9 @@ def retry(op: Callable[[], object]) -> None:
 
 
 class Staging:
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, tmp_dir: Path | None = None) -> None:
         self.dir = root / STAGING
-        self.tmp_dir = root / ".git" / "docket" / "tmp"
+        self.tmp_dir = tmp_dir or root / ".git" / "docket" / "tmp"
         self.decided_file = self.dir / DECIDED
 
     def path(self, staged: Staged) -> Path:

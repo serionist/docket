@@ -1,10 +1,15 @@
-"""A vault on disk: its layout, opening and creating one, committing, and checking that the raw log is intact."""
+"""A vault on disk: its layout, opening and creating one, committing, and checking that the raw log is intact.
+
+A vault is the top of a repo of its own, or a folder of the user's repo (the host); `vault.yaml` says which and
+`home.py` works out where git and Docket's own files are.
+"""
 
 from __future__ import annotations
 
 import json
 import logging
 import os
+import re
 import shutil
 import stat
 from collections import Counter
@@ -19,7 +24,8 @@ from pydantic import ValidationError
 from docket.errors import DocketError
 from docket.vault import machine as machines
 from docket.vault.config import CONFIG_FILE, VaultConfig
-from docket.vault.git import Git, Identity, SyncResult, sync_marker
+from docket.vault.git import DOC_LINE, Git, Identity, SyncResult
+from docket.vault.home import Home, stopped_convert
 from docket.vault.lock import VaultLock
 from docket.vault.rawlog import RUN_FILE, RawLog, parse_run_file
 from docket.vault.records import RawRecord
@@ -31,7 +37,12 @@ SYNC_REBASE_WINDOW_SECONDS = 60
 
 # Folders every vault has from the start; git keeps an empty folder only with a file in it.
 FOLDERS = ["raw", "media", "processed", "entities", "ledger/ops", "state"]
-GITATTRIBUTES = """\
+# The first attribute line must stay first: a host's rules stop at the vault, and the lines after it set the vault's
+# own. Appended last, it would cancel them.
+RESET_LINE = "* !filter !diff !merge !working-tree-encoding"
+GITATTRIBUTES = f"""\
+# Attributes from a repo around the vault stop here; the lines below set the vault's own.
+{RESET_LINE}
 # Text is stored with LF everywhere, so every machine sees the same bytes.
 * text=auto eol=lf
 # Files several machines append to merge by keeping both sides' lines.
@@ -48,6 +59,37 @@ index/
 *.tmp
 .DS_Store
 """
+# A folder vault's search rules: ripgrep, Claude Code and editors see the processed docs and nothing else in it.
+IGNORE = """\
+# Search tools see the processed docs; the rest is read through Docket.
+/*
+!/processed/
+"""
+# A sample path, an attribute and the value it must have; what `git check-attr` says for each is checked.
+ATTRIBUTE_CHECKS = [
+    ("raw/s/2026/01/2026-01-01T0000-m.jsonl", "filter", "unspecified"),
+    ("raw/s/2026/01/2026-01-01T0000-m.jsonl", "merge", "union"),
+    ("raw/s/2026/01/2026-01-01T0000-m.jsonl", "eol", "lf"),
+    ("media/s/2026/01/x.age", "filter", "lfs"),
+    ("processed/t/x.md", "filter", "unspecified"),
+    ("state/holds/s.txt", "merge", "union"),
+]
+# A path in each place the vault commits; no ignore rule may match one.
+IGNORE_SAMPLES = [
+    CONFIG_FILE,
+    ".gitattributes",
+    "raw/s/2026/01/2026-01-01T0000-m.jsonl",
+    "media/s/2026/01/x.age",
+    "processed/t/x.md",
+    "entities/t/x.yaml",
+    "ledger/ops/2026-01-m.jsonl",
+    "state/cursors-m.yaml",
+    "state/holds/s.txt",
+]
+
+
+# `git check-ignore -v`'s rule: <source>:<line>:<pattern>, where a source on Windows can hold a drive's colon.
+_IGNORE_RULE = re.compile(r"^(.*?):(\d+):(.*)$")
 
 
 @dataclass
@@ -63,6 +105,10 @@ class Problem:
 class Status:
     root: Path
     machine: str
+    storage: str = "repo"
+    host: Path | None = None
+    branch: str | None = None
+    branch_warning: str | None = None
     records: Counter[str] = field(default_factory=Counter[str])
     runs: int = 0
     uncommitted_runs: list[str] = field(default_factory=list[str])
@@ -71,22 +117,26 @@ class Status:
 
 
 class Vault:
-    def __init__(self, root: Path, config: VaultConfig) -> None:
+    def __init__(self, root: Path, config: VaultConfig, home: Home | None = None) -> None:
         self.root = root
         self.config = config
-        self.machine = machines.resolve(root)
+        self.home = home or Home.resolve(root, config.storage)
+        self.machine = machines.resolve(self.home.private)
         owner_email = config.owner.emails[0] if config.owner.emails else "docket@localhost"
-        self.git = Git(root, Identity(config.owner.name, owner_email))
-        self.lock = VaultLock(root / ".git")
-        self.rawlog = RawLog(root, self.machine, self.lock)
+        self.git = Git(root, Identity(config.owner.name, owner_email), self.home)
+        self.lock = VaultLock(self.home.git_dir, lock_file=self.home.lock_file, clear_stale_index=not self.home.folder)
+        self.rawlog = RawLog(root, self.machine, self.lock, self.home.tmp_dir)
 
     # -- finding and creating ------------------------------------------------------------------------------------
 
     @staticmethod
     def find(start: Path) -> Path | None:
-        """The vault holding a path: the nearest folder upward with a vault.yaml and its own .git."""
+        """The vault holding a path: the nearest folder upward with a vault.yaml and its own .git, or a vault.yaml
+        Docket wrote (a folder vault, or one whose .git is missing, which open then explains). Another tool's
+        vault.yaml in some repo is never taken for a vault."""
         for folder in [start.resolve(), *start.resolve().parents]:
-            if (folder / CONFIG_FILE).is_file() and (folder / ".git").exists():
+            config = folder / CONFIG_FILE
+            if config.is_file() and ((folder / ".git").exists() or is_docket_config(config)):
                 return folder
         return None
 
@@ -95,35 +145,48 @@ class Vault:
         root = cls.find(path)
         if root is None:
             raise DocketError(f"no vault at or above {path}; create one with `docket init`")
+        if stopped_convert(root) is not None:
+            raise DocketError(
+                f"a convert of {root} stopped part way; run `docket vault convert` to finish it, or `docket vault "
+                "convert --abort` to undo it"
+            )
         return cls(root, VaultConfig.load(root / CONFIG_FILE))
 
     @classmethod
     def init(cls, path: Path, config: VaultConfig, machine: str) -> Vault:
-        """Create a vault in a folder that doesn't exist yet, or is empty. Nothing existing is ever overwritten."""
+        """Create a vault in a folder that doesn't exist yet, or is empty. Nothing existing is ever overwritten. A
+        folder vault writes only inside its folder, and its one commit holds only its own paths."""
         path = path.resolve()
         if cls.find(path) == path:
             raise DocketError(f"already a vault: {path}")
         if path.exists() and (not path.is_dir() or any(path.iterdir())):
             raise DocketError(f"{path} exists and isn't empty; a vault starts in an empty folder")
         created = not path.exists()
+        folder = config.storage == "folder"
+        private: Path | None = None
+        private_existed = False
         written: list[str] = []
         try:
             path.mkdir(parents=True, exist_ok=True)
-            vault_git = Git(path, Identity(config.owner.name, config.owner.emails[0] if config.owner.emails else ""))
-            vault_git.init()
-            for folder in FOLDERS:
-                keep = path / folder / ".gitkeep"
+            if not folder:
+                Git(path).init()
+            home = Home.resolve(path, config.storage)
+            private, private_existed = home.private, home.private.exists()
+            for name in FOLDERS:
+                keep = path / name / ".gitkeep"
                 keep.parent.mkdir(parents=True, exist_ok=True)
                 keep.write_text("", encoding="utf-8")
-                written.append(f"{folder}/.gitkeep")
-            for name, text in ((".gitattributes", GITATTRIBUTES), (".gitignore", GITIGNORE)):
+                written.append(f"{name}/.gitkeep")
+            files = [(".gitattributes", GITATTRIBUTES), (".gitignore", GITIGNORE)]
+            for name, text in [*files, *([(".ignore", IGNORE)] if folder else [])]:
                 (path / name).write_text(text, encoding="utf-8", newline="\n")
                 written.append(name)
             (path / CONFIG_FILE).write_text(config.dump(), encoding="utf-8", newline="\n")
             written.append(CONFIG_FILE)
-            machines.remember(path, machine)
-            vault_git.lfs_install()
-            vault = cls(path, config)
+            machines.remember(home.private, machine)
+            vault = cls(path, config, home)
+            if not folder:
+                vault.git.lfs_install()
             vault.git.commit(written, "Start the vault")
             return vault
         except BaseException:
@@ -132,6 +195,8 @@ class Vault:
             else:
                 for child in list(path.iterdir()):
                     remove_tree(child) if child.is_dir() else _unlink_writable(child)
+            if folder and private is not None and not private_existed and private.exists():
+                remove_tree(private)
             raise
 
     # -- writing ---------------------------------------------------------------------------------------------------
@@ -146,10 +211,18 @@ class Vault:
         """Commit locally. Run files left uncommitted by an interrupted run go in too; never a changed raw file."""
         with self.lock:
             self._recover()
-            orphans = [p for p in self.git.untracked("raw") if RUN_FILE.match(Path(p).name)]
-            return self.git.commit([*paths, *orphans], message)
+            return self.git.commit([*paths, *self.uncommitted_runs()], message)
+
+    def uncommitted_runs(self) -> list[str]:
+        """Run files not in HEAD: untracked, or staged by an add whose commit never came."""
+        found = [*self.git.untracked("raw"), *self.git.staged_new("raw")]
+        return sorted({p for p in found if RUN_FILE.match(Path(p).name)})
 
     def sync(self) -> SyncResult:
+        if self.home.folder:
+            # The host is the user's: Docket never fetches, rebases, stashes or pushes it.
+            message = f"{self.root} is a folder of {self.home.top}: your own git (commit, pull, push) moves it"
+            return SyncResult(False, False, message)
         with self.lock:
             self._recover()
             return self.git.sync()
@@ -164,25 +237,29 @@ class Vault:
 
     def _recover(self) -> None:
         """Before writing: undo a rebase a killed sync of ours left behind (its marker says so, and under the lock no
-        sync of ours is running), and refuse to touch anything else git is in the middle of, which is the user's."""
-        git_dir = self.root / ".git"
-        marker = sync_marker(self.root)
+        sync of ours is running), and refuse to touch anything else git is in the middle of, which is the user's. In
+        a folder of the user's repo Docket never syncs, so nothing there is ever undone."""
+        git_dir = self.home.git_dir
+        repo = self.home.top
         state = next((git_dir / d for d in ("rebase-merge", "rebase-apply") if (git_dir / d).exists()), None)
         rebasing = state is not None
-        if state is not None and marker.exists() and _started_with(state, marker):
-            log.warning("undoing a rebase a stopped sync left in %s", self.root)
-            self.git.run("rebase", "--abort")
-            rebasing = False
-        marker.unlink(missing_ok=True)
+        if not self.home.folder:
+            marker = self.home.sync_marker
+            if state is not None and marker.exists() and _started_with(state, marker):
+                log.warning("undoing a rebase a stopped sync left in %s", self.root)
+                self.git.run("rebase", "--abort")
+                rebasing = False
+            marker.unlink(missing_ok=True)
         if rebasing:
-            raise DocketError(f"a rebase is in progress in {self.root}; finish it (git rebase --continue) or undo it")
+            raise DocketError(f"a rebase is in progress in {repo}; finish it (git rebase --continue) or undo it")
         for head, what in (("MERGE_HEAD", "merge"), ("CHERRY_PICK_HEAD", "cherry-pick"), ("REVERT_HEAD", "revert")):
             if (git_dir / head).exists():
-                raise DocketError(f"a {what} is in progress in {self.root}; finish or undo it before Docket writes")
+                raise DocketError(f"a {what} is in progress in {repo}; finish or undo it before Docket writes")
         if self.git.branch() == "HEAD":
-            raise DocketError(f"{self.root} isn't on a branch (a detached HEAD); check out main before Docket writes")
+            raise DocketError(f"{repo} isn't on a branch (a detached HEAD); check out a branch before Docket writes")
         # A conflict a stash pop or a merge --squash left leaves no *_HEAD file, only unmerged paths; committing then
-        # would take in the conflict markers and mark the conflict resolved.
+        # would take in the conflict markers and mark the conflict resolved. Only the vault's own paths count: git's
+        # partial commit leaves a conflict in the user's files as it is.
         unmerged = sorted({line.split("\t", 1)[-1] for line in self.git.out("ls-files", "-u").splitlines()})
         if unmerged:
             raise DocketError(f"{', '.join(unmerged)} in {self.root} has a conflict; resolve it before Docket writes")
@@ -190,8 +267,9 @@ class Vault:
     # -- checking ------------------------------------------------------------------------------------------------
 
     def check(self) -> list[Problem]:
-        """What would make the raw log untrustworthy: a file that doesn't parse, a record twice in one run, a raw file
-        changed or deleted after it was committed, or a file in raw/ that isn't a run file."""
+        """What would make the vault untrustworthy: a raw file that doesn't parse, a record twice in one run, a raw
+        file changed or deleted after it was committed, a file in raw/ that isn't a run file; an ignore rule that
+        hides a path the vault commits, an attribute that isn't the vault's own; a doc rev two commits claim."""
         problems: list[Problem] = []
         raw = self.root / "raw"
         for path in sorted(raw.rglob("*")) if raw.is_dir() else []:
@@ -218,10 +296,49 @@ class Vault:
             Problem(rel, "changed or deleted after it was committed; raw files are written once")
             for rel in self.git.changed_against_head("raw")
         )
+        hidden: dict[tuple[str, str], list[str]] = {}
+        for rel, rule, pattern in ignored(self.root):
+            hidden.setdefault((rule, pattern), []).append(rel)
+        for (rule, pattern), rels in hidden.items():
+            more = f" and {len(rels) - 1} more of the vault's paths" if len(rels) > 1 else ""
+            hint = (
+                "; `docket vault convert` took this line out of the repo's .gitignore: commit that edit"
+                if pattern == f"/{self.home.prefix}"
+                else ""
+            )
+            problems.append(Problem(rels[0], f"an ignore rule hides it{more} from git ({rule}){hint}"))
+        problems.extend(Problem(rel, message) for rel, message in attribute_mismatches(self.root))
+        problems.extend(self._doc_rev_problems())
         return problems
+
+    def _doc_rev_problems(self) -> list[Problem]:
+        """A doc rev that two commits claim: the user's own merge can bring one from each side, which Docket's sync
+        would have stopped. The next put goes on from the highest rev."""
+        out = self.git.run("log", "--no-show-signature", "--format=%H%x1f%B%x1e", "--", "processed", check=False)
+        claims: dict[tuple[str, int], list[str]] = {}
+        for entry in out.stdout.split("\x1e"):
+            sha, _, message = entry.strip("\n").partition("\x1f")
+            for line in message.splitlines():
+                m = DOC_LINE.match(line.strip())
+                if m:
+                    claims.setdefault((m.group(1), int(m.group(2))), []).append(sha[:12])
+        return [
+            Problem(doc, f"rev {rev} is claimed by {len(shas)} commits ({', '.join(shas)}); the next put goes on from "
+                    "the highest rev")
+            for (doc, rev), shas in sorted(claims.items())
+            if len(shas) > 1
+        ]  # fmt: skip
 
     def status(self) -> Status:
         status = Status(root=self.root, machine=self.machine, last_commit=self.git.last_commit())
+        status.storage = self.home.storage
+        status.host = self.home.top if self.home.folder else None
+        status.branch = self.git.branch()
+        default = self.git.run("symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD", check=False).stdout.strip()
+        if default and default.removeprefix("origin/") != status.branch:
+            status.branch_warning = (
+                f"Docket commits on {status.branch}, not {default.removeprefix('origin/')}, the remote's default"
+            )
         runs_of: dict[tuple[str, str], set[str]] = {}
         for run in self.rawlog.run_files():
             status.runs += 1
@@ -229,8 +346,61 @@ class Vault:
                 status.records[record.source] += 1
                 runs_of.setdefault((record.rid, record.v), set()).add(run.stem)
         status.seen_in_several_runs = sum(1 for runs in runs_of.values() if len(runs) > 1)
-        status.uncommitted_runs = [p for p in self.git.untracked("raw") if RUN_FILE.match(Path(p).name)]
+        status.uncommitted_runs = self.uncommitted_runs()
         return status
+
+
+def is_docket_config(config: Path) -> bool:
+    """Whether a vault.yaml is Docket's: it names the primary machine. Read as text, so one with a typo still counts
+    and its load says what is wrong, while another tool's vault.yaml is just a no."""
+    try:
+        text = config.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    return any(line.startswith("primary_machine:") for line in text.splitlines())
+
+
+def ignored(cwd: Path, prefix: str = "") -> list[tuple[str, str, str]]:
+    """(the sample path, the rule, its pattern) for each sample path of the vault an ignore rule hides; run from the
+    vault, or from the host's top with the vault's prefix before it exists."""
+    paths = [prefix + p for p in IGNORE_SAMPLES]
+    proc = Git(cwd).run("check-ignore", "-v", "--no-index", "--", *paths, check=False)
+    found: list[tuple[str, str, str]] = []
+    for line in proc.stdout.splitlines():
+        rule, _, path = line.partition("\t")
+        m = _IGNORE_RULE.match(rule)
+        source, number, pattern = m.groups() if m else (rule, "", "")
+        if pattern.startswith("!"):
+            continue  # a rule that brings the path back
+        found.append((path[len(prefix) :], f"{source}:{number}: {pattern}", pattern))
+    return found
+
+
+def attribute_mismatches(cwd: Path) -> list[tuple[str, str]]:
+    """(the sample path, what is wrong) for each attribute git resolves to something other than the vault's own."""
+    paths = sorted({path for path, _, _ in ATTRIBUTE_CHECKS})
+    out = Git(cwd).run("check-attr", "filter", "merge", "eol", "--", *paths, check=False).stdout
+    seen: dict[tuple[str, str], str] = {}
+    for line in out.splitlines():
+        path, attr, value = line.rsplit(": ", 2)
+        seen[(path, attr)] = value
+    return [
+        (path, f"git gives it {attr}: {seen.get((path, attr), 'nothing')}, the vault's own is {want}; a rule in "
+               ".git/info/attributes or the repo around it overrides the vault's .gitattributes")
+        for path, attr, want in ATTRIBUTE_CHECKS
+        if seen.get((path, attr)) != want
+    ]  # fmt: skip
+
+
+def with_attributes(text: str) -> str:
+    """A vault's .gitattributes with every line of the current one it lacks: the reset line first, the rest after."""
+    have = {line.strip() for line in text.splitlines()}
+    lines = text.splitlines()
+    wanted = [line for line in GITATTRIBUTES.splitlines() if line and not line.startswith("#")]
+    if RESET_LINE not in have:
+        lines = [GITATTRIBUTES.splitlines()[0], RESET_LINE, *lines]
+    lines += [line for line in wanted if line not in have and line != RESET_LINE]
+    return "".join(f"{line}\n" for line in lines)
 
 
 def _started_with(state: Path, marker: Path) -> bool:

@@ -108,8 +108,9 @@ class DocStore:
         return self.file(doc_id).is_file() or bool(self.history(doc_id))
 
     def _blob(self, sha: str, doc_id: str) -> str:
-        # Not `git show`: it also tries its argument as a file path, which fails past 260 characters on Windows.
-        return self.vault.git.out("cat-file", "blob", f"{sha}:{self.path(doc_id).as_posix()}")
+        # Not `git show`: it also tries its argument as a file path, which fails past 260 characters on Windows. The
+        # ./ makes git read the path from the vault's folder, not the top of a host repo the vault is a folder of.
+        return self.vault.git.out("cat-file", "blob", f"{sha}:./{self.path(doc_id).as_posix()}")
 
     def at_rev(self, doc_id: str, rev: int) -> ProcessedDoc:
         """The doc as the commit that wrote that rev left it."""
@@ -363,7 +364,7 @@ class DocStore:
 
     def _replace(self, path: Path, data: bytes) -> None:
         """Write a file whole through a temp file and a rename; the temp file lives in .git, never in processed/."""
-        tmp_dir = self.root / ".git" / "docket" / "tmp"
+        tmp_dir = self.vault.home.tmp_dir
         tmp_dir.mkdir(parents=True, exist_ok=True)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = tmp_dir / f"{path.name}.{os.getpid()}.tmp"

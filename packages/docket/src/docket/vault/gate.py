@@ -25,7 +25,6 @@ from docket.vault import cuts as cutting
 from docket.vault import holds, neverstore
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.cuts import CUT_MARKER, Cut
-from docket.vault.rawlog import RUN_FILE
 from docket.vault.records import RawRecord, version
 from docket.vault.redact import Redactor, markers
 from docket.vault.staging import Classifier, Decided, Entry, Scan, Staged, Staging, State, key_of, rid_hash
@@ -90,7 +89,7 @@ class Shown:
 class Gate:
     def __init__(self, vault: Vault) -> None:
         self.vault = vault
-        self.staging = Staging(vault.root)
+        self.staging = Staging(vault.root, vault.home.tmp_dir)
         self._cut_rids: set[str] = set()
         self._read_runs: set[Path] = set()
         self._holds = holds.Holds()
@@ -250,9 +249,7 @@ class Gate:
     def _uncommitted_runs_with(self, rid: str) -> list[str]:
         """The run files git hasn't committed yet that hold a record, vault-relative."""
         found: list[str] = []
-        for rel in self.vault.git.untracked("raw"):
-            if not RUN_FILE.match(Path(rel).name):
-                continue
+        for rel in self.vault.uncommitted_runs():
             with (self.vault.root / rel).open(encoding="utf-8", newline="\n") as f:
                 for line in f:
                     data: Any = json.loads(line) if line.strip() else {}

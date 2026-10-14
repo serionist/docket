@@ -19,15 +19,24 @@ STALE_INDEX_LOCK_SECONDS = 600
 
 
 class VaultLock:
-    def __init__(self, git_dir: Path, timeout: float = 60.0) -> None:
+    def __init__(
+        self, git_dir: Path, timeout: float = 60.0, *, lock_file: Path | None = None, clear_stale_index: bool = True
+    ) -> None:
+        """The lock on `lock_file` (`<git dir>/docket.lock` by default). In a folder of the user's repo the git dir
+        is theirs, so a stale `index.lock` there is theirs too and is left alone (`clear_stale_index=False`)."""
         self.git_dir = git_dir
-        self._lock = FileLock(str(git_dir / "docket.lock"), timeout=timeout)
+        self.path = lock_file or git_dir / "docket.lock"
+        self.clear_stale_index = clear_stale_index
+        self._lock = FileLock(str(self.path), timeout=timeout)
 
     def __enter__(self) -> VaultLock:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         try:
             self._lock.acquire()
         except Timeout as e:
-            raise DocketError(f"another docket process holds {self.git_dir / 'docket.lock'}; try again") from e
+            raise DocketError(f"another docket process holds {self.path}; try again") from e
+        if not self.clear_stale_index:
+            return self
         try:
             clear_stale_index_lock(self.git_dir)
         except BaseException:

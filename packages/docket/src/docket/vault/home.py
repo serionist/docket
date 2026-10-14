@@ -1,0 +1,127 @@
+"""Where a vault's git and Docket's own files live: the top of a repo of its own, or a folder of the user's repo.
+
+`vault.yaml` says which (`storage: repo` or `folder`), and the disk has to agree. In a repo of its own, Docket's
+private files sit in its `.git` as they always have; in a folder of a host repo, they sit under the host's git dir, in
+`docket/<vault path>/`, so nothing of Docket's ever shows in the user's tree.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
+
+from docket.errors import DocketError
+
+Storage = Literal["repo", "folder"]
+CONVERT_FILE = "convert.json"
+
+
+@dataclass(frozen=True)
+class Home:
+    root: Path
+    storage: Storage
+    top: Path
+    prefix: str  # the vault's path in its repo, with a trailing slash; empty for a repo of its own
+    git_dir: Path
+    private: Path
+
+    @property
+    def folder(self) -> bool:
+        return self.storage == "folder"
+
+    @property
+    def lock_file(self) -> Path:
+        return self.private / "docket.lock" if self.folder else self.git_dir / "docket.lock"
+
+    @property
+    def tmp_dir(self) -> Path:
+        return self.private / "tmp"
+
+    @property
+    def sync_marker(self) -> Path:
+        return self.private / "sync-rebase"
+
+    @property
+    def no_hooks(self) -> Path:
+        return self.private / "no-hooks"
+
+    @property
+    def ceiling(self) -> Path | None:
+        """In a repo of its own, git must never look above the vault: a vault whose .git went missing would commit
+        into whatever repo holds it."""
+        return None if self.folder else self.root.parent
+
+    @staticmethod
+    def resolve(root: Path, storage: Storage) -> Home:
+        root = root.resolve()
+        if storage == "repo":
+            return _own_repo(root)
+        return _folder(root)
+
+
+def rev_parse(cwd: Path, *flags: str) -> list[str] | None:
+    """`git rev-parse` with these flags, one answer per line; None outside a repo."""
+    proc = subprocess.run(
+        ["git", "rev-parse", *flags],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        env={**os.environ},
+    )
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.splitlines()
+
+
+def _own_repo(root: Path) -> Home:
+    if not (root / ".git").exists():
+        raise DocketError(
+            f"{root}/vault.yaml says storage: repo, but there is no .git in {root}; restore it, or set storage: "
+            "folder if the vault is a folder of the repo around it"
+        )
+    git_dir = root / ".git"
+    return Home(root, "repo", root, "", git_dir, git_dir / "docket")
+
+
+def _folder(root: Path) -> Home:
+    if (root / ".git").exists():
+        raise DocketError(
+            f"{root}/vault.yaml says storage: folder, but {root} has a .git of its own; a folder vault is part of the "
+            "repo around it"
+        )
+    answer = rev_parse(
+        root, "--show-toplevel", "--show-prefix", "--absolute-git-dir", "--path-format=absolute", "--git-common-dir"
+    )
+    if answer is None:
+        raise DocketError(f"{root}/vault.yaml says storage: folder, but {root} isn't inside a git repo")
+    # The prefix is never empty: the top of a repo has a .git, which a folder vault refuses above.
+    top, prefix, git_dir, common = answer
+    top_path = Path(top).resolve()
+    common_dir = Path(common).resolve()
+    git_path = Path(git_dir).resolve()
+    if common_dir != git_path:
+        main = common_dir.parent / prefix.rstrip("/")
+        raise DocketError(
+            f"{root} is in a linked worktree; Docket writes the vault in the main checkout: {main} (pass --vault)"
+        )
+    if (top_path / "vault.yaml").is_file():
+        raise DocketError(f"{root} is inside another vault, {top_path}; a vault can't hold another")
+    return Home(root, "folder", top_path, prefix, git_path, git_path.joinpath("docket", *prefix.rstrip("/").split("/")))
+
+
+def stopped_convert(root: Path) -> Path | None:
+    """The state file of a convert that stopped part way, for a vault without a .git of its own: the host's git dir
+    keeps it under the vault's path."""
+    root = root.resolve()
+    if (root / ".git").exists():
+        return None
+    answer = rev_parse(root, "--absolute-git-dir", "--show-prefix")
+    if answer is None or not answer[1]:
+        return None
+    state = Path(answer[0]).joinpath("docket", *answer[1].rstrip("/").split("/"), CONVERT_FILE)
+    return state if state.is_file() else None

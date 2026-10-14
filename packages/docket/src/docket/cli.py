@@ -128,11 +128,23 @@ def init(
     Wizard(TyperPrompter(), given).run()
 
 
+@app.command()
+def sync(vault: VaultOption = None) -> None:
+    """Move the vault with its remote: in a repo of its own, fetch and rebase; in a folder, your own git does it."""
+    result = find_vault(vault).sync()
+    typer.echo(result.message)
+    if "resolve it by hand" in result.message:
+        raise typer.Exit(1)
+
+
 @vault_app.command("status")
 def vault_status(vault: VaultOption = None) -> None:
     """Records per source, runs, and what isn't committed yet."""
     s = find_vault(vault).status()
     typer.echo(f"vault    {s.root}")
+    typer.echo(f"storage  {f'a folder of {s.host}' if s.host else 'a repo of its own'}, on {s.branch}")
+    if s.branch_warning:
+        typer.echo(f"warning  {s.branch_warning}")
     typer.echo(f"machine  {s.machine}")
     typer.echo(f"runs     {s.runs}")
     for source, count in sorted(s.records.items()):

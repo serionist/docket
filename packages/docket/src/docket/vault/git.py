@@ -1,5 +1,9 @@
 """The git calls the vault makes. Committing is always local; talking to a remote is a separate step that never
-blocks a commit."""
+blocks a commit.
+
+In a folder of the user's repo (the host), git runs from the vault's folder: pathspecs are relative to it, but some
+names git prints are relative to the host's top, and the index, its lock and the hooks are the host's.
+"""
 
 from __future__ import annotations
 
@@ -7,13 +11,19 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from docket.errors import DocketError
+from docket.vault.home import Home
 
 # A processed doc's rev is the commit whose message has this line, in its subject or its body (DR-0112).
 DOC_LINE = re.compile(r"^Doc: (\S+) rev ([1-9]\d*)(?: \(edited by hand\))?$")
+# Another git holding the index (an editor refreshing its status) lets go within moments; past this, it is reported.
+INDEX_LOCK_WAIT_SECONDS = 3.0
+_INDEX_LOCK_PAUSE = 0.1
+_PATHSPEC = ("--pathspec-from-file=-", "--pathspec-file-nul")
 
 
 @dataclass(frozen=True)
@@ -30,9 +40,11 @@ class SyncResult:
 
 
 class Git:
-    def __init__(self, root: Path, fallback: Identity | None = None) -> None:
+    def __init__(self, root: Path, fallback: Identity | None = None, home: Home | None = None) -> None:
         self.root = root
         self.fallback = fallback
+        self.home = home
+        self.prefix = home.prefix if home is not None else ""
 
     def run(
         self,
@@ -45,20 +57,41 @@ class Git:
         config: list[str] = []
         if identity and self.fallback is not None and not self.has_identity():
             config = ["-c", f"user.name={self.fallback.name}", "-c", f"user.email={self.fallback.email}"]
-        proc = subprocess.run(
-            ["git", *config, *args],
-            cwd=self.root,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-            env={**os.environ, **(env or {})},
-            input=stdin,
-        )
+        extra = dict(env or {})
+        ceiling = self.home.ceiling if self.home is not None else None
+        if ceiling is not None:
+            extra["GIT_CEILING_DIRECTORIES"] = str(ceiling)
+        deadline = time.monotonic() + INDEX_LOCK_WAIT_SECONDS
+        while True:
+            proc = subprocess.run(
+                ["git", *config, *args],
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+                env={**os.environ, **extra},
+                input=stdin,
+            )
+            held = proc.returncode != 0 and "index.lock" in proc.stderr and "File exists" in proc.stderr
+            if not held or time.monotonic() >= deadline:
+                break
+            time.sleep(_INDEX_LOCK_PAUSE)
         if check and proc.returncode != 0:
-            raise DocketError(f"git {args[0]}: {(proc.stderr or proc.stdout).strip()}")
+            message = (proc.stderr or proc.stdout).strip()
+            if held:
+                message += self._index_lock_age()
+            raise DocketError(f"git {args[0]}: {message}")
         return proc
+
+    def _index_lock_age(self) -> str:
+        git_dir = self.home.git_dir if self.home is not None else self.root / ".git"
+        try:
+            age = time.time() - (git_dir / "index.lock").stat().st_mtime
+        except FileNotFoundError:
+            return ""
+        return f" (index.lock is {int(age // 60)} minute(s) old; if no git is running, delete it)"
 
     def out(self, *args: str) -> str:
         return self.run(*args).stdout
@@ -84,24 +117,42 @@ class Git:
             return None
         # On stdin, not the command line: a backlog of run files would pass Windows' 32,767-character limit.
         spec = "\0".join(paths)
-        pathspec = ("--pathspec-from-file=-", "--pathspec-file-nul")
-        self.run("add", *pathspec, stdin=spec)
-        staged = {p for p in self.out("diff", "--cached", "--name-only", "-z").split("\0") if p}
-        if not staged & {Path(p).as_posix() for p in paths}:
-            return None
-        self.run("commit", "-q", "--only", *pathspec, "-m", message, identity=True, stdin=spec)
+        folder = self.home is not None and self.home.folder
+        try:
+            self.run("add", *_PATHSPEC, stdin=spec)
+            # `-- .` and the prefix, not --relative: that crashes git 2.47.0.windows.2 while a stash pop conflicts.
+            staged = {p for p in self.out("diff", "--cached", "--name-only", "-z", "--", ".").split("\0") if p}
+            if not staged & {self.prefix + Path(p).as_posix() for p in paths}:
+                return None
+            hooks: list[str] = []
+            if folder and self.home is not None:
+                # The host's hooks are written for the user's commits: a formatter would rewrite a raw file written
+                # once, a commit-msg rule would refuse or rewrite a Doc: line.
+                hooks = ["-c", f"core.hooksPath={self.home.no_hooks.as_posix()}"]
+            self.run(*hooks, "commit", "-q", "--only", *_PATHSPEC, "-m", message, identity=True, stdin=spec)
+        except BaseException:
+            if folder:
+                self.run("reset", "-q", *_PATHSPEC, check=False, stdin=spec)
+            raise
         return self.out("rev-parse", "HEAD").strip()
+
+    def _vault_names(self, out: str) -> list[str]:
+        """Names git printed from the repo's top, made relative to the vault."""
+        return [p.removeprefix(self.prefix) for p in out.split("\0") if p]
 
     def untracked(self, under: str) -> list[str]:
         out = self.out("ls-files", "-z", "--others", "--exclude-standard", "--", under)
         return [p for p in out.split("\0") if p]
 
+    def staged_new(self, under: str) -> list[str]:
+        """Files under a path that are staged but not in HEAD: what a crash between add and commit leaves."""
+        return self._vault_names(self.out("diff", "--cached", "--name-only", "--diff-filter=A", "-z", "--", under))
+
     def changed_against_head(self, under: str) -> list[str]:
         """Tracked files under a path that differ from HEAD, staged or not, deletions included."""
         if self.run("rev-parse", "--verify", "--quiet", "HEAD", check=False).returncode != 0:
             return []
-        out = self.out("diff", "--name-only", "-z", "HEAD", "--", under)
-        return [p for p in out.split("\0") if p]
+        return self._vault_names(self.out("diff", "--name-only", "-z", "HEAD", "--", under))
 
     def branch(self) -> str:
         return self.out("rev-parse", "--abbrev-ref", "HEAD").strip()
@@ -110,7 +161,7 @@ class Git:
         return name in self.out("remote").split()
 
     def last_commit(self) -> str | None:
-        proc = self.run("log", "-1", "--no-show-signature", "--format=%h %cs %s", check=False)
+        proc = self.run("log", "-1", "--no-show-signature", "--format=%h %cs %s", "--", ".", check=False)
         return proc.stdout.strip() or None
 
     def doc_revs(self, commits: str) -> set[tuple[str, int]]:
