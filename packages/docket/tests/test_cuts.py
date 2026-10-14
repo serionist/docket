@@ -1,23 +1,37 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from docket_testkit import make_record
 from pydantic import ValidationError
 
 from docket.errors import DocketError
-from docket.vault import cuts as cutting
-from docket.vault.cuts import CUT_MARKER, Cut, apply, cut_text, merge, parse, register_cutter
+from docket.vault.cuts import CUT_MARKER, Cut, apply, cut_text, merge, parse
 from docket.vault.records import RawRecord
 
+SAID: list[dict[str, Any]] = [
+    {"start_ms": 0, "end_ms": 4000, "speaker": "Ben Sample", "text": "Morning, Cleo."},
+    {"start_ms": 3000, "end_ms": 9000, "speaker": "Cleo Test", "text": "Morning. About my dentist on Friday."},
+    {"start_ms": 9000, "end_ms": 12000, "speaker": "Ben Sample", "text": "The offer is ten million."},
+    {"start_ms": 12000, "end_ms": 12000, "speaker": None, "text": "(a beep)"},
+    {"start_ms": 20000, "end_ms": 26000, "speaker": "Cleo Test", "text": "Send it by Friday."},
+]
 
-@pytest.fixture(autouse=True)
-def no_cutters() -> Iterator[None]:
-    saved = dict(cutting._CUTTERS)
-    yield
-    cutting._CUTTERS.clear()
-    cutting._CUTTERS.update(saved)
+
+def transcript(**fields: Any) -> RawRecord:
+    base: dict[str, Any] = {
+        "rid": "calls:rec-1/transcript",
+        "source": "calls",
+        "kind": "transcript",
+        "segments": SAID,
+        "native": {"utterances": "the stretch again, in the vendor's shape"},
+    }
+    return make_record(**{**base, **fields})
+
+
+def texts(record: RawRecord) -> list[str]:
+    return [s.text for s in record.segments or []]
 
 
 def test_overlapping_and_touching_cuts_are_merged() -> None:
@@ -34,11 +48,12 @@ def test_a_cut_must_end_after_it_starts() -> None:
         Cut(start=5, end=5)
 
 
-def test_a_text_cut_leaves_its_marker_and_clears_native() -> None:
+def test_a_text_cut_leaves_its_marker_clears_native_and_marks_the_record_cut() -> None:
     record = make_record(text="work part. private part. work again.", native={"text": "private part"})
     out = apply(record, [Cut(start=11, end=25)])
     assert out.text == f"work part. {CUT_MARKER}work again."
     assert out.native == {}
+    assert out.fidelity == "cut"
     assert apply(record, []) is record
 
 
@@ -47,34 +62,78 @@ def test_a_cut_past_the_end_is_refused() -> None:
         cut_text(make_record(text="short"), [Cut(start=2, end=50)])
 
 
-def test_time_cuts_need_the_source_s_cutter() -> None:
-    record = make_record(text="a recording")
-    with pytest.raises(DocketError, match=r"no cutter for time cuts; the core's comes with #10.*classify it whole"):
-        apply(record, [Cut(start=0, end=1000, unit="ms")])
+def test_a_time_cut_drops_whole_segments_and_widens_its_marker() -> None:
+    out = apply(transcript(), [Cut(start=5000, end=6000, unit="ms")])
+    # The cut touched only Cleo's line, 0:03 to 0:09, so the marker spans that whole line.
+    assert [(s.start_ms, s.end_ms, s.text) for s in out.segments or [] if s.text == CUT_MARKER] == [
+        (3000, 9000, "[cut]")
+    ]
+    assert "dentist" not in out.model_dump_json()
+    assert texts(out) == ["Morning, Cleo.", CUT_MARKER, "The offer is ten million.", "(a beep)", "Send it by Friday."]
+    assert out.text == "\n".join(
+        [
+            "Ben Sample: Morning, Cleo.",
+            CUT_MARKER,
+            "Ben Sample: The offer is ten million.",
+            "(a beep)",
+            "Cleo Test: Send it by Friday.",
+        ]
+    )
+    assert out.native == {}
+    assert out.fidelity == "cut"
 
 
-def test_a_registered_cutter_cuts_its_own_source_only() -> None:
-    def recording_cutter(record: RawRecord, cuts: list[Cut]) -> RawRecord:
-        kept = [s for s in record.native["segments"] if not any(c.start <= s["start"] < c.end for c in cuts)]
-        return record.model_copy(
-            update={"text": " ".join(s["text"] for s in kept) + f" {CUT_MARKER}", "native": {"segments": kept}}
-        )
-
-    register_cutter("calls", recording_cutter)
-    segments = [{"start": 0, "text": "hello team"}, {"start": 5000, "text": "the private bit"}]
-    call = make_record(rid="calls:rec-1", source="calls", kind="recording", text="", native={"segments": segments})
-    out = apply(call, [Cut(start=4000, end=6000, unit="ms")])
-    assert out.native == {"segments": [{"start": 0, "text": "hello team"}]}
-    assert out.text == f"hello team {CUT_MARKER}"
-    with pytest.raises(DocketError, match="no cutter for time cuts"):
-        apply(make_record(), [Cut(start=0, end=1, unit="ms")])
+def test_cuts_that_touch_after_widening_become_one_marker() -> None:
+    out = apply(transcript(), [Cut(start=5000, end=6000, unit="ms"), Cut(start=10000, end=11000, unit="ms")])
+    # 0:03-0:09 and 0:09-0:12 widened touch at 0:09; the beep at 0:12 sits at the second cut's widened end, not in it.
+    marks = [(s.start_ms, s.end_ms) for s in out.segments or [] if s.text == CUT_MARKER]
+    assert marks == [(3000, 12000)]
+    assert texts(out) == ["Morning, Cleo.", CUT_MARKER, "(a beep)", "Send it by Friday."]
 
 
-def test_a_cutter_that_leaves_no_marker_is_refused() -> None:
-    register_cutter("calls", lambda record, cuts: record)
-    call = make_record(rid="calls:rec-2", source="calls", text="x")
-    with pytest.raises(DocketError, match="left no"):
-        apply(call, [Cut(start=0, end=1)])
+def test_a_cut_over_silence_still_leaves_its_marker_and_a_moment_inside_a_cut_goes() -> None:
+    out = apply(transcript(), [Cut(start=14000, end=16000, unit="ms")])
+    assert [(s.start_ms, s.end_ms) for s in out.segments or [] if s.text == CUT_MARKER] == [(14000, 16000)]
+    assert len(texts(out)) == len(SAID) + 1
+    beep = apply(transcript(), [Cut(start=12000, end=13000, unit="ms")])
+    assert "(a beep)" not in texts(beep)
+
+
+def test_a_derived_record_stays_derived_when_cut() -> None:
+    out = apply(transcript(fidelity="derived"), [Cut(start=5000, end=6000, unit="ms")])
+    assert out.fidelity == "derived"
+    assert CUT_MARKER in out.text
+    assert out.native == {}
+    assert apply(make_record(fidelity="derived", text="abc def"), [Cut(start=0, end=3)]).fidelity == "derived"
+
+
+@pytest.mark.parametrize(
+    ("record", "cuts", "match"),
+    [
+        (
+            transcript(),
+            [Cut(start=0, end=5)],
+            r"calls:rec-1/transcript is a transcript.*cut a time, such as 12:30-14:05",
+        ),
+        (transcript(), [Cut(start=0, end=1000, unit="ms"), Cut(start=0, end=5)], "cut a time"),
+        (transcript(), [Cut(start=26000, end=30000, unit="ms")], r"a cut from 0:26 starts after the transcript ends"),
+        (make_record(text="a recording"), [Cut(start=0, end=1000, unit="ms")], "has no segments to cut by time"),
+    ],
+)
+def test_what_can_t_be_cut_is_refused(record: RawRecord, cuts: list[Cut], match: str) -> None:
+    with pytest.raises(DocketError, match=match):
+        apply(record, cuts)
+
+
+def test_a_long_transcript_names_hours_in_its_refusal() -> None:
+    long = transcript(segments=[{"start_ms": 0, "end_ms": 3_700_000, "text": "a long call"}])
+    with pytest.raises(DocketError, match=r"from 1:02:00 starts after the transcript ends \(1:01:40\)"):
+        apply(long, [Cut(start=3_720_000, end=3_800_000, unit="ms")])
+
+
+def test_an_empty_segment_list_is_no_transcript() -> None:
+    plain = transcript(source="notes", rid="notes:n-1", segments=[], text="private note")
+    assert apply(plain, [Cut(start=0, end=7)]).text == f"{CUT_MARKER} note"
 
 
 @pytest.mark.parametrize(
@@ -93,31 +152,3 @@ def test_cut_specs_parse(spec: str, cut: Cut) -> None:
 def test_bad_cut_specs_are_refused(spec: str) -> None:
     with pytest.raises(DocketError):
         parse(spec)
-
-
-def test_a_transcript_takes_time_cuts_only() -> None:
-    def time_cutter(record: RawRecord, cuts: list[Cut]) -> RawRecord:
-        kept = [s for s in record.segments or [] if not any(c.start <= s.start_ms < c.end for c in cuts)]
-        return record.model_copy(update={"segments": kept, "text": f"Ben Sample: work part.\n{CUT_MARKER}"})
-
-    segments = [
-        {"start_ms": 0, "end_ms": 1000, "speaker": "Ben Sample", "text": "work part."},
-        {"start_ms": 1000, "end_ms": 2000, "speaker": "Ben Sample", "text": "private part."},
-    ]
-    record = make_record(
-        rid="calls:rec-1",
-        source="calls",
-        kind="recording",
-        text="Ben Sample: work part.\nBen Sample: private part.",
-        segments=segments,
-    )
-    register_cutter("calls", time_cutter)
-    with pytest.raises(DocketError, match=r"calls:rec-1 is a transcript.*takes time cuts.*\(#10\).*classify it whole"):
-        apply(record, [Cut(start=23, end=48)])
-    with pytest.raises(DocketError, match="takes time cuts"):
-        apply(record, [Cut(start=1000, end=2000, unit="ms"), Cut(start=0, end=5)])
-    out = apply(record, [Cut(start=1000, end=2000, unit="ms")])
-    assert [s.text for s in out.segments or []] == ["work part."]
-    # An empty list is no transcript: its text is cut by characters as any other.
-    plain = record.model_copy(update={"source": "notes", "rid": "notes:n-1", "segments": []})
-    assert apply(plain, [Cut(start=0, end=5)]).text.startswith(CUT_MARKER)

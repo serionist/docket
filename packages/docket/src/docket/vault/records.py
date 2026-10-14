@@ -90,7 +90,8 @@ class RawRecord(BaseModel):
     native: dict[str, Any] = Field(default_factory=dict[str, Any])
     fetched: datetime
     via: str
-    fidelity: Literal["verbatim", "derived"] = "verbatim"
+    # verbatim: as the source gave it; derived: its id built from its content; cut: verbatim, then cut by hand.
+    fidelity: Literal["verbatim", "derived", "cut"] = "verbatim"
     run: str = ""
     engine: str | None = None
     lang: str | None = None

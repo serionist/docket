@@ -355,14 +355,14 @@ def test_promote_reports_held_dropped_and_redacted_and_names_no_dropped_record(
     out = capsys.readouterr().out
     assert "chat: 1 written" in out
     assert "redacted: password 1" in out
-    assert f"held      {key[:12]} (calls): calls has no cutter for time cuts" in out
+    assert f"held      {key[:12]} (calls): calls:rec-3 has no segments to cut by time" in out
     assert "dropped   never-store 1" in out
     assert "zebrafinch" not in out
     assert "1791000002" not in out
     assert main(["staging", "list", "--vault", str(path)]) == 0
-    assert "held: calls has no cutter" in capsys.readouterr().out
+    assert "held: calls:rec-3 has no segments to cut by time" in capsys.readouterr().out
     assert main(["staging", "show", key[:8], "--vault", str(path)]) == 0
-    assert "problem   calls has no cutter" in capsys.readouterr().out
+    assert "problem   calls:rec-3 has no segments" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
@@ -423,11 +423,11 @@ def test_a_cut_read_off_staging_show_lands_where_it_was_read(
     assert record.text == "\n".join([*lines[:4], "[cut]", lines[5]])
 
 
-def test_show_says_why_a_cut_can_t_be_made_yet(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_show_says_why_a_cut_can_t_be_made(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     path, gate = staging_vault(tmp_path)
     gate.stage([call(1, text="a recording")])
     key = next(e.key for e in gate.list().entries)
     staged = gate.staging.read(gate.staging.dir / "calls" / f"{key}.json")
     gate.staging.write(staged.model_copy(update={"cuts": [Cut(start=0, end=10, unit="ms")]}))
     assert main(["staging", "show", "calls:rec-1", "--vault", str(path)]) == 0
-    assert "after the cuts: calls has no cutter for time cuts" in capsys.readouterr().out
+    assert "after the cuts: calls:rec-1 has no segments to cut by time" in capsys.readouterr().out
