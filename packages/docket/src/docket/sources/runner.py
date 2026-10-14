@@ -11,9 +11,12 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import signal
 import subprocess
 import sys
 import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import IO, Any, cast
 
@@ -29,6 +32,15 @@ STDERR_KEEP = 64 * 1024
 # What Python needs to start on each system, and nothing the service holds in its own environment.
 KEEP_ENV = ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR", "HOME", "USERPROFILE", "LANG", "LC_ALL")
 _CHUNK = 64 * 1024
+_GROUPS = hasattr(os, "killpg")
+
+
+def _no_groups(pid: int, sig: int) -> None:
+    """Windows has no process groups: a helper a mapper starts there outlives the run, though the run still fails."""
+
+
+_KILLPG: Callable[[int, int], None] = getattr(os, "killpg", _no_groups)
+_SIGKILL: int = getattr(signal, "SIGKILL", signal.SIGTERM)
 
 
 class MapperFailedError(DocketError):
@@ -91,49 +103,65 @@ def run(path: Path, payload: dict[str, Any], *, time_limit: float = TIME_LIMIT, 
     command = [sys.executable, "-I", "-X", "utf8", "-m", "docket.sources.child", str(path)]
     out, err = bytearray(), bytearray()
     over = threading.Event()
-    # The context closes all three pipes however the run ends.
-    with subprocess.Popen(  # noqa: S603 - Docket's own interpreter and module; find_mapper checked the path
-        command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=path.parent, env=env
-    ) as proc:
+    deadline = time.monotonic() + time_limit
+    # A process group of its own where the system has them, so a helper the mapper starts is stopped with it.
+    proc = subprocess.Popen(  # noqa: S603 - Docket's own interpreter and module; find_mapper checked the path
+        command,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=path.parent,
+        env=env,
+        start_new_session=_GROUPS,
+    )
 
-        def feed(pipe: IO[bytes]) -> None:
-            # A mapper that stops early closes its end; what it didn't read doesn't matter then.
-            with contextlib.suppress(OSError):
-                pipe.write(data)
-                pipe.close()
+    # Each thread closes its own pipe when it is done with it: a pipe a stray helper still holds is never closed under
+    # a thread blocked reading it.
+    def feed(pipe: IO[bytes]) -> None:
+        # A mapper that stops early closes its end; what it didn't read doesn't matter then.
+        with contextlib.suppress(OSError), pipe:
+            pipe.write(data)
 
-        def drain(pipe: IO[bytes]) -> None:
+    def drain(pipe: IO[bytes]) -> None:
+        with pipe:
             while chunk := pipe.read(_CHUNK):
                 out.extend(chunk)
                 if len(out) > output_cap:
                     over.set()
-                    proc.kill()
+                    _stop(proc)
                     return
 
-        def keep_tail(pipe: IO[bytes]) -> None:
+    def keep_tail(pipe: IO[bytes]) -> None:
+        with pipe:
             while chunk := pipe.read(_CHUNK):
                 err.extend(chunk)
                 del err[:-STDERR_KEEP]
 
-        # All three are pipes, since PIPE was asked for each.
-        pipes = cast(tuple[IO[bytes], IO[bytes], IO[bytes]], (proc.stdin, proc.stdout, proc.stderr))
-        threads = [
-            threading.Thread(target=target, args=(pipe,), daemon=True)
-            for target, pipe in zip((feed, drain, keep_tail), pipes, strict=True)
-        ]
-        for thread in threads:
-            thread.start()
-        try:
-            code = proc.wait(timeout=time_limit)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-            code = None
-        for thread in threads:
-            thread.join()
+    # All three are pipes, since PIPE was asked for each.
+    pipes = cast(tuple[IO[bytes], IO[bytes], IO[bytes]], (proc.stdin, proc.stdout, proc.stderr))
+    threads = [
+        threading.Thread(target=target, args=(pipe,), daemon=True)
+        for target, pipe in zip((feed, drain, keep_tail), pipes, strict=True)
+    ]
+    for thread in threads:
+        thread.start()
+    try:
+        code = proc.wait(timeout=time_limit)
+    except subprocess.TimeoutExpired:
+        _stop(proc)
+        proc.wait()
+        code = None
+    for thread in threads:
+        thread.join(max(0.0, deadline - time.monotonic()))
+    # The mapper is gone, yet its output is still open: something it started holds it.
+    held_open = any(thread.is_alive() for thread in threads)
+    if held_open:
+        _stop(proc)
     stderr = err.decode("utf-8", "replace")
     if code is None:
         raise MapperFailedError(f"the mapper ran past its time limit of {time_limit:g} s and was stopped", stderr)
+    if held_open:
+        raise MapperFailedError("the mapper left a process holding its output, so the run was stopped", stderr)
     if over.is_set():
         raise MapperFailedError(f"the mapper's output passed the cap of {output_cap} bytes and it was stopped", stderr)
     if code != 0:
@@ -142,3 +170,11 @@ def run(path: Path, payload: dict[str, Any], *, time_limit: float = TIME_LIMIT, 
         return json.loads(out.decode("utf-8"))
     except ValueError:
         raise MapperFailedError("the mapper's output isn't JSON", stderr) from None
+
+
+def _stop(proc: subprocess.Popen[bytes]) -> None:
+    """Kill the mapper, and on systems with process groups every process it started. One that has already ended, or
+    whose group is gone, is left alone."""
+    with contextlib.suppress(OSError):
+        _KILLPG(proc.pid, _SIGKILL)
+        proc.kill()

@@ -4,6 +4,7 @@ written per test into a temp consuming project; the core never runs the Plaud ex
 from __future__ import annotations
 
 import io
+import time
 from pathlib import Path
 
 import pytest
@@ -105,6 +106,20 @@ def test_a_mapper_past_its_time_limit_is_stopped(tmp_path: Path) -> None:
     path = write_mapper(tmp_path, "slow", "import time\n\ndef map_run(run):\n    time.sleep(60)\n")
     with pytest.raises(MapperFailedError, match="ran past its time limit of 1 s"):
         runner.run(path, {}, time_limit=1)
+
+
+def test_a_helper_left_holding_the_output_fails_the_run_at_its_limit(tmp_path: Path) -> None:
+    # The mapper answers at once, but a helper it started keeps its stdout and stderr open for longer than the limit.
+    code = (
+        "import subprocess, sys\n\n"
+        "def map_run(run):\n"
+        "    subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        "    return {}\n"
+    )
+    started = time.monotonic()
+    with pytest.raises(MapperFailedError, match="the mapper left a process holding its output"):
+        runner.run(write_mapper(tmp_path, "helper", code), {}, time_limit=3)
+    assert time.monotonic() - started < 15
 
 
 def test_output_past_the_cap_stops_the_mapper(tmp_path: Path) -> None:
