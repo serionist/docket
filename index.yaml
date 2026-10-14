@@ -78,7 +78,7 @@ decisions:
     by: Soma Osvay
     cost: medium
     sources: ["#1"]
-    description: uv run gate full on Linux and uv run gate os on Windows and macOS are the required checks of the main ruleset; nothing merges with a red check. main accepts pull requests only, squash-merged, so each PR title becomes one commit.
+    description: uv run gate full on Linux and uv run gate os on Windows and macOS, the PR text workflow (the PR's title and body, run again on every edit) and CodeQL are the required checks of the main ruleset; nothing merges with a red check. main accepts pull requests only, squash-merged, so each PR title becomes one commit.
     binds: [A check is never weakened to let a change pass.]
   - id: DR-0007
     title: Nothing on main carries tool attribution
@@ -213,12 +213,12 @@ conventions:
   - id: CV-0004
     rule: Commits, PR titles and PR bodies carry no tool attribution
     area: git
-    enforced_by: "the commit-msg hook; gate: commits"
+    enforced_by: "the commit-msg hook; gate: commits (the PR title and body in the PR text workflow)"
     decision: DR-0007
   - id: CV-0005
     rule: No name from the private deny list in the repo, its commits, its PRs or its issues
     area: privacy
-    enforced_by: "gate: content; gate check-text before posting"
+    enforced_by: "gate: content (the PR title and body in the PR text workflow); gate check-text before posting"
     decision: DR-0008
   - id: CV-0006
     rule: Tests, fixtures and examples use invented people, companies, places and messages

@@ -278,7 +278,7 @@ STEPS = [
     Step("format", ("quick", "full"), "formatting", step_format),
     Step("types", ("quick", "full", "os"), "pyright (strict on src/)", step_types),
     Step("docs", ("quick", "full"), "entry files and citations against the regime", step_docs),
-    Step("commits", ("quick", "full"), "no tool attribution; the PR title in CI", step_commits),
+    Step("commits", ("quick", "full"), "no tool attribution; the PR text with DOCKET_PR_TEXT=1", step_commits),
     Step("content", ("quick", "full"), "no private names (the deny list)", step_content),
     Step("secrets", ("quick", "full"), "gitleaks", step_secrets),
     Step("harness", ("quick", "full"), "AGENTS.md, skills, plugin manifests", step_harness),
