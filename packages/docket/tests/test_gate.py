@@ -328,13 +328,14 @@ def test_a_never_store_record_leaves_no_trace(gate: Gate, vault: Vault, caplog: 
 # -- crashes -------------------------------------------------------------------------------------------------------
 
 
-def fail_once(monkeypatch: pytest.MonkeyPatch, owner: object, name: str) -> None:
+def fail_once(monkeypatch: pytest.MonkeyPatch, owner: object, name: str, after: int = 0) -> None:
+    """The call after `after` good ones stops the machine; the ones after it work again."""
     original = getattr(owner, name)
-    done: list[bool] = []
+    calls: list[int] = []
 
     def crash(*args: Any, **kwargs: Any) -> Any:
-        if not done:
-            done.append(True)
+        calls.append(1)
+        if len(calls) == after + 1:
             raise RuntimeError("the machine stopped here")
         return original(*args, **kwargs)
 
@@ -342,17 +343,19 @@ def fail_once(monkeypatch: pytest.MonkeyPatch, owner: object, name: str) -> None
 
 
 @pytest.mark.parametrize(
-    ("owner", "name"),
+    "crash",
     [
-        (Redactor, "record"),
-        (RawLog, "_write_new"),
-        (Vault, "commit"),
-        (Staging, "remember"),
-        (Staging, "delete"),
+        (Redactor, "record", 0),
+        (RawLog, "_write_new", 0),
+        # The first commit takes what an earlier promotion left; the second one commits this promotion's runs.
+        (Vault, "commit", 0),
+        (Vault, "commit", 1),
+        (Staging, "remember", 0),
+        (Staging, "delete", 0),
     ],
 )
 def test_a_crash_in_promotion_never_lets_a_pending_record_or_a_secret_into_raw(
-    gate: Gate, vault: Vault, monkeypatch: pytest.MonkeyPatch, owner: object, name: str
+    gate: Gate, vault: Vault, monkeypatch: pytest.MonkeyPatch, crash: tuple[object, str, int]
 ) -> None:
     gate.stage(
         [
@@ -362,7 +365,7 @@ def test_a_crash_in_promotion_never_lets_a_pending_record_or_a_secret_into_raw(
         ]
     )
     gate.classify("chat:C0TEST/1791000002.000100", "work", [Cut(start=10, end=22)])
-    fail_once(monkeypatch, owner, name)
+    fail_once(monkeypatch, *crash)
     with pytest.raises(RuntimeError, match="stopped here"):
         gate.promote()
     raw_text = "".join(p.read_text(encoding="utf-8") for p in (vault.root / "raw").rglob("*.jsonl"))
@@ -385,6 +388,32 @@ def test_a_crash_in_classify_private_never_lets_the_record_through(
     assert gate.promote().runs == []
     assert in_raw(vault) == []
     assert gate.list().entries == []
+
+
+def test_a_repo_docket_can_t_commit_to_stops_promotion_before_anything_is_written(gate: Gate, vault: Vault) -> None:
+    gate.stage([make_record(1)])
+    sh(vault.root, "git", "checkout", "-q", "--detach")
+    with pytest.raises(DocketError, match="detached HEAD"):
+        gate.promote()
+    assert list((vault.root / "raw").rglob("*.jsonl")) == []
+    assert gate.list().counts() == Counter({"ready": 1})
+
+
+def test_classify_private_refuses_a_record_already_in_an_uncommitted_run(gate: Gate, vault: Vault) -> None:
+    gate.stage([make_record(1, text=f"about the {PRIVATE_WORD}"), make_record(2)])
+    staged = [e.staged.record for e in gate.list().entries]
+    (vault.root / "raw" / "stray.txt").write_text("not a run file", encoding="utf-8")
+    run = vault.rawlog.write_run("chat", staged).path
+    assert run is not None
+    with run.open("a", encoding="utf-8", newline="\n") as f:
+        f.write("\n")
+    with pytest.raises(DocketError, match="git hasn't committed yet: delete that file"):
+        gate.classify("chat:C0TEST/1791000001.000100", "private")
+    assert len(gate.list().entries) == 2
+    run.unlink()
+    assert gate.classify("chat:C0TEST/1791000001.000100", "private") is None
+    gate.promote()
+    assert raw_rids(vault) == Counter({"chat:C0TEST/1791000002.000100": 1})
 
 
 def test_temp_files_a_crash_left_are_cleared_on_the_next_call(gate: Gate, vault: Vault) -> None:

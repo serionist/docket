@@ -75,7 +75,12 @@ class RawLog:
 
     def _refresh(self) -> None:
         """Read the run files this process hasn't seen, so another process's writes count as already in the log."""
-        for run in self.run_files():
+        runs = self.run_files()
+        if self._read - {run.path for run in runs}:
+            # A run file that was never committed was deleted by hand; its records are no longer in the log.
+            self._seen.clear()
+            self._read.clear()
+        for run in runs:
             if run.path in self._read:
                 continue
             for _, record in _lines(run.path):

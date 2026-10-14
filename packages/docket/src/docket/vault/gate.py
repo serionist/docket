@@ -25,6 +25,7 @@ from docket.vault import cuts as cutting
 from docket.vault import neverstore
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.cuts import CUT_MARKER, Cut
+from docket.vault.rawlog import RUN_FILE
 from docket.vault.records import RawRecord, version
 from docket.vault.redact import Redactor, markers
 from docket.vault.staging import Classifier, Decided, Entry, Scan, Staged, Staging, State, key_of, rid_hash
@@ -161,7 +162,14 @@ class Gate:
             if label == "private":
                 if cuts:
                     raise DocketError("cuts go with work; a private record is dropped whole")
-                self.staging.remember([(entry.staged.record.rid, entry.key)])
+                rid = entry.staged.record.rid
+                for path in self._uncommitted_runs_with(rid):
+                    # The next commit would take it into git; everything in that file is still staged.
+                    raise DocketError(
+                        f"{rid} is already in {path}, a run file git hasn't committed yet: delete that file (all of "
+                        "it is still staged and goes again at the next promotion), then classify it again"
+                    )
+                self.staging.remember([(rid, entry.key)])
                 self.staging.delete(entry.path)
                 log.info("gate: one record classified private and dropped")
                 return None
@@ -177,6 +185,9 @@ class Gate:
     def promote(self, source: str | None = None) -> PromoteResult:
         """Write every ready record to the raw log: cut, redacted with the current rules, one run per source."""
         with self.vault.lock:
+            # Before anything is written: commit what an earlier promotion left behind, so a repo Docket can't commit
+            # to (a rebase in progress, a detached HEAD) stops the promotion here, with no new run file on disk.
+            self.vault.commit([], f"Raw: an interrupted run from {self.vault.machine}")
             config = self._config()
             result = PromoteResult(dropped=self._sweep(config))
             redactor = Redactor.from_config(config.redaction)
@@ -217,6 +228,20 @@ class Gate:
             self.staging.delete(entry.path)
         redactions = sum((markers(final) for _, final in items), Counter[str]())
         return SourceRun(name, run.path, run.written, run.skipped, commit, redactions)
+
+    def _uncommitted_runs_with(self, rid: str) -> list[str]:
+        """The run files git hasn't committed yet that hold a record, vault-relative."""
+        found: list[str] = []
+        for rel in self.vault.git.untracked("raw"):
+            if not RUN_FILE.match(Path(rel).name):
+                continue
+            with (self.vault.root / rel).open(encoding="utf-8", newline="\n") as f:
+                for line in f:
+                    data: Any = json.loads(line) if line.strip() else {}
+                    if data.get("rid") == rid:
+                        found.append(rel)
+                        break
+        return found
 
     def _hold(self, entry: Entry, problem: str) -> Held:
         if entry.staged.problem != problem:
