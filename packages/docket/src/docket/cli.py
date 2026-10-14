@@ -15,6 +15,7 @@ import typer
 
 from docket import __version__, index, recall, userconfig
 from docket.errors import DocketError
+from docket.imports import notes
 from docket.vault import cuts
 from docket.vault.anchors import format_time
 from docket.vault.gate import Gate, Label
@@ -40,6 +41,10 @@ doc_app = typer.Typer(help="Processed docs: put one with its anchors, read it, v
 app.add_typer(doc_app, name="doc")
 index_app = typer.Typer(help="The index: built from the vault on this machine, for search.", no_args_is_help=True)
 app.add_typer(index_app, name="index")
+
+
+import_app = typer.Typer(help="Bring what already exists into the vault: a notes folder first.", no_args_is_help=True)
+app.add_typer(import_app, name="import")
 
 VaultOption = Annotated[Path | None, typer.Option("--vault", help="The vault; default: DOCKET_VAULT, here, ./vault")]
 
@@ -340,16 +345,22 @@ def doc_read(
 ) -> None:
     """A doc, or a record and the doc lines that point at it: the summary first, the raw for accuracy."""
     result = recall.read(find_vault(vault), locator, view=view, around=around, rev=rev)
+    if result.resolved is not None and result.resolved != locator.strip():
+        say(f"read as {result.resolved}")
+    for problem in result.problems:
+        say(f"! {problem}")
     if result.doc is not None:
         say(f"{result.doc.id} rev {result.doc.rev}  {result.doc.path}")
         if result.doc.superseded_by:
             say(f"superseded by {', '.join(result.doc.superseded_by)}")
         for line in result.doc.lines:
             say(f"{line.n:>4}  {line.text}")
-    elif result.view != "raw" and not result.lines:
+    elif result.view != "raw" and not result.lines and not result.legacy:
         say("no current doc points at it yet")
     for cited in result.lines:
         say(f"{cited.doc} rev {cited.rev} line {cited.n}: {cited.text}")
+    for ref in result.legacy:
+        say(f"{ref.id}, a legacy note, covers it: {', '.join(ref.old_paths)}")
     for s in result.spans:
         _span(s, "")
 
@@ -494,6 +505,53 @@ def search_command(
                 say(f"       -> {anchor}")
             if hit.also:
                 say(f"       also {', '.join(hit.also)}")
+
+
+@import_app.command("notes")
+def import_notes(
+    folder: Annotated[Path, typer.Argument(help="The notes folder. It is only read, never changed.")],
+    as_: Annotated[
+        str | None,
+        typer.Option(
+            "--as", help="What old paths start with; default: the folder's path from its repo's root; . for none."
+        ),
+    ] = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Say what would happen and write nothing.")] = False,
+    take: Annotated[
+        list[str] | None,
+        typer.Option(
+            help="For a note changed in the folder and in the vault: note:<hash>:<path> or vault:<hash>:<path>."
+        ),
+    ] = None,
+    vault: VaultOption = None,
+) -> None:
+    """Import a notes folder's markdown notes as legacy notes that keep their old paths; run again for changes."""
+    takes = [notes.Take.parse(t) for t in take or []]
+    report = notes.import_notes(find_vault(vault), folder, as_, dry_run=dry_run, takes=takes)
+    sample = f"  (old paths look like {report.sample})" if report.sample else ""
+    say(f"prefix   {report.prefix or '.'}{sample}")
+    for name in ("new", "updated", "covers", "same"):
+        say(f"{name:<8} {getattr(report, name)}")
+    if report.gone:
+        say(f"gone     {report.gone} (their docs stay, so old references still resolve)")
+    for kept in report.kept:
+        say(f"kept     {kept.old_path}: edited in the vault and changed in the folder")
+        say(f"         settle it: run again with --take note:{kept.hash}:{kept.old_path} or vault:{kept.hash}:...")
+    for gone in report.deleted:
+        say(f"deleted  {gone.old_path}: its doc was deleted in the vault")
+        say(f"         bring it back: run again with --take note:{gone.hash}:{gone.old_path}")
+    for line in report.refused:
+        say(f"refused  {line}")
+    if report.skipped:
+        say("skipped  " + ", ".join(f"{why} {n}" for why, n in report.skipped.items()))
+    for line in report.reported:
+        say(f"         {line}")
+    if report.dry_run:
+        say("dry run: nothing written")
+    elif report.commit:
+        say(f"commit   {report.commit[:12]}")
+    if not report.ok:
+        raise typer.Exit(1)
 
 
 def utf8_console() -> None:
