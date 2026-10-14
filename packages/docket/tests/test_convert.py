@@ -479,12 +479,69 @@ def test_a_vault_an_older_docket_wrote_with_a_merge(tmp_path: Path, monkeypatch:
     assert "notes/vault/raw/a/x.jsonl: merge: union" in attrs
 
 
-def test_an_ignore_rule_the_vault_s_line_hid_is_said_after(tmp_path: Path) -> None:
+def test_an_ignore_rule_the_vault_s_own_line_hides_refuses_before_the_yes(tmp_path: Path) -> None:
     top, root = nested(tmp_path)
-    (top / ".gitignore").write_text("/notes/vault/\n*.age\n", encoding="utf-8")
-    git(top, "commit", "-qm", "ignore media", "--", ".gitignore")
-    script = run(root)
-    assert any("media/s/2026/01/x.age: an ignore rule still hides it" in line for line in script.said)
+    (top / ".gitignore").write_text("/notes/vault/\nraw/\n", encoding="utf-8")
+    git(top, "commit", "-qm", "ignore raw folders", "--", ".gitignore")
+    before = snapshot(top, root)
+    refused(root, r"ignore rules hide raw/s/2026/01/2026-01-01T0000-m\.jsonl \(\.gitignore:2: raw/\)")
+    assert snapshot(top, root) == before
+
+
+def copy_half_then_crash(source: Path, target: Path) -> None:
+    target.write_bytes(source.read_bytes()[: len(source.read_bytes()) // 2])
+    raise KeyboardInterrupt
+
+
+def test_a_crash_mid_copy_of_an_lfs_object(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    top, root = nested(tmp_path)
+    store = top / ".git" / "lfs" / "objects"
+    monkeypatch.setattr("docket.vault.convert.shutil.copy2", copy_half_then_crash)
+    with pytest.raises(KeyboardInterrupt):
+        run(root)
+    monkeypatch.undo()
+    assert not (store / LFS_OBJECT).exists()
+    state = json.loads((top / ".git" / "docket" / "notes" / "vault" / "convert.json").read_text(encoding="utf-8"))
+    assert state["lfs_copied"] == [LFS_OBJECT]
+    run(root)
+    check_converted(top, root)
+    assert (store / LFS_OBJECT).read_bytes() == b"encrypted audio"
+    assert not list(store.rglob("*.docket-partial"))
+
+
+def test_abort_after_a_crash_mid_copy_then_a_fresh_convert(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    top, root = nested(tmp_path)
+    store = top / ".git" / "lfs" / "objects"
+    monkeypatch.setattr("docket.vault.convert.shutil.copy2", copy_half_then_crash)
+    with pytest.raises(KeyboardInterrupt):
+        run(root)
+    monkeypatch.undo()
+    run(root, abort=True)
+    assert not (store / LFS_OBJECT).exists()
+    assert not list(store.rglob("*.docket-partial"))
+    # An object a convert before this one left short is copied again, not taken as there.
+    (store / LFS_OBJECT).parent.mkdir(parents=True, exist_ok=True)
+    (store / LFS_OBJECT).write_bytes(b"encrypt")
+    run(root)
+    check_converted(top, root)
+    assert (store / LFS_OBJECT).read_bytes() == b"encrypted audio"
+
+
+def test_a_named_vault_that_isn_t_one_never_falls_through_to_the_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    top, root = nested(tmp_path)
+    monkeypatch.setattr(cv.convert, "__defaults__", (local,))
+    before = snapshot(top, root)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(top)
+    assert main(["vault", "convert", "--yes", "--vault", str(elsewhere)]) == 2
+    assert f"no vault at or above {elsewhere}" in capsys.readouterr().err
+    monkeypatch.setenv("DOCKET_VAULT", str(elsewhere))
+    assert main(["vault", "convert", "--yes"]) == 2
+    assert snapshot(top, root) == before
+    assert (root / ".git").is_dir()
 
 
 def test_helpers() -> None:

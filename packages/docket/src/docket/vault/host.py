@@ -125,7 +125,8 @@ def state_problems(top: Path) -> list[str]:
 class Lfs:
     installed: bool
     filter_set: bool
-    hook: Literal["ok", "missing", "foreign"]
+    # in-tree: the repo's hooks live in its own tree (core.hooksPath, such as husky's .husky), as tracked files.
+    hook: Literal["ok", "missing", "foreign", "in-tree"]
 
     def summary(self) -> str:
         if not self.installed:
@@ -134,6 +135,11 @@ class Lfs:
             return "set up"
         if self.hook == "foreign":
             return 'your own pre-push hook is there: add `git lfs pre-push "$@"` to it, so your push carries media'
+        if self.hook == "in-tree":
+            return (
+                "your repo's hooks are files in its tree (core.hooksPath), which Docket doesn't write: add `git lfs "
+                'pre-push "$@"` to its pre-push hook, so your push carries media'
+            )
         return "Docket runs `git lfs install --local` in the repo, so your push carries media"
 
 
@@ -141,25 +147,56 @@ def lfs_state(top: Path) -> Lfs:
     git = Git(top)
     installed = shutil.which("git-lfs") is not None
     filter_set = bool(git.run("config", "--get", "filter.lfs.process", check=False).stdout.strip())
-    hooks = Path(git.out("rev-parse", "--path-format=absolute", "--git-path", "hooks").strip())
+    hooks = Path(git.out("rev-parse", "--path-format=absolute", "--git-path", "hooks").strip()).resolve()
+    git_dir = Path(git.out("rev-parse", "--absolute-git-dir").strip()).resolve()
+    in_tree = hooks.is_relative_to(top.resolve()) and not hooks.is_relative_to(git_dir)
     pre_push = hooks / "pre-push"
-    if not pre_push.is_file():
-        return Lfs(installed, filter_set, "missing")
-    text = pre_push.read_text(encoding="utf-8", errors="replace")
-    return Lfs(installed, filter_set, "ok" if "git lfs" in text or "git-lfs" in text else "foreign")
+    text = pre_push.read_text(encoding="utf-8", errors="replace") if pre_push.is_file() else ""
+    if "git lfs" in text or "git-lfs" in text:
+        return Lfs(installed, filter_set, "ok")
+    if in_tree:
+        return Lfs(installed, filter_set, "in-tree")
+    return Lfs(installed, filter_set, "foreign" if text else "missing")
 
 
 def setup_lfs(top: Path, lfs: Lfs) -> str | None:
     """After the user's yes: set git-lfs up in the host when its filter or hook is missing. What the user still has
-    to do, or None."""
+    to do, or None. Hooks that are files in the repo's own tree are never written: only the filter is set there."""
     if not lfs.installed:
         return lfs.summary()
     if lfs.filter_set and lfs.hook == "ok":
         return None
-    done = Git(top).run("lfs", "install", "--local", check=False).returncode == 0
-    if lfs.hook == "foreign":
+    install = ["lfs", "install", "--local", *(["--skip-repo"] if lfs.hook == "in-tree" else [])]
+    done = Git(top).run(*install, check=False).returncode == 0
+    if lfs.hook in ("foreign", "in-tree"):
         return lfs.summary()
     return None if done else f"`git lfs install --local` failed in {top}; run it there yourself"
+
+
+def ignored_without(top: Path, prefix: str, line: str) -> list[tuple[str, str, str]]:
+    """The vault's paths the host's ignore rules hide, read as if `line` (the vault's own /<vault>/ line, which the
+    convert takes out) weren't in the host's top .gitignore: while it is there it hides every other rule. The rules
+    are copied into a scratch repo, so nothing of the host's changes."""
+    git_dir = Path(Git(top).out("rev-parse", "--absolute-git-dir").strip())
+    with tempfile.TemporaryDirectory(prefix="docket-ignore-") as scratch:
+        shadow = Path(scratch)
+        Git(shadow).run("init", "-q")
+        parts = prefix.rstrip("/").split("/")
+        for depth in range(len(parts) + 1):
+            rel = Path(*parts[:depth])
+            source = top / rel / ".gitignore"
+            if not source.is_file():
+                continue
+            lines = source.read_text(encoding="utf-8", errors="replace").splitlines()
+            # Blanked rather than dropped, so every other rule keeps its line number in what the user is shown.
+            kept = [x if depth or x.strip() != line else "" for x in lines]
+            (shadow / rel).mkdir(parents=True, exist_ok=True)
+            (shadow / rel / ".gitignore").write_text("".join(f"{x}\n" for x in kept), encoding="utf-8")
+        exclude = git_dir / "info" / "exclude"
+        if exclude.is_file():
+            (shadow / ".git" / "info").mkdir(parents=True, exist_ok=True)
+            (shadow / ".git" / "info" / "exclude").write_bytes(exclude.read_bytes())
+        return ignored(shadow, prefix)
 
 
 @dataclass
@@ -199,10 +236,10 @@ def check(
     prefix: str,
     own_emails: Iterable[str],
     visibility: Callable[[str], Visibility] = remote_visibility,
-    allowed_rule: str | None = None,
+    without: str | None = None,
 ) -> HostReport:
-    """Every check of the host for a vault at `prefix` (its path in the host, with a trailing slash). An ignore rule
-    whose pattern is `allowed_rule` (the convert's own /<vault>/ line, which it takes out) doesn't count."""
+    """Every check of the host for a vault at `prefix` (its path in the host, with a trailing slash). With `without`
+    (the convert's own /<vault>/ line, which it takes out), the ignore rules are read as if that line were gone."""
     git = Git(top)
     branch = git.run("symbolic-ref", "-q", "--short", "HEAD", check=False).stdout.strip()
     report = HostReport(top, branch or "(no branch)", lfs=lfs_state(top))
@@ -213,6 +250,7 @@ def check(
         elif seen == "unknown":
             report.unknown.append(url)
     report.shared = others(top, own_emails)
-    report.ignored = [f"{path} ({rule})" for path, rule, pattern in ignored(top, prefix) if pattern != allowed_rule]
+    hidden = ignored(top, prefix) if without is None else ignored_without(top, prefix, without)
+    report.ignored = [f"{path} ({rule})" for path, rule, _ in hidden]
     report.state = state_problems(top)
     return report

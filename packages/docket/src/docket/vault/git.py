@@ -140,8 +140,11 @@ class Git:
         """Names git printed from the repo's top, made relative to the vault."""
         return [p.removeprefix(self.prefix) for p in out.split("\0") if p]
 
-    def untracked(self, under: str) -> list[str]:
-        out = self.out("ls-files", "-z", "--others", "--exclude-standard", "--", under)
+    def untracked(self, under: str, *, ignored: bool = False) -> list[str]:
+        """Files under a path git doesn't track: those its ignore rules let through, or with `ignored` the ones they
+        hide."""
+        hidden = ["--ignored"] if ignored else []
+        out = self.out("ls-files", "-z", "--others", *hidden, "--exclude-standard", "--", under)
         return [p for p in out.split("\0") if p]
 
     def staged_new(self, under: str) -> list[str]:

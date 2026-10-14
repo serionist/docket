@@ -162,6 +162,16 @@ def test_a_stash_pop_conflict_in_the_user_s_files_doesnt_block_docket(tmp_path: 
     assert git(top, "ls-files", "-u", "--", ":/").strip()
 
 
+def test_a_run_file_the_host_ignores_fails_loudly(tmp_path: Path) -> None:
+    vault = folder_vault(tmp_path)
+    top = vault.home.top
+    (top / ".gitignore").write_text("raw/\n", encoding="utf-8")
+    with pytest.raises(DocketError, match="ignored"):
+        vault.write_run("chat", [make_record(1)])
+    assert len(vault.uncommitted_runs()) == 1
+    assert "raw/" in str(vault.check()[0])
+
+
 def test_a_failed_commit_leaves_nothing_of_docket_s_staged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     vault = folder_vault(tmp_path)
     top = vault.home.top

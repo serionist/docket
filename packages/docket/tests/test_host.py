@@ -147,13 +147,44 @@ def test_check_gathers_every_finding(tmp_path: Path) -> None:
     # The convert's own line, which it takes out, doesn't count.
     (top / ".gitignore").write_text("/notes/vault/\n", encoding="utf-8")
     assert len(host.check(top, "notes/vault/", [], lambda _u: "local").ignored) == 9
-    assert host.check(top, "notes/vault/", [], lambda _u: "local", allowed_rule="/notes/vault/").ignored == []
+    assert host.check(top, "notes/vault/", [], lambda _u: "local", without="/notes/vault/").ignored == []
     blocking = report.blocking()
     assert blocking[0].startswith("https://example.invalid/open.git can be read without signing in")
     lines = report.lines()
     assert "(public)" in lines[0]
     assert "you confirm it's private" in lines[0]
     assert HostReport(top, "main").lines()[:2] == ["remotes:  none public", "shared:   no other committers"]
+
+
+def test_rules_the_vault_s_own_line_hides_are_read_without_it(tmp_path: Path) -> None:
+    top = host_repo(tmp_path)
+    (top / ".gitignore").write_text("/notes/vault/\nraw/\n", encoding="utf-8")
+    (top / "notes").mkdir()
+    (top / "notes" / ".gitignore").write_text("*.age\n", encoding="utf-8")
+    (top / ".git" / "info").mkdir(exist_ok=True)
+    (top / ".git" / "info" / "exclude").write_text("entities/\n", encoding="utf-8")
+    before = git(top, "status", "--porcelain", "--ignored")
+    found = {path: rule for path, rule, _ in host.ignored_without(top, "notes/vault/", "/notes/vault/")}
+    assert found["raw/s/2026/01/2026-01-01T0000-m.jsonl"] == ".gitignore:2: raw/"
+    assert found["media/s/2026/01/x.age"] == "notes/.gitignore:1: *.age"
+    assert found["entities/t/x.yaml"].endswith("info/exclude:1: entities/")
+    assert git(top, "status", "--porcelain", "--ignored") == before
+    report = host.check(top, "notes/vault/", [], lambda _u: "local", without="/notes/vault/")
+    assert any(line.startswith("the repo's ignore rules hide raw/") for line in report.blocking())
+
+
+def test_hooks_kept_in_the_repo_s_tree_are_never_written(tmp_path: Path) -> None:
+    top = host_repo(tmp_path)
+    git(top, "config", "core.hooksPath", ".husky")
+    (top / ".husky").mkdir()
+    (top / ".husky" / "pre-commit").write_text("#!/bin/sh\nnpm test\n", encoding="utf-8")
+    assert host.lfs_state(top).hook == "in-tree"
+    message = host.setup_lfs(top, Lfs(True, False, "in-tree"))
+    assert message is not None
+    assert "files in its tree" in message
+    assert sorted(p.name for p in (top / ".husky").iterdir()) == ["pre-commit"]
+    (top / ".husky" / "pre-push").write_text('#!/bin/sh\ngit lfs pre-push "$@"\n', encoding="utf-8")
+    assert host.lfs_state(top).hook == "ok"
 
 
 def test_a_host_on_no_branch(tmp_path: Path) -> None:

@@ -79,10 +79,17 @@ def find_vault(explicit: Path | None) -> Vault:
 
 def _vault_root(explicit: Path | None) -> Path:
     """The vault's folder, found the way `find_vault` finds it but without opening it: a convert works on a vault
-    that open would refuse."""
+    that open would refuse. A path the user named is the only one tried: falling through to ./vault or the default
+    vault would convert one they never named."""
     env = os.environ.get("DOCKET_VAULT")
+    named = explicit or (Path(env) if env else None)
+    if named is not None:
+        root = Vault.find(named)
+        if root is None:
+            raise DocketError(f"no vault at or above {named}")
+        return root
     here = Path.cwd()
-    for candidate in (explicit, Path(env) if env else None, here, here / "vault", userconfig.default_vault()):
+    for candidate in (here, here / "vault", userconfig.default_vault()):
         root = Vault.find(candidate) if candidate is not None else None
         if root is not None:
             return root

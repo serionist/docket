@@ -39,7 +39,7 @@ from docket.vault.git import Git, Identity
 from docket.vault.home import CONVERT_FILE, rev_parse
 from docket.vault.host import HostReport, Visibility, remote_visibility
 from docket.vault.lock import VaultLock
-from docket.vault.vault import IGNORE, ignored, with_attributes
+from docket.vault.vault import IGNORE, with_attributes
 from docket.vault.wizard import Prompter, confirm_private
 
 SOURCE_REF = "refs/docket/convert/source"
@@ -47,6 +47,8 @@ REWRITTEN_REF = "refs/docket/convert/rewritten"
 FOLDER_COMMIT = "Make the vault a folder of this repo"
 MERGE_COMMIT = "Move the vault into this repo, with its history"
 BACKUP = "before-folder.git"
+# An LFS object being copied has this after its name until it is whole.
+PARTIAL = ".docket-partial"
 TEMP_INDEX = "convert.index"
 FOLDER_FILES = (CONFIG_FILE, ".gitattributes", ".ignore")
 # On Windows a program holding a file open makes a rename fail for a moment.
@@ -175,7 +177,8 @@ def survey(where: Where, opts: Options, visibility: Callable[[str], Visibility])
         refusals.append(f"{root} has uncommitted changes; commit them first")
     if _lock_held(root / ".git" / "docket.lock"):
         refusals.append(f"another docket process holds {root / '.git' / 'docket.lock'}")
-    report = host.check(where.top, where.prefix, config.owner.emails, visibility, allowed_rule=f"/{where.prefix}")
+    # The vault's own /<vault>/ line hides every other ignore rule while it is there: the rules are read without it.
+    report = host.check(where.top, where.prefix, config.owner.emails, visibility, without=f"/{where.prefix}")
     refusals += report.blocking()
     if Git(where.top).out("ls-files", "--", where.name).strip():
         refusals.append(f"{where.top} already tracks files under {where.name}/ (or holds it as a submodule)")
@@ -246,9 +249,6 @@ def _run(where: Where, state: State, p: Prompter) -> None:
         f"The vault is a folder of {where.top} now; your own git moves it. Left for you to commit: "
         f"{', '.join(edits) or 'nothing'}. The old repo is in {where.backup}; delete it when you're happy."
     )
-    # The vault's own line in the repo's .gitignore hid any other rule while it was there; with it gone, they show.
-    for rel, rule, _ in ignored(where.root):
-        p.say(f"{rel}: an ignore rule still hides it from git ({rule}); Docket can't commit there until it goes")
 
 
 # -- the steps ---------------------------------------------------------------------------------------------------
@@ -262,11 +262,16 @@ def _fetch(where: Where, state: State) -> None:
     source_store = _lfs_store(where.root / ".git", Git(where.root))
     target_store = _lfs_store(where.git_dir, top)
     for rel in _lfs_missing(source_store, target_store):
+        # Recorded before the copy, so an abort after a crash mid-copy still removes it; copied under a temp name and
+        # renamed, so a crash never leaves a short object with the real name.
+        if rel not in state.lfs_copied:
+            state.lfs_copied.append(rel)
+            state.save(where)
         target = target_store / rel
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_store / rel, target)
-        state.lfs_copied.append(rel)
-        state.save(where)
+        partial = _partial(target)
+        shutil.copy2(source_store / rel, partial)
+        partial.replace(target)
 
 
 def _rewrite(where: Where, state: State) -> None:
@@ -402,6 +407,7 @@ def abort(where: Where, p: Prompter) -> None:
     store = _lfs_store(where.git_dir, top)
     for rel in state.lfs_copied:
         (store / rel).unlink(missing_ok=True)
+        _partial(store / rel).unlink(missing_ok=True)
     if state.lfs_copied:
         removed.append(f"removed the {len(state.lfs_copied)} LFS object(s) it copied")
     (where.private / TEMP_INDEX).unlink(missing_ok=True)
@@ -489,11 +495,19 @@ def _lfs_store(git_dir: Path, git: Git) -> Path:
 
 
 def _lfs_missing(source: Path, target: Path) -> list[str]:
-    """The LFS objects in `source` that `target` lacks, as paths relative to the store."""
+    """The LFS objects in `source` that `target` lacks, or holds at another size, as paths relative to the store."""
     if not source.is_dir():
         return []
-    found = (p.relative_to(source).as_posix() for p in source.rglob("*") if p.is_file())
-    return sorted(rel for rel in found if not (target / rel).exists())
+    found = [p for p in source.rglob("*") if p.is_file() and not p.name.endswith(PARTIAL)]
+    return sorted(
+        p.relative_to(source).as_posix()
+        for p in found
+        if not (t := target / p.relative_to(source)).is_file() or t.stat().st_size != p.stat().st_size
+    )
+
+
+def _partial(target: Path) -> Path:
+    return target.with_name(target.name + PARTIAL)
 
 
 def _host_edits(where: Where, *, apply: bool, done: bool = False) -> list[str]:
