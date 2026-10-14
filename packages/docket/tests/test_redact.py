@@ -25,6 +25,8 @@ PEM = "-----" + "BEGIN RSA " + KEY_BLOCK + "\nMIIEow" + "IBAAKCAQEA\n-----" + "E
 PEM_CUT_OFF = "-----" + "BEGIN " + KEY_BLOCK + "\nMIIEvQ" + "IBADANBgkq and the rest was lost"
 
 HIDDEN = "hunter2-Example"
+NBSP = chr(0x00A0)
+NARROW_NBSP = chr(0x202F)
 
 
 @pytest.fixture
@@ -123,6 +125,9 @@ def test_long_runs_of_filler_are_read_in_linear_time(redactor: Redactor) -> None
         "password: " * 20_000,
         "Password:" + "<b>" * n + "x",
         "token" + "_" * n,
+        "password" + NBSP * n,
+        "tel" + NBSP * n,
+        "+" + "1 " * n,
     ]
     start = time.perf_counter()
     for text in inputs:
@@ -186,10 +191,29 @@ def test_phone_numbers_need_a_plus_or_a_label(redactor: Redactor, text: str) -> 
         "delta: +1 500 000 Ft",
         "up +12345678 USD, +87654321$, +11223344 € and +99887766% on last year",
         "+12345678 huf",
+        f"+12 500 000{NBSP}Ft",
     ],
 )
 def test_numbers_and_words_docket_keeps(redactor: Redactor, text: str) -> None:
     assert redacted(redactor, text) == (text, Counter())
+
+
+@pytest.mark.parametrize("space", [NBSP, NARROW_NBSP])
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Password:{s}" + HIDDEN, "Password:{s}[redacted:password]"),
+        ("<b>Password:</b>{s}" + HIDDEN, "<b>Password:</b>{s}[redacted:password]"),
+        ("Mot de passe{s}: " + HIDDEN, "Mot de passe{s}: [redacted:password]"),
+        ("Mot{s}de{s}passe{s}:{s}" + HIDDEN, "Mot{s}de{s}passe{s}:{s}[redacted:password]"),
+        ("Authorization: Bearer{s}abcdefghijklmnop1234", "Authorization: Bearer{s}[redacted:api-key]"),
+        ("Tel.{s}:{s}06 30 123 4567", "Tel.{s}:{s}[redacted:phone]"),
+    ],
+)
+def test_a_no_break_space_is_a_space(redactor: Redactor, space: str, text: str, expected: str) -> None:
+    out, counts = redacted(redactor, text.format(s=space))
+    assert out == expected.format(s=space)
+    assert counts.total() == 1
 
 
 def test_redacting_twice_is_redacting_once(redactor: Redactor) -> None:

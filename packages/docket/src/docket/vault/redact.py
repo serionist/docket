@@ -68,17 +68,19 @@ def _outside_markers(text: str, fn: Callable[[str], str]) -> str:
 
 # A label starts a word, or a word inside an identifier in any case style: DB_PASSWORD, client-secret, clientSecret.
 _LABEL_START = r"(?:(?<![A-Za-z0-9])|(?<=[a-z0-9])(?=[A-Z]))"
-# Between a label and its value: spaces and line breaks, emphasis and table marks (`*Password:* x`, `| Password: |`),
-# HTML tags, even long ones a mail client wrapped over lines (`<td>Password:</td>\r\n<td>x`), and entities. Possessive,
-# so a long run of it is read once and never backtracked into.
-_FILLER = r"(?:[ \t*_`~|]|\r?\n|<[^<>]{0,2000}>|&[A-Za-z0-9#]{2,10};)*+"
+# Between a label and its value: any horizontal space (the no-break spaces Word and Outlook put in too) and line
+# breaks, emphasis and table marks (`*Password:* x`, `| Password: |`), HTML tags, even long ones a mail client wrapped
+# over lines (`<td>Password:</td>\r\n<td>x`), and entities. Possessive, so a long run of it is read once and never
+# backtracked into.
+_SPACE = r"[^\S\r\n]"
+_FILLER = rf"(?:{_SPACE}|[*_`~|]|\r?\n|<[^<>]{{0,2000}}>|&[A-Za-z0-9#]{{2,10}};)*+"
 # An unquoted value has a letter or a digit, so a mark that closes the label is never taken for the secret.
 _VALUE = (
     r"(?:\"(?P<secret>[^\"\n]+)\"|'(?P<secret2>[^'\n]+)'"
     r"|(?P<secret3>(?=[^\s;,<>\"'&|]*?[A-Za-z0-9])[^\s;,<>\"'&|]+))"
 )
 
-_SEP = r"[ _.\-]?"
+_SEP = rf"(?:[_.\-]|{_SPACE})?"
 API_KEY_LABELS = [
     rf"api{_SEP}key",
     rf"client{_SEP}secret",
@@ -145,7 +147,7 @@ API_KEY = Rule(
     "api-key",
     (
         re.compile(_EDGE_L + "(?:" + "|".join(_TOKEN_SHAPES) + ")" + _EDGE_R),
-        re.compile(r"(?i:bearer)[ \t]+(?P<secret>[A-Za-z0-9._~+/\-]{16,}=*)"),
+        re.compile(r"(?i:bearer)" + _SPACE + r"+(?P<secret>[A-Za-z0-9._~+/\-]{16,}=*)"),
         _labelled(API_KEY_LABELS),
     ),
 )
@@ -158,7 +160,7 @@ PASSWORD = Rule(
 )
 # A phone number needs a + or a label: a bare run of digits is as likely an amount, a ticket or a timestamp, the
 # numbers Docket exists to keep. A + number followed by a currency or a percent is a change in an amount.
-_AMOUNT = r"(?![ \t]*(?:(?i:ft|huf|eur|usd|gbp|chf)(?![A-Za-z])|[$€£%]))"
+_AMOUNT = rf"(?!{_SPACE}*(?:(?i:ft|huf|eur|usd|gbp|chf)(?![A-Za-z])|[$€£%]))"
 PHONE = Rule(
     "phone",
     (
@@ -166,7 +168,7 @@ PHONE = Rule(
         re.compile(
             r"(?<![A-Za-z0-9])"
             + rf"(?i:{'|'.join(PHONE_LABELS)})"
-            + r"(?![A-Za-z0-9])[\"']?[ \t.]*(?:[:=#])?"
+            + rf"(?![A-Za-z0-9])[\"']?(?:{_SPACE}|\.)*+(?:[:=#])?"
             + _FILLER
             + r"(?P<secret>\+?\(?\d(?:[ .\-/()]{0,2}\d){6,14})(?!\d)"
         ),
