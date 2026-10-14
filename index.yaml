@@ -7,6 +7,7 @@ reading:
   - { path: docs/docs-regime.md, role: guide, note: how the entries work and how the tool writes them }
   - { path: docs/plans/README.md, role: guide, note: "when a change needs a plan, and the template" }
   - { path: CONTRIBUTING.md, role: guide, note: a first contribution's short path }
+  - { path: docs/design.md, role: design, note: "how the vault, the service and the plugin fit, and the phases" }
 decisions:
   - id: DR-0001
     title: Docket is open source under Apache-2.0, public on GitHub from day one
@@ -135,6 +136,66 @@ decisions:
     sources: ["#1"]
     description: The review rules asked for the maintainer's yes before any fix on a sensitive area. Under an autonomy grant that would stop the loop on fixes that only tighten a check or protect data, so those are made and recorded in the PR's Decided without asking. A fix that loosens a check, changes a one-way door or changes what happens to stored data still waits for the maintainer.
     not_chosen: ["Every sensitive fix waits for the maintainer, even under an autonomy grant."]
+  - id: DR-0013
+    title: Every user's data lives in their own private git vault; git is the source of truth
+    status: decided
+    at: "2026-10-14"
+    by: Soma Osvay
+    cost: one-way
+    sources: [docs/design.md]
+    description: Raw records, processed docs, entities and the ledger are files in a private git repo the user owns, committed after the staging gate. Any number of machines work on it; each machine's index is a cache rebuilt from the repo.
+    binds:
+      - The index database is never committed; a rebuild from the repo gives the same database, vectors aside.
+      - Raw text is in plain git, media in LFS encrypted per file.
+    not_chosen:
+      - "Committing the database: it can't merge between machines and LFS would keep a copy per commit."
+      - "Raw text in LFS: it breaks grep, diffs and partial clones."
+  - id: DR-0014
+    title: Raw records are JSONL, one file per source per sync run per machine, written once
+    status: decided
+    at: "2026-10-14"
+    by: Soma Osvay
+    cost: one-way
+    sources: [docs/design.md]
+    description: "A sync run writes one JSONL file for each source it read and never touches it again; a second run in the same minute gets its own name. Two machines never write the same file, so merges are trivial, and a changed raw file is something a check can see. The one exception is forgetting: docket forget rewrites the file's whole history without the record (git filter-repo), from any machine, and force-pushes."
+    not_chosen: [One file per source appended forever., SQLite as the store.]
+  - id: DR-0015
+    title: Everything reaches the raw log through a staging gate
+    status: decided
+    at: "2026-10-14"
+    by: Soma Osvay
+    cost: medium
+    sources: [docs/design.md]
+    description: New records land in staging, on the local disk and never committed. The gate applies the never-store lists, the source rules, classification for sources that can be private, cuts and redaction; only then is a record written to the raw log.
+    binds: ["A private recording never reaches git, not even in history."]
+  - id: DR-0016
+    title: The web app is FastAPI with server-rendered HTML and HTMX, with no front-end build
+    status: decided
+    at: "2026-10-14"
+    by: Soma Osvay
+    cost: medium
+    sources: [docs/design.md]
+    description: "One Python service renders the pages with Jinja templates and uses HTMX for interaction, so a friend installs one package and nothing needs Node. It still has a real structure: routes, templates as components, a small design system, tests over HTTP."
+    not_chosen:
+      - A single-page app (React or Svelte) with its own build, shipped inside the wheel.
+  - id: DR-0017
+    title: Search is SQLite FTS5 over three columns, plus vectors and a reranker where a model is available
+    status: decided
+    at: "2026-10-14"
+    by: Soma Osvay
+    cost: medium
+    sources: [docs/design.md]
+    description: Each chunk is indexed accent-folded, Hungarian-stemmed and English-stemmed, so names, Hungarian suffixes and loanwords all match. Embeddings and a reranker add recall when a model is available, local or through an API; without one, keyword search works alone.
+    binds: [Every model feature is optional.]
+  - id: DR-0018
+    title: Claude reaches Docket through an MCP endpoint on the local service and a Claude Code plugin
+    status: decided
+    at: "2026-10-14"
+    by: Soma Osvay
+    cost: one-way
+    sources: [docs/design.md]
+    description: The service serves MCP over HTTP on localhost; the plugin configures it and brings the skills and hooks. Headless Claude inside the service, from phase 3, runs only on the user's own API credentials (Anthropic, Bedrock, Vertex or Foundry), never on a claude.ai login.
+    binds: [The MCP tools' names and parameters are a one-way door once they land.]
 conventions:
   - id: CV-0001
     rule: Python code passes ruff's lint rules and its formatter, at 120 columns
