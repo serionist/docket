@@ -6,7 +6,7 @@ import os
 import re
 import sys
 from collections.abc import Sequence
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated
 from zoneinfo import ZoneInfo
@@ -16,11 +16,14 @@ import typer
 from docket import __version__, index, recall, userconfig
 from docket.errors import DocketError
 from docket.imports import notes
+from docket.sources.contract import Manifest
+from docket.sources.ingest import IngestReport, ingest_run
+from docket.sources.runner import MapperFailedError
 from docket.vault import cuts
 from docket.vault.anchors import format_time
 from docket.vault.gate import Gate, Label
 from docket.vault.processed import DocRefusedError
-from docket.vault.records import RawRecord
+from docket.vault.records import RawRecord, source_name_problem
 from docket.vault.spans import WINDOW, Span
 from docket.vault.staging import Classifier, Entry, State
 from docket.vault.vault import Vault
@@ -151,6 +154,63 @@ def vault_check(vault: VaultOption = None) -> None:
         typer.echo(f"{len(problems)} problem(s)")
         raise typer.Exit(1)
     typer.echo("vault ok")
+
+
+@app.command("ingest")
+def ingest(
+    source: Annotated[str, typer.Argument(help="The source, as vault.yaml names it.")],
+    folder: Annotated[Path, typer.Argument(help="A folder of payloads fetched earlier, and its hold.txt.")],
+    *,
+    hold: Annotated[
+        list[Path] | None, typer.Option("--hold", help="A file of ids to hold, one a line, besides hold.txt (repeat).")
+    ] = None,
+    final: Annotated[bool, typer.Option("--final", help="Tell the mapper not to wait for anything more.")] = False,
+    mapper_errors: Annotated[
+        bool, typer.Option("--mapper-errors", help="Print the mapper's own errors, which can quote a payload.")
+    ] = False,
+    vault: VaultOption = None,
+) -> None:
+    """Import a folder of payloads through the source's mapper: every record goes to staging, nothing on hold."""
+    problem = source_name_problem(source)
+    if problem is not None:
+        raise DocketError(problem)
+    found = find_vault(vault)
+    run = f"import-{datetime.now(UTC):%Y%m%dT%H%M%S}"
+    manifest = Manifest(run=run, source=source, captures=0, final=final, folder=str(folder))
+    try:
+        report = ingest_run(found, source, manifest, [], folder=folder, hold_files=hold or [])
+    except MapperFailedError as e:
+        if mapper_errors and e.stderr:
+            typer.echo(e.stderr, err=True)
+        raise
+    _ingest_report(report)
+
+
+def _ingest_report(report: IngestReport) -> None:
+    """Counts, ids and short reasons: never a title, so a never-store recording's name stays out of the terminal."""
+    if report.holds_added:
+        say(f"holds      {report.source}: {report.holds_added} added")
+    for unseen in report.holds_unseen:
+        say(f"holds      {unseen} isn't in this import; check hold.txt for a typo")
+    staged = report.staged
+    say(
+        f"staged     {report.source}: {staged.pending} pending, {staged.ready} ready, "
+        f"{staged.skipped} already staged or in raw"
+    )
+    if report.on_hold:
+        say(f"on hold    {report.on_hold}")
+    if staged.dropped:
+        say("dropped    " + ", ".join(f"{reason} {n}" for reason, n in sorted(staged.dropped.items())))
+    for entry in report.set_aside:
+        where = " ".join(part for part in (entry.tool, entry.key) if part)
+        say(f"set aside  {entry.id or '(no id)'}  {entry.reason}" + (f"  {where}" if where else ""))
+    for waiting in report.waiting:
+        say(f"waiting    {waiting.id}  for {waiting.for_}")
+    for rid in report.held_in_raw:
+        say(f"in raw     {rid} is on hold but already in raw; it waits for docket forget")
+    if report.unreadable:
+        places = ", ".join(str(n) for n in report.unreadable)
+        say(f"skipped    file(s) {places} of {report.files} in name order: not JSON")
 
 
 RefArgument = Annotated[str, typer.Argument(help="A rid, or at least 6 characters of a key from `staging list`.")]

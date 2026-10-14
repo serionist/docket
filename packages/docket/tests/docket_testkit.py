@@ -170,6 +170,27 @@ def copy_vault(template: Path, tmp_path: Path) -> Vault:
     return Vault.open(target)
 
 
+def template_project(factory: pytest.TempPathFactory, mappers: dict[str, str]) -> Path:
+    """A consuming project with its vault, built once for a test module under conftest's git settings; each test
+    copies it with copy_project."""
+    home = factory.mktemp("template-home")
+    (home / "gitconfig").write_text("", encoding="utf-8")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("GIT_CONFIG_GLOBAL", str(home / "gitconfig"))
+        mp.setenv("GIT_CONFIG_NOSYSTEM", "1")
+        mp.setenv("DOCKET_CONFIG_DIR", str(home / "docket"))
+        mp.setenv("DOCKET_MACHINE", "test-box")
+        for name in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
+            mp.delenv(name, raising=False)
+        return consuming_project(factory.mktemp("template-project"), mappers).root.parent
+
+
+def copy_project(template: Path, tmp_path: Path) -> Vault:
+    target = tmp_path / "project"
+    shutil.copytree(template, target)
+    return Vault.open(target / "vault")
+
+
 def note(
     doc_id: str = "recording-note:2026-10-14-supplier-call",
     covers: list[str] | None = None,

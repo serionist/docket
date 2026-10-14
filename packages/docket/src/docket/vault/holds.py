@@ -41,14 +41,17 @@ class Holds:
         return bool(ids) and any(covered(ref, record.source, ids) for ref in refs)
 
 
-def covered(ref: str | None, source: str, ids: frozenset[str]) -> bool:
-    """Whether a rid of a source is a held id or sits under one: `plaud:<id>` and `plaud:<id>/summary`, never
-    `plaud:<id>x`."""
+def holder(ref: str | None, source: str, ids: frozenset[str]) -> str | None:
+    """The held id a rid of a source is, or sits under: `plaud:<id>` and `plaud:<id>/summary`, never `plaud:<id>x`."""
     prefix = f"{source}:"
     if ref is None or not ref.startswith(prefix):
-        return False
+        return None
     parts = ref[len(prefix) :].split("/")
-    return any("/".join(parts[:n]) in ids for n in range(1, len(parts) + 1))
+    return next(("/".join(parts[:n]) for n in range(1, len(parts) + 1) if "/".join(parts[:n]) in ids), None)
+
+
+def covered(ref: str | None, source: str, ids: frozenset[str]) -> bool:
+    return holder(ref, source, ids) is not None
 
 
 def parse(text: str, where: str) -> list[str]:

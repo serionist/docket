@@ -91,6 +91,11 @@ class RawLog:
         self._refresh()
         return (record.rid, version(record)) in self._seen
 
+    def rids(self) -> set[str]:
+        """Every rid the raw log holds, from the same scan `contains` keeps."""
+        self._refresh()
+        return {rid for rid, _ in self._seen}
+
     def _target(self, source: str, run_at: datetime) -> Path:
         at = run_at.astimezone(UTC)
         folder = self.raw_dir / source / f"{at:%Y}" / f"{at:%m}"

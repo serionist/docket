@@ -7,7 +7,7 @@ import io
 from pathlib import Path
 
 import pytest
-from docket_testkit import consuming_project, write_mapper
+from docket_testkit import template_project, write_mapper
 
 from docket.errors import DocketError
 from docket.sources import child, runner
@@ -26,14 +26,7 @@ PRIVATE_TITLE = "Dentist with Cleo"
 @pytest.fixture(scope="module")
 def project(tmp_path_factory: pytest.TempPathFactory) -> Vault:
     # Built once: a vault takes seconds to make on some systems, and these tests only read it.
-    with pytest.MonkeyPatch.context() as mp:
-        home = tmp_path_factory.mktemp("home")
-        (home / "gitconfig").write_text("", encoding="utf-8")
-        mp.setenv("GIT_CONFIG_GLOBAL", str(home / "gitconfig"))
-        mp.setenv("GIT_CONFIG_NOSYSTEM", "1")
-        mp.setenv("DOCKET_CONFIG_DIR", str(home / "docket"))
-        mp.setenv("DOCKET_MACHINE", "test-box")
-        return consuming_project(tmp_path_factory.mktemp("runner"), {"plaud": ECHO})
+    return Vault.open(template_project(tmp_path_factory, {"plaud": ECHO}) / "vault")
 
 
 @pytest.fixture
