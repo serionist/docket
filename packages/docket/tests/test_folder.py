@@ -4,6 +4,7 @@ host's hooks and locks left alone, and nothing ever done to the host's remote.""
 from __future__ import annotations
 
 import os
+import shutil
 import stat
 import threading
 import time
@@ -16,13 +17,30 @@ from docket.cli import main
 from docket.errors import DocketError
 from docket.imports.notes import import_notes
 from docket.vault import git as gitmod
-from docket.vault import holds
+from docket.vault import holds, host
 from docket.vault.config import CONFIG_FILE, SourceConfig, VaultConfig
 from docket.vault.docstore import DocStore
 from docket.vault.vault import Vault
 
 DOC = "recording-note:2026-10-14-supplier-call"
 HELD = "of_00c0ffee00c0ffee00c0ffee00c0ffee"
+
+
+@pytest.mark.skipif(shutil.which("git-lfs") is None, reason="needs git-lfs")
+def test_docket_s_own_media_commit_keeps_git_lfs_out_of_an_in_tree_hooks_folder(tmp_path: Path) -> None:
+    vault = folder_vault(tmp_path)
+    top = vault.home.top
+    git(top, "config", "core.hooksPath", ".husky")
+    (top / ".husky").mkdir()
+    (top / ".husky" / "pre-commit").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    git(top, "lfs", "install", "--local", "--skip-repo")
+    media = vault.root / "media" / "s" / "2026" / "10" / "a.age"
+    media.parent.mkdir(parents=True)
+    media.write_bytes(b"encrypted audio")
+    vault.commit(["media/s/2026/10/a.age"], "Media: a")
+    assert "version https://git-lfs" in git(top, "cat-file", "blob", "HEAD:notes/vault/media/s/2026/10/a.age")
+    assert sorted(p.name for p in (top / ".husky").iterdir()) == ["pre-commit"]
+    assert host.new_hooks(top) == [".husky/pre-commit"]
 
 
 def test_hold_lists_in_a_folder_vault(tmp_path: Path) -> None:

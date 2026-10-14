@@ -82,7 +82,9 @@ class Git:
             message = (proc.stderr or proc.stdout).strip()
             if held:
                 message += self._index_lock_age()
-            raise DocketError(f"git {args[0]}: {message}")
+            # The command's name, past any -c options before it.
+            name = next(a for i, a in enumerate(args) if a != "-c" and (i == 0 or args[i - 1] != "-c"))
+            raise DocketError(f"git {name}: {message}")
         return proc
 
     def _index_lock_age(self) -> str:
@@ -118,21 +120,22 @@ class Git:
         # On stdin, not the command line: a backlog of run files would pass Windows' 32,767-character limit.
         spec = "\0".join(paths)
         folder = self.home is not None and self.home.folder
+        hooks: list[str] = []
+        if folder and self.home is not None:
+            # The host's hooks are written for the user's commits: a formatter would rewrite a raw file written once,
+            # a commit-msg rule would refuse or rewrite a Doc: line. On the add too: git-lfs's filter writes its own
+            # hooks into the hooks path when it runs, which for a host like husky's is the user's tree.
+            hooks = ["-c", f"core.hooksPath={self.home.no_hooks.as_posix()}"]
         try:
-            self.run("add", *_PATHSPEC, stdin=spec)
+            self.run(*hooks, "add", *_PATHSPEC, stdin=spec)
             # `-- .` and the prefix, not --relative: that crashes git 2.47.0.windows.2 while a stash pop conflicts.
             staged = {p for p in self.out("diff", "--cached", "--name-only", "-z", "--", ".").split("\0") if p}
             if not staged & {self.prefix + Path(p).as_posix() for p in paths}:
                 return None
-            hooks: list[str] = []
-            if folder and self.home is not None:
-                # The host's hooks are written for the user's commits: a formatter would rewrite a raw file written
-                # once, a commit-msg rule would refuse or rewrite a Doc: line.
-                hooks = ["-c", f"core.hooksPath={self.home.no_hooks.as_posix()}"]
             self.run(*hooks, "commit", "-q", "--only", *_PATHSPEC, "-m", message, identity=True, stdin=spec)
         except BaseException:
             if folder:
-                self.run("reset", "-q", *_PATHSPEC, check=False, stdin=spec)
+                self.run(*hooks, "reset", "-q", *_PATHSPEC, check=False, stdin=spec)
             raise
         return self.out("rev-parse", "HEAD").strip()
 

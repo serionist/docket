@@ -361,11 +361,11 @@ def is_docket_config(config: Path) -> bool:
     return any(line.startswith("primary_machine:") for line in text.splitlines())
 
 
-def ignored(cwd: Path, prefix: str = "") -> list[tuple[str, str, str]]:
+def ignored(cwd: Path, prefix: str = "", config: tuple[str, ...] = ()) -> list[tuple[str, str, str]]:
     """(the sample path, the rule, its pattern) for each sample path of the vault an ignore rule hides; run from the
-    vault, or from the host's top with the vault's prefix before it exists."""
+    vault, or from the host's top with the vault's prefix before it exists. `config` is git's own -c options."""
     paths = [prefix + p for p in IGNORE_SAMPLES]
-    proc = Git(cwd).run("check-ignore", "-v", "--no-index", "--", *paths, check=False)
+    proc = Git(cwd).run(*config, "check-ignore", "-v", "--no-index", "--", *paths, check=False)
     found: list[tuple[str, str, str]] = []
     for line in proc.stdout.splitlines():
         rule, _, path = line.partition("\t")

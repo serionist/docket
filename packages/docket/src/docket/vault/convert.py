@@ -37,7 +37,7 @@ from docket.vault import host
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.git import Git, Identity
 from docket.vault.home import CONVERT_FILE, rev_parse
-from docket.vault.host import HostReport, Visibility, remote_visibility
+from docket.vault.host import HostReport, Visibility, remote_visibility, same_rule
 from docket.vault.lock import VaultLock
 from docket.vault.vault import IGNORE, with_attributes
 from docket.vault.wizard import Prompter, confirm_private
@@ -249,6 +249,12 @@ def _run(where: Where, state: State, p: Prompter) -> None:
         f"The vault is a folder of {where.top} now; your own git moves it. Left for you to commit: "
         f"{', '.join(edits) or 'nothing'}. The old repo is in {where.backup}; delete it when you're happy."
     )
+    hooks = host.new_hooks(where.top)
+    if hooks:
+        p.say(
+            f"git-lfs added its hooks to your repo's own hooks folder: {', '.join(hooks)}. Commit them, or delete them "
+            'and add `git lfs pre-push "$@"` to your own pre-push hook, so your push carries media.'
+        )
 
 
 # -- the steps ---------------------------------------------------------------------------------------------------
@@ -521,14 +527,16 @@ def _host_edits(where: Where, *, apply: bool, done: bool = False) -> list[str]:
     ):
         path = where.top / file
         text = path.read_text(encoding="utf-8") if path.is_file() else ""
-        kept = [line for line in text.splitlines() if line not in lines]
+        # The same matcher the dry run's ignore check uses: a line git reads as the rule is the rule, spaces or not.
+        kept = [line for line in text.splitlines() if not any(same_rule(line, rule) for rule in lines)]
         if done:
             if Git(where.top).out("status", "--porcelain", "--", file).strip():
                 edits.append(file)
             continue
         if len(kept) == len(text.splitlines()):
             continue
-        edits.append(f"{file} drops {', '.join(line for line in lines if line in text.splitlines())}")
+        found = [rule for rule in lines if any(same_rule(line, rule) for line in text.splitlines())]
+        edits.append(f"{file} drops {', '.join(found)}")
         if apply:
             path.write_text("".join(f"{line}\n" for line in kept), encoding="utf-8", newline="\n")
     return edits

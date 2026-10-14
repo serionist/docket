@@ -4,6 +4,7 @@ the user's yes; a crash at any step is finished by a second run, or undone befor
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -477,6 +478,44 @@ def test_a_vault_an_older_docket_wrote_with_a_merge(tmp_path: Path, monkeypatch:
     attrs = git(top, "check-attr", "filter", "merge", "--", "notes/vault/media/x.age", "notes/vault/raw/a/x.jsonl")
     assert "notes/vault/media/x.age: filter: lfs" in attrs
     assert "notes/vault/raw/a/x.jsonl: merge: union" in attrs
+
+
+def test_the_vault_s_line_with_a_trailing_space_is_taken_out_too(tmp_path: Path) -> None:
+    top, root = nested(tmp_path)
+    (top / ".gitignore").write_text("/notes/vault/ \n*.log\n", encoding="utf-8")
+    git(top, "commit", "-qm", "the vault's line, with a space", "--", ".gitignore")
+    script = run(root, dry_run=True)
+    assert ".gitignore drops /notes/vault/" in script.said[0]
+    run(root)
+    vault = check_converted(top, root)
+    assert (top / ".gitignore").read_text(encoding="utf-8") == "*.log\n"
+    assert vault.check() == []
+
+
+@pytest.mark.skipif(shutil.which("git-lfs") is None, reason="needs git-lfs")
+def test_hooks_git_lfs_adds_to_an_in_tree_hooks_folder_are_named(tmp_path: Path) -> None:
+    top, root = nested(tmp_path)
+    media = root / "media" / "s" / "2026" / "10" / "a.age"
+    media.parent.mkdir(parents=True)
+    media.write_bytes(b"encrypted audio, as git-lfs stores it")
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "Media")
+    assert "version https://git-lfs" in git(root, "cat-file", "blob", "HEAD:media/s/2026/10/a.age")
+    git(top, "config", "core.hooksPath", ".husky")
+    (top / ".husky").mkdir()
+    (top / ".husky" / "pre-commit").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    git(top, "add", ".husky")
+    git(top, "commit", "-qm", "husky")
+    script = run(root)
+    vault = check_converted(top, root)
+    # git-lfs's filter ran on the media and wrote its hooks there, which Docket can't stop: it names each one.
+    added = sorted(p.name for p in (top / ".husky").iterdir() if p.name != "pre-commit")
+    assert "pre-push" in added
+    said = "\n".join(script.said)
+    assert "git-lfs: your repo's hooks are files in its tree" in said
+    for name in added:
+        assert f".husky/{name}" in said
+    assert vault.config.storage == "folder"
 
 
 def test_an_ignore_rule_the_vault_s_own_line_hides_refuses_before_the_yes(tmp_path: Path) -> None:

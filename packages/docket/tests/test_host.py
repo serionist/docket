@@ -173,11 +173,21 @@ def test_rules_the_vault_s_own_line_hides_are_read_without_it(tmp_path: Path) ->
     assert any(line.startswith("the repo's ignore rules hide raw/") for line in report.blocking())
 
 
+def test_the_host_s_own_excludes_file_is_read_too(tmp_path: Path) -> None:
+    top = host_repo(tmp_path)
+    (top / ".gitignore").write_text("/notes/vault/\n", encoding="utf-8")
+    (top / "my-excludes").write_text("*.jsonl\n", encoding="utf-8")
+    git(top, "config", "core.excludesFile", "my-excludes")
+    found = {path: rule for path, rule, _ in host.ignored_without(top, "notes/vault/", "/notes/vault/")}
+    assert found["raw/s/2026/01/2026-01-01T0000-m.jsonl"].endswith("my-excludes:1: *.jsonl")
+    assert found["ledger/ops/2026-01-m.jsonl"].endswith("my-excludes:1: *.jsonl")
+
+
 def test_hooks_kept_in_the_repo_s_tree_are_never_written(tmp_path: Path) -> None:
     top = host_repo(tmp_path)
     git(top, "config", "core.hooksPath", ".husky")
     (top / ".husky").mkdir()
-    (top / ".husky" / "pre-commit").write_text("#!/bin/sh\nnpm test\n", encoding="utf-8")
+    (top / ".husky" / "pre-commit").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     assert host.lfs_state(top).hook == "in-tree"
     message = host.setup_lfs(top, Lfs(True, False, "in-tree"))
     assert message is not None
