@@ -58,9 +58,9 @@ decisions:
     not_chosen: ["argparse: hand-written help and parsing for every command."]
   - id: DR-0024
     title: Staging holds one file per staged version, pending or ready, and a hash-only memory of hand decisions
-    status: proposed
+    status: decided
     at: "2026-10-14"
-    by: Claude (autonomy grant)
+    by: Soma Osvay
     cost: one-way
     sources: ["#5"]
     description: staging/<source>/<key>.json holds one staged version of a record; the key is the first 32 hex characters of sha256 of the rid, a newline and v, taken over the record as redacted at intake. The file holds schema_version 1, state (pending waits for a classification, ready goes to raw at the next promotion), staged_at, classified_by (user, claude, or null when the source's rule made it ready), cuts, problem (why a promotion held it back) and the record. staging/_decided.jsonl holds a line of hashes (the rid's and the key) for every version classified private or promoted with cuts, so a re-pull isn't asked again. Staging holds the only copy of a waiting record, so a later Docket reads every earlier schema_version or migrates it.
@@ -74,9 +74,9 @@ decisions:
       - "No memory: each lookback re-asks every recording, and a cut work record comes back uncut."
   - id: DR-0025
     title: The gate drops at intake in memory, redacts at intake, and cuts then redacts again at promotion
-    status: proposed
+    status: decided
     at: "2026-10-14"
-    by: Claude (autonomy grant)
+    by: Soma Osvay
     cost: medium
     sources: ["#5"]
     description: "Intake refuses a whole batch that has an unknown or disabled source, drops private-source and never-store records in memory before anything is written, redacts the rest, skips a version already in raw, already staged or in _decided.jsonl, and stages work as ready and mixed as pending. A record decided by hand (its rid in _decided.jsonl, a [cut] in its raw version, or another staged version holding cuts) waits as pending whatever its source. Every call re-reads vault.yaml, refuses to run while it doesn't load, and sweeps staging against it: drops what it now forbids, deletes keys in _decided.jsonl, and sends back to pending a ready record nobody classified when its source became mixed or it was decided by hand. Promotion cuts the staged text, redacts with the current rules, writes one run per source and commits before it deletes the staged files."
@@ -90,9 +90,9 @@ decisions:
       - "Re-read vault.yaml only when its modification time changes: misses fast edits."
   - id: DR-0026
     title: "Never-store lists match failing closed: folded, wherever a record names someone or says something"
-    status: proposed
+    status: decided
     at: "2026-10-14"
-    by: Claude (autonomy grant)
+    by: Soma Osvay
     cost: medium
     sources: ["#5"]
     description: "Matching fails closed: too broad drops a work record, too narrow stores a private one. people match, case-folded, the author, any to, or any string in native, and an address inside Name <addr> on either side matches by itself; containers match container or thread, case-folded, with or without the <source>: prefix. keywords match whole tokens in title, text, attachment names and every string in native: case and accents are folded, curly apostrophes and typographic dashes read as plain ones, HTML entities as what they stand for, and every run of characters that aren't letters or digits is one space, so a hyphen in a keyword also matches a space (check-up drops check up). A keyword of two or more words also matches them split at a lower-to-upper case change and run together, so dora example matches dora-example, dora_example, DoraExample and doraexample; a one-word keyword never splits a word, so art never matches inside start and Max never inside maxRetries. matches_text holds a plain string (a path, a slug, an id) to the same rule. A match drops the whole record, and the gate reports only which list matched, never the entry."
@@ -102,9 +102,9 @@ decisions:
       - "Containers with their prefix only: a bare id the user wrote would store what they listed."
   - id: DR-0027
     title: Redaction marks each match in place as [redacted:<rule>] and never keeps the secret
-    status: proposed
+    status: decided
     at: "2026-10-14"
-    by: Claude (autonomy grant)
+    by: Soma Osvay
     cost: medium
     sources: ["#5"]
     description: "The built-in rules (password, api-key, private-key, phone) and the user's patterns run over text, title, attachment names and refs, and every key and value in native. A label counts quoted, inside an identifier in any case style (DB_PASSWORD, client-secret, clientSecret, refresh_token), wrapped in emphasis or table marks (*Password:*, | Password: |), or with line breaks, HTML tags (long ones and ones wrapped over lines too) and entities before its value; an unquoted value needs a letter or a digit, and the filler is read possessively so a long run can't make matching slow. A native key that is a label has its value redacted whole. A phone number needs a + or a phone label, and a + number followed by a currency or a percent is an amount, not a phone number. Ids (rid, container, thread, author, to) are never redacted. A match becomes [redacted:<rule>]; text inside a marker is never matched again, so redacting twice is once; a run reports how many markers of each rule it holds. A user pattern replaces its match, or only its secret group."
@@ -114,9 +114,9 @@ decisions:
       - "Any long run of digits as a phone number: it redacts amounts, tickets and timestamps."
   - id: DR-0028
     title: Cuts are character or time ranges; a source's connector registers the cutter for time
-    status: proposed
+    status: decided
     at: "2026-10-14"
-    by: Claude (autonomy grant)
+    by: Soma Osvay
     cost: medium
     sources: ["#5"]
     description: "A Cut is a start, an end and a unit, char or ms. Character cuts are offsets in the staged text and are made at promotion, before redaction; the default cutter replaces each with [cut] and clears native, because a copy of the stretch there may be HTML or escaped. Time cuts need the cutter a connector registers for its source with register_cutter, like register_projection; without one, classify refuses them and promotion holds the record with its problem. Every cutter leaves [cut] in text: that is how another machine knows the record was cut by hand."
