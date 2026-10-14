@@ -4,20 +4,25 @@ doc_put, read and verify are the names of the MCP tools the service (#8) exposes
 first, raw for accuracy: `read` gives a doc or the doc lines that point at a record, and `verify` puts each line of a
 doc next to the raw its anchors point at. Text from docs and records comes back as data in the result models; nothing
 here acts on what it says.
+
+`read` also takes the path other files cite a legacy note by (its old path), with an optional time: the note, and the
+raw at that time in the recording it covered. A rid in the raw log stays a rid, and `r:` is always raw.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from docket.errors import DocketError
-from docket.vault.anchors import Anchor, AnchorError, parse_locator, trailing_anchors
+from docket.vault import legacy
+from docket.vault.anchors import Anchor, AnchorError, format_anchor, parse_locator, split_path_locator, trailing_anchors
 from docket.vault.docstore import DocStore, PutResult
 from docket.vault.processed import DOC_TYPES, ProcessedDoc, parse_doc
-from docket.vault.records import RawRecord
+from docket.vault.records import RID, RawRecord
 from docket.vault.segments import segments
 from docket.vault.spans import WINDOW, RawLookup, Span, span
 from docket.vault.vault import Vault
@@ -45,6 +50,7 @@ class DocView(BaseModel):
     supersedes: list[str]
     entities: list[str]
     superseded_by: list[str]
+    old_paths: list[str] = Field(default_factory=list[str])
     text: str
     lines: list[DocLine]
 
@@ -59,12 +65,25 @@ class CitingLine(BaseModel):
     anchors: list[str]
 
 
+class LegacyRef(BaseModel):
+    """A legacy note that covers the record asked for: it has no anchors, so it is named whole."""
+
+    id: str
+    old_paths: list[str]
+
+
 class ReadResult(BaseModel):
+    """What `read` found. `resolved` is the canonical locator a path led to (a doc id, or `r:<rid>@<time>` for an old
+    path with a time), so an answer cites that; `problems` says what couldn't be placed."""
+
     locator: str
     view: View
     doc: DocView | None = None
     lines: list[CitingLine] = Field(default_factory=list[CitingLine])
     spans: list[Span] = Field(default_factory=list[Span])
+    legacy: list[LegacyRef] = Field(default_factory=list[LegacyRef])
+    resolved: str | None = None
+    problems: list[str] = Field(default_factory=list[str])
 
 
 class VerifiedLine(BaseModel):
@@ -96,7 +115,11 @@ def read(vault: Vault, locator: str, view: str = "summary", around: int = 0, rev
         raise DocketError("around counts minutes, paragraphs or messages either side; it can't be negative")
     the_view: View = "summary" if view == "summary" else "raw" if view == "raw" else "both"
     store = DocStore(vault)
+    value = locator.strip()
     try:
+        path = None if value.startswith(("[", "r:")) else split_path_locator(value)
+        if path is not None and not (RID.match(value) and RawLookup(vault.root).versions(value)):
+            return _read_path(store, locator, found=path, view=the_view, around=around, rev=rev)
         loc = parse_locator(locator, DOC_TYPES)
     except AnchorError as e:
         raise DocketError(str(e)) from None
@@ -115,7 +138,56 @@ def read(vault: Vault, locator: str, view: str = "summary", around: int = 0, rev
     if the_view != "summary":
         result.spans = _raw_spans(lookup, record, anchor, len(versions), around)
     if the_view != "raw":
-        result.lines = _citing(store.all(), record.rid, anchor, around)
+        docs = store.all()
+        result.lines = _citing(docs, record.rid, anchor, around)
+        result.legacy = [
+            LegacyRef(id=d.meta.id, old_paths=d.meta.old_paths)
+            for d in docs
+            if d.meta.type == "legacy-note" and record.rid in d.meta.covers
+        ]
+    return result
+
+
+def _read_path(
+    store: DocStore, locator: str, *, found: tuple[str, Anchor | None], view: View, around: int, rev: int | None
+) -> ReadResult:
+    """A doc by a path: one in the vault's processed/ folder, else a legacy note by its old path; with a time, the
+    raw at that time in the one recording it covers."""
+    path, at = found
+    processed = (store.root / "processed").resolve()
+    given = Path(os.path.normpath(store.root / path.replace("\\", "/")))
+    if given.is_relative_to(processed) and given.is_file():
+        doc = _load(store, "path", str(given), rev)
+    else:
+        doc_id = legacy.find(legacy.old_paths(store.all()), path)
+        doc = _load(store, "doc", doc_id, rev)
+    result = _read_doc(store, doc, locator, view)
+    result.resolved = doc.meta.id
+    if at is None:
+        return result
+    lookup = RawLookup(store.root)
+    timed = [rid for rid in doc.meta.covers if any(segments(r) for r in lookup.versions(rid)[-1:])]
+    if len(timed) != 1:
+        if timed:
+            options = ", ".join(format_anchor(rid, at.kind, at.start, at.end)[1:-1] for rid in timed)
+            result.problems.append(f"{doc.meta.id} covers {len(timed)} recordings; read one of {options}")
+        else:
+            result.problems.append(
+                f"{doc.meta.id} covers no recording in the raw log, so {at.token} can't be placed; "
+                "import the recording, then run docket import notes again"
+            )
+        return result
+    rid = timed[0]
+    anchor = Anchor(rid, at.kind, at.start, at.end, format_anchor(rid, at.kind, at.start, at.end))
+    result.resolved = anchor.token[1:-1]
+    versions = lookup.versions(rid)
+    if view != "raw":
+        result.lines = _citing(store.all(), rid, anchor, around)
+    found_span = span(anchor, versions[-1], len(versions), around=around)
+    if found_span.problem is not None:
+        result.problems.append(found_span.problem)
+    if view != "summary":
+        result.spans = [] if found_span.problem is not None else [found_span]
     return result
 
 
@@ -209,6 +281,7 @@ def _read_doc(store: DocStore, doc: ProcessedDoc, locator: str, view: View) -> R
             supersedes=meta.supersedes,
             entities=meta.entities,
             superseded_by=superseded_by,
+            old_paths=meta.old_paths,
             text=doc.source,
             lines=[
                 DocLine(n=n, text=text, anchors=[a.token for a in trailing_anchors(text).anchors])
