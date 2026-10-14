@@ -18,7 +18,7 @@ from pydantic import ValidationError
 from docket.errors import DocketError
 from docket.vault import machine as machines
 from docket.vault.config import CONFIG_FILE, VaultConfig
-from docket.vault.git import Git, Identity, SyncResult
+from docket.vault.git import Git, Identity, SyncResult, sync_marker
 from docket.vault.lock import VaultLock
 from docket.vault.rawlog import RUN_FILE, RawLog, parse_run_file
 from docket.vault.records import RawRecord
@@ -149,12 +149,21 @@ class Vault:
             return self.git.sync()
 
     def _recover(self) -> None:
-        """Undo a rebase a killed sync left behind, so nothing is committed on a detached HEAD. Under the lock no sync
-        of ours is running, and nothing was committed since it stopped, so the abort loses nothing."""
+        """Before writing: undo a rebase a killed sync of ours left behind (its marker says so, and under the lock no
+        sync of ours is running), and refuse to touch anything else git is in the middle of, which is the user's."""
         git_dir = self.root / ".git"
-        if (git_dir / "rebase-merge").exists() or (git_dir / "rebase-apply").exists():
-            log.warning("undoing a rebase left in progress in %s", self.root)
+        marker = sync_marker(self.root)
+        rebasing = (git_dir / "rebase-merge").exists() or (git_dir / "rebase-apply").exists()
+        if rebasing and marker.exists():
+            log.warning("undoing a rebase a stopped sync left in %s", self.root)
             self.git.run("rebase", "--abort")
+            rebasing = False
+        marker.unlink(missing_ok=True)
+        if rebasing:
+            raise DocketError(f"a rebase is in progress in {self.root}; finish it (git rebase --continue) or undo it")
+        for head, what in (("MERGE_HEAD", "merge"), ("CHERRY_PICK_HEAD", "cherry-pick"), ("REVERT_HEAD", "revert")):
+            if (git_dir / head).exists():
+                raise DocketError(f"a {what} is in progress in {self.root}; finish or undo it before Docket writes")
         if self.git.branch() == "HEAD":
             raise DocketError(f"{self.root} isn't on a branch (a detached HEAD); check out main before Docket writes")
 

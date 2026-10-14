@@ -11,7 +11,8 @@ from docket_testkit import make_record, sh
 
 from docket.errors import DocketError
 from docket.vault.config import VaultConfig
-from docket.vault.lock import clear_stale_index_lock
+from docket.vault.git import sync_marker
+from docket.vault.lock import VaultLock, clear_stale_index_lock
 from docket.vault.rawlog import RawLog
 from docket.vault.records import RawRecord
 from docket.vault.vault import Vault
@@ -367,9 +368,12 @@ def test_a_rebase_left_in_progress_is_undone_before_the_next_commit(tmp_path: Pa
     (vault.root / "vault.yaml").write_text("# ours\n", encoding="utf-8")
     vault.commit(["vault.yaml"], "ours")
     vault.git.run("fetch", "-q", "origin")
-    vault.git.run("rebase", "origin/main", check=False, identity=True)  # a sync killed mid-way leaves this behind
+    # A sync killed mid-way leaves its marker and the rebase behind.
+    sync_marker(vault.root).write_text("origin/main", encoding="utf-8")
+    vault.git.run("rebase", "origin/main", check=False, identity=True)
     assert (vault.root / ".git" / "rebase-merge").exists() or (vault.root / ".git" / "rebase-apply").exists()
     assert vault.write_run("chat", [make_record(1)], RUN_AT) is not None
+    assert not sync_marker(vault.root).exists()
     assert vault.git.branch() == "main"
     assert sh(vault.root, "git", "log", "--format=%s", "-2").split("\n")[:2] == [
         "Raw: chat, 1 record(s) from test-box",
@@ -409,5 +413,43 @@ def test_the_lock_is_released_when_clearing_a_stale_index_lock_fails(
     with pytest.raises(PermissionError), vault.lock:
         pass
     monkeypatch.undo()
-    with vault.lock:
+    # Another instance, as another process would be: filelock lets the same instance take its own lock again.
+    with VaultLock(vault.root / ".git", timeout=0.5):
         pass
+
+
+def _conflicting_vault(tmp_path: Path, config: VaultConfig) -> Vault:
+    sh(tmp_path, "git", "init", "-q", "--bare", "remote.git")
+    remote = tmp_path / "remote.git"
+    vault = new_vault(tmp_path, config)
+    vault.git.run("remote", "add", "origin", str(remote))
+    vault.git.run("push", "-q", "origin", "main")
+    other = tmp_path / "other"
+    sh(tmp_path, "git", "clone", "-q", "-b", "main", str(remote), str(other))
+    (other / "vault.yaml").write_text("# theirs\n", encoding="utf-8")
+    sh(other, "git", "-c", "user.name=B", "-c", "user.email=b@example.invalid", "commit", "-qam", "theirs")
+    sh(other, "git", "push", "-q", "origin", "main")
+    (vault.root / "vault.yaml").write_text("# ours\n", encoding="utf-8")
+    vault.commit(["vault.yaml"], "ours")
+    vault.git.run("fetch", "-q", "origin")
+    return vault
+
+
+def test_a_rebase_the_user_is_resolving_is_never_touched(tmp_path: Path, config: VaultConfig) -> None:
+    vault = _conflicting_vault(tmp_path, config)
+    vault.git.run("rebase", "origin/main", check=False, identity=True)
+    (vault.root / "vault.yaml").write_text("# resolved by hand\n", encoding="utf-8")
+    vault.git.run("add", "vault.yaml")
+    with pytest.raises(DocketError, match="a rebase is in progress"):
+        vault.write_run("chat", [make_record(1)], RUN_AT)
+    assert (vault.root / "vault.yaml").read_text(encoding="utf-8") == "# resolved by hand\n"
+    assert (vault.root / ".git" / "rebase-merge").exists() or (vault.root / ".git" / "rebase-apply").exists()
+    assert vault.rawlog.read(make_record(1).rid) != []
+
+
+def test_a_merge_in_progress_is_refused(tmp_path: Path, config: VaultConfig) -> None:
+    vault = _conflicting_vault(tmp_path, config)
+    vault.git.run("merge", "origin/main", check=False, identity=True)
+    assert (vault.root / ".git" / "MERGE_HEAD").exists()
+    with pytest.raises(DocketError, match="a merge is in progress"):
+        vault.commit([], "x")

@@ -114,11 +114,24 @@ class Git:
         upstream = f"origin/{self.branch()}"
         if self.run("rev-parse", "--verify", "--quiet", upstream, check=False).returncode != 0:
             return SyncResult(True, False, f"{upstream} doesn't exist yet")
-        proc = self.run("rebase", "--autostash", "-q", upstream, check=False, identity=True)
-        if proc.returncode != 0:
-            self.run("rebase", "--abort", check=False)
-            return SyncResult(True, False, f"the rebase onto {upstream} conflicted and was undone; resolve it by hand")
+        # The marker says this rebase is Docket's own: one a killed sync leaves behind may be undone, a user's never.
+        marker = sync_marker(self.root)
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(upstream, encoding="utf-8")
+        try:
+            proc = self.run("rebase", "--autostash", "-q", upstream, check=False, identity=True)
+            if proc.returncode != 0:
+                self.run("rebase", "--abort", check=False)
+                return SyncResult(
+                    True, False, f"the rebase onto {upstream} conflicted and was undone; resolve it by hand"
+                )
+        finally:
+            marker.unlink(missing_ok=True)
         return SyncResult(True, True, f"rebased onto {upstream}")
+
+
+def sync_marker(root: Path) -> Path:
+    return root / ".git" / "docket" / "sync-rebase"
 
 
 def toplevel(path: Path) -> Path | None:
