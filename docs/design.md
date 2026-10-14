@@ -287,7 +287,7 @@ vault/
   index, the gate's cuts, `verify` and rebuilds read that field, never `native`. A vendor's own summary is a
   `vendor-summary` record.
 - `rid` is also the ledger's locator, so every ledger source resolves to a record. Older locators (a legacy note's
-  path) resolve through the crosswalk.
+  path) resolve through the note's `old_paths`, which the index loads into its crosswalk.
 
 ### 5.3 Processed docs
 
@@ -536,8 +536,10 @@ offer. A daily spend cap and a model per job type. What it writes that needs the
 No big-bang switch: each piece of an existing setup is replaced only after its replacement has a week of real use.
 
 1. Recordings first: transcripts already fetched go through the gate into the raw log.
-2. An existing notes folder stays, frozen and read-only. Its notes become `legacy-note` docs that keep their old
-   paths as aliases, so every reference to them still resolves.
+2. An existing notes folder stays, frozen and read-only. `docket import notes <folder>` makes its notes
+   `legacy-note` docs that keep their old paths (`old_paths`), so every reference to them still resolves, and
+   `notes/x.md@12:08` reads the recording a note covered at that time. Running it again picks up what changed in the
+   folder; an edit made in the vault is kept until the note itself changes.
 3. Entities are seeded from the people directory and the glossary, then reviewed in a few curate rounds; after
    that, those files are rendered from the entities.
 4. The ledger moves last, imported with its whole history; for a week both run in step, the old one read-only.

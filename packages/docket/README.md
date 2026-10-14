@@ -19,6 +19,7 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 | `docket index rebuild` | build this machine's index from the vault, from scratch |
 | `docket index update` | index what changed since; it rebuilds when it has to |
 | `docket index status` | whether the index is there and current, its languages, counts, what is new, and its problems |
+| `docket import notes <folder>` | each markdown note in an existing folder becomes a legacy note that keeps its old path, so `doc read notes/x.md` or `notes/x.md@12:08` still finds it; the folder is only read; run it again to pick up changes; `--dry-run` first, `--as` for what old paths start with |
 
 A command finds its vault from `--vault`, `DOCKET_VAULT`, the working folder upward, a `vault/` folder in it, or the
 default the wizard recorded. A `<ref>` is a record's rid, or at least 6 characters of the key `staging list` shows.

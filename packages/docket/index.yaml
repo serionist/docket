@@ -8,6 +8,7 @@ reading:
   - { path: packages/docket/src/docket/vault/anchors.py, role: contract, note: "the anchor grammar and how lines and paragraphs are counted: a one-way door" }
   - { path: packages/docket/src/docket/vault/segments.py, role: contract, note: "a transcript's segments in time order and the time range an anchor resolves in: a one-way door" }
   - { path: packages/docket/src/docket/vault/entities.py, role: contract, note: "the entity file format: a one-way door" }
+  - { path: packages/docket/src/docket/vault/legacy.py, role: contract, note: "how an old path finds its legacy note: a one-way door" }
 decisions:
   - id: DR-0019
     title: The vault's layout and run-file names are fixed
@@ -255,3 +256,76 @@ decisions:
     not_chosen:
       - "The package's stemmer(): PyStemmer would change stems under an index."
       - "Hunspell: a dictionary per language and a C library."
+  - id: DR-0130
+    title: A legacy note keeps its old paths and the hash of the body the import wrote
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#11"]
+    description: "A legacy-note doc's frontmatter adds old_paths, a block list of the paths other files cite it by, and import_hash, sha256: and 64 hex of the body the import last wrote. An old path is relative to the notes folder's repo root, with / separators, in NFC, with no empty, . or .. part, no ':', and no control character or line break. The hash is of the body as a doc gives it back after Docket's render and parse. Both are refused on other doc types and written after entities, only when set. This extends DR-0109."
+    binds:
+      - An old path is kept as other files wrote it, never resolved against a disk.
+      - import_hash is over the body as written, so a note ending in a blank line never looks edited.
+    not_chosen:
+      - "A crosswalk file in the vault: a second place to keep in step, and a grep for an old path wouldn't land on the doc."
+      - "One old path as a string: a later rename or a second prefix would change the format."
+  - id: DR-0131
+    title: An old path is a locator, with an optional time
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#11"]
+    description: "read takes path [@times], the path ending in .md or .markdown in any case. r: is always raw, a doc id stays a doc, and a bare <source>:<id> that is a rid in the raw log stays a rid. Otherwise the path is a doc under processed/ when one is there, else a legacy note's old path, matched in steps that stop at the first with exactly one match: exact, case-folded, the longest suffix (after a ':' any old path, after a '/' only one of two parts or more), then a bare file name. Normalizing makes \\ a /, drops a leading ./ and repeated /, composes to NFC and refuses a .. part; a drive or a leading / takes part in the suffix step only, and nothing touches the file system. A time is placed in the one covered record with segments; none or several is a problem in the result. This extends DR-0110."
+    binds:
+      - Nothing, or several equally good matches, is an error naming the candidates, never a guess.
+      - A one-part old path that ends a longer locator after a / is never resolved, only named as a candidate.
+    not_chosen:
+      - "Exact matches only: a <source>: prefix, an absolute path, another case or a bare file name would all miss."
+      - "Times read against the note's own text: legacy bodies have no anchors and write times many ways."
+  - id: DR-0132
+    title: Re-importing a notes folder follows the note and keeps an edit made in the vault
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#11"]
+    description: "A re-run writes a doc's next rev only when the note's body, redacted and as a doc gives it back, no longer matches import_hash, or when new covers were found. An edit made in the vault (a doc_put, a hand edit, or a doc with no import_hash) is kept while the note is the same. When both changed, the doc is kept and reported with --take note or vault and the note's short hash, refused once the note changes again; a doc merged by hand to equal the note only moves its hash. Covers are only ever added and entities kept. A note gone from the folder keeps its doc; a doc deleted in the vault stays deleted until --take note. One commit per run carries a Doc: line per doc (DR-0112)."
+    not_chosen:
+      - "Comparing texts: an edit made in the vault would be overwritten on every run."
+      - "A commit per note: minutes on Windows and hundreds of commits on a first import."
+  - id: DR-0133
+    title: A legacy note's id comes from its file name and never changes
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#11"]
+    description: "A legacy note's id is legacy-note:<slug>, the slug being the file's stem folded to ASCII, lowercased, other runs made -, trimmed, cut to 80 and trimmed again; an empty one is note, a Windows device name gets -note. An id another note holds (a file or any Doc: commit) gets the stem cut to 73 and - with 6 hex of the old path's sha256. Once given, a doc is found by its old path, never by working its id out again."
+    not_chosen:
+      - "The whole path as the slug: long, and never dated, so never in a year and month folder."
+      - "A hash as the id: unreadable."
+  - id: DR-0134
+    title: A legacy note covers the records its head names, from generic record fields only
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#11"]
+    description: A note's head is its lines before the first heading of level two or deeper after the first line, at most 40. A token there (backticked text, or a word of six characters or more) names a record when it is its rid, its id after <source>:, or that id's last run of 12 or more letters and digits. A head that names none falls back on the one record with segments whose source is a folder of the old path, whose ts falls on the date the file name starts with in the owner's time zone, and whose title words all appear in the file name or first heading. There is no code per source (DR-0108).
+    not_chosen:
+      - "The whole note: a recording it only mentions would count as covered."
+      - "A finder registered per source: code per source in the core, which DR-0108 rules out."
+  - id: DR-0135
+    title: The import reads a notes folder through git's ignore rules and the never-store lists, and never writes it
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#11"]
+    description: In a git repo the folder is listed with git ls-files -co --exclude-standard, deduplicated, and every git call into that repo runs with GIT_OPTIONAL_LOCKS=0 so its index isn't refreshed; a repo git can't read stops the import. Outside a repo the folder is walked, dot folders left out. Links and nested repos are counted, never followed or named, a listed path not on disk is gone, and the vault's own folder is skipped by path (DR-0102). Every listed path, the slug its doc would get, and then the note's text are screened with the never-store keywords before anything logs, reports or reads them; a match is counted, never named. The text is redacted (DR-0027). Only .md and .markdown files, in UTF-8, of at most 2 MB, are imported.
+    binds:
+      - "A note screened out leaves no trace: no doc, id, vault path, commit message, report or log line."
+    not_chosen:
+      - "Every file in the folder: a note the user kept out of git would be committed to the vault."

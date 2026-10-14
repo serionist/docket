@@ -21,3 +21,5 @@ Unreleased in the same PR.
   time words and boosts; hits come grouped by recording or thread, with their locators and summaries.
 - `docket index rebuild | update | status`: the search index on each machine, built from the vault.
 - Entity files under `entities/`: names, aliases and ids that search matches into everything kept.
+- `docket import notes`: an existing notes folder becomes legacy notes that keep their old paths, so references like
+  `notes/calls/x.md@12:08` still resolve, with the time placed in the recording a note covered.
