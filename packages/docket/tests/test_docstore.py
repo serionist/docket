@@ -217,6 +217,17 @@ def test_a_hand_edit_committed_by_hand_goes_in_too(vault: Vault) -> None:
     assert "ten million" in store.at_rev(NOTE_ID, 2).body
 
 
+def test_a_hand_commit_that_raised_the_rev_line_itself_still_gets_its_own_rev(vault: Vault) -> None:
+    recall.doc_put(vault, note())
+    hand_edit(vault, "rev: 1\n", "rev: 2\n")
+    hand_edit(vault, "10 million forints", "ten million forints")
+    hand_commit(vault, "my edit, rev raised by hand")
+    assert any("is at rev 3 now" in p for p in refused(vault, note(rev="2", lines=["- stale @12:08"])))
+    store = DocStore(vault)
+    assert [rev for rev, _ in store.history(NOTE_ID)] == [3, 1]
+    assert "ten million" in store.at_rev(NOTE_ID, 3).body
+
+
 def test_putting_the_hand_edited_file_itself_takes_it_in(vault: Vault) -> None:
     recall.doc_put(vault, note())
     hand_edit(vault, "10 million forints", "10 million forints, net")

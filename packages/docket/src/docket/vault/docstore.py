@@ -188,8 +188,7 @@ class DocStore:
         if on_disk is not None:
             written = normalize_newlines(self._blob(history[0][1], meta.id)) if history else None
             if normalize_newlines(on_disk) != written:
-                taken_in = stored + 1
-                on_disk = self._take_in(meta.id, path, on_disk, taken_in)
+                taken_in, on_disk = self._take_in(meta.id, path, on_disk, stored)
                 stored = taken_in
         if on_disk is not None and parse_doc(on_disk, lenient=True).render(rev=0) == doc.render(rev=0):
             return PutResult(id=meta.id, rev=stored, path=rel, changed=False, taken_in=taken_in)
@@ -232,15 +231,18 @@ class DocStore:
             stack.extend(found.meta.supersedes if found is not None else [])
         return False
 
-    def _take_in(self, doc_id: str, path: Path, on_disk: str, rev: int) -> str:
+    def _take_in(self, doc_id: str, path: Path, on_disk: str, stored: int) -> tuple[int, str]:
         """Commit a hand edit as the next rev, changing only its rev line, so a put made before it can't overwrite it.
-        If the commit fails, the user's bytes go back as they were and nothing stays staged."""
+        The rev is one past both the stored rev and the file's own, so the rev line always changes and the commit is
+        never empty, even when the user raised it by hand. If the commit fails, the user's bytes go back as they were
+        and nothing stays staged."""
         rel = path.relative_to(self.root).as_posix()
         try:
-            parse_doc(on_disk, lenient=True)
+            edited = parse_doc(on_disk, lenient=True)
         except DocRefusedError:
             message = f"{rel} was edited by hand and its frontmatter no longer parses; fix it or check it out again"
             raise DocRefusedError([DocProblem(None, message)]) from None
+        rev = max(stored, edited.meta.rev) + 1
         original = path.read_bytes()
         text = _with_rev(on_disk, rev)
         self._replace(path, text.encode("utf-8"))
@@ -250,7 +252,7 @@ class DocStore:
             self._unstage(rel)
             self._replace(path, original)
             raise
-        return text
+        return rev, text
 
     def _write_and_commit(self, path: Path, rel: str, text: str, message: str) -> str | None:
         original = path.read_bytes() if path.is_file() else None
