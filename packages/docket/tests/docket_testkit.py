@@ -83,6 +83,26 @@ def at(hour: int, minute: int = 0) -> datetime:
     return datetime(2026, 10, 14, hour, minute, tzinfo=UTC)
 
 
+def consuming_project(tmp_path: Path, mappers: dict[str, str]) -> Vault:
+    """A git repo with a mapper per source under .claude/skills/sources/, and a vault nested in it whose vault.yaml
+    names each mapper; each source is mixed."""
+    project = tmp_path / "project"
+    project.mkdir()
+    sh(project, "git", "init", "-q", "-b", "main")
+    config = make_config()
+    for source, code in mappers.items():
+        write_mapper(project, source, code)
+        config.sources[source] = SourceConfig(sensitivity="mixed", mapper=f".claude/skills/sources/{source}/mapper.py")
+    return Vault.init(project / "vault", config, "test-box")
+
+
+def write_mapper(project: Path, source: str, code: str) -> Path:
+    path = project / ".claude" / "skills" / "sources" / source / "mapper.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(code, encoding="utf-8", newline="\n")
+    return path
+
+
 def fixture_runs() -> list[tuple[str, str, list[RawRecord]]]:
     """The fixture's raw log as (source, run, records): one run per source at 10:00, and an edit at 11:00."""
     call = make_record(
