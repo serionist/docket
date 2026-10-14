@@ -23,3 +23,10 @@ Unreleased in the same PR.
 - Entity files under `entities/`: names, aliases and ids that search matches into everything kept.
 - `docket import notes`: an existing notes folder becomes legacy notes that keep their old paths, so references like
   `notes/calls/x.md@12:08` still resolve, with the time placed in the recording a note covered.
+- `docket ingest <source> <folder>`: imports payloads fetched earlier through the source's mapper, which lives in your
+  project under `.claude/skills/sources/<source>/`; Docket runs it in its own process and checks every record.
+- Hold lists: `state/holds/<source>.txt` keeps records out of staging and raw until a hold is released, on every
+  route and in the gate.
+- Time cuts on transcripts: each utterance a cut touches goes whole, and `[cut]` takes its place; a cut record keeps
+  no payload.
+- Plaud as the reference source, under `examples/sources/plaud`: a skill and a mapper to copy.

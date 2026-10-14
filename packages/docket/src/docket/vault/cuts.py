@@ -5,7 +5,8 @@ characters in `text`, times in a transcript's `segments`, whose text is rendered
 takes time cuts only and one without takes characters only. No source registers a cutter.
 
 Every cut leaves `[cut]` in `text` where it cut: that marker is how another machine knows the record was cut by hand.
-A cut record keeps no `native`, which would still hold the stretch, and a verbatim one is marked `fidelity: cut`.
+A cut record keeps no `native`, which would still hold the stretch, and a verbatim one is marked `fidelity: cut`
+(DR-0126).
 """
 
 from __future__ import annotations

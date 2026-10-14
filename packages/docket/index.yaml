@@ -9,6 +9,8 @@ reading:
   - { path: packages/docket/src/docket/vault/segments.py, role: contract, note: "a transcript's segments in time order and the time range an anchor resolves in: a one-way door" }
   - { path: packages/docket/src/docket/vault/entities.py, role: contract, note: "the entity file format: a one-way door" }
   - { path: packages/docket/src/docket/vault/legacy.py, role: contract, note: "how an old path finds its legacy note: a one-way door" }
+  - { path: packages/docket/src/docket/sources/contract.py, role: contract, note: "the mapper interface, contract 1, and the core's checks on what a mapper returns: a one-way door" }
+  - { path: packages/docket/src/docket/vault/holds.py, role: contract, note: "hold lists, a one-way door: the file, how it reads and fails closed, what a hold covers" }
 decisions:
   - id: DR-0019
     title: The vault's layout and run-file names are fixed
@@ -329,3 +331,124 @@ decisions:
       - "A note screened out leaves no trace: no doc, id, vault path, commit message, report or log line."
     not_chosen:
       - "Every file in the folder: a note the user kept out of git would be committed to the vault."
+  - id: DR-0119
+    title: "A source's mapper is map_run(run): plain JSON in and out, contract 1"
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#10"]
+    description: "A mapper is code in the consuming project, map_run(run) -> dict in .claude/skills/sources/<source>/mapper.py. In: contract, source, the run's manifest (run, source, the count of captures, final, window, skipped, folder), its captures (seq, run, captured, the tool's name without the host's prefix, arguments, the result as given; or file, for an import folder's file) and the source's holds. Out: contract, records in the core's shape without v or run, set_aside as {id, reason, tool, key}, waiting as {id, for}, and held. Both are plain JSON, so a mapper needs only Python's standard library."
+    binds:
+      - "A mapper never imports Docket: the contract is the JSON."
+      - A later contract changes the number, and a mapper written for another one fails the run.
+      - The manifest and the capture are the shapes the service's ingest tool and the capture hook use.
+    not_chosen:
+      - "A Python API over Docket's models: every mapper would break on Docket's internals."
+  - id: DR-0120
+    title: The core orders a transcript's segments and renders its text
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#10"]
+    description: "Before a mapper's record is versioned, the core sorts its segments by start, end, speaker and text, drops exact duplicates, and renders its text from them: one line per segment, <speaker>: <text>, or the text alone without a speaker. A mapper that sets text on a record with segments is refused. This refines DR-0111's bind that a record keeps its mapper's order: on the mapper route, the order kept is the core's, so a page boundary or the order captures arrived in never makes a new version."
+    binds: ["Changing the order or the rendering needs a migration of every vault, like DR-0020."]
+    not_chosen:
+      - "Each mapper renders its own text: sources read differently, and one mapper's change re-versions every transcript it made."
+      - "The mapper's order: a page boundary would make a new version."
+  - id: DR-0121
+    title: Hold lists keep a source's held records out on every route
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#10"]
+    description: "state/holds/<source>.txt is committed: one native id a line, read as UTF-8 with or without a BOM, lines stripped, blank lines skipped, any order and duplicates. A hold on <id> covers a record whose rid, thread or container is <source>:<id> or sits under <source>:<id>/. A held record gets no record on any route, and one waiting in staging stops every ingest of its source, naming each staged file, until the files are deleted. The list fails closed: a bad line, named by its number only, or a list or folder that is a link stops every ingest and every gate call. Docket only adds ids, through a temp file and a rename, committed with a message that names none; #31 releases them."
+    binds:
+      - The vault's .gitattributes has state/holds/*.txt merge=union, so two machines can add at once.
+      - Nothing that reports a hold names a title.
+    not_chosen:
+      - "hold.txt read only by the import: a live run or a second import stages held recordings whole."
+      - "A top-level holds/ folder: it changes the vault's layout (DR-0019)."
+  - id: DR-0122
+    title: The gate honours hold lists on stage, classify and promote
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#10"]
+    description: The gate's sweep reads every hold list on every call, as it reads vault.yaml, and a list that doesn't read stops the call. A record on hold is never staged and only counted as on_hold; classify refuses it, work or private, writing nothing; promote leaves it waiting. So a record staged on another clone before its hold arrived can't reach raw, whether or not an ingest runs first.
+    binds: [The count is on_hold; held stays the name for records a promotion can't take.]
+    not_chosen:
+      - "The ingest's check alone: a record staged before its hold arrived could be classified and promoted with no ingest between."
+      - "Allowing classify private: it records a decision releasing the hold would have to undo."
+  - id: DR-0123
+    title: A mapper runs in its own process, from its skill folder, with limits
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#10"]
+    description: "The consuming repo is the git repo that holds the vault's folder; a vault outside any git repo runs no mapper. A mapper's real path, after links, must sit under the real path of .claude/skills/sources/<source>/ built from the checked name, and outside the vault. The core starts it with its own interpreter in isolated mode (python -I -X utf8 -m docket.sources.child), an environment holding only what Python needs to start, 300 seconds and 256 MiB of output. A timeout, a crash, output that isn't JSON or any refused record fails the whole run: nothing is staged and the captures are fetched again. Errors name a record's position and field, never a value; the mapper's stderr is never logged and is printed only by docket ingest --mapper-errors."
+    binds: [The service runs only the consuming repo's mappers (DR-0108).]
+    not_chosen:
+      - "The service's own process: a hung or crashing mapper takes it down."
+      - "Skipping a refused record and staging the rest: the mark moves past it for good."
+      - "A project path in vault.yaml: one more setting, for the layout the setup already makes."
+  - id: DR-0124
+    title: vault.yaml's sources name their mapper, tools and media hosts
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#10"]
+    description: Each source in vault.yaml can have mapper (its path relative to the consuming repo, written with /, with no .., naming a .py file), tools (the names the capture hook posts, without the host's mcp__ prefix) and media_hosts (lowercase host names media_put may fetch from, with no scheme, port or path). All three are optional, so schema_version stays 1 and an older file reads unchanged (DR-0021).
+    not_chosen: ["schema_version 2: an older Docket refuses the new keys either way."]
+  - id: DR-0125
+    title: A source's name is safe in every path built from it
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#10"]
+    description: "A sources key in vault.yaml matches the rid's source pattern (lowercase letters, digits, dots, underscores and hyphens, starting with a letter or digit) and doesn't end in a dot, which Windows drops from a file name. So .., a/b or Plaud never names a folder: not a skill folder, not a hold list. The runner and the hold lists check the name again."
+    not_chosen:
+      - "Checking only where each path is built: one missed place lets .. widen the mapper's folder or move a hold list out of the vault."
+  - id: DR-0126
+    title: A cut record keeps no native, and a verbatim one becomes fidelity cut
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#10"]
+    description: "Every cut record loses its native, which would still hold the stretch. fidelity: cut replaces verbatim only: a derived record (its id built from its content) stays derived, and is known as cut by [cut] in its text and its empty native. A mapper can't set cut. This refines DR-0108's bind that every cut record is marked fidelity: cut, so the derived-id mark is never lost."
+    not_chosen:
+      - "cut on every cut record: a derived record would lose the mark that says its id came from its content."
+  - id: DR-0127
+    title: A record with segments is cut only by time, one without only by characters
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#10"]
+    description: "A time cut on a record without segments is refused: cut its transcript, or classify it whole. A character cut on a record with segments is refused (DR-0028), since its text is rendered from them. Each segment overlapping a time cut goes whole, one [cut] segment spans the cut widened to what it removed, cuts that touch after widening become one, and a cut that starts after the transcript ends is refused."
+    not_chosen: ["Trimming a segment at the cut: its words have no times."]
+  - id: DR-0128
+    title: docket ingest <source> <folder> runs the source's mapper
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#10"]
+    description: "One command for every source: it reads the folder's hold.txt and any --hold file, then its JSON files as captures (a saved capture as itself, any other file as a file for the mapper), and runs ingest_run, the entry the service's ingest tool shares. A file that isn't JSON is counted by its place in name order, never named, since a backfill's file names can be titles. The output is counts, ids and short reasons."
+    not_chosen: ["A command group per source, such as docket plaud import."]
+  - id: DR-0129
+    title: No source registers note names
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#10"]
+    description: "The core takes no per-source code (DR-0108), so no source registers the other names a note may use for its records. Importing a notes folder (#11) matches a legacy note to recordings by the generic record fields: title, ts and source."
+    not_chosen: ["register_note_names per source: per-source code in the core."]

@@ -47,6 +47,7 @@ The schema is `docs/docs-regime.yaml`, explained in `docs/docs-regime.md`.
 |------|------|
 | `packages/docket/` | the app: the vault, the service (web app, MCP endpoint, scheduler), the source contract, the `docket` command |
 | `plugin/` | the Claude Code plugin: setup, sync, tasks, recall, curate, the capture hook, `docket source new`; source skills live in the consuming project; `.claude-plugin/marketplace.json` makes the repo its marketplace |
+| `examples/` | reference sources to copy into a project, tested in CI and never a dependency: Plaud under `sources/plaud` |
 | `tools/devkit/` | the development kit, never published: `gate`, `docs`, `devkit` |
 | `docs/` | the design, the regime, the glossary, plans and reviews |
 | `.claude/skills/` | the work loop: `start-work`, `review-plan`, `review-code`, `finish-work` |
@@ -99,7 +100,9 @@ agrees in the issue:
 - the vault's format: its layout and run-file names (DR-0019), the raw record's version (DR-0020), `vault.yaml`
   (DR-0021), staging's files and states (DR-0024), the processed doc's format (DR-0109), the anchor grammar (DR-0110),
   a transcript's segments as a record field (DR-0111), doc revisions as the commits that wrote them (DR-0112),
-  entity files (DR-0113), a legacy note's old paths and import hash (DR-0130), old paths as locators (DR-0131);
+  entity files (DR-0113), a transcript's text rendered by the core (DR-0120), hold lists (DR-0121), a cut record's
+  fidelity (DR-0126), a legacy note's old paths and import hash (DR-0130), old paths as locators (DR-0131);
+- a source's mapper interface (DR-0119), and the names and keys of a source in `vault.yaml` (DR-0124, DR-0125);
 - the MCP tools' names and parameters, and the plugin's skill and hook names, once they land.
 
 Each lands with its decision in `index.yaml`, marked `cost: one-way`.

@@ -17,7 +17,7 @@ __all__ = ["Segment", "normalize", "render", "segments", "time_range"]
 def normalize(segs: Iterable[Segment]) -> list[Segment]:
     """A transcript's segments in the core's order: by start, end, speaker and text, exact duplicates once. The core
     puts a mapper's segments in this order before it versions them, so a page boundary or the order captures arrived
-    in never makes a new version (this refines DR-0111's "the mapper's order" for the mapper route)."""
+    in never makes a new version (DR-0120, which refines DR-0111's "the mapper's order" for the mapper route)."""
     return sorted(set(segs), key=lambda s: (s.start_ms, s.end_ms, s.speaker is not None, s.speaker or "", s.text))
 
 

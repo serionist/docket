@@ -1,4 +1,4 @@
-"""The mapper interface, contract 1: what a source's mapper gets and what it gives back.
+"""The mapper interface, contract 1 (DR-0119): what a source's mapper gets and what it gives back.
 
 A mapper is `map_run(run) -> dict` in the consuming project's `.claude/skills/sources/<source>/mapper.py`. Both sides
 are plain JSON, so a mapper needs nothing but Python's standard library and never imports Docket.

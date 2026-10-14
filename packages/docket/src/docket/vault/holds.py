@@ -1,4 +1,4 @@
-"""Hold lists: records Docket must not stage yet, held by id in the vault, one list per source.
+"""Hold lists (DR-0121): records Docket must not stage yet, held by id in the vault, one list per source.
 
 `state/holds/<source>.txt` is committed, so a hold reaches every machine with git: one native id a line, read as UTF-8
 with or without a BOM, lines stripped, blank lines skipped, any order and duplicates allowed. A hold on `<id>` covers a

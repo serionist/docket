@@ -11,7 +11,8 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 | `docket staging list` | what waits for the gate, oldest first: `pending` waits for you or Claude, `ready` goes to raw at the next promotion |
 | `docket staging show <ref>` | one staged record, its cuts, and the version in raw that was cut, when there is one |
 | `docket staging classify <ref> work\|private` | work makes it ready, `--cut 120-340` (characters) or `--cut 12:30-14:05` (a time) cuts a stretch; private drops it |
-| `docket staging promote` | writes every ready record to the raw log, cut and redacted, one run per source, and commits |
+| `docket staging promote` | writes every ready record to the raw log, cut and redacted, one run per source, and commits; a record on hold stays in staging |
+| `docket ingest <source> <folder>` | imports payloads fetched earlier through the source's mapper: the folder's `hold.txt` first, then its JSON files; every record goes to staging, nothing on hold; `--hold <file>` adds more ids to hold, `--final` tells the mapper not to wait for more, `--mapper-errors` prints the mapper's own errors |
 | `docket doc put <file or ->` | store a processed doc as its next rev; refused, with every problem and its line, when the frontmatter is wrong, an anchor doesn't resolve, or the doc changed since the rev it carries |
 | `docket doc read <locator>` | a doc, or a record and the doc lines that point at it; `--view raw` or `both` for the raw, `--around` for minutes, paragraphs or messages either side, `--rev` for an earlier revision |
 | `docket doc verify <doc>` | each line of a doc next to the raw its anchors point at; `--line` for chosen lines |
@@ -31,6 +32,8 @@ Every record reaches the raw log through the gate. It reads `vault.yaml` on ever
 | `vault.yaml` | What it does |
 |---|---|
 | `sources.<name>.sensitivity` | `work` goes through, `mixed` waits in staging to be classified, `private` is dropped |
+| `sources.<name>.mapper` | the source's mapper, relative to the repo that holds the vault: `.claude/skills/sources/<name>/mapper.py` |
+| `sources.<name>.tools`, `media_hosts` | the tools the capture hook posts for the source, and the hosts `media_put` may fetch from; the service reads them |
 | `never_store.people` | drops a record whose author, any recipient, or any id in its source's payload equals an entry: an exact address (`kid@example.invalid`, also inside `Kid <kid@example.invalid>`) or the source's user id (`U0KID`); case doesn't matter |
 | `never_store.containers` | drops a record from a channel, chat or folder: its id, with or without the source's prefix (`slack:C0FAMILY` or `C0FAMILY`) |
 | `never_store.keywords` | drops a record that says the words anywhere, title, text, attachment names or payload, as whole words: case, accents and curly apostrophes don't matter (`kovacs` matches `Kovács`, not `kovacsfalva`), and any punctuation may join the words; a keyword of two or more words also matches them joined by a case change or by nothing (`dora example` matches `dora-example`, `dora_example`, `DoraExample` and `doraexample`), while a one-word keyword never matches inside a word (`Max` leaves `maxRetries` alone); a name behind an encoding matches too: percent-encoded, once or wrapped again as a Safe Link does (`Dora%2520Example`), behind HTML entities, in Latin-1, or as `%u` and `\u` escapes |
@@ -41,6 +44,38 @@ Every record reaches the raw log through the gate. It reads `vault.yaml` on ever
 - A dropped record leaves no file and no log line, only a count.
 - What is redacted becomes `[redacted:<name>]`, and a cut stretch becomes `[cut]`; the secret itself is kept nowhere.
 - Staging lives in the vault's `staging/` folder, on this machine only, never committed.
+- A source's name is lowercase letters, digits, dots, underscores and hyphens, and doesn't end in a dot: it names
+  folders and files.
+- A transcript is cut by time: each utterance the cut touches goes whole, and one `[cut]` takes its place. Any other
+  text is cut by characters. A cut record keeps no payload.
+
+## Sources and their mappers
+
+A source's skill and mapper live in your project, under `.claude/skills/sources/<source>/`; Docket runs the mapper and
+checks what it returns (DR-0108, DR-0119). [examples/sources/plaud](../../examples/sources/plaud) is the reference to
+copy: its `SKILL.md` says how to set it up.
+
+- The mapper is `map_run(run)` in `mapper.py`: a run's captures and its manifest in, records out, as plain JSON.
+- Docket runs it in its own process, for at most 300 seconds and 256 MiB of output. A failure stages nothing, and the
+  run's captures are fetched again.
+- Docket checks every rid, sorts a transcript's segments and renders its text, and computes every version: a mapper
+  can't break ids or decide what counts as new.
+- Changing a mapper: keep its output stable, since every record the lookback reads again gets a new version when it
+  changes; pin golden versions in its tests, as the example does; pull the project on every machine before its next
+  sync.
+
+## Hold lists
+
+Records Docket must not stage yet, such as backfilled recordings with stretches you left out, are held by id in
+`state/holds/<source>.txt` (DR-0121). Every ingest and the gate read it.
+
+- Write `hold.txt` beside the backfill files before the first import, one id a line. `docket ingest` adds it to
+  `state/holds/<source>.txt`, which is then the only truth, and commits it. Only releasing a hold (#31) removes an id.
+- A held record gets no record on any route; it is only counted.
+- When an ingest stops because a held record waits in staging, delete the files it names, then run it again.
+- `docket staging classify` refuses a held record, work or private, and `promote` leaves it waiting.
+- A held record already in raw is named on every ingest; it waits for `docket forget`.
+- A recording's id in `never_store.containers` keeps it out for good, held or not.
 
 ## Processed docs
 

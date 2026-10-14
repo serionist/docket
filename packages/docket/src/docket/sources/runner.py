@@ -1,4 +1,4 @@
-"""Running a source's mapper: found from vault.yaml, its path checked, started in its own process with limits.
+"""Running a source's mapper (DR-0123): found from vault.yaml, its path checked, run in its own process with limits.
 
 The mapper is the consuming project's code. Its real path must sit under that repo's
 `.claude/skills/sources/<source>/`, so a `.py` that arrived as data (a download, a vault file) never runs. Its process
