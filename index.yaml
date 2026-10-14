@@ -273,8 +273,8 @@ decisions:
     sources: ["#28"]
     description: The calendar source's profile turns events into the ledger's meeting ops, keyed by the event's own id (its iCalUId, or the provider's id where there is none). A meeting that moves, is renamed or is cancelled updates the same meeting, so its prep, points and outcomes stay with it. Recordings and chats still link to meetings by time.
     binds:
-      - A meeting's key is its calendar event's id, never its start time plus subject.
-      - A moved, renamed or cancelled event updates the meeting it made, never a new one.
+      - A meeting's key is its calendar event's id, plus the occurrence's original start when the event recurs (RECURRENCE-ID or originalStartTime); never its start time plus subject.
+      - A moved, renamed or cancelled event or occurrence updates the meeting it made, never a new one; cancelling one occurrence cancels only that meeting.
       - Recordings and chats link to meetings by time.
     not_chosen:
       - "Matching meetings on start time plus subject: a moved or renamed meeting would split in two."
@@ -290,6 +290,7 @@ decisions:
       - A stream's state is kept in the ledger; its status file is output, rendered only where vault.yaml sets a path for it.
       - A hand edit to a rendered file is reported, not merged.
       - Docket writes the file but commits only the vault's paths (DR-0102), so a status file outside the vault is committed by the user's own git flow.
+      - Docket renders only into a repo that passes setup's public-remote check (DR-0102), and asks before the first render; the same holds for the people directory and glossary renders.
   - id: DR-0107
     title: Personal source notes live in the vault; the plugin's source skills stay generic
     status: decided

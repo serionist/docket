@@ -133,10 +133,11 @@ Marco went unanswered"); time-driven changes (rollover, archiving) are written a
 same result on any day.
 
 - Meetings come from the calendar. Its profile turns events into meeting ops keyed by the event's own id (iCalUId or
-  the provider's id), so a moved, renamed or cancelled meeting updates the same meeting; nothing is matched on start
-  time plus subject.
+  the provider's id), plus the occurrence's original start for a recurring event, so a moved, renamed or cancelled
+  meeting updates the same meeting; nothing is matched on start time plus subject.
 - A stream can have a status file in the user's repo, rendered from the ledger at a path set per stream in
   `vault.yaml`, with frontmatter `where`, `next`, `deadline` and `updated`. A hand edit to it is reported, not merged.
+  Docket renders only into a repo that passes setup's public-remote check.
 
 ### 3.5 Beyond search
 
