@@ -14,6 +14,7 @@ from docket.vault.anchors import (
     parse_locator,
     parse_time,
     split_lines,
+    split_path_locator,
     trailing_anchors,
 )
 
@@ -187,3 +188,39 @@ def test_a_locator_keeps_its_position_and_a_bare_rid_is_taken_as_written() -> No
 def test_a_locator_that_is_nothing_is_refused(text: str) -> None:
     with pytest.raises(AnchorError):
         parse_locator(text, DOC_TYPES)
+
+
+@pytest.mark.parametrize(
+    ("text", "path", "token", "start", "end"),
+    [
+        ("notes/calls/x.md", "notes/calls/x.md", None, 0, None),
+        ("notes/calls/x.md@12:08", "notes/calls/x.md", "@12:08", 728, None),
+        ("notes/calls/x.MD@1:02:15", "notes/calls/x.MD", "@1:02:15", 3735, None),
+        ("x.markdown@12:08-14:30", "x.markdown", "@12:08-14:30", 728, 870),
+        ("notes/b@k/x.md@12:08", "notes/b@k/x.md", "@12:08", 728, None),
+        ("calls:notes/x.md@27:17", "calls:notes/x.md", "@27:17", 1637, None),
+        (" D:\\work\\x.md ", "D:\\work\\x.md", None, 0, None),
+    ],
+)
+def test_a_path_locator_splits_its_time(text: str, path: str, token: str | None, start: int, end: int | None) -> None:
+    found = split_path_locator(text)
+    assert found is not None
+    assert found[0] == path
+    anchor = found[1]
+    if token is None:
+        assert anchor is None
+    else:
+        assert anchor is not None
+        assert (anchor.rid, anchor.kind, anchor.token, anchor.start, anchor.end) == (None, "time", token, start, end)
+
+
+@pytest.mark.parametrize(
+    "text", ["x.md@12:08:", "x.md@1:60", "notes/x.txt", "x.md#heading", "calls:rec-0042", "@12:08"]
+)
+def test_what_isnt_a_path_locator(text: str) -> None:
+    assert split_path_locator(text) is None
+
+
+def test_a_path_locator_whose_stretch_runs_backwards_is_refused() -> None:
+    with pytest.raises(AnchorError, match="ends before it starts"):
+        split_path_locator("x.md@14:52-14:30")
