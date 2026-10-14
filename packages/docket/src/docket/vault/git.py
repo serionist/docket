@@ -31,7 +31,12 @@ class Git:
         self.fallback = fallback
 
     def run(
-        self, *args: str, check: bool = True, env: dict[str, str] | None = None, identity: bool = False
+        self,
+        *args: str,
+        check: bool = True,
+        env: dict[str, str] | None = None,
+        identity: bool = False,
+        stdin: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         config: list[str] = []
         if identity and self.fallback is not None and not self.has_identity():
@@ -45,6 +50,7 @@ class Git:
             errors="replace",
             check=False,
             env={**os.environ, **(env or {})},
+            input=stdin,
         )
         if check and proc.returncode != 0:
             raise DocketError(f"git {args[0]}: {(proc.stderr or proc.stdout).strip()}")
@@ -70,7 +76,8 @@ class Git:
     def commit(self, paths: list[str], message: str) -> str | None:
         """Add the paths and commit them; None when there was nothing to commit."""
         if paths:
-            self.run("add", "--", *paths)
+            # On stdin, not the command line: a backlog of run files would pass Windows' 32,767-character limit.
+            self.run("add", "--pathspec-from-file=-", "--pathspec-file-nul", stdin="\0".join(paths))
         if self.run("diff", "--cached", "--quiet", check=False).returncode == 0:
             return None
         self.run("commit", "-q", "-m", message, identity=True)

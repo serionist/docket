@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 import shutil
+import stat
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,6 +22,8 @@ from docket.vault.git import Git, Identity, SyncResult
 from docket.vault.lock import VaultLock
 from docket.vault.rawlog import RUN_FILE, RawLog, parse_run_file
 from docket.vault.records import RawRecord
+
+log = logging.getLogger(__name__)
 
 # Folders every vault has from the start; git keeps an empty folder only with a file in it.
 FOLDERS = ["raw", "media", "processed", "entities", "ledger/ops", "state"]
@@ -116,10 +122,10 @@ class Vault:
             return vault
         except BaseException:
             if created:
-                shutil.rmtree(path, ignore_errors=True)
+                remove_tree(path)
             else:
                 for child in list(path.iterdir()):
-                    shutil.rmtree(child, ignore_errors=True) if child.is_dir() else child.unlink(missing_ok=True)
+                    remove_tree(child) if child.is_dir() else _unlink_writable(child)
             raise
 
     # -- writing ---------------------------------------------------------------------------------------------------
@@ -133,12 +139,24 @@ class Vault:
     def commit(self, paths: list[str], message: str) -> str | None:
         """Commit locally. Run files left uncommitted by an interrupted run go in too; never a changed raw file."""
         with self.lock:
+            self._recover()
             orphans = [p for p in self.git.untracked("raw") if RUN_FILE.match(Path(p).name)]
             return self.git.commit([*paths, *orphans], message)
 
     def sync(self) -> SyncResult:
         with self.lock:
+            self._recover()
             return self.git.sync()
+
+    def _recover(self) -> None:
+        """Undo a rebase a killed sync left behind, so nothing is committed on a detached HEAD. Under the lock no sync
+        of ours is running, and nothing was committed since it stopped, so the abort loses nothing."""
+        git_dir = self.root / ".git"
+        if (git_dir / "rebase-merge").exists() or (git_dir / "rebase-apply").exists():
+            log.warning("undoing a rebase left in progress in %s", self.root)
+            self.git.run("rebase", "--abort")
+        if self.git.branch() == "HEAD":
+            raise DocketError(f"{self.root} isn't on a branch (a detached HEAD); check out main before Docket writes")
 
     # -- checking ------------------------------------------------------------------------------------------------
 
@@ -184,6 +202,21 @@ class Vault:
         status.seen_in_several_runs = sum(1 for runs in runs_of.values() if len(runs) > 1)
         status.uncommitted_runs = [p for p in self.git.untracked("raw") if RUN_FILE.match(Path(p).name)]
         return status
+
+
+def _unlink_writable(path: Path) -> None:
+    path.chmod(stat.S_IWRITE)
+    path.unlink(missing_ok=True)
+
+
+def remove_tree(path: Path) -> None:
+    """Delete a folder git wrote into: git makes its objects read-only, which Windows won't delete as they are."""
+
+    def retry(func: Callable[..., object], target: str, _exc: BaseException) -> None:
+        os.chmod(target, stat.S_IWRITE)  # noqa: PTH101 - shutil hands over a string path
+        func(target)
+
+    shutil.rmtree(path, onexc=retry)
 
 
 def _records(path: Path) -> list[tuple[Path, int, RawRecord]]:

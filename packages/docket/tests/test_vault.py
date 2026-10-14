@@ -306,3 +306,108 @@ def test_a_conflicting_remote_is_reported_and_the_local_commit_kept(tmp_path: Pa
 
 def test_records_type(records: Callable[..., RawRecord]) -> None:
     assert records(3).rid.endswith("3.000100")
+
+
+# -- the review's findings -------------------------------------------------------------------------------------------
+
+
+def test_a_refused_batch_leaves_its_records_free_to_write(tmp_path: Path, config: VaultConfig) -> None:
+    vault = new_vault(tmp_path, config)
+    foreign = make_record(2, rid="calls:x", source="calls")
+    with pytest.raises(DocketError, match="not this run's source"):
+        vault.rawlog.write_run("chat", [make_record(1), foreign], RUN_AT)
+    assert vault.rawlog.write_run("chat", [make_record(1)], RUN_AT).written == 1
+
+
+def test_a_failed_write_leaves_its_records_free_to_write(
+    tmp_path: Path, config: VaultConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = new_vault(tmp_path, config)
+    real = RawLog._write_new  # pyright: ignore[reportPrivateUsage]
+    calls: list[int] = []
+
+    def flaky(self: RawLog, target: Path, text: str) -> None:
+        calls.append(1)
+        if len(calls) == 1:
+            raise OSError("the rename was blocked")
+        real(self, target, text)
+
+    monkeypatch.setattr(RawLog, "_write_new", flaky)
+    with pytest.raises(OSError, match="blocked"):
+        vault.rawlog.write_run("chat", [make_record(1)], RUN_AT)
+    assert vault.rawlog.write_run("chat", [make_record(1)], RUN_AT).written == 1
+    assert len(vault.rawlog.read(make_record(1).rid)) == 1
+
+
+def test_an_init_whose_real_commit_fails_leaves_nothing(tmp_path: Path, config: VaultConfig) -> None:
+    gitconfig = Path(os.environ["GIT_CONFIG_GLOBAL"])
+    gitconfig.write_text("[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = no-such-signer\n", encoding="utf-8")
+    with pytest.raises(DocketError, match="git commit"):
+        new_vault(tmp_path, config)
+    assert not (tmp_path / "vault").exists()
+    (tmp_path / "empty").mkdir()
+    with pytest.raises(DocketError):
+        Vault.init(tmp_path / "empty", config, "test-box")
+    assert list((tmp_path / "empty").iterdir()) == []
+    gitconfig.write_text("", encoding="utf-8")
+    assert new_vault(tmp_path, config).root == (tmp_path / "vault").resolve()
+
+
+def test_a_rebase_left_in_progress_is_undone_before_the_next_commit(tmp_path: Path, config: VaultConfig) -> None:
+    sh(tmp_path, "git", "init", "-q", "--bare", "remote.git")
+    remote = tmp_path / "remote.git"
+    vault = new_vault(tmp_path, config)
+    vault.git.run("remote", "add", "origin", str(remote))
+    vault.git.run("push", "-q", "origin", "main")
+    other = tmp_path / "other"
+    sh(tmp_path, "git", "clone", "-q", "-b", "main", str(remote), str(other))
+    (other / "vault.yaml").write_text("# theirs\n", encoding="utf-8")
+    sh(other, "git", "-c", "user.name=B", "-c", "user.email=b@example.invalid", "commit", "-qam", "theirs")
+    sh(other, "git", "push", "-q", "origin", "main")
+    (vault.root / "vault.yaml").write_text("# ours\n", encoding="utf-8")
+    vault.commit(["vault.yaml"], "ours")
+    vault.git.run("fetch", "-q", "origin")
+    vault.git.run("rebase", "origin/main", check=False, identity=True)  # a sync killed mid-way leaves this behind
+    assert (vault.root / ".git" / "rebase-merge").exists() or (vault.root / ".git" / "rebase-apply").exists()
+    assert vault.write_run("chat", [make_record(1)], RUN_AT) is not None
+    assert vault.git.branch() == "main"
+    assert sh(vault.root, "git", "log", "--format=%s", "-2").split("\n")[:2] == [
+        "Raw: chat, 1 record(s) from test-box",
+        "ours",
+    ]
+
+
+def test_nothing_is_committed_on_a_detached_head(tmp_path: Path, config: VaultConfig) -> None:
+    vault = new_vault(tmp_path, config)
+    vault.git.run("checkout", "-q", "--detach")
+    with pytest.raises(DocketError, match="detached HEAD"):
+        vault.write_run("chat", [make_record(1)], RUN_AT)
+    with pytest.raises(DocketError, match="detached HEAD"):
+        vault.sync()
+
+
+def test_a_large_backlog_of_run_files_still_commits(tmp_path: Path, config: VaultConfig) -> None:
+    vault = new_vault(tmp_path, config)
+    folder = vault.root / "raw" / "chat" / "2026" / "10"
+    folder.mkdir(parents=True)
+    line = make_record(1).model_copy(update={"v": "sha256:x"}).to_json()
+    for n in range(2, 802):
+        (folder / f"2026-10-14T1550-test-box.{n}.jsonl").write_text(f"{line}\n", encoding="utf-8")
+    assert vault.commit([], "backlog") is not None
+    assert len([f for f in tracked(vault.root) if f.endswith(".jsonl")]) == 800
+
+
+def test_the_lock_is_released_when_clearing_a_stale_index_lock_fails(
+    tmp_path: Path, config: VaultConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = new_vault(tmp_path, config)
+
+    def held(_git_dir: Path, now: float | None = None) -> bool:
+        raise PermissionError("index.lock is open")
+
+    monkeypatch.setattr("docket.vault.lock.clear_stale_index_lock", held)
+    with pytest.raises(PermissionError), vault.lock:
+        pass
+    monkeypatch.undo()
+    with vault.lock:
+        pass

@@ -246,3 +246,15 @@ def test_a_bad_answer_is_refused_before_anything_is_written(tmp_path: Path) -> N
     with pytest.raises(DocketError, match="sensitivity"):
         Wizard(Script(), given(tmp_path / "v", yes=True, sources=["chat=secret"])).run()
     assert not (tmp_path / "v").exists()
+
+
+def test_a_nested_vault_is_found_from_the_parent_s_root_without_a_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    parent = parent_repo(tmp_path)
+    Wizard(Script(), given(parent / "vault", yes=True)).run()
+    monkeypatch.setenv("DOCKET_CONFIG_DIR", str(tmp_path / "no-config"))
+    assert userconfig.default_vault() is None
+    monkeypatch.chdir(parent)
+    assert main(["vault", "status"]) == 0
+    assert str((parent / "vault").resolve()) in capsys.readouterr().out

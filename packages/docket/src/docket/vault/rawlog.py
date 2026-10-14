@@ -99,25 +99,29 @@ class RawLog:
 
     def write_run(self, source: str, records: list[RawRecord], run_at: datetime | None = None) -> RunResult:
         """Write one run of a source. Records already in the log, or earlier in this batch, are skipped."""
+        foreign = next((r for r in records if r.source != source), None)
+        if foreign is not None:
+            raise DocketError(f"{foreign.rid} is from {foreign.source!r}, not this run's source {source!r}")
         with self.lock:
             self._refresh()
             target = self._target(source, run_at or datetime.now(UTC))
             stem = target.name[: -len(".jsonl")]
             lines: list[str] = []
+            batch: set[tuple[str, str]] = set()
             skipped = 0
             for record in records:
-                if record.source != source:
-                    raise DocketError(f"{record.rid} is from {record.source!r}, not this run's source {source!r}")
                 stored = record.model_copy(update={"v": version(record), "run": stem})
                 key = (stored.rid, stored.v)
-                if key in self._seen:
+                if key in self._seen or key in batch:
                     skipped += 1
                     continue
-                self._seen.add(key)
+                batch.add(key)
                 lines.append(stored.to_json())
             if not lines:
                 return RunResult(None, 0, skipped)
             self._write_new(target, "".join(f"{line}\n" for line in lines))
+            # Only now are these records in the log: a write that failed leaves them free to be written again.
+            self._seen |= batch
             self._read.add(target)
             return RunResult(target, len(lines), skipped)
 

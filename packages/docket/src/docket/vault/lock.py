@@ -28,7 +28,11 @@ class VaultLock:
             self._lock.acquire()
         except Timeout as e:
             raise DocketError(f"another docket process holds {self.git_dir / 'docket.lock'}; try again") from e
-        clear_stale_index_lock(self.git_dir)
+        try:
+            clear_stale_index_lock(self.git_dir)
+        except BaseException:
+            self._lock.release()
+            raise
         return self
 
     def __exit__(
