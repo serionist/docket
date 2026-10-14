@@ -145,19 +145,19 @@ decisions:
     sources: [docs/design.md]
     description: Raw records, processed docs, entities and the ledger are files in a private git repo the user owns, committed after the staging gate. Any number of machines work on it; each machine's index is a cache rebuilt from the repo.
     binds:
-      - The index database is never committed; a rebuild from the repo gives the same database.
+      - The index database is never committed; a rebuild from the repo gives the same database, vectors aside.
       - Raw text is in plain git, media in LFS encrypted per file.
     not_chosen:
       - "Committing the database: it can't merge between machines and LFS would keep a copy per commit."
       - "Raw text in LFS: it breaks grep, diffs and partial clones."
   - id: DR-0014
-    title: Raw records are JSONL, one file per sync run per machine, written once
+    title: Raw records are JSONL, one file per source per sync run per machine, written once
     status: decided
     at: "2026-10-14"
     by: Soma Osvay
     cost: one-way
     sources: [docs/design.md]
-    description: A sync run writes one JSONL file of records and never touches it again. Two machines never write the same file, so merges are trivial, and a changed raw file is something a check can see.
+    description: "A sync run writes one JSONL file for each source it read and never touches it again; a second run in the same minute gets its own name. Two machines never write the same file, so merges are trivial, and a changed raw file is something a check can see. The one exception is forgetting: docket forget rewrites the file's whole history without the record (git filter-repo), from any machine, and force-pushes."
     not_chosen: [One file per source appended forever., SQLite as the store.]
   - id: DR-0015
     title: Everything reaches the raw log through a staging gate
@@ -185,7 +185,7 @@ decisions:
     by: Soma Osvay
     cost: medium
     sources: [docs/design.md]
-    description: Each chunk is indexed accent-folded, Hungarian-stemmed and English-stemmed, so names, Hungarian suffixes and loanwords all match. Embeddings and a reranker add recall when the machine has a model; without one, keyword search works alone.
+    description: Each chunk is indexed accent-folded, Hungarian-stemmed and English-stemmed, so names, Hungarian suffixes and loanwords all match. Embeddings and a reranker add recall when a model is available, local or through an API; without one, keyword search works alone.
     binds: [Every model feature is optional.]
   - id: DR-0018
     title: Claude reaches Docket through an MCP endpoint on the local service and a Claude Code plugin
@@ -194,7 +194,7 @@ decisions:
     by: Soma Osvay
     cost: one-way
     sources: [docs/design.md]
-    description: The service serves MCP over HTTP on localhost; the plugin configures it and brings the skills and hooks. Headless Claude inside the service, from phase 3, runs only on the user's own API key, never on a claude.ai login.
+    description: The service serves MCP over HTTP on localhost; the plugin configures it and brings the skills and hooks. Headless Claude inside the service, from phase 3, runs only on the user's own API credentials (Anthropic, Bedrock, Vertex or Foundry), never on a claude.ai login.
     binds: [The MCP tools' names and parameters are a one-way door once they land.]
 conventions:
   - id: CV-0001

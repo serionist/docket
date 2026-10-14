@@ -192,7 +192,7 @@ flowchart TB
 
 | Feature | NVIDIA GPU | Apple silicon | CPU only | No models |
 |---|---|---|---|---|
-| Speech | faster-whisper large-v3, float16, about 10x real time | whisper.cpp or mlx-whisper | turbo int8, about 3x real time, overnight | the source's own transcript |
+| Speech | faster-whisper large-v3, float16, about 10x real time | whisper.cpp or mlx-whisper | the source's own transcript; turbo int8 overnight as an optional extra | the source's own transcript |
 | Embeddings | local model | local model on MPS | small model or an API | keyword search only |
 | Reranker | local cross-encoder, 0.6B or smaller | the same on MPS | small model or an API | rank fusion only |
 
@@ -232,8 +232,8 @@ vault/
 ### 5.2 A raw record
 
 ```json
-{"rid": "slack:C0EXAMPLE/1791894338.568819", "v": "sha256:...", "source": "slack", "kind": "message",
- "container": "slack:C0EXAMPLE", "thread": "slack:C0EXAMPLE/1791894338.568819",
+{"rid": "slack:C0EXAMPLE/1791000000.000100", "v": "sha256:...", "source": "slack", "kind": "message",
+ "container": "slack:C0EXAMPLE", "thread": "slack:C0EXAMPLE/1791000000.000100",
  "ts": "2026-10-13T12:25:38Z", "author": "U0EXAMPLE", "to": [], "title": null,
  "text": "...", "attachments": [{"name": "...", "kind": "file", "ref": "..."}],
  "native": {"...": "the payload exactly as the tool or API gave it"},
@@ -245,6 +245,7 @@ vault/
   `fidelity: derived`, and a crosswalk links it to the real id once a better route has it.
 - Versions are content hashes of a per-source canonical projection (text, author, attachments), not of volatile
   fields such as reactions or reply counts.
+- Redaction and cuts apply to `native` too: `fidelity: verbatim` means not retyped by Claude, never unredacted.
 - A recording is one record with its segments in `native`. Each transcript is its own record (`kind: transcript`,
   with its engine); a vendor's own summary is a `vendor-summary` record.
 - `rid` is also the ledger's locator, so every ledger source resolves to a record. Older locators (a legacy note's
@@ -283,7 +284,8 @@ every anchor resolves before it accepts the doc.
 
 Prevention first: the gate keeps private, uncut and unredacted content out of git. Retention per source (for example
 audio for a year, text forever): for media, expiry deletes the file's key. `docket forget <rid | query>` deletes the
-media keys, rewrites the raw file without the record and force-pushes, and rebuilds the index and the docs that cited
+media keys, rewrites the raw file's whole history without the record (`git filter-repo`, from any machine) and
+force-pushes, and rebuilds the index and the docs that cited
 it; the app shows what it will touch first.
 
 ## 6. Keywords and aliases
@@ -326,8 +328,8 @@ role: the customer's site lead
 
 ### 6.2 Matching
 
-- Three search columns per chunk, all precomputed: accent-folded (`unicode61 remove_diacritics 2`, so "molnar"
-  finds "Molnár"); Hungarian-stemmed with Snowball; English-stemmed, because the Hungarian stemmer mangles loanwords.
+- Three search columns per chunk, all precomputed: accent-folded (`unicode61 remove_diacritics 2`, so "hatarido"
+  finds "határidő"); Hungarian-stemmed with Snowball; English-stemmed, because the Hungarian stemmer mangles loanwords.
   A query searches all three, with prefix matching as the fallback.
 - Multi-word aliases match on stem sequences.
 - Aliases marked `asr` also match within one or two edits on words of five letters or more, over the FTS5 vocabulary.
@@ -450,7 +452,7 @@ when they disagree, and propose a correction.
 **Claude inside the service** (phase 3) does processing, not harvesting: notes and minutes, digests, briefs,
 proposals, meeting prep, draft replies, through the Claude Agent SDK loading the same plugin. It runs on the user's
 own Anthropic API key (or Bedrock, Vertex or Foundry), never on a claude.ai login, which third-party products may not
-offer. A daily spend cap, a model per job type, and everything it writes is a proposal or a draft.
+offer. A daily spend cap and a model per job type. What it writes that needs the user's yes is a proposal, replies are drafts, and nothing is sent.
 
 ## 12. Importing what exists
 
