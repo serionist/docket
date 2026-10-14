@@ -98,8 +98,10 @@ class RawRecord(BaseModel):
         return self
 
     def to_json(self) -> str:
-        """The record as one line of the raw log."""
-        return self.model_dump_json(exclude_none=False)
+        """The record as one line of the raw log. A record without segments leaves the field out, so its line is the
+        one Docket wrote before segments existed, and an older machine, which refuses fields it doesn't know, reads
+        it."""
+        return self.model_dump_json(exclude_none=False, exclude=None if self.segments else {"segments"})
 
 
 def utc_seconds(value: datetime) -> str:
