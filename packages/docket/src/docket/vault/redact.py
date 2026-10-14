@@ -212,10 +212,25 @@ class Redactor:
             )
             for a in record.attachments
         ]
+        # A transcript's segments say again what its text says, so they are redacted the same way.
+        segments = (
+            None
+            if record.segments is None
+            else [
+                s.model_copy(
+                    update={
+                        "speaker": self.text(s.speaker, counts) if s.speaker is not None else None,
+                        "text": self.text(s.text, counts),
+                    }
+                )
+                for s in record.segments
+            ]
+        )
         update: dict[str, Any] = {
             "title": self.text(record.title, counts) if record.title is not None else None,
             "text": self.text(record.text, counts),
             "attachments": attachments,
+            "segments": segments,
             "native": self._native(record.native, counts, None),
         }
         return record.model_copy(update=update), counts
@@ -249,6 +264,7 @@ def markers(record: RawRecord) -> Counter[str]:
     """How many redaction markers of each rule a record holds: what a run reports, since intake redacted already."""
     texts = [record.title or "", record.text, *(a.name for a in record.attachments)]
     texts += [a.ref for a in record.attachments if a.ref is not None]
+    texts += [t for s in record.segments or [] for t in (s.speaker or "", s.text)]
     texts += strings(record.native)
     return Counter(m.group(0)[len("[redacted:") : -1] for t in texts for m in MARKER.finditer(t))
 

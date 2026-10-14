@@ -125,8 +125,10 @@ def matches_text(text: str, lists: NeverStore) -> bool:
 def match(record: RawRecord, lists: NeverStore) -> ListName | None:
     """The list a record matches, or None."""
     people = set[str]().union(*(_forms(p) for p in lists.people)) if lists.people else set[str]()
+    segments = record.segments or []
     if people:
-        named = [s for s in (record.author, *record.to) if s] + list(strings(record.native))
+        named = [s for s in (record.author, *record.to, *(seg.speaker for seg in segments)) if s]
+        named += list(strings(record.native))
         if any(_forms(s) & people for s in named):
             return "people"
     containers = {fold(c.strip()) for c in lists.containers if c.strip()}
@@ -135,6 +137,7 @@ def match(record: RawRecord, lists: NeverStore) -> ListName | None:
             return "containers"
     if any(k.strip() for k in lists.keywords):
         texts = [t for t in (record.title, record.text, *(a.name for a in record.attachments)) if t]
+        texts += [t for seg in segments for t in (seg.speaker, seg.text) if t]
         if _says([*texts, *strings(record.native)], lists.keywords):
             return "keywords"
     return None

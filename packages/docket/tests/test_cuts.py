@@ -93,3 +93,20 @@ def test_cut_specs_parse(spec: str, cut: Cut) -> None:
 def test_bad_cut_specs_are_refused(spec: str) -> None:
     with pytest.raises(DocketError):
         parse(spec)
+
+
+def test_a_text_cut_clears_the_segments_that_still_say_the_cut_stretch() -> None:
+    record = make_record(
+        rid="calls:rec-1",
+        source="calls",
+        kind="recording",
+        text="work part. private part. work again.",
+        segments=[
+            {"start_ms": 0, "end_ms": 1000, "text": "work part."},
+            {"start_ms": 1000, "end_ms": 2000, "text": "private part."},
+        ],
+    )
+    out = apply(record, [Cut(start=11, end=25)])
+    assert out.text == f"work part. {CUT_MARKER}work again."
+    assert out.segments is None
+    assert "private" not in out.model_dump_json()

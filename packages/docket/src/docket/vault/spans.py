@@ -13,7 +13,6 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from docket.errors import DocketError
 from docket.vault.anchors import Anchor, encode_rid, format_time, normalize_newlines, paragraphs
 from docket.vault.rawlog import parse_run_file
 from docket.vault.records import RID, RawRecord
@@ -95,11 +94,7 @@ def problem(anchor: Anchor, record: RawRecord) -> str | None:
         if anchor.last > count:
             return f"{record.rid} has {count} paragraph(s), so #{anchor.last} isn't one"
         return None
-    try:
-        segs = segments(record)
-    except DocketError as e:
-        return str(e)
-    bounds = time_range(segs)
+    bounds = time_range(segments(record))
     if bounds is None:
         return f"{record.rid} has no transcript segments; anchor the whole record: [r:{encode_rid(record.rid)}]"
     lo, hi = bounds
@@ -133,11 +128,7 @@ def span(
         last = min(len(paras), anchor.last + around)
         return head.model_copy(update={"paragraphs": (first, last), "text": "\n\n".join(paras[first - 1 : last])})
     if anchor.kind == "record":
-        try:
-            segs = segments(record)
-        except DocketError:
-            segs = []
-        return head.model_copy(update={"segments": segs, "text": normalize_newlines(record.text)})
+        return head.model_copy(update={"segments": segments(record), "text": normalize_newlines(record.text)})
     lo = max(0, anchor.start - around * 60) * 1000
     hi = ((anchor.last + 1) if anchor.end is not None else (anchor.start + window)) * 1000 + around * 60_000
     chosen = [s for s in segments(record) if s.start_ms < hi and (s.end_ms > lo or s.start_ms >= lo)]

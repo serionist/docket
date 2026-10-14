@@ -3,9 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from docket_testkit import MAIL, REC, SIDE, THREAD, VENDOR, make_record, vendor_segments, write_raw
+from docket_testkit import MAIL, REC, SIDE, THREAD, VENDOR, make_record, write_raw
 
-from docket.vault import segments as seg
 from docket.vault.anchors import Anchor, parse_anchor
 from docket.vault.records import RawRecord
 from docket.vault.spans import RawLookup, problem, span
@@ -20,8 +19,7 @@ def raw_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.fixture
-def lookup(raw_root: Path, monkeypatch: pytest.MonkeyPatch) -> RawLookup:
-    monkeypatch.setattr(seg, "_READERS", {"vendor": vendor_segments})
+def lookup(raw_root: Path) -> RawLookup:
     return RawLookup(raw_root)
 
 
@@ -93,10 +91,12 @@ def test_whether_an_anchor_resolves(lookup: RawLookup, rid: str, token: str, say
     assert problem(anchor, record(lookup, rid)) == says
 
 
-def test_a_malformed_transcript_is_the_reason_a_time_doesn_t_resolve() -> None:
-    broken = make_record(rid="calls:rec-bad", source="calls", native={"segments": [{"start_ms": 5}]})
-    assert "calls:rec-bad: segment 1" in (problem(Anchor(None, "time", 1), broken) or "")
-    whole = span(Anchor("calls:rec-bad", "record"), broken, 1)
+def test_segments_in_native_are_never_read() -> None:
+    native_only = make_record(
+        rid="calls:rec-raw", source="calls", native={"segments": [{"start_ms": 0, "end_ms": 5000, "text": "hi"}]}
+    )
+    assert "has no transcript segments" in (problem(Anchor(None, "time", 1), native_only) or "")
+    whole = span(Anchor("calls:rec-raw", "record"), native_only, 1)
     assert (whole.problem, whole.segments, whole.text) == (None, [], "message 1")
 
 

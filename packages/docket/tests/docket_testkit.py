@@ -12,7 +12,6 @@ import pytest
 
 from docket.vault.config import Owner, SourceConfig, VaultConfig
 from docket.vault.records import RawRecord, version
-from docket.vault.segments import Segment
 from docket.vault.vault import Vault
 
 # The fixture vault's records: a call over an hour long, a recording in a vendor's own shape, a chat thread, two
@@ -77,13 +76,6 @@ def make_record(n: int = 1, **fields: Any) -> RawRecord:
     return RawRecord.model_validate(base)
 
 
-def vendor_segments(record: RawRecord) -> list[Segment]:
-    """A vendor's own transcript shape: utterances with a start in seconds and a word list, half a second each."""
-    return [
-        Segment(start_ms=int(u["t"] * 1000), end_ms=int(u["t"] * 1000) + 500, text=u["w"]) for u in record.native["utt"]
-    ]
-
-
 def at(hour: int, minute: int = 0) -> datetime:
     return datetime(2026, 10, 14, hour, minute, tzinfo=UTC)
 
@@ -92,10 +84,14 @@ def fixture_runs() -> list[tuple[str, str, list[RawRecord]]]:
     """The fixture's raw log as (source, run, records): one run per source at 10:00, and an edit at 11:00."""
     call = make_record(
         rid=REC, source="calls", kind="recording", container=None, title="Supplier call", text="Supplier call",
-        native={"segments": CALL_SEGMENTS},
+        segments=CALL_SEGMENTS,
     )  # fmt: skip
+    # A recording whose transcript starts a second and a half in: a vendor's own shape, mapped to the core's.
     utterances = [{"t": 1.5, "w": "hello"}, {"t": 4.0, "w": "the price is fine"}]
-    vendor = make_record(rid=VENDOR, source="vendor", kind="recording", container=None, native={"utt": utterances})
+    mapped = [{"start_ms": int(u["t"] * 1000), "end_ms": int(u["t"] * 1000) + 500, "text": u["w"]} for u in utterances]
+    vendor = make_record(
+        rid=VENDOR, source="vendor", kind="recording", container=None, segments=mapped, native={"utt": utterances}
+    )
     thread = [make_record(n, thread=THREAD[0], text=f"thread message {n}") for n in (1, 2, 3)]
     side = [make_record(n, container="chat:C0SIDE", text=f"side message {n}") for n in (4, 5)]
     mail = make_record(
@@ -123,8 +119,7 @@ def write_raw(root: Path) -> None:
 
 
 def fixture_vault(tmp_path: Path) -> Vault:
-    """A vault with the fixture's raw log committed in one commit; a test that reads the vendor recording's times
-    registers vendor_segments for the `vendor` source itself."""
+    """A vault with the fixture's raw log committed in one commit."""
     vault = Vault.init(tmp_path / "vault", make_config(), "test-box")
     write_raw(vault.root)
     vault.commit([], "Raw: the fixture")

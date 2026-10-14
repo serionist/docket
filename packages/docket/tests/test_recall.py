@@ -247,8 +247,8 @@ def test_an_id_that_walks_out_of_processed_is_refused(vault: Vault, doc_id: str)
         DocStore(vault).history(doc_id)
 
 
-def test_around_on_a_record_with_a_broken_transcript_counts_messages(vault: Vault) -> None:
-    broken = make_record(rid="calls:rec-bad", source="calls", kind="recording", native={"segments": [{"start_ms": 1}]})
-    vault.write_run("calls", [broken], run_at=at(12))
-    spans = recall.read(vault, "calls:rec-bad", view="raw", around=1).spans
-    assert [(s.rid, s.segments) for s in spans] == [("calls:rec-bad", [])]
+def test_around_on_a_recording_without_segments_in_its_record_counts_messages(vault: Vault) -> None:
+    native_only = make_record(rid="calls:rec-raw", source="calls", kind="recording", native={"segments": [{"x": 1}]})
+    vault.write_run("calls", [native_only], run_at=at(12))
+    spans = recall.read(vault, "calls:rec-raw", view="raw", around=1).spans
+    assert [(s.rid, s.segments) for s in spans] == [("calls:rec-raw", [])]

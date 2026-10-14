@@ -227,7 +227,7 @@ def _read_doc(store: DocStore, doc: ProcessedDoc, locator: str, view: View) -> R
 
 
 def _raw_spans(lookup: RawLookup, record: RawRecord, anchor: Anchor, versions: int, around: int) -> list[Span]:
-    if anchor.kind == "record" and around > 0 and not _has_segments(record):
+    if anchor.kind == "record" and around > 0 and not segments(record):
         return [
             span(Anchor(r.rid, "record"), r, len(lookup.versions(r.rid))) for r in lookup.neighbours(record, around)
         ]
@@ -235,13 +235,6 @@ def _raw_spans(lookup: RawLookup, record: RawRecord, anchor: Anchor, versions: i
     if found.problem is not None:
         raise DocketError(found.problem)
     return [found]
-
-
-def _has_segments(record: RawRecord) -> bool:
-    try:
-        return bool(segments(record))
-    except DocketError:
-        return False
 
 
 def _citing(docs: list[ProcessedDoc], rid: str, at: Anchor, around: int) -> list[CitingLine]:

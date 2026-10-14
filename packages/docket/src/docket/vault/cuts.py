@@ -59,8 +59,9 @@ def merge(cuts: Sequence[Cut]) -> list[Cut]:
 
 
 def cut_text(record: RawRecord, cuts: list[Cut]) -> RawRecord:
-    """The default cutter: each character range of `text` becomes `[cut]`, and `native` is cleared, because a copy of
-    the stretch there may be HTML or escaped, which a plain replace would miss."""
+    """The default cutter: each character range of `text` becomes `[cut]`, and `native` and the segments are cleared,
+    because a copy of the stretch there may be HTML or escaped, or split across utterances, which a plain replace
+    would miss."""
     if any(c.unit == "ms" for c in cuts):
         raise DocketError(f"{record.source} has no cutter for time cuts; its connector brings one")
     text = record.text
@@ -68,7 +69,7 @@ def cut_text(record: RawRecord, cuts: list[Cut]) -> RawRecord:
         if cut.end > len(text):
             raise DocketError(f"a cut to character {cut.end} is past the end of the text ({len(text)})")
         text = text[: cut.start] + CUT_MARKER + text[cut.end :]
-    return record.model_copy(update={"text": text, "native": {}})
+    return record.model_copy(update={"text": text, "native": {}, "segments": None})
 
 
 def apply(record: RawRecord, cuts: Sequence[Cut]) -> RawRecord:
