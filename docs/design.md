@@ -16,11 +16,12 @@ Three parts:
 - The vault is the data layer: raw records, media, processed docs, entities and the ledger, in a folder of the
   user's own repo (or a repo of its own), private and in git.
 - The service runs it: staging and the gate, the index and search, the web app, the MCP endpoint with its read and
-  write tools, the models in worker processes. One per machine, always on, in the user's session. It keeps a small
-  profile per source (ids, versions, segments) and does the compute: search, transcription.
-- The Claude Code plugin feeds and maintains it: its skills harvest each source with the user's own MCPs and plugins,
-  write notes and summaries, translate and reconcile, curate the keywords and run the ledger, through the service's
-  tools. Its setup asks what the user wants to set up.
+  write tools, the models in worker processes. One per machine, always on, in the user's session. It keeps the source
+  contract (record shapes, rid rules, versions) and does the compute: search, transcription.
+- The Claude Code plugin feeds and maintains it, through the service's tools: setup, sync, tasks, recall, curate, the
+  capture hook and the source scaffold. Its skills write notes and summaries, translate and reconcile, curate the
+  keywords and run the ledger; its setup asks what the user wants to set up. The consuming project's own source skills
+  do the harvesting, with the user's own MCPs and plugins (see Sources).
 
 The binding choices are entries in `index.yaml` (`uv run docs list decisions`); this page explains how the parts fit.
 
@@ -34,9 +35,9 @@ The binding choices are entries in `index.yaml` (`uv run docs list decisions`); 
 | Recall that works | a set of real questions finds the right source in the top 10 for at least 90% of them |
 | Local speech recognition | Whisper next to the recorder's own transcript, reconciled in context; without a GPU, the source's transcript |
 | Embeddings and a reranker | multilingual, behind a provider interface: GPU, CPU, an API, or keyword search alone |
-| Sync from anything | call recorders, chat, mail, calendars, Claude sessions and documents; a new source is a skill plus a profile |
+| Sync from anything | call recorders, chat, mail, calendars, Claude sessions and documents; a new source is a skill and a mapper in the user's own project, scaffolded by `docket source new` |
 | Memory and tasks | the ledger (owed, waiting, decisions, invites, triage, materials, outcomes), meetings with prep, minutes and outcomes, briefs ready before each meeting |
-| Claude first | an MCP endpoint and a plugin with the skills (setup, one per source, sync, tasks, recall, curate), the capture hook and a session-start dashboard |
+| Claude first | an MCP endpoint and a plugin with the skills (setup, sync, tasks, recall, curate), the capture hook, the source scaffold and a session-start dashboard |
 | In git | everything in the vault is committed after a staging gate; media through LFS, encrypted; the database is rebuilt from what's committed |
 | Private stays private | nothing private, uncut or unredacted is ever committed; forgetting removes it for real |
 | Local first | Windows, macOS and Linux; every GPU feature optional; no telemetry |
@@ -56,11 +57,13 @@ has to be good. Once it has found the right 50 passages, Claude can read all of 
 
 ```mermaid
 flowchart LR
-  SK["source skills<br/>(the user's own MCPs and plugins)"] -- "tool output" --> HK["capture hook<br/>verbatim"]
-  SK -- "manifest, media" --> PF["source profile<br/>ids, versions, segments"]
-  HK --> PF
-  PY["Python connector<br/>only where no skill can harvest"] --> PF
-  PF --> ST["staging<br/>local, never committed"]
+  SK["source skills, in the consuming project<br/>(the user's own MCPs and plugins)"]
+  SK -- "tool output" --> HK["capture hook<br/>verbatim"]
+  HK -- "a run's captures" --> MP["the source's mapper<br/>in its own process"]
+  MP -- "normalized records" --> CK["core<br/>rid checks, versions, ingest checks"]
+  SK -- "manifest, media" --> CK
+  PY["Python connector<br/>only where no skill can harvest"] --> CK
+  CK --> ST["staging<br/>local, never committed"]
   ST --> G{"gate<br/>never-store, rules,<br/>classify, cut, redact"}
   G -- "work" --> RAW[("raw log<br/>plain git")]
   G -- "private" --> X["dropped, no trace"]
@@ -84,7 +87,8 @@ flowchart LR
   rate-limited calls are caught on the next run. Each machine commits its own cursor file, and a sync starts from the
   furthest point any machine reached.
 - Source skills don't retype anything. The plugin's PostToolUse capture hook posts what the source's tools return,
-  verbatim, to the service; Claude only sends a run manifest (the window, the counts, what it skipped). A Python
+  verbatim, to the service; Claude only sends a run manifest (the window, the counts, what it skipped). The source's
+  mapper turns the run's captures into records, and the core checks every rid and computes the versions. A Python
   connector exists only where no skill can harvest (see Sources).
 
 ### 3.2 Processing
@@ -132,7 +136,7 @@ archiving after closing. Every item's source resolves to a raw record; the histo
 Marco went unanswered"); time-driven changes (rollover, archiving) are written as explicit ops, so rebuilding gives the
 same result on any day.
 
-- Meetings come from the calendar. Its profile turns events into meeting ops keyed by the event's own id (iCalUId or
+- Meetings come from the calendar. The core turns its records into meeting ops keyed by the event's own id (iCalUId or
   the provider's id), plus the occurrence's original start for a recurring event, so a moved, renamed or cancelled
   meeting updates the same meeting; nothing is matched on start time plus subject.
 - A stream can have a status file in the user's repo, rendered from the ledger at a path set per stream in
@@ -157,7 +161,10 @@ same result on any day.
 ```mermaid
 flowchart TB
   subgraph Claude["Claude Code, Claude Desktop, any MCP client"]
-    PL["plugin: skills setup, one per source, sync, tasks, recall, curate;<br/>SessionStart dashboard; PostToolUse capture hook;<br/>the MCP endpoint configured"]
+    PL["plugin: skills setup, sync, tasks, recall, curate;<br/>SessionStart dashboard; PostToolUse capture hook;<br/>the source scaffold; the MCP endpoint configured"]
+  end
+  subgraph PROJ["the consuming project"]
+    SS["source skills and their mappers<br/>under .claude/skills/sources/"]
   end
   subgraph SVC["docket service: one process per machine, in the user's session"]
     HTTP["HTTP on 127.0.0.1<br/>/ web app, /api REST, /mcp MCP"]
@@ -170,6 +177,8 @@ flowchart TB
   VAULT[("vault: a folder of the user's repo, or a repo of its own<br/>raw/ and processed/ in plain git, media/ in LFS (encrypted),<br/>staging/ and index/ never committed")]
   PL -- "MCP over HTTP" --> HTTP
   PL --> CLI
+  SS -- "tool output, through the capture hook" --> PL
+  CORE -- "runs each mapper<br/>in its own process" --> SS
   CLI --> HTTP
   HTTP --> CORE
   SCH --> CORE
@@ -237,7 +246,6 @@ vault/
   entities/_proposals-<machine>.jsonl                                                       -> plain git
   ledger/ops/<yyyy-mm>-<machine>.jsonl                                                      -> plain git
   state/cursors-<machine>.yaml   each machine's cursors per source                         -> plain git
-  sources/<source>.md            the user's own notes on each source's route and quirks     -> plain git
   index/docket.sqlite            derived; `docket rebuild` makes it from the above          -> never committed
 ```
 
@@ -266,8 +274,8 @@ vault/
 - Ids don't change with the route. Mail uses its Message-ID where there is one; chat uses channel and timestamp.
   Where a route gives no stable id, the id is a hash of sender, sent second, subject and the start of the body, marked
   `fidelity: derived`, and a crosswalk links it to the real id once a better route has it.
-- Versions are content hashes of a per-source canonical projection (text, author, attachments), not of volatile
-  fields such as reactions or reply counts.
+- Versions are content hashes of the normalized fields (text, author, attachments), computed by the core and never by
+  a mapper; volatile fields such as reactions or reply counts are left out.
 - Redaction and cuts apply to `native` too: `fidelity: verbatim` means not retyped by Claude, never unredacted.
 - A recording is one record with its segments in `native`. Each transcript is its own record (`kind: transcript`,
   with its engine); a vendor's own summary is a `vendor-summary` record.
@@ -427,26 +435,30 @@ ScreenCaptureKit on macOS, a PipeWire monitor on Linux), Opus at 32 kbps mono; s
 
 ## 9. Sources
 
-Claude harvests every source through a plugin skill, with the MCPs and plugins the user already has; the service
-stores what it is handed. A source needs two things:
+A source's skill and mapper live in the project that uses them; Docket keeps the contract they write to. Routes are
+personal (one user's mail goes through a browser because of an access policy, another's through an API) and a vendor's
+change lands on whoever uses that vendor, while the core still checks every rid and computes every version.
 
 | Part | Lives in | What it does |
 |---|---|---|
-| a skill | the plugin | reads the source with the user's own tools (Plaud's MCP, the Slack plugin, mail and chat in the browser), knows its quirks (paging, rate limits, late summaries) and its cursor, and hands the payloads to the service |
-| a profile | the core | turns a source's payloads into raw records: the ids, what counts as a new version, the transcript segments, the cuts; a few dozen lines, because these are one-way doors a prompt's wording must never move |
+| the skill | the consuming project, `.claude/skills/sources/<source>/SKILL.md` | reads the source with the user's own tools (Plaud's MCP, the Slack plugin, mail and chat in the browser); keeps the route's quirks (paging, rate limits, late summaries) in its own files, learned run by run; sends the run manifest |
+| the mapper | the consuming project, `mapper.py` and `tests/` next to the skill | code, never a prompt: turns a run's captures into normalized records; the service runs it in its own process from the path `vault.yaml` names for the source, and the CLI import uses the same one |
+| the contract | Docket | the record shapes; the rid rules (`<source>:<native id>`, checked on every record); versions computed from the normalized fields, never by a mapper; the ingest checks, holds and the gate; the capture hook and the run manifest |
 
 - A PostToolUse hook in the plugin posts what the source's tools return to the service verbatim, so a long transcript
   never passes through Claude's output; Claude sends a manifest (the window, the counts, what it skipped).
-- A source skill reads `sources/<source>.md` in the vault first, the user's own route, quirks and gotchas, and appends
-  what it learned there. The plugin's skills stay generic and public.
+- `docket source new` scaffolds a skill, a mapper and its tests in the consuming repo; setup runs it for each source
+  the user chooses.
+- Plaud is the reference source, under `examples/sources/plaud` and tested in CI: an example to copy, not a
+  dependency.
 - Audio is handed over by path or URL, and the service fetches it only within limits:
   - a path under a folder `vault.yaml` names (a downloads folder) or the plugin's own drop folder;
-  - a URL over https, to a host the source's profile lists, never a private, loopback or link-local address;
+  - a URL over https, to a host `vault.yaml` lists for that source, never a private, loopback or link-local address;
   - a few redirects at most, each checked again, and a size cap.
 - Every record goes through the staging gate; a source's sensitivity is in `vault.yaml`.
 - A Python connector is written only where no skill can harvest: a scheduled run with nobody's Claude session open.
-- Payloads fetched before Docket existed (an export, a backfill folder) are imported through the source's profile
-  from the command line.
+- Payloads fetched before Docket existed (an export, a backfill folder) are imported from the command line, through
+  the source's mapper.
 
 ## 10. The web app
 
@@ -478,15 +490,16 @@ MCP tools:
 | `entity` | canonical name, aliases, related, ids, last seen, open items |
 | `doc_put` | write a processed doc; checks the frontmatter and that every anchor resolves |
 | `propose` | a ledger item, a decision, an alias, a correction, into the review tiers |
-| `ingest` | a source's payloads from a skill (or the hook's verbatim capture) and the run's manifest; the source's profile makes the raw records, which go to staging |
-| `media_put` | audio or an attachment by path or URL, within the limits in Sources (named folders, https to the profile's hosts, no private addresses, few redirects, a size cap); the service fetches, encrypts and stores it |
+| `ingest` | a run's captures (the hook's verbatim tool output) and its manifest; the source's mapper makes normalized records, the core checks their rids and computes their versions, and they go to staging |
+| `media_put` | audio or an attachment by path or URL, within the limits in Sources (named folders, https to the hosts `vault.yaml` lists for the source, no private addresses, few redirects, a size cap); the service fetches, encrypts and stores it |
 | `transcribe` | run speech recognition on a stored recording (phase 2, when a model is installed) |
 | `ledger` | snapshot, history queries, batch ops, queue, meetings, points |
 | `secret` | a named secret, with a confirmation |
 
-The plugin brings the skills (setup, one per source, sync, tasks, recall, curate), the SessionStart dashboard, the
-PostToolUse capture hook, and the rules: answer with locators; read the summary first, then open the raw span behind every fact you use; say
-when they disagree, and propose a correction.
+The plugin brings the skills (setup, sync, tasks, recall, curate), the SessionStart dashboard, the PostToolUse capture
+hook, `docket source new` for scaffolding a source, and the rules: answer with locators; read the summary first, then
+open the raw span behind every fact you use; say when they disagree, and propose a correction. The source skills
+themselves come from the consuming project (see Sources).
 
 **Claude inside the service** (phase 3) does processing, not harvesting: notes and minutes, digests, briefs,
 proposals, meeting prep, draft replies, through the Claude Agent SDK loading the same plugin. It runs on the user's
@@ -503,9 +516,9 @@ No big-bang switch: each piece of an existing setup is replaced only after its r
 3. Entities are seeded from the people directory and the glossary, then reviewed in a few curate rounds; after
    that, those files are rendered from the entities.
 4. The ledger moves last, imported with its whole history; for a week both run in step, the old one read-only.
-   Until the day pages exist, an existing setup's sync harvests through Docket's source skills and keeps reconciling
-   into its own task list. Once the ledger has moved, each stream's status file is rendered from it, as the people
-   directory and the glossary are from the entities.
+   Until the day pages exist, an existing setup's sync harvests through its own source skills into Docket and keeps
+   reconciling into its own task list. Once the ledger has moved, each stream's status file is rendered from it, as
+   the people directory and the glossary are from the entities.
 
 ## 13. How we know it works
 
