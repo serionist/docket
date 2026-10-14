@@ -1,0 +1,6 @@
+id: harbour-site
+type: site
+name: {en: Harbour site, hu: kikötői telephely}
+aliases:
+  - {text: harbour}
+related: {customer: [northwind]}

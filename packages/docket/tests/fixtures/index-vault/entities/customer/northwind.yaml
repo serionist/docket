@@ -1,0 +1,11 @@
+id: northwind
+type: customer
+name: {en: Northwind, hu: Northwind}
+aliases:
+  - {text: Northwind Traders}
+  - {text: Nortwin, kind: asr}
+  - {text: North Wind, kind: asr}
+  - {text: Norton, kind: asr, needs: [ben-sample, harbour-site]}
+related: {site: [harbour-site], person: [ben-sample]}
+ids: {email_domain: northwind.example}
+status: active

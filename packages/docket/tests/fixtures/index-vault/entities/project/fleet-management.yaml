@@ -1,0 +1,6 @@
+id: fleet-management
+type: project
+name: {en: Fleet management}
+aliases:
+  - {text: fleet dashboard}
+note: the dashboard that shows every robot's battery and position
