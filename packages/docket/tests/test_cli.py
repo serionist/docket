@@ -390,3 +390,44 @@ def test_an_unreadable_staging_file_is_listed(tmp_path: Path, capsys: pytest.Cap
     (path / "staging" / "calls" / "broken.json").write_text("{", encoding="utf-8")
     assert main(["staging", "list", "--vault", str(path)]) == 0
     assert "unreadable" in capsys.readouterr().out
+
+
+def test_a_cut_read_off_staging_show_lands_where_it_was_read(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path, gate = staging_vault(tmp_path)
+    private = "Also my hearing is on Friday, please keep quiet."
+    lines = [
+        "Standup:",
+        "- shipped the parser",
+        '- "review" pending\t(tab)',
+        "- fixed the build\r",
+        private,
+        "Next: notes.",
+    ]
+    gate.stage([call(1, text="\n".join(lines))])
+    v = ["--vault", str(path)]
+    assert main(["staging", "show", "calls:rec-1", *v]) == 0
+    shown = capsys.readouterr().out
+    assert '"text"' not in shown
+    start = int(next(ln for ln in shown.splitlines() if ln.endswith(private)).split()[0])
+    assert main(["staging", "classify", "calls:rec-1", "work", "--cut", f"{start}-{start + len(private)}", *v]) == 0
+    classified = capsys.readouterr().out
+    assert "after the cuts:" in classified
+    assert private not in classified
+    assert "- fixed the build" in classified
+    assert main(["staging", "show", "calls:rec-1", *v]) == 0
+    assert "after the cuts:" in capsys.readouterr().out
+    assert main(["staging", "promote", *v]) == 0
+    [record] = [r for _, _, r in Vault.open(path).rawlog.iter_records()]
+    assert record.text == "\n".join([*lines[:4], "[cut]", lines[5]])
+
+
+def test_show_says_why_a_cut_can_t_be_made_yet(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    path, gate = staging_vault(tmp_path)
+    gate.stage([call(1, text="a recording")])
+    key = next(e.key for e in gate.list().entries)
+    staged = gate.staging.read(gate.staging.dir / "calls" / f"{key}.json")
+    gate.staging.write(staged.model_copy(update={"cuts": [Cut(start=0, end=10, unit="ms")]}))
+    assert main(["staging", "show", "calls:rec-1", "--vault", str(path)]) == 0
+    assert "after the cuts: calls has no cutter for time cuts" in capsys.readouterr().out

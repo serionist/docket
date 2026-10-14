@@ -14,6 +14,7 @@ from docket import __version__, userconfig
 from docket.errors import DocketError
 from docket.vault import cuts
 from docket.vault.gate import Gate, Label
+from docket.vault.records import RawRecord
 from docket.vault.staging import Classifier, Entry, State
 from docket.vault.vault import Vault
 from docket.vault.wizard import Given, Wizard
@@ -168,10 +169,12 @@ def staging_show(ref: RefArgument, vault: VaultOption = None) -> None:
         typer.echo("cuts      " + ", ".join(f"{c.start}-{c.end} {c.unit}" for c in staged.cuts))
     if staged.problem:
         typer.echo(f"problem   {staged.problem}")
-    typer.echo(staged.record.model_dump_json(indent=2))
+    typer.echo(staged.record.model_dump_json(indent=2, exclude={"text"}))
+    _echo_text("text, each line after the character it starts at; a cut is <start>-<end> in these", staged.record.text)
+    if staged.cuts:
+        _echo_cut(staged.record, staged.cuts)
     if shown.cut_before is not None:
-        typer.echo(f"cut before, in raw run {shown.cut_before.run}:")
-        typer.echo(shown.cut_before.text)
+        _echo_text(f"cut before, in raw run {shown.cut_before.run}", shown.cut_before.text)
 
 
 @staging_app.command("classify")
@@ -188,6 +191,26 @@ def staging_classify(
     """Classify a staged record: work makes it ready, with its cuts; private drops it."""
     staged = Gate(find_vault(vault)).classify(ref, _label(label), [cuts.parse(c) for c in cut or []], _by(by))
     typer.echo("dropped" if staged is None else f"ready     {staged.key[:12]}")
+    if staged is not None and staged.cuts:
+        _echo_cut(staged.record, staged.cuts)
+
+
+def _echo_text(heading: str, text: str) -> None:
+    """Text as it is, never JSON-escaped, each line after the character offset it starts at, so a cut read off it
+    lands where it was read."""
+    typer.echo(f"{heading}:")
+    offset = 0
+    for line in text.split("\n"):
+        shown = line.removesuffix("\r")
+        typer.echo(f"{offset:>8}  {shown}")
+        offset += len(line) + 1
+
+
+def _echo_cut(record: RawRecord, chosen: list[cuts.Cut]) -> None:
+    try:
+        _echo_text("after the cuts", cuts.apply(record, chosen).text)
+    except DocketError as e:
+        typer.echo(f"after the cuts: {e}")
 
 
 @staging_app.command("promote")
