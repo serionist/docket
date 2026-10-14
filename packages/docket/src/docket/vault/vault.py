@@ -8,7 +8,8 @@ import os
 import shutil
 import stat
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -150,6 +151,14 @@ class Vault:
         with self.lock:
             self._recover()
             return self.git.sync()
+
+    @contextmanager
+    def writing(self) -> Generator[None]:
+        """The lock, then the recovery check, for a writer that reads what it is about to change: nothing is read
+        while a git operation is under way, and a rebase a killed sync left behind is undone first."""
+        with self.lock:
+            self._recover()
+            yield
 
     def _recover(self) -> None:
         """Before writing: undo a rebase a killed sync of ours left behind (its marker says so, and under the lock no
