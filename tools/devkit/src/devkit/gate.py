@@ -254,7 +254,8 @@ def step_tests(ctx: Ctx) -> Outcome:
     report = ctx.root / ".local" / "coverage.json"
     report.parent.mkdir(exist_ok=True)
     report.unlink(missing_ok=True)
-    cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+    # One worker per core: most of the time goes to git subprocesses that would otherwise wait on each other.
+    cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-n", "auto"]
     if ctx.lane == "full":
         cmd += ["--cov", f"--cov-report=json:{report.as_posix()}", "--cov-report=term:skip-covered"]
     code, lines = _run(ctx, cmd)
