@@ -13,12 +13,14 @@ price a colleague named in a call ("10 millió forint"), and only the summary ha
 
 Three parts:
 
-- The vault is the data layer: the user's own private git repo of raw records, media, processed docs, entities and
-  the ledger.
-- The service runs it: staging and the gate, the index and search, the web app, the MCP endpoint, the models in
-  worker processes, and later scheduled syncs. One per machine, always on, in the user's session.
-- The Claude Code plugin maintains it: it runs the syncs (at first, all of them), writes notes and summaries,
-  curates the keywords and reconciles the ledger, through the service's tools.
+- The vault is the data layer: raw records, media, processed docs, entities and the ledger, in a folder of the
+  user's own repo (or a repo of its own), private and in git.
+- The service runs it: staging and the gate, the index and search, the web app, the MCP endpoint with its read and
+  write tools, the models in worker processes. One per machine, always on, in the user's session. It keeps a small
+  profile per source (ids, versions, segments) and does the compute: search, transcription.
+- The Claude Code plugin feeds and maintains it: its skills harvest each source with the user's own MCPs and plugins,
+  write notes and summaries, translate and reconcile, curate the keywords and run the ledger, through the service's
+  tools. Its setup asks what the user wants to set up.
 
 The binding choices are entries in `index.yaml` (`uv run docs list decisions`); this page explains how the parts fit.
 
@@ -206,6 +208,10 @@ faster-whisper; sentence-transformers. MCP servers it launches are pinned to a v
 
 ### 5.1 The vault
 
+The vault is a folder of the repo the user already works in by default, committed into that repo with Docket's
+commits limited to the vault's own paths; the setup also offers a repo of its own, for a separate history, remote or
+LFS. Inside, the layout is the same either way:
+
 ```
 vault/
   vault.yaml                     the owner, time zone, languages, sources, primary machine, models, redaction, never-store
@@ -373,6 +379,9 @@ The target is under 1.5 s for k = 20 on a desktop GPU, with the models kept load
 
 ## 8. Speech
 
+The app transcribes, because it needs a local model; skills translate, reconcile and summarize, because that is
+judgement.
+
 1. Audio arrives with the recording, decoded by our own code.
 2. VAD, then Whisper large-v3 in float16, the language forced where it's known. Hungarian gets a short vocabulary for
    the meeting (its attendees and project).
@@ -393,23 +402,23 @@ The target is under 1.5 s for k = 20 on a desktop GPU, with the models kept load
 ScreenCaptureKit on macOS, a PipeWire monitor on Linux), Opus at 32 kbps mono; started from the tray, the app or a
 `record` MCP tool; a visible indicator all the time.
 
-## 9. Connectors
+## 9. Sources
 
-```python
-class Connector(Protocol):
-    name: str  # "plaud", "slack", "msgraph-mail"
+Claude harvests every source through a plugin skill, with the MCPs and plugins the user already has; the service
+stores what it is handed. A source needs two things:
 
-    def pull(self, cursor: Cursor) -> Iterator[RawRecord]: ...  # records since the cursor, into staging
-```
-
-| Kind | How | Examples |
+| Part | Lives in | What it does |
 |---|---|---|
-| script | Python calls an API or reads files, credentials from the keychain | Microsoft Graph, Gmail, IMAP, a Slack user token, a documents folder, Claude Code session logs |
-| MCP bridge | Python launches or connects to an MCP server and calls its tools | Plaud |
-| agent | a skill Claude runs with tools only it has; a PostToolUse hook captures their output verbatim | mail and chat in the browser, the Slack plugin |
+| a skill | the plugin | reads the source with the user's own tools (Plaud's MCP, the Slack plugin, mail and chat in the browser), knows its quirks (paging, rate limits, late summaries) and its cursor, and hands the payloads to the service |
+| a profile | the core | turns a source's payloads into raw records: the ids, what counts as a new version, the transcript segments, the cuts; a few dozen lines, because these are one-way doors a prompt's wording must never move |
 
-Every connector gets cursors with lookback and retries, backoff on rate limits, the gate, and a sensitivity label.
-Connectors are packages of their own, found through the `docket.connectors` entry point.
+- A PostToolUse hook in the plugin posts what the source's tools return to the service verbatim, so a long transcript
+  never passes through Claude's output; Claude sends a manifest (the window, the counts, what it skipped).
+- Audio is handed over by path or URL, and the service fetches it.
+- Every record goes through the staging gate; a source's sensitivity is in `vault.yaml`.
+- A Python connector is written only where no skill can harvest: a scheduled run with nobody's Claude session open.
+- Payloads fetched before Docket existed (an export, a backfill folder) are imported through the source's profile
+  from the command line.
 
 ## 10. The web app
 
@@ -441,12 +450,14 @@ MCP tools:
 | `entity` | canonical name, aliases, related, ids, last seen, open items |
 | `doc_put` | write a processed doc; checks the frontmatter and that every anchor resolves |
 | `propose` | a ledger item, a decision, an alias, a correction, into the review tiers |
-| `ingest` | a run manifest from an agent connector (the raw comes from the hook) |
+| `ingest` | a source's payloads from a skill (or the hook's verbatim capture) and the run's manifest; the source's profile makes the raw records, which go to staging |
+| `media_put` | audio or an attachment by path or URL; the service fetches, encrypts and stores it |
+| `transcribe` | run speech recognition on a stored recording (phase 2, when a model is installed) |
 | `ledger` | snapshot, history queries, batch ops, queue, meetings, points |
 | `secret` | a named secret, with a confirmation |
 
-The plugin brings the skills (sync, tasks, recall, curate), the SessionStart dashboard, the PostToolUse capture hook,
-and the rules: answer with locators; read the summary first, then open the raw span behind every fact you use; say
+The plugin brings the skills (setup, one per source, sync, tasks, recall, curate), the SessionStart dashboard, the
+PostToolUse capture hook, and the rules: answer with locators; read the summary first, then open the raw span behind every fact you use; say
 when they disagree, and propose a correction.
 
 **Claude inside the service** (phase 3) does processing, not harvesting: notes and minutes, digests, briefs,
