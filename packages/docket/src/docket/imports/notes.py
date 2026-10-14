@@ -323,13 +323,14 @@ class Names:
         except ValueError:
             return []
         folders = {fold(part) for part in listed.old_path.split("/")[:-1]}
-        said = words(f"{stem} {first_heading(head)}")
+        # The title's words must be the note's own title, not a few of its words: a same-day "Call" isn't the
+        # "Supplier call" a note was written about, and a wrong cover would stay, since covers are only added.
+        titles = {words(stem[m.end() :]), words(first_heading(head))} - {frozenset()}
         found = [
             rid
             for rid, light in self.light.items()
-            if light.timed and light.ts_day == day and fold(light.source) in folders and light.title <= said
-            and light.title
-        ]  # fmt: skip
+            if light.timed and light.ts_day == day and fold(light.source) in folders and light.title in titles
+        ]
         return found if len(found) == 1 else []
 
 
@@ -450,7 +451,7 @@ def import_notes(
         and any(p.startswith(f"{the_prefix}/") or not the_prefix for p in d.meta.old_paths)
     )
     report.skipped = dict(sorted(skipped.items()))
-    _write(store, plans, report, the_prefix)
+    _write(store, plans, report, the_prefix, wanted)
     return report
 
 
@@ -564,7 +565,7 @@ def _decide(
     return None
 
 
-def _write(store: DocStore, plans: list[Plan], report: ImportReport, prefix: str) -> None:
+def _write(store: DocStore, plans: list[Plan], report: ImportReport, prefix: str, takes: dict[str, Take]) -> None:
     """Write every planned doc in one commit. A doc refused because the vault moved on meanwhile (#6 took in an edit
     on disk first) is decided once more at its new rev; a second refusal is reported."""
     counts = Counter(p.count for p in plans)
@@ -585,7 +586,7 @@ def _write(store: DocStore, plans: list[Plan], report: ImportReport, prefix: str
             report.commit = result.commit
     for p in retry:
         counts[p.count] -= 1
-    again = _again(store, retry, report)
+    again = _again(store, retry, report, takes)
     for p, result in zip(again, store.put_many([p.text for p in again], subject) if again else [], strict=True):
         if isinstance(result, DocRefusedError):
             report.refused.append(f"{p.listed.old_path}: {result}")
@@ -595,8 +596,9 @@ def _write(store: DocStore, plans: list[Plan], report: ImportReport, prefix: str
     _tally(report, counts)
 
 
-def _again(store: DocStore, retry: list[Plan], report: ImportReport) -> list[Plan]:
-    """Plans for docs refused as stale, decided again against the doc as the vault now has it."""
+def _again(store: DocStore, retry: list[Plan], report: ImportReport, takes: dict[str, Take]) -> list[Plan]:
+    """Plans for docs refused as stale, decided again against the doc as the vault now has it. A --take given for the
+    note still counts, and its hash still guards it."""
     out: list[Plan] = []
     for p in retry:
         doc = store.get(p.doc_id)
@@ -613,7 +615,7 @@ def _again(store: DocStore, retry: list[Plan], report: ImportReport) -> list[Pla
             new_body=new_body,
             new_hash=body_hash(new_body),
             found=planned.meta.covers,
-            take=None,
+            take=takes.get(p.listed.old_path),
             report=report,
             dirty=set(),
         )

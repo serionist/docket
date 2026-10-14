@@ -536,10 +536,11 @@ def import_notes(
         say(f"gone     {report.gone} (their docs stay, so old references still resolve)")
     for kept in report.kept:
         say(f"kept     {kept.old_path}: edited in the vault and changed in the folder")
-        say(f"         settle it: run again with --take note:{kept.hash}:{kept.old_path} or vault:{kept.hash}:...")
+        say(f'         keep the note:  run again with --take "note:{kept.hash}:{kept.old_path}"')
+        say(f'         keep the vault: run again with --take "vault:{kept.hash}:{kept.old_path}"')
     for gone in report.deleted:
         say(f"deleted  {gone.old_path}: its doc was deleted in the vault")
-        say(f"         bring it back: run again with --take note:{gone.hash}:{gone.old_path}")
+        say(f'         bring it back: run again with --take "note:{gone.hash}:{gone.old_path}"')
     for line in report.refused:
         say(f"refused  {line}")
     if report.skipped:

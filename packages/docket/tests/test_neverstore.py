@@ -181,3 +181,22 @@ def test_a_transcript_s_segments_are_held_to_the_lists_like_its_text() -> None:
     assert match(recording("Kid Example", "hello"), NeverStore(people=["kid example"])) == "people"
     assert match(recording("Kid Example", "hello"), NeverStore(keywords=["kid example"])) == "keywords"
     assert match(recording("Ben Sample", "hello"), NeverStore(people=["kid example"], keywords=["dora"])) is None
+
+
+@pytest.mark.parametrize(
+    ("text", "keyword"),
+    [
+        ("see ../people/Dora%20Example/x.md", "dora example"),
+        ("notes/people/Kov%C3%A1cs%20B%C3%A9la/intro.md", "kovács"),
+        ("[intro](../people/Kov%c3%a1cs%20B%c3%a9la/2026-09-02-intro.md)", "kovács"),
+        ("Dora%2DExample", "dora example"),
+    ],
+)
+def test_a_percent_encoded_name_is_matched_too(text: str, keyword: str) -> None:
+    assert matches_text(text, NeverStore(keywords=[keyword]))
+    assert match(make_record(text=text), NeverStore(keywords=[keyword])) == "keywords"
+
+
+def test_decoding_never_makes_a_name_out_of_nothing() -> None:
+    assert not matches_text("100%25 sure, 50%off", NeverStore(keywords=["dora example"]))
+    assert not matches_text("Kov%ZZacs", NeverStore(keywords=["kovács"]))

@@ -74,10 +74,11 @@ def test_a_note_changed_in_both_places_and_its_take(
     assert main(["import", "notes", str(folder)]) == 1
     out = capsys.readouterr().out
     assert f"kept     {CALL}: edited in the vault and changed in the folder" in out
-    found = re.search(r"--take note:([0-9a-f]{8}):(\S+) or vault:\1:\.\.\.", out)
+    found = re.search(r'keep the vault: run again with --take "(vault:([0-9a-f]{8}):[^"]+)"', out)
     assert found is not None
-    assert found.group(2) == CALL
-    assert main(["import", "notes", str(folder), "--take", f"vault:{found.group(1)}:{CALL}"]) == 0
+    assert found.group(1) == f"vault:{found.group(2)}:{CALL}"
+    assert f'keep the note:  run again with --take "note:{found.group(2)}:{CALL}"' in out
+    assert main(["import", "notes", str(folder), "--take", found.group(1)]) == 0
     assert "updated  1" in capsys.readouterr().out
 
 
@@ -91,7 +92,33 @@ def test_a_deleted_doc_says_how_to_bring_it_back(
     assert main(["import", "notes", str(folder)]) == 0
     out = capsys.readouterr().out
     assert f"deleted  {OFFER}: its doc was deleted in the vault" in out
-    assert re.search(rf"bring it back: run again with --take note:[0-9a-f]{{8}}:{re.escape(OFFER)}", out)
+    assert re.search(rf'bring it back: run again with --take "note:[0-9a-f]{{8}}:{re.escape(OFFER)}"', out)
+
+
+def test_the_take_hints_are_quoted_for_a_path_with_a_space(
+    vault: Vault, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    note = plain / "a b.md"
+    note.write_text("# First\n", encoding="utf-8")
+    main(["import", "notes", str(plain)])
+    doc = DocStore(vault).get("legacy-note:a-b")
+    assert doc is not None
+    recall.doc_put(vault, ProcessedDoc(doc.meta.model_copy(update={"by": "claude"}), "# Claude's\n", 0).render())
+    note.write_text("# Second\n", encoding="utf-8")
+    capsys.readouterr()
+    assert main(["import", "notes", str(plain)]) == 1
+    out = capsys.readouterr().out
+    found = re.search(r'keep the note:  run again with --take "(note:[0-9a-f]{8}:plain/a b\.md)"', out)
+    assert found is not None
+    assert main(["import", "notes", str(plain), "--take", found.group(1)]) == 0
+    (vault.root / "processed" / "legacy-note" / "a-b.md").unlink()
+    sh(vault.root, "git", *ADA, "commit", "-q", "-am", "drop it")
+    capsys.readouterr()
+    main(["import", "notes", str(plain)])
+    hint = re.search(r'bring it back: run again with --take "note:[0-9a-f]{8}:plain/a b\.md"', capsys.readouterr().out)
+    assert hint is not None
 
 
 def test_gone_refused_and_what_isnt_listed(vault: Vault, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

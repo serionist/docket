@@ -12,6 +12,7 @@ import unicodedata
 from collections.abc import Iterator
 from functools import lru_cache
 from typing import Any, Literal, cast
+from urllib.parse import unquote
 
 from docket.vault.config import NeverStore
 from docket.vault.records import RawRecord
@@ -91,6 +92,8 @@ def _keyword_shapes(keyword: str) -> tuple[frozenset[str], bool]:
 def _says(texts: list[str], keywords: list[str]) -> bool:
     keywords = [k for k in keywords if k.strip()]
     texts = [t for t in texts if t]
+    # A link writes a name percent-encoded (Dora%20Example, Kov%C3%A1cs); its decoded form is held to the rule too.
+    texts += [decoded for t in texts if (decoded := unquote(t)) != t]
     if not keywords or not texts:
         return False
     folded = [fold(t) for t in texts]

@@ -274,6 +274,8 @@ def test_a_prefix_that_isnt_one(given: str) -> None:
         ("notes/DoraExample.md", True),
         ("notes/project/falcon/kickoff.md", True),
         ("notes/Dóra-Example.md", True),
+        ("notes/people/Dora%20Example/x.md", True),
+        ("notes/people/Dora%20Example.md", True),
         ("notes/dora/x.md", False),
         ("notes/adorable-example.md", False),
     ],
@@ -286,6 +288,9 @@ def test_the_path_screen(old_path: str, screened: bool) -> None:
     ("text", "keyword", "screened"),
     [
         ("see ../people/dora-example/x.md", "dora example", True),
+        ("See [the catch-up](../people/Dora%20Example/2026-09-01-catch-up.md).", "dora example", True),
+        ("See [intro](../people/Kov%C3%A1cs%20B%C3%A9la/2026-09-02-intro.md).", "kovács", True),
+        ("notes/people/Kov%C3%A1cs%20B%C3%A9la/intro.md", "kovács", True),
         ("call_with_dora.md", "dora", True),
         ("DoraExample said", "dora example", True),
         ("doraexample", "dora example", True),
@@ -764,3 +769,28 @@ def test_a_path_old_paths_cant_hold_is_refused(vault: Vault, folder: Path, monke
     monkeypatch.setattr(notes, "list_folder", odd)
     report = run(vault, folder, dry_run=True)
     assert report.refused == ["notes/odd\u0007name.md: 'notes/odd\\x07name.md' has a control character or a line break"]
+
+
+def test_a_same_day_recording_titled_with_only_part_of_the_notes_title_covers_nothing() -> None:
+    zone = ZoneInfo("Europe/Budapest")
+    listed = Listed("notes/calls/2026-10-14-supplier-call.md", Path("x"))
+    call_only = Names([record("calls:rec-0101", "Call", ts=at(6))], zone)
+    assert call_only.covers(listed, "# Supplier call\n\nno ids\n") == []
+    both = Names([record("calls:rec-0101", "Call", ts=at(6)), record("calls:rec-0102", "Supplier call")], zone)
+    assert both.covers(listed, "# Supplier call\n\nno ids\n") == ["calls:rec-0102"]
+    assert both.covers(Listed("notes/calls/2026-10-14-call.md", Path("x")), "# x\n") == ["calls:rec-0101"]
+
+
+def test_a_take_given_while_the_vault_edit_is_uncommitted_still_lands(after: tuple[Vault, Path]) -> None:
+    vault, folder = after
+    path = vault.root / "processed" / "legacy-note" / "2026" / "09" / "2026-09-10-supplier-call.md"
+    path.write_text(path.read_text(encoding="utf-8") + "- Added by hand in the vault.\n", encoding="utf-8")
+    (folder / "calls" / "2026-09-10-supplier-call.md").write_text("# Supplier call\n\nSecond.\n", encoding="utf-8")
+    kept = run(vault, folder).kept[0]
+    took = run(vault, folder, takes=[Take(side="note", hash=kept.hash, old_path=CALL)])
+    assert (took.updated, took.kept, took.refused, took.ok) == (1, [], [], True)
+    doc = DocStore(vault).get(CALL_ID)
+    assert doc is not None
+    assert doc.body == "# Supplier call\n\nSecond.\n"
+    rel = path.relative_to(vault.root).as_posix()
+    assert "(edited by hand)" in sh(vault.root, "git", "log", "--format=%B", "--", rel)
