@@ -52,13 +52,15 @@ def set_owner_only_dacl(path: Path, sid: str) -> None:  # pragma: no cover - Win
     """Replace a file's DACL with one entry, full control for `sid`, protected from inheritance. icacls can't: its
     grant leaves the explicit entries a file got at creation (an elevated process's default DACL adds SYSTEM,
     Administrators and OWNER RIGHTS)."""
+    # Both exist only in Windows' ctypes, so they are looked up, not named, for the type checker on other systems.
     dll: Any = vars(ctypes)["WinDLL"]
+    last_error: Any = vars(ctypes)["get_last_error"]
     advapi32, kernel32 = dll("advapi32", use_last_error=True), dll("kernel32", use_last_error=True)
     descriptor = ctypes.c_void_p()
     if not advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(
         f"D:P(A;;FA;;;{sid})", 1, ctypes.byref(descriptor), None
     ):
-        raise DocketError(f"can't make {path} private to this user: Windows error {ctypes.get_last_error()}")
+        raise DocketError(f"can't make {path} private to this user: Windows error {last_error()}")
     try:
         present, defaulted, dacl = ctypes.c_int(), ctypes.c_int(), ctypes.c_void_p()
         advapi32.GetSecurityDescriptorDacl(
