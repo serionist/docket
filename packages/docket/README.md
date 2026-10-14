@@ -25,7 +25,7 @@ Every record reaches the raw log through the gate. It reads `vault.yaml` on ever
 | `sources.<name>.sensitivity` | `work` goes through, `mixed` waits in staging to be classified, `private` is dropped |
 | `never_store.people` | drops a record whose author, any recipient, or any id in its source's payload equals an entry: an exact address (`kid@example.invalid`, also inside `Kid <kid@example.invalid>`) or the source's user id (`U0KID`); case doesn't matter |
 | `never_store.containers` | drops a record from a channel, chat or folder: its id, with or without the source's prefix (`slack:C0FAMILY` or `C0FAMILY`) |
-| `never_store.keywords` | drops a record that says the words anywhere, title, text, attachment names or payload: whole words, case and accents ignored (`kovacs` matches `Kovács`, not `kovacsfalva`) |
+| `never_store.keywords` | drops a record that says the words anywhere, title, text, attachment names or payload, as whole words: case, accents and curly apostrophes don't matter (`kovacs` matches `Kovács`, not `kovacsfalva`), and any punctuation, a case change or nothing at all may join the words (`dora example` matches `dora-example`, `dora_example`, `DoraExample` and `doraexample`) |
 | `redaction.builtin` | `true` (the default) redacts passwords and secrets after a label, API keys and tokens, private key blocks, and phone numbers written with `+` or after a label |
 | `redaction.patterns` | your own: each has a `name` (it shows in the marker) and a `pattern`, a regular expression; a group named `secret` redacts only that part (`door code (?P<secret>\d+)`) |
 

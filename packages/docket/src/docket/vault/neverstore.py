@@ -6,6 +6,7 @@ Matching fails closed. Too broad drops a work record; too narrow stores a privat
 
 from __future__ import annotations
 
+import html
 import re
 import unicodedata
 from collections.abc import Iterator
@@ -18,12 +19,42 @@ from docket.vault.records import RawRecord
 ListName = Literal["people", "containers", "keywords"]
 
 _ADDRESS = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+# Typographic apostrophes (U+2018, U+2019, U+02BC) and dashes (U+2010 to U+2015) read as the plain ones, so a name
+# typed with a straight apostrophe or a hyphen matches the curly or the non-breaking one a mail client wrote.
+_PLAIN = str.maketrans({chr(c): "'" for c in (0x2018, 0x2019, 0x02BC)} | {chr(c): "-" for c in range(0x2010, 0x2016)})
+_NOT_A_WORD = re.compile(r"[\W_]+")
 
 
 def fold(text: str) -> str:
-    """Case- and accent-folded: `Kovács` and `KOVACS` are one name."""
-    decomposed = unicodedata.normalize("NFKD", text)
+    """Case- and accent-folded, with typographic apostrophes and dashes made plain: `Kovács` and `KOVACS` are one
+    name, and so is O'Brien written with a curly apostrophe."""
+    decomposed = unicodedata.normalize("NFKD", text).translate(_PLAIN)
     return "".join(c for c in decomposed if not unicodedata.combining(c)).casefold()
+
+
+def _split_case(text: str) -> str:
+    """A space where lower case turns upper: `DoraExample` is `Dora Example`."""
+    out: list[str] = []
+    prev = ""
+    for ch in text:
+        if prev.islower() and ch.isupper():
+            out.append(" ")
+        out.append(ch)
+        prev = ch
+    return "".join(out)
+
+
+def _words(text: str) -> str:
+    """Words only, padded with spaces so a word is found whole: HTML entities read as what they stand for, and every
+    run of characters that aren't letters or digits is one space (`dora-example`, `dora_example`, `call_with_dora`,
+    `Project&nbsp;Phoenix`)."""
+    return f" {_NOT_A_WORD.sub(' ', fold(html.unescape(text))).strip()} "
+
+
+def _shapes(text: str) -> tuple[str, str]:
+    """A text's words as written, and with case changes split (`DoraExample`); both, since splitting alone would
+    lose `iPhone` as one word."""
+    return _words(text), _words(_split_case(text))
 
 
 def _forms(value: str) -> set[str]:
@@ -49,8 +80,36 @@ def strings(value: Any) -> Iterator[str]:
 
 @lru_cache(maxsize=1024)
 def _keyword(keyword: str) -> re.Pattern[str]:
+    """The keyword as written, folded: it still catches a keyword of punctuation alone (`++`)."""
     words = fold(keyword).split()
     return re.compile(r"(?<!\w)" + r"\s+".join(re.escape(w) for w in words) + r"(?!\w)")
+
+
+@lru_cache(maxsize=1024)
+def _keyword_shapes(keyword: str) -> frozenset[str]:
+    """Every whole-token shape a keyword can take: its words as written, split at case changes, and run together
+    (`dora example` is also the one token `doraexample`, which `DoraExample` folds to)."""
+    shapes = set(_shapes(keyword))
+    shapes |= {f" {shape.replace(' ', '')} " for shape in set(shapes)}
+    return frozenset(s for s in shapes if s.strip())
+
+
+def _says(texts: list[str], keywords: list[str]) -> bool:
+    keywords = [k for k in keywords if k.strip()]
+    texts = [t for t in texts if t]
+    if not keywords or not texts:
+        return False
+    folded = [fold(t) for t in texts]
+    if any(_keyword(k).search(t) for k in keywords for t in folded):
+        return True
+    wanted = frozenset[str]().union(*(_keyword_shapes(k) for k in keywords))
+    return any(w in shape for t in texts for shape in _shapes(t) for w in wanted)
+
+
+def matches_text(text: str, lists: NeverStore) -> bool:
+    """Whether a plain string (a path, a slug, an id) says something on the keyword list, by the same rule a record's
+    text is held to."""
+    return _says([text], lists.keywords)
 
 
 def match(record: RawRecord, lists: NeverStore) -> ListName | None:
@@ -64,10 +123,8 @@ def match(record: RawRecord, lists: NeverStore) -> ListName | None:
     for where in (record.container, record.thread):
         if where and (fold(where) in containers or fold(where.split(":", 1)[-1]) in containers):
             return "containers"
-    keywords = [k for k in lists.keywords if k.strip()]
-    if keywords:
-        texts = [record.title or "", record.text, *(a.name for a in record.attachments), *strings(record.native)]
-        folded = [fold(t) for t in texts if t]
-        if any(_keyword(k).search(t) for k in keywords for t in folded):
+    if any(k.strip() for k in lists.keywords):
+        texts = [t for t in (record.title, record.text, *(a.name for a in record.attachments)) if t]
+        if _says([*texts, *strings(record.native)], lists.keywords):
             return "keywords"
     return None
