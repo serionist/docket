@@ -164,7 +164,7 @@ class Wizard:
             e for e in re.split(r"[,\s]+", self._answer(None, "Your email addresses", email_default) or "") if e
         ]
         languages = g.languages or [
-            x for x in re.split(r"[,\s]+", self._answer(None, "Languages you work in", "en")) if x
+            x for x in re.split(r"[,\s]+", self._answer(None, "Language codes you work in, such as en hu", "en")) if x
         ]
         zone = self._answer(g.time_zone, "Your time zone (IANA, such as Europe/Budapest)", local_time_zone())
         machine = machines.validate(self._answer(g.machine, "This machine's name", machines.resolve(None)))

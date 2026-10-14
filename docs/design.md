@@ -249,7 +249,7 @@ vault/
   entities/_proposals-<machine>.jsonl                                                       -> plain git
   ledger/ops/<yyyy-mm>-<machine>.jsonl                                                      -> plain git
   state/cursors-<machine>.yaml   each machine's cursors per source                         -> plain git
-  index/docket.sqlite            derived; `docket rebuild` makes it from the above          -> never committed
+  index/docket.sqlite            derived; `docket index rebuild` makes it from the above    -> never committed
 ```
 
 - Setup checks the host repo's remotes before it offers a folder: it refuses one the host reports as public, warns
@@ -313,11 +313,12 @@ the earlier ones (DR-0112).
 
 | Table | What |
 |---|---|
-| `records`, `crosswalk` | every raw record's current version with its file and line in the raw log; old and new ids of one thing |
+| `meta`, `run_files`, `problems` | what the index was built with (schema, languages, stemmer), the run files it read, what didn't load |
+| `records`, `record_versions`, `crosswalk` | every raw record's current version with its file and line in the raw log, and every version; old and new ids of one thing |
 | `segments` | transcript utterances: rid, engine, start and end ms, speaker, person, text |
-| `chunks`, `chunks_fts`, `chunk_vec_<model>` | the searchable units; FTS5 over three columns (accent-folded, Hungarian-stemmed, English-stemmed); vectors per model |
-| `docs`, `doc_anchors`, `derived_from` | processed docs, each line's raw span, and what each item and brief line was built from |
-| `entities`, `aliases`, `entity_links`, `external_ids` | the keyword layer loaded from YAML |
+| `chunks`, `chunks_fts`, `chunk_vec_<model>` | the searchable units; FTS5 over the text as written and a stemmed column per language (DR-0114); vectors per model |
+| `docs`, `doc_covers`, `doc_anchors`, `derived_from` | processed docs, the records each covers, each line's anchors, and what each item and brief line was built from |
+| `entities`, `aliases`, `alias_terms`, `entity_links`, `external_ids` | the keyword layer loaded from YAML, with each alias's forms and misspellings |
 | `mentions`, `extracts` | which chunk mentions which entity; typed values (ticket, amount, date, URL) |
 | `items`, `item_log`, `meetings`, `points`, `streams` | the ledger, folded from the op log |
 | `links`, `runs` | meetings to records, items to records; sync history |
@@ -342,9 +343,10 @@ This decides whether recall works on garbled transcripts in two languages, so it
 
 ### 6.1 Entities
 
-Types: person, org, customer, project, site, robot or device, product or system, topic, stream, meeting series,
-document, repo, place, term. Typed extractors catch what patterns catch better: ticket ids, amounts with currency
-("10 millió forint" is 10,000,000 HUF), dates and durations, URLs.
+Types: person, org, customer, project, site, device, product, topic, stream, meeting-series, document, repo, place,
+term. Typed extractors catch what patterns catch better: ticket ids, amounts with currency ("10 millió forint" is
+10,000,000 HUF), dates and durations, URLs. The file format is DR-0113: besides the fields below, `note` holds free text
+and `schema` (absent or 1) guards against a later format.
 
 ```yaml
 # entities/customer/northwind.yaml
@@ -376,13 +378,20 @@ role: the customer's site lead
 
 ### 6.2 Matching
 
-- Three search columns per chunk, all precomputed: accent-folded (`unicode61 remove_diacritics 2`, so "hatarido"
-  finds "határidő"); Hungarian-stemmed with Snowball; English-stemmed, because the Hungarian stemmer mangles loanwords.
-  A query searches all three, with prefix matching as the fallback.
-- Multi-word aliases match on stem sequences.
-- Aliases marked `asr` also match within one or two edits on words of five letters or more, over the FTS5 vocabulary.
+- Search columns per chunk, all precomputed: the text as written, accent-folded (`unicode61 remove_diacritics 2`, so
+  "hatarido" finds "határidő"); then a Snowball-stemmed column per language in `owner.languages`, English always,
+  because a language's stemmer mangles the other's loanwords (DR-0114).
+- A word's forms in a stemmed column are its stem, itself, and what its language adds: Snowball cuts a bare Hungarian
+  word shorter than an inflected one (`forint` to `forin`, `forintot` to `forint`), so Hungarian adds the stem of the
+  word's dative, and for a query word the stem of its stem when the index holds that stem as a word, more often than
+  the second cut (`robotot` to `robot` to `rob`, what a bare `robot` holds; not `form` to `for`).
+- A compound is one word (`tízmillió`), so `millió` doesn't find it; amounts come with the typed extractors.
+- Aliases match as written, and through those forms in the columns of languages that inflect names (Hungarian, not
+  English: `Mark` would match `marking`). Each stem form is judged: one under three letters, or one that floods the
+  index (`Mark` stems to `mar`, which `már` gives too), is dropped and listed for curation.
+- Aliases marked `asr` also match vocabulary words within one edit of a word of 5 to 7 letters, two of 8 or more.
 - Aliases with `needs` count only when one of the named entities is in the same chunk.
-- A diarized speaker matched to a person counts as a mention of that person for the whole turn.
+- A diarized speaker, or an author whose id an entity lists, counts as a mention of that person.
 
 ### 6.3 Keeping it up, in three tiers
 
@@ -401,7 +410,7 @@ The dashboard shows review minutes per week, a number to keep down.
 
 | Kind | Chunk |
 |---|---|
-| transcript | consecutive utterances, about 60-90 s or 350 tokens, one utterance of overlap; speakers and times kept |
+| transcript | consecutive utterances, about 60-90 s or 350 words, one utterance of overlap; speakers and times kept |
 | mail | one message without the quoted history and signature, subject on top; split above 500 tokens |
 | chat | one message with its author and channel; plus thread windows (the parent and up to 10 replies) |
 | calendar | one event: subject, organiser, attendees, time, response |
@@ -412,12 +421,13 @@ The dashboard shows review minutes per week, a number to keep down.
 
 1. Read the query: entities expand to their aliases in both languages and their ASR forms; time words ("last week",
    "múlt héten") become a filter; people and entities become boosts.
-2. Candidates: FTS5 (BM25 over the three columns) top 200, the vector index top 200, chunks that mention the query's
-   entities.
+2. Candidates, filters applied inside each: FTS5 (BM25 over the columns; all words, then any, then prefixes) top 200,
+   the vector index top 200, chunks that mention the query's entities.
 3. Fuse by reciprocal rank; rerank the top 50 with a small cross-encoder; keep the top k.
 4. Group by container (a recording, a thread, a mail conversation), attach its summary, return locators.
 
-The target is under 1.5 s for k = 20 on a desktop GPU, with the models kept loaded.
+Without models, steps 2 and 3 are FTS5 and the mentions, fused by rank (DR-0117). The target is under 1.5 s for k = 20
+on a desktop GPU with the models kept loaded; keyword search alone answers in under 0.2 s over 100,000 chunks.
 
 ## 8. Speech
 
@@ -548,7 +558,7 @@ No big-bang switch: each piece of an existing setup is replaced only after its r
 
 | Phase | What | Usable for |
 |---|---|---|
-| 0 | the vault and its raw log behind the gate; recordings and old notes imported; full-text search with three columns and seeded aliases; a minimal service with MCP `search`, `read`, `verify`, `doc_put`; the Search page | finding anything already kept, with sources, from any Claude session |
+| 0 | the vault and its raw log behind the gate; recordings and old notes imported; full-text search with a column per language and seeded aliases; a minimal service with MCP `search`, `read`, `verify`, `doc_put`; the Search page | finding anything already kept, with sources, from any Claude session |
 | 1 | syncs write raw through the gate; the capture hook; embeddings and a reranker in a worker; the question set; curate tiers; own documents; highlights; the Staging, Curate, Sync and Settings pages | recall on Hungarian and paraphrased questions; every source raw |
 | 2 | Whisper with encrypted media; reconciling transcripts in context; vocabulary and learned corrections; Claude sessions as a source; briefs; the decision log; corrections that propagate; the secret store; retention and forget; the Recording page | prep from ready briefs; decisions with sources and history |
 | 3 | the ledger and the day pages (Today, Queue, Ledger, Meetings, Outbox); GitHub and Azure DevOps activity; scheduled connectors and Claude inside the service | daily use; syncs without a session |

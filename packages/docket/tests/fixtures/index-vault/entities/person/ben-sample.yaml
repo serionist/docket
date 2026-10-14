@@ -1,0 +1,7 @@
+id: ben-sample
+type: person
+name: {en: Ben Sample, hu: Sample Ben}
+aliases:
+  - {text: Ben}
+ids: {chat: U0BEN, email: ben@northwind.example}
+role: the customer's site lead

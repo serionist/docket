@@ -7,6 +7,7 @@ reading:
   - { path: packages/docket/src/docket/vault/staging.py, role: contract, note: "staging's format, a one-way door: one file per staged version, its two states, the hand-decision memory" }
   - { path: packages/docket/src/docket/vault/anchors.py, role: contract, note: "the anchor grammar and how lines and paragraphs are counted: a one-way door" }
   - { path: packages/docket/src/docket/vault/segments.py, role: contract, note: "a transcript's segments in time order and the time range an anchor resolves in: a one-way door" }
+  - { path: packages/docket/src/docket/vault/entities.py, role: contract, note: "the entity file format: a one-way door" }
 decisions:
   - id: DR-0019
     title: The vault's layout and run-file names are fixed
@@ -188,3 +189,69 @@ decisions:
     not_chosen:
       - "A new file per version: briefs and digests rebuilt after every sync would fill their folders with stale copies."
       - "Last write wins: two sessions would overwrite each other silently."
+  - id: DR-0113
+    title: Entities are YAML files, one per entity, read leniently
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#7"]
+    description: "An entity is entities/<type>/<id>.yaml: id (the file's name, a slug unique across all types), type (the folder's name, one of person, org, customer, project, site, device, product, topic, stream, meeting-series, document, repo, place, term), name (a map from a language code to the name), aliases (a list of {text, kind, needs}, kind absent or asr), related (a type to entity ids), ids (a key of lowercase letters, digits, ., _ or -, so a source's name can be one, to text or a list of it, kept as written and matched ignoring case), status (active or archived), role, note, and schema (absent or 1). Files are read with YAML's base loader, so every value is text. An unknown key or type, a key given twice (the last is read), or an id that names no entity, is a problem and the rest of the file loads; an alias whose needs can't be read is left out with a problem, since without its condition it would match everywhere; a file that can't be an entity, or has another schema, is skipped with a problem. Names starting with _ or . are not entities."
+    binds:
+      - "A breaking change writes schema: 2, which an older Docket skips rather than misreads."
+      - "The ids keys Docket matches: a source's name (the author on that source), email and email_domain."
+    not_chosen:
+      - "Strict reading: one typo in one file would stop the index."
+      - "YAML's safe loader: no becomes false and 2026 a number."
+      - "Ids per type: needs and a doc's entities name bare ids."
+  - id: DR-0115
+    title: The index is a per-machine SQLite cache, rebuilt from the vault's working tree
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#7"]
+    description: "index/docket.sqlite is built from raw/, processed/ and entities/ as they are on disk, never staging/ or git objects. A rebuild writes a new file with every insert sorted and replaces the old one, after letting SQLite roll back a hot journal an interrupted update left, so two rebuilds give the same database; it removes the temp files a killed rebuild left. An update follows new run files, changed docs and entity files and ends with the same rows as a rebuild; it rebuilds when it can't follow (a run file gone or changed in size or modification time, another schema, stemmer version or set of languages). Readers open the file by its path with query_only, so a hot journal is rolled back and a vault on a network share opens. Raw lines are read leniently: one that doesn't load is a problem, a field this Docket doesn't know (at the top or in an attachment) is left out and reported, and the rest is indexed."
+    binds:
+      - "The FTS5 table is contentless: a chunk's text lives once, in chunks."
+      - A chunk keeps a hash of its text, so later vectors survive a rebuild.
+    not_chosen:
+      - "Rebuilding in place in one transaction: the file doubles until a VACUUM."
+      - "WAL: a crashed reader's -wal file would be replayed into the replaced file."
+  - id: DR-0116
+    title: Chunks are cut per kind, and aliases match as written and through the stems of languages that inflect names
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#7"]
+    description: "Transcripts are cut into windows that grow to 60 s and stop before 90 s or 350 words, sharing one utterance; a message is a chunk alone and its thread gets windows of the parent and up to 10 replies, sharing one; other records carry their title on top and split above 500 words between paragraphs; processed docs split per section, their anchors cut from the text and kept. An alias matches its words as written, or its stem forms (its stem, its dative's stem, itself) in the stemmed columns of languages that allow it: Hungarian, not English. A stem form under three letters, in over ten times as many chunks as the alias as written, or in over a fifth of all chunks and over 100, is dropped. An asr alias also matches vocabulary words within one edit of a word of 5 to 7 letters, two of 8 or more; an alias with needs counts only beside an unconditional mention. Speakers, authors (by ids) and a doc's entities are mentions too."
+    binds: ["No entity name enters chunk text, so editing an entity never re-chunks."]
+    not_chosen:
+      - "English stems for aliases: Mark would match every marking."
+      - "A minimum alias length instead of judging stem forms: Kata would lose Katának."
+  - id: DR-0117
+    title: Search reads the query, ranks by BM25 with boosts fused by rank, and groups hits by recording or thread
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#7"]
+    description: A query is quoted phrases and words, never FTS5 syntax; time words become a filter; names in it expand to their aliases, and are searched as typed first. Filters run inside every candidate query. FTS candidates take all words, then any, then prefixes, by BM25 weighted 1.0 as written and 0.6 per stemmed column; entity candidates come from mentions; the two lists fuse by reciprocal rank, so a boost lifts a chunk and never drops one. Hits of two transcripts on the same stretch collapse. A group is a record's thread, else the record, with the current minutes, recording note or thread summary covering it.
+    binds:
+      - A transcript or vendor summary of a recording sets thread to the recording's rid.
+      - The result (the query as read, groups, hits with locators, facets) is what the MCP search tool returns (#8).
+    not_chosen:
+      - "Multiplying BM25 by a boost: a chunk with no word match could never surface."
+      - "Dropping a time filter that empties the result: the user asked for that time."
+  - id: DR-0118
+    title: Stemming uses snowballstemmer's pure-Python classes
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#7"]
+    description: snowballstemmer (BSD-3-Clause, pure Python, 36 stemmers for 34 languages) stems every language. Docket imports its classes directly, because its stemmer() switches to PyStemmer when that is installed, which can stem differently; the index records the package's version and rebuilds when it changes.
+    not_chosen:
+      - "The package's stemmer(): PyStemmer would change stems under an index."
+      - "Hunspell: a dictionary per language and a C library."

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import shutil
+import sqlite3
 import subprocess
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -161,3 +164,94 @@ def note(
         head.append("by: claude-test, sync 2026-10-14T16:07")
     body = lines if lines is not None else ["- Ben put the consultant at 10 million forints. @12:08"]
     return "---\n" + "\n".join(head) + "\n---\n\n# A note\n\n" + "\n".join(body) + "\n"
+
+
+# -- the index fixture ------------------------------------------------------------------------------------------------
+
+INDEX_FIXTURE = Path(__file__).parent / "fixtures" / "index-vault"
+# The index fixture's clock: Wednesday 14 October 2026, so "last week" is 5 to 11 October.
+INDEX_NOW = datetime(2026, 10, 14, 8, 0, tzinfo=UTC)
+CALL = "calls:rec-0100"
+SECOND = "calls:rec-0100-second"
+FLEET = "calls:rec-0101"
+PARENT = "chat:C0OPS/1791400000.000100"
+OFFER = "mail:<offer-1@northwind.example>"
+
+
+def index_config(languages: list[str] | None = None) -> VaultConfig:
+    return VaultConfig(
+        owner=Owner(
+            name="Ada Example",
+            emails=["ada@example.invalid"],
+            languages=languages or ["en", "hu"],
+            time_zone="Europe/Budapest",
+        ),
+        primary_machine="test-box",
+        sources={
+            "calls": SourceConfig(sensitivity="mixed"),
+            "chat": SourceConfig(),
+            "mail": SourceConfig(),
+            "cal": SourceConfig(),
+        },
+    )
+
+
+def fixture_records(source: str) -> list[RawRecord]:
+    lines = (INDEX_FIXTURE / "records" / f"{source}.jsonl").read_text(encoding="utf-8").splitlines()
+    return [RawRecord.model_validate(json.loads(line)) for line in lines if line.strip()]
+
+
+def build_index_vault(root: Path) -> Vault:
+    """The index fixture as a vault: its records written through write_run, its entity files copied in, its docs put
+    through doc_put in file-name order. Built under the caller's git settings."""
+    from docket import recall
+
+    vault = Vault.init(root / "vault", index_config(), "test-box")
+    for source in ("cal", "calls", "chat", "mail"):
+        vault.write_run(source, fixture_records(source), datetime(2026, 10, 14, 7, 0, tzinfo=UTC))
+    shutil.copytree(INDEX_FIXTURE / "entities", vault.root / "entities", dirs_exist_ok=True)
+    vault.commit(["entities"], "Entities")
+    for path in sorted((INDEX_FIXTURE / "docs").glob("*.md")):
+        recall.doc_put(vault, path.read_text(encoding="utf-8"))
+    return vault
+
+
+LOGICAL_TABLES = (
+    "meta", "run_files", "records", "record_versions", "segments", "docs", "doc_files", "doc_covers", "doc_anchors",
+    "entities", "entity_files", "aliases", "alias_terms", "entity_links", "external_ids", "problems",
+)  # fmt: skip
+
+
+def logical_dump(db: Path) -> dict[str, list[tuple[Any, ...]]]:
+    """An index's rows keyed by what they mean, not by row id: chunks by owner and ordinal, the FTS5 index as its
+    words per chunk. Two indexes with the same dump answer every query the same."""
+    conn = sqlite3.connect(db)
+    try:
+        keys = {row[0]: (row[1], row[2]) for row in conn.execute("SELECT id, owner, ordinal FROM chunks")}
+        out = {t: sorted(conn.execute(f"SELECT * FROM {t}").fetchall()) for t in LOGICAL_TABLES}  # noqa: S608
+        out["chunks"] = sorted(tuple(row[1:]) for row in conn.execute("SELECT * FROM chunks"))
+        out["mentions"] = sorted((keys[c], e, h, a) for c, e, h, a in conn.execute("SELECT * FROM mentions"))
+        conn.execute("CREATE VIRTUAL TABLE temp.words USING fts5vocab(main, chunks_fts, 'instance')")
+        out["fts"] = sorted((t, keys[d], c, o) for t, d, c, o in conn.execute("SELECT * FROM temp.words"))
+        return out
+    finally:
+        conn.close()
+
+
+def template_with(factory: pytest.TempPathFactory, make: Callable[[Path], Vault]) -> Path:
+    """A vault built once for a test module, under the isolated git settings conftest gives each test; tests copy it."""
+    home = factory.mktemp("template-home")
+    (home / "gitconfig").write_text("", encoding="utf-8")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("GIT_CONFIG_GLOBAL", str(home / "gitconfig"))
+        mp.setenv("GIT_CONFIG_NOSYSTEM", "1")
+        mp.setenv("DOCKET_CONFIG_DIR", str(home / "docket"))
+        mp.setenv("DOCKET_MACHINE", "test-box")
+        for name in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
+            mp.delenv(name, raising=False)
+        return make(factory.mktemp("template")).root
+
+
+def index_template(factory: pytest.TempPathFactory) -> Path:
+    """The index fixture built once for a test module; tests copy it."""
+    return template_with(factory, build_index_vault)
