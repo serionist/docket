@@ -1,0 +1,19 @@
+[project]
+name = "docket"
+version = "0.0.0"
+description = "A personal memory and task manager that Claude works in: raw and processed, in your own git repo, local first."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [{ name = "Soma Osvay" }]
+dependencies = []
+
+[project.scripts]
+docket = "docket.cli:main"
+
+[project.urls]
+Repository = "https://github.com/serionist/docket"
+
+[build-system]
+requires = ["uv_build>=0.12,<0.13"]
+build-backend = "uv_build"

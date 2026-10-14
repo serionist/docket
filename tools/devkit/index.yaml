@@ -1,0 +1,5 @@
+# What binds `tools/devkit`: reading list, decisions, conventions. Entries change only through `uv run docs`;
+# docs/docs-regime.md explains the schema.
+
+reading:
+  - { path: tools/devkit/src/devkit/gate.py, role: contract, note: "the gate's steps and lanes: what passes here is the merge rule" }

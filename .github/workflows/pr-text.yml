@@ -1,0 +1,41 @@
+# The PR's title and body, checked again whenever they change: the title becomes the commit on main, and the body
+# must carry no private name and no tool attribution. A workflow of its own, so an edit never re-runs (or skips) the
+# gate's required jobs in ci.yml.
+name: PR text
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-text-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  text:
+    name: PR text
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync --locked
+      - name: The private deny list
+        env:
+          DENYLIST: ${{ secrets.DOCKET_DENYLIST }}
+        run: |
+          if [ -n "$DENYLIST" ]; then
+            printf '%s\n' "$DENYLIST" > "$RUNNER_TEMP/denylist.txt"
+            echo "DOCKET_DENYLIST=$RUNNER_TEMP/denylist.txt" >> "$GITHUB_ENV"
+          fi
+      - name: Title, body and commits
+        run: uv run gate quick --only commits,content

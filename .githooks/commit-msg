@@ -1,0 +1,3 @@
+#!/bin/sh
+# Strips tool attribution from the message before git records it; the gate refuses any that gets through.
+exec uv run --quiet devkit commit-msg "$1"

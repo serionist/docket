@@ -1,0 +1,13 @@
+{
+  "name": "docket",
+  "version": "0.0.0",
+  "description": "Docket for Claude Code: search and cite your vault, run your syncs and your task queue, prepare your meetings.",
+  "author": {
+    "name": "Soma Osvay",
+    "url": "https://github.com/serionist"
+  },
+  "homepage": "https://github.com/serionist/docket",
+  "repository": "https://github.com/serionist/docket",
+  "license": "Apache-2.0",
+  "keywords": ["memory", "tasks", "meetings", "local-first", "mcp"]
+}

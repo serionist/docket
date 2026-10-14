@@ -1,0 +1,30 @@
+# Dependabot version updates, weekly: the Python packages in uv.lock and the actions the workflows pin by SHA. Each
+# update is a PR like any other: CI must pass and the maintainer merges it. Security updates come as soon as an advisory
+# is published, whatever the schedule.
+version: 2
+
+updates:
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # Wait a week after a version is published, so a broken or compromised release is pulled first.
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 10
+    groups:
+      dev-tools:
+        patterns: ["ruff", "pyright", "pytest*", "types-*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ["*"]
