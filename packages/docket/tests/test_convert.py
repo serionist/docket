@@ -472,7 +472,8 @@ def test_a_vault_an_older_docket_wrote_with_a_merge(tmp_path: Path, monkeypatch:
     # The reset line goes first: appended last, it would cancel the vault's own lines.
     lines = (root / ".gitattributes").read_text(encoding="utf-8").splitlines()
     assert lines[1] == "* !filter !diff !merge !working-tree-encoding"
-    assert lines[2:] == old_attributes.splitlines()
+    # The vault's own lines stay as they were, and the one it lacked (the hold lists' merge rule) comes after them.
+    assert lines[2:] == [*old_attributes.splitlines(), "state/holds/*.txt merge=union"]
     attrs = git(top, "check-attr", "filter", "merge", "--", "notes/vault/media/x.age", "notes/vault/raw/a/x.jsonl")
     assert "notes/vault/media/x.age: filter: lfs" in attrs
     assert "notes/vault/raw/a/x.jsonl: merge: union" in attrs

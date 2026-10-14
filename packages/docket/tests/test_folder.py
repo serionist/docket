@@ -14,11 +14,64 @@ from docket_testkit import REC, folder_vault, git, make_config, make_record, not
 
 from docket.cli import main
 from docket.errors import DocketError
+from docket.imports.notes import import_notes
 from docket.vault import git as gitmod
+from docket.vault import holds
+from docket.vault.config import CONFIG_FILE, SourceConfig, VaultConfig
 from docket.vault.docstore import DocStore
 from docket.vault.vault import Vault
 
 DOC = "recording-note:2026-10-14-supplier-call"
+HELD = "of_00c0ffee00c0ffee00c0ffee00c0ffee"
+
+
+def test_hold_lists_in_a_folder_vault(tmp_path: Path) -> None:
+    vault = folder_vault(tmp_path)
+    top = vault.home.top
+    before = users_work(top)
+    assert holds.add(vault, "calls", [HELD]) == 1
+    assert files_in(top) == ["notes/vault/state/holds/calls.txt"]
+    assert not (vault.root / ".git").exists()
+    # A vault made before hold lists: the merge rule goes into the vault's own .gitattributes, committed with the list.
+    attrs = vault.root / ".gitattributes"
+    attrs.write_text(attrs.read_text(encoding="utf-8").replace(f"{holds.UNION}\n", ""), encoding="utf-8")
+    git(top, "commit", "-qm", "older", "--", str(attrs))
+    assert holds.add(vault, "chat", [HELD]) == 1
+    assert sorted(files_in(top)) == ["notes/vault/.gitattributes", "notes/vault/state/holds/chat.txt"]
+    merge = git(top, "check-attr", "merge", "--", "notes/vault/state/holds/chat.txt")
+    assert merge.strip().endswith("merge: union")
+    assert users_work(top)[1] == before[1]
+    assert vault.check() == []
+
+
+def test_the_notes_import_skips_a_folder_vault_inside_the_notes(tmp_path: Path) -> None:
+    vault = folder_vault(tmp_path)
+    top = vault.home.top
+    (top / "notes" / "calls").mkdir()
+    (top / "notes" / "calls" / "2026-09-10-supplier-call.md").write_text(
+        "# Supplier call\n\nFirst.\n", encoding="utf-8"
+    )
+    git(top, "add", "notes/calls")
+    report = import_notes(vault, top / "notes")
+    assert report.new == 1
+    docs = git(top, "show", "--name-only", "--format=", "HEAD").split()
+    assert docs == ["notes/vault/processed/legacy-note/2026/09/2026-09-10-supplier-call.md"]
+    assert "notes/calls/2026-09-10-supplier-call.md" in git(top, "diff", "--cached", "--name-only")
+
+
+def test_storage_and_a_source_s_keys_sit_together_in_vault_yaml(tmp_path: Path) -> None:
+    config = make_config("folder")
+    config.sources["calls"] = SourceConfig(
+        sensitivity="mixed",
+        mapper=".claude/skills/sources/calls/mapper.py",
+        tools=["get_transcript"],
+        media_hosts=["media.example.invalid"],
+    )
+    (tmp_path / CONFIG_FILE).write_text(config.dump(), encoding="utf-8")
+    loaded = VaultConfig.load(tmp_path / CONFIG_FILE)
+    assert loaded.storage == "folder"
+    assert loaded.sources["calls"].mapper == ".claude/skills/sources/calls/mapper.py"
+    assert loaded == config
 
 
 def files_in(top: Path, commit: str = "HEAD") -> list[str]:
@@ -244,7 +297,7 @@ def test_check_names_an_ignore_rule_that_hides_the_vault(tmp_path: Path) -> None
     (top / ".gitignore").write_text("/notes/vault/\n", encoding="utf-8")
     problems = [str(p) for p in vault.check()]
     assert len(problems) == 1
-    assert "and 7 more of the vault's paths" in problems[0]
+    assert "and 8 more of the vault's paths" in problems[0]
     assert problems[0].endswith("took this line out of the repo's .gitignore: commit that edit")
 
 
