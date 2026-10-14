@@ -14,7 +14,6 @@ Structured docs are YAML entries that the docs tool manages; prose stays markdow
 | decisions (`DR-`), conventions (`CV-`), reading lists | the `index.yaml` of the folder they bind |
 | terms | `docs/glossary.yaml` |
 | plans and reviews | `docs/plans/`, `docs/reviews/`: dated records, history, never current truth |
-| the design | `docs/design.md` |
 
 Before you plan, change, review or answer questions about a path:
 
@@ -48,7 +47,7 @@ The schema is `docs/docs-regime.yaml`, explained in `docs/docs-regime.md`.
 | `packages/docket/` | the app: the vault, the service (web app, MCP endpoint, scheduler), the `docket` command |
 | `plugin/` | the Claude Code plugin; `.claude-plugin/marketplace.json` makes the repo its marketplace |
 | `tools/devkit/` | the development kit, never published: `gate`, `docs`, `devkit` |
-| `docs/` | the design, the regime, the glossary, plans and reviews |
+| `docs/` | the regime, the glossary, plans and reviews |
 | `.claude/skills/` | the work loop: `start-work`, `review-plan`, `review-code`, `finish-work` |
 | `.github/` | CI, the PR text check, CodeQL, Dependabot, issue forms, the PR template |
 | `.githooks/` | `commit-msg` strips tool attribution, `pre-push` runs `gate quick` |
