@@ -227,6 +227,25 @@ def test_the_core_drops_what_a_mapper_returns_on_hold_and_names_what_raw_already
     assert ingest_run(vault, "memo", manifest(0), []).held_in_raw == ["memo:m6"]
 
 
+def test_the_import_says_what_the_gate_dropped_and_what_raw_holds_on_hold(
+    vault: Vault, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    folder = folder_with(tmp_path, {"a.json": memo("m6"), "b.json": memo("m7", text="about the zebrafinch")})
+    config = vault.root / "vault.yaml"
+    text = config.read_text(encoding="utf-8").replace("  keywords: []", "  keywords:\n  - zebrafinch")
+    config.write_text(text, encoding="utf-8")
+    assert ingest(vault, folder) == 0
+    out = capsys.readouterr().out
+    assert "dropped    never-store 1" in out
+    assert "zebrafinch" not in out
+    gate = Gate(vault)
+    gate.classify("memo:m6", "work")
+    gate.promote()
+    holds.add(vault, "memo", ["m6"])
+    assert ingest(vault, folder) == 0
+    assert "in raw     memo:m6 is on hold but already in raw; it waits for docket forget" in capsys.readouterr().out
+
+
 def test_the_service_s_route_maps_a_run_s_captures_and_checks_their_count(vault: Vault) -> None:
     report = ingest_run(vault, "memo", manifest(2), [capture(0, memo("m1")), capture(1, [memo("m2"), {"id": "m3"}])])
     assert report.staged.pending == 2
