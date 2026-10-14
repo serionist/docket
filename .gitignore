@@ -1,0 +1,52 @@
+# Secrets: path-independent globs, never anchored paths (an anchored rule goes inert when a folder moves).
+.env
+.env.*
+!.env.example
+*.secrets
+**/secrets/*
+*.key
+*.pem
+*.pfx
+*.p12
+!*.key.example
+!*.pem.example
+# age identities: a vault's media key never enters this repo.
+*.agekey
+age-identity*.txt
+# The content gate's deny list lives outside the repo; a copy dropped here by mistake stays out.
+*denylist*.txt
+*denylist*.yaml
+
+# A real vault never lives in this repo; tests use the synthetic one under tests/fixtures/.
+/vault/
+
+# Claude Code local state: machine-specific settings and tokens.
+.claude/settings.local.json
+.claude/worktrees/
+CLAUDE.local.md
+
+# Local working files: review packs, PR body drafts, scratch.
+.local/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+coverage.json
+coverage.xml
+htmlcov/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
