@@ -68,9 +68,15 @@ def _outside_markers(text: str, fn: Callable[[str], str]) -> str:
 
 # A label starts a word, or a word inside an identifier in any case style: DB_PASSWORD, client-secret, clientSecret.
 _LABEL_START = r"(?:(?<![A-Za-z0-9])|(?<=[a-z0-9])(?=[A-Z]))"
-# Between a label and its value: spaces, HTML tags and entities (`<b>Password:</b>&nbsp;x`).
-_FILLER = r"(?:[ \t]|<[^<>\n]{0,200}>|&[A-Za-z0-9#]{2,10};)*"
-_VALUE = r"(?:\"(?P<secret>[^\"\n]+)\"|'(?P<secret2>[^'\n]+)'|(?P<secret3>[^\s;,<>\"'&]+))"
+# Between a label and its value: spaces and line breaks, emphasis and table marks (`*Password:* x`, `| Password: |`),
+# HTML tags, even long ones a mail client wrapped over lines (`<td>Password:</td>\r\n<td>x`), and entities. Possessive,
+# so a long run of it is read once and never backtracked into.
+_FILLER = r"(?:[ \t*_`~|]|\r?\n|<[^<>]{0,2000}>|&[A-Za-z0-9#]{2,10};)*+"
+# An unquoted value has a letter or a digit, so a mark that closes the label is never taken for the secret.
+_VALUE = (
+    r"(?:\"(?P<secret>[^\"\n]+)\"|'(?P<secret2>[^'\n]+)'"
+    r"|(?P<secret3>(?=[^\s;,<>\"'&|]*?[A-Za-z0-9])[^\s;,<>\"'&|]+))"
+)
 
 _SEP = r"[ _.\-]?"
 API_KEY_LABELS = [

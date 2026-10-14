@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections import Counter
 
 import pytest
@@ -43,7 +44,7 @@ def redacted(redactor: Redactor, text: str) -> tuple[str, Counter[str]]:
         (f'{{"password": "{HIDDEN}", "user": "ada"}}', '{"password": "[redacted:password]", "user": "ada"}'),
         (f"'client_secret' = '{HIDDEN}'", "'client_secret' = '[redacted:api-key]'"),
         (f"DB_PASSWORD={HIDDEN}", "DB_PASSWORD=[redacted:password]"),
-        (f"AWS_HIDDEN_ACCESS_KEY={AWS_HIDDEN}", "AWS_HIDDEN_ACCESS_KEY=[redacted:api-key]"),
+        (f"AWS_SECRET_ACCESS_KEY={AWS_HIDDEN}", "AWS_SECRET_ACCESS_KEY=[redacted:api-key]"),
         (f"client-secret: {HIDDEN}", "client-secret: [redacted:api-key]"),
         (f'clientSecret: "{HIDDEN}"', 'clientSecret: "[redacted:api-key]"'),
         (f"apiKey = {HIDDEN}", "apiKey = [redacted:api-key]"),
@@ -61,6 +62,72 @@ def test_a_label_in_every_form_hides_its_value_and_keeps_the_label(
     out, counts = redacted(redactor, text)
     assert out == expected
     assert counts.total() == 1
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (f"*Password:* {HIDDEN}", "*Password:* [redacted:password]"),
+        (f"*Password*: {HIDDEN}", "*Password*: [redacted:password]"),
+        (f"**Password:** {HIDDEN}", "**Password:** [redacted:password]"),
+        (f"_Password:_ {HIDDEN}", "_Password:_ [redacted:password]"),
+        (f"**API key:** {HIDDEN}", "**API key:** [redacted:api-key]"),
+        (f"| Password: | {HIDDEN} |", "| Password: | [redacted:password] |"),
+        # A mark right after the value goes with it: a password may end in one, and losing a mark beats showing it.
+        (f"`password`: `{HIDDEN}`", "`password`: `[redacted:password]"),
+    ],
+)
+def test_emphasis_and_table_marks_around_a_label_are_never_taken_for_its_value(
+    redactor: Redactor, text: str, expected: str
+) -> None:
+    out, counts = redacted(redactor, text)
+    assert out == expected
+    assert counts.total() == 1
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"<td>Password:</td>\r\n<td>{HIDDEN}</td>",
+        f"<td>Password:</td>\n  <td>{HIDDEN}</td>",
+        f"<b>Password:</b><span\r\nstyle='color:red'>{HIDDEN}</span>",
+        "<b>Password:</b><span style='" + "x" * 500 + f"'>{HIDDEN}</span>",
+        f"Password:<br>\n{HIDDEN}",
+        f"Password:\n{HIDDEN}",
+        "<p class=MsoNormal>Password:<o:p></o:p></p>\r\n</td>\r\n<td width=200 style='width:150.0pt'>\r\n"
+        f"<p class=MsoNormal>{HIDDEN}<o:p></o:p></p>",
+    ],
+)
+def test_a_value_on_the_next_line_or_behind_long_tags_is_redacted(redactor: Redactor, text: str) -> None:
+    out, counts = redacted(redactor, text)
+    assert HIDDEN not in out
+    assert counts == Counter({"password": 1})
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["the passwordless login: works", "passwordHash: abc", "password: ***", "Password:\n\n## Next"],
+)
+def test_what_isn_t_a_labelled_secret_stays(redactor: Redactor, text: str) -> None:
+    assert redacted(redactor, text) == (text, Counter())
+
+
+def test_long_runs_of_filler_are_read_in_linear_time(redactor: Redactor) -> None:
+    n = 50_000
+    inputs = [
+        "Password:" + "*" * n,
+        "password: " + "%" * n,
+        ("password " + " " * 1000) * 100,
+        "Password:" + "<" + "a" * 1999 + "x" * n,
+        "Password" + "\r\n" * n + ": x",
+        "password: " * 20_000,
+        "Password:" + "<b>" * n + "x",
+        "token" + "_" * n,
+    ]
+    start = time.perf_counter()
+    for text in inputs:
+        redactor.text(text)
+    assert time.perf_counter() - start < 5
 
 
 @pytest.mark.parametrize("token", [GH_TOKEN, GH_PAT, SLACK_TOKEN, AI_KEY, AWS_ID, GOOGLE_KEY, JWT])
