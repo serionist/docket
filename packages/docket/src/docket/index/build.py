@@ -263,7 +263,6 @@ class Indexer:
             threads.add(old[0] or record.rid)
         self.drop_owner(record_owner(record.rid))
         self.conn.execute("DELETE FROM segments WHERE rid = ?", (record.rid,))
-        self.conn.execute("DELETE FROM problems WHERE kind = 'segments' AND place = ?", (record.rid,))
         self.conn.execute(
             "INSERT OR REPLACE INTO records (rid, v, versions, source, kind, container, thread, ts, author, title, "
             "lang, engine, fidelity, grp, path, line) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -272,13 +271,8 @@ class Indexer:
                 record.author, record.title, record.lang, record.engine, record.fidelity, group_of(record), rel, line,
             ),
         )  # fmt: skip
-        try:
-            segs = segments(record)
-        except DocketError as e:
-            self.conn.execute(
-                "INSERT INTO problems (kind, place, message) VALUES ('segments', ?, ?)", (record.rid, str(e))
-            )
-            segs = []
+        # Segments are a field of the record, checked when its line is read: a malformed one is that line's problem.
+        segs = segments(record)
         self.conn.executemany(
             "INSERT INTO segments (rid, ordinal, engine, start_ms, end_ms, speaker, text) VALUES (?, ?, ?, ?, ?, ?, ?)",
             [(record.rid, n, record.engine, s.start_ms, s.end_ms, s.speaker, s.text) for n, s in enumerate(segs)],

@@ -120,15 +120,16 @@ def test_an_unknown_field_inside_an_attachment_is_left_out_and_the_record_indexe
     assert "the winch manual" in texts
 
 
-def test_malformed_segments_are_a_problem_and_the_text_is_indexed(vault: Vault) -> None:
-    broken = make_record(
-        rid="calls:broken", source="calls", kind="recording", container=None, text="Fallback text.",
-        native={"segments": [{"start_ms": 5, "end_ms": 1}]},
-    )  # fmt: skip
-    vault.write_run("calls", [broken], datetime(2026, 10, 14, 9, 0, tzinfo=UTC))
+def test_a_line_with_malformed_segments_is_a_problem_and_the_rest_is_indexed(vault: Vault) -> None:
+    fine = make_record(rid="calls:fine", source="calls", kind="recording", container=None, text="Fine text.")
+    broken = json.loads(fine.to_json()) | {"rid": "calls:broken", "segments": [{"start_ms": 5, "end_ms": 1}]}
+    path = vault.root / "raw" / "calls" / "2026" / "10" / "2026-10-14T1200-test-box.jsonl"
+    path.write_text(f"{json.dumps(broken)}\n{fine.to_json()}\n", encoding="utf-8", newline="\n")
     report = rebuild(vault)
-    assert any(p.startswith("calls:broken: calls:broken: segment 1") for p in report.problems)
-    assert rows(vault, "SELECT text, kind FROM chunks WHERE rid = 'calls:broken'") == [("Fallback text.", "record")]
+    place = "raw/calls/2026/10/2026-10-14T1200-test-box.jsonl"
+    assert any(p.startswith(f"{place}:1: not a raw record: segments.0") for p in report.problems), report.problems
+    assert rows(vault, "SELECT count(*) FROM records WHERE rid = 'calls:broken'") == [(0,)]
+    assert rows(vault, "SELECT text, kind FROM chunks WHERE rid = 'calls:fine'") == [("Fine text.", "record")]
 
 
 def test_docs_that_can_t_be_read_are_problems(vault: Vault) -> None:

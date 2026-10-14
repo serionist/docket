@@ -201,7 +201,7 @@ def test_two_recordings_in_one_thread_at_other_hours_stay_apart(tmp_path: Path) 
         segs = [{"start_ms": 0, "end_ms": 50000, "speaker": "Ben Sample", "text": said}]
         return make_record(
             rid=f"calls:part-{n}", source="calls", kind="transcript", container=None, thread="calls:meeting-7",
-            ts=datetime(2026, 10, 12, hour, tzinfo=UTC), native={"segments": segs},
+            ts=datetime(2026, 10, 12, hour, tzinfo=UTC), segments=segs,
         )  # fmt: skip
 
     v.write_run("calls", [part(1, 8, "the crane budget is fine"), part(2, 10, "the crane budget was cut")], LATER)

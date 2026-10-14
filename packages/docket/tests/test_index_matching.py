@@ -60,12 +60,10 @@ def make_matching_vault(root: Path) -> Vault:
             source="calls",
             kind="recording",
             container=None,
-            native={
-                "segments": [
-                    {"start_ms": 0, "end_ms": 1000, "speaker": "Ben Sample", "text": "Hello."},
-                    {"start_ms": 1000, "end_ms": 2000, "speaker": "Speaker 2", "text": "Hi."},
-                ]
-            },
+            segments=[
+                {"start_ms": 0, "end_ms": 1000, "speaker": "Ben Sample", "text": "Hello."},
+                {"start_ms": 1000, "end_ms": 2000, "speaker": "Speaker 2", "text": "Hi."},
+            ],
         )
     )
     records.append(
