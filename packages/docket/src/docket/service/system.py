@@ -1,0 +1,76 @@
+"""What the service asks of the operating system: the commands it runs, which system this is, the user's SID on
+Windows, and files only the user can read. Everything takes its runner and system as arguments, so each system's
+path runs in the tests of every other."""
+
+from __future__ import annotations
+
+import csv
+import io
+import os
+import platform
+import subprocess
+from collections.abc import Callable, Sequence
+from pathlib import Path
+
+from docket.errors import DocketError
+
+Runner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
+
+# "Windows", "Darwin" or "Linux".
+SYSTEM = platform.system()
+
+
+def run(args: Sequence[str]) -> subprocess.CompletedProcess[str]:
+    """Run a command with an argument list, never a shell; a missing program is exit code 127, as a shell says."""
+    try:
+        return subprocess.run(  # noqa: S603 - an argument list Docket built, never a shell
+            list(args), capture_output=True, text=True, encoding="utf-8", errors="replace", check=False
+        )
+    except FileNotFoundError as e:
+        return subprocess.CompletedProcess(list(args), 127, "", str(e))
+
+
+def windows_sid(runner: Runner = run) -> str:
+    """The current user's SID, from `whoami /user`: a name can be renamed or carry a domain prefix, a SID can't."""
+    proc = runner(["whoami", "/user", "/fo", "csv", "/nh"])
+    rows = list(csv.reader(io.StringIO(proc.stdout)))
+    sid = rows[0][1].strip() if proc.returncode == 0 and rows and len(rows[0]) > 1 else ""
+    if not sid.startswith("S-1-"):
+        raise DocketError(f"can't find this user's SID (whoami /user exited {proc.returncode})")
+    return sid
+
+
+def owner_only(path: Path, *, system: str = SYSTEM, runner: Runner = run) -> None:
+    """Make a file readable by its owner alone: 0600 on macOS and Linux; on Windows, where the mode means nothing, a
+    DACL naming only the user, with inheritance from the folder removed."""
+    if system == "Windows":
+        sid = windows_sid(runner)
+        proc = runner(["icacls", str(path), "/inheritance:r", "/grant:r", f"*{sid}:F"])
+        if proc.returncode != 0:
+            raise DocketError(f"can't make {path} private to this user: icacls exited {proc.returncode}")
+    else:
+        path.chmod(0o600)
+
+
+def write_private(path: Path, text: str, *, system: str = SYSTEM, runner: Runner = run) -> None:
+    """Write a file only its owner can read: made private while still empty, filled, then renamed over the old one,
+    so the text is never in a file anyone else could open."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.unlink(missing_ok=True)
+    try:
+        os.close(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+        owner_only(tmp, system=system, runner=runner)
+        with tmp.open("w", encoding="utf-8", newline="\n") as out:
+            out.write(text)
+            out.flush()
+            os.fsync(out.fileno())
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def others_can_read(path: Path, *, system: str = SYSTEM) -> bool:
+    """Whether group or others can read a file. Only macOS and Linux can say from the mode; on Windows the DACL
+    `owner_only` set is the control."""
+    return system != "Windows" and bool(path.stat().st_mode & 0o077)

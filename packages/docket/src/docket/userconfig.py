@@ -67,7 +67,8 @@ def set_default_vault(path: Path) -> None:
 class ServiceSettings:
     vault: Path | None = None
     port: int | None = None
-    token_store: TokenStore | None = None
+    # `service.token_store` in the file.
+    store: TokenStore | None = None
 
 
 def service() -> ServiceSettings:
@@ -91,12 +92,12 @@ def service() -> ServiceSettings:
     return ServiceSettings(
         vault=Path(vault) if vault else None,
         port=port,
-        token_store=store,
+        store=store,
     )
 
 
 def set_service(
-    *, vault: Path | None = None, port: int | None = None, token_store: TokenStore | None = None
+    *, vault: Path | None = None, port: int | None = None, store: TokenStore | None = None
 ) -> ServiceSettings:
     """Write the given `service` keys and keep the rest of the file as it is."""
     data = load()
@@ -106,8 +107,8 @@ def set_service(
         section["vault"] = str(vault)
     if port is not None:
         section["port"] = port
-    if token_store is not None:
-        section["token_store"] = token_store
+    if store is not None:
+        section["token_store"] = store
     data["service"] = section
     _save(data)
     return service()

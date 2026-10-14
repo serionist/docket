@@ -25,8 +25,8 @@ def test_the_service_keys_sit_beside_the_default_vault(tmp_path: Path) -> None:
     assert userconfig.service() == userconfig.ServiceSettings()
     userconfig.set_default_vault(tmp_path / "vault")
     userconfig.set_service(vault=tmp_path / "vault", port=8741)
-    settings = userconfig.set_service(token_store="file")  # noqa: S106 - the store's kind, not a secret
-    expected = userconfig.ServiceSettings(vault=tmp_path / "vault", port=8741, token_store="file")  # noqa: S106
+    settings = userconfig.set_service(store="file")
+    expected = userconfig.ServiceSettings(vault=tmp_path / "vault", port=8741, store="file")
     assert settings == expected
     assert userconfig.default_vault() == tmp_path / "vault"
     assert set(userconfig.load()) == {"default_vault", "service"}
