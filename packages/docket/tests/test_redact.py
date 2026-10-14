@@ -181,6 +181,11 @@ def test_phone_numbers_need_a_plus_or_a_label(redactor: Redactor, text: str) -> 
         "Tokens: 5",
         "the risk-assessment-for-the-quarterly-plan",
         "Mobile 2026 roadmap",
+        "budget +12 500 000 Ft vs plan",
+        "revenue +25.000.000 EUR",
+        "delta: +1 500 000 Ft",
+        "up +12345678 USD, +87654321$, +11223344 € and +99887766% on last year",
+        "+12345678 huf",
     ],
 )
 def test_numbers_and_words_docket_keeps(redactor: Redactor, text: str) -> None:

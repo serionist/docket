@@ -157,11 +157,12 @@ PASSWORD = Rule(
     ),
 )
 # A phone number needs a + or a label: a bare run of digits is as likely an amount, a ticket or a timestamp, the
-# numbers Docket exists to keep.
+# numbers Docket exists to keep. A + number followed by a currency or a percent is a change in an amount.
+_AMOUNT = r"(?![ \t]*(?:(?i:ft|huf|eur|usd|gbp|chf)(?![A-Za-z])|[$€£%]))"
 PHONE = Rule(
     "phone",
     (
-        re.compile(r"(?<![\w+])\+(?:[ .\-()]{0,2}\d){8,15}(?!\d)"),
+        re.compile(r"(?<![\w+])\+(?:[ .\-()]{0,2}\d){8,15}(?!\d)" + _AMOUNT),
         re.compile(
             r"(?<![A-Za-z0-9])"
             + rf"(?i:{'|'.join(PHONE_LABELS)})"
