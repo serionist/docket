@@ -25,8 +25,9 @@ def main(argv: list[str], stdin: BinaryIO, stdout: BinaryIO) -> int:
         return 2
     run = json.loads(stdin.read().decode("utf-8"))
     module = importlib.util.module_from_spec(spec)
-    # So a mapper can keep helpers in modules next to it.
+    # So a mapper can keep helpers in modules next to it, and use dataclasses, which look their module up by name.
     sys.path.insert(0, str(path.parent))
+    sys.modules[spec.name] = module
     stdout_before = sys.stdout
     sys.stdout = sys.stderr
     try:
@@ -39,6 +40,7 @@ def main(argv: list[str], stdin: BinaryIO, stdout: BinaryIO) -> int:
     finally:
         sys.stdout = stdout_before
         sys.path.remove(str(path.parent))
+        sys.modules.pop(spec.name, None)
     stdout.write(json.dumps(result, ensure_ascii=False).encode("utf-8"))
     stdout.flush()
     return 0

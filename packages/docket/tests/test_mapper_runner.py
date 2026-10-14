@@ -154,3 +154,11 @@ def test_the_child_refuses_what_it_can_t_run(tmp_path: Path, capsys: pytest.Capt
     assert child.main([str(empty)], io.BytesIO(b"{}"), out) == 3
     assert out.getvalue() == b""
     assert "has no map_run" in capsys.readouterr().err
+
+
+def test_a_mapper_can_use_dataclasses(tmp_path: Path) -> None:
+    code = (
+        "from __future__ import annotations\n\nfrom dataclasses import dataclass\n\n\n@dataclass\nclass Seen:\n"
+        "    n: int\n\n\ndef map_run(run):\n    return Seen(run['n']).n + 1\n"
+    )
+    assert runner.run(write_mapper(tmp_path, "typed", code), {"n": 41}) == 42
