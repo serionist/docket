@@ -379,8 +379,14 @@ def test_a_failed_write_leaves_its_records_free_to_write(
 
 
 def test_an_init_whose_real_commit_fails_leaves_nothing(tmp_path: Path, config: VaultConfig) -> None:
+    # A pre-commit hook that refuses: Docket's commits never sign, so a failing signer no longer stops one.
+    hooks = tmp_path / "hooks"
+    hooks.mkdir()
+    refuse = hooks / "pre-commit"
+    refuse.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8", newline="\n")
+    refuse.chmod(0o755)
     gitconfig = Path(os.environ["GIT_CONFIG_GLOBAL"])
-    gitconfig.write_text("[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = no-such-signer\n", encoding="utf-8")
+    gitconfig.write_text(f"[core]\n\thooksPath = {hooks.as_posix()}\n", encoding="utf-8")
     with pytest.raises(DocketError, match="git commit"):
         new_vault(tmp_path, config)
     assert not (tmp_path / "vault").exists()
