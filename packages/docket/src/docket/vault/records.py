@@ -30,6 +30,24 @@ class Attachment(BaseModel):
     ref: str | None = None
 
 
+class Segment(BaseModel):
+    """One utterance of a transcript: where it starts and ends in whole milliseconds from the record's start, who
+    spoke, and what was said. A source's mapper fills a record's segments in this shape (DR-0111)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    start_ms: int = Field(ge=0)
+    end_ms: int = Field(ge=0)
+    speaker: str | None = None
+    text: str
+
+    @model_validator(mode="after")
+    def _ordered(self) -> Segment:
+        if self.end_ms < self.start_ms:
+            raise ValueError(f"it ends ({self.end_ms} ms) before it starts ({self.start_ms} ms)")
+        return self
+
+
 class RawRecord(BaseModel):
     """One item from a source: a message, an event, a recording, a transcript, a vendor's summary."""
 
@@ -47,6 +65,7 @@ class RawRecord(BaseModel):
     title: str | None = None
     text: str = ""
     attachments: list[Attachment] = Field(default_factory=list[Attachment])
+    segments: list[Segment] | None = None
     native: dict[str, Any] = Field(default_factory=dict[str, Any])
     fetched: datetime
     via: str
@@ -79,8 +98,10 @@ class RawRecord(BaseModel):
         return self
 
     def to_json(self) -> str:
-        """The record as one line of the raw log."""
-        return self.model_dump_json(exclude_none=False)
+        """The record as one line of the raw log. A record without segments leaves the field out, so its line is the
+        one Docket wrote before segments existed, and an older machine, which refuses fields it doesn't know, reads
+        it."""
+        return self.model_dump_json(exclude_none=False, exclude=None if self.segments else {"segments"})
 
 
 def utc_seconds(value: datetime) -> str:
@@ -104,6 +125,16 @@ def default_projection(record: RawRecord) -> dict[str, Any]:
         "title": record.title,
         "text": record.text,
         "attachments": [{k: v for k, v in a.items() if v not in (None, "")} for a in attachments],
+        # Named one by one, like everything here, and kept in their order: a transcript in another order is another
+        # transcript. A record without segments projects as it did before they existed.
+        "segments": [
+            {
+                k: v
+                for k, v in (("start_ms", s.start_ms), ("end_ms", s.end_ms), ("speaker", s.speaker), ("text", s.text))
+                if v not in (None, "")
+            }
+            for s in record.segments or []
+        ],
     }
     return {k: v for k, v in fields.items() if v not in (None, "", [])}
 

@@ -49,7 +49,7 @@ def test_a_cut_past_the_end_is_refused() -> None:
 
 def test_time_cuts_need_the_source_s_cutter() -> None:
     record = make_record(text="a recording")
-    with pytest.raises(DocketError, match="no cutter for time cuts"):
+    with pytest.raises(DocketError, match=r"no cutter for time cuts; the core's comes with #10.*classify it whole"):
         apply(record, [Cut(start=0, end=1000, unit="ms")])
 
 
@@ -93,3 +93,31 @@ def test_cut_specs_parse(spec: str, cut: Cut) -> None:
 def test_bad_cut_specs_are_refused(spec: str) -> None:
     with pytest.raises(DocketError):
         parse(spec)
+
+
+def test_a_transcript_takes_time_cuts_only() -> None:
+    def time_cutter(record: RawRecord, cuts: list[Cut]) -> RawRecord:
+        kept = [s for s in record.segments or [] if not any(c.start <= s.start_ms < c.end for c in cuts)]
+        return record.model_copy(update={"segments": kept, "text": f"Ben Sample: work part.\n{CUT_MARKER}"})
+
+    segments = [
+        {"start_ms": 0, "end_ms": 1000, "speaker": "Ben Sample", "text": "work part."},
+        {"start_ms": 1000, "end_ms": 2000, "speaker": "Ben Sample", "text": "private part."},
+    ]
+    record = make_record(
+        rid="calls:rec-1",
+        source="calls",
+        kind="recording",
+        text="Ben Sample: work part.\nBen Sample: private part.",
+        segments=segments,
+    )
+    register_cutter("calls", time_cutter)
+    with pytest.raises(DocketError, match=r"calls:rec-1 is a transcript.*takes time cuts.*\(#10\).*classify it whole"):
+        apply(record, [Cut(start=23, end=48)])
+    with pytest.raises(DocketError, match="takes time cuts"):
+        apply(record, [Cut(start=1000, end=2000, unit="ms"), Cut(start=0, end=5)])
+    out = apply(record, [Cut(start=1000, end=2000, unit="ms")])
+    assert [s.text for s in out.segments or []] == ["work part."]
+    # An empty list is no transcript: its text is cut by characters as any other.
+    plain = record.model_copy(update={"source": "notes", "rid": "notes:n-1", "segments": []})
+    assert apply(plain, [Cut(start=0, end=5)]).text.startswith(CUT_MARKER)

@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from functools import partial
+from itertools import accumulate
 from typing import Any, cast
 
 from docket.vault.config import Redaction
@@ -19,7 +19,6 @@ from docket.vault.neverstore import strings
 from docket.vault.records import Attachment, RawRecord
 
 MARKER = re.compile(r"\[redacted:[a-z0-9-]+\]")
-_SPLIT = re.compile(rf"({MARKER.pattern})")
 
 
 def marker(rule: str) -> str:
@@ -40,28 +39,34 @@ class Rule:
 
     def apply(self, text: str, counts: Counter[str]) -> str:
         for pattern in self.patterns:
-            text = _outside_markers(text, partial(self._sub, pattern, counts))
+            text = self.replace(text, self.spans(pattern, text), counts)
         return text
 
-    def _sub(self, pattern: re.Pattern[str], counts: Counter[str], text: str) -> str:
+    def spans(self, pattern: re.Pattern[str], text: str) -> list[tuple[int, int]]:
+        """What a pattern replaces, in order: each match whole, or only its secret groups. It reads the text between
+        markers only, so a marker is never matched again and redacting twice is once."""
+        out: list[tuple[int, int]] = []
+        start = 0
+        for m in [*MARKER.finditer(text), None]:
+            end = len(text) if m is None else m.start()
+            for found in pattern.finditer(text[start:end]):
+                groups = found.groupdict().items()
+                secrets = [found.span(g) for g, v in groups if g.startswith("secret") and v is not None]
+                out += [(start + a, start + b) for a, b in secrets or [found.span()] if a != b]
+            if m is not None:
+                start = m.end()
+        return out
+
+    def replace(self, text: str, spans: list[tuple[int, int]], counts: Counter[str]) -> str:
+        """The text with each span, in order, made this rule's marker."""
         out: list[str] = []
         last = 0
-        for m in pattern.finditer(text):
-            secrets = [m.span(g) for g, v in m.groupdict().items() if g.startswith("secret") and v is not None]
-            for start, end in secrets or [m.span()]:
-                if start == end:
-                    continue
-                out += [text[last:start], marker(self.name)]
-                last = end
-                counts[self.name] += 1
+        for start, end in spans:
+            out += [text[last:start], marker(self.name)]
+            last = end
+            counts[self.name] += 1
         out.append(text[last:])
         return "".join(out)
-
-
-def _outside_markers(text: str, fn: Callable[[str], str]) -> str:
-    """Apply `fn` to the text between markers only, so a marker is never matched again and redacting twice is once."""
-    parts = _SPLIT.split(text)
-    return "".join(part if i % 2 else fn(part) for i, part in enumerate(parts))
 
 
 # -- the built-in rules -------------------------------------------------------------------------------------------
@@ -212,13 +217,57 @@ class Redactor:
             )
             for a in record.attachments
         ]
+        # A transcript's segments say again what its text says, so they are redacted too.
+        segments = None
+        if record.segments is not None:
+            said = self.segment_texts([s.text for s in record.segments], counts)
+            segments = [
+                s.model_copy(
+                    update={"speaker": self.text(s.speaker, counts) if s.speaker is not None else None, "text": t}
+                )
+                for s, t in zip(record.segments, said, strict=True)
+            ]
         update: dict[str, Any] = {
             "title": self.text(record.title, counts) if record.title is not None else None,
             "text": self.text(record.text, counts),
             "attachments": attachments,
+            "segments": segments,
             "native": self._native(record.native, counts, None),
         }
         return record.model_copy(update=update), counts
+
+    def segment_texts(self, texts: list[str], counts: Counter[str]) -> list[str]:
+        """A transcript's segment texts redacted with their neighbours as context: joined by line breaks, so a label at
+        the end of one utterance and its value at the start of the next still match. A match that takes a boundary
+        with it (a key block read out over two utterances) leaves no way to tell what was whose, so each segment it
+        touches becomes that rule's marker whole."""
+        text = "\n".join(texts)
+        # Where each boundary between two segments is in the text as it is now; a taken one keeps the rule that took it.
+        bounds = [end - 1 for end in accumulate(len(t) + 1 for t in texts[:-1])]
+        taken: dict[int, str] = {}
+        for rule in self.rules:
+            for pattern in rule.patterns:
+                spans = rule.spans(pattern, text)
+                for start, end in reversed(spans):
+                    shift = len(marker(rule.name)) - (end - start)
+                    for k, at in enumerate(bounds):
+                        if k in taken:
+                            continue
+                        if start <= at < end:
+                            taken[k] = rule.name
+                        elif at >= end:
+                            bounds[k] = at + shift
+                text = rule.replace(text, spans, Counter[str]())
+        out: list[str] = []
+        first = last = 0
+        for k in range(len(texts)):
+            if k in taken:
+                continue
+            end = bounds[k] if k < len(bounds) else len(text)
+            out += [text[last:end]] if first == k else [marker(taken[first])] * (k - first + 1)
+            first, last = k + 1, end + 1
+        counts.update(_rules(out) - _rules(texts))
+        return out
 
     def _native(self, value: Any, counts: Counter[str], label: str | None) -> Any:
         if isinstance(value, dict):
@@ -249,7 +298,13 @@ def markers(record: RawRecord) -> Counter[str]:
     """How many redaction markers of each rule a record holds: what a run reports, since intake redacted already."""
     texts = [record.title or "", record.text, *(a.name for a in record.attachments)]
     texts += [a.ref for a in record.attachments if a.ref is not None]
+    texts += [t for s in record.segments or [] for t in (s.speaker or "", s.text)]
     texts += strings(record.native)
+    return _rules(texts)
+
+
+def _rules(texts: Iterable[str]) -> Counter[str]:
+    """How many markers of each rule the texts hold."""
     return Counter(m.group(0)[len("[redacted:") : -1] for t in texts for m in MARKER.finditer(t))
 
 

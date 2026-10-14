@@ -171,6 +171,16 @@ def test_classify_refuses_what_it_can_t_do(gate: Gate) -> None:
     assert gate.list().counts() == Counter({"pending": 1})
 
 
+def test_classify_refuses_a_character_cut_on_a_transcript(gate: Gate, vault: Vault) -> None:
+    said = [{"start_ms": 0, "end_ms": 4000, "speaker": "Ben Sample", "text": f"the {PRIVATE_WORD} trip"}]
+    gate.stage([call(1, text=f"Ben Sample: the {PRIVATE_WORD} trip", segments=said)])
+    with pytest.raises(DocketError, match=r"calls:rec-1 is a transcript.*takes time cuts"):
+        gate.classify("calls:rec-1", "work", [Cut(start=16, end=26)])
+    assert gate.list().counts() == Counter({"pending": 1})
+    assert gate.promote().runs == []
+    assert in_raw(vault) == []
+
+
 def test_a_ref_is_a_rid_or_a_long_enough_key_prefix(gate: Gate) -> None:
     gate.stage([call(1, text="first"), call(2)])
     gate.stage([call(1, text="second version")])

@@ -9,7 +9,7 @@ import pytest
 from docket_testkit import make_record
 
 from docket.vault.config import Redaction, RedactionPattern
-from docket.vault.records import Attachment
+from docket.vault.records import Attachment, RawRecord
 from docket.vault.redact import Redactor, markers, slug
 
 GH_TOKEN = "gh" + "p_" + "a1B2" * 9
@@ -315,3 +315,52 @@ def test_a_record_without_a_title_or_attachment_ref_keeps_them_absent(redactor: 
     out, _ = redactor.record(record)
     assert out.title is None
     assert out.attachments[0].ref is None
+
+
+def test_a_transcript_s_segments_are_redacted_like_its_text(redactor: Redactor) -> None:
+    record = make_record(
+        rid="calls:rec-1",
+        source="calls",
+        kind="recording",
+        text=f"the key is {GH_TOKEN}",
+        segments=[
+            {"start_ms": 0, "end_ms": 4000, "speaker": "Ben Sample", "text": f"the key is {GH_TOKEN}"},
+            {"start_ms": 4000, "end_ms": 9000, "speaker": "+1 555 010 0106", "text": f"password: {HIDDEN}"},
+            {"start_ms": 9000, "end_ms": 9500, "text": "bye"},
+        ],
+    )
+    out, counts = redactor.record(record)
+    assert GH_TOKEN not in out.model_dump_json()
+    assert HIDDEN not in out.model_dump_json()
+    segments = out.segments or []
+    assert [s.text for s in segments] == ["the key is [redacted:api-key]", "password: [redacted:password]", "bye"]
+    assert [s.speaker for s in segments] == ["Ben Sample", "[redacted:phone]", None]
+    assert [(s.start_ms, s.end_ms) for s in segments] == [(0, 4000), (4000, 9000), (9000, 9500)]
+    assert markers(out) == counts
+    assert redactor.record(make_record())[0].segments is None
+
+
+def transcript(*said: str) -> RawRecord:
+    segments = [{"start_ms": 1000 * n, "end_ms": 1000 * n + 900, "text": t} for n, t in enumerate(said)]
+    return make_record(rid="calls:rec-1", source="calls", kind="recording", text=" ".join(said), segments=segments)
+
+
+def test_a_label_and_its_value_in_two_segments_are_still_redacted(redactor: Redactor) -> None:
+    out, counts = redactor.record(transcript("call my mobile", "06 30 123 4567 after five"))
+    assert "4567" not in out.model_dump_json()
+    assert [s.text for s in out.segments or []] == ["call my mobile", "[redacted:phone] after five"]
+    assert markers(out) == counts
+
+
+def test_a_match_over_a_boundary_takes_each_segment_it_touches_whole(redactor: Redactor) -> None:
+    head, body, tail = PEM.split("\n")
+    out, counts = redactor.record(
+        transcript("call me on +36 30 123 4567, the key is", f"{head}\n{body}", tail, "thanks, bye")
+    )
+    assert [s.text for s in out.segments or []] == [
+        "call me on [redacted:phone], the key is",
+        "[redacted:private-key]",
+        "[redacted:private-key]",
+        "thanks, bye",
+    ]
+    assert markers(out) == counts

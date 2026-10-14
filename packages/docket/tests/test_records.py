@@ -25,10 +25,48 @@ GOLDEN = {
 }
 # Pinned: if this changes, every record in every vault gets a new version. Change it only with a migration.
 GOLDEN_VERSION = "sha256:fd1ea8553b0375dd1dc06dc77cab86c78a48032f48d694384a560180bdb845b4"
+GOLDEN_SEGMENTS = [
+    {"start_ms": 0, "end_ms": 4000, "speaker": "Ben Sample", "text": "Árvíztűrő, said Ben."},
+    {"start_ms": 3000, "end_ms": 9000, "text": "Talking over, no speaker."},
+]
+# Pinned the same way: the golden record with a transcript's segments.
+GOLDEN_SEGMENTS_VERSION = "sha256:650ea17ac32b07d07a24f1cbb475f21c2f9c90132e6a4fbb472506fe88f49e0a"
+# The raw log line Docket wrote for the golden record before segments existed, byte for byte: an older machine refuses
+# fields it doesn't know, so a record without segments must still write exactly this.
+GOLDEN_LINE = (
+    '{"rid":"chat:C0TEST/1791000001.000100","v":"","source":"chat","kind":"message","container":"chat:C0TEST",'
+    '"thread":null,"ts":"2026-10-14T09:30:01Z","author":"U0ADA","to":["U0BEN","U0CAT"],"title":null,'
+    '"text":"Árvíztűrő \\"tükörfúrógép\\"\\nsecond line","attachments":[{"name":"b.pdf","kind":"file","ref":"F2"},'
+    '{"name":"a.png","kind":"image","ref":"F1"}],"native":{},"fetched":"2026-10-14T12:00:00Z","via":"test",'
+    '"fidelity":"verbatim","run":"","engine":null,"lang":null}'
+)
 
 
 def test_the_golden_record_hashes_to_its_pinned_version() -> None:
     assert version(RawRecord.model_validate(GOLDEN)) == GOLDEN_VERSION
+
+
+def test_a_record_without_segments_hashes_as_before_they_existed() -> None:
+    for none in (None, []):
+        assert version(RawRecord.model_validate({**GOLDEN, "segments": none})) == GOLDEN_VERSION
+
+
+def test_a_record_without_segments_writes_the_line_it_wrote_before_them() -> None:
+    for none in (None, []):
+        assert RawRecord.model_validate({**GOLDEN, "segments": none}).to_json() == GOLDEN_LINE
+    with_segments = RawRecord.model_validate({**GOLDEN, "segments": GOLDEN_SEGMENTS})
+    line = with_segments.to_json()
+    assert '"segments":[{"start_ms":0,"end_ms":4000,"speaker":"Ben Sample",' in line
+    assert RawRecord.model_validate_json(line) == with_segments
+
+
+def test_segments_are_in_the_version_in_their_order() -> None:
+    with_segments = RawRecord.model_validate({**GOLDEN, "segments": GOLDEN_SEGMENTS})
+    assert version(with_segments) == GOLDEN_SEGMENTS_VERSION
+    reordered = RawRecord.model_validate({**GOLDEN, "segments": list(reversed(GOLDEN_SEGMENTS))})
+    assert version(reordered) != GOLDEN_SEGMENTS_VERSION
+    retimed = [{**GOLDEN_SEGMENTS[0], "end_ms": 4001}, GOLDEN_SEGMENTS[1]]
+    assert version(RawRecord.model_validate({**GOLDEN, "segments": retimed})) != GOLDEN_SEGMENTS_VERSION
 
 
 def test_fields_outside_the_projection_never_change_the_version() -> None:

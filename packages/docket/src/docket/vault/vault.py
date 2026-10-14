@@ -8,7 +8,8 @@ import os
 import shutil
 import stat
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -151,6 +152,14 @@ class Vault:
             self._recover()
             return self.git.sync()
 
+    @contextmanager
+    def writing(self) -> Generator[None]:
+        """The lock, then the recovery check, for a writer that reads what it is about to change: nothing is read
+        while a git operation is under way, and a rebase a killed sync left behind is undone first."""
+        with self.lock:
+            self._recover()
+            yield
+
     def _recover(self) -> None:
         """Before writing: undo a rebase a killed sync of ours left behind (its marker says so, and under the lock no
         sync of ours is running), and refuse to touch anything else git is in the middle of, which is the user's."""
@@ -170,6 +179,11 @@ class Vault:
                 raise DocketError(f"a {what} is in progress in {self.root}; finish or undo it before Docket writes")
         if self.git.branch() == "HEAD":
             raise DocketError(f"{self.root} isn't on a branch (a detached HEAD); check out main before Docket writes")
+        # A conflict a stash pop or a merge --squash left leaves no *_HEAD file, only unmerged paths; committing then
+        # would take in the conflict markers and mark the conflict resolved.
+        unmerged = sorted({line.split("\t", 1)[-1] for line in self.git.out("ls-files", "-u").splitlines()})
+        if unmerged:
+            raise DocketError(f"{', '.join(unmerged)} in {self.root} has a conflict; resolve it before Docket writes")
 
     # -- checking ------------------------------------------------------------------------------------------------
 

@@ -165,3 +165,19 @@ def test_html_entities_between_words_read_as_spaces() -> None:
 def test_a_keyword_of_punctuation_only_still_matches_literally() -> None:
     assert match(make_record(text="we use ++ here"), NeverStore(keywords=["++"])) == "keywords"
     assert match(make_record(text="nothing here"), NeverStore(keywords=["++"])) is None
+
+
+def test_a_transcript_s_segments_are_held_to_the_lists_like_its_text() -> None:
+    def recording(speaker: str | None, text: str) -> Any:
+        return make_record(
+            rid="calls:rec-1",
+            source="calls",
+            kind="recording",
+            text="",
+            segments=[{"start_ms": 0, "end_ms": 1000, "speaker": speaker, "text": text}],
+        )
+
+    assert match(recording(None, "about the kovács birthday"), NeverStore(keywords=["Kovacs birthday"])) == "keywords"
+    assert match(recording("Kid Example", "hello"), NeverStore(people=["kid example"])) == "people"
+    assert match(recording("Kid Example", "hello"), NeverStore(keywords=["kid example"])) == "keywords"
+    assert match(recording("Ben Sample", "hello"), NeverStore(people=["kid example"], keywords=["dora"])) is None

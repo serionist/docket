@@ -12,6 +12,9 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 | `docket staging show <ref>` | one staged record, its cuts, and the version in raw that was cut, when there is one |
 | `docket staging classify <ref> work\|private` | work makes it ready, `--cut 120-340` (characters) or `--cut 12:30-14:05` (a time) cuts a stretch; private drops it |
 | `docket staging promote` | writes every ready record to the raw log, cut and redacted, one run per source, and commits |
+| `docket doc put <file or ->` | store a processed doc as its next rev; refused, with every problem and its line, when the frontmatter is wrong, an anchor doesn't resolve, or the doc changed since the rev it carries |
+| `docket doc read <locator>` | a doc, or a record and the doc lines that point at it; `--view raw` or `both` for the raw, `--around` for minutes, paragraphs or messages either side, `--rev` for an earlier revision |
+| `docket doc verify <doc>` | each line of a doc next to the raw its anchors point at; `--line` for chosen lines |
 
 A command finds its vault from `--vault`, `DOCKET_VAULT`, the working folder upward, a `vault/` folder in it, or the
 default the wizard recorded. A `<ref>` is a record's rid, or at least 6 characters of the key `staging list` shows.
@@ -33,3 +36,10 @@ Every record reaches the raw log through the gate. It reads `vault.yaml` on ever
 - A dropped record leaves no file and no log line, only a count.
 - What is redacted becomes `[redacted:<name>]`, and a cut stretch becomes `[cut]`; the secret itself is kept nowhere.
 - Staging lives in the vault's `staging/` folder, on this machine only, never committed.
+
+## Processed docs
+
+A processed doc's lines end with anchors: `@12:08` in a doc covering one record, `[r:<rid>@12:08]`, `[r:<rid>#2]` or
+`[r:<rid>]` across records (DR-0110). A locator is a doc's id or path, `r:<rid>@12:08`, or a rid. The same three
+operations are `docket.recall.doc_put`, `read` and `verify` in Python. A time resolves against the record's `segments`
+field, which the source's mapper fills (DR-0111); a record without segments takes paragraph and whole-record anchors.

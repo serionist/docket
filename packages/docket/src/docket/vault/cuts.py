@@ -3,7 +3,7 @@
 A cut is a range of characters in the staged text, or of milliseconds in a recording. Characters are cut here; times
 need the source's own cutter, which its connector registers, because only it knows where a recording keeps its
 segments. Every cutter leaves `[cut]` in `text` where it cut: that marker is how another machine knows the record was
-cut by hand.
+cut by hand. A transcript's text is rendered from its segments, so a record with segments takes time cuts only.
 """
 
 from __future__ import annotations
@@ -62,7 +62,10 @@ def cut_text(record: RawRecord, cuts: list[Cut]) -> RawRecord:
     """The default cutter: each character range of `text` becomes `[cut]`, and `native` is cleared, because a copy of
     the stretch there may be HTML or escaped, which a plain replace would miss."""
     if any(c.unit == "ms" for c in cuts):
-        raise DocketError(f"{record.source} has no cutter for time cuts; its connector brings one")
+        raise DocketError(
+            f"{record.source} has no cutter for time cuts; the core's comes with #10, and until then leave the record "
+            "pending or classify it whole"
+        )
     text = record.text
     for cut in sorted(cuts, key=lambda c: c.start, reverse=True):
         if cut.end > len(text):
@@ -75,6 +78,13 @@ def apply(record: RawRecord, cuts: Sequence[Cut]) -> RawRecord:
     """The record with its cuts made, by its source's cutter or the default one."""
     if not cuts:
         return record
+    if record.segments and any(c.unit == "char" for c in cuts):
+        # The text is rendered from the segments, so a character cut would leave the stretch in them.
+        raise DocketError(
+            f"{record.rid} is a transcript, its text rendered from its segments, so it takes time cuts, not "
+            "characters; time cuts come with the core's time cutter (#10), and until then leave the record pending "
+            "or classify it whole"
+        )
     cutter = _CUTTERS.get(record.source, cut_text)
     result = cutter(record, merge(cuts))
     if CUT_MARKER not in result.text:

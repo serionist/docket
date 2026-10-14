@@ -2,6 +2,9 @@
 # only through `uv run docs`; docs/docs-regime.md explains the schema.
 
 terms:
+  - term: anchor
+    definition: "What ends a line of a processed doc and points at the raw it came from: @mm:ss in a doc covering one record, [r:<rid>@mm:ss], [r:<rid>#n] or [r:<rid>] across records."
+    see: [packages/docket/src/docket/vault/anchors.py]
   - term: autonomy grant
     definition: "The maintainer's word that an agent runs a piece of work to its merge without asking. Every choice it would have asked about is recorded: as a proposed decision, and in the PR's Decided without asking."
     see: [.claude/skills/start-work/SKILL.md]
@@ -19,9 +22,19 @@ terms:
     definition: The one set of checks every change passes, `uv run gate`. The quick lane runs in seconds before every push; `gate full` is the merge rule.
     see: [tools/devkit/src/devkit/gate.py]
     close_terms: [staging gate (the vault's)]
+  - term: locator
+    definition: "What read takes: a doc's id or path, or a record part such as r:<rid>@12:08, the same in brackets, or a bare rid."
+    see: [packages/docket/src/docket/vault/anchors.py]
   - term: one-way door
     definition: Something users or their stored data depend on, such as a name, the vault's format or an MCP tool. It changes only with the maintainer's agreement, in a PR that names it.
     see: [AGENTS.md]
+  - term: processed doc
+    definition: "A summary, note, digest, brief or minutes in the vault: markdown with frontmatter naming the raw records it covers, every line ending with its anchors, written through doc_put."
+    see: [packages/docket/src/docket/vault/processed.py]
+    close_terms: [raw record (what it is built from)]
+  - term: segment
+    definition: "One utterance of a transcript: where it starts and ends in milliseconds from the record's start, who spoke, and what was said."
+    see: [packages/docket/src/docket/vault/segments.py]
   - term: staging gate
     definition: "The checks every record passes on its way from a connector to the raw log: the never-store lists, the source rules, classification, cuts and redaction. Records wait in the vault's staging/ folder, never committed."
     see: [packages/docket/src/docket/vault/gate.py]

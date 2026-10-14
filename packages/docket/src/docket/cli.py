@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -10,11 +11,14 @@ from typing import Annotated
 
 import typer
 
-from docket import __version__, userconfig
+from docket import __version__, recall, userconfig
 from docket.errors import DocketError
 from docket.vault import cuts
+from docket.vault.anchors import format_time
 from docket.vault.gate import Gate, Label
+from docket.vault.processed import DocRefusedError
 from docket.vault.records import RawRecord
+from docket.vault.spans import WINDOW, Span
 from docket.vault.staging import Classifier, Entry, State
 from docket.vault.vault import Vault
 from docket.vault.wizard import Given, Wizard
@@ -30,6 +34,8 @@ vault_app = typer.Typer(help="The vault: its state and its integrity.", no_args_
 app.add_typer(vault_app, name="vault")
 staging_app = typer.Typer(help="Records waiting for the gate: list, show, classify, promote.", no_args_is_help=True)
 app.add_typer(staging_app, name="staging")
+doc_app = typer.Typer(help="Processed docs: put one with its anchors, read it, verify it.", no_args_is_help=True)
+app.add_typer(doc_app, name="doc")
 
 VaultOption = Annotated[Path | None, typer.Option("--vault", help="The vault; default: DOCKET_VAULT, here, ./vault")]
 
@@ -256,6 +262,108 @@ def _by(value: str) -> Classifier:
     if value in ("user", "claude"):
         return value
     raise DocketError(f"--by is user or claude, not {value!r}")
+
+
+# C0 and C1 control characters and DEL, but newline and tab: raw text printed as it is could drive the terminal
+# (OSC 52 sets the clipboard).
+CONTROL = re.compile("[\\x00-\\x08\\x0b-\\x1f\\x7f-\\x9f]")
+
+
+def printable(text: str) -> str:
+    return CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", text)
+
+
+def say(text: str) -> None:
+    typer.echo(printable(text))
+
+
+def _span(s: Span, indent: str) -> None:
+    head = f"{indent}{s.anchor}"
+    if s.ts is not None:
+        head += f"  {s.kind} {s.ts:%Y-%m-%d %H:%M}Z"
+    if s.author:
+        head += f" {s.author}"
+    if s.versions > 1:
+        head += f" ({s.versions} versions; this is the latest)"
+    say(head)
+    if s.problem is not None:
+        say(f"{indent}  ! {s.problem}")
+    elif s.segments:
+        for seg in s.segments:
+            say(f"{indent}  {format_time(seg.start_ms // 1000)}  {seg.speaker or '?'}: {seg.text}")
+    else:
+        for line in s.text.split("\n"):
+            say(f"{indent}  {line}")
+
+
+@doc_app.command("put")
+def doc_put(
+    source: Annotated[str, typer.Argument(help="The doc's file, or - to read it from stdin.")],
+    vault: VaultOption = None,
+) -> None:
+    """Store a processed doc as its next rev; refused, with every problem, when it can't be."""
+    if source == "-":
+        data = sys.stdin.buffer.read()
+    elif Path(source).is_file():
+        data = Path(source).read_bytes()
+    else:
+        raise DocketError(f"no file {source}")
+    try:
+        text = data.decode("utf-8").removeprefix("\ufeff")
+    except UnicodeDecodeError:
+        raise DocketError(f"{source} isn't UTF-8") from None
+    try:
+        result = recall.doc_put(find_vault(vault), text)
+    except DocRefusedError as e:
+        for problem in e.problems:
+            say(str(problem))
+        say(f"refused: {len(e.problems)} problem(s)")
+        raise typer.Exit(1) from None
+    if result.taken_in:
+        say(f"a hand edit went in first, as rev {result.taken_in}")
+    say(f"{'put' if result.changed else 'unchanged'} {result.id} rev {result.rev}  {result.path}")
+
+
+@doc_app.command("read")
+def doc_read(
+    locator: Annotated[str, typer.Argument(help="A doc's id or path, or a record: a rid, or r:<rid>@mm:ss or #n.")],
+    view: Annotated[str, typer.Option(help="summary, raw or both.")] = "summary",
+    around: Annotated[int, typer.Option(help="Minutes, paragraphs or messages either side.")] = 0,
+    rev: Annotated[int | None, typer.Option(help="An earlier revision of a doc.")] = None,
+    vault: VaultOption = None,
+) -> None:
+    """A doc, or a record and the doc lines that point at it: the summary first, the raw for accuracy."""
+    result = recall.read(find_vault(vault), locator, view=view, around=around, rev=rev)
+    if result.doc is not None:
+        say(f"{result.doc.id} rev {result.doc.rev}  {result.doc.path}")
+        if result.doc.superseded_by:
+            say(f"superseded by {', '.join(result.doc.superseded_by)}")
+        for line in result.doc.lines:
+            say(f"{line.n:>4}  {line.text}")
+    elif result.view != "raw" and not result.lines:
+        say("no current doc points at it yet")
+    for cited in result.lines:
+        say(f"{cited.doc} rev {cited.rev} line {cited.n}: {cited.text}")
+    for s in result.spans:
+        _span(s, "")
+
+
+@doc_app.command("verify")
+def doc_verify(
+    doc: Annotated[str, typer.Argument(help="A doc's id or path.")],
+    line: Annotated[list[int] | None, typer.Option("--line", help="A line to check, by its number (repeat).")] = None,
+    window: Annotated[int, typer.Option(help="Seconds of transcript shown after a point in time.")] = WINDOW,
+    vault: VaultOption = None,
+) -> None:
+    """Each line of a doc next to the raw its anchors point at."""
+    result = recall.verify(find_vault(vault), doc, lines=line or None, window=window)
+    say(f"{result.doc} rev {result.rev}")
+    for checked in result.lines:
+        say(f"{checked.n:>4}  {checked.text}")
+        for problem in checked.problems:
+            say(f"        ! {problem}")
+        for s in checked.spans:
+            _span(s, "        ")
 
 
 def utf8_console() -> None:
