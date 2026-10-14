@@ -74,8 +74,8 @@ class Git:
         return self.run("lfs", "install", "--local", check=False).returncode == 0
 
     def commit(self, paths: list[str], message: str) -> str | None:
-        """Commit exactly these paths; None when they hold nothing new. Whatever else the user staged stays staged and
-        out of Docket's commit."""
+        """Commit exactly these file paths (files, not folders); None when they hold nothing new. Whatever else the
+        user staged stays staged and out of Docket's commit."""
         if not paths:
             return None
         # On stdin, not the command line: a backlog of run files would pass Windows' 32,767-character limit.
