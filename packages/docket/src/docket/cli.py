@@ -106,12 +106,16 @@ def init(
     source: Annotated[
         list[str] | None, typer.Option(help="A source to enable: name, or name=work|mixed|private (repeat).")
     ] = None,
+    storage: Annotated[
+        str | None, typer.Option(help="folder (a folder of the repo around it) or repo (a repo of its own).")
+    ] = None,
     remote: Annotated[str | None, typer.Option(help="none, a path or URL, or github[:name].")] = None,
     remote_is_private: Annotated[bool, typer.Option(help="Confirm a remote Docket can't check is private.")] = False,
+    allow_shared: Annotated[bool, typer.Option(help="Keep a folder vault in a repo others commit to.")] = False,
     allow_dirty_parent: Annotated[bool, typer.Option(help="Nest in a repo with uncommitted changes.")] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Take the defaults and don't ask.")] = False,
 ) -> None:
-    """Set up a vault: anywhere, or nested in a working folder that is its own git repo."""
+    """Set up a vault: a folder of the repo you work in, or a repo of its own."""
     given = Given(
         path=path,
         owner=owner,
@@ -120,8 +124,10 @@ def init(
         time_zone=time_zone,
         machine=machine,
         sources=source or [],
+        storage=storage,
         remote=remote,
         remote_is_private=remote_is_private,
+        allow_shared=allow_shared,
         allow_dirty_parent=allow_dirty_parent,
         yes=yes,
     )
