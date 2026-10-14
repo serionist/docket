@@ -202,6 +202,68 @@ class DocStore:
         return problems
 
     def _put_locked(self, doc: ProcessedDoc, head: list[str]) -> PutResult:
+        result, text = self._check_locked(doc, head)
+        if text is None:
+            return result
+        commit = self._write_all_and_commit([(result.path, text)], f"Doc: {result.id} rev {result.rev}")
+        return result.model_copy(update={"commit": commit})
+
+    def put_many(self, texts: list[str], subject: str) -> list[PutResult | DocRefusedError]:
+        """Store several docs in one commit: each is checked as `put` checks one, and refused on its own; the accepted
+        ones are written and committed together, the commit's body holding a `Doc: <id> rev <n>` line for each. If a
+        write or the commit fails, every file goes back as it was and nothing stays staged."""
+        out: list[PutResult | DocRefusedError | None] = [None] * len(texts)
+        ready: list[tuple[int, ProcessedDoc, list[str]]] = []
+        for i, text in enumerate(texts):
+            head = normalize_newlines(text.removeprefix("﻿")).split("\n")
+            try:
+                doc = parse_doc(text)
+                problems = [] if _reads_back(doc) else [DocProblem(None, "the frontmatter can't be written back")]
+                problems += self._against_raw(doc, head)
+            except DocRefusedError as e:
+                out[i] = e
+                continue
+            if problems:
+                out[i] = DocRefusedError(problems)
+            else:
+                ready.append((i, doc, head))
+        writes: list[tuple[int, PutResult, str]] = []
+        with self.vault.writing():
+            seen: set[str] = set()
+            for i, doc, head in ready:
+                if doc.meta.id in seen:
+                    out[i] = DocRefusedError([DocProblem(None, f"{doc.meta.id} is in this batch twice")])
+                    continue
+                seen.add(doc.meta.id)
+                try:
+                    result, text = self._check_locked(doc, head)
+                except DocRefusedError as e:
+                    out[i] = e
+                    continue
+                if text is None:
+                    out[i] = result
+                else:
+                    writes.append((i, result, text))
+            if writes:
+                lines = "\n".join(f"Doc: {result.id} rev {result.rev}" for _, result, _ in writes)
+                commit = self._write_all_and_commit([(r.path, t) for _, r, t in writes], f"{subject}\n\n{lines}")
+                for i, result, _ in writes:
+                    out[i] = result.model_copy(update={"commit": commit})
+        return [r for r in out if r is not None]
+
+    def latest_revs(self, doc_type: str) -> dict[str, int]:
+        """The last rev of every doc of a type that git history knows, files deleted since included, from one log."""
+        out = self.vault.git.out("log", "--no-show-signature", "--format=%B", "--", f"processed/{doc_type}")
+        revs: dict[str, int] = {}
+        for line in out.splitlines():
+            m = DOC_LINE.match(line.strip())
+            if m and m.group(1).startswith(f"{doc_type}:"):
+                revs[m.group(1)] = max(revs.get(m.group(1), 0), int(m.group(2)))
+        return revs
+
+    def _check_locked(self, doc: ProcessedDoc, head: list[str]) -> tuple[PutResult, str | None]:
+        """Under the lock: take in a hand edit, then check the rev and supersedes. The result, and the text to write at
+        the next rev, or None when nothing changed."""
         meta = doc.meta
         rel = doc_path(meta.id).as_posix()
         path = self.root / rel
@@ -215,7 +277,7 @@ class DocStore:
                 taken_in, on_disk = self._take_in(meta.id, path, on_disk, stored)
                 stored = taken_in
         if on_disk is not None and parse_doc(on_disk, lenient=True).render(rev=0) == doc.render(rev=0):
-            return PutResult(id=meta.id, rev=stored, path=rel, changed=False, taken_in=taken_in)
+            return PutResult(id=meta.id, rev=stored, path=rel, changed=False, taken_in=taken_in), None
         problems: list[DocProblem] = []
         rev_line = key_line(head[1 : doc.head_lines - 1], "rev")
         if not stored and meta.rev:
@@ -228,8 +290,7 @@ class DocStore:
         if problems:
             raise DocRefusedError(problems)
         rev = stored + 1
-        commit = self._write_and_commit(path, rel, doc.render(rev=rev), f"Doc: {meta.id} rev {rev}")
-        return PutResult(id=meta.id, rev=rev, path=rel, changed=True, commit=commit, taken_in=taken_in)
+        return PutResult(id=meta.id, rev=rev, path=rel, changed=True, taken_in=taken_in), doc.render(rev=rev)
 
     def _supersedes_problems(self, meta: DocMeta, head: list[str], head_lines: int) -> list[DocProblem]:
         line = key_line(head[1 : head_lines - 1], "supersedes")
@@ -278,17 +339,23 @@ class DocStore:
             raise
         return rev, text
 
-    def _write_and_commit(self, path: Path, rel: str, text: str, message: str) -> str | None:
-        original = path.read_bytes() if path.is_file() else None
-        self._replace(path, text.encode("utf-8"))
+    def _write_all_and_commit(self, files: list[tuple[str, str]], message: str) -> str | None:
+        """Write each (path, text) and commit them together. If a write or the commit fails, every file written goes
+        back to its old bytes (or away, when it is new) and nothing stays staged."""
+        originals: list[tuple[str, bytes | None]] = []
         try:
-            return self.vault.commit([rel], message)
+            for rel, text in files:
+                path = self.root / rel
+                originals.append((rel, path.read_bytes() if path.is_file() else None))
+                self._replace(path, text.encode("utf-8"))
+            return self.vault.commit([rel for rel, _ in files], message)
         except BaseException:
-            self._unstage(rel)
-            if original is None:
-                path.unlink(missing_ok=True)
-            else:
-                self._replace(path, original)
+            for rel, original in reversed(originals):
+                self._unstage(rel)
+                if original is None:
+                    (self.root / rel).unlink(missing_ok=True)
+                else:
+                    self._replace(self.root / rel, original)
             raise
 
     def _unstage(self, rel: str) -> None:

@@ -530,3 +530,68 @@ def test_a_put_during_a_stash_pop_conflict_is_refused_and_commits_nothing(vault:
     assert sh(vault.root, "git", "ls-files", "-u")
     with pytest.raises(DocketError, match="has a conflict"):
         vault.commit([], "anything")
+
+
+def legacy(slug: str, body: str = "Old note.", rev: str | None = None) -> str:
+    rev_line = f"rev: {rev}\n" if rev else ""
+    return f"---\nid: legacy-note:{slug}\ntype: legacy-note\n{rev_line}by: docket import\n---\n{body}\n"
+
+
+def test_put_many_writes_every_doc_in_one_commit(vault: Vault) -> None:
+    store = DocStore(vault)
+    results = store.put_many([legacy("one"), legacy("two"), legacy("three")], "Import notes: 3 new from notes")
+    shas = {r.commit for r in results if not isinstance(r, DocRefusedError)}
+    assert len(shas) == 1
+    sha = shas.pop()
+    assert sha == head(vault)
+    message = sh(vault.root, "git", "log", "-1", "--format=%B")
+    assert message.splitlines()[:2] == ["Import notes: 3 new from notes", ""]
+    assert "Doc: legacy-note:two rev 1" in message
+    assert store.history("legacy-note:three") == [(1, sha)]
+    assert store.latest_revs("legacy-note") == {"legacy-note:one": 1, "legacy-note:two": 1, "legacy-note:three": 1}
+    assert staged(vault) == ""
+
+
+def test_put_many_refuses_each_doc_on_its_own(vault: Vault) -> None:
+    store = DocStore(vault)
+    store.put_many([legacy("one"), legacy("two")], "Import notes")
+    before = head(vault)
+    broken = "---\nid: legacy-note:bad\n---\n"
+    results = store.put_many(
+        [legacy("one", rev="1"), legacy("two", "Changed.", rev="7"), broken, legacy("three"), legacy("three")],
+        "Import notes again",
+    )
+    assert [type(r).__name__ for r in results] == [
+        "PutResult",
+        "DocRefusedError",
+        "DocRefusedError",
+        "PutResult",
+        "DocRefusedError",
+    ]
+    unchanged, stale, bad, new, twice = results
+    assert not isinstance(unchanged, DocRefusedError)
+    assert (unchanged.changed, unchanged.commit) == (False, None)
+    assert isinstance(stale, DocRefusedError)
+    assert "is at rev 1 now" in str(stale)
+    assert isinstance(bad, DocRefusedError)
+    assert isinstance(twice, DocRefusedError)
+    assert "in this batch twice" in str(twice)
+    assert not isinstance(new, DocRefusedError)
+    assert new.commit == head(vault) != before
+    covering = legacy("covers").replace("by: docket", "covers:\n  - calls:gone\nby: docket")
+    assert isinstance(store.put_many([covering], "x")[0], DocRefusedError)
+    assert store.put_many([], "nothing") == []
+    assert store.put_many([legacy("one", rev="1")], "no change")[0].commit is None  # type: ignore[union-attr]
+
+
+def test_put_many_puts_every_file_back_when_the_commit_fails(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = DocStore(vault)
+    store.put_many([legacy("one")], "Import notes")
+    one = vault.root / "processed" / "legacy-note" / "one.md"
+    before = one.read_bytes()
+    fail_commits(vault, monkeypatch)
+    with pytest.raises(DocketError, match="a hook said no"):
+        store.put_many([legacy("one", "Changed.", rev="1"), legacy("two")], "Import notes again")
+    assert one.read_bytes() == before
+    assert not (vault.root / "processed" / "legacy-note" / "two.md").exists()
+    assert staged(vault) == ""
