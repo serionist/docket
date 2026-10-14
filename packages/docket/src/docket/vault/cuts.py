@@ -62,7 +62,10 @@ def cut_text(record: RawRecord, cuts: list[Cut]) -> RawRecord:
     """The default cutter: each character range of `text` becomes `[cut]`, and `native` is cleared, because a copy of
     the stretch there may be HTML or escaped, which a plain replace would miss."""
     if any(c.unit == "ms" for c in cuts):
-        raise DocketError(f"{record.source} has no cutter for time cuts; its connector brings one")
+        raise DocketError(
+            f"{record.source} has no cutter for time cuts; the core's comes with #10, and until then leave the record "
+            "pending or classify it whole"
+        )
     text = record.text
     for cut in sorted(cuts, key=lambda c: c.start, reverse=True):
         if cut.end > len(text):
@@ -78,8 +81,9 @@ def apply(record: RawRecord, cuts: Sequence[Cut]) -> RawRecord:
     if record.segments and any(c.unit == "char" for c in cuts):
         # The text is rendered from the segments, so a character cut would leave the stretch in them.
         raise DocketError(
-            f"{record.rid} is a transcript, its text rendered from its segments: cut a time, such as 12:30-14:05, "
-            "not characters"
+            f"{record.rid} is a transcript, its text rendered from its segments, so it takes time cuts, not "
+            "characters; time cuts come with the core's time cutter (#10), and until then leave the record pending "
+            "or classify it whole"
         )
     cutter = _CUTTERS.get(record.source, cut_text)
     result = cutter(record, merge(cuts))

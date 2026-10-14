@@ -49,7 +49,7 @@ def test_a_cut_past_the_end_is_refused() -> None:
 
 def test_time_cuts_need_the_source_s_cutter() -> None:
     record = make_record(text="a recording")
-    with pytest.raises(DocketError, match="no cutter for time cuts"):
+    with pytest.raises(DocketError, match=r"no cutter for time cuts; the core's comes with #10.*classify it whole"):
         apply(record, [Cut(start=0, end=1000, unit="ms")])
 
 
@@ -112,9 +112,9 @@ def test_a_transcript_takes_time_cuts_only() -> None:
         segments=segments,
     )
     register_cutter("calls", time_cutter)
-    with pytest.raises(DocketError, match=r"calls:rec-1 is a transcript.*cut a time"):
+    with pytest.raises(DocketError, match=r"calls:rec-1 is a transcript.*takes time cuts.*\(#10\).*classify it whole"):
         apply(record, [Cut(start=23, end=48)])
-    with pytest.raises(DocketError, match="cut a time"):
+    with pytest.raises(DocketError, match="takes time cuts"):
         apply(record, [Cut(start=1000, end=2000, unit="ms"), Cut(start=0, end=5)])
     out = apply(record, [Cut(start=1000, end=2000, unit="ms")])
     assert [s.text for s in out.segments or []] == ["work part."]
