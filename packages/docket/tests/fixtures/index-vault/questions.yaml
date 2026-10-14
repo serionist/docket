@@ -1,20 +1,24 @@
-# Invented questions over the index fixture, each with where its answer is: a locator the top five hits start with
-# (a hit's own locator or one collapsed under it), and the group it sits in when that matters. They seed the question
-# set `docket eval` runs (phase 1).
+# Invented questions over the index fixture, each with where its answer is: a locator among the top five hits (a hit's
+# own or one collapsed under it), matched exactly, or a record's locator that the hit's extends with @ or #. The group
+# it sits in is named when that matters. They seed the question set `docket eval` runs (phase 1).
+# The second transcript writes "tíz millió"; the first writes "tízmillió", one word that "millió" never finds.
 - q: millió forint
-  expect: "r:calls:rec-0100"
+  expect: "r:calls:rec-0100-second@00:30-01:51"
 - q: hatarido
-  expect: "r:calls:rec-0100@02:30"
+  expect: "r:calls:rec-0100@02:30-04:00"
 - q: Nortwin
-  expect: "r:calls:rec-0100@01:50"
+  expect: "r:calls:rec-0100@01:50-03:20"
 - q: cold-rated model
   expect: "r:chat:C0OPS/1791400800.000100"
 - q: day rate
-  expect: "r:mail:<offer-1@northwind.example>#"
+  expect: "r:mail:<offer-1@northwind.example>#1-4"
 - q: deadline with Ben
   expect: "recording-note:2026-10-07-supplier-call"
   group: "calls:rec-0100"
 - q: múlt héten pallet labels
   expect: "r:chat:C0OPS/1791400000.000100"
 - q: fleet dashboard battery
-  expect: "r:calls:rec-0101@"
+  expect: "r:calls:rec-0101@00:00-01:30"
+# Inflected, where the call says the bare word: Snowball cuts "projekt" to "proj" and "projektről" to "projekt".
+- q: projektről
+  expect: "r:calls:rec-0100@05:00-06:00"

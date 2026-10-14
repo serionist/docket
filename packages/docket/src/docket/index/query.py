@@ -154,11 +154,19 @@ def _instant(value: datetime | date, tz: ZoneInfo, end: bool) -> datetime:
     return datetime(day.year, day.month, day.day, tzinfo=tz)
 
 
+def _span(row: _Row) -> tuple[float, float]:
+    """A transcript chunk's stretch in absolute milliseconds: its time is the record's plus the window's start."""
+    at = _time(row.ts)
+    start = at.timestamp() * 1000 if at is not None else float(row.start_ms or 0)
+    return start, start + (row.end_ms or 0) - (row.start_ms or 0)
+
+
 def _overlaps(a: _Row, b: _Row) -> bool:
-    """Two hits on the same stretch: two transcripts of one recording whose times overlap by more than half the
-    shorter (a record's own windows share an utterance, and stay apart), or a message inside a window."""
+    """Two hits on the same stretch: two transcripts whose times overlap by more than half the shorter (a record's
+    own windows share an utterance, and stay apart), or a message inside a window. Times are absolute, so two
+    recordings in one thread don't hide each other."""
     if a.kind == b.kind == "transcript" and a.rid != b.rid:
-        a0, a1, b0, b1 = a.start_ms or 0, a.end_ms or 0, b.start_ms or 0, b.end_ms or 0
+        (a0, a1), (b0, b1) = _span(a), _span(b)
         overlap = min(a1, b1) - max(a0, b0)
         shorter = min(a1 - a0, b1 - b0)
         return overlap > shorter / 2 if shorter else overlap >= 0
@@ -248,6 +256,11 @@ class _Search:
         forms = [("folded", fold(word))]
         for lang in self.langs.languages:
             forms += [(lang.column, f) for f in self.analyzer.forms(word, lang)]
+            twice = self.analyzer.restem(word, lang)
+            # Only when the stem is a word the index holds as written: a bare word's stem is no word, and its second
+            # cut (`forint` to `forin` to `for`) would meet every English `for`.
+            if twice is not None and len(twice[1]) >= matching.SHORT and self._docs("folded", twice[0]):
+                forms.append((lang.column, twice[1]))
         return forms
 
     def word_groups(self, tokens: list[str]) -> tuple[list[tuple[str, str]], list[str]]:

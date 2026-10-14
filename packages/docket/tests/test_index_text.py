@@ -63,6 +63,25 @@ def test_inflected_hungarian_stems_pinned(word: str, stem: str) -> None:
     assert Analyzer(resolve(["hu"])).stem(word, language("hu")) == stem
 
 
+@pytest.mark.parametrize(
+    ("inflected", "bare"),
+    [("forintot", "forint"), ("forintban", "forint"), ("projektet", "projekt"), ("projektről", "projekt"),
+     ("ajánlatot", "ajánlat"), ("ajánlatról", "ajánlat"), ("robotot", "robot"), ("robotok", "robot")],
+)  # fmt: skip
+def test_an_inflected_word_s_stem_stemmed_again_is_the_bare_word_s_stem(inflected: str, bare: str) -> None:
+    analyzer = Analyzer(resolve(["en", "hu"]))
+    hu = language("hu")
+    assert analyzer.stem(bare, hu) not in analyzer.forms(inflected, hu)
+    assert analyzer.restem(inflected, hu) == (fold(bare), analyzer.stem(bare, hu))
+
+
+def test_only_a_language_that_stems_twice_restems_and_only_when_the_second_cut_differs() -> None:
+    analyzer = Analyzer(resolve(["en", "hu"]))
+    assert analyzer.restem("robotot", language("en")) is None
+    assert analyzer.restem("robot", language("hu")) is None
+    assert analyzer.restem("határidőről", language("hu")) is None
+
+
 def test_a_word_s_forms_meet_its_inflected_forms() -> None:
     analyzer = Analyzer(resolve(["en", "hu"]))
     hu = language("hu")

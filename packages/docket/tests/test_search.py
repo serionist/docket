@@ -1,20 +1,34 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
-from docket_testkit import CALL, FLEET, INDEX_FIXTURE, INDEX_NOW, OFFER, PARENT, copy_vault, index_template
+from docket_testkit import (
+    CALL,
+    FLEET,
+    INDEX_FIXTURE,
+    INDEX_NOW,
+    OFFER,
+    PARENT,
+    copy_vault,
+    index_config,
+    index_template,
+    make_record,
+)
 
 from docket.errors import DocketError
 from docket.index import query as search_module
 from docket.index import rebuild, search
 from docket.index.build import languages_of, open_index
 from docket.index.query import SearchResult
+from docket.vault.records import RawRecord
 from docket.vault.vault import Vault
 
 QUESTIONS: list[dict[str, Any]] = yaml.safe_load((INDEX_FIXTURE / "questions.yaml").read_text(encoding="utf-8"))
+LATER = datetime(2026, 10, 14, 9, 0, tzinfo=UTC)
 
 
 @pytest.fixture(scope="module")
@@ -36,18 +50,43 @@ def hits(result: SearchResult) -> list[tuple[str, str]]:
     return [(g.key, h.locator) for g in result.groups for h in g.hits]
 
 
+def answers(loc: str, expect: str) -> bool:
+    """The locator expected, or a part of the record expected: a prefix alone would let `rec-0100` answer for
+    `rec-0100-second`."""
+    return loc == expect or loc.startswith((f"{expect}@", f"{expect}#"))
+
+
+def test_an_answer_is_its_locator_or_a_part_of_its_record() -> None:
+    assert answers("r:calls:rec-0100@00:30-01:50", "r:calls:rec-0100")
+    assert answers("r:mail:<offer-1@northwind.example>#1-4", "r:mail:<offer-1@northwind.example>")
+    assert not answers("r:calls:rec-0100-second@00:30-01:51", "r:calls:rec-0100")
+    assert not answers("r:calls:rec-0100@02:30-04:00", "r:calls:rec-0100@02:30")
+
+
 @pytest.mark.parametrize("question", QUESTIONS, ids=[q["q"] for q in QUESTIONS])
 def test_each_question_finds_its_answer_in_the_top_five(vault: Vault, question: dict[str, Any]) -> None:
     result = find(vault, question["q"], k=5)
     found = [(g.key, loc) for g in result.groups for h in g.hits for loc in (h.locator, *h.also)]
-    assert any(loc.startswith(question["expect"]) for _, loc in found), found
+    assert any(answers(loc, question["expect"]) for _, loc in found), found
     if "group" in question:
-        assert any(key == question["group"] and loc.startswith(question["expect"]) for key, loc in found)
+        assert any(key == question["group"] and answers(loc, question["expect"]) for key, loc in found)
 
 
 def test_a_bare_word_finds_its_inflected_form_through_its_dative_stem(vault: Vault) -> None:
     result = find(vault, "forint", sources=["calls"], k=20)
     assert any(loc.startswith(f"r:{CALL}@00:") for loc in locators(result))
+
+
+def test_an_inflected_word_finds_the_bare_word_through_its_stem_stemmed_again(tmp_path: Path) -> None:
+    v = Vault.init(tmp_path / "vault", index_config(), "test-box")
+    said = ["Az ajánlat még nincs kész, a robot leállt.", "A projekt felelőse Dóra.", "Thanks for the update."]
+    v.write_run("chat", [make_record(n, container="chat:C0X", text=t) for n, t in enumerate(said, start=1)], LATER)
+    rebuild(v)
+    for query, expect in [("ajánlatot", 1), ("ajánlatról", 1), ("robotot", 1), ("projektről", 2)]:
+        result = find(v, query)
+        assert [h.rid for g in result.groups for h in g.hits] == [f"chat:C0TEST/179100000{expect}.000100"], query
+    # A bare word's stem is no word the index holds, so its second cut (`forint`, `forin`, `for`) isn't searched.
+    assert find(v, "forint").groups == []
 
 
 def test_all_then_any_then_prefixes(vault: Vault) -> None:
@@ -153,6 +192,23 @@ def test_two_transcripts_of_one_stretch_collapse_and_a_record_s_own_windows_do_n
     harbour = find(vault, "harbour", sources=["calls"], k=20)
     windows = [h.locator for g in harbour.groups for h in g.hits if h.rid == CALL]
     assert len(windows) >= 2
+
+
+def test_two_recordings_in_one_thread_at_other_hours_stay_apart(tmp_path: Path) -> None:
+    v = Vault.init(tmp_path / "vault", index_config(), "test-box")
+
+    def part(n: int, hour: int, said: str) -> RawRecord:
+        segs = [{"start_ms": 0, "end_ms": 50000, "speaker": "Ben Sample", "text": said}]
+        return make_record(
+            rid=f"calls:part-{n}", source="calls", kind="transcript", container=None, thread="calls:meeting-7",
+            ts=datetime(2026, 10, 12, hour, tzinfo=UTC), native={"segments": segs},
+        )  # fmt: skip
+
+    v.write_run("calls", [part(1, 8, "the crane budget is fine"), part(2, 10, "the crane budget was cut")], LATER)
+    rebuild(v)
+    result = find(v, "crane budget")
+    assert sorted(h.rid or "" for g in result.groups for h in g.hits) == ["calls:part-1", "calls:part-2"]
+    assert all(h.also == [] for g in result.groups for h in g.hits)
 
 
 def test_groups_carry_their_kind_title_and_current_summary(vault: Vault) -> None:

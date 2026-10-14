@@ -101,6 +101,17 @@ class Analyzer:
         extra = lang.more(word) if lang.more is not None else []
         return dedupe(fold(x) for x in [s.stem(word), word, *(s.stem(x) for x in extra)])
 
+    def restem(self, word: str, lang: Language) -> tuple[str, str] | None:
+        """A word's stem and that stem stemmed again, folded, when the language stems twice and the second cut
+        differs. For an inflected word the stem is the bare word, and the second cut is what the bare word holds in
+        the stemmed column; search keeps it only when the index holds the bare word as written."""
+        if not lang.restem:
+            return None
+        s = stemmer(lang)
+        once = s.stem(word)
+        again = fold(s.stem(once))
+        return None if again == fold(once) else (fold(once), again)
+
     def seeds(self, word: str, lang: Language) -> list[str]:
         """What a misspelling is looked for from in a stemmed vocabulary: the hook's stems and the word as written,
         not Snowball's cut stem, which is shorter than the word."""

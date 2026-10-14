@@ -44,6 +44,9 @@ class Language:
     # More words to stem for a word (lowercased, as written), because the stemmer cuts a bare word shorter than an
     # inflected one.
     more: Callable[[str], list[str]] | None = None
+    # A query word's stem is stemmed again, because the stemmer cuts a bare word further than the same word inflected
+    # (`robot` to `rob`, `robotot` to `robot`): the second cut meets the bare word.
+    restem: bool = False
     time_words: tuple[TimeWord, ...] = ()
 
     @property
@@ -96,7 +99,7 @@ def hungarian_dative(word: str) -> list[str]:
 
 KNOWN: dict[str, Language] = {
     "en": Language("en", "english", time_words=ENGLISH_TIME),
-    "hu": Language("hu", "hungarian", alias_stems=True, more=hungarian_dative, time_words=HUNGARIAN_TIME),
+    "hu": Language("hu", "hungarian", alias_stems=True, more=hungarian_dative, restem=True, time_words=HUNGARIAN_TIME),
 }
 
 
