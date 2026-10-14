@@ -36,6 +36,8 @@ GITATTRIBUTES = """\
 * text=auto eol=lf
 # Files several machines append to merge by keeping both sides' lines.
 *.jsonl merge=union
+# Hold lists from several machines merge by keeping both sides' ids.
+state/holds/*.txt merge=union
 # Media goes to LFS, encrypted per file.
 media/** filter=lfs diff=lfs merge=lfs -text
 """
