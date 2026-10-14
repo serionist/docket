@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from docket.vault.config import Owner, SourceConfig, VaultConfig
+from docket.vault.config import NeverStore, Owner, SourceConfig, VaultConfig
 from docket.vault.records import RawRecord, version
 from docket.vault.vault import Vault
 
@@ -255,3 +255,88 @@ def template_with(factory: pytest.TempPathFactory, make: Callable[[Path], Vault]
 def index_template(factory: pytest.TempPathFactory) -> Path:
     """The index fixture built once for a test module; tests copy it."""
     return template_with(factory, build_index_vault)
+
+
+# An invented notes folder, as an existing setup would have it: notes per source, a clash of stems, a note naming two
+# recordings, one naming a recording not in the raw log yet, one with its own frontmatter, CRLF with a BOM, a
+# credential, Latin-1, files that aren't notes, a folder git ignores, and two the never-store keywords catch: one by
+# its text, one by a folder name that sorts first, so a path logged before the screen would show.
+NEVER_STORE_KEYWORDS = ["dora example", "project falcon"]
+NOTES: dict[str, bytes] = {
+    "notes/0-people/dora-example/2026-09-01-catch-up.md": b"# Catch-up\n\nAll fine.\n",
+    "notes/calls/2026-09-10-supplier-call.md": (
+        b"# Supplier call\n\nSource: call recorder `rec-0042`, 45 min.\n\n## What was said\n\n"
+        b"- Ben put the consultant at 10 million forints (12:08).\n- The follow-up is `rec-0099`.\n"
+    ),
+    "notes/calls/2026-09-12-two-parts.md": b"# Two parts\n\nRecorded as calls:rec-0042 and vendor:rec-0007.\n",
+    "notes/calls/2026-09-14-later.md": b"# A later call\n\nSource: `calls:rec-0050`, not fetched yet.\n",
+    "notes/calls/2026-10-14-supplier-call.md": b"# Supplier call again\n\nNo recorder id here.\n",
+    "notes/chat/2026-09-10-supplier-call.md": b"# Chat about the supplier\n\nBen and Cleo agreed on Friday.\n",
+    "notes/falcon.md": b"# Plans\n\nProject Falcon starts in spring.\n",
+    "notes/latin1.md": b"caf\xe9\n",
+    "notes/mail/2026-09-11-offer.md": (
+        b"\xef\xbb\xbf# The offer\r\n\r\nCleo sent the offer.\r\npassword: hunter2-Example\r\n"
+    ),
+    "notes/own-frontmatter.md": b"---\ntags: [old]\n---\n# With its own frontmatter\n",
+    "notes/photo.jpg": b"\xff\xd8\xff\xe0",
+    "notes/private/diary.md": b"# Kept out of git\n",
+    "notes/raw.json": b"{}\n",
+    "notes/árvíztűrő-jegyzet.md": "# Árvíztűrő tükörfúrógép\n".encode(),
+}
+UNTRACKED_NOTE = "notes/calls/2026-09-13-untracked.md"
+ADA = ("-c", "user.name=Ada Example", "-c", "user.email=ada@example.invalid")
+
+
+def make_notes_repo(root: Path) -> Path:
+    """The invented notes folder in a git repo of its own, committed, with one note not committed yet; returns the
+    notes folder."""
+    repo = root / "work"
+    for rel, data in NOTES.items():
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    (repo / ".gitignore").write_text("notes/private/\n", encoding="utf-8")
+    sh(repo, "git", "init", "-q", "-b", "main")
+    sh(repo, "git", "add", "-A")
+    sh(repo, "git", *ADA, "commit", "-q", "-m", "notes")
+    (repo / UNTRACKED_NOTE).write_text("# Not committed yet\n\nA new note.\n", encoding="utf-8")
+    return repo / "notes"
+
+
+def isolated_git(mp: pytest.MonkeyPatch, home: Path) -> None:
+    """The git and Docket settings conftest gives each test, for a fixture built once per module."""
+    (home / "gitconfig").write_text("", encoding="utf-8")
+    mp.setenv("GIT_CONFIG_GLOBAL", str(home / "gitconfig"))
+    mp.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    mp.setenv("DOCKET_CONFIG_DIR", str(home / "docket"))
+    mp.setenv("DOCKET_MACHINE", "test-box")
+    for name in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
+        mp.delenv(name, raising=False)
+
+
+def screening(vault: Vault) -> Vault:
+    """The vault with the fixture's never-store keywords in its settings, in memory and in vault.yaml."""
+    vault.config = vault.config.model_copy(update={"never_store": NeverStore(keywords=NEVER_STORE_KEYWORDS)})
+    (vault.root / "vault.yaml").write_text(vault.config.dump(), encoding="utf-8", newline="\n")
+    return vault
+
+
+def notes_template(factory: pytest.TempPathFactory) -> Path:
+    """The invented notes repo built once for a module; returns the repo (its notes folder is notes/)."""
+    with pytest.MonkeyPatch.context() as mp:
+        isolated_git(mp, factory.mktemp("notes-home"))
+        return make_notes_repo(factory.mktemp("notes")).parent
+
+
+def imported_template(factory: pytest.TempPathFactory, vault_template: Path, repo_template: Path) -> Path:
+    """A vault after importing the invented notes folder, and the folder beside it, built once for a module: returns
+    the folder holding both (vault/ and work/)."""
+    from docket.imports.notes import import_notes
+
+    base = factory.mktemp("imported")
+    with pytest.MonkeyPatch.context() as mp:
+        isolated_git(mp, factory.mktemp("imported-home"))
+        vault = screening(copy_vault(vault_template, base))
+        shutil.copytree(repo_template, base / "work")
+        import_notes(vault, base / "work" / "notes")
+    return base
