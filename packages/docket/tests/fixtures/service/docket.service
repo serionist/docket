@@ -1,0 +1,12 @@
+[Unit]
+Description=Docket: the local service for Claude and the web app
+
+[Service]
+Type=simple
+ExecStart="/home/Árvíztűrő Teszt %%USERNAME%% $$HOME/venv/bin/python" "-X" "utf8" "-m" "docket" "serve" "--env-file" "/home/Árvíztűrő Teszt %%USERNAME%% $$HOME/docket/service-env.json"
+WorkingDirectory="/home/Árvíztűrő Teszt %%USERNAME%% $$HOME/docket/log"
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>Label</key>
+	<string>io.github.serionist.docket-test</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/Árvíztűrő Teszt %USERNAME% $HOME/venv/bin/python</string>
+		<string>-X</string>
+		<string>utf8</string>
+		<string>-m</string>
+		<string>docket</string>
+		<string>serve</string>
+		<string>--env-file</string>
+		<string>/Users/Árvíztűrő Teszt %USERNAME% $HOME/docket/service-env.json</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/Users/Árvíztűrő Teszt %USERNAME% $HOME/docket/log/launchd.log</string>
+	<key>StandardOutPath</key>
+	<string>/Users/Árvíztűrő Teszt %USERNAME% $HOME/docket/log/launchd.log</string>
+	<key>WorkingDirectory</key>
+	<string>/Users/Árvíztűrő Teszt %USERNAME% $HOME/docket/log</string>
+</dict>
+</plist>
