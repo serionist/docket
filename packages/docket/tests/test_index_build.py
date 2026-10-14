@@ -105,6 +105,21 @@ def test_raw_lines_are_read_leniently(vault: Vault) -> None:
     assert {"still indexed", "from a newer docket"} <= texts
 
 
+def test_an_unknown_field_inside_an_attachment_is_left_out_and_the_record_indexed(vault: Vault) -> None:
+    attached = json.loads(make_record(92, text="the winch manual", attachments=[{"name": "winch.pdf"}]).to_json())
+    attached["attachments"][0] |= {"size": 1234, "pages": 9}
+    odd = json.loads(make_record(93, text="an attachment that is only a name").to_json()) | {"attachments": ["x.pdf"]}
+    run_file(vault, "2026-10-14T1200-test-box.jsonl", [json.dumps(attached), json.dumps(odd)])
+    report = rebuild(vault)
+    place = "raw/chat/2026/10/2026-10-14T1200-test-box.jsonl"
+    assert (
+        f"{place}:1: fields this Docket doesn't know, left out: attachments.pages, attachments.size" in report.problems
+    )
+    assert any(p.startswith(f"{place}:2: not a raw record: attachments.0") for p in report.problems)
+    texts = {r[0] for r in rows(vault, "SELECT text FROM chunks WHERE kind = 'message'")}
+    assert "the winch manual" in texts
+
+
 def test_malformed_segments_are_a_problem_and_the_text_is_indexed(vault: Vault) -> None:
     broken = make_record(
         rid="calls:broken", source="calls", kind="recording", container=None, text="Fallback text.",
@@ -150,11 +165,10 @@ def test_a_failure_halfway_leaves_the_old_index(vault: Vault, monkeypatch: pytes
     assert not list((vault.root / "index").glob("*.tmp"))
 
 
-def test_a_hot_journal_beside_the_old_index_is_rolled_back_first(vault: Vault, tmp_path: Path) -> None:
-    rebuild(vault)
-    db = build.db_path(vault)
+def interrupted_update(db: Path, tmp_path: Path) -> Path:
+    """The index and the hot journal an update killed halfway leaves: its pages written, its journal still there."""
     crashed = tmp_path / "crashed"
-    crashed.mkdir()
+    crashed.mkdir(exist_ok=True)
     conn = sqlite3.connect(db, isolation_level=None)
     conn.execute("PRAGMA cache_size = 1")
     conn.execute("BEGIN")
@@ -167,12 +181,60 @@ def test_a_hot_journal_beside_the_old_index_is_rolled_back_first(vault: Vault, t
     conn.close()
     shutil.copy(crashed / db.name, db)
     shutil.copy(crashed / journal.name, journal)
+    return journal
+
+
+def test_a_hot_journal_beside_the_old_index_is_rolled_back_first(vault: Vault, tmp_path: Path) -> None:
+    rebuild(vault)
+    db = build.db_path(vault)
+    journal = interrupted_update(db, tmp_path)
     rebuild(vault)
     assert not journal.exists()
     check = sqlite3.connect(db)
     assert check.execute("PRAGMA integrity_check").fetchone() == ("ok",)
     assert check.execute("SELECT count(*) FROM chunks WHERE text LIKE '%than fit in one page'").fetchone() == (0,)
     check.close()
+
+
+def test_reading_after_an_interrupted_update_rolls_its_journal_back(vault: Vault, tmp_path: Path) -> None:
+    rebuild(vault)
+    db = build.db_path(vault)
+    journal = interrupted_update(db, tmp_path)
+    assert status(vault).stale is None
+    assert not journal.exists()
+    interrupted_update(db, tmp_path)
+    build.open_index(vault).close()
+    assert not journal.exists()
+    check = sqlite3.connect(db)
+    assert check.execute("SELECT count(*) FROM chunks WHERE text LIKE '%than fit in one page'").fetchone() == (0,)
+    check.close()
+
+
+def test_a_reader_never_writes(vault: Vault) -> None:
+    rebuild(vault)
+    conn = build.open_index(vault)
+    with pytest.raises(sqlite3.OperationalError, match="readonly"):
+        conn.execute("DELETE FROM chunks")
+    conn.close()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the \\\\?\\ prefix is Windows'")
+def test_an_index_on_a_path_no_file_uri_can_name_opens(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
+    rebuild(vault)
+    # A `\\?\` path, like a `\\server\share` one, has no file URI SQLite opens.
+    long_form = Path("\\\\?\\" + str(build.db_path(vault)))
+    monkeypatch.setattr(build, "db_path", lambda _vault: long_form)
+    conn = build.open_index(vault)
+    assert conn.execute("SELECT count(*) FROM records").fetchone() == (22,)
+    conn.close()
+
+
+def test_a_killed_rebuild_s_temp_file_goes_with_the_next_rebuild(vault: Vault) -> None:
+    rebuild(vault)
+    left = build.db_path(vault).with_name("docket.sqlite.99999.tmp")
+    left.write_bytes(b"x" * 1000)
+    rebuild(vault)
+    assert not left.exists()
 
 
 def test_an_old_index_that_won_t_open_goes_with_its_journals(vault: Vault) -> None:

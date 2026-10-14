@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -61,6 +62,26 @@ def test_new_runs_new_versions_and_a_moved_thread_window(vault: Vault) -> None:
 
     report = same_as_rebuild(vault, change)
     assert report.runs == 2
+
+
+def test_an_edited_parent_without_a_thread_field_is_cut_again_in_its_windows(vault: Vault) -> None:
+    parent = "chat:C0OPS/1791500000.000100"
+
+    def message(n: int, text: str, thread: str | None) -> RawRecord:
+        return make_record(
+            rid=f"chat:C0OPS/{1791500000 + n}.000100", container="chat:C0OPS", thread=thread, text=text,
+            ts=datetime(2026, 10, 9, 7, n, tzinfo=UTC),
+        )  # fmt: skip
+
+    first = [message(0, "Kickoff plan alpha for the crane", None)]
+    vault.write_run("chat", [*first, message(1, "Reply one", parent), message(2, "Reply two", parent)], LATER)
+    update(vault)
+    edited = message(0, "Kickoff plan omega for the crane", None)
+    same_as_rebuild(vault, lambda: vault.write_run("chat", [edited], datetime(2026, 10, 14, 10, 0, tzinfo=UTC)))
+    conn = sqlite3.connect(build.db_path(vault))
+    texts = [r[0] for r in conn.execute("SELECT text FROM chunks WHERE owner = ?", (f"t {parent}",))]
+    conn.close()
+    assert texts and all("omega" in t and "alpha" not in t for t in texts)
 
 
 def test_a_run_from_another_machine_that_is_older_keeps_the_newer_version(vault: Vault) -> None:
@@ -136,6 +157,25 @@ def test_a_shortened_run_file_or_new_languages_or_another_version_rebuild(vault:
     conn.commit()
     conn.close()
     assert "snowballstemmer" in str(update(vault).reason)
+
+
+def test_a_run_file_written_again_at_the_same_length_rebuilds(vault: Vault) -> None:
+    first = sorted((vault.root / "raw" / "chat").rglob("*.jsonl"))[0]
+    data = first.read_bytes()
+    redacted = data.replace(b"Pallet labels", b"XXXXXX XXXXXX")
+    assert len(redacted) == len(data) and redacted != data
+    before = first.stat().st_mtime_ns
+    first.write_bytes(redacted)
+    # What a pull of a rewritten history leaves: the file written later. Set apart by a second for filesystems that
+    # keep coarse times.
+    os.utime(first, ns=(before + 1_000_000_000, before + 1_000_000_000))
+    assert status(vault).changed_runs == 1
+    report = update(vault)
+    assert report.rebuilt and "changed or went" in str(report.reason)
+    conn = sqlite3.connect(build.db_path(vault))
+    old = conn.execute("SELECT count(*) FROM chunks WHERE text LIKE 'Pallet labels at the harbour keep%'").fetchone()
+    conn.close()
+    assert old == (0,)
 
 
 def test_no_index_yet_builds_one(template: Path, tmp_path: Path) -> None:

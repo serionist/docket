@@ -9,6 +9,7 @@ rebuild. Raw lines are read leniently: a line that doesn't load is a problem and
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -44,7 +45,7 @@ from docket.index.text import Analyzer, fold, words
 from docket.vault.entities import entity_files, load_entities
 from docket.vault.processed import doc_path, parse_doc
 from docket.vault.rawlog import RunFile, parse_run_file
-from docket.vault.records import RawRecord
+from docket.vault.records import Attachment, RawRecord
 from docket.vault.segments import segments
 from docket.vault.vault import Vault
 
@@ -107,6 +108,33 @@ def _rel(root: Path, path: Path) -> str:
     return path.relative_to(root).as_posix()
 
 
+def _stamp(path: Path) -> tuple[int, int]:
+    """A run file's size and modification time: a history rewrite can keep the size, never the time."""
+    st = path.stat()
+    return st.st_size, st.st_mtime_ns
+
+
+def _known_fields(data: dict[Any, Any]) -> tuple[dict[str, object], list[str]]:
+    """A raw line's fields without those this Docket doesn't know, at the top and in each attachment (DR-0020 lets a
+    newer Docket add optional ones), and the names left out."""
+    fields: dict[str, object] = {str(k): v for k, v in data.items()}
+    unknown = sorted(set(fields) - set(RawRecord.model_fields))
+    fields = {k: v for k, v in fields.items() if k not in unknown}
+    attachments = fields.get("attachments")
+    if isinstance(attachments, list):
+        known = set(Attachment.model_fields)
+        kept: list[object] = []
+        for item in cast(list[Any], attachments):
+            if not isinstance(item, dict):
+                kept.append(item)
+                continue
+            entry = {str(k): v for k, v in cast(dict[Any, Any], item).items()}
+            unknown += [f"attachments.{k}" for k in set(entry) - known]
+            kept.append({k: v for k, v in entry.items() if k in known})
+        fields["attachments"] = kept
+    return fields, sorted(set(unknown))
+
+
 def read_run(root: Path, run: RunFile) -> tuple[list[tuple[int, RawRecord]], list[tuple[str, str]]]:
     """A run file's records with their lines, read leniently: a line that doesn't load is a problem, and a field this
     Docket doesn't know is left out and reported."""
@@ -126,11 +154,9 @@ def read_run(root: Path, run: RunFile) -> tuple[list[tuple[int, RawRecord]], lis
             if not isinstance(data, dict):
                 problems.append((place, "not a raw record: a JSON object per line"))
                 continue
-            fields: dict[str, object] = {str(k): v for k, v in cast(dict[Any, Any], data).items()}
-            unknown = sorted(set(fields) - set(RawRecord.model_fields))
+            fields, unknown = _known_fields(cast(dict[Any, Any], data))
             if unknown:
                 problems.append((place, f"fields this Docket doesn't know, left out: {', '.join(unknown)}"))
-                fields = {k: v for k, v in fields.items() if k not in unknown}
             try:
                 records.append((n, RawRecord.model_validate(fields)))
             except ValidationError as e:
@@ -195,8 +221,9 @@ class Indexer:
             seen: set[str] = set()
             for run in sorted(by_source[source], key=lambda r: r.order):
                 rel = _rel(self.root, run.path)
+                stamp = _stamp(run.path)
                 records, problems = read_run(self.root, run)
-                self.conn.execute("INSERT INTO run_files (path, size) VALUES (?, ?)", (rel, run.path.stat().st_size))
+                self.conn.execute("INSERT INTO run_files (path, size, mtime_ns) VALUES (?, ?, ?)", (rel, *stamp))
                 self.conn.executemany(
                     "INSERT OR IGNORE INTO problems (kind, place, message) VALUES ('raw', ?, ?)", problems
                 )
@@ -230,8 +257,10 @@ class Indexer:
         whose windows must be cut again."""
         threads: set[str] = set()
         old = self.conn.execute("SELECT thread, kind FROM records WHERE rid = ?", (record.rid,)).fetchone()
-        if old is not None and old[0] and old[1] == "message":
-            threads.add(old[0])
+        # An edited message is cut again in the windows it was in. A parent has no thread of its own: its rid is the
+        # thread its replies name.
+        if old is not None and old[1] == "message":
+            threads.add(old[0] or record.rid)
         self.drop_owner(record_owner(record.rid))
         self.conn.execute("DELETE FROM segments WHERE rid = ?", (record.rid,))
         self.conn.execute("DELETE FROM problems WHERE kind = 'segments' AND place = ?", (record.rid,))
@@ -416,7 +445,10 @@ def _rebuild(vault: Vault, reason: str | None, started: float) -> BuildReport:
     analyzer = Analyzer(langs)
     db = db_path(vault)
     tmp = db.with_name(f"{db.name}.{os.getpid()}.tmp")
-    tmp.unlink(missing_ok=True)
+    # Under the lock no other rebuild is writing one, so every temp file here is left from a rebuild that was killed.
+    for left in db.parent.glob(f"{db.name}.*.tmp"):
+        with contextlib.suppress(OSError):
+            left.unlink()
     conn = _connect(tmp)
     try:
         conn.execute("PRAGMA journal_mode = OFF")
@@ -463,10 +495,10 @@ def rebuild(vault: Vault, reason: str | None = None) -> BuildReport:
 
 
 def _changed_runs(conn: sqlite3.Connection, vault: Vault) -> tuple[list[RunFile], int]:
-    """The run files not indexed yet, and how many indexed ones changed size or went (a rewritten history)."""
-    stored = dict(conn.execute("SELECT path, size FROM run_files").fetchall())
+    """The run files not indexed yet, and how many indexed ones went or were written again (a rewritten history)."""
+    stored = {path: (size, mtime) for path, size, mtime in conn.execute("SELECT path, size, mtime_ns FROM run_files")}
     runs = {_rel(vault.root, r.path): r for r in vault.rawlog.run_files()}
-    gone = sum(1 for rel, size in stored.items() if rel not in runs or runs[rel].path.stat().st_size != size)
+    gone = sum(1 for rel, stamp in stored.items() if rel not in runs or _stamp(runs[rel].path) != stamp)
     return [r for rel, r in runs.items() if rel not in stored], gone
 
 
@@ -510,13 +542,22 @@ def update(vault: Vault) -> BuildReport:
     return report
 
 
+def _reader(db: Path) -> sqlite3.Connection:
+    """The index opened to read: by its plain path, since a URI can't name a file on a network share, and writable
+    underneath, so SQLite rolls back a hot journal an interrupted update left; `query_only` keeps every statement a
+    read."""
+    conn = sqlite3.connect(db, timeout=BUSY_SECONDS)
+    conn.execute("PRAGMA query_only = ON")
+    return conn
+
+
 def open_index(vault: Vault) -> sqlite3.Connection:
     """The index to read, refused when there is none or it was built for another Docket or other languages."""
     check_sqlite()
     db = db_path(vault)
     if not db.exists():
         raise DocketError("there is no index yet; run docket index rebuild")
-    conn = sqlite3.connect(f"{db.as_uri()}?mode=ro", uri=True, timeout=BUSY_SECONDS)
+    conn = _reader(db)
     why = stale(conn, languages_of(vault))
     if why is not None:
         conn.close()
@@ -531,7 +572,7 @@ def status(vault: Vault) -> IndexStatus:
     base = IndexStatus(exists=db.exists(), path=_rel(vault.root, db), languages=list(langs.codes))
     if not base.exists:
         return base
-    conn = sqlite3.connect(f"{db.as_uri()}?mode=ro", uri=True, timeout=BUSY_SECONDS)
+    conn = _reader(db)
     try:
         base.stale = stale(conn, langs)
         if base.stale is not None:
