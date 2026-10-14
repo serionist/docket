@@ -12,6 +12,9 @@ import typer
 
 from docket import __version__, userconfig
 from docket.errors import DocketError
+from docket.vault import cuts
+from docket.vault.gate import Gate, Label
+from docket.vault.staging import Classifier, Entry, State
 from docket.vault.vault import Vault
 from docket.vault.wizard import Given, Wizard
 
@@ -24,6 +27,8 @@ app = typer.Typer(
 )
 vault_app = typer.Typer(help="The vault: its state and its integrity.", no_args_is_help=True)
 app.add_typer(vault_app, name="vault")
+staging_app = typer.Typer(help="Records waiting for the gate: list, show, classify, promote.", no_args_is_help=True)
+app.add_typer(staging_app, name="staging")
 
 VaultOption = Annotated[Path | None, typer.Option("--vault", help="The vault; default: DOCKET_VAULT, here, ./vault")]
 
@@ -128,6 +133,106 @@ def vault_check(vault: VaultOption = None) -> None:
         typer.echo(f"{len(problems)} problem(s)")
         raise typer.Exit(1)
     typer.echo("vault ok")
+
+
+RefArgument = Annotated[str, typer.Argument(help="A rid, or at least 6 characters of a key from `staging list`.")]
+SourceOption = Annotated[str | None, typer.Option("--source", help="Only this source.")]
+
+
+@staging_app.command("list")
+def staging_list(
+    vault: VaultOption = None,
+    source: SourceOption = None,
+    state: Annotated[str | None, typer.Option("--state", help="Only pending or ready.")] = None,
+) -> None:
+    """What waits in staging, oldest first."""
+    listing = Gate(find_vault(vault)).list(source, _state(state))
+    for entry in listing.entries:
+        typer.echo(_entry_line(entry))
+    for path, message in listing.unreadable:
+        typer.echo(f"unreadable    {path}: {message}")
+    counts = listing.counts()
+    typer.echo(f"{counts['pending']} pending, {counts['ready']} ready" if listing.entries else "nothing waits")
+
+
+@staging_app.command("show")
+def staging_show(ref: RefArgument, vault: VaultOption = None) -> None:
+    """One staged record, its state and its cuts, and the version in raw that was cut, when there is one."""
+    shown = Gate(find_vault(vault)).show(ref)
+    staged = shown.entry.staged
+    typer.echo(f"key       {shown.entry.key}")
+    typer.echo(f"state     {staged.state}")
+    typer.echo(f"staged    {staged.staged_at:%Y-%m-%d %H:%M} UTC")
+    typer.echo(f"by        {staged.classified_by or '-'}")
+    if staged.cuts:
+        typer.echo("cuts      " + ", ".join(f"{c.start}-{c.end} {c.unit}" for c in staged.cuts))
+    if staged.problem:
+        typer.echo(f"problem   {staged.problem}")
+    typer.echo(staged.record.model_dump_json(indent=2))
+    if shown.cut_before is not None:
+        typer.echo(f"cut before, in raw run {shown.cut_before.run}:")
+        typer.echo(shown.cut_before.text)
+
+
+@staging_app.command("classify")
+def staging_classify(
+    ref: RefArgument,
+    label: Annotated[str, typer.Argument(help="work or private.")],
+    cut: Annotated[
+        list[str] | None,
+        typer.Option("--cut", help="A stretch to cut: 120-340 (characters) or 12:30-14:05 (a time). Repeat."),
+    ] = None,
+    by: Annotated[str, typer.Option("--by", help="Who classified it: user or claude.")] = "user",
+    vault: VaultOption = None,
+) -> None:
+    """Classify a staged record: work makes it ready, with its cuts; private drops it."""
+    staged = Gate(find_vault(vault)).classify(ref, _label(label), [cuts.parse(c) for c in cut or []], _by(by))
+    typer.echo("dropped" if staged is None else f"ready     {staged.key[:12]}")
+
+
+@staging_app.command("promote")
+def staging_promote(source: SourceOption = None, vault: VaultOption = None) -> None:
+    """Write every ready record to the raw log, cut and redacted, one run per source, and commit."""
+    found = find_vault(vault)
+    result = Gate(found).promote(source)
+    for run in result.runs:
+        where = run.run.relative_to(found.root).as_posix() if run.run is not None else "nothing new"
+        redacted = ", ".join(f"{rule} {n}" for rule, n in sorted(run.redactions.items()))
+        line = f"{run.source}: {run.written} written ({where}), {run.skipped} already in raw"
+        typer.echo(line + (f"; redacted: {redacted}" if redacted else ""))
+    for held in result.held:
+        typer.echo(f"held      {held.key[:12]} ({held.source}): {held.problem}")
+    if result.dropped:
+        typer.echo("dropped   " + ", ".join(f"{reason} {n}" for reason, n in sorted(result.dropped.items())))
+    if not result.runs and not result.held:
+        typer.echo("nothing ready")
+
+
+def _entry_line(entry: Entry) -> str:
+    staged = entry.staged
+    record = staged.record
+    about = " ".join((record.title or record.text).split())[:60]
+    problem = f"  held: {staged.problem}" if staged.problem else ""
+    when = f"{record.ts:%Y-%m-%d %H:%M}"
+    return f"{entry.key[:12]}  {staged.state:<7}  {record.source}  {when}  {record.kind}  {about}{problem}"
+
+
+def _state(value: str | None) -> State | None:
+    if value is None or value in ("pending", "ready"):
+        return value
+    raise DocketError(f"a state is pending or ready, not {value!r}")
+
+
+def _label(value: str) -> Label:
+    if value in ("work", "private"):
+        return value
+    raise DocketError(f"a record is work or private, not {value!r}")
+
+
+def _by(value: str) -> Classifier:
+    if value in ("user", "claude"):
+        return value
+    raise DocketError(f"--by is user or claude, not {value!r}")
 
 
 def utf8_console() -> None:

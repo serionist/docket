@@ -11,6 +11,9 @@ from docket_testkit import make_record, sh
 from docket import __version__, userconfig
 from docket.cli import main
 from docket.errors import DocketError
+from docket.vault.cuts import Cut
+from docket.vault.gate import Gate
+from docket.vault.records import RawRecord
 from docket.vault.vault import Vault
 from docket.vault.wizard import Given, Visibility, Wizard
 
@@ -277,3 +280,113 @@ def test_the_console_speaks_utf8_through_a_pipe(tmp_path: Path) -> None:
     )
     assert proc.returncode == 0
     assert "Árvíztűrő vault" in proc.stdout.decode("utf-8")
+
+
+# -- docket staging --------------------------------------------------------------------------------------------------
+
+
+def staging_vault(tmp_path: Path) -> tuple[Path, Gate]:
+    path = tmp_path / "vault"
+    flags = ["chat=work" if flag == "chat" else flag for flag in FLAGS]
+    main(["init", "--yes", "--path", str(path), "--remote", "none", *flags])
+    return path, Gate(Vault.open(path))
+
+
+def call(n: int, text: str) -> RawRecord:
+    return make_record(n, rid=f"calls:rec-{n}", source="calls", kind="recording", text=text)
+
+
+def test_staging_list_show_classify_and_promote(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    path, gate = staging_vault(tmp_path)
+    v = ["--vault", str(path)]
+    assert main(["staging", "list", *v]) == 0
+    assert "nothing waits" in capsys.readouterr().out
+    gate.stage([make_record(1, title="Weekly sync"), call(2, text="work part. holiday part.")])
+    assert main(["staging", "list", *v]) == 0
+    out = capsys.readouterr().out
+    assert "ready    chat" in out
+    assert "pending  calls" in out
+    assert "Weekly sync" in out
+    assert out.strip().endswith("1 pending, 1 ready")
+    assert main(["staging", "list", "--state", "pending", "--source", "calls", *v]) == 0
+    assert "chat" not in capsys.readouterr().out.replace("chat:", "")
+    assert main(["staging", "classify", "calls:rec-2", "work", "--cut", "11-24", "--by", "claude", *v]) == 0
+    assert capsys.readouterr().out.startswith("ready")
+    assert main(["staging", "show", "calls:rec-2", *v]) == 0
+    out = capsys.readouterr().out
+    assert "by        claude" in out
+    assert "cuts      11-24 char" in out
+    assert main(["staging", "promote", *v]) == 0
+    out = capsys.readouterr().out
+    assert "calls: 1 written (raw/calls/" in out
+    assert "chat: 1 written" in out
+    assert main(["staging", "promote", *v]) == 0
+    assert capsys.readouterr().out.strip() == "nothing ready"
+    gate.stage([call(2, text="work part. holiday part. and more")])
+    assert main(["staging", "show", "calls:rec-2", *v]) == 0
+    out = capsys.readouterr().out
+    assert "cut before, in raw run" in out
+    assert "work part. [cut]" in out
+    assert main(["staging", "classify", "calls:rec-2", "private", *v]) == 0
+    assert capsys.readouterr().out.strip() == "dropped"
+
+
+def test_promote_reports_held_dropped_and_redacted_and_names_no_dropped_record(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path, gate = staging_vault(tmp_path)
+    gate.stage(
+        [
+            make_record(1, text="password: " + "hunter2-" + "Example"),
+            make_record(2, text="about the zebrafinch"),
+            call(3, text="a call"),
+        ]
+    )
+    gate.classify("calls:rec-3", "work")
+    key = next(e.key for e in gate.list().entries if e.staged.record.source == "calls")
+    staged = gate.staging.read(gate.staging.dir / "calls" / f"{key}.json")
+    gate.staging.write(staged.model_copy(update={"cuts": [Cut(start=0, end=10, unit="ms")]}))
+    yaml = path / "vault.yaml"
+    yaml.write_text(
+        yaml.read_text(encoding="utf-8").replace("  keywords: []", "  keywords:\n  - zebrafinch"), encoding="utf-8"
+    )
+    capsys.readouterr()
+    assert main(["staging", "promote", "--vault", str(path)]) == 0
+    out = capsys.readouterr().out
+    assert "chat: 1 written" in out
+    assert "redacted: password 1" in out
+    assert f"held      {key[:12]} (calls): calls has no cutter for time cuts" in out
+    assert "dropped   never-store 1" in out
+    assert "zebrafinch" not in out
+    assert "1791000002" not in out
+    assert main(["staging", "list", "--vault", str(path)]) == 0
+    assert "held: calls has no cutter" in capsys.readouterr().out
+    assert main(["staging", "show", key[:8], "--vault", str(path)]) == 0
+    assert "problem   calls has no cutter" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["staging", "show", "calls:rec-9"], "nothing staged as calls:rec-9"),
+        (["staging", "list", "--state", "done"], "pending or ready"),
+        (["staging", "classify", "calls:rec-1", "maybe"], "work or private"),
+        (["staging", "classify", "calls:rec-1", "work", "--by", "robot"], "user or claude"),
+        (["staging", "classify", "calls:rec-1", "work", "--cut", "5"], "a cut is <start>-<end>"),
+    ],
+)
+def test_staging_mistakes_exit_2_with_one_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], args: list[str], message: str
+) -> None:
+    path, gate = staging_vault(tmp_path)
+    gate.stage([call(1, text="x")])
+    assert main([*args, "--vault", str(path)]) == 2
+    assert message in capsys.readouterr().err
+
+
+def test_an_unreadable_staging_file_is_listed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    path, gate = staging_vault(tmp_path)
+    gate.stage([call(1, text="x")])
+    (path / "staging" / "calls" / "broken.json").write_text("{", encoding="utf-8")
+    assert main(["staging", "list", "--vault", str(path)]) == 0
+    assert "unreadable" in capsys.readouterr().out
