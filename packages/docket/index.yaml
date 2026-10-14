@@ -13,7 +13,7 @@ decisions:
     by: Claude (autonomy grant)
     cost: one-way
     sources: ["#4"]
-    description: A vault holds vault.yaml, raw/, media/, processed/, entities/, ledger/ops/, state/ and sources/; staging/ and index/ are never committed. A raw run file is raw/<source>/<yyyy>/<mm>/<yyyy-mm-dd>T<hhmm>-<machine>.jsonl in UTC, and a second run in the same minute gets .2, .3 before .jsonl. A machine name is lowercase letters, digits and inner hyphens and never ends in -<digits>.
+    description: A vault holds vault.yaml, raw/, media/, processed/, entities/, ledger/ops/ and state/; staging/ and index/ are never committed. A raw run file is raw/<source>/<yyyy>/<mm>/<yyyy-mm-dd>T<hhmm>-<machine>.jsonl in UTC, and a second run in the same minute gets .2, .3 before .jsonl. A machine name is lowercase letters, digits and inner hyphens and never ends in -<digits>.
     binds:
       - Every record's run field is its run file's stem.
       - Temp files are written in .git/docket/tmp/, never under raw/.
@@ -25,7 +25,7 @@ decisions:
     by: Claude (autonomy grant)
     cost: one-way
     sources: ["#4"]
-    description: v is sha256 of kind, container, thread, ts in whole UTC seconds, author, to, title, text and the attachments (name, kind, ref) sorted, with empty and absent values left out, written as JSON by Docket's own function (sorted keys, no spaces, UTF-8). A new optional field, a library upgrade, attachment order or milliseconds never change a version; a golden test pins the hash. A source can register its own projection.
+    description: "v is sha256 of kind, container, thread, ts in whole UTC seconds, author, to, title, text, the attachments (name, kind, ref) sorted, and a transcript's segments (start_ms, end_ms, speaker, text) in their order, with empty and absent values left out, written as JSON by Docket's own function (sorted keys, no spaces, UTF-8). A new optional field, a library upgrade, attachment order or the milliseconds of ts never change a version; a golden test pins the hash. The projection is the same for every source: no source or mapper can register its own (DR-0108); records.register_projection goes with #10."
     binds: [Changing the projection or the JSON writer needs a migration of every vault.]
     not_chosen:
       - "Hashing every field except a few: any new field would change every version."

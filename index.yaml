@@ -200,11 +200,12 @@ decisions:
     binds: [The MCP tools' names and parameters are a one-way door once they land.]
   - id: DR-0100
     title: Sources are harvested by Claude through plugin skills; the core keeps a profile per source
-    status: decided
+    status: superseded
     at: "2026-10-14"
     by: Soma Osvay
     cost: medium
     sources: ["#28"]
+    superseded_by: [DR-0108]
     description: |-
       Each source (Plaud, Slack, mail, chat, calendar) is a skill in the Claude Code plugin that uses the user's own MCPs and plugins to read it, and hands what it read to the service's MCP write tools: raw records, audio, transcripts, summaries, docs, tasks. A small profile per source in the core fixes what can't be left to a prompt's wording: the record ids, what counts as a new version, the transcript segments. A plugin hook captures the source tools' output verbatim, so a long transcript never passes through Claude's output.
 
@@ -224,7 +225,7 @@ decisions:
     cost: medium
     sources: ["#28"]
     supersedes: [DR-0002]
-    description: packages/docket holds the app (vault, service, web app, CLI, source profiles); plugin/ is the Claude Code plugin, and the repo is its own marketplace; tools/devkit is the development kit, never published. A connector package under packages/ appears only for a source a skill can't harvest (DR-0100).
+    description: packages/docket holds the app (vault, service, web app, CLI, the source contract); plugin/ is the Claude Code plugin, and the repo is its own marketplace; examples/ holds the reference sources (Plaud under examples/sources/plaud), tested in CI and never a dependency; tools/devkit is the development kit, never published. A connector package under packages/ appears only for a source a skill can't harvest (DR-0108).
     binds: [GPU and large model dependencies are optional extras.]
   - id: DR-0102
     title: A user's data lives in a folder of their own repo by default, or in a repo of its own
@@ -254,6 +255,8 @@ decisions:
     cost: cheap
     sources: ["#28"]
     description: A setup skill in the plugin looks at the MCPs and plugins the user already has, asks which sources to set up, where the data should live and which languages they work in, and runs the init with the answers. The command-line wizard stays for scripts.
+    binds:
+      - Setup scaffolds each source the user chooses with docket source new, in the consuming repo.
   - id: DR-0104
     title: The app transcribes; skills translate, reconcile and summarize
     status: proposed
@@ -271,7 +274,7 @@ decisions:
     by: Soma Osvay
     cost: medium
     sources: ["#28"]
-    description: The calendar source's profile turns events into the ledger's meeting ops, keyed by the event's own id (its iCalUId, or the provider's id where there is none). A meeting that moves, is renamed or is cancelled updates the same meeting, so its prep, points and outcomes stay with it. Recordings and chats still link to meetings by time.
+    description: The core turns the calendar's records into the ledger's meeting ops, keyed by the event's own id (its iCalUId, or the provider's id where there is none). A meeting that moves, is renamed or is cancelled updates the same meeting, so its prep, points and outcomes stay with it. Recordings and chats still link to meetings by time.
     binds:
       - A meeting's key is its calendar event's id, plus the occurrence's original start when the event recurs (RECURRENCE-ID or originalStartTime); never its start time plus subject.
       - A moved, renamed or cancelled event or occurrence updates the meeting it made, never a new one; cancelling one occurrence cancels only that meeting.
@@ -293,16 +296,53 @@ decisions:
       - Docket renders only into a repo that passes setup's public-remote check (DR-0102), and asks before the first render; the same holds for the people directory and glossary renders.
   - id: DR-0107
     title: Personal source notes live in the vault; the plugin's source skills stay generic
-    status: decided
+    status: superseded
     at: "2026-10-14"
     by: Soma Osvay
     cost: one-way
     sources: ["#28"]
+    superseded_by: [DR-0108]
     description: "Each source skill reads sources/<source>.md in the vault before it harvests: the user's own route, quirks and gotchas for that source. It appends what it learned there. The plugin's skills stay generic and public, and what is particular to one user stays private with their data."
     binds:
       - A source skill reads sources/<source>.md first and appends what it learned.
       - Nothing particular to one user goes into the plugin's skills.
       - sources/ is part of the vault's layout (DR-0019), in plain git.
+  - id: DR-0108
+    title: Source skills and mappers live in the consuming project; the core keeps the contract
+    status: proposed
+    at: "2026-10-14"
+    by: serionist
+    cost: medium
+    sources: ["#35"]
+    supersedes: [DR-0100, DR-0107]
+    description: |-
+      Each source's skill (which tool reads it and how), its mapper (code that turns a run's captures into normalized records) and the route's quirks live in the consuming project, under .claude/skills/sources/<source>/. Docket keeps the contract: the record shapes, the rid rules, the versions, the ingest checks, holds and the gate, the capture hook and the run manifest, the scaffold (docket source new), and Plaud as a reference source.
+
+      Routes are personal: one user reads mail through a browser because of an access policy, another through an API. The know-how already lives in the projects that use it, and a vendor's change lands on the people who use that vendor. The core computes the versions and checks every rid, so a skill kept elsewhere can't break ids or privacy.
+    binds:
+      - A source's skill, its mapper and its tests live in the consuming project, under .claude/skills/sources/<source>/ (SKILL.md, mapper.py, tests/); Docket's plugin ships none of them.
+      - The route's quirks are learned run by run and kept in the skill's own files.
+      - "A mapper is code, never a prompt: it turns a run's captures into records in the core's shape."
+      - "A transcript record carries its utterances in a segments field, in the core's shape: a list of start_ms, end_ms, speaker and text."
+      - The index, the gate's cuts, verify and rebuilds read the segments field, never native.
+      - "A record with a cut keeps no native: the core drops it and marks the record fidelity: cut, because native would still hold the cut stretch."
+      - A rid is <source>:<native id>, and the core checks every rid a mapper returns.
+      - The core computes every version from the normalized fields, never a mapper.
+      - Every record a mapper returns goes through the core's ingest checks, holds and the staging gate.
+      - The service runs a source's mapper in a separate process, loaded from the path vault.yaml names for that source; the CLI import uses the same mapper.
+      - A mapper's path is relative to the consuming repo's root and must resolve, after symlinks, under .claude/skills/sources/<source>/; any other path is refused.
+      - A mapper's process has a time limit and an output cap. A timeout fails the run, and its captures are dropped and fetched again, as for a run that never closes.
+      - The service runs only the consuming repo's mappers, never code from the vault, a downloads folder or a drop folder.
+      - The plugin's PostToolUse hook posts a source tool's output to the service verbatim, and Claude sends only the run manifest.
+      - The hook posts only while a run the skill opened is open, and only for the tools vault.yaml lists for that source; each capture is tagged with its run, and nothing outside an open run is posted.
+      - docket source new scaffolds a source's skill, mapper and tests in the consuming repo.
+      - Plaud is the reference source, under examples/sources/plaud and tested in CI; it is an example, not a dependency.
+      - media_put and the service's fetch take a local path only under a folder vault.yaml names (a downloads folder) or the plugin's own drop folder, and a URL only over https to a host vault.yaml lists for that source; private, loopback and link-local addresses are refused, at most a few redirects are followed and each is checked again, and a file over the size cap is refused.
+      - "A Python connector is written only where a skill can't harvest: scheduled or headless runs."
+    not_chosen:
+      - "Per-source skills shipped in Docket's plugin: vendor churn would land in the core's releases, and routes are personal."
+      - "Skills only, with Claude mapping payloads: ids would follow a prompt's wording."
+      - "A core profile per source (DR-0100): each new source and each vendor change would wait for a Docket release."
 conventions:
   - id: CV-0001
     rule: Python code passes ruff's lint rules and its formatter, at 120 columns
