@@ -13,7 +13,7 @@ The frontmatter, in the order Docket writes it:
 A doc lives at processed/<type>/<yyyy>/<mm>/<slug>.md when its slug starts with a date, else processed/<type>/<slug>.md.
 The frontmatter is read with YAML's base loader, so every value is text (`no` and `2026` stay slugs), and written by
 the renderer here. Writing is strict; reading is lenient, so an older machine still reads a newer one's docs. This
-format is a one-way door (DR-0024): docs in users' vaults depend on it.
+format is a one-way door (DR-0108): docs in users' vaults depend on it.
 """
 
 from __future__ import annotations

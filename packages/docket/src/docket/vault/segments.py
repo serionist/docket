@@ -3,7 +3,7 @@
 A segment is one utterance: where it starts and ends in milliseconds from the record's start, who spoke, and what was
 said. A connector whose source keeps its transcript in its own shape registers a reader for it; everything else is read
 from `native["segments"]`, the shape Docket's own transcripts are written in. A reader is pure: the index stores what
-it returns, and two rebuilds must agree. The contract is a one-way door (DR-0026).
+it returns, and two rebuilds must agree. The contract is a one-way door (DR-0110).
 """
 
 from __future__ import annotations

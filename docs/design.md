@@ -122,11 +122,13 @@ sequenceDiagram
 ```
 
 - `verify` is mechanical because every line carries anchors: `@12:08` within a single-record note, or `[r:<rid>@12:08]`
-  when a doc covers several records.
+  when a doc covers several records; `[r:<rid>#2]` points at a paragraph of a mail or message and `[r:<rid>]` at a whole
+  record (DR-0109).
 - People and entity filters are boosts with a fallback, not hard filters: an unlabelled speaker would otherwise drop
   the very chunk that holds the answer.
 - A correction propagates. Every ledger item, decision and brief line records what it was built from
-  (`derived_from`). A correction is a new version of the doc, and its dependents are flagged for review.
+  (`derived_from`). A correction is a new version of the doc (its next rev, DR-0111), and its dependents are flagged
+  for review.
 
 ### 3.4 Tasks
 
@@ -292,16 +294,20 @@ vault/
 Markdown with frontmatter, readable in any editor:
 
 ```yaml
-id: note:2026-10-14-marco-consultant
+id: recording-note:2026-10-14-marco-consultant
 type: recording-note            # also: thread-summary, digest, minutes, brief, correction, legacy-note
-covers: [plaud:of_0123456789abcdef]
+rev: 1                          # the commit that wrote it says: Doc: <id> rev 1
+covers:
+  - plaud:of_0123456789abcdef
 by: claude-opus-5.5, sync 2026-10-14T16:07
-supersedes: null
+supersedes: []
 entities: [marco, northwind, fleet-management]
 ```
 
 Every bullet ends with its anchors. Docs are written through the `doc_put` tool, which checks the frontmatter and that
-every anchor resolves before it accepts the doc.
+every anchor resolves before it accepts the doc. A doc lives at `processed/<type>/<yyyy>/<mm>/<slug>.md` when its slug
+starts with a date, else `processed/<type>/<slug>.md` (DR-0108). A changed doc is its next rev, and git history keeps
+the earlier ones (DR-0111).
 
 ### 5.4 The index database
 
@@ -493,7 +499,7 @@ MCP tools:
 | Tool | Does |
 |---|---|
 | `search` | query, boosts and filters (sources, people, entities, since, until, k); hits with locators |
-| `read` | a locator or doc: the summary, the raw, or both, with `around` (minutes or messages) |
+| `read` | a locator or doc: the summary, the raw, or both, with `around` (minutes, paragraphs or messages) and a doc's `rev` |
 | `verify` | a doc's lines next to their raw spans |
 | `timeline` | an entity's mentions by date and container |
 | `entity` | canonical name, aliases, related, ids, last seen, open items |
