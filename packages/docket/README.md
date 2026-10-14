@@ -15,6 +15,10 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 | `docket doc put <file or ->` | store a processed doc as its next rev; refused, with every problem and its line, when the frontmatter is wrong, an anchor doesn't resolve, or the doc changed since the rev it carries |
 | `docket doc read <locator>` | a doc, or a record and the doc lines that point at it; `--view raw` or `both` for the raw, `--around` for minutes, paragraphs or messages either side, `--rev` for an earlier revision |
 | `docket doc verify <doc>` | each line of a doc next to the raw its anchors point at; `--line` for chosen lines |
+| `docket search <query>` | hits grouped by recording or thread, each with its locator and the group's summary; `--since`, `--until`, `--source`, `--person`, `--entity`, `-k`; it updates the index first unless `--no-update` |
+| `docket index rebuild` | build this machine's index from the vault, from scratch |
+| `docket index update` | index what changed since; it rebuilds when it has to |
+| `docket index status` | whether the index is there and current, its languages, counts, what is new, and its problems |
 
 A command finds its vault from `--vault`, `DOCKET_VAULT`, the working folder upward, a `vault/` folder in it, or the
 default the wizard recorded. A `<ref>` is a record's rid, or at least 6 characters of the key `staging list` shows.
@@ -43,3 +47,43 @@ A processed doc's lines end with anchors: `@12:08` in a doc covering one record,
 `[r:<rid>]` across records (DR-0110). A locator is a doc's id or path, `r:<rid>@12:08`, or a rid. The same three
 operations are `docket.recall.doc_put`, `read` and `verify` in Python. A time resolves against the record's `segments`
 field, which the source's mapper fills (DR-0111); a record without segments takes paragraph and whole-record anchors.
+
+## Search
+
+A query is words, `"quoted phrases"`, names and time words: `docket search "tízmillió forint" múlt héten --person
+ben-sample`. Words match as written, accents or not, and through their stems in each of your languages; names expand to
+their aliases; time words ("last week", "múlt héten", "yesterday", "2026-10") become a filter; `--person` and
+`--entity` lift what mentions them and never hide the rest. In Python it is `docket.index.search`.
+
+The index lives in `index/` in the vault, on each machine, never committed. `docket search` keeps it up to date, and
+`docket index rebuild` makes it again from scratch.
+
+Your languages are `owner.languages` in `vault.yaml`, as codes such as `en` and `hu`; English is always searched. Write
+Norwegian as `"no"` in quotes, or YAML reads it as false. Adding or removing a language rebuilds the index the next
+time you search.
+
+## Entities
+
+An entity is one YAML file, `entities/<type>/<id>.yaml`, that tells search who or what a name means:
+
+```yaml
+id: northwind
+type: customer
+name: {en: Northwind, hu: Northwind}
+aliases:
+  - {text: Northwind Traders}
+  - {text: Nortwin, kind: asr}
+  - {text: Norton, kind: asr, needs: [ben-sample]}
+related: {person: [ben-sample]}
+ids: {email_domain: northwind.example}
+```
+
+| Field | What |
+|---|---|
+| `id`, `type` | the file's name and its folder: person, org, customer, project, site, device, product, topic, stream, meeting-series, document, repo, place or term |
+| `name` | the name per language code |
+| `aliases` | other ways it is written; `kind: asr` for how speech recognition mangles it (matched within an edit or two); `needs` when it counts only next to one of those entities |
+| `ids` | a source's user id (`chat: U0EXAMPLE`), `email` or `email_domain`, so what they wrote counts as theirs |
+| `related`, `status`, `role`, `note` | kept for the entity view; `status` is active or archived |
+
+A file with a mistake still loads where it can; `docket index status` lists what was wrong (DR-0113).

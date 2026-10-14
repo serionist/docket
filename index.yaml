@@ -182,11 +182,12 @@ decisions:
       - A single-page app (React or Svelte) with its own build, shipped inside the wheel.
   - id: DR-0017
     title: Search is SQLite FTS5 over three columns, plus vectors and a reranker where a model is available
-    status: decided
+    status: superseded
     at: "2026-10-14"
     by: Soma Osvay
     cost: medium
     sources: [docs/design.md]
+    superseded_by: [DR-0114]
     description: Each chunk is indexed accent-folded, Hungarian-stemmed and English-stemmed, so names, Hungarian suffixes and loanwords all match. Embeddings and a reranker add recall when a model is available, local or through an API; without one, keyword search works alone.
     binds: [Every model feature is optional.]
   - id: DR-0018
@@ -343,6 +344,18 @@ decisions:
       - "Per-source skills shipped in Docket's plugin: vendor churn would land in the core's releases, and routes are personal."
       - "Skills only, with Claude mapping payloads: ids would follow a prompt's wording."
       - "A core profile per source (DR-0100): each new source and each vendor change would wait for a Docket release."
+  - id: DR-0114
+    title: Search is SQLite FTS5 over the text as written and a stemmed column per owner language, plus vectors and a reranker where a model is available
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#7"]
+    supersedes: [DR-0017]
+    description: "Each chunk is indexed as written (case and accents folded by FTS5's unicode61 remove_diacritics 2) and stemmed with Snowball once per language in vault.yaml's owner.languages: English always, the rest in code order. A language's hook adds the word forms its stemmer needs (Hungarian: the stem of the word's dative) and says whether aliases match on its stems; its time words come from a table of its own. Languages written without spaces between words wait for a trigram column. Embeddings and a reranker add recall when a model is available, local or through an API; without one, keyword search works alone."
+    binds: [Every model feature is optional., Adding or removing a language rebuilds the index.]
+    not_chosen:
+      - "Three fixed columns (as written, Hungarian, English): a German user would get Hungarian stems."
 conventions:
   - id: CV-0001
     rule: Python code passes ruff's lint rules and its formatter, at 120 columns

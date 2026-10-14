@@ -17,3 +17,7 @@ Unreleased in the same PR.
 - `docket staging list`, `show`, `classify` (work or private, with cuts) and `promote`.
 - Processed docs with anchors: `docket doc put` stores a summary only when every line points at raw that exists, and
   keeps each change as a revision; `docket doc read` and `docket doc verify` show a doc or a record next to its raw.
+- `docket search`: full-text search over everything kept, in English and your other languages, with names, aliases,
+  time words and boosts; hits come grouped by recording or thread, with their locators and summaries.
+- `docket index rebuild | update | status`: the search index on each machine, built from the vault.
+- Entity files under `entities/`: names, aliases and ids that search matches into everything kept.
