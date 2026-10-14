@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta, timezone
 import pytest
 from pydantic import ValidationError
 
-from docket.vault.records import Attachment, RawRecord, canonical_json, register_projection, version
+from docket.vault.records import Attachment, RawRecord, canonical_json, version
 
 Make = Callable[..., RawRecord]
 
@@ -131,13 +131,3 @@ def test_canonical_json_is_ours() -> None:
     assert canonical_json(False) == "false"
     with pytest.raises(TypeError):
         canonical_json(1.5)
-
-
-def test_a_source_can_register_its_own_projection(records: Make) -> None:
-    register_projection("notes", lambda r: {"text": r.text})
-    try:
-        a = records(1, rid="notes:1", source="notes", author="U0ADA")
-        b = records(1, rid="notes:1", source="notes", author="U0BEN")
-        assert version(a) == version(b)
-    finally:
-        register_projection("notes", lambda r: {"text": r.text, "author": r.author})

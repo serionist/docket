@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
@@ -18,8 +17,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 RID = re.compile(r"^([a-z0-9][a-z0-9._-]*):(\S+)$")
 SOURCE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
-
-Projection = Callable[["RawRecord"], dict[str, Any]]
 
 
 class Attachment(BaseModel):
@@ -139,14 +136,6 @@ def default_projection(record: RawRecord) -> dict[str, Any]:
     return {k: v for k, v in fields.items() if v not in (None, "", [])}
 
 
-_PROJECTIONS: dict[str, Projection] = {}
-
-
-def register_projection(source: str, projection: Projection) -> None:
-    """A connector whose source needs a different idea of "the same content" registers its own projection."""
-    _PROJECTIONS[source] = projection
-
-
 def _escape(text: str) -> str:
     out = ['"']
     for ch in text:
@@ -189,6 +178,6 @@ def canonical_json(value: Any) -> str:
 
 
 def version(record: RawRecord) -> str:
-    projection = _PROJECTIONS.get(record.source, default_projection)
-    digest = hashlib.sha256(canonical_json(projection(record)).encode("utf-8")).hexdigest()
+    """The same projection for every source (DR-0020): no source or mapper decides what counts as new content."""
+    digest = hashlib.sha256(canonical_json(default_projection(record)).encode("utf-8")).hexdigest()
     return f"sha256:{digest}"
