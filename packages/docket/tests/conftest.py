@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+import keyring
 import pytest
 from docket_testkit import make_config, make_record
+from keyring.backends.fail import Keyring as FailKeyring
 
 from docket.vault.config import VaultConfig
 from docket.vault.records import RawRecord
@@ -19,6 +21,10 @@ def isolated(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.Monke
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("DOCKET_CONFIG_DIR", str(home / "docket"))
+    monkeypatch.setenv("DOCKET_STATE_DIR", str(home / "docket-state"))
+    # No test may reach the developer's real keychain: keyring's failing backend, here and in any subprocess.
+    monkeypatch.setenv("PYTHON_KEYRING_BACKEND", "keyring.backends.fail.Keyring")
+    keyring.set_keyring(FailKeyring())
     monkeypatch.setenv("DOCKET_MACHINE", "test-box")
     monkeypatch.delenv("DOCKET_VAULT", raising=False)
     for name in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):

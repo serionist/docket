@@ -1,19 +1,39 @@
-"""The user's own Docket settings, outside any vault: for now, which vault commands use by default."""
+"""The user's own Docket settings, outside any vault: which vault commands use by default, and the service's vault,
+port and token store. Also the folders Docket keeps per-user state and logs in."""
 
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import yaml
-from platformdirs import user_config_path
+from platformdirs import user_config_path, user_log_path, user_state_path
+
+from docket.errors import DocketError
+
+TokenStore = Literal["keyring", "file"]
+TOKEN_STORES: tuple[TokenStore, ...] = ("keyring", "file")
+MAX_PORT = 65535
 
 
 def config_path() -> Path:
     env = os.environ.get("DOCKET_CONFIG_DIR")
     folder = Path(env) if env else user_config_path("docket", appauthor=False)
     return folder / "config.yaml"
+
+
+def state_dir() -> Path:
+    """Where the service keeps its pid file, its lock and `docket open`'s redirect page."""
+    env = os.environ.get("DOCKET_STATE_DIR")
+    return Path(env) if env else user_state_path("docket", appauthor=False)
+
+
+def log_dir() -> Path:
+    # A state folder moved by DOCKET_STATE_DIR (tests, or a user who moved it) takes the log with it.
+    env = os.environ.get("DOCKET_STATE_DIR")
+    return Path(env) / "log" if env else user_log_path("docket", appauthor=False)
 
 
 def load() -> dict[str, Any]:
@@ -26,6 +46,12 @@ def load() -> dict[str, Any]:
     return {str(k): v for k, v in cast(dict[object, Any], data).items()}
 
 
+def _save(data: dict[str, Any]) -> None:
+    target = config_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(yaml.safe_dump(data, sort_keys=True, allow_unicode=True), encoding="utf-8")
+
+
 def default_vault() -> Path | None:
     value = load().get("default_vault")
     return Path(value) if isinstance(value, str) and value else None
@@ -34,6 +60,54 @@ def default_vault() -> Path | None:
 def set_default_vault(path: Path) -> None:
     data = load()
     data["default_vault"] = str(path)
-    target = config_path()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(yaml.safe_dump(data, sort_keys=True, allow_unicode=True), encoding="utf-8")
+    _save(data)
+
+
+@dataclass(frozen=True)
+class ServiceSettings:
+    vault: Path | None = None
+    port: int | None = None
+    token_store: TokenStore | None = None
+
+
+def service() -> ServiceSettings:
+    """The `service` keys. A value of the wrong kind is refused: the service would otherwise start on a vault, a port
+    or a token store nobody chose."""
+    raw: Any = load().get("service")
+    if raw is None:
+        return ServiceSettings()
+    if not isinstance(raw, dict):
+        raise DocketError(f"{config_path()}: service must be a map of vault, port and token_store")
+    data = cast(dict[str, Any], raw)
+    vault: Any = data.get("vault")
+    port: Any = data.get("port")
+    store: Any = data.get("token_store")
+    if vault is not None and not (isinstance(vault, str) and vault):
+        raise DocketError(f"{config_path()}: service.vault must be a folder's path")
+    if port is not None and (not isinstance(port, int) or isinstance(port, bool) or not 0 < port <= MAX_PORT):
+        raise DocketError(f"{config_path()}: service.port must be a port number from 1 to {MAX_PORT}")
+    if store is not None and store not in TOKEN_STORES:
+        raise DocketError(f"{config_path()}: service.token_store is keyring or file, not {store!r}")
+    return ServiceSettings(
+        vault=Path(vault) if vault else None,
+        port=port,
+        token_store=store,
+    )
+
+
+def set_service(
+    *, vault: Path | None = None, port: int | None = None, token_store: TokenStore | None = None
+) -> ServiceSettings:
+    """Write the given `service` keys and keep the rest of the file as it is."""
+    data = load()
+    raw: Any = data.get("service")
+    section: dict[str, Any] = dict(cast(dict[str, Any], raw)) if isinstance(raw, dict) else {}
+    if vault is not None:
+        section["vault"] = str(vault)
+    if port is not None:
+        section["port"] = port
+    if token_store is not None:
+        section["token_store"] = token_store
+    data["service"] = section
+    _save(data)
+    return service()
