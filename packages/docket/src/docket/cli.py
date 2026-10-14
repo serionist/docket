@@ -180,7 +180,10 @@ def ingest(
     try:
         report = ingest_run(found, source, manifest, [], folder=folder, hold_files=hold or [])
     except MapperFailedError as e:
-        if mapper_errors and e.stderr:
+        if not mapper_errors:
+            hint = "run it again with --mapper-errors to see the mapper's own errors"
+            raise MapperFailedError(f"{e}; {hint}", e.stderr) from None
+        if e.stderr:
             typer.echo(e.stderr, err=True)
         raise
     _ingest_report(report)

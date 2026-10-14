@@ -276,10 +276,12 @@ def test_a_crash_s_own_words_are_printed_only_on_request(
     folder = folder_with(tmp_path, {"a.json": memo("m1", crash=PRIVATE_TITLE)})
     assert ingest(vault, folder) == 2
     err = capsys.readouterr().err
-    assert "docket: the mapper failed (exit 1)" in err
+    assert "docket: the mapper failed (exit 1); run it again with --mapper-errors to see the mapper's own errors" in err
     assert PRIVATE_TITLE not in err
     assert ingest(vault, folder, "--mapper-errors") == 2
-    assert PRIVATE_TITLE in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert PRIVATE_TITLE in err
+    assert "run it again" not in err
 
 
 @pytest.mark.parametrize(
