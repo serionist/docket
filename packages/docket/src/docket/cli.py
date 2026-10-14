@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import sys
 from collections.abc import Sequence
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 from zoneinfo import ZoneInfo
@@ -497,15 +497,6 @@ def index_status(vault: VaultOption = None) -> None:
         raise typer.Exit(1)
 
 
-def _when(text: str | None, what: str) -> date | datetime | None:
-    if text is None:
-        return None
-    try:
-        return date.fromisoformat(text) if len(text) == len("2026-10-14") else datetime.fromisoformat(text)
-    except ValueError:
-        raise DocketError(f"{what} is a date or a time, such as 2026-10-14 or 2026-10-14T09:30") from None
-
-
 @app.command("search")
 def search_command(
     query: Annotated[list[str], typer.Argument(help='Words, "quoted phrases", names, and time words like last week.')],
@@ -534,8 +525,8 @@ def search_command(
         people=person or [],
         entities=entity or [],
         sources=source or [],
-        since=_when(since, "--since"),
-        until=_when(until, "--until"),
+        since=index.parse_when(since, "--since"),
+        until=index.parse_when(until, "--until"),
         k=k,
     )
     say_all(render.search(result, ZoneInfo(v.config.owner.time_zone)))

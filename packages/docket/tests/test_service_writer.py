@@ -15,7 +15,8 @@ from starlette.testclient import TestClient
 from docket import index
 from docket.errors import DocketError
 from docket.index.build import db_path
-from docket.service.app import LOCK_SECONDS, Service, Settings, create_app
+from docket.service.app import create_app
+from docket.service.state import LOCK_SECONDS, Service, Settings
 from docket.service.writer import IndexUpdater, Writer
 from docket.vault.gate import Gate
 from docket.vault.vault import Vault

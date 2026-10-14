@@ -12,9 +12,10 @@ from starlette.types import Receive, Scope, Send
 
 from docket import userconfig
 from docket.service import system
-from docket.service.app import Settings, create_app
+from docket.service.app import create_app
 from docket.service.security import HEADERS, Guard
 from docket.service.sessions import CODE_SECONDS, COOKIE, SESSION_SECONDS, Sessions, safe_next, write_redirect
+from docket.service.state import Settings
 from docket.vault.config import VaultConfig
 from docket.vault.vault import Vault
 

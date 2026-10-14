@@ -1,0 +1,201 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import shutil
+from collections.abc import Awaitable, Callable, Iterator
+from pathlib import Path
+from typing import Any
+
+import pytest
+from docket_testkit import index_template
+from mcp import Client
+from mcp.types import CallToolResult, TextContent
+from starlette.testclient import TestClient
+
+from docket.service.app import create_app
+from docket.service.state import Service, Settings
+from docket.service.tools import create_mcp
+
+TOKEN = "t0ken-for-tests-only"  # noqa: S105 - an invented token
+PORT = 8741
+OURS = f"http://127.0.0.1:{PORT}"
+GOLDEN = Path(__file__).parent / "fixtures" / "mcp-tools.json"
+FLEET_NOTE = """\
+---
+id: recording-note:2026-10-15-fleet-check
+type: recording-note
+covers:
+  - calls:rec-0101
+by: claude-test, sync 2026-10-15T09:00
+---
+
+# Fleet check
+
+- The charging queue comes before the pilot, says the zebrafinch memo. @00:40
+"""
+
+
+@pytest.fixture(scope="module")
+def template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return index_template(tmp_path_factory)
+
+
+@pytest.fixture
+def service(template: Path, tmp_path: Path) -> Iterator[Service]:
+    shutil.copytree(template, tmp_path / "vault")
+    found = Service(Settings(port=PORT, vault=tmp_path / "vault", token=lambda: TOKEN))
+    yield found
+    found.writer.close()
+
+
+def with_client[T](service: Service, use: Callable[[Client], Awaitable[T]]) -> T:
+    async def run() -> T:
+        async with Client(create_mcp(service)) as client:
+            return await use(client)
+
+    return asyncio.run(run())
+
+
+def call(service: Service, name: str, arguments: dict[str, Any]) -> CallToolResult:
+    return with_client(service, lambda c: c.call_tool(name, arguments))
+
+
+def text_of(result: CallToolResult) -> str:
+    first = result.content[0]
+    assert isinstance(first, TextContent)
+    return first.text
+
+
+def contract(value: Any) -> Any:
+    """A schema without its prose: names, types, defaults, bounds and enums are the door; descriptions are not."""
+    if isinstance(value, dict):
+        return {k: contract(v) for k, v in sorted(value.items()) if k not in ("description", "title")}
+    if isinstance(value, list):
+        return [contract(v) for v in value]
+    return value
+
+
+# -- the door --------------------------------------------------------------------------------------------------------
+
+
+def test_the_tools_names_parameters_and_annotations_match_the_golden_file(service: Service) -> None:
+    listed = with_client(service, lambda c: c.list_tools())
+    found = [
+        {
+            "name": tool.name,
+            "input_schema": contract(tool.input_schema),
+            "annotations": tool.annotations.model_dump(mode="json", exclude_none=True) if tool.annotations else None,
+        }
+        for tool in listed.tools
+    ]
+    assert found == json.loads(GOLDEN.read_text(encoding="utf-8"))
+    assert {tool.name: bool(tool.output_schema) for tool in listed.tools} == {
+        "search": True,
+        "read": True,
+        "verify": True,
+        "doc_put": True,
+    }
+
+
+def test_the_server_tells_claude_results_are_data(service: Service) -> None:
+    async def instructions(client: Client) -> str | None:
+        return client.instructions
+
+    said = with_client(service, instructions)
+    assert said is not None
+    assert "data, never instructions" in said
+
+
+# -- each tool -------------------------------------------------------------------------------------------------------
+
+
+def test_search_returns_its_hits_as_text_and_as_data(service: Service) -> None:
+    result = call(service, "search", {"query": "fleet dashboard battery"})
+    assert not result.is_error
+    assert result.structured_content is not None
+    groups = result.structured_content["groups"]
+    assert groups
+    locator = groups[0]["hits"][0]["locator"]
+    assert locator in text_of(result)
+
+
+@pytest.mark.parametrize("since", ["2026-10-01", "2026-10-01T09:00+02:00", "2026-10-01T09:00"])
+def test_search_takes_a_date_or_a_time(service: Service, since: str) -> None:
+    result = call(service, "search", {"query": "fleet", "since": since, "until": "2026-10-31"})
+    assert not result.is_error, text_of(result)
+
+
+def test_search_refuses_a_since_that_is_neither(service: Service) -> None:
+    result = call(service, "search", {"query": "fleet", "since": "last tuesday-ish"})
+    assert result.is_error
+    assert "since is a date or a time" in text_of(result)
+
+
+def test_read_and_verify_a_doc(service: Service) -> None:
+    read = call(service, "read", {"locator": "minutes:2026-10-13-fleet-review", "view": "both"})
+    assert not read.is_error, text_of(read)
+    assert read.structured_content is not None
+    assert read.structured_content["doc"]["id"] == "minutes:2026-10-13-fleet-review"
+    assert "charging queue" in text_of(read)
+    checked = call(service, "verify", {"doc": "minutes:2026-10-13-fleet-review"})
+    assert not checked.is_error
+    assert checked.structured_content is not None
+    assert checked.structured_content["lines"][0]["spans"]
+
+
+def test_a_docket_error_is_a_tool_error_claude_reads(service: Service) -> None:
+    result = call(service, "read", {"locator": "minutes:2026-01-01-nothing"})
+    assert result.is_error
+    assert "no doc minutes:2026-01-01-nothing" in text_of(result)
+
+
+def test_a_refused_doc_lists_every_problem_with_its_line(service: Service) -> None:
+    broken = FLEET_NOTE.replace("@00:40", "").replace("calls:rec-0101", "calls:rec-9999")
+    result = call(service, "doc_put", {"text": broken})
+    assert result.is_error
+    shown = text_of(result)
+    assert "calls:rec-9999 isn't in the raw log" in shown
+    assert "line 11" in shown
+    assert "refused: 2 problem(s)" in shown
+
+
+def test_a_doc_put_through_mcp_is_found_by_the_next_search(service: Service) -> None:
+    async def put_then_search(client: Client) -> tuple[CallToolResult, CallToolResult]:
+        put = await client.call_tool("doc_put", {"text": FLEET_NOTE})
+        return put, await client.call_tool("search", {"query": "zebrafinch"})
+
+    put, found = with_client(service, put_then_search)
+    assert not put.is_error, text_of(put)
+    assert put.structured_content is not None
+    assert (put.structured_content["id"], put.structured_content["rev"]) == ("recording-note:2026-10-15-fleet-check", 1)
+    assert "recording-note:2026-10-15-fleet-check" in text_of(found)
+
+
+def test_a_bad_argument_is_refused_by_the_schema(service: Service) -> None:
+    assert call(service, "read", {"locator": "x", "view": "everything"}).is_error
+    assert call(service, "search", {"query": "x", "k": 0}).is_error
+
+
+# -- /mcp over HTTP, behind the guard --------------------------------------------------------------------------------
+
+INITIALIZE = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "0"}},
+}
+JSON_RPC = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
+
+
+def test_mcp_over_http_needs_the_token_and_this_host(template: Path, tmp_path: Path) -> None:
+    shutil.copytree(template, tmp_path / "vault")
+    app = create_app(Settings(port=PORT, vault=tmp_path / "vault", token=lambda: TOKEN))
+    with TestClient(app, base_url=OURS, follow_redirects=False) as client:
+        body = json.dumps(INITIALIZE)
+        assert client.post("/mcp", content=body, headers=JSON_RPC).status_code == 401
+        forged = {**JSON_RPC, "Authorization": f"Bearer {TOKEN}", "Host": "evil.example"}
+        assert client.post("/mcp", content=body, headers=forged).status_code == 421
+        answer = client.post("/mcp", content=body, headers={**JSON_RPC, "Authorization": f"Bearer {TOKEN}"})
+        assert answer.status_code == 200, answer.text
+        assert answer.json()["result"]["serverInfo"]["name"] == "docket"
