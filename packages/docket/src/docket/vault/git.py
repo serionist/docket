@@ -74,13 +74,18 @@ class Git:
         return self.run("lfs", "install", "--local", check=False).returncode == 0
 
     def commit(self, paths: list[str], message: str) -> str | None:
-        """Add the paths and commit them; None when there was nothing to commit."""
-        if paths:
-            # On stdin, not the command line: a backlog of run files would pass Windows' 32,767-character limit.
-            self.run("add", "--pathspec-from-file=-", "--pathspec-file-nul", stdin="\0".join(paths))
-        if self.run("diff", "--cached", "--quiet", check=False).returncode == 0:
+        """Commit exactly these paths; None when they hold nothing new. Whatever else the user staged stays staged and
+        out of Docket's commit."""
+        if not paths:
             return None
-        self.run("commit", "-q", "-m", message, identity=True)
+        # On stdin, not the command line: a backlog of run files would pass Windows' 32,767-character limit.
+        spec = "\0".join(paths)
+        pathspec = ("--pathspec-from-file=-", "--pathspec-file-nul")
+        self.run("add", *pathspec, stdin=spec)
+        staged = {p for p in self.out("diff", "--cached", "--name-only", "-z").split("\0") if p}
+        if not staged & {Path(p).as_posix() for p in paths}:
+            return None
+        self.run("commit", "-q", "--only", *pathspec, "-m", message, identity=True, stdin=spec)
         return self.out("rev-parse", "HEAD").strip()
 
     def untracked(self, under: str) -> list[str]:

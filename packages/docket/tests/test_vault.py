@@ -486,3 +486,16 @@ def test_an_interrupted_sync_keeps_its_marker_and_the_next_write_undoes_it(
     assert sync_marker(vault.root).exists()
     assert vault.write_run("chat", [make_record(1)], RUN_AT) is not None
     assert vault.git.branch() == "main"
+
+
+def test_what_the_user_staged_stays_out_of_docket_s_commits(tmp_path: Path, config: VaultConfig) -> None:
+    vault = new_vault(tmp_path, config)
+    (vault.root / "notes.md").write_text("my own draft\n", encoding="utf-8")
+    (vault.root / "vault.yaml").write_text((vault.root / "vault.yaml").read_text(encoding="utf-8") + "\n", "utf-8")
+    vault.git.run("add", "notes.md", "vault.yaml")
+    assert vault.write_run("chat", [make_record(1)], RUN_AT) is not None
+    committed = sh(vault.root, "git", "show", "--name-only", "--format=", "HEAD").split()
+    assert committed == ["raw/chat/2026/10/2026-10-14T1550-test-box.jsonl"]
+    assert sorted(sh(vault.root, "git", "diff", "--cached", "--name-only").split()) == ["notes.md", "vault.yaml"]
+    assert vault.commit(["notes.md"], "the user's own") is not None
+    assert sh(vault.root, "git", "diff", "--cached", "--name-only").split() == ["vault.yaml"]
