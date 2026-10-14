@@ -499,3 +499,8 @@ def test_what_the_user_staged_stays_out_of_docket_s_commits(tmp_path: Path, conf
     assert sorted(sh(vault.root, "git", "diff", "--cached", "--name-only").split()) == ["notes.md", "vault.yaml"]
     assert vault.commit(["notes.md"], "the user's own") is not None
     assert sh(vault.root, "git", "diff", "--cached", "--name-only").split() == ["vault.yaml"]
+
+
+def test_a_commit_of_unchanged_paths_is_none(tmp_path: Path, config: VaultConfig) -> None:
+    vault = new_vault(tmp_path, config)
+    assert vault.commit(["vault.yaml"], "nothing changed") is None
