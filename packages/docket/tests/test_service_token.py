@@ -216,9 +216,14 @@ def test_choosing_the_same_store_again_isnt_a_move() -> None:
 
 
 @pytest.mark.skipif(ON_WINDOWS, reason="the mode means nothing on Windows; the DACL test covers it")
-def test_the_token_file_is_made_0600_and_refused_when_others_can_read_it() -> None:
+def test_the_token_file_is_made_0600() -> None:
     tokens(Refusing(), "Linux", Commands()).rotate()
     assert Tokens.file().stat().st_mode & 0o777 == 0o600
+
+
+def test_a_token_file_others_can_read_is_refused_on_macos_and_linux() -> None:
+    tokens(Refusing(), "Linux", Commands()).rotate()
+    # On Windows every file reads as 0o666 or 0o444, so pretending to be Linux sees it as open to others.
     Tokens.file().chmod(0o644)
     with pytest.raises(DocketError, match="others can read"):
         tokens(Refusing(), "Linux", Commands()).read()
