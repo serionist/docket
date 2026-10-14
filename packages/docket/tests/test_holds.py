@@ -137,6 +137,41 @@ def test_an_older_vault_gets_the_union_line_in_the_commit_that_first_creates_a_l
     assert sh(vault.root, "git", "show", "--name-only", "--format=", "HEAD").split() == ["state/holds/plaud.txt"]
 
 
+def test_a_list_whose_commit_failed_is_committed_by_the_next_add(vault: Vault) -> None:
+    # An older vault, so the merge rule is left uncommitted too.
+    attrs = vault.root / ".gitattributes"
+    attrs.write_text(attrs.read_text(encoding="utf-8").replace(UNION + "\n", ""), encoding="utf-8")
+    sh(vault.root, "git", "-c", "user.name=Ada", "-c", "user.email=ada@example.invalid", "commit", "-qam", "older")
+    # Another git process (an editor's status refresh) holds the index for a moment.
+    lock = vault.root / ".git" / "index.lock"
+    lock.write_text("", encoding="utf-8")
+    with pytest.raises(DocketError):
+        holds.add(vault, "plaud", [HELD])
+    lock.unlink()
+    assert holds.read(vault.root, "plaud") == {HELD}
+    # The same import again: nothing new, and the list still reaches git.
+    assert holds.add(vault, "plaud", [HELD]) == 0
+    assert subjects(vault)[0] == "Holds: plaud, the list committed on test-box"
+    tracked = sh(vault.root, "git", "ls-tree", "-r", "--name-only", "HEAD", "--", "state/holds").split()
+    assert tracked == ["state/holds/plaud.txt"]
+    assert UNION in sh(vault.root, "git", "show", "HEAD:.gitattributes")
+    assert sh(vault.root, "git", "status", "--porcelain").strip() == ""
+
+
+def test_a_user_s_own_gitattributes_edit_stays_theirs(vault: Vault) -> None:
+    attrs = vault.root / ".gitattributes"
+    attrs.write_text(attrs.read_text(encoding="utf-8") + "*.pdf binary\n", encoding="utf-8")
+    assert holds.add(vault, "plaud", [HELD]) == 1
+    assert sh(vault.root, "git", "show", "--name-only", "--format=", "HEAD").split() == ["state/holds/plaud.txt"]
+    assert sh(vault.root, "git", "status", "--porcelain").strip() == "M .gitattributes"
+
+
+def test_adding_nothing_to_no_list_writes_nothing(vault: Vault) -> None:
+    assert holds.add(vault, "plaud", []) == 0
+    assert not (vault.root / HOLDS).exists()
+    assert len(subjects(vault)) == 1
+
+
 def test_two_clones_add_at_once_and_both_read_both_ids(tmp_path: Path, vault: Vault) -> None:
     sh(tmp_path, "git", "init", "-q", "--bare", "remote.git")
     vault.git.run("remote", "add", "origin", str(tmp_path / "remote.git"))

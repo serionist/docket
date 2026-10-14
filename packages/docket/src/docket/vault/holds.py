@@ -133,14 +133,22 @@ def add(vault: Vault, source: str, ids: Iterable[str]) -> int:
         path = list_path(vault.root, source)
         current = read(vault.root, source)
         added = new - current
-        if not added:
+        if added:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            _replace(vault.root, path, "".join(f"{i}\n" for i in sorted(current | added)))
+        if not path.exists():
             return 0
-        path.parent.mkdir(parents=True, exist_ok=True)
-        _replace(vault.root, path, "".join(f"{i}\n" for i in sorted(current | added)))
-        paths = [f"{HOLDS}/{source}.txt"]
-        if _union_line(vault.root):
+        _union_line(vault.root)
+        # Committed whenever the list or its merge rule differs from HEAD, new ids or not: an add whose commit failed
+        # (another git held the index) left them on disk, and a re-run that finds nothing new must still commit them,
+        # or the hold never reaches another machine.
+        rel = f"{HOLDS}/{source}.txt"
+        paths = [rel] if vault.git.untracked(rel) or vault.git.changed_against_head(rel) else []
+        if _union_uncommitted(vault):
             paths.append(".gitattributes")
-        vault.commit(paths, f"Holds: {source}, {len(added)} added on {vault.machine}")
+        if paths:
+            what = f"{len(added)} added" if added else "the list committed"
+            vault.commit(paths, f"Holds: {source}, {what} on {vault.machine}")
         return len(added)
 
 
@@ -160,14 +168,24 @@ def _replace(root: Path, path: Path, text: str) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def _union_line(root: Path) -> bool:
-    """Add the merge rule to the vault's .gitattributes when a vault made before hold lists lacks it; True if added."""
+def _has_union(text: str) -> bool:
+    return UNION in (line.strip() for line in text.splitlines())
+
+
+def _union_line(root: Path) -> None:
+    """Add the merge rule to the vault's .gitattributes when a vault made before hold lists lacks it."""
     attrs = root / ".gitattributes"
     text = attrs.read_text(encoding="utf-8") if attrs.is_file() else ""
-    if UNION in (line.strip() for line in text.splitlines()):
-        return False
+    if _has_union(text):
+        return
     if text and not text.endswith("\n"):
         text += "\n"
     note = "# Hold lists from several machines merge by keeping both sides' ids."
     attrs.write_text(f"{text}{note}\n{UNION}\n", encoding="utf-8", newline="\n")
-    return True
+
+
+def _union_uncommitted(vault: Vault) -> bool:
+    """Whether the merge rule is in .gitattributes but not in HEAD's: only then does Docket commit that file, so a
+    user's own edits there stay theirs."""
+    committed = vault.git.run("show", "HEAD:.gitattributes", check=False).stdout
+    return not _has_union(committed) and _has_union((vault.root / ".gitattributes").read_text(encoding="utf-8"))
