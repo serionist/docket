@@ -6,7 +6,7 @@ import pytest
 from docket_testkit import make_record
 
 from docket.vault.config import NeverStore
-from docket.vault.neverstore import fold, match, matches_text, strings
+from docket.vault.neverstore import DECODE_ROUNDS, decoded_forms, fold, match, matches_text, strings
 from docket.vault.records import Attachment
 
 
@@ -200,3 +200,34 @@ def test_a_percent_encoded_name_is_matched_too(text: str, keyword: str) -> None:
 def test_decoding_never_makes_a_name_out_of_nothing() -> None:
     assert not matches_text("100%25 sure, 50%off", NeverStore(keywords=["dora example"]))
     assert not matches_text("Kov%ZZacs", NeverStore(keywords=["kovács"]))
+
+
+SAFE_LINK = (
+    "https://eur01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fcontoso.example%2Fsites%2FTeam"
+    "%2FShared%2520Documents%2FPeople%2FDora%2520Example%2F1-1.docx&data=05%7C02%7C%7Cabc%7C0"
+)
+
+
+@pytest.mark.parametrize(
+    ("text", "keyword"),
+    [
+        ("see ../people/Dora%2520Example/x.md", "dora example"),
+        (f"[1-1 doc]({SAFE_LINK})", "dora example"),
+        ("Dora&#37;20Example", "dora example"),
+        ("Kov%25C3%25A1cs", "kovács"),
+        ("Kov&#37;C3&#37;A1cs", "kovács"),
+        ("Dora%25252520Example", "dora example"),
+        ("https://legacy.example/staff?name=Kov%E1cs", "kovács"),
+        ("https://legacy.example/staff?name=Erd%u0151s", "erdős"),
+        ('{"name": "Kov\\u00e1cs B\\u00e9la"}', "kovács"),
+    ],
+)
+def test_a_name_behind_any_encoding_a_link_or_payload_uses_is_matched(text: str, keyword: str) -> None:
+    assert matches_text(text, NeverStore(keywords=[keyword]))
+    assert match(make_record(text=text), NeverStore(keywords=[keyword])) == "keywords"
+
+
+def test_decoding_keeps_every_rounds_form_and_stops() -> None:
+    assert decoded_forms("plain text") == []
+    assert decoded_forms("Dora%2520Example")[:2] == ["Dora%20Example", "Dora Example"]
+    assert len(decoded_forms("x" + "%25" * 9 + "20y")) <= DECODE_ROUNDS + DECODE_ROUNDS + 1

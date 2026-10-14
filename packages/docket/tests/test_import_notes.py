@@ -794,3 +794,32 @@ def test_a_take_given_while_the_vault_edit_is_uncommitted_still_lands(after: tup
     assert doc.body == "# Supplier call\n\nSecond.\n"
     rel = path.relative_to(vault.root).as_posix()
     assert "(edited by hand)" in sh(vault.root, "git", "log", "--format=%B", "--", rel)
+
+
+def test_a_name_behind_a_safe_link_or_an_old_encoding_reaches_no_doc(vault: Vault, tmp_path: Path) -> None:
+    vault.config = vault.config.model_copy(
+        update={"never_store": NeverStore(keywords=["dora example", "kovács", "erdős"])}
+    )
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    safe_link = (
+        "https://eur01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fcontoso.example%2FPeople"
+        "%2FDora%2520Example%2F1-1.docx&data=05%7C02"
+    )
+    notes_with = {
+        "a.md": f"# A\n\nSee [the 1-1]({safe_link}).\n",
+        "b.md": "# B\n\nSee Dora&#37;20Example.\n",
+        "c.md": "# C\n\nhttps://legacy.example/staff?name=Kov%E1cs\n",
+        "d.md": "# D\n\nhttps://legacy.example/staff?name=Erd%u0151s\n",
+        "e.md": '# E\n\n{"name": "Kov\\u00e1cs B\\u00e9la"}\n',
+        "f.md": "# F\n\nNothing to hide.\n",
+    }
+    for name, text in notes_with.items():
+        (plain / name).write_text(text, encoding="utf-8")
+    report = run(vault, plain)
+    assert (report.new, report.skipped) == (1, {"never-store": 5})
+    stored = [p.read_text(encoding="utf-8").casefold() for p in (vault.root / "processed").rglob("*.md")]
+    history = sh(vault.root, "git", "log", "-p", "--all").casefold()
+    for needle in ("dora", "kov", "erd", "safelinks"):
+        assert not any(needle in text for text in stored)
+        assert needle not in history
