@@ -119,9 +119,9 @@ decisions:
     description: "The app and the kit run on Python 3.12 or later, managed with uv: one lock file for the workspace, uv sync to install, uv run for every command."
   - id: DR-0011
     title: ruff, pyright strict on src, pytest, uv_build, and coverage floors per module
-    status: proposed
+    status: decided
     at: "2026-10-14"
-    by: Claude (autonomy grant)
+    by: Soma Osvay
     cost: cheap
     sources: ["#1"]
     description: ruff lints and formats at 120 columns; pyright checks every package and runs strict on each src/ folder; pytest runs the tests with coverage, and each top-level module keeps a floor that only rises. Packages build with uv_build, uv's own backend, so the toolchain is one vendor's.
@@ -130,9 +130,9 @@ decisions:
       - "hatchling: a second build tool for no gain."
   - id: DR-0012
     title: Under an autonomy grant, a fix on a sensitive area that only makes a check stricter or data safer goes ahead
-    status: proposed
+    status: decided
     at: "2026-10-14"
-    by: Claude (autonomy grant)
+    by: Soma Osvay
     cost: cheap
     sources: ["#1"]
     description: The review rules asked for the maintainer's yes before any fix on a sensitive area. Under an autonomy grant that would stop the loop on fixes that only tighten a check or protect data, so those are made and recorded in the PR's Decided without asking. A fix that loosens a check, changes a one-way door or changes what happens to stored data still waits for the maintainer.
@@ -259,9 +259,9 @@ decisions:
       - Setup scaffolds each source the user chooses with docket source new, in the consuming repo.
   - id: DR-0104
     title: The app transcribes; skills translate, reconcile and summarize
-    status: proposed
+    status: decided
     at: "2026-10-14"
-    by: Claude (autonomy grant)
+    by: Soma Osvay
     cost: cheap
     sources: ["#28"]
     description: Speech recognition is compute that is the same for every user and needs a local model (Whisper, optional, a worker behind an MCP tool such as transcribe), so the app does it. Translating, reconciling two transcripts in context and writing summaries are judgement, so they are skills Claude runs, with the app's search, aliases and transcripts as tools.
@@ -309,9 +309,9 @@ decisions:
       - sources/ is part of the vault's layout (DR-0019), in plain git.
   - id: DR-0108
     title: Source skills and mappers live in the consuming project; the core keeps the contract
-    status: proposed
+    status: decided
     at: "2026-10-14"
-    by: serionist
+    by: Soma Osvay
     cost: medium
     sources: ["#35"]
     supersedes: [DR-0100, DR-0107]
