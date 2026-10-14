@@ -323,13 +323,9 @@ def _write_folder_files(where: Where, state: State) -> None:
 def _merge(where: Where, state: State) -> None:
     top = Git(where.top)
     lock = where.git_dir / "index.lock"
-    if lock.exists():
-        age = int((time.time() - lock.stat().st_mtime) // 60)
-        raise DocketError(
-            f"{lock} is there, {age} minute(s) old. A convert that stopped while it held it leaves one; so does a git "
-            "that is still running. If no git is running, delete it and run `docket vault convert` again"
-        )
     if top.run("merge-base", "--is-ancestor", state.rewritten, "HEAD", check=False).returncode == 0:
+        # A second run: the merge is in; the vault's entries go in the index, the same however often this runs. An
+        # index.lock a crash left between update-ref and the rename is reported with its age, never deleted.
         top.run("reset", "-q", "--", where.name)
         return
     head = top.out("rev-parse", "HEAD").strip()
@@ -549,7 +545,8 @@ def _owner_git(where: Where) -> Git:
 
 
 def _take(lock: Path) -> None:
-    """Take the host's index.lock the way git does: create it, failing if it is there."""
+    """Take the host's index.lock the way git does: create it, failing if it is there. One that stays is reported with
+    its age and never deleted: only the user can tell a running git's from one a crash left."""
     deadline = time.monotonic() + RENAME_SECONDS
     while True:
         try:
@@ -557,7 +554,11 @@ def _take(lock: Path) -> None:
             return
         except FileExistsError as e:
             if time.monotonic() >= deadline:
-                raise DocketError(f"{lock} is held by another git; run `docket vault convert` again") from e
+                age = int((time.time() - lock.stat().st_mtime) // 60)
+                raise DocketError(
+                    f"{lock} is there, {age} minute(s) old; if no git is running, delete it and run `docket vault "
+                    "convert` again"
+                ) from e
             time.sleep(_RENAME_PAUSE)
 
 

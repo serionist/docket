@@ -279,7 +279,7 @@ def test_a_crash_between_update_ref_and_the_rename(tmp_path: Path, monkeypatch: 
     monkeypatch.undo()
     lock = top / ".git" / "index.lock"
     assert lock.exists()
-    with pytest.raises(DocketError, match=r"index\.lock is there, 0 minute\(s\) old"):
+    with pytest.raises(DocketError, match=r"index\.lock is 0 minute\(s\) old; if no git is running, delete it"):
         run(root)
     lock.unlink()
     run(root)
@@ -501,7 +501,7 @@ def test_lfs_store_and_locks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(cv, "RENAME_SECONDS", 0.2)
     lock = tmp_path / "index.lock"
     lock.write_text("", encoding="utf-8")
-    with pytest.raises(DocketError, match="held by another git"):
+    with pytest.raises(DocketError, match=r"is there, 0 minute\(s\) old"):
         cv._take(lock)  # pyright: ignore[reportPrivateUsage]
 
 
