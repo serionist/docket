@@ -13,9 +13,8 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 10
-    groups:
-      dev-tools:
-        patterns: ["ruff", "pyright", "pytest*", "types-*"]
+    # No group: a grouped title ("Bump x from a to b in the <group> group across 1 directory") can pass the 72
+    # characters a commit on main may have, so each Python update comes as its own short-titled PR.
 
   - package-ecosystem: github-actions
     directory: /

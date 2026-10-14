@@ -1,5 +1,5 @@
 # The gate on every pull request and every push to main. Linux runs `gate full`, which is the merge rule: lint, format,
-# types, the docs, commit messages and the PR title, private names, secrets over the whole history, the harness and the
+# types, the docs, commit messages, private names, secrets over the whole history, the harness and the
 # plugin validated by Claude Code, and the tests with their coverage floors. Windows and macOS run the types and the
 # tests (`gate os`), so a change that only works on one system fails here.
 name: CI

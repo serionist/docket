@@ -237,3 +237,17 @@ def test_the_board_helper_stops_retrying_after_its_last_wait(monkeypatch: pytest
     with pytest.raises(KitError, match="Something went wrong"):
         cli._gh("project", "view", "3")
     assert sleeps == [2.0, 5.0, 10.0]
+
+
+def test_only_the_pr_text_run_checks_the_title(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({"pull_request": {"title": "a title that is far too long " * 4, "body": ""}}), "utf-8")
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+    monkeypatch.delenv("DOCKET_PR_TEXT", raising=False)
+    assert gate.run("quick", ["commits"]) == 0
+    monkeypatch.setenv("DOCKET_PR_TEXT", "1")
+    assert gate.run("quick", ["commits"]) == 1
+    assert "PR title is" in capsys.readouterr().out
