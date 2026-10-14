@@ -93,7 +93,7 @@ def write_entities(conn: sqlite3.Connection, found: Entities, hashes: dict[str, 
         )
         conn.executemany(
             "INSERT INTO external_ids (entity, key, value) VALUES (?, ?, ?)",
-            sorted({(e.id, k, v.casefold()) for k, values in e.ids.items() for v in values}),
+            sorted({(e.id, k, v) for k, values in e.ids.items() for v in values}),
         )
     conn.executemany("INSERT INTO entity_files (path, sha256) VALUES (?, ?)", sorted(hashes.items()))
     conn.executemany(
@@ -367,14 +367,17 @@ def _speakers(aliases: Iterable[AliasRow]) -> dict[str, str]:
 
 
 def _authors(author: str, source: str | None, ids: list[tuple[str, str, str]]) -> list[str]:
+    """The entities whose ids name an author. Ids are kept as written, for the entity tool, and compared ignoring
+    case."""
     address = _address(author)
     domain = address.rpartition("@")[2] if address else None
     out: list[str] = []
     for key, value, entity in ids:
+        folded = value.casefold()
         if (
-            (key == "email" and value == address)
-            or (key == "email_domain" and value == domain)
-            or (key == source and value == author.casefold())
+            (key == "email" and folded == address)
+            or (key == "email_domain" and folded == domain)
+            or (key == source and folded == author.casefold())
         ):
             out.append(entity)
     return out

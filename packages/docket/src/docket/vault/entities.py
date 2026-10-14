@@ -39,8 +39,11 @@ ENTITY_TYPES = (
 KEYS = frozenset({"id", "type", "name", "aliases", "related", "ids", "status", "role", "note", "schema"})
 ALIAS_KEYS = frozenset({"text", "kind", "needs"})
 LANG = re.compile(r"^[a-z]{2,3}$")
-ID_KEY = re.compile(r"^[a-z0-9_-]+$")
+# A source's name can hold a dot (slack.work), and an ids key names a source.
+ID_KEY = re.compile(r"^[a-z0-9_.-]+$")
 WORDY = re.compile(r"[^\W_]")
+RELATED_RULE = "lowercase letters, digits and inner hyphens"
+IDS_RULE = "lowercase letters, digits, ., _ or -"
 
 AliasKind = Literal["plain", "asr"]
 
@@ -87,6 +90,26 @@ class Entities:
 
 class _SkipError(Exception):
     """A file that can't be read as an entity."""
+
+
+class _Loader(yaml.BaseLoader):
+    """YAML's base loader, noting each key a mapping repeats: YAML keeps the last silently, and a second `aliases:`
+    added at the end of a file would replace the first."""
+
+    def __init__(self, stream: str) -> None:
+        super().__init__(stream)
+        self.repeated: list[tuple[int, str]] = []
+
+    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict[Any, Any]:
+        seen: set[str] = set()
+        for key_node, _ in node.value:
+            # A key that isn't text (a list) is refused by the loader itself, as YAML that isn't an entity.
+            if isinstance(key_node, yaml.ScalarNode):
+                key = str(key_node.value)
+                if key in seen:
+                    self.repeated.append((key_node.start_mark.line + 1, key))
+                seen.add(key)
+        return super().construct_mapping(node, deep=deep)
 
 
 def entity_files(root: Path) -> list[Path]:
@@ -157,8 +180,9 @@ class _Reader:
         try:
             needs = _texts(item["needs"], "needs") if "needs" in item else ()
         except ValueError:
-            self.problem(f"aliases item {n}: needs is a list of entity ids")
-            needs = ()
+            # Without its condition the alias would match everywhere: a `needs` alias is one that misfires alone.
+            self.problem(f"aliases item {n}: needs is a list of entity ids; the alias is left out")
+            return None
         return Alias(text.strip(), kind, needs)
 
     def aliases(self, value: Any) -> tuple[Alias, ...]:
@@ -168,7 +192,7 @@ class _Reader:
         found = (self.alias(n, item) for n, item in enumerate(cast(list[Any], value), start=1))
         return tuple(a for a in found if a is not None)
 
-    def mapping(self, key: str, value: Any, keys: re.Pattern[str]) -> dict[str, tuple[str, ...]]:
+    def mapping(self, key: str, value: Any, keys: re.Pattern[str], rule: str) -> dict[str, tuple[str, ...]]:
         if not isinstance(value, dict):
             self.problem(f"{key} is a map")
             return {}
@@ -179,7 +203,7 @@ class _Reader:
                     raise ValueError
                 out[k] = _texts(v, key)
             except ValueError:
-                self.problem(f"{key}: {k!s}: a key of lowercase letters, digits, _ or -, then text or a list of it")
+                self.problem(f"{key}: {k!s}: a key of {rule}, then text or a list of it")
         return out
 
     def free(self, key: str, value: Any) -> str | None:
@@ -216,8 +240,8 @@ class _Reader:
             path=self.rel,
             names=self.names(data["name"]),
             aliases=self.aliases(data["aliases"]) if "aliases" in data else (),
-            related=self.mapping("related", data["related"], SLUG) if "related" in data else {},
-            ids=self.mapping("ids", data["ids"], ID_KEY) if "ids" in data else {},
+            related=self.mapping("related", data["related"], SLUG, RELATED_RULE) if "related" in data else {},
+            ids=self.mapping("ids", data["ids"], ID_KEY, IDS_RULE) if "ids" in data else {},
             status=status,
             role=self.free("role", data["role"]) if "role" in data else None,
             note=self.free("note", data["note"]) if "note" in data else None,
@@ -237,10 +261,15 @@ def load_file(root: Path, path: Path) -> tuple[Entity | None, list[EntityProblem
             text = path.read_bytes().decode("utf-8")
         except UnicodeDecodeError:
             raise _SkipError("isn't UTF-8") from None
+        loader = _Loader(normalize_newlines(text.removeprefix("﻿")))
         try:
-            data: Any = yaml.load(normalize_newlines(text.removeprefix("﻿")), Loader=yaml.BaseLoader)  # noqa: S506 - the base loader builds no objects
+            data: Any = loader.get_single_data()
         except yaml.YAMLError as e:
             raise _SkipError(f"isn't YAML: {getattr(e, 'problem', None) or e}") from None
+        finally:
+            loader.dispose()
+        for line, key in loader.repeated:
+            reader.problem(f"line {line}: {key!r} is given twice; the last one is read")
         if not isinstance(data, dict):
             raise _SkipError("an entity is keys and values: id, type, name, ...")
         fields = {str(k): v for k, v in cast(dict[Any, Any], data).items()}

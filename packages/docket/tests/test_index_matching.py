@@ -177,6 +177,27 @@ def test_speakers_authors_and_tags_are_mentions(vault: Vault) -> None:
     assert problems == [("processed/legacy-note/kata-notes.md", "entities: no entity has the id 'ghost'")]
 
 
+def test_ids_are_kept_as_written_and_matched_ignoring_case(tmp_path: Path) -> None:
+    v = Vault.init(tmp_path / "vault", index_config(), "test-box")
+    at = datetime(2026, 10, 14, 7, tzinfo=UTC)
+    v.write_run("chat", [make_record(1, author="U0CLEO", text="Hello from chat.")], at)
+    mail = make_record(rid="mail:<a@x.example>", source="mail", kind="mail", author="cleo@Tests.Example", text="Hi.")
+    v.write_run("mail", [mail], at)
+    person = v.root / "entities" / "person" / "cleo-test.yaml"
+    person.parent.mkdir(parents=True)
+    person.write_text(
+        "id: cleo-test\ntype: person\nname: {en: Cleo Test}\nids: {chat: U0Cleo, email: Cleo@tests.example}\n",
+        encoding="utf-8",
+    )
+    rebuild(v)
+    assert query(v, "SELECT key, value FROM external_ids ORDER BY key") == [
+        ("chat", "U0Cleo"),
+        ("email", "Cleo@tests.example"),
+    ]
+    assert mentioned_rid(v, make_record(1).rid) == {"cleo-test": "author"}
+    assert mentioned_rid(v, mail.rid) == {"cleo-test": "author"}
+
+
 def brute(word: str, limit: int, vocab: list[str]) -> list[tuple[str, int]]:
     def distance(a: str, b: str) -> int:
         row = list(range(len(b) + 1))

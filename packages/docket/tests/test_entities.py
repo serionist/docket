@@ -109,7 +109,7 @@ def test_unknown_keys_and_values_are_problems_and_the_rest_loads(tmp_path: Path)
     found = load_entities(tmp_path)
     acme = found.by_id()["acme"]
     assert acme.status == "active"
-    assert acme.aliases == (Alias("Acme Ltd"), Alias("ACM"))
+    assert acme.aliases == (Alias("Acme Ltd"),)
     assert acme.related == {"customer": ("ghost",)}
     assert acme.ids == {}
     assert acme.role is None and acme.note is None
@@ -124,7 +124,7 @@ def test_unknown_keys_and_values_are_problems_and_the_rest_loads(tmp_path: Path)
         "aliases item 1: kind is asr or absent, not 'exact'; read as plain",
         "aliases item 2: text is the alias",
         "aliases item 3: an alias is",
-        "aliases item 4: needs is a list of entity ids",
+        "aliases item 4: needs is a list of entity ids; the alias is left out",
         "related: Bad Key: a key of lowercase letters",
         "ids is a map",
         "related customer: no entity has the id 'ghost'",
@@ -132,6 +132,30 @@ def test_unknown_keys_and_values_are_problems_and_the_rest_loads(tmp_path: Path)
         "x.yaml: related is a map",
     ):
         assert needle in said, needle
+
+
+def test_a_key_given_twice_is_a_problem_and_the_last_is_read(tmp_path: Path) -> None:
+    write(
+        tmp_path,
+        "customer/contoso.yaml",
+        "id: contoso\ntype: customer\nname: {en: Contoso}\naliases:\n  - {text: Contoso Ltd}\n"
+        "  - {text: Kontozo, kind: asr, kind: plain}\nstatus: active\naliases:\n  - {text: Contoso Group}\n",
+    )
+    write(tmp_path, "person/odd.yaml", "id: odd\ntype: person\nname: {en: Odd}\n? [a, b]\n: c\n")
+    found = load_entities(tmp_path)
+    assert [e.id for e in found.entities] == ["contoso"]
+    assert found.entities[0].aliases == (Alias("Contoso Group"),)
+    said = messages(tmp_path)
+    assert "entities/customer/contoso.yaml: line 8: 'aliases' is given twice; the last one is read" in said
+    assert "entities/customer/contoso.yaml: line 6: 'kind' is given twice; the last one is read" in said
+    assert any(p.startswith("entities/person/odd.yaml: isn't YAML") for p in said)
+
+
+def test_an_ids_key_can_name_a_source_with_a_dot_and_values_stay_as_written(tmp_path: Path) -> None:
+    write(tmp_path, "person/ben.yaml", "id: ben\ntype: person\nname: {en: Ben}\nids: {slack.work: U0BeN}\n")
+    found = load_entities(tmp_path)
+    assert found.problems == []
+    assert found.entities[0].ids == {"slack.work": ("U0BeN",)}
 
 
 def test_one_id_in_two_types_keeps_the_first_in_path_order(tmp_path: Path) -> None:
