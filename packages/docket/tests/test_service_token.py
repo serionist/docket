@@ -68,7 +68,9 @@ class Commands:
         return subprocess.CompletedProcess(list(args), code, out, "")
 
 
-WHOAMI = (0, '"EXAMPLE\\ada","S-1-5-21-1111111111-2222222222-3333333333-1001"\n')
+FAKE_WHOAMI = (0, '"EXAMPLE\\ada","S-1-5-21-1111111111-2222222222-3333333333-1001"\n')
+# On Windows the token file's DACL is set for real, so it must name the real user, or the test could no longer read it.
+WHOAMI = (0, system.run(["whoami", "/user", "/fo", "csv", "/nh"]).stdout) if ON_WINDOWS else FAKE_WHOAMI
 
 
 def tokens(backend: Memory | None = None, system_name: str = HERE, runner: Commands | None = None) -> Tokens:
@@ -229,13 +231,14 @@ def test_a_token_file_others_can_read_is_refused_on_macos_and_linux() -> None:
         tokens(Refusing(), "Linux", Commands()).read()
 
 
-def test_on_windows_the_file_gets_a_dacl_naming_only_the_user(tmp_path: Path) -> None:
-    runner = Commands({"whoami": WHOAMI})
+def test_on_windows_the_file_gets_a_dacl_naming_only_the_user(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    set_for: list[tuple[str, str]] = []
+    monkeypatch.setattr(system, "set_owner_only_dacl", lambda path, sid: set_for.append((path.name, sid)))
+    runner = Commands({"whoami": FAKE_WHOAMI})
     system.write_private(tmp_path / "secret", "x\n", system="Windows", runner=runner)
-    assert runner.calls[0] == ["whoami", "/user", "/fo", "csv", "/nh"]
-    icacls = runner.calls[1]
-    assert icacls[0] == "icacls"
-    assert icacls[2:] == ["/inheritance:r", "/grant:r", "*S-1-5-21-1111111111-2222222222-3333333333-1001:F"]
+    assert runner.calls == [["whoami", "/user", "/fo", "csv", "/nh"]]
+    # Made private while still empty, under its temp name, before the text goes in.
+    assert set_for == [(f".secret.{os.getpid()}.tmp", "S-1-5-21-1111111111-2222222222-3333333333-1001")]
     assert (tmp_path / "secret").read_text(encoding="utf-8") == "x\n"
     assert not system.others_can_read(tmp_path / "secret", system="Windows")
 
@@ -251,11 +254,13 @@ def test_the_real_dacl_lists_only_the_user(tmp_path: Path) -> None:
     assert entries[0].endswith(":(F)")
 
 
-def test_a_failing_icacls_or_whoami_is_refused(tmp_path: Path) -> None:
-    with pytest.raises(DocketError, match="icacls exited 5"):
-        system.write_private(
-            tmp_path / "s", "x", system="Windows", runner=Commands({"whoami": WHOAMI, "icacls": (5, "")})
-        )
+def test_a_failing_dacl_or_whoami_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def refused(path: Path, sid: str) -> None:
+        raise DocketError(f"can't make {path} private to this user: Windows error 5")
+
+    monkeypatch.setattr(system, "set_owner_only_dacl", refused)
+    with pytest.raises(DocketError, match="Windows error 5"):
+        system.write_private(tmp_path / "s", "x", system="Windows", runner=Commands({"whoami": FAKE_WHOAMI}))
     assert list(tmp_path.iterdir()) == []
     with pytest.raises(DocketError, match="SID"):
         system.windows_sid(Commands({"whoami": (1, "")}))

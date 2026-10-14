@@ -341,6 +341,12 @@ def unit_quote(arg: str) -> str:
     return f'"{escaped}"'
 
 
+def unit_path(path: str) -> str:
+    """A path for WorkingDirectory: the rest of the line, unquoted, with only specifiers (%) escaped; systemd
+    expands no variables there and refuses quotes."""
+    return path.replace("%", "%%")
+
+
 def user_unit(launch: Launch) -> str:
     """A user unit retried every 5 seconds after any failure: systemd's own 100 ms would hit its start limit in a
     second and give up on an exit 1."""
@@ -350,7 +356,7 @@ Description={DESCRIPTION}
 [Service]
 Type=simple
 ExecStart={" ".join(unit_quote(a) for a in launch.argv())}
-WorkingDirectory={unit_quote(launch.log_dir)}
+WorkingDirectory={unit_path(launch.log_dir)}
 Restart=on-failure
 RestartSec=5
 

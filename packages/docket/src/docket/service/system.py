@@ -5,12 +5,14 @@ path runs in the tests of every other."""
 from __future__ import annotations
 
 import csv
+import ctypes
 import io
 import os
 import platform
 import subprocess
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any
 
 from docket.errors import DocketError
 
@@ -40,14 +42,41 @@ def windows_sid(runner: Runner = run) -> str:
     return sid
 
 
+# SetNamedSecurityInfoW's object type and what it sets: a file's DACL, protected from its folder's.
+SE_FILE_OBJECT = 1
+DACL_SECURITY_INFORMATION = 0x4
+PROTECTED_DACL_SECURITY_INFORMATION = 0x80000000
+
+
+def set_owner_only_dacl(path: Path, sid: str) -> None:  # pragma: no cover - Windows' own API; its tests run there
+    """Replace a file's DACL with one entry, full control for `sid`, protected from inheritance. icacls can't: its
+    grant leaves the explicit entries a file got at creation (an elevated process's default DACL adds SYSTEM,
+    Administrators and OWNER RIGHTS)."""
+    dll: Any = vars(ctypes)["WinDLL"]
+    advapi32, kernel32 = dll("advapi32", use_last_error=True), dll("kernel32", use_last_error=True)
+    descriptor = ctypes.c_void_p()
+    if not advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        f"D:P(A;;FA;;;{sid})", 1, ctypes.byref(descriptor), None
+    ):
+        raise DocketError(f"can't make {path} private to this user: Windows error {ctypes.get_last_error()}")
+    try:
+        present, defaulted, dacl = ctypes.c_int(), ctypes.c_int(), ctypes.c_void_p()
+        advapi32.GetSecurityDescriptorDacl(
+            descriptor, ctypes.byref(present), ctypes.byref(dacl), ctypes.byref(defaulted)
+        )
+        info = DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION
+        error = advapi32.SetNamedSecurityInfoW(str(path), SE_FILE_OBJECT, info, None, None, dacl, None)
+        if error:
+            raise DocketError(f"can't make {path} private to this user: Windows error {error}")
+    finally:
+        kernel32.LocalFree(descriptor)
+
+
 def owner_only(path: Path, *, system: str = SYSTEM, runner: Runner = run) -> None:
     """Make a file readable by its owner alone: 0600 on macOS and Linux; on Windows, where the mode means nothing, a
-    DACL naming only the user, with inheritance from the folder removed."""
+    DACL whose one entry is the user, protected from the folder's."""
     if system == "Windows":
-        sid = windows_sid(runner)
-        proc = runner(["icacls", str(path), "/inheritance:r", "/grant:r", f"*{sid}:F"])
-        if proc.returncode != 0:
-            raise DocketError(f"can't make {path} private to this user: icacls exited {proc.returncode}")
+        set_owner_only_dacl(path, windows_sid(runner))
     else:
         path.chmod(0o600)
 

@@ -25,6 +25,7 @@ from docket.service.platforms import (
     Windows,
     agent_plist,
     task_xml,
+    unit_path,
     unit_quote,
     user_unit,
 )
@@ -278,6 +279,10 @@ def test_the_unit_matches_its_golden_file_and_retries_every_five_seconds() -> No
 )
 def test_a_unit_argument_is_quoted_with_specifiers_and_variables_escaped(arg: str, quoted: str) -> None:
     assert unit_quote(arg) == quoted
+
+
+def test_the_working_directory_is_unquoted_with_only_specifiers_escaped() -> None:
+    assert unit_path("/home/a b/50% $HOME") == "/home/a b/50%% $HOME"
 
 
 def linux(runner: Commands, tmp_path: Path) -> Linux:
