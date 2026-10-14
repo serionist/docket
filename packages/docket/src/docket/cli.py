@@ -580,6 +580,19 @@ def import_notes(
         raise typer.Exit(1)
 
 
+PortOption = Annotated[int | None, typer.Option("--port", help="The port on 127.0.0.1; default: the config, or 8741.")]
+ServiceVaultOption = Annotated[Path | None, typer.Option("--vault", help="The vault; default: the one install chose.")]
+
+
+@app.command()
+def serve(vault: ServiceVaultOption = None, port: PortOption = None) -> None:
+    """Run the service in the foreground: the MCP endpoint, the REST API and the web app, on 127.0.0.1."""
+    # The service's packages (FastAPI, the MCP SDK, uvicorn) load only for the commands that need them.
+    from docket.service import server  # noqa: PLC0415
+
+    server.serve(vault.resolve() if vault else None, port, said=typer.echo)
+
+
 def utf8_console() -> None:
     """Read and write the console as UTF-8: on Windows a pipe gets the ANSI code page, which can't hold every name."""
     for stream in (sys.stdin, sys.stdout, sys.stderr):

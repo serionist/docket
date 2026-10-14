@@ -1,0 +1,156 @@
+"""`docket serve`: one service per user, bound to 127.0.0.1 on one port.
+
+It takes a lock in the state folder, so a second one names the pid that runs; reads the token from the store install
+recorded and never makes one; binds the socket itself, so the app's allowed hosts name the port it really got (also
+with `--port 0`); records its pid and port in `service.json`; and hands the socket to uvicorn.
+"""
+
+from __future__ import annotations
+
+import errno
+import json
+import logging
+import os
+import socket
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+
+import uvicorn
+from filelock import FileLock, Timeout
+
+from docket import __version__, userconfig
+from docket.errors import DocketError
+from docket.service import client, logs
+from docket.service.app import ServiceApp, create_app
+from docket.service.state import Settings
+from docket.service.system import SYSTEM
+from docket.service.token import Tokens
+
+log = logging.getLogger("docket.service")
+
+HOST = "127.0.0.1"
+LOCK_FILE = "service.lock"
+LOG_FILE = "service.log"
+
+
+@dataclass
+class Prepared:
+    """A service ready to run: its lock held, its socket bound, its app built, its record written."""
+
+    app: ServiceApp
+    sock: socket.socket
+    port: int
+    lock: FileLock
+    handler: logging.Handler
+
+    def close(self) -> None:
+        mine = client.recorded()
+        if mine is not None and mine.get("pid") == os.getpid():
+            client.service_file().unlink(missing_ok=True)
+        self.sock.close()
+        self.lock.release()
+        logging.getLogger().removeHandler(self.handler)
+        self.handler.close()
+
+
+def socket_options(system: str = SYSTEM) -> list[tuple[int, int, int]]:
+    """On Windows the service takes its port for itself, so no other process binds it beside the service; elsewhere
+    it may reuse a port a stopped service left in TIME_WAIT, which never lets two listen."""
+    if system == "Windows":
+        # SO_EXCLUSIVEADDRUSE is ~SO_REUSEADDR in Winsock; the socket module names it only on Windows.
+        exclusive: int = vars(socket).get("SO_EXCLUSIVEADDRUSE", ~socket.SO_REUSEADDR)
+        return [(socket.SOL_SOCKET, exclusive, 1)]
+    return [(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)]
+
+
+# EADDRINUSE and EACCES, and Winsock's own numbers for them.
+IN_USE = {errno.EADDRINUSE, errno.EACCES, 10048, 10013}
+
+
+def bind(port: int, options: list[tuple[int, int, int]] | None = None) -> socket.socket:
+    """A listening socket on 127.0.0.1 only."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        for level, name, value in socket_options() if options is None else options:
+            sock.setsockopt(level, name, value)
+        sock.bind((HOST, port))
+        sock.listen(128)
+    except OSError as e:
+        sock.close()
+        if e.errno in IN_USE or getattr(e, "winerror", None) in IN_USE:
+            raise DocketError(
+                f"port {port} on {HOST} is in use by another program; free it, or give Docket another with "
+                "`docket service install --port <n>` (and the same in Claude Code's MCP config)"
+            ) from None
+        raise
+    return sock
+
+
+def prepare(vault: Path | None = None, port: int | None = None, *, tokens: Tokens | None = None) -> Prepared:
+    settings = userconfig.service()
+    vault = vault or settings.vault
+    wanted = port if port is not None else (settings.port or client.DEFAULT_PORT)
+    state = userconfig.state_dir()
+    state.mkdir(parents=True, exist_ok=True)
+    lock = FileLock(str(state / LOCK_FILE), timeout=0)
+    try:
+        lock.acquire()
+    except Timeout:
+        running = client.recorded() or {}
+        raise DocketError(
+            f"the service already runs (pid {running.get('pid', '?')}, port {running.get('port', '?')}); "
+            "`docket service status` says more"
+        ) from None
+    try:
+        store = tokens or Tokens()
+        token = store.read()
+        sock = bind(wanted)
+    except BaseException:
+        lock.release()
+        raise
+    actual: int = sock.getsockname()[1]
+    handler = logs.configure(userconfig.log_dir() / LOG_FILE)
+    started = datetime.now(UTC)
+    app = create_app(Settings(port=actual, vault=vault, token=lambda: token, store=store.where(), started=started))
+    record = {
+        "pid": os.getpid(),
+        "port": actual,
+        "vault": str(vault) if vault else None,
+        "version": __version__,
+        "started": started.isoformat(),
+    }
+    target = client.service_file()
+    tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8", newline="\n")
+    tmp.replace(target)
+    log.info("serving on %s:%d", HOST, actual)
+    return Prepared(app=app, sock=sock, port=actual, lock=lock, handler=handler)
+
+
+def serve(
+    vault: Path | None = None,
+    port: int | None = None,
+    *,
+    said: Callable[[str], None] = lambda _line: None,
+    running: Callable[[uvicorn.Server], None] = lambda _server: None,
+) -> None:
+    """Run the service until it is stopped. `running` gets the server, so a caller can stop it."""
+    ready = prepare(vault, port)
+    try:
+        said(f"Docket serves on http://{HOST}:{ready.port} (log: {userconfig.log_dir() / LOG_FILE})")
+        config = uvicorn.Config(
+            ready.app,
+            log_config=None,
+            access_log=False,
+            server_header=False,
+            http="h11",
+            ws="none",
+            lifespan="on",
+        )
+        server = uvicorn.Server(config)
+        running(server)
+        server.run(sockets=[ready.sock])
+    finally:
+        ready.close()
