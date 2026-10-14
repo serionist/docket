@@ -52,16 +52,18 @@ known-first-party = ["docket", "devkit"]
 ban-relative-imports = "all"
 
 [tool.pyright]
-include = ["packages", "tools/devkit"]
+include = ["packages", "tools/devkit", "examples"]
 exclude = ["**/.venv", "**/__pycache__", "tests/fixtures"]
 pythonVersion = "3.12"
 typeCheckingMode = "standard"
 strict = ["packages/*/src", "tools/devkit/src"]
 reportMissingTypeStubs = false
-extraPaths = ["packages/docket/tests"]
+# The Plaud example's tests import their payload builders by name, as they do once copied into a project.
+extraPaths = ["packages/docket/tests", "examples/sources/plaud/tests"]
 
 [tool.pytest.ini_options]
-testpaths = ["packages", "tools/devkit/tests"]
+# The reference sources' tests run in CI like the app's (DR-0101): an example nobody runs drifts from the contract.
+testpaths = ["packages", "tools/devkit/tests", "examples"]
 # The app tests' shared builders (docket_testkit) import by name; test folders are not packages.
 pythonpath = ["packages/docket/tests"]
 addopts = ["--import-mode=importlib", "-ra", "--strict-markers"]
