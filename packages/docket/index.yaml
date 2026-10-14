@@ -14,11 +14,12 @@ reading:
 decisions:
   - id: DR-0019
     title: The vault's layout and run-file names are fixed
-    status: proposed
+    status: superseded
     at: "2026-10-14"
     by: Claude (autonomy grant)
     cost: one-way
     sources: ["#4"]
+    superseded_by: [DR-0141]
     description: A vault holds vault.yaml, raw/, media/, processed/, entities/, ledger/ops/ and state/; staging/ and index/ are never committed. A raw run file is raw/<source>/<yyyy>/<mm>/<yyyy-mm-dd>T<hhmm>-<machine>.jsonl in UTC, and a second run in the same minute gets .2, .3 before .jsonl. A machine name is lowercase letters, digits and inner hyphens and never ends in -<digits>.
     binds:
       - Every record's run field is its run file's stem.
@@ -452,3 +453,130 @@ decisions:
     sources: ["#10"]
     description: "The core takes no per-source code (DR-0108), so no source registers the other names a note may use for its records. Importing a notes folder (#11) matches a legacy note to recordings by the generic record fields: title, ts and source."
     not_chosen: ["register_note_names per source: per-source code in the core."]
+  - id: DR-0140
+    title: "vault.yaml says where git keeps the vault: a folder of the repo around it, or a repo of its own"
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#34"]
+    description: "vault.yaml has storage: folder or repo; no key means repo, the only kind there was before, so schema_version stays 1. Docket checks the disk agrees before it writes: a repo of its own has its own .git, a folder vault has none and sits strictly inside a host repo. A folder vault is found only by Docket's own vault.yaml, never by another tool's."
+    binds:
+      - "Open refuses storage: folder with a .git of its own, storage: repo without one, a folder vault inside another vault, and a folder vault reached through a linked worktree of its host."
+      - Open first looks for a convert that stopped part way and points at `docket vault convert` and --abort.
+      - In a repo of its own git runs with GIT_CEILING_DIRECTORIES at the vault's parent, so a vault whose .git went missing never commits into a repo above it.
+    not_chosen:
+      - "Detecting it from the disk alone: a copied vault, or one whose .git went missing, would commit into whatever repo holds it."
+  - id: DR-0141
+    title: The vault's layout and run-file names are fixed, and Docket's own files live in the git dir
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#34"]
+    supersedes: [DR-0019]
+    description: Restates DR-0019 and adds where Docket's private files live in each mode. A vault holds vault.yaml, raw/, media/, processed/, entities/, ledger/ops/ and state/; staging/ and index/ are never committed. A raw run file is raw/<source>/<yyyy>/<mm>/<yyyy-mm-dd>T<hhmm>-<machine>.jsonl in UTC, and a second run in the same minute gets .2, .3 before .jsonl. A machine name is lowercase letters, digits and inner hyphens and never ends in -<digits>. Docket's lock, machine file, temp files and markers are in .git/docket/ (the lock .git/docket.lock) for a repo of its own, and in <host git dir>/docket/<vault path>/ for a folder vault, so nothing of Docket's shows in the user's tree. A folder vault also has its own .ignore (/*, !/processed/), so search tools see its processed docs and nothing else in it. This refines DR-0024's temp-file bind for both modes; DR-0024 stays as decided.
+    binds:
+      - Every record's run field is its run file's stem.
+      - Temp files, staging's included, are written in the private folder's tmp/, never under raw/ or staging/.
+    not_chosen:
+      - "A -2 suffix: ambiguous with machine names that end in a number."
+      - "Private files in an ignored folder of the vault: a host's git clean -x deletes them, and editors list them."
+  - id: DR-0142
+    title: A vault's git attributes are in its own .gitattributes, in both modes
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#34"]
+    description: "Refines DR-0102's bind on the media lines, which stays as decided: a folder vault's LFS lines are in its own .gitattributes, not the host's. Git reads a nested .gitattributes for the paths below it, a deeper file wins over the host's root, and the file moves with the folder. Its first line, * !filter !diff !merge !working-tree-encoding, stops the host's rules at the vault; the lines after it set the vault's own: LF, merge=union for JSONL and for the hold lists, media in LFS."
+    binds:
+      - "The reset line stays first: appended last it would cancel the vault's own lines."
+      - Init, convert and vault check read the resolved attributes with git check-attr and report a mismatch; only .git/info/attributes can override the vault's file.
+      - Init writes nothing into the host's .gitattributes.
+    not_chosen:
+      - "The host's root .gitattributes: a line there goes stale when the folder moves, and it is a host path Docket would have to commit."
+  - id: DR-0143
+    title: In a host, Docket's commits skip the host's hooks and leave its locks alone
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#34"]
+    description: "A folder vault's commits run with core.hooksPath pointed at an empty folder in Docket's private folder. The host's index.lock is the user's: a fresh one is waited for a few seconds, a stale one is reported with its age, and Docket never deletes it. A commit that fails after its add unstages Docket's paths, and a run file a crash left staged counts as uncommitted and goes in with the next commit."
+    binds:
+      - An operation in progress in the host (merge, rebase, cherry-pick, revert, a detached HEAD) blocks Docket's writes, and Docket never aborts it.
+      - "A conflict in the user's own files doesn't block Docket: git's partial commit leaves it as it is."
+    not_chosen:
+      - "Running the host's hooks: a formatter would rewrite raw files written once, and a commit-msg rule would refuse or rewrite Doc: lines."
+  - id: DR-0144
+    title: In a host, Docket commits on whichever branch is checked out
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#34"]
+    description: "No branch is pinned: the user's own git flow moves the vault, branches included. docket vault status shows the branch and warns when the host has an origin/HEAD and the branch isn't it."
+    not_chosen:
+      - "Committing only on one branch: writes on any other branch would wait uncommitted, for the user's own git add -A to sweep into a feature branch."
+  - id: DR-0145
+    title: In a host, two commits claiming one doc rev are reported, not prevented
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#34"]
+    description: "DR-0112's sync stop (both sides wrote the same Doc: <id> rev <n>) has no folder-mode twin, since Docket never runs the user's merges. vault check reports a doc rev that two commits claim, naming both, and the next put goes on from the highest rev."
+    not_chosen: ["A merge driver or hook in the host: Docket doesn't run the user's merges."]
+  - id: DR-0146
+    title: Setup checks the host before a folder vault goes there
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#34"]
+    description: Init and the convert check every fetch and push URL from git remote get-url (insteadOf and pushInsteadOf expanded). An SSH URL is probed as https on the same host, with an anonymous ls-remote run outside any repo and with the user's git config shut out. A public remote refuses folder mode; one that can't be checked needs the user's word that it is private. Other committers in HEAD's last 1000 commits make a warning and a repo of its own the default. A host ignore rule that hides a vault path refuses folder mode, and git-lfs's filter and pre-push hook are set up in the host after the user's yes.
+    binds: ["Under --yes, folder mode in a host that looks shared needs --allow-shared."]
+    not_chosen:
+      - Trusting SSH remotes as private.
+      - Probing with the user's config, which can rewrite the URL or add credentials.
+      - Only a warning under --yes for a shared host.
+  - id: DR-0147
+    title: A vault becomes a folder by rewriting its history under its path and one host merge
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#34"]
+    description: docket vault convert fetches the vault's branch into the host, rewrites it under the vault's path with one git fast-import (each tree the original at the vault's path, author, committer, dates and message kept), ends it with an ordinary commit that makes the vault a folder, and merges that into the host's branch in one commit that adds nothing of its own, so a pull --rebase keeps everything. The vault's own .git moves to Docket's private folder as the backup. A dry run comes first and nothing changes before the user's yes; each step is recorded before it runs, so a second run finishes what a crash stopped, and --abort undoes a convert stopped before the host merge.
+    binds:
+      - "A vault with any remote is refused: another machine's clone of it would be overwritten by that machine's next pull of the host."
+      - "The host merge is made the way git commit makes one: under the host's index.lock, the index written with the vault's entries before the lock is renamed over it."
+      - "Every Doc: line and rev keeps its commit, under the vault's new path (DR-0112)."
+    not_chosen:
+      - "The folder files in the merge itself: a pull --rebase drops the merge and them with it."
+      - "A bundle of the old history: revisions would end at the convert, and a bundle carries no LFS objects."
+      - "git subtree: a contrib script many installs lack, and its history keeps the old paths."
+      - "git filter-repo: another install."
+      - "The user's own git merge: it refuses while anything is staged."
+  - id: DR-0148
+    title: The convert leaves its .gitignore and .ignore edits for the user to commit
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#34"]
+    description: The convert takes the vault's lines out of the host's .gitignore and .ignore in the working tree only. Its host merge holds the vault's paths and nothing else; the dry run, the last message and vault check name the two files.
+    not_chosen:
+      - "Putting them in the host merge: Docket would commit paths that aren't the vault's."
+  - id: DR-0149
+    title: A folder vault isn't opened from a linked worktree of its host
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#34"]
+    description: A linked worktree holds its own copy of the vault folder, on its own branch. Open refuses it and names the main checkout's copy, the one the service writes.
+    not_chosen:
+      - "Writing the worktree's copy: vault commits would land on a feature branch."
+      - Redirecting to the main checkout without saying so.

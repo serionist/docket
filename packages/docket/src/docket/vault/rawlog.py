@@ -58,10 +58,10 @@ def parse_run_file(raw_dir: Path, path: Path) -> RunFile | None:
 
 
 class RawLog:
-    def __init__(self, root: Path, machine: str, lock: VaultLock) -> None:
+    def __init__(self, root: Path, machine: str, lock: VaultLock, tmp_dir: Path | None = None) -> None:
         self.root = root
         self.raw_dir = root / "raw"
-        self.tmp_dir = root / ".git" / "docket" / "tmp"
+        self.tmp_dir = tmp_dir or root / ".git" / "docket" / "tmp"
         self.machine = machine
         self.lock = lock
         self._seen: set[tuple[str, str]] = set()

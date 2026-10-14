@@ -1,7 +1,8 @@
 """`docket init`: the questions that set up a vault, then `Vault.init`.
 
 Every answer can also come from a flag, so `docket init --yes --path ... --owner ...` runs unattended. Nothing is
-written before the summary is confirmed.
+written before the summary is confirmed. Inside a git repo the vault is a folder of it by default; the host checks
+decide whether that is allowed, and a repo of its own is always offered.
 """
 
 from __future__ import annotations
@@ -17,10 +18,15 @@ from typing import Literal, Protocol
 
 from docket import userconfig
 from docket.errors import DocketError
+from docket.vault import host
 from docket.vault import machine as machines
 from docket.vault.config import NeverStore, Owner, SourceConfig, VaultConfig
 from docket.vault.git import Git, toplevel
-from docket.vault.vault import Vault
+from docket.vault.home import Storage
+from docket.vault.host import HostReport, Visibility, remote_visibility
+from docket.vault.vault import Vault, attribute_mismatches
+
+__all__ = ["Given", "Plan", "Visibility", "Wizard", "nest_in_parent", "remote_visibility"]
 
 # The sources Docket knows, and how private each can be: "mixed" ones can carry private content, so their records
 # wait in staging until classified.
@@ -34,8 +40,6 @@ KNOWN_SOURCES: dict[str, Literal["work", "mixed", "private"]] = {
     "claude-sessions": "work",
     "documents": "work",
 }
-
-Visibility = Literal["public", "unknown", "local"]
 
 
 class Prompter(Protocol):
@@ -55,8 +59,10 @@ class Given:
     time_zone: str | None = None
     machine: str | None = None
     sources: list[str] = field(default_factory=list[str])
+    storage: str | None = None
     remote: str | None = None
     remote_is_private: bool = False
+    allow_shared: bool = False
     allow_dirty_parent: bool = False
     yes: bool = False
 
@@ -69,6 +75,7 @@ class Plan:
     machine: str
     remote: str | None
     new_github_repo: str | None
+    host: HostReport | None = None
 
 
 def _git_config(key: str) -> str:
@@ -83,35 +90,6 @@ def local_time_zone() -> str | None:
         return get_localzone_name()
     except Exception:
         return None
-
-
-def remote_visibility(url: str) -> Visibility:
-    """Whether anyone can read a remote: an anonymous `git ls-remote` that works means the repo is public. Fails
-    closed: anything that can't be checked anonymously is "unknown", and the user has to say it's private."""
-    if Path(url).exists() or re.match(r"^[A-Za-z]:[\\/]", url) or url.startswith(("/", "./", "../", "file://")):
-        return "local"
-    if url.startswith(("git@", "ssh://")) or re.match(r"^[\w.-]+@[\w.-]+:", url):
-        return "unknown"
-    env = {
-        **os.environ,
-        "GIT_TERMINAL_PROMPT": "0",
-        "GCM_INTERACTIVE": "never",
-        "GIT_ASKPASS": "",
-        "SSH_ASKPASS": "",
-    }
-    try:
-        proc = subprocess.run(
-            ["git", "-c", "credential.helper=", "ls-remote", "--heads", url],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-            env=env,
-            timeout=30,
-        )
-    except subprocess.TimeoutExpired:
-        return "unknown"
-    return "public" if proc.returncode == 0 else "unknown"
 
 
 def _gh_ready() -> bool:
@@ -132,6 +110,15 @@ def _parse_sources(items: list[str]) -> dict[str, SourceConfig]:
             raise DocketError(f"source {name}: sensitivity is work, mixed or private, not {level!r}")
         out[name] = SourceConfig(sensitivity=level)  # pyright: ignore[reportArgumentType]
     return out
+
+
+def confirm_private(prompter: Prompter, urls: list[str], given_private: bool, yes: bool) -> None:
+    """Each remote Docket can't check anonymously needs the user's word that it is private."""
+    for url in urls:
+        if given_private:
+            continue
+        if yes or not prompter.confirm(f"Docket can't check {url} itself. Private?", False):
+            raise DocketError(f"can't confirm {url} is private; pass --remote-is-private if it is")
 
 
 class Wizard:
@@ -156,7 +143,9 @@ class Wizard:
         default_path = str((repo or here) / "vault")
         path = Path(self._answer(str(g.path) if g.path else None, "Where should the vault live?", default_path))
         path = path.expanduser().resolve()
-        parent = self._check_parent(path)
+        around = toplevel(path.parent)
+        if around is not None:
+            _refuse_tracked(around, path)
 
         owner = self._answer(g.owner, "Your name", _git_config("user.name") or os.environ.get("USERNAME") or None)
         email_default = _git_config("user.email") or None
@@ -172,8 +161,10 @@ class Wizard:
         source_items = g.sources or self._answer(
             None, "Sources to enable (name or name=work|mixed|private)", source_default
         ).split(",")
+        storage, report = self._storage(path, around, emails)
         try:
             config = VaultConfig(
+                storage=storage,
                 owner=Owner(name=owner, emails=emails, languages=languages, time_zone=zone),
                 primary_machine=machine,
                 sources=_parse_sources(source_items),
@@ -181,18 +172,52 @@ class Wizard:
             )
         except ValueError as e:
             raise DocketError(str(e)) from e
+        if storage == "folder":
+            return Plan(path, None, config, machine, None, None, report)
+        parent = self._check_dirty(around) if around is not None else None
         remote, new_repo = self._remote()
         return Plan(path, parent, config, machine, remote, new_repo)
 
-    def _check_parent(self, path: Path) -> Path | None:
-        parent = toplevel(path.parent)
-        if parent is None or parent == path:
-            return None
-        parent_git = Git(parent)
-        rel = path.relative_to(parent).as_posix()
-        if parent_git.out("ls-files", "--", rel).strip():
-            raise DocketError(f"{parent} already tracks files under {rel}/; pick a new folder name for the vault")
-        dirty = parent_git.out("status", "--porcelain").strip()
+    def _storage(self, path: Path, around: Path | None, emails: list[str]) -> tuple[Storage, HostReport | None]:
+        """Folder or repo: the host checks set the default, refuse folder mode outright, or warn."""
+        g = self.given
+        if g.storage not in (None, "folder", "repo"):
+            raise DocketError(f"--storage is folder or repo, not {g.storage!r}")
+        if around is None:
+            if g.storage == "folder":
+                raise DocketError(
+                    f"{path.parent} isn't inside a git repo; a folder vault needs one (or --storage repo)"
+                )
+            return "repo", None
+        prefix = path.relative_to(around).as_posix() + "/"
+        report = host.check(around, prefix, emails, self.visibility)
+        blocking = report.blocking()
+        for line in blocking:
+            self.p.say(f"Folder mode isn't possible here: {line}.")
+        if report.shared:
+            self.p.say(
+                f"{around} looks shared: {', '.join(report.shared)} also commit to it. A folder vault there is seen by "
+                "everyone who can read the repo; a repo of its own keeps it apart."
+            )
+        default = "repo" if blocking or report.shared else "folder"
+        question = f"Keep the vault as a folder of {around} (folder), or as a repo of its own (repo)?"
+        storage = self._answer(g.storage, question, default)
+        if storage not in ("folder", "repo"):
+            raise DocketError(f"the vault is a folder or a repo, not {storage!r}")
+        if storage == "repo":
+            return "repo", None
+        if blocking:
+            raise DocketError(f"a folder of {around} isn't possible: {'; '.join(blocking)}")
+        if report.shared and g.yes and not g.allow_shared:
+            raise DocketError(
+                f"{around} looks shared ({', '.join(report.shared)}); pass --allow-shared to keep the vault there "
+                "anyway, or --storage repo"
+            )
+        confirm_private(self.p, report.unknown, g.remote_is_private, g.yes)
+        return "folder", report
+
+    def _check_dirty(self, parent: Path) -> Path:
+        dirty = Git(parent).out("status", "--porcelain").strip()
         if dirty and not self.given.allow_dirty_parent:
             raise DocketError(
                 f"{parent} has uncommitted changes. Commit them first, so the vault's arrival is a clean point in its "
@@ -214,9 +239,8 @@ class Wizard:
         visibility = self.visibility(answer)
         if visibility == "public":
             raise DocketError(f"{answer} can be read without signing in; a vault never goes to a public repo")
-        unconfirmed = visibility == "unknown" and not g.remote_is_private
-        if unconfirmed and (g.yes or not self.p.confirm(f"Docket can't check {answer} itself. Private?", False)):
-            raise DocketError(f"can't confirm {answer} is private; pass --remote-is-private if it is")
+        if visibility == "unknown":
+            confirm_private(self.p, [answer], g.remote_is_private, g.yes)
         return answer, None
 
     def run(self) -> Vault:
@@ -225,7 +249,13 @@ class Wizard:
         if not self.given.yes and not self.p.confirm("Create it?", True):
             raise DocketError("nothing created")
         vault = Vault.init(plan.path, plan.config, plan.machine)
-        if plan.parent is not None:
+        if plan.host is not None:
+            note = host.setup_lfs(plan.host.top, plan.host.lfs)
+            if note:
+                self.p.say(f"git-lfs: {note}")
+            for rel, message in attribute_mismatches(vault.root):
+                self.p.say(f"{rel}: {message}")
+        elif plan.parent is not None:
             nest_in_parent(plan.parent, plan.path)
         if plan.remote:
             vault.git.run("remote", "add", "origin", plan.remote)
@@ -255,19 +285,37 @@ class Wizard:
         return vault
 
     def _summary(self, plan: Plan) -> None:
-        new_repo = f"new private GitHub repo {plan.new_github_repo}" if plan.new_github_repo else "none"
+        if plan.host is not None:
+            rel = plan.path.relative_to(plan.host.top).as_posix()
+            where = [
+                f"storage:  a folder of {plan.host.top}, on {plan.host.branch}: Docket commits only {rel}/, locally; "
+                "your own git moves it",
+                *(f"          {line}" for line in plan.host.lines()),
+            ]
+        else:
+            new_repo = f"new private GitHub repo {plan.new_github_repo}" if plan.new_github_repo else "none"
+            where = [
+                "storage:  a repo of its own",
+                f"inside:   {plan.parent} (its .gitignore and .ignore get the vault's lines)"
+                if plan.parent
+                else "inside:   no other repo",
+                f"remote:   {plan.remote or new_repo}",
+            ]
         lines = [
             f"vault:    {plan.path}",
-            f"inside:   {plan.parent} (its .gitignore and .ignore get the vault's lines)"
-            if plan.parent
-            else "inside:   no other repo",
+            *where,
             f"owner:    {plan.config.owner.name} <{', '.join(plan.config.owner.emails) or 'no email'}>",
             f"time:     {plan.config.owner.time_zone}, languages {', '.join(plan.config.owner.languages)}",
             f"machine:  {plan.machine} (primary)",
             f"sources:  {', '.join(f'{k} ({v.sensitivity})' for k, v in plan.config.sources.items()) or 'none yet'}",
-            f"remote:   {plan.remote or new_repo}",
         ]
         self.p.say("\n".join(lines))
+
+
+def _refuse_tracked(parent: Path, path: Path) -> None:
+    rel = path.relative_to(parent).as_posix()
+    if Git(parent).out("ls-files", "--", rel).strip():
+        raise DocketError(f"{parent} already tracks files under {rel}/; pick a new folder name for the vault")
 
 
 def nest_in_parent(parent: Path, vault: Path) -> None:

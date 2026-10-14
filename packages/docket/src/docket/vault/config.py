@@ -135,6 +135,9 @@ class Redaction(_Model):
 
 class VaultConfig(_Model):
     schema_version: Literal[1] = 1
+    # Where git keeps the vault: the top of a repo of its own, or a folder of the repo around it. No key means a repo
+    # of its own, the only kind there was before folders.
+    storage: Literal["repo", "folder"] = "repo"
     owner: Owner
     primary_machine: str
     sources: dict[str, SourceConfig] = Field(default_factory=dict[str, SourceConfig])

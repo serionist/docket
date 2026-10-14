@@ -162,7 +162,7 @@ def test_nothing_is_written_before_the_confirmation(tmp_path: Path) -> None:
 
 def test_a_nested_vault_ignores_itself_in_the_parent(tmp_path: Path) -> None:
     parent = parent_repo(tmp_path)
-    Wizard(Script(), given(parent / "vault", yes=True)).run()
+    Wizard(Script(), given(parent / "vault", yes=True, storage="repo")).run()
     assert "/vault/" in (parent / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert (parent / ".ignore").read_text(encoding="utf-8").splitlines() == [
         "!/vault/",
@@ -182,9 +182,9 @@ def test_a_dirty_parent_is_refused(tmp_path: Path) -> None:
     parent = parent_repo(tmp_path)
     (parent / "notes.md").write_text("changed\n", encoding="utf-8")
     with pytest.raises(DocketError, match="uncommitted changes"):
-        Wizard(Script(), given(parent / "vault", yes=True)).run()
+        Wizard(Script(), given(parent / "vault", yes=True, storage="repo")).run()
     assert not (parent / "vault").exists()
-    Wizard(Script(), given(parent / "vault", yes=True, allow_dirty_parent=True)).run()
+    Wizard(Script(), given(parent / "vault", yes=True, storage="repo", allow_dirty_parent=True)).run()
     assert (parent / "vault" / "vault.yaml").is_file()
 
 
@@ -255,7 +255,7 @@ def test_a_nested_vault_is_found_from_the_parent_s_root_without_a_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     parent = parent_repo(tmp_path)
-    Wizard(Script(), given(parent / "vault", yes=True)).run()
+    Wizard(Script(), given(parent / "vault", yes=True, storage="repo")).run()
     monkeypatch.setenv("DOCKET_CONFIG_DIR", str(tmp_path / "no-config"))
     assert userconfig.default_vault() is None
     monkeypatch.chdir(parent)

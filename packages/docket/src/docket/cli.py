@@ -19,7 +19,7 @@ from docket.imports import notes
 from docket.sources.contract import Manifest
 from docket.sources.ingest import IngestReport, ingest_run
 from docket.sources.runner import MapperFailedError
-from docket.vault import cuts
+from docket.vault import convert, cuts
 from docket.vault.anchors import format_time
 from docket.vault.gate import Gate, Label
 from docket.vault.processed import DocRefusedError
@@ -77,6 +77,25 @@ def find_vault(explicit: Path | None) -> Vault:
     raise DocketError("no vault here; pass --vault, set DOCKET_VAULT, or create one with `docket init`")
 
 
+def _vault_root(explicit: Path | None) -> Path:
+    """The vault's folder, found the way `find_vault` finds it but without opening it: a convert works on a vault
+    that open would refuse. A path the user named is the only one tried: falling through to ./vault or the default
+    vault would convert one they never named."""
+    env = os.environ.get("DOCKET_VAULT")
+    named = explicit or (Path(env) if env else None)
+    if named is not None:
+        root = Vault.find(named)
+        if root is None:
+            raise DocketError(f"no vault at or above {named}")
+        return root
+    here = Path.cwd()
+    for candidate in (here, here / "vault", userconfig.default_vault()):
+        root = Vault.find(candidate) if candidate is not None else None
+        if root is not None:
+            return root
+    raise DocketError("no vault here; pass --vault")
+
+
 def _version(value: bool) -> None:
     if value:
         typer.echo(f"docket {__version__}")
@@ -106,12 +125,16 @@ def init(
     source: Annotated[
         list[str] | None, typer.Option(help="A source to enable: name, or name=work|mixed|private (repeat).")
     ] = None,
+    storage: Annotated[
+        str | None, typer.Option(help="folder (a folder of the repo around it) or repo (a repo of its own).")
+    ] = None,
     remote: Annotated[str | None, typer.Option(help="none, a path or URL, or github[:name].")] = None,
     remote_is_private: Annotated[bool, typer.Option(help="Confirm a remote Docket can't check is private.")] = False,
+    allow_shared: Annotated[bool, typer.Option(help="Keep a folder vault in a repo others commit to.")] = False,
     allow_dirty_parent: Annotated[bool, typer.Option(help="Nest in a repo with uncommitted changes.")] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Take the defaults and don't ask.")] = False,
 ) -> None:
-    """Set up a vault: anywhere, or nested in a working folder that is its own git repo."""
+    """Set up a vault: a folder of the repo you work in, or a repo of its own."""
     given = Given(
         path=path,
         owner=owner,
@@ -120,12 +143,23 @@ def init(
         time_zone=time_zone,
         machine=machine,
         sources=source or [],
+        storage=storage,
         remote=remote,
         remote_is_private=remote_is_private,
+        allow_shared=allow_shared,
         allow_dirty_parent=allow_dirty_parent,
         yes=yes,
     )
     Wizard(TyperPrompter(), given).run()
+
+
+@app.command()
+def sync(vault: VaultOption = None) -> None:
+    """Move the vault with its remote: in a repo of its own, fetch and rebase; in a folder, your own git does it."""
+    result = find_vault(vault).sync()
+    typer.echo(result.message)
+    if "resolve it by hand" in result.message:
+        raise typer.Exit(1)
 
 
 @vault_app.command("status")
@@ -133,6 +167,9 @@ def vault_status(vault: VaultOption = None) -> None:
     """Records per source, runs, and what isn't committed yet."""
     s = find_vault(vault).status()
     typer.echo(f"vault    {s.root}")
+    typer.echo(f"storage  {f'a folder of {s.host}' if s.host else 'a repo of its own'}, on {s.branch}")
+    if s.branch_warning:
+        typer.echo(f"warning  {s.branch_warning}")
     typer.echo(f"machine  {s.machine}")
     typer.echo(f"runs     {s.runs}")
     for source, count in sorted(s.records.items()):
@@ -214,6 +251,22 @@ def _ingest_report(report: IngestReport) -> None:
     if report.unreadable:
         places = ", ".join(str(n) for n in report.unreadable)
         say(f"skipped    file(s) {places} of {report.files} in name order: not JSON")
+
+
+@vault_app.command("convert")
+def vault_convert(
+    *,
+    vault: VaultOption = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Show what would change, and stop.")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Convert without asking.")] = False,
+    abort: Annotated[bool, typer.Option("--abort", help="Undo a convert that stopped before its commit.")] = False,
+    remote_is_private: Annotated[bool, typer.Option(help="Confirm a remote Docket can't check is private.")] = False,
+    allow_shared: Annotated[bool, typer.Option(help="Convert into a repo others commit to.")] = False,
+) -> None:
+    """Make a vault that is a repo of its own a folder of the repo around it, history included."""
+    root = _vault_root(vault)
+    options = convert.Options(dry_run, yes, abort, remote_is_private, allow_shared)
+    convert.convert(root, TyperPrompter(), options)
 
 
 RefArgument = Annotated[str, typer.Argument(help="A rid, or at least 6 characters of a key from `staging list`.")]

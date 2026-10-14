@@ -135,7 +135,7 @@ def add(vault: Vault, source: str, ids: Iterable[str]) -> int:
         added = new - current
         if added:
             path.parent.mkdir(parents=True, exist_ok=True)
-            _replace(vault.root, path, "".join(f"{i}\n" for i in sorted(current | added)))
+            _replace(vault.home.tmp_dir, path, "".join(f"{i}\n" for i in sorted(current | added)))
         if not path.exists():
             return 0
         _union_line(vault.root)
@@ -152,10 +152,9 @@ def add(vault: Vault, source: str, ids: Iterable[str]) -> int:
         return len(added)
 
 
-def _replace(root: Path, path: Path, text: str) -> None:
-    """Write through a temp file in .git and a rename, so a crash leaves the old list or the new, and a link planted
-    at the list's path is replaced, never written through."""
-    tmp_dir = root / ".git" / "docket" / "tmp"
+def _replace(tmp_dir: Path, path: Path, text: str) -> None:
+    """Write through a temp file in Docket's private folder under the git dir and a rename, so a crash leaves the old
+    list or the new, and a link planted at the list's path is replaced, never written through."""
     tmp_dir.mkdir(parents=True, exist_ok=True)
     tmp = tmp_dir / f"holds-{path.stem}.{os.getpid()}.tmp"
     try:
@@ -187,5 +186,6 @@ def _union_line(root: Path) -> None:
 def _union_uncommitted(vault: Vault) -> bool:
     """Whether the merge rule is in .gitattributes but not in HEAD's: only then does Docket commit that file, so a
     user's own edits there stay theirs."""
-    committed = vault.git.run("show", "HEAD:.gitattributes", check=False).stdout
+    # ./ reads the vault's own file: in a folder of the user's repo, HEAD:.gitattributes is the repo's.
+    committed = vault.git.run("show", "HEAD:./.gitattributes", check=False).stdout
     return not _has_union(committed) and _has_union((vault.root / ".gitattributes").read_text(encoding="utf-8"))

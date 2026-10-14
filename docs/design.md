@@ -254,12 +254,23 @@ vault/
   index/docket.sqlite            derived; `docket index rebuild` makes it from the above    -> never committed
 ```
 
-- Setup checks the host repo's remotes before it offers a folder: it refuses one the host reports as public, warns
-  when the repo looks shared (other committers), and offers a repo of its own instead.
+- `vault.yaml` says which (`storage: folder` or `repo`), and Docket checks the disk agrees before it writes.
+  Docket's own files (the lock, the machine name, temp files) live in the git dir, never in the user's tree:
+  `.git/docket/` for a repo of its own, `<host git dir>/docket/<vault path>/` for a folder.
+- Setup checks the host repo before it offers a folder: it refuses a remote anyone can read (an SSH remote is asked
+  over https), warns when the repo looks shared (other committers), refuses a host ignore rule that would hide the
+  vault, and offers a repo of its own instead.
+- In a folder, Docket's commits hold only the vault's paths, skip the host's hooks, and land on whichever branch is
+  checked out; `docket vault status` warns when that isn't the remote's default.
 - Raw text is in plain git, so grep, diffs and partial clones keep working. Only `media/` is in LFS, in both modes,
-  so a clone with `lfs.fetchexclude=media/**` can rebuild everything except playback.
-- In a folder of the user's repo, init writes the LFS attributes for the vault's `media/` path into that repo's
-  `.gitattributes` and checks that git-lfs is installed.
+  so a clone with `lfs.fetchexclude=<vault path>/media/**` can rebuild everything except playback.
+- The vault's own `.gitattributes` holds every attribute it needs, in both modes: its first line stops the host's
+  rules at the vault, the rest set LF, `merge=union` for JSONL and the hold lists, and media in LFS. Init writes
+  nothing into the host's `.gitattributes`, and checks that git-lfs is installed and set up for the host's push.
+- A folder vault has its own `.ignore`, so search tools see its processed docs and nothing else in it.
+- `docket vault convert` turns a nested repo of its own into a folder of the repo around it: its history rewritten
+  under the vault's path and merged in one commit, after a dry run and the user's yes, its old `.git` kept as a
+  backup. A crash at any step is finished by running it again.
 - Media is encrypted, one key per file (age), the keys in the keychain plus an exported backup. Deleting a key is
   what makes forgetting real.
 - The database isn't committed. It rebuilds from what's committed; a test checks that two rebuilds give the same

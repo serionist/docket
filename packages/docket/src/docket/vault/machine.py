@@ -30,24 +30,25 @@ def from_host(host: str) -> str:
     return name
 
 
-def machine_file(vault_root: Path) -> Path:
-    """Where the wizard keeps this clone's name: inside `.git`, so it is never committed or shared."""
-    return vault_root / ".git" / "docket" / "machine"
+def machine_file(private: Path) -> Path:
+    """Where the wizard keeps this clone's name: in Docket's private folder under the git dir, so it is never
+    committed or shared."""
+    return private / "machine"
 
 
-def resolve(vault_root: Path | None = None) -> str:
+def resolve(private: Path | None = None) -> str:
     """This machine's name: `DOCKET_MACHINE`, else the clone's own file, else the host name."""
     env = os.environ.get("DOCKET_MACHINE")
     if env:
         return validate(env.strip())
-    if vault_root is not None:
-        path = machine_file(vault_root)
+    if private is not None:
+        path = machine_file(private)
         if path.is_file():
             return validate(path.read_text(encoding="utf-8").strip())
     return from_host(socket.gethostname())
 
 
-def remember(vault_root: Path, name: str) -> None:
-    path = machine_file(vault_root)
+def remember(private: Path, name: str) -> None:
+    path = machine_file(private)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(validate(name) + "\n", encoding="utf-8")

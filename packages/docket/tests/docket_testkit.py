@@ -9,7 +9,7 @@ import subprocess
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
@@ -50,8 +50,9 @@ def sh(cwd: Path, *args: str, check: bool = True) -> str:
     return proc.stdout
 
 
-def make_config(**owner: Any) -> VaultConfig:
+def make_config(storage: Literal["repo", "folder"] = "repo", **owner: Any) -> VaultConfig:
     return VaultConfig(
+        storage=storage,
         owner=Owner(
             name=owner.get("name", "Ada Example"),
             emails=owner.get("emails", ["ada@example.invalid"]),
@@ -189,6 +190,44 @@ def copy_project(template: Path, tmp_path: Path) -> Vault:
     target = tmp_path / "project"
     shutil.copytree(template, target)
     return Vault.open(target / "vault")
+
+
+def git(cwd: Path, *args: str) -> str:
+    """git as the user of a host repo: an invented identity, the user's own commits."""
+    return sh(cwd, "git", "-c", "user.name=Ada Example", "-c", "user.email=ada@example.invalid", *args)
+
+
+def host_repo(tmp_path: Path) -> Path:
+    """A user's repo with two files in one commit and a bare origin it pushed to: the host a folder vault lives in."""
+    sh(tmp_path, "git", "init", "-q", "--bare", "-b", "main", "origin.git")
+    top = tmp_path / "host"
+    top.mkdir()
+    git(top, "init", "-q", "-b", "main")
+    (top / "README.md").write_text("hello\n", encoding="utf-8")
+    (top / "other.txt").write_text("other\n", encoding="utf-8")
+    git(top, "add", "-A")
+    git(top, "commit", "-qm", "Host start")
+    git(top, "remote", "add", "origin", str(tmp_path / "origin.git"))
+    git(top, "push", "-q", "origin", "main")
+    return top
+
+
+def folder_vault(tmp_path: Path) -> Vault:
+    """A folder vault at notes/vault of a host repo, two levels down so a path bug can't hide, with the user's own
+    work around it: a staged change, an unstaged one, and a staged hand-made file inside the vault."""
+    top = host_repo(tmp_path)
+    vault = Vault.init(top / "notes" / "vault", make_config("folder"), "test-box")
+    (top / "README.md").write_text("hello, staged\n", encoding="utf-8")
+    git(top, "add", "README.md")
+    (top / "other.txt").write_text("other, unstaged\n", encoding="utf-8")
+    (vault.root / "processed" / "mine.md").write_text("my own note\n", encoding="utf-8")
+    git(top, "add", "notes/vault/processed/mine.md")
+    return vault
+
+
+def users_work(top: Path) -> tuple[str, str]:
+    """What the user staged and changed in a host, as git shows it."""
+    return git(top, "diff", "--cached"), git(top, "diff")
 
 
 def note(
