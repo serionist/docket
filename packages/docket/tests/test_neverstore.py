@@ -87,9 +87,32 @@ def test_every_typographic_dash_is_a_hyphen(dash: str) -> None:
     assert match(make_record(text=f"Jean{dash}Luc said"), NeverStore(keywords=["Jean-Luc"])) == "keywords"
 
 
-@pytest.mark.parametrize("written", ["dora-example", "dora_example", "DoraExample", "call_with_dora"])
-def test_a_one_word_keyword_matches_every_way_a_name_is_joined(written: str) -> None:
+@pytest.mark.parametrize("written", ["dora-example", "dora_example", "call_with_dora", "DORA_TEAM"])
+def test_a_one_word_keyword_matches_a_name_joined_by_punctuation(written: str) -> None:
     assert match(make_record(text=f"see {written} now"), NeverStore(keywords=["dora"])) == "keywords"
+
+
+@pytest.mark.parametrize(
+    ("keyword", "text"),
+    [
+        ("dora", "DoraExample"),
+        ("Max", "set maxRetries to 5"),
+        ("Mark", "call markAsRead() after the fetch"),
+        ("Jo", "JoAnn from finance"),
+        ("Kim", "KimTech invoice"),
+        ("Hub", "push to GitHub"),
+    ],
+)
+def test_a_one_word_keyword_never_splits_a_word_at_its_case_change(keyword: str, text: str) -> None:
+    assert match(make_record(text=text), NeverStore(keywords=[keyword])) is None
+
+
+@pytest.mark.parametrize(
+    ("keyword", "text"),
+    [("check-up", "can you check up on the build"), ("check up", "the yearly check-up"), ("Jean-Luc", "jean luc")],
+)
+def test_a_hyphen_in_a_keyword_also_matches_a_space(keyword: str, text: str) -> None:
+    assert match(make_record(text=text), NeverStore(keywords=[keyword])) == "keywords"
 
 
 @pytest.mark.parametrize(
@@ -98,6 +121,11 @@ def test_a_one_word_keyword_matches_every_way_a_name_is_joined(written: str) -> 
 def test_a_two_word_keyword_matches_the_name_joined_any_way(written: str) -> None:
     assert match(make_record(text=f"see {written} now"), NeverStore(keywords=["dora example"])) == "keywords"
     assert match(make_record(text=f"see {written} now"), NeverStore(keywords=["DoraExample"])) == "keywords"
+
+
+def test_a_two_word_keyword_is_found_inside_a_longer_camel_case_name() -> None:
+    assert match(make_record(text="the DoraExampleTeam board"), NeverStore(keywords=["dora example"])) == "keywords"
+    assert match(make_record(text="see McDonaldFoods"), NeverStore(keywords=["McDonald"])) == "keywords"
 
 
 def test_a_two_word_keyword_needs_both_words_and_a_whole_token() -> None:
@@ -112,8 +140,8 @@ def test_a_two_word_keyword_needs_both_words_and_a_whole_token() -> None:
 )
 def test_matches_text_screens_paths_slugs_and_ids(text: str) -> None:
     assert matches_text(text, NeverStore(keywords=["dora example"]))
-    # One lowercase token can't be split without letting `art` hit `start`, so `dora` alone only finds a word.
-    assert matches_text(text, NeverStore(keywords=["dora"])) == (text != "doraexample.md")
+    # A one-word keyword finds a word set apart by punctuation, never one inside a token or a case change.
+    assert matches_text(text, NeverStore(keywords=["dora"])) == (text.startswith(("notes/", "dora_")))
 
 
 def test_matches_text_holds_plain_strings_to_the_same_rule() -> None:

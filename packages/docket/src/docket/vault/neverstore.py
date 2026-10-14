@@ -51,12 +51,6 @@ def _words(text: str) -> str:
     return f" {_NOT_A_WORD.sub(' ', fold(html.unescape(text))).strip()} "
 
 
-def _shapes(text: str) -> tuple[str, str]:
-    """A text's words as written, and with case changes split (`DoraExample`); both, since splitting alone would
-    lose `iPhone` as one word."""
-    return _words(text), _words(_split_case(text))
-
-
 def _forms(value: str) -> set[str]:
     """How a person can be named by one string: the string itself, and every address in it (`Name <addr>`)."""
     forms = {fold(value.strip())}
@@ -86,12 +80,12 @@ def _keyword(keyword: str) -> re.Pattern[str]:
 
 
 @lru_cache(maxsize=1024)
-def _keyword_shapes(keyword: str) -> frozenset[str]:
-    """Every whole-token shape a keyword can take: its words as written, split at case changes, and run together
-    (`dora example` is also the one token `doraexample`, which `DoraExample` folds to)."""
-    shapes = set(_shapes(keyword))
-    shapes |= {f" {shape.replace(' ', '')} " for shape in set(shapes)}
-    return frozenset(s for s in shapes if s.strip())
+def _keyword_shapes(keyword: str) -> tuple[frozenset[str], bool]:
+    """Every whole-token shape a keyword can take, and whether it has several words. The shapes are its words as
+    written, split at case changes, and run together (`dora example` is also the one token `doraexample`)."""
+    written, cased = _words(keyword), _words(_split_case(keyword))
+    shapes = {written, cased} | {f" {shape.replace(' ', '')} " for shape in (written, cased)}
+    return frozenset(s for s in shapes if s.strip()), len(cased.split()) > 1
 
 
 def _says(texts: list[str], keywords: list[str]) -> bool:
@@ -102,8 +96,24 @@ def _says(texts: list[str], keywords: list[str]) -> bool:
     folded = [fold(t) for t in texts]
     if any(_keyword(k).search(t) for k in keywords for t in folded):
         return True
-    wanted = frozenset[str]().union(*(_keyword_shapes(k) for k in keywords))
-    return any(w in shape for t in texts for shape in _shapes(t) for w in wanted)
+    anywhere: set[str] = set()
+    # Only a keyword of several words is looked for in text split at case changes too: `DoraExample` holds `dora
+    # example`, but `Max` must not drop every `maxRetries`, nor `Jo` every `JoAnn`.
+    split_too: set[str] = set()
+    for keyword in keywords:
+        shapes, several = _keyword_shapes(keyword)
+        anywhere |= shapes
+        if several:
+            split_too |= shapes
+    for text in texts:
+        written = _words(text)
+        if any(shape in written for shape in anywhere):
+            return True
+        if split_too:
+            cased = _words(_split_case(text))
+            if any(shape in cased for shape in split_too):
+                return True
+    return False
 
 
 def matches_text(text: str, lists: NeverStore) -> bool:
