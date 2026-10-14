@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 import sys
 from collections.abc import Sequence
 from datetime import UTC, date, datetime
@@ -13,18 +12,18 @@ from zoneinfo import ZoneInfo
 
 import typer
 
-from docket import __version__, index, recall, userconfig
+from docket import __version__, index, recall, render, userconfig
 from docket.errors import DocketError
 from docket.imports import notes
+from docket.render import printable
 from docket.sources.contract import Manifest
 from docket.sources.ingest import IngestReport, ingest_run
 from docket.sources.runner import MapperFailedError
 from docket.vault import convert, cuts
-from docket.vault.anchors import format_time
 from docket.vault.gate import Gate, Label
 from docket.vault.processed import DocRefusedError
 from docket.vault.records import RawRecord, source_name_problem
-from docket.vault.spans import WINDOW, Span
+from docket.vault.spans import WINDOW
 from docket.vault.staging import Classifier, Entry, State
 from docket.vault.vault import Vault
 from docket.vault.wizard import Given, Wizard
@@ -393,36 +392,14 @@ def _by(value: str) -> Classifier:
     raise DocketError(f"--by is user or claude, not {value!r}")
 
 
-# C0 and C1 control characters and DEL, but newline and tab: raw text printed as it is could drive the terminal
-# (OSC 52 sets the clipboard).
-CONTROL = re.compile("[\\x00-\\x08\\x0b-\\x1f\\x7f-\\x9f]")
-
-
-def printable(text: str) -> str:
-    return CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", text)
-
-
 def say(text: str) -> None:
+    """Print a line with its control characters escaped: raw text printed as it is could drive the terminal."""
     typer.echo(printable(text))
 
 
-def _span(s: Span, indent: str) -> None:
-    head = f"{indent}{s.anchor}"
-    if s.ts is not None:
-        head += f"  {s.kind} {s.ts:%Y-%m-%d %H:%M}Z"
-    if s.author:
-        head += f" {s.author}"
-    if s.versions > 1:
-        head += f" ({s.versions} versions; this is the latest)"
-    say(head)
-    if s.problem is not None:
-        say(f"{indent}  ! {s.problem}")
-    elif s.segments:
-        for seg in s.segments:
-            say(f"{indent}  {format_time(seg.start_ms // 1000)}  {seg.speaker or '?'}: {seg.text}")
-    else:
-        for line in s.text.split("\n"):
-            say(f"{indent}  {line}")
+def say_all(lines: list[str]) -> None:
+    for line in lines:
+        say(line)
 
 
 @doc_app.command("put")
@@ -444,13 +421,9 @@ def doc_put(
     try:
         result = recall.doc_put(find_vault(vault), text)
     except DocRefusedError as e:
-        for problem in e.problems:
-            say(str(problem))
-        say(f"refused: {len(e.problems)} problem(s)")
+        say_all(render.refused(e.problems))
         raise typer.Exit(1) from None
-    if result.taken_in:
-        say(f"a hand edit went in first, as rev {result.taken_in}")
-    say(f"{'put' if result.changed else 'unchanged'} {result.id} rev {result.rev}  {result.path}")
+    say_all(render.put(result))
 
 
 @doc_app.command("read")
@@ -462,25 +435,7 @@ def doc_read(
     vault: VaultOption = None,
 ) -> None:
     """A doc, or a record and the doc lines that point at it: the summary first, the raw for accuracy."""
-    result = recall.read(find_vault(vault), locator, view=view, around=around, rev=rev)
-    if result.resolved is not None and result.resolved != locator.strip():
-        say(f"read as {result.resolved}")
-    for problem in result.problems:
-        say(f"! {problem}")
-    if result.doc is not None:
-        say(f"{result.doc.id} rev {result.doc.rev}  {result.doc.path}")
-        if result.doc.superseded_by:
-            say(f"superseded by {', '.join(result.doc.superseded_by)}")
-        for line in result.doc.lines:
-            say(f"{line.n:>4}  {line.text}")
-    elif result.view != "raw" and not result.lines and not result.legacy:
-        say("no current doc points at it yet")
-    for cited in result.lines:
-        say(f"{cited.doc} rev {cited.rev} line {cited.n}: {cited.text}")
-    for ref in result.legacy:
-        say(f"{ref.id}, a legacy note, covers it: {', '.join(ref.old_paths)}")
-    for s in result.spans:
-        _span(s, "")
+    say_all(render.read(recall.read(find_vault(vault), locator, view=view, around=around, rev=rev)))
 
 
 @doc_app.command("verify")
@@ -491,14 +446,7 @@ def doc_verify(
     vault: VaultOption = None,
 ) -> None:
     """Each line of a doc next to the raw its anchors point at."""
-    result = recall.verify(find_vault(vault), doc, lines=line or None, window=window)
-    say(f"{result.doc} rev {result.rev}")
-    for checked in result.lines:
-        say(f"{checked.n:>4}  {checked.text}")
-        for problem in checked.problems:
-            say(f"        ! {problem}")
-        for s in checked.spans:
-            _span(s, "        ")
+    say_all(render.verify(recall.verify(find_vault(vault), doc, lines=line or None, window=window)))
 
 
 def _report(report: index.BuildReport) -> None:
@@ -590,39 +538,7 @@ def search_command(
         until=_when(until, "--until"),
         k=k,
     )
-    tz = ZoneInfo(v.config.owner.time_zone)
-    reading = result.query
-    if reading.since is not None or reading.until is not None:
-        span = [
-            f"{word} {at.astimezone(tz):%Y-%m-%d %H:%M}"
-            for word, at in (("from", reading.since), ("to", reading.until))
-            if at is not None
-        ]
-        said = f" ({', '.join(reading.time_words)})" if reading.time_words else ""
-        say(" ".join(span) + said)
-    for found in reading.entities:
-        say(f"{found.words!r} is {found.id}")
-    if reading.unknown:
-        say(f"not found as a person or entity: {', '.join(reading.unknown)}")
-    if reading.left_out:
-        say(f"too common to search for: {', '.join(reading.left_out)}")
-    if not result.groups:
-        say("nothing found")
-    for group in result.groups:
-        when = f"  {group.first.astimezone(tz):%Y-%m-%d}" if group.first else ""
-        say(f"\n{group.kind}  {group.title}  ({group.source or 'docs'}{when})")
-        if group.summary is not None:
-            say(f"  summary  {group.summary.id} rev {group.summary.rev}: {group.summary.title}")
-        for hit in group.hits:
-            at = f"  {hit.ts.astimezone(tz):%Y-%m-%d %H:%M}" if hit.ts else ""
-            who = ", ".join(hit.speakers or hit.authors)
-            lines = f"  lines {hit.lines[0]}-{hit.lines[1]}" if hit.lines else ""
-            say(f"  {hit.rank:>3}. {hit.locator}{lines}{at}{f'  {who}' if who else ''}")
-            say(f"       {hit.snippet}")
-            for anchor in hit.anchors:
-                say(f"       -> {anchor}")
-            if hit.also:
-                say(f"       also {', '.join(hit.also)}")
+    say_all(render.search(result, ZoneInfo(v.config.owner.time_zone)))
 
 
 @import_app.command("notes")
