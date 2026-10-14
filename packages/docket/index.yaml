@@ -8,9 +8,9 @@ reading:
 decisions:
   - id: DR-0019
     title: The vault's layout and run-file names are fixed
-    status: proposed
+    status: decided
     at: "2026-10-14"
-    by: Claude (autonomy grant)
+    by: Soma Osvay
     cost: one-way
     sources: ["#4"]
     description: A vault holds vault.yaml, raw/, media/, processed/, entities/, ledger/ops/ and state/; staging/ and index/ are never committed. A raw run file is raw/<source>/<yyyy>/<mm>/<yyyy-mm-dd>T<hhmm>-<machine>.jsonl in UTC, and a second run in the same minute gets .2, .3 before .jsonl. A machine name is lowercase letters, digits and inner hyphens and never ends in -<digits>.
@@ -20,9 +20,9 @@ decisions:
     not_chosen: ["A -2 suffix: ambiguous with machine names that end in a number."]
   - id: DR-0020
     title: A raw record's version hashes an explicit allow-list of its fields, as Docket's own canonical JSON
-    status: proposed
+    status: decided
     at: "2026-10-14"
-    by: Claude (autonomy grant)
+    by: Soma Osvay
     cost: one-way
     sources: ["#4"]
     description: "v is sha256 of kind, container, thread, ts in whole UTC seconds, author, to, title, text, the attachments (name, kind, ref) sorted, and a transcript's segments (start_ms, end_ms, speaker, text) in their order, with empty and absent values left out, written as JSON by Docket's own function (sorted keys, no spaces, UTF-8). A new optional field, a library upgrade, attachment order or the milliseconds of ts never change a version; a golden test pins the hash. The projection is the same for every source: no source or mapper can register its own (DR-0108); records.register_projection goes with #10."
@@ -32,26 +32,26 @@ decisions:
       - "A library's JSON dump: an upgrade could change every version."
   - id: DR-0021
     title: vault.yaml is a typed schema that refuses unknown keys, versioned from 1
-    status: proposed
+    status: decided
     at: "2026-10-14"
-    by: Claude (autonomy grant)
+    by: Soma Osvay
     cost: one-way
     sources: ["#4"]
     description: vault.yaml holds schema_version, the owner (name, emails, languages, an IANA time zone), the primary machine, the sources with their sensitivity (work, mixed, private), the never-store lists and the redaction rules. An unknown key is refused, because a mistyped never_store would otherwise store what the user listed never to store.
     binds: [A later schema reads every earlier version and migrates it.]
   - id: DR-0022
     title: Committing to the vault is local; syncing with a remote is a separate step
-    status: proposed
+    status: decided
     at: "2026-10-14"
-    by: Claude (autonomy grant)
+    by: Soma Osvay
     cost: medium
     sources: ["#4"]
     description: A commit never touches the network, so an empty, offline or conflicting remote can never lose or block a raw run. sync fetches and rebases with autostash when the remote branch exists, and on a conflict aborts and keeps the local commits.
   - id: DR-0023
     title: The command line is Typer
-    status: proposed
+    status: decided
     at: "2026-10-14"
-    by: Claude (autonomy grant)
+    by: Soma Osvay
     cost: cheap
     sources: ["#4"]
     description: Typed options and generated help suit the many commands to come. Typer 0.27 carries its own copy of click and brings rich, shellingham, colorama and annotated-doc, all under permissive licences.
