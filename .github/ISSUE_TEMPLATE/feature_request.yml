@@ -1,0 +1,28 @@
+name: Feature request
+description: Something Docket should do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do, and what stops you today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Workarounds you use now, or other designs you considered.
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Would you send the PR?
+      description: A change beyond a typo starts here, and a non-trivial one gets a plan the maintainer approves first (CONTRIBUTING.md).
+      options: ["Yes", "Maybe, with guidance", "No"]

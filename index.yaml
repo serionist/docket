@@ -1,0 +1,174 @@
+# What binds the repo: reading list, decisions, conventions. Entries change only through `uv run docs`;
+# docs/docs-regime.md explains the schema.
+
+reading:
+  - { path: AGENTS.md, role: contract, note: "the router: docs, layout, build, the work loop, doors, never" }
+  - { path: REVIEW.md, role: contract, note: "what a finding is, and the questions every review answers" }
+  - { path: docs/docs-regime.md, role: guide, note: how the entries work and how the tool writes them }
+  - { path: docs/plans/README.md, role: guide, note: "when a change needs a plan, and the template" }
+  - { path: CONTRIBUTING.md, role: guide, note: a first contribution's short path }
+decisions:
+  - id: DR-0001
+    title: Docket is open source under Apache-2.0, public on GitHub from day one
+    status: decided
+    at: "2026-10-14"
+    by: Soma Osvay
+    cost: one-way
+    sources: ["#1"]
+    description: |-
+      The code is public at serionist/docket from the first commit, under Apache-2.0, so friends can use it and anyone can read how it handles their data. Each user's data lives in their own private vault repo, never here.
+
+      On GitHub Free a public repo also gets the rulesets, CodeQL and the macOS CI minutes that a private one would not.
+    binds:
+      - No private data and no private names in this repo; the content check enforces the names (DR-0008).
+      - Tests and fixtures use invented data.
+    not_chosen:
+      - "Private until friends get it (phase 5): no enforced rulesets, no CodeQL and scarce CI minutes on GitHub Free."
+  - id: DR-0002
+    title: "The code is one uv workspace: the app, a package per connector, the plugin and the dev kit"
+    status: decided
+    at: "2026-10-14"
+    by: Soma Osvay
+    cost: medium
+    sources: ["#1"]
+    description: |-
+      packages/docket holds the app (vault, service, web app, CLI); each connector is its own package under packages/, found through an entry point; plugin/ is the Claude Code plugin, and the repo is its own marketplace (.claude-plugin/marketplace.json); tools/devkit is the development kit, never published.
+
+      The connector seam is real from day one, so the core never grows a dependency on one source.
+    binds:
+      - The core package never imports a connector package.
+      - GPU and large model dependencies are optional extras.
+    not_chosen: ["One package with extras, split into core and connectors at phase 5."]
+  - id: DR-0003
+    title: The development kit lives in this repo until a second repo wants it
+    status: decided
+    at: "2026-10-14"
+    by: Soma Osvay
+    cost: cheap
+    sources: ["#1"]
+    description: The gate, the docs tool, the hooks and the work-loop skills live in tools/devkit and .claude/skills. When another repo wants the Python kit, it is extracted then.
+    not_chosen:
+      - A separate shared kit repo installed with uv tool, built and versioned before Docket starts.
+  - id: DR-0004
+    title: Work is tracked as GitHub issues, a milestone per phase, on the Docket board
+    status: decided
+    at: "2026-10-14"
+    by: Soma Osvay
+    cost: cheap
+    sources: ["#1"]
+    description: Every change is an issue with an area label and its phase's milestone, on the public Docket project board (Status, Phase, Size). start-work and finish-work keep the cards current through uv run devkit board.
+    not_chosen: ["Issues and milestones only, with no board."]
+  - id: DR-0005
+    title: Structured docs are YAML entries the docs tool manages; prose stays markdown
+    status: decided
+    at: "2026-10-14"
+    by: Soma Osvay
+    cost: medium
+    sources: ["#1"]
+    description: Decisions, conventions, terms and reading lists are entries in index.yaml files and docs/glossary.yaml, changed only through uv run docs, which checks every edit and writes one canonical form. A session reads the one entry it needs; a fact lives in one place under an id that never changes.
+    binds: [The gate checks every entry file and every DR- and CV- citation.]
+    not_chosen:
+      - One markdown file per decision.
+      - Decisions kept only in plans and the design document.
+  - id: DR-0006
+    title: One gate is the merge rule, and main takes squash-merged PRs only
+    status: decided
+    at: "2026-10-14"
+    by: Soma Osvay
+    cost: medium
+    sources: ["#1"]
+    description: uv run gate full on Linux and uv run gate os on Windows and macOS are the required checks of the main ruleset; nothing merges with a red check. main accepts pull requests only, squash-merged, so each PR title becomes one commit.
+    binds: [A check is never weakened to let a change pass.]
+  - id: DR-0007
+    title: Nothing on main carries tool attribution
+    status: decided
+    at: "2026-10-14"
+    by: Soma Osvay
+    cost: cheap
+    sources: ["#1"]
+    description: Commits, PR titles and PR bodies carry no AI co-author trailers, Generated-with lines or session links. The history says what changed and why; who typed it is not part of that.
+    binds: [The commit-msg hook strips attribution and the gate refuses it.]
+  - id: DR-0008
+    title: Private names are checked against a deny list kept outside the repo
+    status: decided
+    at: "2026-10-14"
+    by: Soma Osvay
+    cost: cheap
+    sources: ["#1"]
+    description: "Docket is built from its maintainer's working life, so the names of the people, customers and places in it must not reach this public repo. The list of those names is itself private: it lives in ~/.config/docket/denylist.txt locally and in a repository secret for CI, and the CI log names a hit by its line number, never by the name."
+    binds: [Issue and PR texts are checked with gate check-text before they are posted.]
+  - id: DR-0009
+    title: Reviews report only real, reproducible problems, and iterate only after a blocker or major
+    status: decided
+    at: "2026-10-14"
+    by: Soma Osvay
+    cost: cheap
+    sources: ["#1"]
+    description: A review is not a bug hunt. A finding states a reproducible scenario that causes an actual failure; without one it is left out. Severities are honest and most findings are minor. A review goes to another round only when its last pass confirmed a blocker or a major.
+    binds:
+      - REVIEW.md, both lens files and the review skills say so, and the deep workflow returns whether another round is needed.
+  - id: DR-0010
+    title: Python 3.12 and uv
+    status: decided
+    at: "2026-10-14"
+    by: Soma Osvay
+    cost: medium
+    sources: ["#1"]
+    description: "The app and the kit run on Python 3.12 or later, managed with uv: one lock file for the workspace, uv sync to install, uv run for every command."
+  - id: DR-0011
+    title: ruff, pyright strict on src, pytest, uv_build, and coverage floors per module
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#1"]
+    description: ruff lints and formats at 120 columns; pyright checks every package and runs strict on each src/ folder; pytest runs the tests with coverage, and each top-level module keeps a floor that only rises. Packages build with uv_build, uv's own backend, so the toolchain is one vendor's.
+    not_chosen:
+      - "mypy: slower, and pyright is what the editor's language server already runs."
+      - "hatchling: a second build tool for no gain."
+conventions:
+  - id: CV-0001
+    rule: Python code passes ruff's lint rules and its formatter, at 120 columns
+    area: python
+    enforced_by: "gate: ruff, format"
+  - id: CV-0002
+    rule: Code under a src/ folder type-checks under pyright strict
+    area: python
+    enforced_by: "gate: types"
+  - id: CV-0003
+    rule: Entry files change only through uv run docs
+    area: docs
+    enforced_by: "gate: docs (the canonical form)"
+    decision: DR-0005
+  - id: CV-0004
+    rule: Commits, PR titles and PR bodies carry no tool attribution
+    area: git
+    enforced_by: "the commit-msg hook; gate: commits"
+    decision: DR-0007
+  - id: CV-0005
+    rule: No name from the private deny list in the repo, its commits, its PRs or its issues
+    area: privacy
+    enforced_by: "gate: content; gate check-text before posting"
+    decision: DR-0008
+  - id: CV-0006
+    rule: Tests, fixtures and examples use invented people, companies, places and messages
+    area: tests
+    review_only: true
+    decision: DR-0001
+  - id: CV-0007
+    rule: A comment or doc says the reason itself; plan and review finding ids stay in docs/plans and docs/reviews
+    area: docs
+    review_only: true
+  - id: CV-0008
+    rule: Text is read and written as UTF-8 with an explicit encoding, and stored with LF line endings
+    area: python
+    enforced_by: .gitattributes (LF); review for the explicit encoding
+  - id: CV-0009
+    rule: Each module's line coverage stays at or above its floor in tools/devkit/coverage-floors.json, and a floor only rises
+    area: tests
+    enforced_by: "gate: tests (full lane)"
+    decision: DR-0011
+  - id: CV-0010
+    rule: AGENTS.md is a router and stays under 150 lines
+    area: docs
+    enforced_by: "gate: harness"

@@ -1,0 +1,60 @@
+# The docs regime's machine contract: structured docs are YAML entries that the docs tool (`uv run docs`) lists,
+# searches, shows, checks and writes in one canonical form; prose stays markdown. docs/docs-regime.md says the same for
+# people. Edit both in the same change.
+schema_version: "1"
+
+locations:
+  # Folder-bound kinds sit in the index.yaml of the folder they bind, so `docs door <path>` shows them from the root
+  # down. A decision binds its folder and everything under it.
+  folder_file: index.yaml
+  folder_kinds: [reading, decisions, conventions]
+  # Table kinds sit in one file each.
+  tables:
+    terms: docs/glossary.yaml
+  # Folders the tool never reads: fixtures may hold files named index.yaml that are data, not docs.
+  exclude: [.git, .venv, .local, .claude/worktrees, "**/node_modules", "**/__pycache__", "**/tests/fixtures"]
+
+# Where citing a superseded or removed decision is history, not a living reference.
+citation_free: ["docs/plans/**", "docs/reviews/**", CHANGELOG.md]
+
+# Each kind: the fields an entry requires and may carry, the values some take, and how the canonical form writes it.
+# `key` names an entry for the writer verbs. `order` is the order of the fields (default: required, one_of, optional).
+# `style: flow` writes each entry on one `{ ... }` line. `flags` hold true or false; `list_fields` hold lists of text;
+# every other field holds one text value. `removed` and `removed_why` (a soft delete) are allowed last on every kind.
+kinds:
+  reading:
+    key: path
+    style: flow
+    required: [path, role]
+    optional: [note]
+    values:
+      role: [contract, design, guide, convention, skill, record]
+
+  decisions:
+    key: id
+    id_pattern: "^DR-[0-9]{4}$"
+    required: [id, title, status, at, by, cost, description]
+    optional: [sources, supersedes, superseded_by, binds, not_chosen]
+    order: [id, title, status, at, by, cost, sources, supersedes, superseded_by, description, binds, not_chosen]
+    list_fields: [sources, supersedes, superseded_by, binds, not_chosen]
+    values:
+      # proposed: written by an agent, waiting for a maintainer's yes; decided: confirmed; superseded: replaced.
+      status: [proposed, decided, superseded]
+      # How hard it is to change: one-way (users or stored data depend on it), medium, cheap.
+      cost: [one-way, medium, cheap]
+    dates: [at]
+    defaults: {status: proposed, at: today, by: git-user}
+
+  conventions:
+    key: id
+    id_pattern: "^CV-[0-9]{4}$"
+    required: [id, rule, area]
+    one_of: [enforced_by, review_only]
+    optional: [why, decision]
+    flags: [review_only]
+
+  terms:
+    key: term
+    required: [term, definition]
+    optional: [see, close_terms, not]
+    list_fields: [see, close_terms, not]

@@ -1,0 +1,7 @@
+# The gate's secret scanner (gitleaks 8.30.1): gitleaks' own rules. The quick lane scans the branch's commits and the
+# uncommitted changes, the full lane the whole history. A finding is rotated and removed, or allowed here with its
+# reason; every exception lives in this file.
+title = "Docket"
+
+[extend]
+useDefault = true

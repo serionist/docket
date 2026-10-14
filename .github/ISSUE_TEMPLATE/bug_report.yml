@@ -1,0 +1,50 @@
+name: Bug report
+description: Something Docket does wrong.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Docket holds private data. Never paste real messages, transcripts, names or keys here: describe the shape of the data instead, or invent an example. A security vulnerability goes through a [private report](https://github.com/serionist/docket/security/advisories/new).
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where
+      multiple: true
+      options: [The vault, Search, The web app, The MCP tools, The Claude Code plugin, A connector, Install or the service, Other]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Docket version or commit
+      placeholder: "docket --version"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system and Python
+      placeholder: Windows 11, Python 3.12.10
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, and what Docket did. Include the error and its traceback, with any private text removed.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: Nothing above holds a real person's messages, a name I shouldn't share, or a key, token or password.
+          required: true

@@ -1,0 +1,25 @@
+# The glossary: the words this repo uses with one meaning, one entry per term in alphabetical order. Entries change
+# only through `uv run docs`; docs/docs-regime.md explains the schema.
+
+terms:
+  - term: autonomy grant
+    definition: "The maintainer's word that an agent runs a piece of work to its merge without asking. Every choice it would have asked about is recorded: as a proposed decision, and in the PR's Decided without asking."
+    see: [.claude/skills/start-work/SKILL.md]
+  - term: deny list
+    definition: The private list of names this public repo must never carry, kept outside it (~/.config/docket/denylist.txt, and a secret in CI).
+    see: [tools/devkit/src/devkit/content.py]
+  - term: door
+    definition: "What `uv run docs door <path>` prints: the reading list from the root down to a path, and how many decisions and conventions bind it. Read it before planning, changing or reviewing the path."
+    see: [AGENTS.md]
+  - term: entry
+    definition: A decision, convention, term or reading line, kept as YAML and changed only through the docs tool.
+    see: [docs/docs-regime.md]
+    close_terms: [record (a dated plan or review)]
+  - term: gate
+    definition: The one set of checks every change passes, `uv run gate`. The quick lane runs in seconds before every push; `gate full` is the merge rule.
+    see: [tools/devkit/src/devkit/gate.py]
+  - term: one-way door
+    definition: Something users or their stored data depend on, such as a name, the vault's format or an MCP tool. It changes only with the maintainer's agreement, in a PR that names it.
+    see: [AGENTS.md]
+  - term: vault
+    definition: "A user's own private git repo that Docket maintains: raw records written once, encrypted media, processed docs, entities and the ledger. It is never part of this repo."

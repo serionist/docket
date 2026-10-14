@@ -1,0 +1,17 @@
+{
+  "name": "docket",
+  "owner": {
+    "name": "Soma Osvay",
+    "url": "https://github.com/serionist"
+  },
+  "metadata": {
+    "description": "The Docket plugin for Claude Code."
+  },
+  "plugins": [
+    {
+      "name": "docket",
+      "source": "./plugin",
+      "description": "Docket for Claude Code: search and cite your vault, run your syncs and your task queue, prepare your meetings."
+    }
+  ]
+}

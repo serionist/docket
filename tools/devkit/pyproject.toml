@@ -1,0 +1,19 @@
+[project]
+name = "docket-devkit"
+version = "0.0.0"
+description = "Docket's development kit: the gate, the docs tool and the git hooks. Never published."
+requires-python = ">=3.12"
+license = "Apache-2.0"
+dependencies = ["PyYAML>=6.0.3"]
+
+[project.scripts]
+gate = "devkit.gate:main"
+docs = "devkit.docs:main"
+devkit = "devkit.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "devkit"

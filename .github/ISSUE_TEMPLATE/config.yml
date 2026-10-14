@@ -1,0 +1,6 @@
+# Issues open from the forms only. A security vulnerability never goes into an issue, which anyone can read.
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/serionist/docket/security/advisories/new
+    about: Privately, through a GitHub security advisory. SECURITY.md says what to include.

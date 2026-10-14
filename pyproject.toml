@@ -1,0 +1,71 @@
+# The uv workspace: the app's packages, the connector packages and the development kit. The root is not a package;
+# `uv sync` installs every member into one .venv for development. AGENTS.md says how to build and test.
+[tool.uv]
+package = false
+required-version = ">=0.12"
+
+[tool.uv.workspace]
+members = ["packages/*", "tools/devkit"]
+
+[tool.uv.sources]
+docket = { workspace = true }
+docket-devkit = { workspace = true }
+
+[dependency-groups]
+dev = [
+  "docket",
+  "docket-devkit",
+  "ruff==0.16.9",
+  "pyright[nodejs]==1.1.414",
+  "pytest==9.1.1",
+  "pytest-cov==7.1.0",
+  "types-PyYAML==6.0.12.20260906",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["tests/fixtures"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "S", "C4", "PTH", "PL", "N", "RET", "TID"]
+ignore = [
+  "PLR0911", # too many returns: a dispatcher reads better with them
+  "PLR0912", # too many branches
+  "PLR0913", # too many arguments
+  "PLR0915", # too many statements
+  "PLR2004", # magic values: the regime's limits are named where they are read
+]
+
+[tool.ruff.lint.per-file-ignores]
+# The dev kit's whole job is running git, uv and the checkers.
+"tools/devkit/src/**" = ["S603", "S607"]
+"**/tests/**" = ["S101", "S603", "S607", "PLC0415"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["docket", "devkit"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.pyright]
+include = ["packages", "tools/devkit"]
+exclude = ["**/.venv", "**/__pycache__", "tests/fixtures"]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+strict = ["packages/*/src", "tools/devkit/src"]
+reportMissingTypeStubs = false
+
+[tool.pytest.ini_options]
+testpaths = ["packages", "tools/devkit/tests"]
+addopts = ["--import-mode=importlib", "-ra", "--strict-markers"]
+xfail_strict = true
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+branch = true
+source_pkgs = ["docket", "devkit"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
