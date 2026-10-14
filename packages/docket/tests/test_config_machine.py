@@ -24,6 +24,24 @@ def test_an_unknown_key_is_refused(tmp_path: Path) -> None:
         VaultConfig.load(path)
 
 
+def test_a_key_given_twice_is_refused_not_quietly_replaced(tmp_path: Path) -> None:
+    path = tmp_path / "vault.yaml"
+    text = make_config().dump().replace("  people: []\n", "  people:\n  - U0KID\n  people: []\n")
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(DocketError, match="'people' is given twice"):
+        VaultConfig.load(path)
+
+
+def test_the_loader_stays_safe_and_reports_an_unusable_key(tmp_path: Path) -> None:
+    path = tmp_path / "vault.yaml"
+    path.write_text("owner: !!python/object/apply:os.getcwd []\n", encoding="utf-8")
+    with pytest.raises(DocketError, match="not valid YAML"):
+        VaultConfig.load(path)
+    path.write_text("? [a, b]\n: 1\n", encoding="utf-8")
+    with pytest.raises(DocketError, match="unhashable"):
+        VaultConfig.load(path)
+
+
 @pytest.mark.parametrize("zone", ["Europe/Budapest", "America/New_York", "UTC", "Asia/Kolkata"])
 def test_iana_zones_are_accepted_on_every_system(zone: str) -> None:
     assert make_config().model_copy(update={}).owner.model_validate({"name": "A", "time_zone": zone}).time_zone == zone

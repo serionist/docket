@@ -7,6 +7,7 @@ listed never to store.
 from __future__ import annotations
 
 import re
+from collections.abc import Hashable
 from pathlib import Path
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -18,6 +19,26 @@ from docket.errors import DocketError
 from docket.vault.machine import validate as validate_machine
 
 CONFIG_FILE = "vault.yaml"
+
+
+class UniqueKeyLoader(yaml.SafeLoader):
+    """A safe loader that refuses a key given twice in one map. YAML keeps the last one, so a second `people:` would
+    quietly replace the list the user wrote first."""
+
+
+def _unique_keys(loader: yaml.SafeLoader, node: yaml.MappingNode) -> dict[Any, Any]:
+    seen: set[Any] = set()
+    for key_node, _ in node.value:
+        key: Any = loader.construct_object(key_node)  # pyright: ignore[reportUnknownMemberType]
+        if not isinstance(key, Hashable):
+            continue  # construct_mapping refuses it with its own message
+        if key in seen:
+            raise yaml.constructor.ConstructorError(None, None, f"{key!r} is given twice", key_node.start_mark)
+        seen.add(key)
+    return loader.construct_mapping(node)
+
+
+UniqueKeyLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _unique_keys)
 
 
 class _Model(BaseModel):
@@ -91,7 +112,7 @@ class VaultConfig(_Model):
     @staticmethod
     def load(path: Path) -> VaultConfig:
         try:
-            data: Any = yaml.safe_load(path.read_text(encoding="utf-8"))
+            data: Any = yaml.load(path.read_text(encoding="utf-8"), Loader=UniqueKeyLoader)  # noqa: S506 - a SafeLoader
         except yaml.YAMLError as e:
             raise DocketError(f"{path}: not valid YAML: {e}") from e
         try:
