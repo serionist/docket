@@ -7,9 +7,24 @@ keeps no per-source code. This is a one-way door (DR-0111).
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from docket.vault.records import RawRecord, Segment
 
-__all__ = ["Segment", "segments", "time_range"]
+__all__ = ["Segment", "normalize", "render", "segments", "time_range"]
+
+
+def normalize(segs: Iterable[Segment]) -> list[Segment]:
+    """A transcript's segments in the core's order: by start, end, speaker and text, exact duplicates once. The core
+    puts a mapper's segments in this order before it versions them, so a page boundary or the order captures arrived
+    in never makes a new version (this refines DR-0111's "the mapper's order" for the mapper route)."""
+    return sorted(set(segs), key=lambda s: (s.start_ms, s.end_ms, s.speaker is not None, s.speaker or "", s.text))
+
+
+def render(segs: Iterable[Segment]) -> str:
+    """A transcript's text, rendered by the core from its segments: one line each, `<speaker>: <text>`, or the text
+    alone without a speaker. Every source's transcripts read alike, and the rendering is the core's to keep stable."""
+    return "\n".join(f"{s.speaker}: {s.text}" if s.speaker else s.text for s in segs)
 
 
 def segments(record: RawRecord) -> list[Segment]:
