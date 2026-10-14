@@ -305,6 +305,44 @@ def test_a_conflicting_remote_is_reported_and_the_local_commit_kept(tmp_path: Pa
     assert not (vault.root / ".git" / "rebase-merge").exists()
 
 
+def _signing_that_fails(root: Path, tmp_path: Path) -> None:
+    """The user's repo asks for signed commits, with a signing program that can't run."""
+    sh(root, "git", "config", "commit.gpgsign", "true")
+    sh(root, "git", "config", "gpg.program", str(tmp_path / "no-such-gpg"))
+
+
+def test_a_commit_goes_through_when_the_user_signs_commits(tmp_path: Path, config: VaultConfig) -> None:
+    vault = new_vault(tmp_path, config)
+    _signing_that_fails(vault.root, tmp_path)
+    assert vault.write_run("chat", [make_record(1)], RUN_AT) is not None
+    assert "raw/chat/2026/10/2026-10-14T1550-test-box.jsonl" in tracked(vault.root)
+
+
+def test_sync_rebases_without_signing_when_the_user_signs_commits(tmp_path: Path, config: VaultConfig) -> None:
+    sh(tmp_path, "git", "init", "-q", "--bare", "remote.git")
+    remote = tmp_path / "remote.git"
+    vault = new_vault(tmp_path, config)
+    vault.git.run("remote", "add", "origin", str(remote))
+    vault.git.run("push", "-q", "origin", "main")
+    other = _clone_second_machine(tmp_path, remote)
+    sh(other, "git", "push", "-q", "origin", "main")
+    vault.write_run("chat", [make_record(1)], RUN_AT)
+    _signing_that_fails(vault.root, tmp_path)
+    result = vault.sync()
+    assert result.rebased, result.message
+    assert sh(vault.root, "git", "log", "--format=%s").split("\n")[:2] == ["Raw: chat, 1 record(s) from test-box", "x"]
+
+
+def test_a_write_waits_only_as_long_as_its_vault_was_opened_with(tmp_path: Path, config: VaultConfig) -> None:
+    root = new_vault(tmp_path, config).root
+    impatient = Vault.open(root, lock_timeout=0.2)
+    assert impatient.lock._lock.timeout == 0.2  # pyright: ignore[reportPrivateUsage]
+    started = time.monotonic()
+    with VaultLock(root / ".git"), pytest.raises(DocketError, match="another docket process holds"):
+        impatient.write_run("chat", [make_record(1)], RUN_AT)
+    assert time.monotonic() - started < 10
+
+
 def test_records_type(records: Callable[..., RawRecord]) -> None:
     assert records(3).rid.endswith("3.000100")
 

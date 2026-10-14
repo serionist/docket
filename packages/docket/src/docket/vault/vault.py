@@ -34,6 +34,8 @@ log = logging.getLogger(__name__)
 
 # How long after a sync writes its marker git starts the rebase: seconds in practice.
 SYNC_REBASE_WINDOW_SECONDS = 60
+# How long a write waits for another Docket process to let go of the vault.
+LOCK_TIMEOUT_SECONDS = 60.0
 
 # Folders every vault has from the start; git keeps an empty folder only with a file in it.
 FOLDERS = ["raw", "media", "processed", "entities", "ledger/ops", "state"]
@@ -117,14 +119,21 @@ class Status:
 
 
 class Vault:
-    def __init__(self, root: Path, config: VaultConfig, home: Home | None = None) -> None:
+    def __init__(
+        self, root: Path, config: VaultConfig, home: Home | None = None, *, lock_timeout: float = LOCK_TIMEOUT_SECONDS
+    ) -> None:
         self.root = root
         self.config = config
         self.home = home or Home.resolve(root, config.storage)
         self.machine = machines.resolve(self.home.private)
         owner_email = config.owner.emails[0] if config.owner.emails else "docket@localhost"
         self.git = Git(root, Identity(config.owner.name, owner_email), self.home)
-        self.lock = VaultLock(self.home.git_dir, lock_file=self.home.lock_file, clear_stale_index=not self.home.folder)
+        self.lock = VaultLock(
+            self.home.git_dir,
+            timeout=lock_timeout,
+            lock_file=self.home.lock_file,
+            clear_stale_index=not self.home.folder,
+        )
         self.rawlog = RawLog(root, self.machine, self.lock, self.home.tmp_dir)
 
     # -- finding and creating ------------------------------------------------------------------------------------
@@ -141,7 +150,9 @@ class Vault:
         return None
 
     @classmethod
-    def open(cls, path: Path) -> Vault:
+    def open(cls, path: Path, lock_timeout: float = LOCK_TIMEOUT_SECONDS) -> Vault:
+        """The vault holding a path. `lock_timeout` is how long a write waits for another process's: the service
+        waits less than the command line, so a client gets Docket's message before its own timeout."""
         root = cls.find(path)
         if root is None:
             raise DocketError(f"no vault at or above {path}; create one with `docket init`")
@@ -150,7 +161,7 @@ class Vault:
                 f"a convert of {root} stopped part way; run `docket vault convert` to finish it, or `docket vault "
                 "convert --abort` to undo it"
             )
-        return cls(root, VaultConfig.load(root / CONFIG_FILE))
+        return cls(root, VaultConfig.load(root / CONFIG_FILE), lock_timeout=lock_timeout)
 
     @classmethod
     def init(cls, path: Path, config: VaultConfig, machine: str) -> Vault:
