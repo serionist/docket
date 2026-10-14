@@ -11,6 +11,9 @@ terms:
   - term: autonomy grant
     definition: "The maintainer's word that an agent runs a piece of work to its merge without asking. Every choice it would have asked about is recorded: as a proposed decision, and in the PR's Decided without asking."
     see: [.claude/skills/start-work/SKILL.md]
+  - term: capture
+    definition: "One thing a run brought in: a source tool's result exactly as the tool gave it, posted by the capture hook, or a file from an import folder. A mapper reads captures; Claude never retypes them."
+    see: [packages/docket/src/docket/sources/contract.py]
   - term: chunk
     definition: "The unit search finds: a stretch of a transcript, a message, a thread window, part of a record, or a section of a processed doc, with the locator read takes."
     see: [packages/docket/src/docket/index/chunks.py]
@@ -32,12 +35,18 @@ terms:
     definition: The one set of checks every change passes, `uv run gate`. The quick lane runs in seconds before every push; `gate full` is the merge rule.
     see: [tools/devkit/src/devkit/gate.py]
     close_terms: [staging gate (the vault's)]
+  - term: hold list
+    definition: "state/holds/<source>.txt in the vault: ids of records Docket must not stage yet, such as recordings with stretches the owner left out. Every ingest and the gate read it, failing closed."
+    see: [packages/docket/src/docket/vault/holds.py]
   - term: legacy note
     definition: "A processed doc of type legacy-note made from a note that existed before Docket: its body is the note's text, it may cover no record, and it keeps the note's old paths so references to them still resolve."
     see: [old path]
   - term: locator
     definition: "What read takes: a doc's id or path, or a record part such as r:<rid>@12:08, the same in brackets, or a bare rid."
     see: [packages/docket/src/docket/vault/anchors.py]
+  - term: mapper
+    definition: "A source's code in the consuming project, map_run(run) in .claude/skills/sources/<source>/mapper.py: a run's captures and manifest in, records in the core's shape out, as plain JSON. Docket runs it in its own process and checks what it returns."
+    see: [packages/docket/src/docket/sources/contract.py]
   - term: mention
     definition: "A chunk naming an entity: by an alias in its text, its speaker or author, or its doc's entities. Mentions lift search results; they never filter them."
     see: [packages/docket/src/docket/index/matching.py]
@@ -51,6 +60,9 @@ terms:
     definition: "A summary, note, digest, brief or minutes in the vault: markdown with frontmatter naming the raw records it covers, every line ending with its anchors, written through doc_put."
     see: [packages/docket/src/docket/vault/processed.py]
     close_terms: [raw record (what it is built from)]
+  - term: run manifest
+    definition: "What a source skill sends when its run ends: the run's id, how many captures it made, its window and what it skipped. A run closes only when Docket holds every capture it counts."
+    see: [packages/docket/src/docket/sources/contract.py]
   - term: segment
     definition: "One utterance of a transcript: where it starts and ends in milliseconds from the record's start, who spoke, and what was said."
     see: [packages/docket/src/docket/vault/segments.py]

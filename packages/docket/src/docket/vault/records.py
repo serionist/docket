@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
@@ -18,8 +17,30 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 RID = re.compile(r"^([a-z0-9][a-z0-9._-]*):(\S+)$")
 SOURCE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+NATIVE_ID_MAX = 512
+_CONTROL = re.compile("[\\x00-\\x1f\\x7f-\\x9f]")
 
-Projection = Callable[["RawRecord"], dict[str, Any]]
+
+def source_name_problem(name: str) -> str | None:
+    """Why a name can't be a source's, or None. A source's name builds folder and file names (its skill's folder, its
+    hold list), so it is the rid's source pattern and doesn't end in a dot, which Windows drops from a file name."""
+    if not SOURCE.match(name) or name.endswith("."):
+        return (
+            f"{name!r} isn't a source name: lowercase letters, digits, dots, underscores and hyphens, starting with a "
+            "letter or digit and not ending in a dot"
+        )
+    return None
+
+
+def is_native_id(value: str) -> bool:
+    """A source's own id, the part of a rid after `<source>:`: no whitespace or control characters, at most
+    NATIVE_ID_MAX characters, and no empty part between slashes, so `<id>/` always names what is under `<id>`."""
+    return (
+        0 < len(value) <= NATIVE_ID_MAX
+        and not any(ch.isspace() for ch in value)
+        and not _CONTROL.search(value)
+        and "" not in value.split("/")
+    )
 
 
 class Attachment(BaseModel):
@@ -69,7 +90,8 @@ class RawRecord(BaseModel):
     native: dict[str, Any] = Field(default_factory=dict[str, Any])
     fetched: datetime
     via: str
-    fidelity: Literal["verbatim", "derived"] = "verbatim"
+    # verbatim: as the source gave it; derived: its id built from its content; cut: verbatim, then cut by hand.
+    fidelity: Literal["verbatim", "derived", "cut"] = "verbatim"
     run: str = ""
     engine: str | None = None
     lang: str | None = None
@@ -139,14 +161,6 @@ def default_projection(record: RawRecord) -> dict[str, Any]:
     return {k: v for k, v in fields.items() if v not in (None, "", [])}
 
 
-_PROJECTIONS: dict[str, Projection] = {}
-
-
-def register_projection(source: str, projection: Projection) -> None:
-    """A connector whose source needs a different idea of "the same content" registers its own projection."""
-    _PROJECTIONS[source] = projection
-
-
 def _escape(text: str) -> str:
     out = ['"']
     for ch in text:
@@ -189,6 +203,6 @@ def canonical_json(value: Any) -> str:
 
 
 def version(record: RawRecord) -> str:
-    projection = _PROJECTIONS.get(record.source, default_projection)
-    digest = hashlib.sha256(canonical_json(projection(record)).encode("utf-8")).hexdigest()
+    """The same projection for every source (DR-0020): no source or mapper decides what counts as new content."""
+    digest = hashlib.sha256(canonical_json(default_projection(record)).encode("utf-8")).hexdigest()
     return f"sha256:{digest}"

@@ -85,7 +85,8 @@ flowchart LR
   shows how many.
 - Cursors are a high-water mark plus a lookback window plus a retry set per source, so late arrivals and
   rate-limited calls are caught on the next run. Each machine commits its own cursor file, and a sync starts from the
-  furthest point any machine reached.
+  furthest point any machine reached. A run's window start is kept until the run finishes: a listing is newest first,
+  so moving the mark on partial progress would skip the older part for good.
 - Source skills don't retype anything. The plugin's PostToolUse capture hook posts what the source's tools return,
   verbatim, to the service; Claude only sends a run manifest (the window, the counts, what it skipped). The source's
   mapper turns the run's captures into records, and the core checks every rid and computes the versions. A Python
@@ -249,6 +250,7 @@ vault/
   entities/_proposals-<machine>.jsonl                                                       -> plain git
   ledger/ops/<yyyy-mm>-<machine>.jsonl                                                      -> plain git
   state/cursors-<machine>.yaml   each machine's cursors per source                         -> plain git
+  state/holds/<source>.txt       ids a source must not stage yet, merged by union           -> plain git
   index/docket.sqlite            derived; `docket index rebuild` makes it from the above    -> never committed
 ```
 
@@ -280,12 +282,16 @@ vault/
 - Versions are content hashes of the normalized fields (text, author, attachments), computed by the core and never by
   a mapper; volatile fields such as reactions or reply counts are left out.
 - Redaction applies to `native` too: `fidelity: verbatim` means not retyped by Claude, never unredacted.
-- A record with a cut keeps no `native`: the core drops it and marks the record `fidelity: cut`, because `native`
-  would still hold the cut stretch.
+- A record with a cut keeps no `native`: the core drops it, because `native` would still hold the cut stretch, and
+  marks a verbatim record `fidelity: cut`; a derived one stays `derived`, its `[cut]` saying the rest (DR-0126).
 - A recording is one record. Each transcript is its own record (`kind: transcript`, with its engine) and carries its
   utterances in a `segments` field, in the core's shape: a list of `start_ms`, `end_ms`, `speaker` and `text`. The
   index, the gate's cuts, `verify` and rebuilds read that field, never `native`. A vendor's own summary is a
   `vendor-summary` record.
+- A transcript's `text` is the core's: it sorts the mapper's segments and renders them, one `<speaker>: <text>` line
+  each, so a page boundary never makes a new version and every source's transcripts read alike (DR-0120). Plaud's
+  rids are `plaud:<file id>` for the recording, `plaud:<file id>/<block>` for its transcript and
+  `plaud:<file id>/summary` for its notes.
 - `rid` is also the ledger's locator, so every ledger source resolves to a record. Older locators (a legacy note's
   path) resolve through the note's `old_paths`, which the index loads into its crosswalk.
 
@@ -481,9 +487,14 @@ change lands on whoever uses that vendor, while the core still checks every rid 
   - a URL over https, to a host `vault.yaml` lists for that source, never a private, loopback or link-local address;
   - a few redirects at most, each checked again, and a size cap.
 - Every record goes through the staging gate; a source's sensitivity is in `vault.yaml`.
+- Hold lists keep records out that must not be staged yet, such as backfilled recordings with stretches the owner
+  left out: `state/holds/<source>.txt`, ids only, read on every ingest and by the gate, failing closed (DR-0121,
+  DR-0122). A held record in staging stops every ingest of its source until its file is deleted.
 - A Python connector is written only where no skill can harvest: a scheduled run with nobody's Claude session open.
-- Payloads fetched before Docket existed (an export, a backfill folder) are imported from the command line, through
-  the source's mapper.
+- Payloads fetched before Docket existed (an export, a backfill folder) are imported with `docket ingest <source>
+  <folder>`, through the source's mapper and the same checks as a live run (DR-0128).
+- A skill lists newest first and pages down past its window's start rather than trusting a date filter: a filter in
+  whole days, in the vendor's time zone, can miss a recording at the window's edge.
 
 ## 10. The web app
 

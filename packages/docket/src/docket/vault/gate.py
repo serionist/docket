@@ -4,7 +4,7 @@ Intake drops in memory what a private source or a never-store list names, so a d
 then redacts the rest and stages it: `ready` from a work source, `pending` from a mixed one or when the record was
 decided by hand before. Classification (by the user or Claude) makes a pending record ready, with cuts, or drops it.
 Promotion cuts, redacts again with the current rules and writes one run per source. Every call first sweeps staging
-against the current vault.yaml.
+against the current vault.yaml and reads the hold lists: a record on hold is never staged, classified or promoted.
 
 Nothing here names a dropped record: not a log line, not an error, not a file. Only counts leave the gate.
 """
@@ -22,7 +22,7 @@ from typing import Any, Literal
 
 from docket.errors import DocketError
 from docket.vault import cuts as cutting
-from docket.vault import neverstore
+from docket.vault import holds, neverstore
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.cuts import CUT_MARKER, Cut
 from docket.vault.rawlog import RUN_FILE
@@ -42,6 +42,7 @@ class StageResult:
     ready: int = 0
     pending: int = 0
     skipped: int = 0
+    on_hold: int = 0
     dropped: Counter[str] = field(default_factory=Counter[str])
     redactions: Counter[str] = field(default_factory=Counter[str])
 
@@ -68,6 +69,7 @@ class PromoteResult:
     runs: list[SourceRun] = field(default_factory=list[SourceRun])
     held: list[Held] = field(default_factory=list[Held])
     dropped: Counter[str] = field(default_factory=Counter[str])
+    on_hold: int = 0
 
 
 @dataclass(frozen=True)
@@ -91,6 +93,7 @@ class Gate:
         self.staging = Staging(vault.root)
         self._cut_rids: set[str] = set()
         self._read_runs: set[Path] = set()
+        self._holds = holds.Holds()
 
     def stage(self, records: Iterable[RawRecord]) -> StageResult:
         """Take records from a connector: drop, skip or stage each one."""
@@ -121,6 +124,9 @@ class Gate:
                 if neverstore.match(record, config.never_store):
                     result.dropped["never-store"] += 1
                     continue
+                if self._holds.covers(record):
+                    result.on_hold += 1
+                    continue
                 redacted, counts = redactor.record(record)
                 redacted = redacted.model_copy(update={"v": version(redacted), "run": ""})
                 key = key_of(redacted.rid, redacted.v)
@@ -134,11 +140,12 @@ class Gate:
                 result.ready += not pending
                 result.redactions += counts
             log.info(
-                "gate: %d ready, %d pending, %d skipped, %d dropped",
+                "gate: %d ready, %d pending, %d skipped, %d dropped, %d on hold",
                 result.ready,
                 result.pending,
                 result.skipped,
                 result.dropped.total(),
+                result.on_hold,
             )
             return result
 
@@ -159,6 +166,13 @@ class Gate:
             config = self._config()
             self._sweep(config)
             entry = _resolve(ref, self.staging.scan().entries)
+            record = entry.staged.record
+            if self._holds.covers(record):
+                # Private too: dropping it would record a decision that releasing the hold would have to undo.
+                raise DocketError(
+                    f"{record.rid} is on hold in {holds.HOLDS}/{record.source}.txt: it can't be classified, work or "
+                    "private, until the hold is released"
+                )
             if label == "private":
                 if cuts:
                     raise DocketError("cuts go with work; a private record is dropped whole")
@@ -197,6 +211,9 @@ class Gate:
                 name = staged.record.source
                 if staged.state != "ready" or (source is not None and name != source):
                     continue
+                if self._holds.covers(staged.record):
+                    result.on_hold += 1
+                    continue
                 try:
                     if name not in config.sources:
                         raise DocketError(f"source {name!r} isn't in vault.yaml any more")
@@ -208,10 +225,11 @@ class Gate:
             for name in sorted(groups):
                 result.runs.append(self._promote_source(name, groups[name]))
             log.info(
-                "gate: promoted %d record(s), held %d, dropped %d",
+                "gate: promoted %d record(s), held %d, dropped %d, on hold %d",
                 sum(r.written for r in result.runs),
                 len(result.held),
                 result.dropped.total(),
+                result.on_hold,
             )
             return result
 
@@ -259,7 +277,9 @@ class Gate:
 
     def _sweep(self, config: VaultConfig) -> Counter[str]:
         """Apply the current vault.yaml to what waits: drop what it now forbids, delete what was decided by hand, and
-        send back to pending what nobody classified and can no longer go through on its source's word."""
+        send back to pending what nobody classified and can no longer go through on its source's word. The hold lists
+        are read here too, on every call: a list that doesn't read stops the gate rather than let a held record by."""
+        self._holds = holds.read_all(self.vault.root)
         self.staging.clear_temp()
         self._refresh_cuts()
         scan = self.staging.scan()

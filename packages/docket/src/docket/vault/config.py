@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Hashable
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from docket.errors import DocketError
 from docket.vault.machine import validate as validate_machine
+from docket.vault.records import source_name_problem
 
 CONFIG_FILE = "vault.yaml"
 
@@ -61,11 +62,50 @@ class Owner(_Model):
         return value
 
 
+TOOL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+HOST = re.compile(r"^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$")
+
+
 class SourceConfig(_Model):
     enabled: bool = True
     # work: everything from it is work; mixed: it can carry private content, so records wait to be classified;
     # private: nothing from it is stored.
     sensitivity: Literal["work", "mixed", "private"] = "work"
+    # The source's mapper, relative to the consuming repo: .claude/skills/sources/<source>/mapper.py.
+    mapper: str | None = None
+    # The tools the capture hook posts for this source, by their own names, without the host's prefix.
+    tools: list[str] = Field(default_factory=list[str])
+    # The hosts media_put may fetch this source's media from, over https.
+    media_hosts: list[str] = Field(default_factory=list[str])
+
+    @field_validator("mapper")
+    @classmethod
+    def _mapper(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if "\\" in value or PurePosixPath(value).is_absolute() or PureWindowsPath(value).anchor:
+            raise ValueError("a mapper's path is relative to the consuming repo, written with /")
+        if ".." in PurePosixPath(value).parts or not value.endswith(".py"):
+            raise ValueError("a mapper's path stays inside the repo, with no .., and names a .py file")
+        return value
+
+    @field_validator("tools")
+    @classmethod
+    def _tools(cls, value: list[str]) -> list[str]:
+        for tool in value:
+            if not TOOL.match(tool) or tool.startswith("mcp__"):
+                raise ValueError(
+                    f"{tool!r} isn't a tool's own name: letters, digits, _, . and -, without the host's mcp__ prefix"
+                )
+        return value
+
+    @field_validator("media_hosts")
+    @classmethod
+    def _hosts(cls, value: list[str]) -> list[str]:
+        for host in value:
+            if not HOST.match(host):
+                raise ValueError(f"{host!r} isn't a host name: lowercase, with no scheme, port or path")
+        return value
 
 
 class NeverStore(_Model):
@@ -100,6 +140,16 @@ class VaultConfig(_Model):
     sources: dict[str, SourceConfig] = Field(default_factory=dict[str, SourceConfig])
     never_store: NeverStore = Field(default_factory=NeverStore)
     redaction: Redaction = Field(default_factory=Redaction)
+
+    @field_validator("sources")
+    @classmethod
+    def _source_names(cls, value: dict[str, SourceConfig]) -> dict[str, SourceConfig]:
+        # A source's name builds paths (its skill's folder, its hold list), so `..` or `a/b` must never get that far.
+        for name in value:
+            problem = source_name_problem(name)
+            if problem is not None:
+                raise ValueError(problem)
+        return value
 
     @field_validator("primary_machine")
     @classmethod

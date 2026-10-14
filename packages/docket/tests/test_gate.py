@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 import logging
 from collections import Counter
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -13,9 +13,8 @@ import pytest
 from docket_testkit import make_record, sh
 
 from docket.errors import DocketError
-from docket.vault import cuts as cutting
 from docket.vault.config import RedactionPattern, SourceConfig, VaultConfig
-from docket.vault.cuts import CUT_MARKER, Cut, register_cutter
+from docket.vault.cuts import CUT_MARKER, Cut
 from docket.vault.gate import Gate
 from docket.vault.rawlog import RawLog
 from docket.vault.records import RawRecord
@@ -25,14 +24,6 @@ from docket.vault.vault import Vault
 
 SECRET = "hunter2-" + "Example"
 PRIVATE_WORD = "zebrafinch"
-
-
-@pytest.fixture(autouse=True)
-def no_cutters() -> Iterator[None]:
-    saved = dict(cutting._CUTTERS)
-    yield
-    cutting._CUTTERS.clear()
-    cutting._CUTTERS.update(saved)
 
 
 @pytest.fixture
@@ -164,7 +155,7 @@ def test_classify_refuses_what_it_can_t_do(gate: Gate) -> None:
         gate.classify("calls:rec-1", "private", [Cut(start=0, end=1)])
     with pytest.raises(DocketError, match="work or private"):
         gate.classify("calls:rec-1", "maybe")  # type: ignore[arg-type]
-    with pytest.raises(DocketError, match="no cutter for time cuts"):
+    with pytest.raises(DocketError, match="has no segments to cut by time"):
         gate.classify("calls:rec-1", "work", [Cut(start=0, end=1000, unit="ms")])
     with pytest.raises(DocketError, match="past the end"):
         gate.classify("calls:rec-1", "work", [Cut(start=0, end=99)])
@@ -174,7 +165,7 @@ def test_classify_refuses_what_it_can_t_do(gate: Gate) -> None:
 def test_classify_refuses_a_character_cut_on_a_transcript(gate: Gate, vault: Vault) -> None:
     said = [{"start_ms": 0, "end_ms": 4000, "speaker": "Ben Sample", "text": f"the {PRIVATE_WORD} trip"}]
     gate.stage([call(1, text=f"Ben Sample: the {PRIVATE_WORD} trip", segments=said)])
-    with pytest.raises(DocketError, match=r"calls:rec-1 is a transcript.*takes time cuts"):
+    with pytest.raises(DocketError, match=r"calls:rec-1 is a transcript.*cut a time"):
         gate.classify("calls:rec-1", "work", [Cut(start=16, end=26)])
     assert gate.list().counts() == Counter({"pending": 1})
     assert gate.promote().runs == []
@@ -294,15 +285,16 @@ def test_a_vault_yaml_that_doesn_t_load_stops_the_gate_until_it_does(gate: Gate,
 
 
 def test_a_record_that_can_t_be_promoted_is_held_and_the_rest_go_on(gate: Gate, vault: Vault) -> None:
-    register_cutter("calls", lambda record, cuts: record.model_copy(update={"text": CUT_MARKER}))
     gate.stage([call(1), call(2), make_record(3), note(4)])
-    gate.classify("calls:rec-1", "work", [Cut(start=0, end=1000, unit="ms")])
+    # A time cut on a record without segments, as a staged file from elsewhere could hold; classify would refuse it.
+    entry = next(e for e in gate.list().entries if e.staged.record.rid == "calls:rec-1")
+    timed = [Cut(start=0, end=1000, unit="ms")]
+    gate.staging.write(entry.staged.model_copy(update={"state": "ready", "classified_by": "user", "cuts": timed}))
     gate.classify("calls:rec-2", "work")
-    cutting._CUTTERS.clear()
     rewrite(vault, lambda c: c.sources.pop("notes"))
     result = gate.promote()
     assert sorted((h.source, h.problem.split(";")[0]) for h in result.held) == [
-        ("calls", "calls has no cutter for time cuts"),
+        ("calls", "calls:rec-1 has no segments to cut by time"),
         ("notes", "source 'notes' isn't in vault.yaml any more"),
     ]
     assert raw_rids(vault) == Counter({"calls:rec-2": 1, "chat:C0TEST/1791000003.000100": 1})

@@ -83,6 +83,26 @@ def at(hour: int, minute: int = 0) -> datetime:
     return datetime(2026, 10, 14, hour, minute, tzinfo=UTC)
 
 
+def consuming_project(tmp_path: Path, mappers: dict[str, str]) -> Vault:
+    """A git repo with a mapper per source under .claude/skills/sources/, and a vault nested in it whose vault.yaml
+    names each mapper; each source is mixed."""
+    project = tmp_path / "project"
+    project.mkdir()
+    sh(project, "git", "init", "-q", "-b", "main")
+    config = make_config()
+    for source, code in mappers.items():
+        write_mapper(project, source, code)
+        config.sources[source] = SourceConfig(sensitivity="mixed", mapper=f".claude/skills/sources/{source}/mapper.py")
+    return Vault.init(project / "vault", config, "test-box")
+
+
+def write_mapper(project: Path, source: str, code: str) -> Path:
+    path = project / ".claude" / "skills" / "sources" / source / "mapper.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(code, encoding="utf-8", newline="\n")
+    return path
+
+
 def fixture_runs() -> list[tuple[str, str, list[RawRecord]]]:
     """The fixture's raw log as (source, run, records): one run per source at 10:00, and an edit at 11:00."""
     call = make_record(
@@ -148,6 +168,27 @@ def copy_vault(template: Path, tmp_path: Path) -> Vault:
     target = tmp_path / "vault"
     shutil.copytree(template, target)
     return Vault.open(target)
+
+
+def template_project(factory: pytest.TempPathFactory, mappers: dict[str, str]) -> Path:
+    """A consuming project with its vault, built once for a test module under conftest's git settings; each test
+    copies it with copy_project."""
+    home = factory.mktemp("template-home")
+    (home / "gitconfig").write_text("", encoding="utf-8")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("GIT_CONFIG_GLOBAL", str(home / "gitconfig"))
+        mp.setenv("GIT_CONFIG_NOSYSTEM", "1")
+        mp.setenv("DOCKET_CONFIG_DIR", str(home / "docket"))
+        mp.setenv("DOCKET_MACHINE", "test-box")
+        for name in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
+            mp.delenv(name, raising=False)
+        return consuming_project(factory.mktemp("template-project"), mappers).root.parent
+
+
+def copy_project(template: Path, tmp_path: Path) -> Vault:
+    target = tmp_path / "project"
+    shutil.copytree(template, target)
+    return Vault.open(target / "vault")
 
 
 def note(
