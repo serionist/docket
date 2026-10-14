@@ -38,6 +38,11 @@ terms:
   - term: hold list
     definition: "state/holds/<source>.txt in the vault: ids of records Docket must not stage yet, such as recordings with stretches the owner left out. Every ingest and the gate read it, failing closed."
     see: [packages/docket/src/docket/vault/holds.py]
+  - term: host repo
+    definition: "The user's own git repo a folder vault lives in: Docket commits only the vault's paths there, locally, and the user's own git moves it. Docket's private files sit under its git dir, in docket/<vault path>/."
+    see: [packages/docket/src/docket/vault/home.py]
+    close_terms:
+      - consuming project (the repo the plugin and source skills run in; often the same repo)
   - term: legacy note
     definition: "A processed doc of type legacy-note made from a note that existed before Docket: its body is the note's text, it may cover no record, and it keeps the note's old paths so references to them still resolve."
     see: [old path]

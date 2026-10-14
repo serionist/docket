@@ -5,9 +5,11 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 
 | Command | What it does |
 |---|---|
-| `docket init` | set up a vault: asks where, who you are, this machine's name, the sources and a remote; every answer is also a flag, and `--yes` takes the defaults |
-| `docket vault status` | records per source, runs, run files not committed yet, the last commit |
-| `docket vault check` | whether the raw log is intact: every file parses, nothing written once was changed |
+| `docket init` | set up a vault: asks where, who you are, this machine's name, the sources, and inside a git repo whether the vault is a folder of it (the default) or a repo of its own (`--storage folder\|repo`); every answer is also a flag, and `--yes` takes the defaults |
+| `docket sync` | a repo of its own: fetch and rebase onto its remote; a folder: says your own git moves it, and does nothing else |
+| `docket vault status` | where the vault lives and on which branch, records per source, runs, run files not committed yet, the last commit |
+| `docket vault check` | whether the vault is intact: every raw file parses, nothing written once was changed, no ignore rule hides a vault path, the vault's own attributes apply, no doc rev is claimed by two commits |
+| `docket vault convert` | make a vault that is a repo of its own a folder of the repo around it, history included: a dry run first, then your yes; `--abort` undoes one that stopped before its commit |
 | `docket staging list` | what waits for the gate, oldest first: `pending` waits for you or Claude, `ready` goes to raw at the next promotion |
 | `docket staging show <ref>` | one staged record, its cuts, and the version in raw that was cut, when there is one |
 | `docket staging classify <ref> work\|private` | work makes it ready, `--cut 120-340` (characters) or `--cut 12:30-14:05` (a time) cuts a stretch; private drops it |
@@ -24,6 +26,23 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 
 A command finds its vault from `--vault`, `DOCKET_VAULT`, the working folder upward, a `vault/` folder in it, or the
 default the wizard recorded. A `<ref>` is a record's rid, or at least 6 characters of the key `staging list` shows.
+
+## In a folder of your repo
+
+By default the vault is a folder of the repo you work in (`storage: folder` in `vault.yaml`). Docket commits there
+locally, and your own git does the rest.
+
+- Docket's commits hold only the vault's paths: nothing you staged or changed goes in. They skip your repo's hooks,
+  and land on whichever branch is checked out; `docket vault status` warns when that isn't the remote's default.
+- Docket never fetches, pulls, stashes or pushes your repo. Your push carries the vault, media included once git-lfs
+  is set up (init and convert set it up, or say what to add to a pre-push hook of your own).
+- Docket's own files sit under your repo's `.git/docket/<vault path>/`, never in your tree.
+- `staging/` (records waiting for the gate) is ignored, so `git clean -x` deletes it; a source's next sync pulls those
+  records again.
+- A clone without the audio: `git config lfs.fetchexclude "<vault path>/media/**"`.
+- Init refuses a folder in a repo anyone can read, and warns when others commit to it.
+- `docket vault convert` refuses a vault with a remote: another machine's clone of it would be overwritten by that
+  machine's next pull of your repo. Bring those clones' commits in, delete them, remove the remote, then convert.
 
 ## The gate
 
