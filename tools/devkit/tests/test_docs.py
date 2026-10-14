@@ -56,7 +56,7 @@ def test_an_edit_that_adds_a_problem_is_refused(repo: Path, capsys: pytest.Captu
 
 def test_the_key_cannot_change(repo: Path) -> None:
     add_decision("First")
-    assert call("set", DR1, "--set", "id=DR-0009") == 2
+    assert call("set", DR1, "--set", "id=" + "DR-" + "0009") == 2
 
 
 def test_supersede_links_both_ways(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:

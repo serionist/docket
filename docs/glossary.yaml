@@ -22,4 +22,4 @@ terms:
     definition: Something users or their stored data depend on, such as a name, the vault's format or an MCP tool. It changes only with the maintainer's agreement, in a PR that names it.
     see: [AGENTS.md]
   - term: vault
-    definition: "A user's own private git repo that Docket maintains: raw records written once, encrypted media, processed docs, entities and the ledger. It is never part of this repo."
+    definition: "Where Docket keeps a user's data, private and in git: by default a folder of the repo the user already works in, or a repo of its own. It holds raw records written once, encrypted media, processed docs, entities and the ledger, and is never part of this repo."

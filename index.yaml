@@ -17,7 +17,7 @@ decisions:
     cost: one-way
     sources: ["#1"]
     description: |-
-      The code is public at serionist/docket from the first commit, under Apache-2.0, so friends can use it and anyone can read how it handles their data. Each user's data lives in their own private vault repo, never here.
+      The code is public at serionist/docket from the first commit, under Apache-2.0, so friends can use it and anyone can read how it handles their data. Each user's data lives in their own private vault, a folder of their own repo or a repo of its own (DR-0102), never here.
 
       On GitHub Free a public repo also gets the rulesets, CodeQL and the macOS CI minutes that a private one would not.
     binds:
@@ -212,6 +212,7 @@ decisions:
     binds:
       - A source's ids, projection and segment reader live in the core, never in a skill.
       - "A Python connector is written only where a skill can't harvest: scheduled or headless runs."
+      - media_put and the service's fetch take a local path only under a folder vault.yaml names (a downloads folder) or the plugin's own drop folder, and a URL only over https to a host the source's profile lists; private, loopback and link-local addresses are refused, at most a few redirects are followed and each is checked again, and a file over the size cap is refused.
     not_chosen:
       - Python connector packages for every source, with their own fetching, tokens and cursors.
       - "Skills only, with Claude mapping every payload: ids and versions would follow a prompt's wording."
@@ -233,14 +234,18 @@ decisions:
     cost: one-way
     sources: ["#28"]
     supersedes: [DR-0013]
-    description: By default the vault is a folder inside the repo the user already works in (the consuming repo), committed into that repo's history, with Docket's commits limited to the vault's own paths. The setup wizard also offers a repo of its own, nested in the working folder or anywhere, for those who want a separate history, remote or LFS. Either way git is the source of truth, the data stays private, and each machine's index is a cache rebuilt from what's committed.
+    description: By default the vault is a folder inside the repo the user already works in (the consuming repo), committed into that repo's history, with Docket's commits limited to the vault's own paths. The setup wizard also offers a repo of its own, nested in the working folder or anywhere, for those who want a separate history or remote. Either way git is the source of truth, the data stays private, and each machine's index is a cache rebuilt from what's committed.
     binds:
       - Docket commits only the vault's paths, never what the user staged.
+      - In folder mode Docket only makes local commits of the vault's paths and never fetches, rebases, pushes or rewrites the host repo; the user's own git flow moves it, and docket sync says so and does nothing else.
+      - Forget in folder mode deletes the media keys, so the audio is gone for real, removes the record from the current tree and writes a tombstone so rebuilds skip it; it says plainly that the text stays in the host repo's history and shows the rewrite command for the user to run.
+      - History rewriting (DR-0014) and Docket's own fetch, rebase and push (DR-0022) are for a repo of its own only.
+      - "Setup checks the host repo's remotes: it refuses folder mode when a remote is public (where the host can be asked), warns when the repo looks shared (other committers), and offers a repo of its own instead."
       - The index database is never committed; a rebuild gives the same database, vectors aside.
-      - Raw text is in plain git, media in LFS encrypted per file.
+      - Raw text is in plain git, media in LFS encrypted per file, in both modes; in folder mode init writes the LFS attributes for the vault's media path into the host repo's .gitattributes and checks that git-lfs is installed.
     not_chosen:
       - Always a repo of its own (two repos to manage for every user).
-      - Always a folder of the consuming repo (no separate history, remote or LFS for those who want one).
+      - Always a folder of the consuming repo (no separate history or remote for those who want one).
   - id: DR-0103
     title: The plugin's setup asks what the user wants to set up
     status: decided
