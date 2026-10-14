@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated
@@ -129,8 +130,17 @@ def vault_check(vault: VaultOption = None) -> None:
     typer.echo("vault ok")
 
 
+def utf8_console() -> None:
+    """Read and write the console as UTF-8: on Windows a pipe gets the ANSI code page, which can't hold every name."""
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command; return its exit code. A DocketError is one line on stderr and exit code 2."""
+    utf8_console()
     try:
         app(args=list(argv) if argv is not None else None, standalone_mode=True)
     except DocketError as e:

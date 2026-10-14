@@ -258,3 +258,22 @@ def test_a_nested_vault_is_found_from_the_parent_s_root_without_a_default(
     monkeypatch.chdir(parent)
     assert main(["vault", "status"]) == 0
     assert str((parent / "vault").resolve()) in capsys.readouterr().out
+
+
+def test_the_console_speaks_utf8_through_a_pipe(tmp_path: Path) -> None:
+    import os
+    import subprocess
+
+    path = tmp_path / "Árvíztűrő vault"
+    env = {**os.environ, "PYTHONUTF8": "0", "PYTHONIOENCODING": ""}
+    flags = ["init", "--yes", "--path", str(path), "--remote", "none", *FLAGS]
+    init = subprocess.run([sys.executable, "-m", "docket", *flags], capture_output=True, env=env, check=False)
+    assert init.returncode == 0, init.stderr.decode("utf-8", "replace")
+    proc = subprocess.run(
+        [sys.executable, "-m", "docket", "vault", "status", "--vault", str(path)],
+        capture_output=True,
+        env=env,
+        check=False,
+    )
+    assert proc.returncode == 0
+    assert "Árvíztűrő vault" in proc.stdout.decode("utf-8")

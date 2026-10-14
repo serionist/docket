@@ -162,7 +162,8 @@ def test_a_new_github_repo_is_created_private(tmp_path: Path, monkeypatch: pytes
     def fake(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         if cmd[0] == "gh":
             calls.append(cmd)
-            return subprocess.CompletedProcess(cmd, 1, "", "name taken")
+            # The first create fails (the name is taken), the second succeeds.
+            return subprocess.CompletedProcess(cmd, 1 if len(calls) == 1 else 0, "", "name taken")
         return real_run(cmd, **kwargs)
 
     monkeypatch.setattr(wizard, "_gh_ready", lambda: True)
@@ -228,3 +229,15 @@ def test_a_vault_without_its_machine_file_falls_back_to_the_host(
     monkeypatch.setattr("socket.gethostname", lambda: "HOST-B")
     (tmp_path / ".git").mkdir()
     assert machine.resolve(tmp_path) == "host-b"
+
+
+def test_a_rebase_without_its_head_name_is_never_taken_for_docket_s(tmp_path: Path) -> None:
+    from docket.vault.vault import _started_with  # pyright: ignore[reportPrivateUsage]
+
+    state = tmp_path / "rebase-apply"
+    state.mkdir()
+    marker = tmp_path / "sync-rebase"
+    marker.write_text("origin/main", encoding="utf-8")
+    assert not _started_with(state, marker)
+    (state / "head-name").write_text("refs/heads/main", encoding="utf-8")
+    assert _started_with(state, marker)
