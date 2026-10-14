@@ -264,6 +264,44 @@ decisions:
     description: Speech recognition is compute that is the same for every user and needs a local model (Whisper, optional, a worker behind an MCP tool such as transcribe), so the app does it. Translating, reconciling two transcripts in context and writing summaries are judgement, so they are skills Claude runs, with the app's search, aliases and transcripts as tools.
     not_chosen:
       - "Transcription in the consuming repo's skills: a skill can't run a GPU model by itself."
+  - id: DR-0105
+    title: Meetings come from the calendar, keyed by the event's own id
+    status: proposed
+    at: "2026-10-14"
+    by: Claude
+    cost: medium
+    sources: ["#28"]
+    description: The calendar source's profile turns events into the ledger's meeting ops, keyed by the event's own id (its iCalUId, or the provider's id where there is none). A meeting that moves, is renamed or is cancelled updates the same meeting, so its prep, points and outcomes stay with it. Recordings and chats still link to meetings by time.
+    binds:
+      - A meeting's key is its calendar event's id, never its start time plus subject.
+      - A moved, renamed or cancelled event updates the meeting it made, never a new one.
+      - Recordings and chats link to meetings by time.
+    not_chosen:
+      - "Matching meetings on start time plus subject: a moved or renamed meeting would split in two."
+  - id: DR-0106
+    title: Each stream's status file is rendered from the ledger
+    status: proposed
+    at: "2026-10-14"
+    by: Claude
+    cost: one-way
+    sources: ["#28"]
+    description: Streams live in the ledger. Docket renders a status file per stream into the consuming repo, at a path set per stream in vault.yaml (optional), with frontmatter where, next, deadline and updated. It works the way the people directory and the glossary are rendered from the entities after import, so the ledger stays the one place a stream's state is kept.
+    binds:
+      - A stream's state is kept in the ledger; its status file is output, rendered only where vault.yaml sets a path for it.
+      - A hand edit to a rendered file is reported, not merged.
+      - Docket writes the file but commits only the vault's paths (DR-0102), so a status file outside the vault is committed by the user's own git flow.
+  - id: DR-0107
+    title: Personal source notes live in the vault; the plugin's source skills stay generic
+    status: proposed
+    at: "2026-10-14"
+    by: Claude
+    cost: one-way
+    sources: ["#28"]
+    description: "Each source skill reads sources/<source>.md in the vault before it harvests: the user's own route, quirks and gotchas for that source. It appends what it learned there. The plugin's skills stay generic and public, and what is particular to one user stays private with their data."
+    binds:
+      - A source skill reads sources/<source>.md first and appends what it learned.
+      - Nothing particular to one user goes into the plugin's skills.
+      - sources/ is part of the vault's layout (DR-0019), in plain git.
 conventions:
   - id: CV-0001
     rule: Python code passes ruff's lint rules and its formatter, at 120 columns

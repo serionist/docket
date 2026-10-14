@@ -96,7 +96,8 @@ Each step is idempotent, records the engine and version it used, and can be re-r
 3. Chunk (see Search). Both raw transcripts and the reconciled one are chunked; hits on the same stretch collapse.
 4. Tag: entities by alias, typed extractors (tickets, amounts, dates), speakers to people.
 5. Embed.
-6. Link: recordings and chats to meetings by time; records to the ledger items whose source points at them.
+6. Link: recordings and chats to meetings by time (the meetings come from the calendar, keyed by the event's id);
+   records to the ledger items whose source points at them.
 7. Summarize, with Claude: recording notes, thread summaries, digests, each line with its anchors.
 8. Propose: ledger items, closes, minutes, decisions, entities and aliases. Proposals go to review in tiers (see Keywords and aliases).
 
@@ -130,6 +131,12 @@ notes and an outcome per item, a dated log, meetings with talking points and out
 archiving after closing. Every item's source resolves to a raw record; the history is queryable ("how many asks to
 Marco went unanswered"); time-driven changes (rollover, archiving) are written as explicit ops, so rebuilding gives the
 same result on any day.
+
+- Meetings come from the calendar. Its profile turns events into meeting ops keyed by the event's own id (iCalUId or
+  the provider's id), so a moved, renamed or cancelled meeting updates the same meeting; nothing is matched on start
+  time plus subject.
+- A stream can have a status file in the user's repo, rendered from the ledger at a path set per stream in
+  `vault.yaml`, with frontmatter `where`, `next`, `deadline` and `updated`. A hand edit to it is reported, not merged.
 
 ### 3.5 Beyond search
 
@@ -229,6 +236,7 @@ vault/
   entities/_proposals-<machine>.jsonl                                                       -> plain git
   ledger/ops/<yyyy-mm>-<machine>.jsonl                                                      -> plain git
   state/cursors-<machine>.yaml   each machine's cursors per source                         -> plain git
+  sources/<source>.md            the user's own notes on each source's route and quirks     -> plain git
   index/docket.sqlite            derived; `docket rebuild` makes it from the above          -> never committed
 ```
 
@@ -428,6 +436,8 @@ stores what it is handed. A source needs two things:
 
 - A PostToolUse hook in the plugin posts what the source's tools return to the service verbatim, so a long transcript
   never passes through Claude's output; Claude sends a manifest (the window, the counts, what it skipped).
+- A source skill reads `sources/<source>.md` in the vault first, the user's own route, quirks and gotchas, and appends
+  what it learned there. The plugin's skills stay generic and public.
 - Audio is handed over by path or URL, and the service fetches it only within limits:
   - a path under a folder `vault.yaml` names (a downloads folder) or the plugin's own drop folder;
   - a URL over https, to a host the source's profile lists, never a private, loopback or link-local address;
@@ -492,6 +502,9 @@ No big-bang switch: each piece of an existing setup is replaced only after its r
 3. Entities are seeded from the people directory and the glossary, then reviewed in a few curate rounds; after
    that, those files are rendered from the entities.
 4. The ledger moves last, imported with its whole history; for a week both run in step, the old one read-only.
+   Until the day pages exist, an existing setup's sync harvests through Docket's source skills and keeps reconciling
+   into its own task list. Once the ledger has moved, each stream's status file is rendered from it, as the people
+   directory and the glossary are from the entities.
 
 ## 13. How we know it works
 
