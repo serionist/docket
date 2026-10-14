@@ -241,3 +241,16 @@ def test_a_rebase_without_its_head_name_is_never_taken_for_docket_s(tmp_path: Pa
     assert not _started_with(state, marker)
     (state / "head-name").write_text("refs/heads/main", encoding="utf-8")
     assert _started_with(state, marker)
+
+
+def test_a_read_only_file_is_made_writable_and_deleted(tmp_path: Path) -> None:
+    import os
+    import stat
+
+    from docket.vault.vault import retry_writable
+
+    target = tmp_path / "object"
+    target.write_text("x", encoding="utf-8")
+    target.chmod(stat.S_IREAD)
+    retry_writable(os.unlink, str(target), PermissionError())
+    assert not target.exists()

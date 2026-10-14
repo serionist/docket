@@ -232,14 +232,15 @@ def _unlink_writable(path: Path) -> None:
     path.unlink(missing_ok=True)
 
 
+def retry_writable(func: Callable[..., object], target: str, _exc: BaseException) -> None:
+    """rmtree's error handler: make the file writable and try again. Only Windows refuses to delete a read-only file."""
+    os.chmod(target, stat.S_IWRITE)  # noqa: PTH101 - shutil hands over a string path
+    func(target)
+
+
 def remove_tree(path: Path) -> None:
     """Delete a folder git wrote into: git makes its objects read-only, which Windows won't delete as they are."""
-
-    def retry(func: Callable[..., object], target: str, _exc: BaseException) -> None:
-        os.chmod(target, stat.S_IWRITE)  # noqa: PTH101 - shutil hands over a string path
-        func(target)
-
-    shutil.rmtree(path, onexc=retry)
+    shutil.rmtree(path, onexc=retry_writable)
 
 
 def _records(path: Path) -> list[tuple[Path, int, RawRecord]]:
