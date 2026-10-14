@@ -68,6 +68,8 @@ def test_each_lookup_step(locator: str, doc: str) -> None:
         ("2026-09-10-supplier-call.md", "could be any of"),
         ("elsewhere/2026-09-10-supplier-call.md", "no legacy note has the old path"),
         ("notes/calls/2026-09-30-nothing.md", "no legacy note has the old path"),
+        ("xREADME.md", "no legacy note has the old path"),
+        ("nothing.md", "no legacy note has the old path"),
     ],
 )
 def test_nothing_or_several_is_said_never_guessed(locator: str, says: str) -> None:

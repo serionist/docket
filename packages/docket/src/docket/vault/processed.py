@@ -140,8 +140,10 @@ def old_path_problem(path: str) -> str | None:
         return f"{path!r} starts with /; an old path is relative to its repo"
     if ":" in path:
         return f"{path!r} has a ':', which would read as a source or a drive"
-    if any(not ch.isprintable() for ch in path):
-        return f"{path!r} has a control character"
+    # Control characters and line breaks only: a no-break or zero-width space is a real file name's own, and the
+    # renderer quotes what YAML can't hold plain.
+    if any(unicodedata.category(ch) in ("Cc", "Zl", "Zp") for ch in path):
+        return f"{path!r} has a control character or a line break"
     if any(part in ("", ".", "..") for part in path.split("/")):
         return f"{path!r} has an empty, . or .. part"
     if unicodedata.normalize("NFC", path) != path:

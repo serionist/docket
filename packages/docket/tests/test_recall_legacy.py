@@ -126,3 +126,10 @@ def test_an_old_path_at_an_earlier_rev(vault: Vault) -> None:
     first = recall.read(vault, CALL, rev=1).doc
     assert first is not None
     assert "Source: call recorder `rec-0042`" in first.text
+
+
+def test_verify_takes_a_doc_inside_processed_only(vault: Vault) -> None:
+    with pytest.raises(DocketError, match="isn't a doc in this vault's processed/ folder"):
+        recall.verify(vault, "raw/notes.md")
+    with pytest.raises(DocketError, match="no doc at"):
+        recall.verify(vault, "processed/brief/nobody.md")

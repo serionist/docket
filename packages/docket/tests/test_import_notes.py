@@ -721,3 +721,46 @@ def test_a_deleted_doc_whose_last_rev_cant_be_read_is_ignored(
     report = run(vault, folder)
     assert report.deleted == []
     assert report.refused == []
+
+
+def test_a_frontmatter_edit_made_during_the_run_is_kept_and_the_note_still_lands(
+    after: tuple[Vault, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault, folder = after
+    (folder / "calls" / "2026-09-10-supplier-call.md").write_text("# Changed in the folder\n", encoding="utf-8")
+    real = DocStore.put_many
+    path = vault.root / "processed" / "legacy-note" / "2026" / "09" / "2026-09-10-supplier-call.md"
+
+    def tagged_meanwhile(self: DocStore, texts: list[str], subject: str) -> Any:
+        text = path.read_text(encoding="utf-8")
+        if "entities: []" in text:
+            path.write_text(text.replace("entities: []", "entities: [ben-sample]"), encoding="utf-8")
+        return real(self, texts, subject)
+
+    monkeypatch.setattr(DocStore, "put_many", tagged_meanwhile)
+    report = run(vault, folder)
+    assert (report.updated, report.kept, report.refused) == (1, [], [])
+    doc = DocStore(vault).get(CALL_ID)
+    assert doc is not None
+    assert (doc.body, doc.meta.entities, doc.meta.rev) == ("# Changed in the folder\n", ["ben-sample"], 3)
+
+
+def test_the_vaults_own_folder_is_skipped_by_path(folder: Path) -> None:
+    inside = folder / "vault"
+    (inside / "processed").mkdir(parents=True)
+    (inside / "processed" / "x.md").write_text("# the vault's own\n", encoding="utf-8")
+    old_paths, skipped = listing(folder, inside)
+    assert not any(p.startswith("notes/vault") for p in old_paths)
+    assert skipped["nested repos"] == 0
+
+
+def test_a_path_old_paths_cant_hold_is_refused(vault: Vault, folder: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    real = notes.list_folder
+
+    def odd(*args: Any) -> list[Listed]:
+        found = real(*args)
+        return [Listed("notes/odd\u0007name.md", found[0].path), *found[1:]]
+
+    monkeypatch.setattr(notes, "list_folder", odd)
+    report = run(vault, folder, dry_run=True)
+    assert report.refused == ["notes/odd\u0007name.md: 'notes/odd\\x07name.md' has a control character or a line break"]

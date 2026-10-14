@@ -215,6 +215,13 @@ def test_an_old_path_that_wont_read_the_same_everywhere_is_refused(old_paths: st
     assert any(says in str(p) for p in refusal(text))
 
 
+def test_an_old_path_may_hold_a_no_break_or_zero_width_space() -> None:
+    text = doc(id="legacy-note:x", type="legacy-note", by="import", old_paths='["notes/a\\u00a0b\\u200bc.md"]')
+    parsed = parse_doc(text)
+    assert parsed.meta.old_paths == ["notes/a\u00a0b\u200bc.md"]
+    assert parse_doc(parsed.render()).meta.old_paths == parsed.meta.old_paths
+
+
 def test_legacy_fields_belong_to_a_legacy_note(caplog: pytest.LogCaptureFixture) -> None:
     fields = {"id": "brief:ben", "type": "brief", "covers": "[calls:a]", "by": "Ada", "old_paths": "[notes/x.md]"}
     assert any("legacy note only" in str(p) for p in refusal(doc(**fields)))
