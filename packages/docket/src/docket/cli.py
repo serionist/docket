@@ -19,7 +19,7 @@ from docket.imports import notes
 from docket.sources.contract import Manifest
 from docket.sources.ingest import IngestReport, ingest_run
 from docket.sources.runner import MapperFailedError
-from docket.vault import cuts
+from docket.vault import convert, cuts
 from docket.vault.anchors import format_time
 from docket.vault.gate import Gate, Label
 from docket.vault.processed import DocRefusedError
@@ -75,6 +75,18 @@ def find_vault(explicit: Path | None) -> Vault:
         if candidate is not None and Vault.find(candidate) is not None:
             return Vault.open(candidate)
     raise DocketError("no vault here; pass --vault, set DOCKET_VAULT, or create one with `docket init`")
+
+
+def _vault_root(explicit: Path | None) -> Path:
+    """The vault's folder, found the way `find_vault` finds it but without opening it: a convert works on a vault
+    that open would refuse."""
+    env = os.environ.get("DOCKET_VAULT")
+    here = Path.cwd()
+    for candidate in (explicit, Path(env) if env else None, here, here / "vault", userconfig.default_vault()):
+        root = Vault.find(candidate) if candidate is not None else None
+        if root is not None:
+            return root
+    raise DocketError("no vault here; pass --vault")
 
 
 def _version(value: bool) -> None:
@@ -232,6 +244,22 @@ def _ingest_report(report: IngestReport) -> None:
     if report.unreadable:
         places = ", ".join(str(n) for n in report.unreadable)
         say(f"skipped    file(s) {places} of {report.files} in name order: not JSON")
+
+
+@vault_app.command("convert")
+def vault_convert(
+    *,
+    vault: VaultOption = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Show what would change, and stop.")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Convert without asking.")] = False,
+    abort: Annotated[bool, typer.Option("--abort", help="Undo a convert that stopped before its commit.")] = False,
+    remote_is_private: Annotated[bool, typer.Option(help="Confirm a remote Docket can't check is private.")] = False,
+    allow_shared: Annotated[bool, typer.Option(help="Convert into a repo others commit to.")] = False,
+) -> None:
+    """Make a vault that is a repo of its own a folder of the repo around it, history included."""
+    root = _vault_root(vault)
+    options = convert.Options(dry_run, yes, abort, remote_is_private, allow_shared)
+    convert.convert(root, TyperPrompter(), options)
 
 
 RefArgument = Annotated[str, typer.Argument(help="A rid, or at least 6 characters of a key from `staging list`.")]
