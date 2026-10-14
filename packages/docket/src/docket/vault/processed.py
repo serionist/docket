@@ -9,6 +9,8 @@ The frontmatter, in the order Docket writes it:
     by: claude-opus-5.5, sync 2026-10-14T16:07      <who>[, <run>]
     supersedes: [other docs it replaces]
     entities: [entity slugs]
+    old_paths: [paths other files cite it by]       a legacy note only
+    import_hash: sha256:...                         a legacy note only: the body the import last wrote
 
 A doc lives at processed/<type>/<yyyy>/<mm>/<slug>.md when its slug starts with a date, else processed/<type>/<slug>.md.
 The frontmatter is read with YAML's base loader, so every value is text (`no` and `2026` stay slugs), and written by
@@ -20,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any, Literal, cast
@@ -43,6 +46,7 @@ DEVICE_NAMES = frozenset(
 DATED = re.compile(r"^(\d{4})-(\d{2})-\d{2}(?:-|$)")
 BY_MAX = 200
 NULLS = frozenset({"", "~", "null", "Null", "NULL"})
+IMPORT_HASH = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 _HEADING = re.compile(r"^ {0,3}#{1,6}(?:[ \t]|$)")
@@ -124,6 +128,29 @@ def _no_repeats(values: list[str], what: str) -> list[str]:
     return values
 
 
+def old_path_problem(path: str) -> str | None:
+    """What is wrong with an old path as a legacy note keeps it, or None. It is relative, with `/` separators, in NFC,
+    with no empty, `.` or `..` part, no `:` and no control character, so it reads the same on every system and can't
+    be taken for a rid or a drive."""
+    if not path:
+        return "an old path can't be empty"
+    if "\\" in path:
+        return f"{path!r} has a \\; an old path is written with /"
+    if path.startswith("/"):
+        return f"{path!r} starts with /; an old path is relative to its repo"
+    if ":" in path:
+        return f"{path!r} has a ':', which would read as a source or a drive"
+    # Control characters and line breaks only: a no-break or zero-width space is a real file name's own, and the
+    # renderer quotes what YAML can't hold plain.
+    if any(unicodedata.category(ch) in ("Cc", "Zl", "Zp") for ch in path):
+        return f"{path!r} has a control character or a line break"
+    if any(part in ("", ".", "..") for part in path.split("/")):
+        return f"{path!r} has an empty, . or .. part"
+    if unicodedata.normalize("NFC", path) != path:
+        return f"{path!r} isn't in NFC"
+    return None
+
+
 class DocMeta(BaseModel):
     """A processed doc's frontmatter."""
 
@@ -136,16 +163,39 @@ class DocMeta(BaseModel):
     by: str
     supersedes: list[str] = Field(default_factory=list[str])
     entities: list[str] = Field(default_factory=list[str])
+    old_paths: list[str] = Field(default_factory=list[str])
+    import_hash: str | None = None
 
     @field_validator("rev", mode="before")
     @classmethod
     def _rev(cls, value: Any) -> Any:
         return 0 if isinstance(value, str) and value in NULLS else value
 
-    @field_validator("covers", "supersedes", "entities", mode="before")
+    @field_validator("covers", "supersedes", "entities", "old_paths", mode="before")
     @classmethod
     def _lists(cls, value: Any) -> Any:
         return _as_list(value)
+
+    @field_validator("import_hash", mode="before")
+    @classmethod
+    def _null_hash(cls, value: Any) -> Any:
+        return None if isinstance(value, str) and value in NULLS else value
+
+    @field_validator("old_paths")
+    @classmethod
+    def _old_paths(cls, value: list[str]) -> list[str]:
+        for path in value:
+            problem = old_path_problem(path)
+            if problem:
+                raise ValueError(problem)
+        return _no_repeats(value, "old_paths")
+
+    @field_validator("import_hash")
+    @classmethod
+    def _import_hash(cls, value: str | None) -> str | None:
+        if value is not None and not IMPORT_HASH.match(value):
+            raise ValueError("sha256: and 64 lowercase hex digits")
+        return value
 
     @field_validator("id")
     @classmethod
@@ -203,6 +253,10 @@ class DocMeta(BaseModel):
             log.warning("%s has a type this Docket doesn't know: %s", self.id, self.type)
         if not self.covers and self.type != "legacy-note" and not lenient:
             raise ValueError("covers names at least one rid")
+        if self.type != "legacy-note" and (self.old_paths or self.import_hash is not None):
+            if not lenient:
+                raise ValueError("old_paths and import_hash belong to a legacy note only")
+            log.warning("%s has legacy-note fields this Docket keeps only on legacy notes", self.id)
         if self.id in self.supersedes:
             raise ValueError("a doc can't supersede itself")
         return self
@@ -251,6 +305,8 @@ class ProcessedDoc:
             f"by: {_scalar(m.by, 'value')}",
             *_block("supersedes", m.supersedes),
             "entities: [" + ", ".join(_scalar(e, "flow") for e in m.entities) + "]",
+            *(_block("old_paths", m.old_paths) if m.old_paths else []),
+            *([f"import_hash: {m.import_hash}"] if m.import_hash is not None else []),
             "---",
         ]
         rest = self.body.rstrip("\n")

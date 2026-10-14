@@ -32,12 +32,18 @@ terms:
     definition: The one set of checks every change passes, `uv run gate`. The quick lane runs in seconds before every push; `gate full` is the merge rule.
     see: [tools/devkit/src/devkit/gate.py]
     close_terms: [staging gate (the vault's)]
+  - term: legacy note
+    definition: "A processed doc of type legacy-note made from a note that existed before Docket: its body is the note's text, it may cover no record, and it keeps the note's old paths so references to them still resolve."
+    see: [old path]
   - term: locator
     definition: "What read takes: a doc's id or path, or a record part such as r:<rid>@12:08, the same in brackets, or a bare rid."
     see: [packages/docket/src/docket/vault/anchors.py]
   - term: mention
     definition: "A chunk naming an entity: by an alias in its text, its speaker or author, or its doc's entities. Mentions lift search results; they never filter them."
     see: [packages/docket/src/docket/index/matching.py]
+  - term: old path
+    definition: The path other files cite a legacy note by, from the root of the repo its folder was in, such as notes/calls/x.md; read takes it, with an optional @mm:ss.
+    see: [legacy note, locator]
   - term: one-way door
     definition: Something users or their stored data depend on, such as a name, the vault's format or an MCP tool. It changes only with the maintainer's agreement, in a PR that names it.
     see: [AGENTS.md]

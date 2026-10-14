@@ -19,6 +19,7 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 | `docket index rebuild` | build this machine's index from the vault, from scratch |
 | `docket index update` | index what changed since; it rebuilds when it has to |
 | `docket index status` | whether the index is there and current, its languages, counts, what is new, and its problems |
+| `docket import notes <folder>` | each markdown note in an existing folder becomes a legacy note that keeps its old path, so `doc read notes/x.md` or `notes/x.md@12:08` still finds it; the folder is only read; run it again to pick up changes; `--dry-run` first, `--as` for what old paths start with |
 
 A command finds its vault from `--vault`, `DOCKET_VAULT`, the working folder upward, a `vault/` folder in it, or the
 default the wizard recorded. A `<ref>` is a record's rid, or at least 6 characters of the key `staging list` shows.
@@ -32,7 +33,7 @@ Every record reaches the raw log through the gate. It reads `vault.yaml` on ever
 | `sources.<name>.sensitivity` | `work` goes through, `mixed` waits in staging to be classified, `private` is dropped |
 | `never_store.people` | drops a record whose author, any recipient, or any id in its source's payload equals an entry: an exact address (`kid@example.invalid`, also inside `Kid <kid@example.invalid>`) or the source's user id (`U0KID`); case doesn't matter |
 | `never_store.containers` | drops a record from a channel, chat or folder: its id, with or without the source's prefix (`slack:C0FAMILY` or `C0FAMILY`) |
-| `never_store.keywords` | drops a record that says the words anywhere, title, text, attachment names or payload, as whole words: case, accents and curly apostrophes don't matter (`kovacs` matches `Kovács`, not `kovacsfalva`), and any punctuation may join the words; a keyword of two or more words also matches them joined by a case change or by nothing (`dora example` matches `dora-example`, `dora_example`, `DoraExample` and `doraexample`), while a one-word keyword never matches inside a word (`Max` leaves `maxRetries` alone) |
+| `never_store.keywords` | drops a record that says the words anywhere, title, text, attachment names or payload, as whole words: case, accents and curly apostrophes don't matter (`kovacs` matches `Kovács`, not `kovacsfalva`), and any punctuation may join the words; a keyword of two or more words also matches them joined by a case change or by nothing (`dora example` matches `dora-example`, `dora_example`, `DoraExample` and `doraexample`), while a one-word keyword never matches inside a word (`Max` leaves `maxRetries` alone); a name behind an encoding matches too: percent-encoded, once or wrapped again as a Safe Link does (`Dora%2520Example`), behind HTML entities, in Latin-1, or as `%u` and `\u` escapes |
 | `redaction.builtin` | `true` (the default) redacts passwords and secrets after a label (also in bold, in a table cell, or on the next line of an HTML mail), API keys and tokens, private key blocks, and phone numbers written with `+` or after a label; a `+` amount with its currency (`+12 500 000 Ft`) stays |
 | `redaction.patterns` | your own: each has a `name` (it shows in the marker) and a `pattern`, a regular expression; a group named `secret` redacts only that part (`door code (?P<secret>\d+)`) |
 

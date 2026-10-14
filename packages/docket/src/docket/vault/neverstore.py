@@ -12,6 +12,7 @@ import unicodedata
 from collections.abc import Iterator
 from functools import lru_cache
 from typing import Any, Literal, cast
+from urllib.parse import unquote
 
 from docket.vault.config import NeverStore
 from docket.vault.records import RawRecord
@@ -23,6 +24,10 @@ _ADDRESS = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 # typed with a straight apostrophe or a hyphen matches the curly or the non-breaking one a mail client wrote.
 _PLAIN = str.maketrans({chr(c): "'" for c in (0x2018, 0x2019, 0x02BC)} | {chr(c): "-" for c in range(0x2010, 0x2016)})
 _NOT_A_WORD = re.compile(r"[\W_]+")
+_PERCENT_U = re.compile(r"%u([0-9a-fA-F]{4})")
+_BACKSLASH_U = re.compile(r"\\u([0-9a-fA-F]{4})")
+# Decoding stops when a round changes nothing; a link wrapped more often than this is beyond any mail client seen.
+DECODE_ROUNDS = 4
 
 
 def fold(text: str) -> str:
@@ -88,9 +93,35 @@ def _keyword_shapes(keyword: str) -> tuple[frozenset[str], bool]:
     return frozenset(s for s in shapes if s.strip()), len(cased.split()) > 1
 
 
+def _unicode_escape(m: re.Match[str]) -> str:
+    return chr(int(m.group(1), 16))
+
+
+def decoded_forms(text: str) -> list[str]:
+    """The forms a name can hide behind in a link or a payload, each held to the rule as well as the text: percent
+    encoding, once or wrapped again (an Outlook Safe Link turns %20 into %2520), behind HTML entities (&#37;20), in
+    Latin-1 (Kov%E1cs), and as %uXXXX or \\uXXXX escapes (JavaScript's escape(), JSON). Every round's form is kept,
+    at most DECODE_ROUNDS of them."""
+    forms: list[str] = []
+    current = text
+    for _ in range(DECODE_ROUNDS):
+        decoded = unquote(html.unescape(current))
+        decoded = _BACKSLASH_U.sub(_unicode_escape, _PERCENT_U.sub(_unicode_escape, decoded))
+        if decoded == current:
+            break
+        forms.append(decoded)
+        current = decoded
+    for form in (text, *forms):
+        latin = unquote(form, encoding="latin-1")
+        if latin != form and latin not in forms:
+            forms.append(latin)
+    return forms
+
+
 def _says(texts: list[str], keywords: list[str]) -> bool:
     keywords = [k for k in keywords if k.strip()]
     texts = [t for t in texts if t]
+    texts += [form for t in texts for form in decoded_forms(t)]
     if not keywords or not texts:
         return False
     folded = [fold(t) for t in texts]

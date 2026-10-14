@@ -163,6 +163,75 @@ def test_a_legacy_note_may_cover_nothing() -> None:
     assert parse_doc(doc(id="legacy-note:old-plans", type="legacy-note", by="import")).meta.covers == []
 
 
+LEGACY = """\
+---
+id: legacy-note:2026-09-10-supplier-call
+type: legacy-note
+rev: 2
+covers:
+  - calls:rec-0042
+by: docket import
+supersedes: []
+entities: []
+old_paths:
+  - notes/calls/2026-09-10-supplier-call.md
+  - "notes/no/2026-09-10 #1.md"
+import_hash: sha256:{hash}
+---
+# Supplier call
+
+Source: call recorder `rec-0042`.
+""".replace("{hash}", "0" * 63 + "f")
+
+
+def test_a_legacy_note_keeps_its_old_paths_and_import_hash() -> None:
+    parsed = parse_doc(LEGACY)
+    assert parsed.meta.old_paths == ["notes/calls/2026-09-10-supplier-call.md", "notes/no/2026-09-10 #1.md"]
+    assert parsed.meta.import_hash == "sha256:" + "0" * 63 + "f"
+    assert parsed.render() == LEGACY
+    plain = parse_doc(doc(id="legacy-note:x", type="legacy-note", by="import", import_hash="~"))
+    assert plain.meta.import_hash is None
+    assert "old_paths" not in plain.render()
+    assert "import_hash" not in plain.render()
+
+
+@pytest.mark.parametrize(
+    ("old_paths", "says"),
+    [
+        ('["notes\\\\calls\\\\x.md"]', "has a \\"),
+        ("[/notes/x.md]", "starts with /"),
+        ('["calls:notes/x.md"]', "':'"),
+        ("[notes//x.md]", "empty, . or .."),
+        ("[notes/../x.md]", "empty, . or .."),
+        ("[./x.md]", "empty, . or .."),
+        ('["notes/x\\u0007.md"]', "control character"),
+        ('["notes/a\\u0301rvi\\u0301z.md"]', "NFC"),
+        ("['']", "can't be empty"),
+        ("[a.md, a.md]", "listed twice"),
+    ],
+)
+def test_an_old_path_that_wont_read_the_same_everywhere_is_refused(old_paths: str, says: str) -> None:
+    text = doc(id="legacy-note:x", type="legacy-note", by="import", old_paths=old_paths)
+    assert any(says in str(p) for p in refusal(text))
+
+
+def test_an_old_path_may_hold_a_no_break_or_zero_width_space() -> None:
+    text = doc(id="legacy-note:x", type="legacy-note", by="import", old_paths='["notes/a\\u00a0b\\u200bc.md"]')
+    parsed = parse_doc(text)
+    assert parsed.meta.old_paths == ["notes/a\u00a0b\u200bc.md"]
+    assert parse_doc(parsed.render()).meta.old_paths == parsed.meta.old_paths
+
+
+def test_legacy_fields_belong_to_a_legacy_note(caplog: pytest.LogCaptureFixture) -> None:
+    fields = {"id": "brief:ben", "type": "brief", "covers": "[calls:a]", "by": "Ada", "old_paths": "[notes/x.md]"}
+    assert any("legacy note only" in str(p) for p in refusal(doc(**fields)))
+    caplog.set_level(logging.WARNING)
+    assert parse_doc(doc(**fields), lenient=True).meta.old_paths == ["notes/x.md"]
+    assert "legacy-note fields" in caplog.text
+    bad = doc(id="legacy-note:x", type="legacy-note", by="import", import_hash="sha256:ABC")
+    assert any("64 lowercase hex" in str(p) for p in refusal(bad))
+
+
 @pytest.mark.parametrize(
     ("text", "line", "says"),
     [

@@ -36,6 +36,7 @@ _CODES = {"25": "%", "5d": "]", "5D": "]", "40": "@", "23": "#"}
 _RESERVED = re.compile(r"\[[a-z]+:\S*\]")
 _DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
 _SEPARATOR = re.compile(r"[\\/]")
+_MARKDOWN = re.compile(r"\.(?:md|markdown)$", re.IGNORECASE)
 
 # The characters a blank line may hold. The no-break space is one, because HTML mail turned into text writes its
 # empty lines with it.
@@ -270,3 +271,18 @@ def parse_locator(text: str, doc_types: Collection[str]) -> Locator:
     if not RID.match(value):
         raise AnchorError(f"{value!r} is neither a doc id, a doc's path, nor a rid")
     return Locator("record", value, Anchor(value, "record", token=value))
+
+
+def split_path_locator(text: str) -> tuple[str, Anchor | None] | None:
+    """A path locator, `path [ "@" times ]`: a markdown file's path (`.md` or `.markdown` in any case) and an optional
+    time, split at the last `@` whose rest is a whole time. None when the text isn't one. Which doc the path names is
+    for `read` to find: a doc in the vault, else a legacy note's old path (DR-0110 and the old-path locator)."""
+    value = text.strip()
+    path, anchor = value, None
+    i = value.rfind("@")
+    if i > 0 and _TIMES.fullmatch(value[i + 1 :]):
+        kind, start, end = _position("@", value[i + 1 :])
+        path, anchor = value[:i], Anchor(None, kind, start, end, value[i:])
+    if not _MARKDOWN.search(path):
+        return None
+    return path, anchor

@@ -70,12 +70,15 @@ def test_a_doc_by_its_path_inside_the_vault_only(vault: Vault) -> None:
     absolute = recall.read(vault, str(vault.root / NOTE_PATH))
     assert absolute.doc is not None
     assert absolute.doc.id == NOTE_ID
-    (vault.root / "raw" / "notes.md").write_text("---\n", encoding="utf-8")
-    for outside in ("raw/notes.md", "processed/../raw/notes.md", str(vault.root.parent / "elsewhere.md")):
-        with pytest.raises(DocketError, match="isn't a doc in this vault's processed/ folder"):
+    # A path outside processed/ is looked up as a legacy note's old path, a string match that never reads the file.
+    private = "---\nid: brief:someone\ntype: brief\ncovers: [calls:a]\nby: me\n---\nprivate text @00:01\n"
+    (vault.root / "raw" / "notes.md").write_text(private, encoding="utf-8")
+    (vault.root.parent / "elsewhere.md").write_text(private, encoding="utf-8")
+    for outside in ("raw/notes.md", str(vault.root.parent / "elsewhere.md"), "processed/brief/nobody.md"):
+        with pytest.raises(DocketError, match="no legacy note has the old path"):
             recall.read(vault, outside)
-    with pytest.raises(DocketError, match="no doc at"):
-        recall.read(vault, "processed/brief/nobody.md")
+    with pytest.raises(DocketError, match=r"has a \.\. part"):
+        recall.read(vault, "processed/../raw/notes.md")
 
 
 def test_an_earlier_rev_by_id_or_path(vault: Vault) -> None:
