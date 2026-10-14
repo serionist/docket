@@ -12,3 +12,6 @@ Unreleased in the same PR.
   an optional private remote.
 - The vault's raw log: records written once per source and run, deduplicated, committed locally.
 - `docket vault status` and `docket vault check`.
+- The staging gate: every record reaches the raw log through it. Never-store lists and private sources drop records
+  without a trace, mixed sources wait to be classified, and credentials, keys and phone numbers are redacted.
+- `docket staging list`, `show`, `classify` (work or private, with cuts) and `promote`.
