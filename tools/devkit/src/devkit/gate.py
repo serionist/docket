@@ -292,7 +292,10 @@ def run(lane: str, only: Sequence[str] | None = None) -> int:
     base = pr.base_sha if pr and pr.base_sha else default_base(root)
     if base is None and os.environ.get("GITHUB_EVENT_NAME") == "push":
         base = "HEAD~1"
-    ctx = Ctx(root=root, lane=lane, ci=os.environ.get("CI") == "true", base=base, pr=pr)
+    # The PR's title and body are checked only by the PR text workflow, which runs again on every edit; the gate's
+    # own run reads them from the push event, so a fixed title would stay red there until the next push.
+    pr_text = pr if os.environ.get("DOCKET_PR_TEXT") == "1" else None
+    ctx = Ctx(root=root, lane=lane, ci=os.environ.get("CI") == "true", base=base, pr=pr_text)
     steps = [s for s in STEPS if lane in s.lanes and (not only or s.name in only)]
     unknown = sorted(set(only or []) - {s.name for s in STEPS})
     if unknown:

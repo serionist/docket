@@ -13,8 +13,10 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 10
+    # Short group names: Dependabot's title ("Bump x from a to b in the <group> group across 1 directory") becomes
+    # the commit on main, which may hold 72 characters.
     groups:
-      dev-tools:
+      dev:
         patterns: ["ruff", "pyright", "pytest*", "types-*"]
 
   - package-ecosystem: github-actions

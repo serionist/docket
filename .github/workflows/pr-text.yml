@@ -38,4 +38,6 @@ jobs:
             echo "DOCKET_DENYLIST=$RUNNER_TEMP/denylist.txt" >> "$GITHUB_ENV"
           fi
       - name: Title, body and commits
+        env:
+          DOCKET_PR_TEXT: "1"
         run: uv run gate quick --only commits,content
