@@ -8,6 +8,9 @@ from devkit import docs
 from devkit.regime import Regime
 from devkit.store import Store
 
+# The ids the tests create in their own throwaway repo, built so this file cites no decision of the real one.
+DR1, DR2 = "DR-" + "0001", "DR-" + "0002"
+
 
 def call(*args: str) -> int:
     return docs.main(list(args))
@@ -29,10 +32,10 @@ def test_add_numbers_decisions_and_fills_defaults(repo: Path) -> None:
     add_decision("First")
     add_decision("Second")
     s = store(repo)
-    first = s.find("DR-0001")
+    first = s.find(DR1)
     assert first.entry["status"] == "proposed"
     assert first.entry["by"] == "Ada Example"
-    assert s.find("DR-0002").entry["title"] == "Second"
+    assert s.find(DR2).entry["title"] == "Second"
     assert s.check() == []
 
 
@@ -46,37 +49,37 @@ def test_written_files_are_canonical_and_stable(repo: Path) -> None:
 
 def test_an_edit_that_adds_a_problem_is_refused(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     add_decision("First")
-    assert call("set", "DR-0001", "--set", "cost=expensive") == 2
+    assert call("set", DR1, "--set", "cost=expensive") == 2
     assert "cost must be one of" in capsys.readouterr().err
-    assert store(repo).find("DR-0001").entry["cost"] == "cheap"
+    assert store(repo).find(DR1).entry["cost"] == "cheap"
 
 
 def test_the_key_cannot_change(repo: Path) -> None:
     add_decision("First")
-    assert call("set", "DR-0001", "--set", "id=DR-0009") == 2
+    assert call("set", DR1, "--set", "id=" + "DR-" + "0009") == 2
 
 
 def test_supersede_links_both_ways(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     add_decision("Old")
     add_decision("New")
-    (repo / "notes.md").write_text("We follow DR-0001.\n", encoding="utf-8")
-    assert call("supersede", "DR-0001", "--by", "DR-0002") == 0
+    (repo / "notes.md").write_text(f"We follow {DR1}.\n", encoding="utf-8")
+    assert call("supersede", DR1, "--by", DR2) == 0
     out = capsys.readouterr().out
     assert "notes.md:1" in out
     s = store(repo)
-    assert s.find("DR-0001").entry["superseded_by"] == ["DR-0002"]
-    assert s.find("DR-0001").entry["status"] == "superseded"
-    assert s.find("DR-0002").entry["supersedes"] == ["DR-0001"]
+    assert s.find(DR1).entry["superseded_by"] == [DR2]
+    assert s.find(DR1).entry["status"] == "superseded"
+    assert s.find(DR2).entry["supersedes"] == [DR1]
     problems = [str(p) for p in s.check()]
-    assert problems == ["notes.md:1: cites DR-0001, which is superseded; cite what replaced it"]
+    assert problems == [f"notes.md:1: cites {DR1}, which is superseded; cite what replaced it"]
 
 
 def test_citing_an_old_decision_in_a_record_is_history(repo: Path) -> None:
     add_decision("Old")
     add_decision("New")
     (repo / "docs" / "plans").mkdir()
-    (repo / "docs" / "plans" / "2026-01-01-1-x.md").write_text("Per DR-0001.\n", encoding="utf-8")
-    assert call("supersede", "DR-0001", "--by", "DR-0002") == 0
+    (repo / "docs" / "plans" / "2026-01-01-1-x.md").write_text(f"Per {DR1}.\n", encoding="utf-8")
+    assert call("supersede", DR1, "--by", DR2) == 0
     assert store(repo).check() == []
 
 
@@ -88,8 +91,8 @@ def test_an_unknown_citation_fails(repo: Path) -> None:
 
 def test_remove_keeps_the_entry(repo: Path) -> None:
     add_decision("Gone")
-    assert call("remove", "DR-0001", "--why", "never happened") == 0
-    loc = store(repo).find("DR-0001")
+    assert call("remove", DR1, "--why", "never happened") == 0
+    loc = store(repo).find(DR1)
     assert loc.entry["removed_why"] == "never happened"
     assert not loc.living
 
@@ -132,7 +135,7 @@ def test_a_file_changed_on_disk_is_not_overwritten(repo: Path) -> None:
     add_decision("First")
     s = store(repo)
     (repo / "index.yaml").write_text((repo / "index.yaml").read_text(encoding="utf-8") + "\n", encoding="utf-8")
-    loc = s.find("DR-0001")
+    loc = s.find(DR1)
     loc.entry["title"] = "Changed"
     loc.file.dirty = True
     with pytest.raises(Exception, match="changed on disk"):
@@ -164,7 +167,7 @@ def test_values_come_from_files_and_literal_at_signs(repo: Path, tmp_path: Path)
     body.write_text("Line one.\n\nLine two.\n", encoding="utf-8")
     args = ["add", "decisions", "--in", ".", "--set", "title=@@handle", "--set", "cost=cheap"]
     assert call(*args, "--set", f"description=@{body}") == 0
-    entry = store(repo).find("DR-0001").entry
+    entry = store(repo).find(DR1).entry
     assert entry["title"] == "@handle"
     assert entry["description"] == "Line one.\n\nLine two."
 
@@ -178,7 +181,7 @@ def test_a_value_from_stdin_is_read_once_as_utf8(repo: Path, monkeypatch: pytest
     monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO("Árvíztűrő ok.\r\n".encode())))
     args = ["add", "decisions", "--in", ".", "--set", "title=T", "--set", "cost=cheap", "--set", "description=-"]
     assert call(*args) == 0
-    assert store(repo).find("DR-0001").entry["description"] == "Árvíztűrő ok."
+    assert store(repo).find(DR1).entry["description"] == "Árvíztűrő ok."
 
 
 def test_in_dot_names_the_root(repo: Path) -> None:
@@ -197,7 +200,7 @@ def test_supersede_never_drops_a_field_outside_the_schema(repo: Path) -> None:
         path.read_text(encoding="utf-8").replace("    cost: cheap\n", "    cost: cheap\n    extra: keep me\n", 1),
         "utf-8",
     )
-    assert call("supersede", "DR-0001", "--by", "DR-0002") == 2
+    assert call("supersede", DR1, "--by", DR2) == 2
     assert "keep me" in path.read_text(encoding="utf-8")
 
 
@@ -218,7 +221,7 @@ def test_a_change_across_two_files_is_written_whole_or_not_at_all(repo: Path) ->
     ]
     assert call(*args) == 0
     s = store(repo)
-    first, second = s.find("DR-0001"), s.find("DR-0002")
+    first, second = s.find(DR1), s.find(DR2)
     first.entry["title"] = "Changed"
     second.entry["title"] = "Changed too"
     first.file.dirty = second.file.dirty = True

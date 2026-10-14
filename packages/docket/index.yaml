@@ -12,7 +12,7 @@ decisions:
     by: Claude (autonomy grant)
     cost: one-way
     sources: ["#4"]
-    description: A vault holds vault.yaml, raw/, media/, processed/, entities/, ledger/ops/ and state/; staging/ and index/ are never committed. A raw run file is raw/<source>/<yyyy>/<mm>/<yyyy-mm-dd>T<hhmm>-<machine>.jsonl in UTC, and a second run in the same minute gets .2, .3 before .jsonl. A machine name is lowercase letters, digits and inner hyphens and never ends in -<digits>.
+    description: A vault holds vault.yaml, raw/, media/, processed/, entities/, ledger/ops/, state/ and sources/; staging/ and index/ are never committed. A raw run file is raw/<source>/<yyyy>/<mm>/<yyyy-mm-dd>T<hhmm>-<machine>.jsonl in UTC, and a second run in the same minute gets .2, .3 before .jsonl. A machine name is lowercase letters, digits and inner hyphens and never ends in -<digits>.
     binds:
       - Every record's run field is its run file's stem.
       - Temp files are written in .git/docket/tmp/, never under raw/.

@@ -13,12 +13,14 @@ price a colleague named in a call ("10 millió forint"), and only the summary ha
 
 Three parts:
 
-- The vault is the data layer: the user's own private git repo of raw records, media, processed docs, entities and
-  the ledger.
-- The service runs it: staging and the gate, the index and search, the web app, the MCP endpoint, the models in
-  worker processes, and later scheduled syncs. One per machine, always on, in the user's session.
-- The Claude Code plugin maintains it: it runs the syncs (at first, all of them), writes notes and summaries,
-  curates the keywords and reconciles the ledger, through the service's tools.
+- The vault is the data layer: raw records, media, processed docs, entities and the ledger, in a folder of the
+  user's own repo (or a repo of its own), private and in git.
+- The service runs it: staging and the gate, the index and search, the web app, the MCP endpoint with its read and
+  write tools, the models in worker processes. One per machine, always on, in the user's session. It keeps a small
+  profile per source (ids, versions, segments) and does the compute: search, transcription.
+- The Claude Code plugin feeds and maintains it: its skills harvest each source with the user's own MCPs and plugins,
+  write notes and summaries, translate and reconcile, curate the keywords and run the ledger, through the service's
+  tools. Its setup asks what the user wants to set up.
 
 The binding choices are entries in `index.yaml` (`uv run docs list decisions`); this page explains how the parts fit.
 
@@ -32,9 +34,9 @@ The binding choices are entries in `index.yaml` (`uv run docs list decisions`); 
 | Recall that works | a set of real questions finds the right source in the top 10 for at least 90% of them |
 | Local speech recognition | Whisper next to the recorder's own transcript, reconciled in context; without a GPU, the source's transcript |
 | Embeddings and a reranker | multilingual, behind a provider interface: GPU, CPU, an API, or keyword search alone |
-| Sync from anything | connectors for call recorders, chat, mail, calendars, Claude sessions and documents; a new source is a Python package or a skill |
+| Sync from anything | call recorders, chat, mail, calendars, Claude sessions and documents; a new source is a skill plus a profile |
 | Memory and tasks | the ledger (owed, waiting, decisions, invites, triage, materials, outcomes), meetings with prep, minutes and outcomes, briefs ready before each meeting |
-| Claude first | an MCP endpoint and a plugin with the skills (sync, tasks, recall, curate) and a session-start dashboard |
+| Claude first | an MCP endpoint and a plugin with the skills (setup, one per source, sync, tasks, recall, curate), the capture hook and a session-start dashboard |
 | In git | everything in the vault is committed after a staging gate; media through LFS, encrypted; the database is rebuilt from what's committed |
 | Private stays private | nothing private, uncut or unredacted is ever committed; forgetting removes it for real |
 | Local first | Windows, macOS and Linux; every GPU feature optional; no telemetry |
@@ -54,12 +56,11 @@ has to be good. Once it has found the right 50 passages, Claude can read all of 
 
 ```mermaid
 flowchart LR
-  subgraph C["Connectors"]
-    S1["script<br/>(APIs, files, Claude session logs)"]
-    S2["MCP bridge<br/>(a recorder's MCP server)"]
-    S3["agent<br/>(Claude with tools only it has),<br/>captured by a hook"]
-  end
-  S1 & S2 & S3 --> ST["staging<br/>local, never committed"]
+  SK["source skills<br/>(the user's own MCPs and plugins)"] -- "tool output" --> HK["capture hook<br/>verbatim"]
+  SK -- "manifest, media" --> PF["source profile<br/>ids, versions, segments"]
+  HK --> PF
+  PY["Python connector<br/>only where no skill can harvest"] --> PF
+  PF --> ST["staging<br/>local, never committed"]
   ST --> G{"gate<br/>never-store, rules,<br/>classify, cut, redact"}
   G -- "work" --> RAW[("raw log<br/>plain git")]
   G -- "private" --> X["dropped, no trace"]
@@ -82,8 +83,9 @@ flowchart LR
 - Cursors are a high-water mark plus a lookback window plus a retry set per source, so late arrivals and
   rate-limited calls are caught on the next run. Each machine commits its own cursor file, and a sync starts from the
   furthest point any machine reached.
-- Agent connectors don't retype anything. A PostToolUse hook in the plugin posts what the tools return, verbatim,
-  to the service; Claude only sends a run manifest (the window, the counts, what it skipped).
+- Source skills don't retype anything. The plugin's PostToolUse capture hook posts what the source's tools return,
+  verbatim, to the service; Claude only sends a run manifest (the window, the counts, what it skipped). A Python
+  connector exists only where no skill can harvest (see Sources).
 
 ### 3.2 Processing
 
@@ -94,7 +96,8 @@ Each step is idempotent, records the engine and version it used, and can be re-r
 3. Chunk (see Search). Both raw transcripts and the reconciled one are chunked; hits on the same stretch collapse.
 4. Tag: entities by alias, typed extractors (tickets, amounts, dates), speakers to people.
 5. Embed.
-6. Link: recordings and chats to meetings by time; records to the ledger items whose source points at them.
+6. Link: recordings and chats to meetings by time (the meetings come from the calendar, keyed by the event's id);
+   records to the ledger items whose source points at them.
 7. Summarize, with Claude: recording notes, thread summaries, digests, each line with its anchors.
 8. Propose: ledger items, closes, minutes, decisions, entities and aliases. Proposals go to review in tiers (see Keywords and aliases).
 
@@ -129,6 +132,13 @@ archiving after closing. Every item's source resolves to a raw record; the histo
 Marco went unanswered"); time-driven changes (rollover, archiving) are written as explicit ops, so rebuilding gives the
 same result on any day.
 
+- Meetings come from the calendar. Its profile turns events into meeting ops keyed by the event's own id (iCalUId or
+  the provider's id), plus the occurrence's original start for a recurring event, so a moved, renamed or cancelled
+  meeting updates the same meeting; nothing is matched on start time plus subject.
+- A stream can have a status file in the user's repo, rendered from the ledger at a path set per stream in
+  `vault.yaml`, with frontmatter `where`, `next`, `deadline` and `updated`. A hand edit to it is reported, not merged.
+  Docket renders only into a repo that passes setup's public-remote check.
+
 ### 3.5 Beyond search
 
 | Feature | How it works | Phase |
@@ -147,7 +157,7 @@ same result on any day.
 ```mermaid
 flowchart TB
   subgraph Claude["Claude Code, Claude Desktop, any MCP client"]
-    PL["plugin: skills sync, tasks, recall, curate;<br/>SessionStart dashboard; PostToolUse capture hook;<br/>the MCP endpoint configured"]
+    PL["plugin: skills setup, one per source, sync, tasks, recall, curate;<br/>SessionStart dashboard; PostToolUse capture hook;<br/>the MCP endpoint configured"]
   end
   subgraph SVC["docket service: one process per machine, in the user's session"]
     HTTP["HTTP on 127.0.0.1<br/>/ web app, /api REST, /mcp MCP"]
@@ -157,7 +167,7 @@ flowchart TB
     W2["worker: Whisper, diarization<br/>(per job)"]
   end
   CLI["docket CLI"]
-  VAULT[("vault: a private git repo<br/>raw/ and processed/ in plain git, media/ in LFS (encrypted),<br/>staging/ and index/ never committed")]
+  VAULT[("vault: a folder of the user's repo, or a repo of its own<br/>raw/ and processed/ in plain git, media/ in LFS (encrypted),<br/>staging/ and index/ never committed")]
   PL -- "MCP over HTTP" --> HTTP
   PL --> CLI
   CLI --> HTTP
@@ -185,8 +195,12 @@ flowchart TB
 - Any number of machines; git is the source of truth. Each machine's index is a cache, rebuilt from the repo. Raw
   run files carry the machine's name, cursors are kept per machine, the machine that harvested a record processes it,
   and a record seen twice is dropped by id and content hash. Ledger ids are ULIDs (with short numbers handed out when
-  the ops are folded); op order uses hybrid logical clocks; shared JSONL files merge with `merge=union`; every commit
-  fetches and rebases first. Scheduled jobs run on the machine marked primary in `vault.yaml`.
+  the ops are folded); op order uses hybrid logical clocks; shared JSONL files merge with `merge=union`. Scheduled
+  jobs run on the machine marked primary in `vault.yaml`.
+- A commit is local and never touches the network. In a repo of its own, `docket sync` fetches, rebases with
+  autostash and pushes; on a conflict it aborts and keeps the local commits.
+- In a folder of the user's repo, Docket only makes local commits of the vault's paths. It never fetches, rebases,
+  pushes or rewrites that repo: the user's own git flow moves it, and `docket sync` says so and does nothing else.
 
 ### 4.2 Without a GPU
 
@@ -206,6 +220,10 @@ faster-whisper; sentence-transformers. MCP servers it launches are pinned to a v
 
 ### 5.1 The vault
 
+The vault is a folder of the repo the user already works in by default, committed into that repo with Docket's
+commits limited to the vault's own paths; the setup also offers a repo of its own, for a separate history or remote.
+Inside, the layout is the same either way:
+
 ```
 vault/
   vault.yaml                     the owner, time zone, languages, sources, primary machine, models, redaction, never-store
@@ -219,11 +237,16 @@ vault/
   entities/_proposals-<machine>.jsonl                                                       -> plain git
   ledger/ops/<yyyy-mm>-<machine>.jsonl                                                      -> plain git
   state/cursors-<machine>.yaml   each machine's cursors per source                         -> plain git
+  sources/<source>.md            the user's own notes on each source's route and quirks     -> plain git
   index/docket.sqlite            derived; `docket rebuild` makes it from the above          -> never committed
 ```
 
-- Raw text is in plain git, so grep, diffs and partial clones keep working. Only `media/` is in LFS, so a clone
-  with `lfs.fetchexclude=media/**` can rebuild everything except playback.
+- Setup checks the host repo's remotes before it offers a folder: it refuses one the host reports as public, warns
+  when the repo looks shared (other committers), and offers a repo of its own instead.
+- Raw text is in plain git, so grep, diffs and partial clones keep working. Only `media/` is in LFS, in both modes,
+  so a clone with `lfs.fetchexclude=media/**` can rebuild everything except playback.
+- In a folder of the user's repo, init writes the LFS attributes for the vault's `media/` path into that repo's
+  `.gitattributes` and checks that git-lfs is installed.
 - Media is encrypted, one key per file (age), the keys in the keychain plus an exported backup. Deleting a key is
   what makes forgetting real.
 - The database isn't committed. It rebuilds from what's committed; a test checks that two rebuilds give the same
@@ -284,9 +307,15 @@ every anchor resolves before it accepts the doc.
 
 Prevention first: the gate keeps private, uncut and unredacted content out of git. Retention per source (for example
 audio for a year, text forever): for media, expiry deletes the file's key. `docket forget <rid | query>` deletes the
-media keys, rewrites the raw file's whole history without the record (`git filter-repo`, from any machine) and
-force-pushes, and rebuilds the index and the docs that cited
-it; the app shows what it will touch first.
+media keys, so the audio is gone for real, rebuilds the index and the docs that cited the record, and shows what it
+will touch first. What it does to the text depends on where the vault lives:
+
+| Vault | The text |
+|---|---|
+| a repo of its own | the raw file's whole history is rewritten without the record (`git filter-repo`, from any machine) and force-pushed |
+| a folder of the user's repo | the record leaves the current tree and a tombstone makes rebuilds skip it; Docket says plainly that the text stays in the host repo's history and shows the rewrite command for the user to run |
+
+Docket never rewrites or force-pushes a repo it shares with the user's own work.
 
 ## 6. Keywords and aliases
 
@@ -373,6 +402,9 @@ The target is under 1.5 s for k = 20 on a desktop GPU, with the models kept load
 
 ## 8. Speech
 
+The app transcribes, because it needs a local model; skills translate, reconcile and summarize, because that is
+judgement.
+
 1. Audio arrives with the recording, decoded by our own code.
 2. VAD, then Whisper large-v3 in float16, the language forced where it's known. Hungarian gets a short vocabulary for
    the meeting (its attendees and project).
@@ -393,23 +425,28 @@ The target is under 1.5 s for k = 20 on a desktop GPU, with the models kept load
 ScreenCaptureKit on macOS, a PipeWire monitor on Linux), Opus at 32 kbps mono; started from the tray, the app or a
 `record` MCP tool; a visible indicator all the time.
 
-## 9. Connectors
+## 9. Sources
 
-```python
-class Connector(Protocol):
-    name: str  # "plaud", "slack", "msgraph-mail"
+Claude harvests every source through a plugin skill, with the MCPs and plugins the user already has; the service
+stores what it is handed. A source needs two things:
 
-    def pull(self, cursor: Cursor) -> Iterator[RawRecord]: ...  # records since the cursor, into staging
-```
-
-| Kind | How | Examples |
+| Part | Lives in | What it does |
 |---|---|---|
-| script | Python calls an API or reads files, credentials from the keychain | Microsoft Graph, Gmail, IMAP, a Slack user token, a documents folder, Claude Code session logs |
-| MCP bridge | Python launches or connects to an MCP server and calls its tools | Plaud |
-| agent | a skill Claude runs with tools only it has; a PostToolUse hook captures their output verbatim | mail and chat in the browser, the Slack plugin |
+| a skill | the plugin | reads the source with the user's own tools (Plaud's MCP, the Slack plugin, mail and chat in the browser), knows its quirks (paging, rate limits, late summaries) and its cursor, and hands the payloads to the service |
+| a profile | the core | turns a source's payloads into raw records: the ids, what counts as a new version, the transcript segments, the cuts; a few dozen lines, because these are one-way doors a prompt's wording must never move |
 
-Every connector gets cursors with lookback and retries, backoff on rate limits, the gate, and a sensitivity label.
-Connectors are packages of their own, found through the `docket.connectors` entry point.
+- A PostToolUse hook in the plugin posts what the source's tools return to the service verbatim, so a long transcript
+  never passes through Claude's output; Claude sends a manifest (the window, the counts, what it skipped).
+- A source skill reads `sources/<source>.md` in the vault first, the user's own route, quirks and gotchas, and appends
+  what it learned there. The plugin's skills stay generic and public.
+- Audio is handed over by path or URL, and the service fetches it only within limits:
+  - a path under a folder `vault.yaml` names (a downloads folder) or the plugin's own drop folder;
+  - a URL over https, to a host the source's profile lists, never a private, loopback or link-local address;
+  - a few redirects at most, each checked again, and a size cap.
+- Every record goes through the staging gate; a source's sensitivity is in `vault.yaml`.
+- A Python connector is written only where no skill can harvest: a scheduled run with nobody's Claude session open.
+- Payloads fetched before Docket existed (an export, a backfill folder) are imported through the source's profile
+  from the command line.
 
 ## 10. The web app
 
@@ -441,12 +478,14 @@ MCP tools:
 | `entity` | canonical name, aliases, related, ids, last seen, open items |
 | `doc_put` | write a processed doc; checks the frontmatter and that every anchor resolves |
 | `propose` | a ledger item, a decision, an alias, a correction, into the review tiers |
-| `ingest` | a run manifest from an agent connector (the raw comes from the hook) |
+| `ingest` | a source's payloads from a skill (or the hook's verbatim capture) and the run's manifest; the source's profile makes the raw records, which go to staging |
+| `media_put` | audio or an attachment by path or URL, within the limits in Sources (named folders, https to the profile's hosts, no private addresses, few redirects, a size cap); the service fetches, encrypts and stores it |
+| `transcribe` | run speech recognition on a stored recording (phase 2, when a model is installed) |
 | `ledger` | snapshot, history queries, batch ops, queue, meetings, points |
 | `secret` | a named secret, with a confirmation |
 
-The plugin brings the skills (sync, tasks, recall, curate), the SessionStart dashboard, the PostToolUse capture hook,
-and the rules: answer with locators; read the summary first, then open the raw span behind every fact you use; say
+The plugin brings the skills (setup, one per source, sync, tasks, recall, curate), the SessionStart dashboard, the
+PostToolUse capture hook, and the rules: answer with locators; read the summary first, then open the raw span behind every fact you use; say
 when they disagree, and propose a correction.
 
 **Claude inside the service** (phase 3) does processing, not harvesting: notes and minutes, digests, briefs,
@@ -464,6 +503,9 @@ No big-bang switch: each piece of an existing setup is replaced only after its r
 3. Entities are seeded from the people directory and the glossary, then reviewed in a few curate rounds; after
    that, those files are rendered from the entities.
 4. The ledger moves last, imported with its whole history; for a week both run in step, the old one read-only.
+   Until the day pages exist, an existing setup's sync harvests through Docket's source skills and keeps reconciling
+   into its own task list. Once the ledger has moved, each stream's status file is rendered from it, as the people
+   directory and the glossary are from the entities.
 
 ## 13. How we know it works
 
@@ -483,7 +525,7 @@ No big-bang switch: each piece of an existing setup is replaced only after its r
 | 2 | Whisper with encrypted media; reconciling transcripts in context; vocabulary and learned corrections; Claude sessions as a source; briefs; the decision log; corrections that propagate; the secret store; retention and forget; the Recording page | prep from ready briefs; decisions with sources and history |
 | 3 | the ledger and the day pages (Today, Queue, Ledger, Meetings, Outbox); GitHub and Azure DevOps activity; scheduled connectors and Claude inside the service | daily use; syncs without a session |
 | 4 | the recorder; a Whisper fine-tune; learning the voice; the phone page; diarization if wanted | calls on the laptop without a recorder device |
-| 5 | installers on macOS and Linux; Gmail and IMAP; the package split; docs; the first release | giving it to friends |
+| 5 | installers on macOS and Linux; Gmail and IMAP; docs; the first release | giving it to friends |
 
 Kept out on purpose: a meeting copilot that speaks during calls, anything that sends without the user's click, a
 multi-user server, a native phone app, GraphRAG.

@@ -17,7 +17,7 @@ decisions:
     cost: one-way
     sources: ["#1"]
     description: |-
-      The code is public at serionist/docket from the first commit, under Apache-2.0, so friends can use it and anyone can read how it handles their data. Each user's data lives in their own private vault repo, never here.
+      The code is public at serionist/docket from the first commit, under Apache-2.0, so friends can use it and anyone can read how it handles their data. Each user's data lives in their own private vault, a folder of their own repo or a repo of its own (DR-0102), never here.
 
       On GitHub Free a public repo also gets the rulesets, CodeQL and the macOS CI minutes that a private one would not.
     binds:
@@ -27,11 +27,12 @@ decisions:
       - "Private until friends get it (phase 5): no enforced rulesets, no CodeQL and scarce CI minutes on GitHub Free."
   - id: DR-0002
     title: "The code is one uv workspace: the app, a package per connector, the plugin and the dev kit"
-    status: decided
+    status: superseded
     at: "2026-10-14"
     by: Soma Osvay
     cost: medium
     sources: ["#1"]
+    superseded_by: [DR-0101]
     description: |-
       packages/docket holds the app (vault, service, web app, CLI); each connector is its own package under packages/, found through an entry point; plugin/ is the Claude Code plugin, and the repo is its own marketplace (.claude-plugin/marketplace.json); tools/devkit is the development kit, never published.
 
@@ -138,11 +139,12 @@ decisions:
     not_chosen: ["Every sensitive fix waits for the maintainer, even under an autonomy grant."]
   - id: DR-0013
     title: Every user's data lives in their own private git vault; git is the source of truth
-    status: decided
+    status: superseded
     at: "2026-10-14"
     by: Soma Osvay
     cost: one-way
     sources: [docs/design.md]
+    superseded_by: [DR-0102]
     description: Raw records, processed docs, entities and the ledger are files in a private git repo the user owns, committed after the staging gate. Any number of machines work on it; each machine's index is a cache rebuilt from the repo.
     binds:
       - The index database is never committed; a rebuild from the repo gives the same database, vectors aside.
@@ -196,6 +198,111 @@ decisions:
     sources: [docs/design.md]
     description: The service serves MCP over HTTP on localhost; the plugin configures it and brings the skills and hooks. Headless Claude inside the service, from phase 3, runs only on the user's own API credentials (Anthropic, Bedrock, Vertex or Foundry), never on a claude.ai login.
     binds: [The MCP tools' names and parameters are a one-way door once they land.]
+  - id: DR-0100
+    title: Sources are harvested by Claude through plugin skills; the core keeps a profile per source
+    status: decided
+    at: "2026-10-14"
+    by: Soma Osvay
+    cost: medium
+    sources: ["#28"]
+    description: |-
+      Each source (Plaud, Slack, mail, chat, calendar) is a skill in the Claude Code plugin that uses the user's own MCPs and plugins to read it, and hands what it read to the service's MCP write tools: raw records, audio, transcripts, summaries, docs, tasks. A small profile per source in the core fixes what can't be left to a prompt's wording: the record ids, what counts as a new version, the transcript segments. A plugin hook captures the source tools' output verbatim, so a long transcript never passes through Claude's output.
+
+      It needs no tokens or apps per source (Slack has no personal tokens; work mail is reachable only in the browser), and adding a source is a skill plus a profile.
+    binds:
+      - A source's ids, projection and segment reader live in the core, never in a skill.
+      - "A Python connector is written only where a skill can't harvest: scheduled or headless runs."
+      - media_put and the service's fetch take a local path only under a folder vault.yaml names (a downloads folder) or the plugin's own drop folder, and a URL only over https to a host the source's profile lists; private, loopback and link-local addresses are refused, at most a few redirects are followed and each is checked again, and a file over the size cap is refused.
+    not_chosen:
+      - Python connector packages for every source, with their own fetching, tokens and cursors.
+      - "Skills only, with Claude mapping every payload: ids and versions would follow a prompt's wording."
+  - id: DR-0101
+    title: "The code is one uv workspace: the app, the plugin and the dev kit"
+    status: decided
+    at: "2026-10-14"
+    by: Soma Osvay
+    cost: medium
+    sources: ["#28"]
+    supersedes: [DR-0002]
+    description: packages/docket holds the app (vault, service, web app, CLI, source profiles); plugin/ is the Claude Code plugin, and the repo is its own marketplace; tools/devkit is the development kit, never published. A connector package under packages/ appears only for a source a skill can't harvest (DR-0100).
+    binds: [GPU and large model dependencies are optional extras.]
+  - id: DR-0102
+    title: A user's data lives in a folder of their own repo by default, or in a repo of its own
+    status: decided
+    at: "2026-10-14"
+    by: Soma Osvay
+    cost: one-way
+    sources: ["#28"]
+    supersedes: [DR-0013]
+    description: By default the vault is a folder inside the repo the user already works in (the consuming repo), committed into that repo's history, with Docket's commits limited to the vault's own paths. The setup wizard also offers a repo of its own, nested in the working folder or anywhere, for those who want a separate history or remote. Either way git is the source of truth, the data stays private, and each machine's index is a cache rebuilt from what's committed.
+    binds:
+      - Docket commits only the vault's paths, never what the user staged.
+      - In folder mode Docket only makes local commits of the vault's paths and never fetches, rebases, pushes or rewrites the host repo; the user's own git flow moves it, and docket sync says so and does nothing else.
+      - Forget in folder mode deletes the media keys, so the audio is gone for real, removes the record from the current tree and writes a tombstone so rebuilds skip it; it says plainly that the text stays in the host repo's history and shows the rewrite command for the user to run.
+      - History rewriting (DR-0014) and Docket's own fetch, rebase and push (DR-0022) are for a repo of its own only.
+      - "Setup checks the host repo's remotes: it refuses folder mode when a remote is public (where the host can be asked), warns when the repo looks shared (other committers), and offers a repo of its own instead."
+      - The index database is never committed; a rebuild gives the same database, vectors aside.
+      - Raw text is in plain git, media in LFS encrypted per file, in both modes; in folder mode init writes the LFS attributes for the vault's media path into the host repo's .gitattributes and checks that git-lfs is installed.
+    not_chosen:
+      - Always a repo of its own (two repos to manage for every user).
+      - Always a folder of the consuming repo (no separate history or remote for those who want one).
+  - id: DR-0103
+    title: The plugin's setup asks what the user wants to set up
+    status: decided
+    at: "2026-10-14"
+    by: Soma Osvay
+    cost: cheap
+    sources: ["#28"]
+    description: A setup skill in the plugin looks at the MCPs and plugins the user already has, asks which sources to set up, where the data should live and which languages they work in, and runs the init with the answers. The command-line wizard stays for scripts.
+  - id: DR-0104
+    title: The app transcribes; skills translate, reconcile and summarize
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#28"]
+    description: Speech recognition is compute that is the same for every user and needs a local model (Whisper, optional, a worker behind an MCP tool such as transcribe), so the app does it. Translating, reconciling two transcripts in context and writing summaries are judgement, so they are skills Claude runs, with the app's search, aliases and transcripts as tools.
+    not_chosen:
+      - "Transcription in the consuming repo's skills: a skill can't run a GPU model by itself."
+  - id: DR-0105
+    title: Meetings come from the calendar, keyed by the event's own id
+    status: decided
+    at: "2026-10-14"
+    by: Soma Osvay
+    cost: medium
+    sources: ["#28"]
+    description: The calendar source's profile turns events into the ledger's meeting ops, keyed by the event's own id (its iCalUId, or the provider's id where there is none). A meeting that moves, is renamed or is cancelled updates the same meeting, so its prep, points and outcomes stay with it. Recordings and chats still link to meetings by time.
+    binds:
+      - A meeting's key is its calendar event's id, plus the occurrence's original start when the event recurs (RECURRENCE-ID or originalStartTime); never its start time plus subject.
+      - A moved, renamed or cancelled event or occurrence updates the meeting it made, never a new one; cancelling one occurrence cancels only that meeting.
+      - Recordings and chats link to meetings by time.
+    not_chosen:
+      - "Matching meetings on start time plus subject: a moved or renamed meeting would split in two."
+  - id: DR-0106
+    title: Each stream's status file is rendered from the ledger
+    status: decided
+    at: "2026-10-14"
+    by: Soma Osvay
+    cost: one-way
+    sources: ["#28"]
+    description: Streams live in the ledger. Docket renders a status file per stream into the consuming repo, at a path set per stream in vault.yaml (optional), with frontmatter where, next, deadline and updated. It works the way the people directory and the glossary are rendered from the entities after import, so the ledger stays the one place a stream's state is kept.
+    binds:
+      - A stream's state is kept in the ledger; its status file is output, rendered only where vault.yaml sets a path for it.
+      - A hand edit to a rendered file is reported, not merged.
+      - Docket writes the file but commits only the vault's paths (DR-0102), so a status file outside the vault is committed by the user's own git flow.
+      - Docket renders only into a repo that passes setup's public-remote check (DR-0102), and asks before the first render; the same holds for the people directory and glossary renders.
+  - id: DR-0107
+    title: Personal source notes live in the vault; the plugin's source skills stay generic
+    status: decided
+    at: "2026-10-14"
+    by: Soma Osvay
+    cost: one-way
+    sources: ["#28"]
+    description: "Each source skill reads sources/<source>.md in the vault before it harvests: the user's own route, quirks and gotchas for that source. It appends what it learned there. The plugin's skills stay generic and public, and what is particular to one user stays private with their data."
+    binds:
+      - A source skill reads sources/<source>.md first and appends what it learned.
+      - Nothing particular to one user goes into the plugin's skills.
+      - sources/ is part of the vault's layout (DR-0019), in plain git.
 conventions:
   - id: CV-0001
     rule: Python code passes ruff's lint rules and its formatter, at 120 columns
