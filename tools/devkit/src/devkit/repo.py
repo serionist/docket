@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -57,3 +58,11 @@ def default_base(root: Path) -> str | None:
 def user_name(root: Path) -> str:
     """git's user.name, the default author of a decision."""
     return git(root, "config", "user.name", check=False).strip() or "unknown"
+
+
+def utf8_stdio() -> None:
+    """Read and write the console as UTF-8. On Windows a pipe gets the ANSI code page, which can't hold every name."""
+    for stream in (sys.stdout, sys.stderr, sys.stdin):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8")

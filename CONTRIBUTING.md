@@ -5,14 +5,14 @@ people and agents alike.
 
 ## Before you start
 
-- **Open an issue** for anything beyond a typo, with the bug or feature form, and say there that you want to work on it.
-- **Write a plan first** for a non-trivial change (a new capability, anything touching the vault's format, the MCP
+- Open an issue for anything beyond a typo, with the bug or feature form, and say there that you want to work on it.
+- Write a plan first for a non-trivial change (a new capability, anything touching the vault's format, the MCP
   tools or the plugin), from the template in [docs/plans/README.md](docs/plans/README.md), as a draft PR. The maintainer
   approves it before any code.
-- **Use invented data.** Tests, fixtures, examples and screenshots never hold a real person's messages, recordings or
+- Use invented data. Tests, fixtures, examples and screenshots never hold a real person's messages, recordings or
   names.
-- **Report security issues privately**, never in an issue: see [SECURITY.md](SECURITY.md).
-- **Your contribution is Apache-2.0 licensed**, like the rest of the repo.
+- Report security issues privately, never in an issue: see [SECURITY.md](SECURITY.md).
+- Your contribution is Apache-2.0 licensed, like the rest of the repo.
 
 ## Build and test
 

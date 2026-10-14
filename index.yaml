@@ -95,7 +95,7 @@ decisions:
     by: Soma Osvay
     cost: cheap
     sources: ["#1"]
-    description: "Docket is built from its maintainer's working life, so the names of the people, customers and places in it must not reach this public repo. The list of those names is itself private: it lives in ~/.config/docket/denylist.txt locally and in a repository secret for CI, and the CI log names a hit by its line number, never by the name."
+    description: "Docket is built from its maintainer's working life, so the names of the people, customers and places in it must not reach this public repo. The list is itself private: ~/.config/docket-dev/denylist.txt locally (not ~/.config/docket, the app's own config folder on Linux), a repository secret in CI. A CI log names a hit by its line number, never by the name."
     binds: [Issue and PR texts are checked with gate check-text before they are posted.]
   - id: DR-0009
     title: Reviews report only real, reproducible problems, and iterate only after a blocker or major
@@ -126,6 +126,15 @@ decisions:
     not_chosen:
       - "mypy: slower, and pyright is what the editor's language server already runs."
       - "hatchling: a second build tool for no gain."
+  - id: DR-0012
+    title: Under an autonomy grant, a fix on a sensitive area that only makes a check stricter or data safer goes ahead
+    status: proposed
+    at: "2026-10-14"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#1"]
+    description: The review rules asked for the maintainer's yes before any fix on a sensitive area. Under an autonomy grant that would stop the loop on fixes that only tighten a check or protect data, so those are made and recorded in the PR's Decided without asking. A fix that loosens a check, changes a one-way door or changes what happens to stored data still waits for the maintainer.
+    not_chosen: ["Every sensitive fix waits for the maintainer, even under an autonomy grant."]
 conventions:
   - id: CV-0001
     rule: Python code passes ruff's lint rules and its formatter, at 120 columns
@@ -172,3 +181,8 @@ conventions:
     rule: AGENTS.md is a router and stays under 150 lines
     area: docs
     enforced_by: "gate: harness"
+  - id: CV-0011
+    rule: "Docs are short and plain: a lead line, then a small table or a few one-line bullets; conclusion first; no walls of text, no em dashes, no section numbers in prose"
+    area: docs
+    review_only: true
+    why: The maintainer reads every doc; dense paragraphs and AI phrasing get skipped.

@@ -12,11 +12,12 @@ from devkit.repo import git
 from devkit.yamlio import as_map
 
 # Lines a tool adds to say it wrote the change. main carries none of them: the history says what changed and why.
+# Each pattern matches the whole line a tool adds, so a sentence about Claude (Docket is built around it) passes.
+_TOOLS = r"(claude( code)?|anthropic|copilot|cursor|codex|gemini|chatgpt|devin|aider)"
 ATTRIBUTION = [
-    re.compile(r"^\s*co-authored-by:.*\b(claude|anthropic|copilot|cursor|codex|gemini|devin|aider)\b", re.I),
-    re.compile(r"generated (with|by) .*\b(claude|copilot|cursor|codex|gemini|chatgpt|aider)\b", re.I),
-    re.compile(r"\bclaude\.(ai|com)/(code|chat)\b", re.I),
-    re.compile("\N{ROBOT FACE}"),
+    re.compile(rf"^\s*co-authored-by:.*\b{_TOOLS}\b", re.I),
+    re.compile(rf"^\W*generated (with|by) \[?{_TOOLS}\]?(\s*\(https?://\S+\))?\W*$", re.I),
+    re.compile(r"^\W*(https?://)?claude\.(ai|com)/code/\S+\s*$", re.I),
 ]
 SUBJECT_MAX = 72
 

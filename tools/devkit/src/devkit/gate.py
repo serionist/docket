@@ -28,7 +28,7 @@ from typing import Any
 
 from devkit import commits, content, coverage
 from devkit.regime import Regime
-from devkit.repo import KitError, default_base, listed_files, repo_root
+from devkit.repo import KitError, default_base, listed_files, repo_root, utf8_stdio
 from devkit.store import Store
 
 AGENTS_MAX_LINES = 150
@@ -135,10 +135,10 @@ def step_commits(ctx: Ctx) -> Outcome:
 def step_content(ctx: Ctx) -> Outcome:
     path = content.list_path()
     if path is None:
-        return Outcome.skip("no deny list (DOCKET_DENYLIST or ~/.config/docket/denylist.txt); CI checks with its own")
+        return Outcome.skip(f"no deny list (DOCKET_DENYLIST or {content.DEFAULT_PATH}); CI checks with its own")
     if not path.is_file():
         return Outcome.fail(f"DOCKET_DENYLIST names {path}, which doesn't exist")
-    names = content.parse(path.read_text(encoding="utf-8"))
+    names = content.load(path)
     hits = content.scan_files(ctx.root, listed_files(ctx.root), names)
     for sha, message in commits.branch_messages(ctx.root, ctx.base):
         hits.extend(content.scan_text(message, names, f"commit {sha[:10]}"))
@@ -192,6 +192,13 @@ def step_harness(ctx: Ctx) -> Outcome:
             bad.append(f"AGENTS.md has {n} lines; it is a router, keep it to {AGENTS_MAX_LINES}")
     else:
         bad.append("AGENTS.md is missing")
+    # git skips a hook without the executable bit on Linux and macOS, so a hook stored as 100644 is a hook that is off.
+    code, lines = _run(ctx, ["git", "ls-files", "-s", "--", ".githooks"])
+    for line in lines if code == 0 else []:
+        mode, _, rest = line.partition(" ")
+        if mode != "100755":
+            name = rest.split("	")[-1]
+            bad.append(f"{name} is stored without the executable bit: git update-index --chmod=+x {name}")
     for skill in sorted([*ctx.root.glob(".claude/skills/*/SKILL.md"), *ctx.root.glob("plugin/skills/*/SKILL.md")]):
         rel = skill.relative_to(ctx.root).as_posix()
         meta = _frontmatter(skill.read_text(encoding="utf-8"))
@@ -317,7 +324,7 @@ def check_text(path: Path) -> int:
     problems = [f"tool attribution: {ln.strip()}" for ln in commits.attribution_lines(text)]
     deny = content.list_path()
     if deny is not None and deny.is_file():
-        names = content.parse(deny.read_text(encoding="utf-8"))
+        names = content.load(deny)
         problems += [h.show(masked=False) for h in content.scan_text(text, names, path.name)]
     for p in problems:
         print(p)
@@ -326,9 +333,7 @@ def check_text(path: Path) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    reconfigure = getattr(sys.stdout, "reconfigure", None)
-    if callable(reconfigure):
-        reconfigure(encoding="utf-8")
+    utf8_stdio()
     p = argparse.ArgumentParser(prog="gate", description="The one gate: what passes here is the merge rule.")
     p.add_argument("lane", nargs="?", default="quick", choices=[*LANES, "list", "check-text"])
     p.add_argument("file", nargs="?", help="check-text: the text file to check")

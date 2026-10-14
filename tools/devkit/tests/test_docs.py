@@ -167,3 +167,63 @@ def test_values_come_from_files_and_literal_at_signs(repo: Path, tmp_path: Path)
     entry = store(repo).find("DR-0001").entry
     assert entry["title"] == "@handle"
     assert entry["description"] == "Line one.\n\nLine two."
+
+
+def test_a_value_from_stdin_is_read_once_as_utf8(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import io
+
+    from devkit import docs as docs_module
+
+    monkeypatch.setattr(docs_module, "_stdin", [])
+    monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO("Árvíztűrő ok.\r\n".encode())))
+    args = ["add", "decisions", "--in", ".", "--set", "title=T", "--set", "cost=cheap", "--set", "description=-"]
+    assert call(*args) == 0
+    assert store(repo).find("DR-0001").entry["description"] == "Árvíztűrő ok."
+
+
+def test_in_dot_names_the_root(repo: Path) -> None:
+    (repo / "pkg").mkdir()
+    assert call("add", "reading", "--in", ".", "--set", "path=README.md", "--set", "role=guide") == 0
+    assert call("add", "reading", "--in", "pkg", "--set", "path=README.md", "--set", "role=guide") == 0
+    assert call("set", "README.md", "--in", ".", "--set", "note=the root one") == 0
+    assert store(repo).find("README.md", folder="").entry["note"] == "the root one"
+
+
+def test_supersede_never_drops_a_field_outside_the_schema(repo: Path) -> None:
+    add_decision("Old")
+    add_decision("New")
+    path = repo / "index.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("    cost: cheap\n", "    cost: cheap\n    extra: keep me\n", 1),
+        "utf-8",
+    )
+    assert call("supersede", "DR-0001", "--by", "DR-0002") == 2
+    assert "keep me" in path.read_text(encoding="utf-8")
+
+
+def test_a_change_across_two_files_is_written_whole_or_not_at_all(repo: Path) -> None:
+    (repo / "pkg").mkdir()
+    add_decision("Root one")
+    args = [
+        "add",
+        "decisions",
+        "--in",
+        "pkg",
+        "--set",
+        "title=Pkg one",
+        "--set",
+        "cost=cheap",
+        "--set",
+        "description=x",
+    ]
+    assert call(*args) == 0
+    s = store(repo)
+    first, second = s.find("DR-0001"), s.find("DR-0002")
+    first.entry["title"] = "Changed"
+    second.entry["title"] = "Changed too"
+    first.file.dirty = second.file.dirty = True
+    other = repo / "pkg" / "index.yaml"
+    other.write_text(other.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    with pytest.raises(Exception, match="changed on disk"):
+        s.save({first.file.rel, second.file.rel})
+    assert "Changed" not in (repo / "index.yaml").read_text(encoding="utf-8")

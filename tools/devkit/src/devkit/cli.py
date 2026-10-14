@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from devkit import commits, content
-from devkit.repo import KitError, git, repo_root
+from devkit.repo import KitError, git, repo_root, utf8_stdio
 from devkit.yamlio import as_list, as_map
 
 # The board Docket's work is tracked on (AGENTS.md, How work runs).
@@ -36,7 +36,7 @@ def cmd_setup(_: argparse.Namespace) -> int:
     if deny is None:
         print(f"deny list: none at {content.DEFAULT_PATH}; the content check skips locally (maintainers: add yours)")
     else:
-        names = content.parse(deny.read_text(encoding="utf-8")) if deny.is_file() else []
+        names = content.load(deny) if deny.is_file() else []
         print(f"deny list: {deny} ({len(names)} names)")
     return 1 if missing else 0
 
@@ -109,6 +109,7 @@ def cmd_board(args: argparse.Namespace) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    utf8_stdio()
     p = argparse.ArgumentParser(prog="devkit")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("setup", help="point git at the hooks and check the tools the gate needs").set_defaults(

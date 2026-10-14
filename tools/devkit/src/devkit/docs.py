@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from devkit.regime import Kind, Regime
-from devkit.repo import KitError, repo_root, user_name
+from devkit.repo import KitError, repo_root, user_name, utf8_stdio
 from devkit.store import EntryFile, Located, Store
 from devkit.yamlio import Comments, emit_entry
 
@@ -141,11 +141,21 @@ def cmd_search(args: argparse.Namespace) -> int:
 # -- writes --------------------------------------------------------------------------------------------------------
 
 
+_stdin: list[str] = []
+
+
+def _read_stdin() -> str:
+    """stdin as UTF-8, read once: a value given as `-` may be parsed more than once."""
+    if not _stdin:
+        _stdin.append(sys.stdin.buffer.read().decode("utf-8").replace("\r\n", "\n").rstrip("\n"))
+    return _stdin[0]
+
+
 def _value(raw: str) -> str:
     if raw.startswith("@@"):
         return raw[1:]
     if raw == "-":
-        return sys.stdin.read().rstrip("\n")
+        return _read_stdin()
     if raw.startswith("@"):
         try:
             data = Path(raw[1:]).read_bytes()
@@ -292,7 +302,9 @@ def cmd_supersede(args: argparse.Namespace) -> int:
         old.entry["status"] = "superseded"
         new.entry["supersedes"] = [*(new.entry.get("supersedes") or []), old.key]
         for loc in (old, new):
+            # Fields outside the schema stay, so the render refuses the file instead of dropping their text.
             ordered = {k: loc.entry[k] for k in loc.kind.fields if k in loc.entry}
+            ordered.update({k: v for k, v in loc.entry.items() if k not in ordered})
             loc.entry.clear()
             loc.entry.update(ordered)
         return {old.file.rel, new.file.rel}
@@ -414,6 +426,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    utf8_stdio()
     args = build_parser().parse_args(argv)
     try:
         return int(args.func(args))

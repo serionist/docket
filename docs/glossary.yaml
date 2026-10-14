@@ -6,7 +6,7 @@ terms:
     definition: "The maintainer's word that an agent runs a piece of work to its merge without asking. Every choice it would have asked about is recorded: as a proposed decision, and in the PR's Decided without asking."
     see: [.claude/skills/start-work/SKILL.md]
   - term: deny list
-    definition: The private list of names this public repo must never carry, kept outside it (~/.config/docket/denylist.txt, and a secret in CI).
+    definition: The private list of names this public repo must never carry, kept outside it (~/.config/docket-dev/denylist.txt, and a secret in CI). A name matches as whole words, across a line break too.
     see: [tools/devkit/src/devkit/content.py]
   - term: door
     definition: "What `uv run docs door <path>` prints: the reading list from the root down to a path, and how many decisions and conventions bind it. Read it before planning, changing or reviewing the path."

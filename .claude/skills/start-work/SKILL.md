@@ -11,7 +11,7 @@ code can start: an issue on the board, a plan when the change needs one, the pla
 
 ## Touch points, in order
 
-1. **Find the issue.**
+1. Find the issue.
    - A number (`#12`): `gh issue view 12 --comments`. If it is closed, ask before going on.
    - A sentence: look for an open issue first (`gh issue list --search "<words>"`); if none fits, write the body to
      `.local/issue-body.md`, check it with `uv run gate check-text .local/issue-body.md` (private names, attribution),
@@ -19,25 +19,25 @@ code can start: an issue on the board, a plan when the change needs one, the pla
      --milestone "<phase milestone>"`. A typo or comment fix needs no issue.
    - Put it on the board as in progress: `uv run devkit board <n> --status "In Progress"` (the phase comes from the
      milestone; add `--size S|M|L`).
-2. **Read before planning:** `uv run docs door <path>` for every folder the change touches and what it lists, the
+2. Read before planning: `uv run docs door <path>` for every folder the change touches and what it lists, the
    decisions that bind them (`uv run docs list decisions --path <path>`), the code and the tests there, and
    `REVIEW.md`.
-3. **Decide whether it needs a plan**, by the rule in `docs/plans/README.md`. Recommend one for anything touching a
+3. Decide whether it needs a plan, by the rule in `docs/plans/README.md`. Recommend one for anything touching a
    one-way door, the vault's data, or more than one package.
-4. **Write the plan** at `docs/plans/<today>-<n>-<slug>.md` from the template, with `issue` set. Fill every section;
+4. Write the plan at `docs/plans/<today>-<n>-<slug>.md` from the template, with `issue` set. Fill every section;
    "none" is an answer, a blank is not.
-5. **Review the plan** with the `review-plan` skill until its verdict is `approved`.
-6. **Get it approved by the maintainer:** give the plan's path and the review's verdict, and ask. Under an autonomy
+5. Review the plan with the `review-plan` skill until its verdict is `approved`.
+6. Get it approved by the maintainer: give the plan's path and the review's verdict, and ask. Under an autonomy
    grant (the maintainer said to run the work without asking), approve it yourself, set `approved_by: claude (autonomy
    grant)`, and record each decision you would have asked about (below). Then set `status: approved`, `approved_by`
    and `approved_at` in the plan's frontmatter.
-7. **Start the branch** `<n>-<slug>` from `origin/main`, after `git fetch origin`:
-   - **a new branch** in this checkout (`git switch -c <branch> origin/main`) when the checkout is clean and nothing
+7. Start the branch `<n>-<slug>` from `origin/main`, after `git fetch origin`:
+   - a new branch in this checkout (`git switch -c <branch> origin/main`) when the checkout is clean and nothing
      else runs here;
-   - **a new worktree** (`git worktree add .claude/worktrees/<branch> -b <branch> origin/main`) when other work is in
+   - a new worktree (`git worktree add .claude/worktrees/<branch> -b <branch> origin/main`) when other work is in
      flight or several sessions run at once; then move the session there with the worktree tool.
-8. **Commit the plan** as the branch's first commit: `Plan: <title>`, with `Refs #<n>` in the body.
-9. **Choose how to execute:** directly in this session, or forked agents for independent steps (each in its own
+8. Commit the plan as the branch's first commit: `Plan: <title>`, with `Refs #<n>` in the body.
+9. Choose how to execute: directly in this session, or forked agents for independent steps (each in its own
    worktree, its brief naming the plan, its step and the folders it may touch). This session stays the anchor.
 
 ## Decisions on the way

@@ -11,36 +11,37 @@ are minor.
 
 ## Inputs
 
-- **The plan**, by path: `docs/plans/<date>-<n>-<slug>.md`. Never review "the latest plan".
-- **The tier:** standard by default; deep when asked for, or when the standard pass recommends it.
-- **The model:** Opus, unless the request names another.
+- The plan, by path: `docs/plans/<date>-<n>-<slug>.md`. Never review "the latest plan".
+- The tier: standard by default; deep when asked for, or when the standard pass recommends it.
+- The model: Opus, unless the request names another.
 
 ## Touch points, in order
 
-1. **The ground truth** the reviewer reads: `AGENTS.md`, `REVIEW.md`, the plan in full, the issue it names (`gh issue
+1. The ground truth the reviewer reads: `AGENTS.md`, `REVIEW.md`, the plan in full, the issue it names (`gh issue
    view <n>`), `uv run docs door <path>` and the binding decisions for each folder the plan touches, and every file
    the plan names.
-2. **Review at the tier:**
-   - **Standard:** about ten minutes. Start one fresh agent on the chosen model with the plan's path, the ground-truth
+2. Review at the tier:
+   - Standard: about ten minutes. Start one fresh agent on the chosen model with the plan's path, the ground-truth
      list and `lenses.md`. It reads and nothing else, applies every lens, refutes each finding as it goes by quoting
      the plan and the rule or code, and returns the confirmed and refuted findings, each with its scenario and honest
      severity, a verdict, and whether a deep pass is worth it. Don't read the ground truth into this session yourself.
      Give each confirmed blocker or major, and each sensitive finding, to its own fresh refuter agent, in parallel. A
      refuter that fails leaves its finding unverified, never refuted.
-   - **Deep:** run `.claude/skills/review-code/scripts/review.workflow.js` with the Workflow tool and `args: { kind:
+   - Deep: run `.claude/skills/review-code/scripts/review.workflow.js` with the Workflow tool and `args: { kind:
      "plan", label: "<slug>", plan: "<plan path>", model: "<model>" }`. Recommend it for a plan that changes a one-way
      door or the vault's format.
    - Without agents: apply every lens yourself, then refute each finding. Say in the verdict that the author reviewed
      their own plan.
-3. **Write the findings** into the plan's "Plan review" section as `P1`, `P2`, ...: severity, plan section, the
+3. Write the findings into the plan's "Plan review" section as `P1`, `P2`, ...: severity, plan section, the
    scenario, the proposed edit, status (`open`, `fixed`, `wontfix`), and how it was verified. Refuted findings go under
    "Refuted" with their reasons. Add the tier, the model and the date.
-4. **Act:** apply the edits that don't change the design yourself and mark them `fixed`. Ask the maintainer about an
+4. Act: apply the edits that don't change the design yourself and mark them `fixed`. Ask the maintainer about an
    edit that changes the design or the scope or touches a sensitive area, as a yes or no with your proposal; under an
-   autonomy grant decide it yourself and record it (start-work, Decisions on the way), except on a sensitive area.
-5. **Another round only when needed:** if the last pass confirmed a blocker or a major, review the edited sections and
+   autonomy grant decide it yourself and record it (start-work, Decisions on the way), unless it loosens a check or
+   changes a one-way door.
+5. Another round only when needed: if the last pass confirmed a blocker or a major, review the edited sections and
    what they touch again (fresh agent, the edits only). If it confirmed only minors, the loop ends: fix or record them.
-6. **Set the verdict** in the "Plan review" section: `approved` when no blocker or major is open, every question has
+6. Set the verdict in the "Plan review" section: `approved` when no blocker or major is open, every question has
    its answer, and the plan schedules its tests and docs and ends with `review-code`; otherwise `needs-fixes` or
    `needs-answers`.
 

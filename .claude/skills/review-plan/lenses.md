@@ -12,7 +12,7 @@ as written), the rule or code it is judged against, the evidence (quote the plan
 ## Sensitive areas
 
 The vault's data, keys and secrets, private names, the service's local surface, the one-way doors in `AGENTS.md`, and
-the harness itself. A plan edit there is never made without the maintainer's yes.
+the harness itself. A plan edit there that loosens a check or changes a one-way door waits for the maintainer's yes.
 
 ## rules-and-doors
 

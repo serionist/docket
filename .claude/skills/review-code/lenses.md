@@ -16,7 +16,8 @@ ruff's, taste is the author's.
 The vault's data (raw records written once, anything that can lose, duplicate or half-write what a user stored), keys
 and secrets, private names, the service's local surface (HTTP, MCP, files), the one-way doors in `AGENTS.md`, and the
 harness itself (`AGENTS.md`, `REVIEW.md`, `.claude/`, `.github/`, `.githooks/`, `tools/devkit/`). A finding there is
-never fixed without the maintainer's yes, and a blocker there is never waived.
+fixed without the maintainer's yes only when the fix makes a check stricter or the data safer
+(under an autonomy grant, recorded in the PR); a blocker there is never waived.
 
 ## plan-and-intent
 

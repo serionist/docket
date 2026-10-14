@@ -114,6 +114,8 @@ class Store:
                     yield Located(k, f, e)
 
     def find(self, key: str, *, kind: str | None = None, folder: str | None = None) -> Located:
+        if folder is not None:
+            folder = "" if folder in (".", "") else Path(folder).as_posix().strip("/")
         hits: list[Located] = []
         for loc in self.entries(kind):
             value = str(loc.entry.get(loc.kind.key, ""))
@@ -306,7 +308,8 @@ class Store:
 
     def save(self, changed: set[str]) -> list[str]:
         """Write each changed file in canonical form through a temp file and a rename; refuse one changed on disk."""
-        written: list[str] = []
+        # Every file is checked before any is written, so a change across two files is never left half-done.
+        texts: dict[str, str] = {}
         for rel in sorted(changed):
             f = self.files[rel]
             path = self.root / rel
@@ -316,10 +319,16 @@ class Store:
             if f.comments.stray:
                 raise KitError(f"{rel} has comments the canonical form would lose; move them into fields first")
             text = self.render(f)
+            if text != f.raw:
+                self.verify_round_trip(f, text)
+            texts[rel] = text
+        written: list[str] = []
+        for rel, text in texts.items():
+            f = self.files[rel]
+            path = self.root / rel
             if text == f.raw:
                 f.dirty = False
                 continue
-            self.verify_round_trip(f, text)
             path.parent.mkdir(parents=True, exist_ok=True)
             fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".docs-", suffix=".tmp")
             try:
