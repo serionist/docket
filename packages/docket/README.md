@@ -142,3 +142,46 @@ ids: {email_domain: northwind.example}
 | `related`, `status`, `role`, `note` | kept for the entity view; `status` is active or archived |
 
 A file with a mistake still loads where it can; `docket index status` lists what was wrong (DR-0113).
+
+## The service
+
+One Docket process per user serves Claude and the web app on one 127.0.0.1 port, 8741 unless you choose another. It
+runs its writes one at a time; the commands above keep writing directly, under the same vault lock.
+
+| Command | What it does |
+|---|---|
+| `docket service install --vault <folder> [--port N]` | registers the service to start at your logon (a Task Scheduler task on Windows, a LaunchAgent on macOS, a systemd user unit on Linux), makes its token, starts it, and waits until it answers |
+| `docket service status [--quiet]` | installed or not, running or not, the vault, the port, where the token lives, the PATH it runs with; `--quiet` is one line |
+| `docket service stop` | stops it until the next `install` |
+| `docket service uninstall` | stops it and removes the registration; the token and the config stay |
+| `docket service token [--header] [--rotate]` | prints the token, or the header Claude Code's `headersHelper` reads; `--rotate` makes a new one and restarts the service |
+| `docket open` | opens the web app through a link good once and for a minute, and prints the link |
+| `docket serve [--vault] [--port]` | runs the service in the foreground, where install can't register it (WSL without systemd) |
+
+- Install from a tool environment (`uv tool install`), not a development checkout: the service runs whatever code
+  its interpreter finds at its next start.
+- Upgrading: `docket service stop`, upgrade Docket, `docket service install`. On Windows a running service holds its
+  files open, and the upgrade can't replace them.
+- Run `docket service install` again after your PATH changes: the service runs with the PATH of the shell that
+  installed it, so it finds the git and git-lfs you use.
+- macOS: a vault under `~/Documents`, `~/Desktop`, `~/Downloads` or iCloud Drive needs the Python the service runs to
+  have the Files and Folders permission (or Full Disk Access) in System Settings, Privacy & Security. Install names the
+  Python when it can't read the vault; or move the vault elsewhere.
+- `docket open` prints its link too: a snap or Flatpak browser (Ubuntu's default Firefox) can't open the page it
+  writes in a hidden folder, so paste the link instead.
+
+Claude Code connects through the Docket plugin, or by hand:
+
+```json
+{"type": "http", "url": "http://127.0.0.1:8741/mcp", "headersHelper": "docket service token --header", "timeout": 120000}
+```
+
+What the service refuses, and what it doesn't:
+
+- A request whose Host isn't this port on 127.0.0.1 or localhost, so another site that rebinds its name to
+  127.0.0.1 gets nothing.
+- A write from another origin or site, and any caller without the token (the pages take a session cookie instead).
+  No answer carries a CORS header.
+- Another user of the machine can reach the port and see that Docket answers, and, while the service is down, could
+  bind the port first. Any program running as you can read the token, from the keychain or the file.
+- The log keeps no content: route templates, status codes and exception types, never your words.

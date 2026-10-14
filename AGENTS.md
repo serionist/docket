@@ -104,7 +104,8 @@ agrees in the issue:
   files (DR-0113), a transcript's text rendered by the core (DR-0120), hold lists (DR-0121), a cut record's fidelity
   (DR-0126), a legacy note's old paths and import hash (DR-0130), old paths as locators (DR-0131);
 - a source's mapper interface (DR-0119), and the names and keys of a source in `vault.yaml` (DR-0124, DR-0125);
-- the MCP tools' names and parameters, and the plugin's skill and hook names, once they land.
+- the MCP tools' names and parameters: `search`, `read`, `verify` and `doc_put` (DR-0150); the plugin's skill
+  and hook names, once they land.
 
 Each lands with its decision in `index.yaml`, marked `cost: one-way`.
 

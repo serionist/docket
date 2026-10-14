@@ -11,6 +11,8 @@ reading:
   - { path: packages/docket/src/docket/vault/legacy.py, role: contract, note: "how an old path finds its legacy note: a one-way door" }
   - { path: packages/docket/src/docket/sources/contract.py, role: contract, note: "the mapper interface, contract 1, and the core's checks on what a mapper returns: a one-way door" }
   - { path: packages/docket/src/docket/vault/holds.py, role: contract, note: "hold lists, a one-way door: the file, how it reads and fails closed, what a hold covers" }
+  - { path: packages/docket/src/docket/service/tools.py, role: contract, note: "the MCP tools' names and parameters, a one-way door (DR-0150)" }
+  - { path: packages/docket/src/docket/service/security.py, role: contract, note: "what every request passes before a route: hosts, origins, the token and the session (DR-0152)" }
 decisions:
   - id: DR-0019
     title: The vault's layout and run-file names are fixed
@@ -580,3 +582,113 @@ decisions:
     not_chosen:
       - "Writing the worktree's copy: vault commits would land on a feature branch."
       - Redirecting to the main checkout without saying so.
+  - id: DR-0150
+    title: The service's phase 0 MCP tools are search, read, verify and doc_put, with fixed parameters
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#8"]
+    description: "Served at /mcp: search(query, people, entities, sources, since, until, k), read(locator, view, around, rev), verify(doc, lines, window) and doc_put(text). people, entities and sources are lists of text; since and until are text, a date (the owner's whole day) or a time, with its offset or else in the owner's time zone; k is 1 to 100, 20 by default; view is summary, raw or both; around is 0 or more; rev and lines are optional; window is seconds, 60 by default. Each returns the result model of #6 or #7 as structured content beside a compact text. packages/docket/tests/fixtures/mcp-tools.json holds the names, parameters and annotations, and a test fails on any change to them."
+    binds:
+      - Parameters only gain optional ones whose default keeps today's behaviour, and enums only gain values; nothing is renamed, retyped or removed without a superseding decision.
+      - "Results only gain fields: ReadResult, VerifyResult, PutResult and SearchResult keep every field they have."
+    not_chosen:
+      - "Names of our own, such as docket_search: Claude Code already prefixes a server's tools with its name."
+      - "since and until as JSON dates: a date alone isn't a date-time, and a union of the two is ambiguous."
+  - id: DR-0151
+    title: One service per user on 127.0.0.1 serves /mcp, /api and the pages on one port
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#8"]
+    description: The service binds 127.0.0.1 only, with no option for another address, on --port, else service.port in the user's config, else 8741, and never moves to another port, since clients' configs name it. serve binds the socket itself and builds its allowed hosts from the port it got; on Windows the socket is exclusive. MCP is the SDK's streamable HTTP at exactly /mcp, stateless, with JSON responses. The REST API under /api is Docket's own (the CLI, the plugin's hooks, the pages) and not a door until the first release. A lock in the state folder keeps one service per user, and service.json records its pid and port.
+    not_chosen:
+      - "A port each for MCP, REST and the pages: more config, and no isolation gained on loopback."
+      - "Stateful MCP sessions: a service restart would break every client's session."
+      - "A random port in a discovery file: Claude Code's config needs a fixed URL."
+  - id: DR-0152
+    title: The service refuses other hosts, other origins, and callers without its token
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#8"]
+    description: "Every request's Host is 127.0.0.1:<port> or localhost:<port>, and the MCP SDK checks it again on /mcp. A write whose Origin or Sec-Fetch-Site is from elsewhere is refused, and a write made with the session cookie needs one of the two. /mcp takes only the bearer token, /api the token or the session cookie, the pages the cookie; no CORS header is ever sent. The token is 32 random bytes. Install chooses its store once and records it as service.token_store: the keychain through keyring when a write reads back (on Linux only when the user manager has a session bus), else a file only the user can read, 0600 or an owner-only DACL on Windows. Only install and token --rotate make a token, and both choose again when the recorded store is gone. The browser gets in through a one-time code, good once for 60 seconds, that docket open writes into an owner-only redirect page and prints; it becomes a SameSite=Strict, HttpOnly cookie through a page that moves on, and sessions live in memory for 12 hours at most."
+    binds:
+      - The token is never on a command line, in service.json, in a log or in an environment variable.
+      - "Accepted: any process running as the user can get the token from either store, and another user of the machine can reach the port and, while the service is down, bind it."
+    not_chosen:
+      - "The token in a file always: it would sit in plain files, backups and synced dotfiles."
+      - "The link in the browser's arguments: another account on Linux reads /proc/<pid>/cmdline."
+      - "A redirect after /session: the navigation stays cross-site and the browser holds back the Strict cookie."
+  - id: DR-0153
+    title: The service writes through one thread, and every writer takes the vault lock
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#8"]
+    description: "doc_put, and every later write of the service, runs one at a time on one thread; reads and searches run beside it. Every writer, the service's and the command line's, takes the vault's file lock, so the CLI keeps writing directly while the service runs; the service waits 15 seconds for the lock. Index updates run outside the write queue, under the index's own lock: at start, after the service's writes, and before each search, which waits up to 30 seconds for an update that began after it asked; searches arriving together share one. This refines the design's line that the CLI goes through the service."
+    not_chosen:
+      - "The CLI through the service: two code paths per command for what the lock already gives."
+      - "Index updates on the writer thread: every search would wait behind every write."
+  - id: DR-0154
+    title: The service is installed per user, to start at logon
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#8"]
+    description: "Windows: a Task Scheduler task Docket at the user's own logon, the user named by SID, InteractiveToken and LeastPrivilege, on battery too, restarted after a failure and started again within 5 minutes by a repeating time trigger, IgnoreNew; the per-user Run key value Docket when Task Scheduler refuses. macOS: a LaunchAgent io.github.serionist.docket, RunAtLoad, KeepAlive {SuccessfulExit: false}, booted out fully before it is loaded again. Linux: a systemd user unit docket.service, Restart=on-failure, RestartSec=5. Each runs this Docket's interpreter (pythonw.exe on Windows) with -X utf8 -m docket serve --env-file <file>, the file holding the installing shell's PATH, SSH_AUTH_SOCK except on macOS, and DOCKET_CONFIG_DIR and DOCKET_STATE_DIR when set. Install run again replaces the registration and restarts; an upgrade is stop, upgrade, install. stop disables the Windows task, and under the Run key ends the pid on record once /api/status answers with it."
+    not_chosen:
+      - "A system service: no audio devices, keychain or git credentials of the user."
+      - "The environment in each registration: a Task Scheduler task has none, so one file serves all three."
+      - "A repeating logon trigger: its repetition begins only at the next logon."
+  - id: DR-0155
+    title: The service's log holds no content
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#8"]
+    description: "service.log, in the user's log folder, rotated at 5 MB with three kept, holds a line per request (method, route template, status, milliseconds) and never a query string, a body, a tool's arguments or result, or an exception's message: an exception is written as its type and frames, for each cause and context in its chain. Docket logs at INFO; mcp, uvicorn and starlette at WARNING, since the SDK logs a tool error's text at INFO. The outermost layer answers any exception with a 500 and never raises it again, so no server logs it with its message."
+  - id: DR-0156
+    title: Docket's git never signs
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#8"]
+    description: "Git.run passes -c commit.gpgsign=false on every call, so Docket's commits and sync's rebase skip signing: they are machine commits, and a service with no terminal would hang on a pinentry prompt or fail on a key it can't unlock. The same reasoning as #34 skipping the host repo's hooks; the owner's call."
+    binds:
+      - "A host remote that requires signed commits rejects a push of a branch holding Docket's commits; #34 inherits this knowingly."
+  - id: DR-0157
+    title: The service runs on FastAPI, uvicorn, the MCP SDK 2.3.0 and keyring
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#8"]
+    description: FastAPI (DR-0016) for the app; uvicorn without extras (h11, pure Python) for a loopback service; the MCP Python SDK pinned to exactly 2.3.0, since its API moved between 2.0 and 2.3, a new version coming in by its own reviewed bump; keyring for the keychain on all three systems. Every package the lock gains is at least a week old, as Dependabot's cooldown asks.
+    not_chosen:
+      - "uvicorn[standard]: uvloop and httptools, compiled, for nothing a loopback service needs."
+      - "A version range for mcp: an API change would arrive unreviewed."
+  - id: DR-0158
+    title: The service's tools arrive by phase
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#8"]
+    description: search, read, verify and doc_put in phase 0 (#8); ingest, with the capture endpoint and the capture hook, in phase 1 (#41); media_put, with encrypted media, in phase 2 (#42); ledger in phase 3.
+  - id: DR-0159
+    title: A tool's result is compact text for Claude beside its result model
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#8"]
+    description: "Each MCP tool returns the lines the matching docket command prints, with control characters escaped so a record's terminal codes never reach Claude Code's screen, and its result model, unescaped, as structured content. No tool raises Claude Code's result size: past 50,000 characters Claude Code keeps a result in a file Claude reads in parts, and around, lines and k narrow it."
+    not_chosen: ["The SDK's JSON dump as the text: about twice the tokens for the same transcript."]
