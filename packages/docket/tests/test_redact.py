@@ -192,10 +192,24 @@ def test_phone_numbers_need_a_plus_or_a_label(redactor: Redactor, text: str) -> 
         "up +12345678 USD, +87654321$, +11223344 € and +99887766% on last year",
         "+12345678 huf",
         f"+12 500 000{NBSP}Ft",
+        "budget +12 500 000 000 Ft vs plan",
+        "capex +125 000 000 000 HUF",
+        "deal +12.500.000.000 EUR",
+        "+1 250 000 000 Ft",
+        f"+12 500 000 000{NBSP}Ft",
     ],
 )
 def test_numbers_and_words_docket_keeps(redactor: Redactor, text: str) -> None:
     assert redacted(redactor, text) == (text, Counter())
+
+
+@pytest.mark.parametrize(
+    "text", ["+44 7700 900123", "call +36 30 555 0100.", "+1 555 010 0199 0123", "+1 555 010 0199 then 12 Ft"]
+)
+def test_a_phone_number_stays_redacted_beside_the_amount_rule(redactor: Redactor, text: str) -> None:
+    out, counts = redacted(redactor, text)
+    assert counts == Counter({"phone": 1})
+    assert not any(part in out for part in ("0199 0123", "900123", "555 0100"))
 
 
 @pytest.mark.parametrize("space", [NBSP, NARROW_NBSP])
