@@ -79,7 +79,12 @@ def test_a_bare_word_finds_its_inflected_form_through_its_dative_stem(vault: Vau
 
 def test_an_inflected_word_finds_the_bare_word_through_its_stem_stemmed_again(tmp_path: Path) -> None:
     v = Vault.init(tmp_path / "vault", index_config(), "test-box")
-    said = ["Az ajánlat még nincs kész, a robot leállt.", "A projekt felelőse Dóra.", "Thanks for the update."]
+    said = [
+        "Az ajánlat még nincs kész, a robot leállt.",
+        "A projekt felelőse Dóra.",
+        "Thanks for the update.",
+        "Please fill in the form.",
+    ]
     v.write_run("chat", [make_record(n, container="chat:C0X", text=t) for n, t in enumerate(said, start=1)], LATER)
     rebuild(v)
     for query, expect in [("ajánlatot", 1), ("ajánlatról", 1), ("robotot", 1), ("projektről", 2)]:
@@ -87,6 +92,9 @@ def test_an_inflected_word_finds_the_bare_word_through_its_stem_stemmed_again(tm
         assert [h.rid for g in result.groups for h in g.hits] == [f"chat:C0TEST/179100000{expect}.000100"], query
     # A bare word's stem is no word the index holds, so its second cut (`forint`, `forin`, `for`) isn't searched.
     assert find(v, "forint").groups == []
+    # The second cut of `formed` (`form`, `for`) is a word written as often as `form`, so it isn't searched either.
+    thanks = make_record(3).rid
+    assert thanks not in [h.rid for g in find(v, "formed").groups for h in g.hits]
 
 
 def test_all_then_any_then_prefixes(vault: Vault) -> None:

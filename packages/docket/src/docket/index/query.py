@@ -258,9 +258,12 @@ class _Search:
             forms += [(lang.column, f) for f in self.analyzer.forms(word, lang)]
             twice = self.analyzer.restem(word, lang)
             # Only when the stem is a word the index holds as written: a bare word's stem is no word, and its second
-            # cut (`forint` to `forin` to `for`) would meet every English `for`.
-            if twice is not None and len(twice[1]) >= matching.SHORT and self._docs("folded", twice[0]):
-                forms.append((lang.column, twice[1]))
+            # cut (`forint` to `forin` to `for`) would meet every English `for`. And not when the second cut is itself
+            # a word written at least as often (`form` to `for`, `márka` to `mar`): it would bring every `for`.
+            if twice is not None and len(twice[1]) >= matching.SHORT:
+                written = self._docs("folded", twice[0])
+                if written and self._docs("folded", twice[1]) < written:
+                    forms.append((lang.column, twice[1]))
         return forms
 
     def word_groups(self, tokens: list[str]) -> tuple[list[tuple[str, str]], list[str]]:

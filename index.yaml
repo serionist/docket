@@ -352,7 +352,7 @@ decisions:
     cost: medium
     sources: ["#7"]
     supersedes: [DR-0017]
-    description: "Each chunk is indexed as written (case and accents folded by FTS5's unicode61 remove_diacritics 2) and stemmed with Snowball once per language in vault.yaml's owner.languages: English always, the rest in code order. A language's hook adds the word forms its stemmer needs (Hungarian: the stem of the word's dative, and for a query word the stem of its stem when the index holds that stem as a word) and says whether aliases match on its stems; its time words come from a table of its own. Languages written without spaces between words wait for a trigram column. Embeddings and a reranker add recall when a model is available, local or through an API; without one, keyword search works alone."
+    description: "Each chunk is indexed as written (case and accents folded by FTS5's unicode61 remove_diacritics 2) and stemmed with Snowball once per language in vault.yaml's owner.languages: English always, the rest in code order. A language's hook adds the word forms its stemmer needs (Hungarian: the stem of the word's dative, and for a query word the stem of its stem when the index holds that stem as a word, more often than the second cut) and says whether aliases match on its stems; its time words come from a table of its own. Languages written without spaces between words wait for a trigram column. Embeddings and a reranker add recall when a model is available, local or through an API; without one, keyword search works alone."
     binds: [Every model feature is optional., Adding or removing a language rebuilds the index.]
     not_chosen:
       - "Three fixed columns (as written, Hungarian, English): a German user would get Hungarian stems."
