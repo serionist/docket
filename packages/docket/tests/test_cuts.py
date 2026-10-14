@@ -95,18 +95,29 @@ def test_bad_cut_specs_are_refused(spec: str) -> None:
         parse(spec)
 
 
-def test_a_text_cut_clears_the_segments_that_still_say_the_cut_stretch() -> None:
+def test_a_transcript_takes_time_cuts_only() -> None:
+    def time_cutter(record: RawRecord, cuts: list[Cut]) -> RawRecord:
+        kept = [s for s in record.segments or [] if not any(c.start <= s.start_ms < c.end for c in cuts)]
+        return record.model_copy(update={"segments": kept, "text": f"Ben Sample: work part.\n{CUT_MARKER}"})
+
+    segments = [
+        {"start_ms": 0, "end_ms": 1000, "speaker": "Ben Sample", "text": "work part."},
+        {"start_ms": 1000, "end_ms": 2000, "speaker": "Ben Sample", "text": "private part."},
+    ]
     record = make_record(
         rid="calls:rec-1",
         source="calls",
         kind="recording",
-        text="work part. private part. work again.",
-        segments=[
-            {"start_ms": 0, "end_ms": 1000, "text": "work part."},
-            {"start_ms": 1000, "end_ms": 2000, "text": "private part."},
-        ],
+        text="Ben Sample: work part.\nBen Sample: private part.",
+        segments=segments,
     )
-    out = apply(record, [Cut(start=11, end=25)])
-    assert out.text == f"work part. {CUT_MARKER}work again."
-    assert out.segments is None
-    assert "private" not in out.model_dump_json()
+    register_cutter("calls", time_cutter)
+    with pytest.raises(DocketError, match=r"calls:rec-1 is a transcript.*cut a time"):
+        apply(record, [Cut(start=23, end=48)])
+    with pytest.raises(DocketError, match="cut a time"):
+        apply(record, [Cut(start=1000, end=2000, unit="ms"), Cut(start=0, end=5)])
+    out = apply(record, [Cut(start=1000, end=2000, unit="ms")])
+    assert [s.text for s in out.segments or []] == ["work part."]
+    # An empty list is no transcript: its text is cut by characters as any other.
+    plain = record.model_copy(update={"source": "notes", "rid": "notes:n-1", "segments": []})
+    assert apply(plain, [Cut(start=0, end=5)]).text.startswith(CUT_MARKER)
