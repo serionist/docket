@@ -383,7 +383,9 @@ role: the customer's site lead
   because a language's stemmer mangles the other's loanwords (DR-0114).
 - A word's forms in a stemmed column are its stem, itself, and what its language adds: Snowball cuts a bare Hungarian
   word shorter than an inflected one (`forint` to `forin`, `forintot` to `forint`), so Hungarian adds the stem of the
-  word's dative.
+  word's dative, and for a query word the stem of its stem when the index holds that stem as a word (`robotot` to
+  `robot` to `rob`, what a bare `robot` holds).
+- A compound is one word (`tízmillió`), so `millió` doesn't find it; amounts come with the typed extractors.
 - Aliases match as written, and through those forms in the columns of languages that inflect names (Hungarian, not
   English: `Mark` would match `marking`). Each stem form is judged: one under three letters, or one that floods the
   index (`Mark` stems to `mar`, which `már` gives too), is dropped and listed for curation.
