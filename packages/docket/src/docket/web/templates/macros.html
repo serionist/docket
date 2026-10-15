@@ -17,6 +17,13 @@ href="{{ link.url }}" hx-get="{{ link.fragment }}" hx-target="{{ target }}"
 <span class="locator" dir="ltr">{{ value }}</span>
 {% endmacro %}
 
+{% macro paste(text, label) %}
+<div class="paste">
+  <code class="paste-text">{{ text }}</code>
+  <button type="button" class="button" data-action="copy" data-locator="{{ text }}">{{ icon('copy') }}Copy<span class="visually-hidden"> {{ label }}</span></button>
+</div>
+{% endmacro %}
+
 {% macro copy(value) %}
 <button type="button" class="icon-button" data-action="copy" data-locator="{{ value }}" title="Copy {{ value }}">{{ icon('copy') }}<span class="visually-hidden">Copy the locator {{ value }}</span></button>
 {% endmacro %}

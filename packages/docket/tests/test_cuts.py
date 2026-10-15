@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from docket.errors import DocketError
 from docket.vault.cuts import CUT_MARKER, Cut, apply, cut_text, merge, parse, removes, widen
+from docket.vault.cuts import spec as cut_spec
 from docket.vault.records import RawRecord, Segment
 
 SAID: list[dict[str, Any]] = [
@@ -142,13 +143,34 @@ def test_an_empty_segment_list_is_no_transcript() -> None:
         ("120-340", Cut(start=120, end=340)),
         ("12:30-14:05", Cut(start=750_000, end=845_000, unit="ms")),
         ("1:02:03 - 1:04:00", Cut(start=3_723_000, end=3_840_000, unit="ms")),
+        ("0:12-0:30.4", Cut(start=12_000, end=30_400, unit="ms")),
+        ("0:45.700-0:45.701", Cut(start=45_700, end=45_701, unit="ms")),
     ],
 )
 def test_cut_specs_parse(spec: str, cut: Cut) -> None:
     assert parse(spec) == cut
+    # Written back, a cut reads as itself, milliseconds and all.
+    assert parse(cut_spec(cut)) == cut
 
 
-@pytest.mark.parametrize("spec", ["120", "a-b", "-5", "10-5", "12:30-140", "5:00-4:00", "1-2-3"])
+def test_a_cut_is_written_back_exactly() -> None:
+    assert cut_spec(Cut(start=12_000, end=30_400, unit="ms")) == "0:12-0:30.400"
+    assert cut_spec(Cut(start=3_723_000, end=3_840_005, unit="ms")) == "1:02:03-1:04:00.005"
+    assert cut_spec(Cut(start=120, end=340)) == "120-340"
+
+
+def test_an_utterance_with_no_length_at_the_end_can_be_cut() -> None:
+    record = transcript(
+        segments=[
+            {"start_ms": 0, "end_ms": 1000, "text": "kept"},
+            {"start_ms": 1000, "end_ms": 1000, "text": "Bye."},
+        ]
+    )
+    cut = apply(record, [Cut(start=1000, end=1001, unit="ms")])
+    assert [s.text for s in cut.segments or []] == ["kept", CUT_MARKER]
+
+
+@pytest.mark.parametrize("spec", ["120", "a-b", "-5", "10-5", "12:30-140", "5:00-4:00", "1-2-3", "0:12.5000-0:13"])
 def test_bad_cut_specs_are_refused(spec: str) -> None:
     with pytest.raises(DocketError):
         parse(spec)

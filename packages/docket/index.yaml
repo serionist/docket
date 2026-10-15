@@ -20,6 +20,7 @@ reading:
   - { path: packages/docket/src/docket/service/runs.py, role: contract, note: "open sync runs in memory: bind, captures, close, drop, the caps, the marker the capture hook reads" }
   - { path: packages/docket/src/docket/questions.py, role: contract, note: "the question file docket eval reads, a one-way door (DR-0290), and what answers a wanted locator (DR-0291)" }
   - { path: packages/docket/src/docket/service/history.py, role: contract, note: "the run history: one line of ids and counts per ended run, in the vault's private folder; disposable, not a door" }
+  - { path: packages/docket/src/docket/web/staging.py, role: contract, note: "the Staging page's two writes, through the staging gate's own calls on the writer thread, and no release (DR-0381, DR-0382)" }
 decisions:
   - id: DR-0019
     title: The vault's layout and run-file names are fixed
@@ -899,12 +900,13 @@ decisions:
     status: proposed
     at: "2026-10-15"
     by: Claude (autonomy grant)
-    cost: medium
+    cost: one-way
     sources: ["#31"]
     description: "docket hold release asks its own question inside docket.sources.release, and release() has no parameter that answers it. Before it reads the folder it refuses when CLAUDECODE is set (the shell is Claude Code's) and without a console on both stdin and stdout: on Windows GetConsoleMode must succeed on both handles, since a redirect from NUL passes isatty there; elsewhere both must be terminals. The yes is a four-letter random code drawn fresh for each recording, shown and typed back; n keeps the recording held, q stops, and anything else keeps it held. No flag, environment variable or MCP tool skips the question, and no MCP tool releases a hold. The release line records the yes: when, and on which machine."
     binds:
       - Inside the package only cli.py calls release(); a test scans for it.
       - "Not a wall against a process running as the user: it makes a release a deliberate act, which the cuts skill forbids Claude."
+      - "No page or route releases a hold either: the Staging page names the command (DR-0382)."
     not_chosen:
       - "--yes, or --by user as on classify: Claude passes a flag as easily as the owner."
       - "A y to a y/N question: a pipe or a pseudo-terminal answers it unread."

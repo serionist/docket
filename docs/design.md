@@ -572,7 +572,7 @@ change lands on whoever uses that vendor, while the core still checks every rid 
 | Page | What | Phase |
 |---|---|---|
 | Search | the same search Claude uses, with facets by entity, source, person and time | 0 |
-| Staging | records waiting for the gate: classify, cut, drop; release held recordings, asked through the browser's session | 1 |
+| Staging | records waiting for the gate: classify, cut, drop, promote; held recordings listed with the command that releases each at the owner's console | 1 |
 | Curate | the weekly batch of proposals | 1 |
 | Sync | runs, failures, cursors, rate limits, what needs a Claude session | 1 |
 | Settings | sources, never-store lists, models, the Claude API key, a spend cap, redaction rules | 1 |
@@ -599,6 +599,11 @@ How it is built (DR-0170 to DR-0176):
   final-run rule (DR-0304); the failures still current, each with what to do (DR-0305); the runs open and ended; each
   machine's cursors. Its URL holds `source`, `run` and `k` (DR-0303), and its runs part refreshes while a run is open
   (DR-0306).
+- The Staging page lists what waits at the gate by source and age, with why each waits, and shows a record's text only
+  once it is opened (DR-0380), as promotion would write it (DR-0383). It writes only through the gate's own calls on
+  the writer thread, as same-origin form posts the Guard checks, and refuses a classification the record changed under
+  (DR-0381). Held recordings are listed with the commands that release them at the owner's console; no page releases
+  (DR-0382). Its URL holds the list's filters, the open record and what is checked on it (DR-0384).
 
 ## 11. Claude first
 

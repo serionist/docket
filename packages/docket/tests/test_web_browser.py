@@ -20,6 +20,7 @@ import pytest
 import uvicorn
 from docket_testkit import index_template
 from playwright.sync_api import Page, expect, sync_playwright
+from staging_kit import staging_vault
 from sync_kit import as_structured, as_text, memo, sync_template
 
 from docket.service import client, server
@@ -52,6 +53,12 @@ def sync_service(sync_project: Path, tmp_path: Path) -> Iterator[tuple[int, str]
     """The real service over a consuming project with the invented memo source."""
     shutil.copytree(sync_project, tmp_path / "project")
     yield from _serve(tmp_path / "project" / "vault")
+
+
+@pytest.fixture
+def staging_service(tmp_path: Path) -> Iterator[tuple[int, str]]:
+    """The real service over a vault with a transcript and a mail waiting, and a memo ready."""
+    yield from _serve(staging_vault(tmp_path).root)
 
 
 def _serve(vault: Path) -> Iterator[tuple[int, str]]:
@@ -241,6 +248,71 @@ def test_the_sync_page_in_a_browser(sync_service: tuple[int, str], tmp_path: Pat
         page.reload()
         _fits(page, f"li.run[id='{run}']", "li.failure", ".machine")
         page.screenshot(path=str(shots / "sync-390.png"), full_page=True)
+        assert not errors, errors
+        browser.close()
+
+
+def test_the_staging_page_in_a_browser(staging_service: tuple[int, str], tmp_path: Path) -> None:
+    port, token = staging_service
+    shots = Path(os.environ.get("DOCKET_TEST_SCREENSHOTS") or tmp_path)
+    shots.mkdir(parents=True, exist_ok=True)
+    link = client.call("POST", "/api/session", token=token, at=port)
+    assert link is not None
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel=None if BROWSER == "chromium" else BROWSER)
+        page = browser.new_page(viewport={"width": 1440, "height": 900})
+        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.on("requestfailed", lambda r: errors.append(f"request failed: {r.method} {r.url} ({r.failure})"))
+        page.on(
+            "response", lambda r: errors.append(f"{r.status} {r.request.method} {r.url}") if r.status >= 400 else None
+        )
+        base = f"http://127.0.0.1:{port}"
+        page.goto(f"{link.body['url']}&next=/staging")
+        page.wait_for_url(f"{base}/staging")
+        expect(page.locator(".lead")).to_have_text(
+            "3 records wait at the gate: 2 for you to classify, 1 ready to promote"
+        )
+
+        # j moves to the first record and Enter opens it beside the list, without leaving the page.
+        page.keyboard.press("j")
+        page.keyboard.press("Enter")
+        expect(page.locator("#panel-title")).to_have_text("Supplier call")
+        assert page.url.startswith(f"{base}/staging?open=")
+
+        # Two utterances checked and previewed: the overlapping third goes too. A real browser's post passes the
+        # Guard: the page's Referrer-Policy lets it send its Origin, not null.
+        page.locator("li.utterance input[value='2']").check()
+        page.click("button[value='preview']")
+        expect(page.locator(".preview")).to_contain_text("Removes 2 utterances: 00:12-00:31.")
+        assert "&u=2" in page.url
+        page.screenshot(path=str(shots / "staging.png"), full_page=True)
+
+        # At phone width the open record covers the list and nothing scrolls sideways.
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.reload()
+        _fits(page, "#panel .close", ".utterance", "button[value='work']")
+        page.screenshot(path=str(shots / "staging-390.png"), full_page=True)
+        page.set_viewport_size({"width": 1440, "height": 900})
+
+        page.click("button[value='work']")
+        expect(page.locator(".notice")).to_contain_text("classified work: it goes to raw at the next promotion")
+        expect(page.locator("li.record.state-ready")).to_have_count(2)
+
+        # The mail dropped as private, through its own question.
+        page.click("text=The offer")
+        page.click("text=Private: drop it")
+        page.click("text=Drop it as private")
+        expect(page.locator(".notice")).to_contain_text("dropped as private")
+        expect(page.locator(".record-title")).to_have_count(2)
+
+        page.click("text=Promote all")
+        expect(page.locator(".notice")).to_contain_text("Promoted: 2 records written to raw and committed.")
+        expect(page.locator(".lead")).to_have_text("Nothing waits at the gate")
+        page.set_viewport_size({"width": 390, "height": 844})
+        _fits(page, ".lead", '[data-action="keys"]')
+        page.screenshot(path=str(shots / "staging-390-done.png"), full_page=True)
         assert not errors, errors
         browser.close()
 

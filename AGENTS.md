@@ -116,7 +116,9 @@ agrees in the issue or, under an autonomy grant, with its decision recorded as p
   (DR-0241), and the plugin's server key `docket` that prefixes them (DR-0160);
 - the plugin's skill and hook names: `recall`, `setup`, `cuts` (DR-0207), the SessionStart hook running `docket
   hook session-start` (DR-0161), and the PostToolUse hook running `docket hook post-tool-use` for `mcp__.*`, with
-  its line prefixes (DR-0242).
+  its line prefixes (DR-0242);
+- the release's yes: only the owner releases a held recording, at their own console, by typing back a code, and no
+  page, route or tool releases one (DR-0202, DR-0382). What a release lets in reaches git for good.
 
 Each lands with its decision entry, marked `cost: one-way`.
 

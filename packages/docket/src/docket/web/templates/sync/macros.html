@@ -1,13 +1,6 @@
-{# The Sync page's own pieces: a run's card and the words to paste into Claude Code. Every value is escaped; nothing
-   here comes from a capture. Imported with context, for the owner's zone. #}
+{# The Sync page's own pieces: a run's card. Every value is escaped; nothing here comes from a capture. Imported with
+   context, for the owner's zone. #}
 {% from "macros.html" import locator %}
-
-{% macro paste(text, label) %}
-<div class="paste">
-  <code class="paste-text">{{ text }}</code>
-  <button type="button" class="button" data-action="copy" data-locator="{{ text }}">{{ icon('copy') }}Copy<span class="visually-hidden"> {{ label }}</span></button>
-</div>
-{% endmacro %}
 
 {% macro card(r) %}
 <li class="run state-{{ r.state }}{% if r.focused %} focused{% endif %}" id="{{ r.id }}">

@@ -4,6 +4,7 @@ whatever fails a check stays held while the batch goes on. Then `docket hold lis
 
 from __future__ import annotations
 
+import ast
 import inspect
 import io
 import json
@@ -574,6 +575,21 @@ def test_nothing_answers_the_question_for_the_owner() -> None:
         if p.name != "release.py" and re.search(r"sources(\.| import )release\b", p.read_text(encoding="utf-8"))
     )
     assert callers == ["cli.py"]
+
+
+def test_only_the_release_writes_a_release_line_or_takes_a_hold_off() -> None:
+    """No page, route or tool releases (DR-0382): only the console's release writes the log and takes a hold off."""
+    src = Path(releasing.__file__).resolve().parents[1]
+    writers: dict[str, set[str]] = {}
+    for path in src.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+                continue
+            owner = node.func.value
+            name = f"{owner.id}.{node.func.attr}" if isinstance(owner, ast.Name) else ""
+            if name in ("releaselog.add", "holds.remove"):
+                writers.setdefault(name, set()).add(path.relative_to(src).as_posix())
+    assert writers == {"releaselog.add": {"sources/release.py"}, "holds.remove": {"sources/release.py"}}
 
 
 def write(path: Path, text: str) -> Path:

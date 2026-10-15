@@ -199,3 +199,33 @@ def test_intake_view_says_what_intake_drops_and_redacts_the_rest(vault: Vault) -
         gate.intake_view(rec(source="paused", rid="paused:rec-1", container=None))
     with pytest.raises(DocketError, match=r"'paused' is disabled in vault\.yaml"):
         gate.stage([rec(source="paused", rid="paused:rec-1", container=None)])
+
+
+def test_list_and_show_say_why_each_record_waits(vault: Vault) -> None:
+    gate = Gate(vault)
+    talk = rec("talk-1", "talks", text="first")
+    gate.stage([rec("rec-2"), rec("rec-3"), rec("rec-4"), talk, transcript("rec-5")])
+    gate.classify("calls:rec-3", "work")
+    # The last promotion held it back: its file says why.
+    gate.classify("calls:rec-4", "work")
+    gate.staging.write(gate.show("calls:rec-4").entry.staged.model_copy(update={"problem": "a cut didn't fit"}))
+    # An earlier version dropped by hand: the next one waits, though its source is work.
+    assert gate.classify("talks:talk-1", "private") is None
+    gate.stage([rec("talk-1", "talks", text="second"), rec("talk-2", "talks")])
+    release(vault, "rec-6")
+    gate.stage([transcript("rec-6")])
+    holds.add(vault, "calls", ["rec-5"])
+    listing = gate.list()
+    why = {e.staged.record.rid: listing.why[e.key] for e in listing.entries}
+    assert why == {
+        "calls:rec-2": "mixed",
+        "calls:rec-3": "classified",
+        "calls:rec-4": "held-back",
+        "talks:talk-1": "by-hand",
+        "talks:talk-2": "work",
+        "calls:rec-5/transcript": "on-hold",
+        "calls:rec-6/transcript": "released",
+    }
+    assert {rid: gate.show(rid).why for rid in why} == why
+    # A narrowed list names the reasons of what it lists, and nothing else.
+    assert set(gate.list(source="talks").why) == {e.key for e in gate.list(source="talks").entries}

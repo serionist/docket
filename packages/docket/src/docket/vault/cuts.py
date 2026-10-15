@@ -72,7 +72,8 @@ def cut_segments(record: RawRecord, cuts: list[Cut]) -> RawRecord:
     """Each segment overlapping a cut goes whole, since an utterance has no word times; one `[cut]` segment spans each
     cut widened to what it removed, cuts that touch after widening made one; the text is rendered again."""
     segs = list(record.segments or [])
-    last = max(s.end_ms for s in segs)
+    # Where the transcript ends as `_overlaps` reads it: an utterance with no length still takes its millisecond.
+    last = max(max(s.end_ms, s.start_ms + 1) for s in segs)
     for cut in cuts:
         if cut.start >= last:
             raise DocketError(f"a cut from {_clock(cut.start)} starts after the transcript ends ({_clock(last)})")
@@ -140,11 +141,12 @@ def _clock(ms: int) -> str:
     return f"{hours}:{rest // 60:02d}:{rest % 60:02d}" if hours else f"{rest // 60}:{rest % 60:02d}"
 
 
-_TIME = re.compile(r"^(?:(\d+):)?(\d{1,2}):(\d{2})$")
+_TIME = re.compile(r"^(?:(\d+):)?(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?$")
 
 
 def parse(spec: str) -> Cut:
-    """`120-340` is characters; `12:30-14:05` or `1:02:03-1:04:00` is a time range."""
+    """`120-340` is characters; `12:30-14:05` or `1:02:03-1:04:00` is a time range, and a time may carry milliseconds,
+    `0:30.400`, so a cut made on an utterance's own times can be written back exactly (`spec`)."""
     parts = spec.split("-")
     if len(parts) != 2 or not all(p.strip() for p in parts):
         raise DocketError(f"a cut is <start>-<end>, such as 120-340 or 12:30-14:05, not {spec!r}")
@@ -159,7 +161,20 @@ def _ms(value: str, spec: str) -> int:
     if not m:
         raise DocketError(f"a cut's times are mm:ss or hh:mm:ss, and both ends the same kind: {spec!r}")
     hours, minutes, seconds = int(m.group(1) or 0), int(m.group(2)), int(m.group(3))
-    return ((hours * 60 + minutes) * 60 + seconds) * 1000
+    return ((hours * 60 + minutes) * 60 + seconds) * 1000 + int((m.group(4) or "").ljust(3, "0"))
+
+
+def spec(cut: Cut) -> str:
+    """A cut as `parse` reads it back to the same cut: characters as `120-340`, a time as `12:30-14:05`, with
+    milliseconds where it has them."""
+    if cut.unit == "char":
+        return f"{cut.start}-{cut.end}"
+    return f"{_exact(cut.start)}-{_exact(cut.end)}"
+
+
+def _exact(ms: int) -> str:
+    seconds, fraction = divmod(ms, 1000)
+    return _clock(seconds * 1000) + (f".{fraction:03d}" if fraction else "")
 
 
 def _cut(start: int, end: int, unit: Unit, spec: str) -> Cut:
