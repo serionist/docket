@@ -1343,3 +1343,52 @@ decisions:
       - "A run bounded by a number of items: items differ tenfold in size, and the budget is what Claude's context feels."
       - "final on a run that also lists: every recording it only listed would be stored bare and never fetched again."
       - "A listed-only item giving nothing at all: an item nobody fetched, a backfill's gap or one Claude forgot to skip, would be lost once the mark moves past it."
+  - id: DR-0280
+    title: A hyphenated compound is also indexed joined, after the chunk's own words
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#59"]
+    description: "A run of words joined by hyphens (-, U+2010, U+2011) with no space between, one of them holding a letter, adds its joined form to the chunk's FTS5 row: a run of two or three words adds each joined stretch of two or more (e-mail-cím adds email, mailcím and emailcím), a longer run only its whole, and 2026-10-12 nothing. The joined words go after the chunk's own words in every column, as written in folded and stemmed by each language's stemmer in the others, so e-mailben holds email in stem_hu and kick-offs holds kickoff in stem_en. The chunk's words keep their positions, so phrases and aliases match as before, and the chunks row (the text, its anchors, locator and hash) doesn't change, so snippets, read and verify show the text as written. One pass over the text gives its words and the hyphens between them. The index's schema version went to 2 with it, so an existing index rebuilds at its next update (DR-0115). On the perf test's 100,000 chunks with 1% of the words hyphenated from 2,000 compounds, the index grew from 184.6 to 185.9 MB, and the rebuild stayed within its noise."
+    binds:
+      - "A chunk's text, anchors and locator never carry a joined word: only its FTS5 row does."
+    not_chosen:
+      - "The joined word in place of its parts: kick and mail would no longer find kick-off and e-mail."
+      - "The joined word between the parts: every later word moves, so a phrase across the compound breaks."
+      - "A tokenizer that puts the joined word at the parts' position: FTS5 takes one only through its C API, which Python's sqlite3 doesn't reach."
+      - "A column of joined words: one more per language, weighed apart from the words by BM25."
+      - "Only a run's whole: email would miss e-mail-cím. Every stretch of any run: a UUID adds ten words."
+  - id: DR-0281
+    title: "Spaced compounds are found at query time: a word also as two words in a row, and two words in a row also as one"
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#59"]
+    description: Whether two words make a compound depends on the whole vault, so search reads it from the index's vocabulary at query time. A query word also matches two words in a row, split where the first half has three letters or more and the second two, each half holds a letter, both halves are words the index holds (as written or through a stem), and not both are in half the chunks or more; the split matches as a phrase in every column, as a quoted phrase does. Two query words in a row each also match their joined word, so the all-words stage reads (kick AND off) OR kickoff and the stages and term counts of DR-0231 and DR-0232 don't change. A hyphenated query word stays its parts, each also matching the joined stretches it is in, as the index joins them (DR-0280). Only forms the index holds enter the expression (DR-0230); a word stays in the query however its other spellings fare, and only a split can be left out. The halves' lengths keep contractions, function words and times out (we're for were, in to for into, 1000 for 10:00) and keep up, in and on as second halves (follow up, log in); a letter in each half keeps numbers whole (12345 would meet 123.45). Two halves in most chunks would cost BM25 a pass over most chunks (187 ms against 47 ms on the perf test's 100,000 chunks), and such pairs are function words (may be, can not). A split can still find another word (edit or delete for editor); DR-0282 ranks such chunks after the word itself.
+    binds:
+      - Whether two words make a compound is read from the index when someone searches, never written into chunks.
+      - "A word is never left out of a query for its splits: only a split is."
+    not_chosen:
+      - "Every pair of words in a row indexed joined: the perf index 69% larger and its rebuild nine times slower; real prose holds 9.8 distinct pairs per word of its vocabulary."
+      - "Pairs whose joined form is a word elsewhere, or whose hyphenated form is somewhere, indexed joined: a rebuild reads the vault twice, and an update that meets a new follow-up re-indexes every older chunk saying follow up to stay equal to a rebuild; in real prose the first are mostly a string, a list, may be."
+      - "Halves of two letters and two: we're finds were, we'll finds well."
+      - "Halves of three letters and three: follow up and set up are lost."
+      - "A hyphenated query word as a phrase of its parts: it changes what kick-off finds today and how many terms a title's lead is judged by."
+      - "Numbers split like words: 12345 would meet 123.45."
+  - id: DR-0282
+    title: The word check, snippets and marks read compounds as the index and the query do, and a word held only through a split ranks after the word itself
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#59"]
+    description: "The word check that orders titles' leads and the any-word stage (DR-0231, DR-0232) reads a text's words and its hyphenated compounds joined, in the index's own pass (DR-0280), each joined word at its parts' positions; a query word is held through its forms, its joined words' forms, or one of its splits as a phrase (DR-0281), and the check says which words a text holds only through a split. Within each stage, the chunks holding a query word only through a split go after the rest, lifted ones included, each part keeping its order, and a title's lead doesn't count a word it holds only through a split: in a probe of 40 rows saying editor and 3 saying edit or delete, the three ranked first without this. When the query has a split, the check runs on the all-words stage's candidates too. A split is scanned for only in a text holding a term of each half, from the terms the first-letter screen already computes, and any other text costs one set test: on 200 candidates of 350 words, six query words each with a split took 129 ms, against 556 ms scanning every text. So the title \"Orbex kick-off with Dana\" holds every word of orbex kickoff dana, orbex kick-off dana and orbex kick off dana. A test holds the check to FTS5: on the compound test vault and a sample of the perf index, the chunks it says hold every word are exactly the all-words stage's. Snippets are cut from the chunk's text as written; a hit's snippet starts at a query word, or at two words in a row that are a hyphenated pair joining into one or one of its admitted splits. The Search page, which can't see the vocabulary, marks both words of a hyphenated pair whose joined form is a query word, and of a spaced one when its halves have three and two letters."
+    binds: [The index and the word check read a text's compounds through one function.]
+    not_chosen:
+      - "The word check as it was: the title Orbex kick-off with Dana would not lift orbex kickoff dana."
+      - "Marking whole words only: kick off and kick-off go unmarked for kickoff."
+      - "A split's match ranked like the word's: three edit or delete rows ranked above 40 editor rows."
+      - "Scanning every candidate for every split: 556 ms on 200 candidates for six splits."
+      - "A snippet or mark at any two words joining into a query word: a snippet for were starts at we're."
