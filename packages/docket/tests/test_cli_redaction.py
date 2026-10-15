@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from docket_testkit import make_config, sh
+from docket_testkit import empty_vault, make_config, sh
 
 from docket.cli import main
 from docket.vault import redaction
@@ -21,7 +21,7 @@ FLAGS = [
 def make_vault(tmp_path: Path, *patterns: RedactionPattern) -> Vault:
     config = make_config()
     config.redaction.patterns = list(patterns)
-    return Vault.init(tmp_path / "vault", config, "test-box")
+    return empty_vault(tmp_path, config)
 
 
 def settings(vault: Vault) -> VaultConfig:
