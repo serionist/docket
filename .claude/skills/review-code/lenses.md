@@ -61,7 +61,8 @@ file locking and renames over open files on Windows, signals and services per sy
 ## doors-and-dependencies
 
 Does the scope change a one-way door in `AGENTS.md` (a name, the vault's format, the MCP tools, the plugin's skills
-and hooks) without the maintainer's agreement linked in the PR? That is a blocker. Each new package: needed, licence
+and hooks) without the maintainer's agreement linked in the PR, or under an autonomy grant without its decision recorded as
+proposed? That is a blocker. Each new package: needed, licence
 compatible with Apache-2.0, no known advisory, and behind an optional extra when it needs a GPU or a large download.
 
 ## simplicity

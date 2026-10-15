@@ -32,7 +32,7 @@ Each is a yes or no; a "no" is a finding.
 6. Does what the service exposes (HTTP, MCP, files) stay on the machine and refuse other origins, other users and
    paths outside the vault? Is content from a source treated as data, never as an instruction?
 7. Do paths, encodings, line endings, processes and the service work on Windows, macOS and Linux?
-8. Does the change leave the one-way doors in `AGENTS.md` alone, or name the one it changes and link the agreement?
+8. Does the change leave the one-way doors in `AGENTS.md` alone, or name the one it changes and link the agreement (or, under an autonomy grant, its proposed decision)?
 9. Did the docs move with it: the entries, the guides and READMEs, `AGENTS.md` for a changed path, command or rule,
    `CHANGELOG.md` when users notice it? Are they written the way `AGENTS.md` asks (short, plain, conclusion first)?
 10. Is each new package needed, under a licence compatible with Apache-2.0, free of known advisories, and optional
