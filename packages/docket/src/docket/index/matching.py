@@ -9,11 +9,11 @@ written (counting that as at least five), is dropped and kept in `alias_terms` a
 one stem form is kept, whichever they are cut to (Mark's `Markkal` is cut to `mar`, which `már` crowds out, while his
 `mark` is kept); with every one dropped they don't (Rob's `rob` while `robot`, Rob with -ot, is everywhere). A case
 form is a common word and doesn't count when the index holds it, folded, in over ten times as many chunks as the alias
-as written (at least five), as a stem form; or in over twice as many when no kept stem form checks it, since every
-stem form it is cut to is short or common or it is cut to none (`annál` for Ann's `Annál`, `évet` for Eve's `Evét`,
-cut to `an` and `ev`).
-An `asr` alias also matches through vocabulary words within one edit of a word of 5 to 7 letters, two of 8 or more,
-found per word by a bounded Levenshtein walk (DR-0350).
+as written (at least five), as a stem form; or in over twice as many when every stem form it is cut to is short or
+common, so no kept stem form checks it (`annál` for Ann's `Annál`, `évet` for Eve's `Evét`, cut to `an` and `ev`). One
+the stemmer leaves whole is a spelling no ordinary word has (`Nimishsel`, `Maxszal`) and is judged at ten times. An
+`asr` alias also matches through vocabulary words within one edit of a word of 5 to 7 letters, two of 8 or more, found
+per word by a bounded Levenshtein walk (DR-0350).
 """
 
 from __future__ import annotations
@@ -33,8 +33,8 @@ from docket.vault.entities import Entities, Entity
 
 SHORT = 3
 COMMON_TIMES = 10
-# A case form no kept stem form checks is judged stricter: nothing else tells it from a word that folds and stems as it
-# does (`annál` for Ann's `Annál`, both cut to the short `an`).
+# A case form cut only to short or common stem forms is judged stricter: nothing else tells it from a word that folds
+# and stems as it does (`annál` for Ann's `Annál`, both cut to the short `an`).
 CASE_COMMON_TIMES = 2
 COMMON_FLOOR = 5
 TERMS_SQL = (
@@ -237,9 +237,9 @@ def cases_of(analyzer: Analyzer, ws: list[str], lang: Language) -> Cases:
 def judge_forms(conn: sqlite3.Connection, analyzer: Analyzer, aliases: list[AliasRow]) -> None:
     """Every alias's forms as written and its stem forms, kept or dropped, in alias_terms (word -1), and its common case
     forms, folded: a case form that is also a word would count as the name in every chunk holding the word, since the
-    word stems as the case form does. One a kept stem form checks is common in over ten times as many chunks as the
-    alias as written, as a stem form is; one no kept stem form checks, since every stem form it is cut to is short or
-    common or it is cut to none, in over twice as many (`annál`, Ann's `Annál`, cut to `an`)."""
+    word stems as the case form does. One a kept stem form checks, or one the stemmer leaves whole (`Nimishsel`, a
+    spelling no ordinary word has), is common in over ten times as many chunks as the alias as written, as a stem form
+    is; one cut only to short or common stem forms in over twice as many (`annál`, Ann's `Annál`, cut to `an`)."""
     conn.execute("DELETE FROM alias_terms WHERE word = -1")
     cache: dict[str, int] = {}
     rows: set[tuple[str, int, str, int, str, str, int]] = set()
@@ -262,7 +262,7 @@ def judge_forms(conn: sqlite3.Connection, analyzer: Analyzer, aliases: list[Alia
                     kept.add(form)
                 rows.add((alias.entity, alias.ordinal, lang.column, -1, " ".join(form), how, 0))
             cases = cases_of(analyzer, ws, lang)
-            checked = {form for form, stem in cases.reached if stem in kept}
+            checked = {form for form, stem in cases.reached if stem in kept} | set(cases.alone)
             for form in cases.forms():
                 times = COMMON_TIMES if form in checked else CASE_COMMON_TIMES
                 if _count(conn, phrase("folded", form), cache) > times * floor:

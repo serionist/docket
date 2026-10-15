@@ -607,13 +607,16 @@ def test_a_case_form_a_kept_stem_form_checks_is_judged_as_main_judges_it(colleag
 
 # Names written mostly inflected or never bare, as to-dos and places are: Laci bare in 5 chunks and Lacinak in 16,
 # Tamás bare in 10 and Tamásnak in 25, and Péternek, Bálintnak and the place Győrben, never bare, in 40, 20 and 31. Each
-# case form is past twice the name as written, and a kept stem form checks it.
+# case form is past twice the name as written, and a kept stem form checks it. Nimish bare in 3 with Nimishsel in 13,
+# and Max bare in 10 with Maxszal in 25: forms the stemmer leaves whole, spellings no ordinary word has.
 REGULARS = {
     "person/laci.yaml": "id: laci\ntype: person\nname: {hu: Laci}\n",
     "person/tamas.yaml": "id: tamas\ntype: person\nname: {hu: Tamás}\n",
     "person/peter.yaml": "id: peter\ntype: person\nname: {hu: Péter}\n",
     "person/balint.yaml": "id: balint\ntype: person\nname: {hu: Bálint}\n",
     "place/gyor.yaml": "id: gyor\ntype: place\nname: {hu: Győr}\n",
+    "person/nimish.yaml": "id: nimish\ntype: person\nname: {en: Nimish}\n",
+    "person/max.yaml": "id: max\ntype: person\nname: {en: Max}\n",
 }
 REGULAR_LINES: list[Line] = [
     (80, 0, "Laci szerint jó.", "laci"),
@@ -625,6 +628,10 @@ REGULAR_LINES: list[Line] = [
     (20, 3, "Bálintnak írtam.", "balint"),
     (13, 7, "Győrben voltunk.", "gyor"),
     (40, 8, "Győrbe megyünk.", "gyor"),
+    (150, 0, "Nimish szerint jó.", "nimish"),
+    (31, 9, "Nimishsel beszéltem.", "nimish"),
+    (40, 11, "Max szerint jó.", "max"),
+    (16, 12, "Maxszal beszéltem.", "max"),
 ]
 
 
@@ -642,12 +649,13 @@ def regulars(tmp_path_factory: pytest.TempPathFactory) -> Vault:
 
 def test_a_name_mostly_inflected_or_never_bare_keeps_its_mentions(regulars: Vault) -> None:
     assert not query(regulars, "SELECT entity, term FROM alias_terms WHERE how = 'common'")
-    for entity in ("laci", "tamas", "peter", "balint", "gyor"):
+    for entity in ("laci", "tamas", "peter", "balint", "gyor", "nimish", "max"):
         expected = {n for n in range(400) if entity in lines_message(REGULAR_LINES, n)[1]}
         assert mentions_of(regulars, entity) == expected, entity
     now = datetime(2026, 10, 15, tzinfo=UTC)
     named = [
         ("lacinak", "laci"), ("tamásnak", "tamas"), ("péternek", "peter"), ("bálintnak", "balint"), ("győrben", "gyor"),
+        ("nimishsel", "nimish"), ("maxszal", "max"),
     ]  # fmt: skip
     for word, entity in named:
         assert [e.id for e in search(regulars, word, now=now).query.entities] == [entity], word
