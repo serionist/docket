@@ -54,6 +54,7 @@ def test_the_report(vault: Vault, folder: Path, capsys: pytest.CaptureFixture[st
         "same     0",
         "skipped  .jpg 1, .json 1, never-store 2",
         "         notes/latin1.md: not UTF-8, skipped",
+        "redacted 1 password",
         "dry run: nothing written",
     ]
     assert main(["import", "notes", str(folder), "--as", "."]) == 0

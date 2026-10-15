@@ -54,6 +54,10 @@ def span(s: Span, indent: str = "") -> list[str]:
 def put(result: PutResult) -> list[str]:
     lines = [f"a hand edit went in first, as rev {result.taken_in}"] if result.taken_in else []
     lines.append(f"{'put' if result.changed else 'unchanged'} {result.id} rev {result.rev}  {result.path}")
+    if result.redactions:
+        where = ", ".join(str(n) for n in result.redacted_lines)
+        counts = ", ".join(f"{n} {rule}" for rule, n in result.redactions.items())
+        lines.append(f"redacted on line{'s' if len(result.redacted_lines) > 1 else ''} {where}: {counts}")
     return lines
 
 

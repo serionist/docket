@@ -773,6 +773,8 @@ def import_notes(
         say("skipped  " + ", ".join(f"{why} {n}" for why, n in report.skipped.items()))
     for line in report.reported:
         say(f"         {line}")
+    if report.redactions:
+        say("redacted " + ", ".join(f"{n} {rule}" for rule, n in report.redactions.items()))
     if report.dry_run:
         say("dry run: nothing written")
     elif report.commit:

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import index_template
+from docket_testkit import configure, index_template
 from mcp import Client
 from mcp.types import CallToolResult, TextContent
 from starlette.testclient import TestClient
@@ -199,3 +199,33 @@ def test_mcp_over_http_needs_the_token_and_this_host(template: Path, tmp_path: P
         answer = client.post("/mcp", content=body, headers={**JSON_RPC, "Authorization": f"Bearer {TOKEN}"})
         assert answer.status_code == 200, answer.text
         assert answer.json()["result"]["serverInfo"]["name"] == "docket"
+
+
+# -- redaction and never-store -------------------------------------------------------------------------------------
+
+SECRET = "hunter2-" + "Example"
+
+
+def test_doc_put_says_on_which_lines_it_redacted_and_never_what(service: Service) -> None:
+    text = FLEET_NOTE.replace("says the zebrafinch memo.", f"the password: {SECRET}")
+    result = call(service, "doc_put", {"text": text})
+    assert not result.is_error, text_of(result)
+    assert result.structured_content is not None
+    assert (result.structured_content["redactions"], result.structured_content["redacted_lines"]) == (
+        {"password": 1},
+        [14],
+    )
+    assert "redacted on line 14: 1 password" in text_of(result)
+    assert SECRET not in text_of(result)
+    assert SECRET not in json.dumps(result.structured_content)
+
+
+def test_a_never_store_doc_is_a_tool_error_naming_lines_only(service: Service) -> None:
+    assert service.settings.vault is not None
+    configure(service.settings.vault, keywords=["zebrafinch"])
+    result = call(service, "doc_put", {"text": FLEET_NOTE})
+    assert result.is_error
+    assert text_of(result).endswith(
+        "line 11: says something on the never-store keywords list; leave it out\nrefused: 1 problem(s)\n"
+    )
+    assert "zebrafinch" not in text_of(result)

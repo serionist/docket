@@ -52,6 +52,17 @@ def test_put_from_a_file_then_unchanged_then_the_next_rev(
     assert capsys.readouterr().out == (f"a hand edit went in first, as rev 2\nput {NOTE_ID} rev 3  {NOTE_PATH}\n")
 
 
+def test_put_prints_on_which_lines_it_redacted(
+    vault: Vault, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    secret = "hunter2-" + "Example"
+    lines = [f"- the wifi password: {secret} @12:08", f"- and the api_key: {secret}x @14:30"]
+    assert main(["doc", "put", put_file(tmp_path, note(lines=lines))]) == 0
+    out = capsys.readouterr().out
+    assert out == f"put {NOTE_ID} rev 1  {NOTE_PATH}\nredacted on lines 14, 15: 1 api-key, 1 password\n"
+    assert secret not in (vault.root / NOTE_PATH).read_text(encoding="utf-8")
+
+
 def test_put_from_stdin_drops_a_bom(
     vault: Vault, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

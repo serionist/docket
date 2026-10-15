@@ -7,7 +7,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from docket_testkit import index_template
+from docket_testkit import configure, index_template
 from starlette.testclient import TestClient
 
 from docket import index
@@ -106,6 +106,22 @@ def test_a_refused_doc_is_422_with_every_problem(client: TestClient) -> None:
     problems = answer.json()["problems"]
     assert len(problems) == 2
     assert {p["line"] for p in problems} >= {11}
+
+
+def test_a_put_says_what_it_redacted_and_a_never_store_doc_is_422_without_excerpts(
+    client: TestClient, tmp_path: Path
+) -> None:
+    secret = "hunter2-" + "Example"
+    stored = client.post("/api/docs", content=NOTE.replace("pilot.", f"pilot, password: {secret}"), headers=BEARER)
+    assert stored.status_code == 200, stored.text
+    assert (stored.json()["redactions"], stored.json()["redacted_lines"]) == ({"password": 1}, [14])
+    assert secret not in stored.text
+    configure(tmp_path / "vault", keywords=["charging queue"])
+    refused = client.post("/api/docs", content=NOTE.replace("fleet-check", "fleet-check-2"), headers=BEARER)
+    assert refused.status_code == 422
+    assert refused.json()["problems"] == [
+        {"line": 11, "message": "says something on the never-store keywords list; leave it out", "excerpt": ""}
+    ]
 
 
 def test_a_docket_error_is_400_and_text_that_isnt_utf8_too(client: TestClient) -> None:
