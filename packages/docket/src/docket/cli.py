@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 import typer
 
-from docket import __version__, index, recall, render, userconfig
+from docket import __version__, index, questions, recall, render, userconfig
 from docket.errors import DocketError
 from docket.imports import notes
 from docket.index.build import db_path
@@ -761,6 +761,24 @@ def search_command(
         k=k,
     )
     say_all(render.search(result, ZoneInfo(v.config.owner.time_zone)))
+
+
+@app.command("eval")
+def eval_command(
+    file: Annotated[Path, typer.Argument(help="Your question file, YAML of schema 1. It is only read.")],
+    *,
+    k: Annotated[int, typer.Option("-k", "--k", help="Score the top k hits, 1 to 100.")] = questions.K,
+    as_json: Annotated[bool, typer.Option("--json", help="The numbers and each question's ranks, as JSON.")] = False,
+    vault: VaultOption = None,
+) -> None:
+    """Measure search with your own questions: recall at k and MRR per kind of question. Writes nothing."""
+    v = find_vault(vault)
+    report = questions.run(v, questions.load(file, ZoneInfo(v.config.owner.time_zone)), k=k)
+    if as_json:
+        # ASCII only: a question's text can't put a terminal code on the screen.
+        typer.echo(json.dumps(report.model_dump(mode="json"), indent=2))
+    else:
+        say_all(render.eval_report(report))
 
 
 @import_app.command("notes")
