@@ -13,11 +13,12 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass, replace
+from itertools import pairwise
 
 from docket.vault.anchors import normalize_newlines, trailing_anchors
 from docket.vault.config import NeverStore
 from docket.vault.neverstore import matches_text
-from docket.vault.processed import DocProblem, DocRefusedError, ProcessedDoc, key_line, line_roles
+from docket.vault.processed import DOC_TYPES, DocProblem, DocRefusedError, ProcessedDoc, key_line, line_roles
 from docket.vault.redact import BUILTIN_NAMES, MARKER, Redactor
 
 LEGACY = "legacy-note"
@@ -31,6 +32,10 @@ PATTERN_SAYS = (
 KNOWN = frozenset({"id", "type", "rev", "covers", "by", "supersedes", "entities", "old_paths", "import_hash"})
 SCREENED = frozenset({"id", "entities", "supersedes", "old_paths"})
 _KEY = re.compile(r"^([A-Za-z_][\w-]*)[ \t]*:(.*)$")
+# The rev line a take-in rewrites whole: `rev:` and a number, nothing else.
+_REV = re.compile(r"rev:[ \t]*\d*[ \t]*")
+# A doc type before a slug, `minutes:`, is Docket's own word, so the keyword screen leaves it out.
+_TYPED = re.compile(r"(?<![\w-])(?:" + "|".join(re.escape(t) for t in DOC_TYPES) + r"):")
 
 
 @dataclass(frozen=True)
@@ -137,6 +142,13 @@ def check(doc: ProcessedDoc, head: list[str], redactor: Redactor, lists: NeverSt
     redacted = redact(doc.meta.type, doc.body, redactor)
     first = doc.head_lines + 1
     problems = meta_hits(doc, head, lists)
+    # `by` is the frontmatter's one free text: it isn't screened for keywords (it names the writer, and `sync` would
+    # refuse every doc), but what redaction would hide in it refuses the doc, since no marker goes into YAML.
+    rules = _rules_added(doc.meta.by, redactor.text(doc.meta.by))
+    if rules:
+        plural = "s" if len(rules) > 1 else ""
+        message = f"by: holds what the {', '.join(rules)} rule{plural} would redact; say who wrote it, nothing more"
+        problems.append(DocProblem(key_line(head, "by"), message))
     problems += [DocProblem(first + i, message) for i, message in body_hits(doc.meta.type, redacted.body, lists)]
     if problems:
         raise DocRefusedError(problems)
@@ -160,46 +172,89 @@ def _parts(text: str) -> tuple[list[str], list[str]]:
     return lines[: close + 1], lines[close + 1 :]
 
 
-def _values(head: list[str]) -> list[tuple[int, str, str, str]]:
-    """Each frontmatter line after the first --- as (line number, the line, its key, the text to check): a comment line
-    whole, a key's value, or a list item or continuation under the key above it."""
-    out: list[tuple[int, str, str, str]] = []
+@dataclass(frozen=True)
+class _Line:
+    """A frontmatter line after the first ---: its number in the file, the line, the key it sits under (`#` for a
+    comment line), and what the keyword screen reads of it."""
+
+    n: int
+    line: str
+    key: str
+    probe: str
+
+
+def _lines(head: list[str]) -> list[_Line]:
+    """Each frontmatter line with its key: a comment line, a key's own line, or a list item or continuation under the
+    key above it. The keyword screen reads a comment or a line under a key this Docket doesn't know whole, the key's
+    name included (`dora_example: yes`), and a known key's value, its `<type>:` prefixes left out, since a doc type is
+    Docket's own word."""
+    out: list[_Line] = []
     key = ""
     for n, line in enumerate(head[1:-1], start=2):
         stripped = line.strip()
         m = _KEY.match(line)
         if stripped.startswith("#"):
-            out.append((n, line, "#", stripped))
-        elif m is not None:
+            out.append(_Line(n, line, "#", line))
+            continue
+        if m is not None:
             key = m.group(1)
-            out.append((n, line, key, m.group(2)))
+            value = m.group(2)
         elif stripped:
-            out.append((n, line, key, stripped))
+            value = stripped
+        else:
+            continue
+        out.append(_Line(n, line, key, line if key not in KNOWN else _TYPED.sub(" ", value)))
     return out
+
+
+def _runs(lines: list[_Line]) -> list[list[_Line]]:
+    """The lines in runs of neighbours: a label and its value, or a keyword's words, can sit on two lines in a row."""
+    runs: list[list[_Line]] = []
+    for line in lines:
+        if runs and runs[-1][-1].n + 1 == line.n:
+            runs[-1].append(line)
+        else:
+            runs.append([line])
+    return runs
+
+
+def _rules_added(before: str, after: str) -> list[str]:
+    added = Counter(_rule(m.group(0)) for m in MARKER.finditer(after))
+    added.subtract(_rule(m.group(0)) for m in MARKER.finditer(before))
+    return sorted(rule for rule, n in added.items() if n > 0)
 
 
 def hand_edit(doc_type: str, text: str, last: str | None, redactor: Redactor, lists: NeverStore) -> HandEdit:
     """A hand edit to commit: its body redacted, its frontmatter left as written. What stops it: a body line on the
     keywords list, and in the frontmatter, which is committed as it stands, a comment, a key this Docket doesn't
     know, a screened key, or a line the edit changed from the last rev (every line when there is none) that says a
-    keyword, or holds what redaction would hide. No marker is ever written into YAML, so redaction there refuses."""
+    keyword, or holds what redaction would hide. Lines are read whole and in runs of neighbours, as a body is, so a
+    label is its key and a value on the next line still counts. No marker is ever written into YAML, so redaction there
+    refuses. The one rev line the take-in rewrites is left out; any other rev line is read like a changed one."""
     head, body = _parts(text)
     before = set(_parts(last)[0]) if last is not None else set[str]()
     redacted = redact(doc_type, "\n".join(body), redactor)
-    stops: list[tuple[int, str]] = []
-    for n, line, key, value in _values(head):
-        if key == "rev":
-            continue
-        hand = key == "#" or key not in KNOWN or line not in before
-        probe = value.partition(":")[2] if key in ("id", "supersedes") else value
-        if (hand or key in SCREENED) and _keywords(lists) and matches_text(probe, lists):
-            stops.append((n, SAYS))
-        elif hand:
-            counts = Counter[str]()
-            redactor.text(value, counts)
-            if counts:
-                rules = ", ".join(sorted(counts))
-                stops.append((n, f"holds what the {rules} rule{'s' if len(counts) > 1 else ''} would redact"))
+    lines = _lines(head)
+    # The rev line the take-in replaces: the first that starts `rev:`, when it holds a number and nothing else.
+    first_rev = next((line for line in lines if line.line.startswith("rev:")), None)
+    lines = [line for line in lines if not (line is first_rev and _REV.fullmatch(line.line))]
+    hand = [line for line in lines if line.key in ("#", "rev") or line.key not in KNOWN or line.line not in before]
+    screened = [line for line in lines if line in hand or line.key in SCREENED]
+    stops: dict[int, str] = {}
+    if _keywords(lists):
+        stops.update((line.n, SAYS) for line in screened if matches_text(line.probe, lists))
+        for run in _runs(hand):
+            for one, two in pairwise(run):
+                if matches_text(f"{one.probe}\n{two.probe}", lists):
+                    stops.setdefault(one.n, SAYS)
+                    stops.setdefault(two.n, SAYS)
+    for run in _runs(hand):
+        said = redactor.segment_texts([line.line for line in run], Counter[str]())
+        for line, new in zip(run, said, strict=True):
+            rules = _rules_added(line.line, new)
+            if rules:
+                plural = "s" if len(rules) > 1 else ""
+                stops.setdefault(line.n, f"holds what the {', '.join(rules)} rule{plural} would redact")
     first = len(head) + 1
-    stops += [(first + i, SAYS) for i, _ in body_hits(doc_type, redacted.body, lists)]
-    return HandEdit("\n".join([*head, redacted.body]), redacted, stops)
+    stops.update((first + i, SAYS) for i, _ in body_hits(doc_type, redacted.body, lists))
+    return HandEdit("\n".join([*head, redacted.body]), redacted, sorted(stops.items()))

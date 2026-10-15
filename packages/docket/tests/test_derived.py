@@ -209,3 +209,10 @@ def test_a_keyword_over_three_lines_names_every_line_with_text() -> None:
 def test_no_keywords_means_nothing_is_screened() -> None:
     stored = passes("- Dora Example @12:08", lists=NeverStore())
     assert stored.body.startswith("- Dora Example")
+
+
+def test_a_put_s_by_holding_what_redaction_hides_is_refused_and_a_keyword_in_it_passes() -> None:
+    [problem] = refused("- fine @12:08", by=f"claude, call {PHONE}")
+    assert problem == "line 5: by: holds what the phone rule would redact; say who wrote it, nothing more"
+    assert PHONE not in problem
+    passes("- fine @12:08", by="claude, sync 2026-10-15", lists=NeverStore(keywords=["sync"]))

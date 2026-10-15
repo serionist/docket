@@ -606,6 +606,7 @@ def test_put_many_puts_every_file_back_when_the_commit_fails(vault: Vault, monke
 
 PHONE = "+1 555 010 0188"
 SECRET = "hunter2-" + "Example"
+TOKEN = "abc123" + "def456"
 
 
 def with_settings(vault: Vault, phone: bool = True, keywords: list[str] | None = None) -> Vault:
@@ -697,6 +698,24 @@ def test_a_hand_edit_with_a_credential_is_taken_in_redacted(vault: Vault) -> Non
         ("by: claude-test, sync 2026-10-14T16:07", "by: Dora Example", "says something on the never-store"),
         ("by: claude-test", f"# her line {PHONE}\nby: claude-test", "holds what the phone rule would redact"),
         ("  - calls:rec-0042", "  - calls:rec-0042\n  - calls:+15550100188", "holds what the phone rule would redact"),
+        # A key that is a label is read with its value, and a key this Docket doesn't know is screened with its name.
+        ("by: claude-test", f"password: {SECRET}\nby: claude-test", "holds what the password rule would redact"),
+        ("by: claude-test", f"db_password: {SECRET}\nby: claude-test", "holds what the password rule would redact"),
+        ("by: claude-test", f"token: {TOKEN}\nby: claude-test", "holds what the api-key rule would redact"),
+        ("by: claude-test", "phone: 555 010 0188\nby: claude-test", "holds what the phone rule would redact"),
+        ("by: claude-test", "dora_example: yes\nby: claude-test", "says something on the never-store"),
+        ("supersedes: []", "supersedes: []  # a call with Dora Example", "says something on the never-store"),
+        ("supersedes: []", "supersedes:  # a call with Dora Example", "says something on the never-store"),
+        # A label and its value, or a keyword's words, over two lines.
+        ("by: claude-test", f"notes: |\n  the wifi password:\n  {SECRET}\nby: claude-test", "the password rule"),
+        (
+            "by: claude-test",
+            "# notes on the dora\n# example call\nby: claude-test",
+            "says something on the never-store",
+        ),
+        # Only the rev line the take-in rewrites is left out.
+        ("rev: 1\n", f"rev : 1  # password: {SECRET}\n", "holds what the password rule would redact"),
+        ("rev: 1\n", f"rev: 1\nrev: 1  # password: {SECRET}\n", "holds what the password rule would redact"),
     ],
 )
 def test_a_hand_edit_that_says_a_keyword_or_holds_a_secret_in_its_frontmatter_is_refused(
@@ -708,11 +727,13 @@ def test_a_hand_edit_that_says_a_keyword_or_holds_a_secret_in_its_frontmatter_is
     hand_edit(vault, old, new)
     edited = (vault.root / NOTE_PATH).read_text(encoding="utf-8")
     problems = refused(vault, note(rev="1", lines=["- an edit @12:08"]))
-    assert len(problems) == 1
-    assert problems[0].startswith(f"doc: {NOTE_PATH} was edited by hand, and its line ")
-    assert what in problems[0]
-    assert problems[0].endswith("; edit it or check it out again")
-    assert "dora" not in problems[0].lower()
+    assert problems
+    for problem in problems:
+        assert problem.startswith(f"doc: {NOTE_PATH} was edited by hand, and its line ")
+        assert what in problem
+        assert problem.endswith("; edit it or check it out again")
+        assert "dora" not in problem.lower()
+        assert SECRET not in problem
     assert head(vault) == before
     assert (vault.root / NOTE_PATH).read_text(encoding="utf-8") == edited
     assert "[redacted" not in edited.split("---")[1]

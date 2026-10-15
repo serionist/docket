@@ -395,12 +395,15 @@ def hold_release(
 @redaction_app.callback(invoke_without_command=True)
 def redaction_show(ctx: typer.Context, vault: VaultOption = None) -> None:
     """Which redaction rules run: credentials, phone numbers, your own patterns. Names are never redacted."""
+    # `docket redaction --vault <path> set ...` names the vault before the subcommand: set takes it from here.
+    ctx.obj = vault
     if ctx.invoked_subcommand is None:
         say_all(redaction.describe(find_vault(vault).config.redaction))
 
 
 @redaction_app.command("set")
 def redaction_set(
+    ctx: typer.Context,
     rule: Annotated[str, typer.Argument(help="credentials, phone, or one of your patterns by its name.")],
     state: Annotated[str, typer.Argument(help="on or off.")],
     vault: VaultOption = None,
@@ -408,7 +411,8 @@ def redaction_set(
     """Turn one redaction rule on or off in vault.yaml, and commit it."""
     if state not in ("on", "off"):
         raise DocketError(f"the setting is on or off, not {state!r}")
-    done = redaction.set_rule(find_vault(vault), rule, state == "on")
+    named: Path | None = vault if vault is not None else ctx.obj
+    done = redaction.set_rule(find_vault(named), rule, state == "on")
     if done.by_hand is not None:
         say(f"vault.yaml has comments or a layout of your own, so it is left as it is; set it there: {done.by_hand}")
     elif done.changed:

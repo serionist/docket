@@ -91,27 +91,50 @@ def test_set_turns_a_pattern_off_by_its_name(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("patterns", "rule", "message"),
+    ("patterns", "rule", "state", "message"),
     [
-        ([], "names", "no redaction rule names: credentials, phone"),
-        ([RedactionPattern(name="door", pattern="x")], "doors", "credentials, phone, or door"),
-        ([RedactionPattern(name="phone", pattern="x")], "phone", "phone: true, under redaction:"),
-        ([RedactionPattern(name="credentials", pattern="x")], "credentials", "in place of builtin:"),
+        ([], "names", "on", "no redaction rule names: credentials, phone"),
+        ([RedactionPattern(name="door", pattern="x")], "doors", "on", "credentials, phone, or door"),
+        ([RedactionPattern(name="phone", pattern="x")], "phone", "on", "phone: true, under redaction:"),
+        (
+            [RedactionPattern(name="phone", pattern="x")],
+            "phone",
+            "off",
+            "phone: false, under redaction:, or enabled: false",
+        ),
+        ([RedactionPattern(name="credentials", pattern="x")], "credentials", "on", "in place of builtin:"),
         (
             [RedactionPattern(name="door", pattern="x"), RedactionPattern(name="door", pattern="y")],
             "door",
-            "2 patterns",
+            "off",
+            "2 patterns are named door; change the one you mean in vault.yaml (enabled: false)",
         ),
     ],
 )
 def test_a_rule_set_can_t_place_is_refused(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], patterns: list[RedactionPattern], rule: str, message: str
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    patterns: list[RedactionPattern],
+    rule: str,
+    state: str,
+    message: str,
 ) -> None:
     vault = make_vault(tmp_path, *patterns)
     before = (vault.root / "vault.yaml").read_text(encoding="utf-8")
-    assert main(["redaction", "set", rule, "on", "--vault", str(vault.root)]) == 2
+    assert main(["redaction", "set", rule, state, "--vault", str(vault.root)]) == 2
     assert message in capsys.readouterr().err
     assert (vault.root / "vault.yaml").read_text(encoding="utf-8") == before
+
+
+def test_the_group_s_vault_reaches_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    here = make_vault(tmp_path / "a")
+    there = make_vault(tmp_path / "b")
+    monkeypatch.chdir(here.root)
+    assert main(["redaction", "--vault", str(there.root), "set", "credentials", "off"]) == 0
+    assert not settings(there).redaction.credentials
+    assert settings(here).redaction.credentials
+    assert subjects(here)[0] != "Config: redaction credentials off"
 
 
 def test_set_takes_on_or_off_only(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

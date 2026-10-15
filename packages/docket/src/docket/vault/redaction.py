@@ -70,20 +70,21 @@ def by_hand(rule: str, on: bool, pattern: bool) -> str:
     return f"{rule}: {value}, under redaction:{old}"
 
 
-def _target(settings: Redaction, rule: str) -> bool:
+def _target(settings: Redaction, rule: str, on: bool) -> bool:
     """Whether the rule is one of the user's patterns rather than a built-in switch; refused when the name is no rule,
-    or could be either, or two patterns share it."""
+    or could be either, or two patterns share it, with the vault.yaml lines that would set it `on` as asked."""
     named = [p for p in settings.patterns if p.name == rule]
     if rule in BUILTIN:
         if named:
             raise DocketError(
                 f"{rule} names the built-in rule and a pattern of yours; change the one you mean in vault.yaml: "
-                f"{by_hand(rule, True, False)}, or {by_hand(rule, True, True)}; or rename the pattern"
+                f"{by_hand(rule, on, False)}, or {by_hand(rule, on, True)}; or rename the pattern"
             )
         return False
     if len(named) > 1:
         raise DocketError(
-            f"{len(named)} patterns are named {rule}; change the one you mean in vault.yaml (enabled: true or false), "
+            f"{len(named)} patterns are named {rule}; change the one you mean in vault.yaml "
+            f"(enabled: {'true' if on else 'false'}), "
             "or give each its own name"
         )
     if not named:
@@ -99,7 +100,7 @@ def set_rule(vault: Vault, rule: str, on: bool) -> Switched:
         text = path.read_bytes().decode("utf-8")
         config = VaultConfig.load(path)
         settings = config.redaction
-        pattern = _target(settings, rule)
+        pattern = _target(settings, rule, on)
         result = Switched(rule=rule, on=on)
         current = next(p.enabled for p in settings.patterns if p.name == rule) if pattern else getattr(settings, rule)
         if current == on:

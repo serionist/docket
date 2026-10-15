@@ -4,12 +4,14 @@ strings are assembled from parts, as in test_redact.py; people and numbers are i
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 from docket_testkit import configure, copy_vault, git, note, sh, template_vault
 
 from docket import index, recall, render
 from docket.cli import main
+from docket.vault import derived
 from docket.vault.docstore import DocStore, Redacting, RedactReport
 from docket.vault.vault import Vault
 
@@ -110,6 +112,9 @@ def test_what_it_can_t_redact_is_left_and_named(vault: Vault, capsys: pytest.Cap
     [
         ("# a call with Dora Example", "says something on the never-store keywords list"),
         (f"title: call {PHONE}", "holds what the phone rule would redact"),
+        # A key that is a label, and a key whose own name says a keyword.
+        (f"db_password: {SECRET}", "holds what the password rule would redact"),
+        ("dora_example: yes", "says something on the never-store keywords list"),
     ],
 )
 def test_a_committed_frontmatter_holding_a_keyword_or_a_secret_is_left(
@@ -127,6 +132,28 @@ def test_a_committed_frontmatter_holding_a_keyword_or_a_secret_is_left(
     assert NOTE_ID not in sh(vault.root, "git", "log", "-1", "--format=%B")
     assert at_head(vault, NOTE_PATH) == committed
     assert line in committed
+
+
+def test_a_doc_edited_while_the_pass_runs_is_left_not_written_over(
+    vault: Vault, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = derived.hand_edit
+    path = vault.root / NOTE_PATH
+
+    def then_the_user_saves(doc_type: str, text: str, *args: Any) -> derived.HandEdit:
+        found = real(doc_type, text, *args)
+        if "wifi" in text:
+            path.write_text(text.replace("@12:08", "and the user's edit @12:08"), encoding="utf-8", newline="\n")
+        return found
+
+    monkeypatch.setattr(derived, "hand_edit", then_the_user_saves)
+    assert redact(vault) == 1
+    out = capsys.readouterr().out
+    assert f"          {NOTE_PATH}: it changed while the pass ran; run docket doc redact again" in out
+    assert out.startswith("redacted  1 doc: 1 password")
+    assert "and the user's edit" in path.read_text(encoding="utf-8")
+    message = sh(vault.root, "git", "log", "-1", "--format=%B")
+    assert (MINUTES_ID in message, NOTE_ID in message) == (True, False)
 
 
 def test_a_key_this_docket_doesn_t_know_is_kept(vault: Vault) -> None:

@@ -415,15 +415,16 @@ class DocStore:
         redaction would hide, and a file that doesn't parse or sits where its id doesn't say are left and named."""
         report = RedactReport(dry_run=dry_run)
         folder = self.root / "processed"
-        writes: list[tuple[str, str]] = []
-        lines: list[str] = []
+        # Each doc to write: its path, the bytes it was read as, the text to write, and what the report says of it.
+        pending: list[tuple[str, bytes, str, Redacting]] = []
         with self.vault.writing():
             for path in sorted(folder.rglob("*.md")) if folder.is_dir() else []:
                 rel = path.relative_to(self.root).as_posix()
+                data = path.read_bytes()
                 try:
-                    text = self.read_file(path)
+                    text = data.decode("utf-8")
                     doc = parse_doc(text, lenient=True)
-                except DocketError:
+                except (UnicodeDecodeError, DocketError):
                     report.left.append(f"{rel}: it doesn't parse as a doc; fix it")
                     continue
                 meta = doc.meta
@@ -446,11 +447,25 @@ class DocStore:
                         rev, _ = self._take_in(meta.id, path, text, stored, last)
                     report.docs.append(Redacting(id=meta.id, rev=rev, redactions=counts, by_hand=True))
                     continue
-                report.docs.append(Redacting(id=meta.id, rev=stored + 1, redactions=counts))
-                writes.append((rel, _with_rev(edit.text, stored + 1)))
-                lines.append(f"Doc: {meta.id} rev {stored + 1}")
+                pending.append(
+                    (
+                        rel,
+                        data,
+                        _with_rev(edit.text, stored + 1),
+                        Redacting(id=meta.id, rev=stored + 1, redactions=counts),
+                    )
+                )
+            writes: list[tuple[str, str]] = []
+            for rel, data, new, redacting in pending:
+                # A hand edit saved while the pass ran isn't the text it redacted: leave it rather than write over it.
+                if (self.root / rel).read_bytes() != data:
+                    report.left.append(f"{rel}: it changed while the pass ran; run docket doc redact again")
+                    continue
+                report.docs.append(redacting)
+                writes.append((rel, new))
             if writes and not dry_run:
-                report.commit = self._write_all_and_commit(writes, f"Redact docs: {len(writes)}\n\n" + "\n".join(lines))
+                lines = "\n".join(f"Doc: {r.id} rev {r.rev}" for r in report.docs if not r.by_hand)
+                report.commit = self._write_all_and_commit(writes, f"Redact docs: {len(writes)}\n\n{lines}")
         return report
 
     def _write_all_and_commit(self, files: list[tuple[str, str]], message: str) -> str | None:
