@@ -79,3 +79,37 @@ jobs:
         run: uv sync --locked
       - name: Types and tests
         run: uv run gate os
+
+  # The service registered for real on each system, killed, back again, stopped and uninstalled, under a name of its
+  # own and on a temp vault. A runner whose user session can't hold the registration skips it, and the PR says which ran.
+  service:
+    name: Service install (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, name: Windows }
+          - { os: macos-latest, name: macOS }
+          - { os: ubuntu-latest, name: Linux }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync --locked
+      # A systemd user instance needs the user to linger, and its bus to be found.
+      - name: A systemd user instance
+        if: runner.os == 'Linux'
+        run: |
+          sudo loginctl enable-linger "$USER"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
+      - name: Install, kill, wait, stop and uninstall
+        env:
+          DOCKET_TEST_LIVE_SERVICE: "1"
+        run: uv run pytest packages/docket/tests/test_service_install_live.py -v -rs -p no:cacheprovider

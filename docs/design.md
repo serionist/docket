@@ -192,18 +192,19 @@ flowchart TB
 
 ### 4.1 The service
 
-- One process per machine, in the user's session, installed by `docket service install`: a task started at logon
-  on Windows, a LaunchAgent on macOS, a systemd user unit on Linux. Not a system service: the recorder needs the
-  user's audio devices, and the keychain, git credentials and GPU are the user's.
-- It serves the web app, a REST API and the MCP endpoint on one localhost port. The plugin registers it with Claude
-  Code.
-- The single writer. Every Claude session, the CLI and the app go through it, and it serializes writes. If it's
-  down, the CLI works on the files with a lock.
+- One process per user, in the user's session, installed by `docket service install`: a task started at logon
+  on Windows, a LaunchAgent on macOS, a systemd user unit on Linux (DR-0154). Not a system service: the recorder needs
+  the user's audio devices, and the keychain, git credentials and GPU are the user's.
+- It serves the web app, a REST API and the MCP endpoint on one 127.0.0.1 port, 8741 unless the user's config says
+  otherwise (DR-0151). The plugin registers it with Claude Code.
+- It runs its writes one at a time. Every Claude session and the app go through it; the CLI writes directly, under
+  the same vault lock the service takes, whether the service runs or not (DR-0153).
 - Models run in worker processes, each in its own environment: the embedder and reranker stay loaded; Whisper
   starts per job and ends, freeing its VRAM, and its CUDA libraries never share a process with PyTorch's.
-- Security on localhost: bound to 127.0.0.1; the browser gets a session cookie from a one-time link the CLI opens
-  (SameSite=Strict); every write checks Origin and Sec-Fetch-Site; the API and MCP take a bearer token from the
-  keychain; the MCP endpoint uses the MCP SDK's DNS-rebinding protection. The service runs the consuming repo's
+- Security on localhost (DR-0152): bound to 127.0.0.1; every request's Host checked; the browser gets a session
+  cookie (SameSite=Strict) from a one-time link `docket open` opens; every write checks Origin and Sec-Fetch-Site;
+  the API and MCP take a bearer token from the keychain, or from a file only the user can read where there is no
+  keychain; the MCP endpoint also uses the MCP SDK's DNS-rebinding protection. The service runs the consuming repo's
   mappers, never code from the vault, a downloads folder or a drop folder.
 - Any number of machines; git is the source of truth. Each machine's index is a cache, rebuilt from the repo. Raw
   run files carry the machine's name, cursors are kept per machine, the machine that harvested a record processes it,
@@ -530,15 +531,15 @@ MCP tools:
 
 | Tool | Does |
 |---|---|
-| `search` | query, boosts and filters (sources, people, entities, since, until, k); hits with locators |
+| `search` | query, boosts and filters (sources, people, entities, since and until as a date or a time, k); hits with locators |
 | `read` | a locator or doc: the summary, the raw, or both, with `around` (minutes, paragraphs or messages) and a doc's `rev` |
 | `verify` | a doc's lines next to their raw spans |
 | `timeline` | an entity's mentions by date and container |
 | `entity` | canonical name, aliases, related, ids, last seen, open items |
 | `doc_put` | write a processed doc; checks the frontmatter and that every anchor resolves |
 | `propose` | a ledger item, a decision, an alias, a correction, into the review tiers |
-| `ingest` | a run's captures (the hook's verbatim tool output) and its manifest; the source's mapper makes normalized records, the core checks their rids and computes their versions, and they go to staging |
-| `media_put` | audio or an attachment by path or URL, within the limits in Sources (named folders, https to the hosts `vault.yaml` lists for the source, no private addresses, few redirects, a size cap); the service fetches, encrypts and stores it |
+| `ingest` | a run's captures (the hook's verbatim tool output) and its manifest; the source's mapper makes normalized records, the core checks their rids and computes their versions, and they go to staging (phase 1, #41) |
+| `media_put` | audio or an attachment by path or URL, within the limits in Sources (named folders, https to the hosts `vault.yaml` lists for the source, no private addresses, few redirects, a size cap); the service fetches, encrypts and stores it (phase 2, #42) |
 | `transcribe` | run speech recognition on a stored recording (phase 2, when a model is installed) |
 | `ledger` | snapshot, history queries, batch ops, queue, meetings, points |
 | `secret` | a named secret, with a confirmation |
@@ -583,8 +584,8 @@ No big-bang switch: each piece of an existing setup is replaced only after its r
 | Phase | What | Usable for |
 |---|---|---|
 | 0 | the vault and its raw log behind the gate; recordings and old notes imported; full-text search with a column per language and seeded aliases; a minimal service with MCP `search`, `read`, `verify`, `doc_put`; the Search page | finding anything already kept, with sources, from any Claude session |
-| 1 | syncs write raw through the gate; the capture hook; embeddings and a reranker in a worker; the question set; curate tiers; own documents; highlights; the Staging, Curate, Sync and Settings pages | recall on Hungarian and paraphrased questions; every source raw |
-| 2 | Whisper with encrypted media; reconciling transcripts in context; vocabulary and learned corrections; Claude sessions as a source; briefs; the decision log; corrections that propagate; the secret store; retention and forget; the Recording page | prep from ready briefs; decisions with sources and history |
+| 1 | syncs write raw through the gate; the capture hook and the service's `ingest`; embeddings and a reranker in a worker; the question set; curate tiers; own documents; highlights; the Staging, Curate, Sync and Settings pages | recall on Hungarian and paraphrased questions; every source raw |
+| 2 | Whisper with encrypted media and `media_put`; reconciling transcripts in context; vocabulary and learned corrections; Claude sessions as a source; briefs; the decision log; corrections that propagate; the secret store; retention and forget; the Recording page | prep from ready briefs; decisions with sources and history |
 | 3 | the ledger and the day pages (Today, Queue, Ledger, Meetings, Outbox); GitHub and Azure DevOps activity; scheduled connectors and Claude inside the service | daily use; syncs without a session |
 | 4 | the recorder; a Whisper fine-tune; learning the voice; the phone page; diarization if wanted | calls on the laptop without a recorder device |
 | 5 | installers on macOS and Linux; Gmail and IMAP; docs; the first release | giving it to friends |

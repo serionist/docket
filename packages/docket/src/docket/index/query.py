@@ -142,6 +142,17 @@ class _Row:
     also: list[str] = field(default_factory=list[str])
 
 
+def parse_when(text: str | None, what: str) -> date | datetime | None:
+    """`since` or `until` as given on the command line or to a tool: a date (the owner's whole day), or a time, with its
+    offset or else in the owner's time zone. Anything else is refused, naming what it was given for."""
+    if text is None:
+        return None
+    try:
+        return date.fromisoformat(text) if len(text) == len("2026-10-14") else datetime.fromisoformat(text)
+    except ValueError:
+        raise DocketError(f"{what} is a date or a time, such as 2026-10-14 or 2026-10-14T09:30") from None
+
+
 def _time(value: str | None) -> datetime | None:
     return None if value is None else datetime.fromisoformat(value.replace("Z", "+00:00"))
 

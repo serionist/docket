@@ -510,6 +510,9 @@ def test_signed_commits_shown_with_their_signatures_dont_confuse_the_history(vau
     if subprocess.run([*probe, "-m", "probe"], cwd=vault.root, capture_output=True, check=False).returncode != 0:
         pytest.skip("this git can't sign with ssh")
     first = recall.doc_put(vault, note())
+    # Docket's own commits never sign; the user's own commit on top of them is signed.
+    assert sh(vault.root, "git", "log", "-1", "--no-show-signature", "--format=%G?").strip() == "N"
+    subprocess.run([*probe, "-m", "the user's own, signed"], cwd=vault.root, capture_output=True, check=True)
     assert len(sh(vault.root, "git", "log", "-1", "--format=%H").splitlines()) > 1  # the signature shows
     assert recall.doc_put(vault, note(rev="1", lines=["- signed again @12:08"])).rev == 2
     assert DocStore(vault).history(NOTE_ID)[1] == (1, first.commit)

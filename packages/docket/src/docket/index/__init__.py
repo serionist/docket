@@ -4,7 +4,7 @@
 """
 
 from docket.index.build import BuildReport, IndexStatus, RecordLocation, locate, rebuild, status, update
-from docket.index.query import Group, Hit, QueryReading, SearchResult, search
+from docket.index.query import Group, Hit, QueryReading, SearchResult, parse_when, search
 
 __all__ = [
     "BuildReport",
@@ -15,6 +15,7 @@ __all__ = [
     "RecordLocation",
     "SearchResult",
     "locate",
+    "parse_when",
     "rebuild",
     "search",
     "status",

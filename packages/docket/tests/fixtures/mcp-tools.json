@@ -1,0 +1,170 @@
+[
+  {
+    "name": "search",
+    "input_schema": {
+      "properties": {
+        "entities": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "k": {
+          "default": 20,
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "people": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "query": {
+          "type": "string"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sources": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "until": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "annotations": {
+      "read_only_hint": true,
+      "open_world_hint": false
+    }
+  },
+  {
+    "name": "read",
+    "input_schema": {
+      "properties": {
+        "around": {
+          "default": 0,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "locator": {
+          "type": "string"
+        },
+        "rev": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "view": {
+          "default": "summary",
+          "enum": [
+            "summary",
+            "raw",
+            "both"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "locator"
+      ],
+      "type": "object"
+    },
+    "annotations": {
+      "read_only_hint": true,
+      "open_world_hint": false
+    }
+  },
+  {
+    "name": "verify",
+    "input_schema": {
+      "properties": {
+        "doc": {
+          "type": "string"
+        },
+        "lines": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "window": {
+          "default": 60,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "doc"
+      ],
+      "type": "object"
+    },
+    "annotations": {
+      "read_only_hint": true,
+      "open_world_hint": false
+    }
+  },
+  {
+    "name": "doc_put",
+    "input_schema": {
+      "properties": {
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "annotations": {
+      "read_only_hint": false,
+      "destructive_hint": false,
+      "idempotent_hint": true,
+      "open_world_hint": false
+    }
+  }
+]

@@ -24,6 +24,7 @@ DOC_LINE = re.compile(r"^Doc: (\S+) rev ([1-9]\d*)(?: \(edited by hand\))?$")
 INDEX_LOCK_WAIT_SECONDS = 3.0
 _INDEX_LOCK_PAUSE = 0.1
 _PATHSPEC = ("--pathspec-from-file=-", "--pathspec-file-nul")
+NO_SIGNING = ("-c", "commit.gpgsign=false")
 
 
 @dataclass(frozen=True)
@@ -54,9 +55,11 @@ class Git:
         identity: bool = False,
         stdin: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
-        config: list[str] = []
+        # Docket's commits are machine commits, so they never sign, and neither does sync's rebase, which writes
+        # commits again: a service with no terminal would hang on a pinentry prompt or fail on a key it can't unlock.
+        config: list[str] = list(NO_SIGNING)
         if identity and self.fallback is not None and not self.has_identity():
-            config = ["-c", f"user.name={self.fallback.name}", "-c", f"user.email={self.fallback.email}"]
+            config += ["-c", f"user.name={self.fallback.name}", "-c", f"user.email={self.fallback.email}"]
         extra = dict(env or {})
         ceiling = self.home.ceiling if self.home is not None else None
         if ceiling is not None:

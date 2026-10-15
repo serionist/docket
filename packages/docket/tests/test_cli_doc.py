@@ -9,7 +9,8 @@ from pathlib import Path
 import pytest
 from docket_testkit import REC, at, copy_vault, make_record, note, template_vault
 
-from docket.cli import main, printable
+from docket.cli import main
+from docket.render import printable
 from docket.vault.vault import Vault
 
 NOTE_ID = "recording-note:2026-10-14-supplier-call"

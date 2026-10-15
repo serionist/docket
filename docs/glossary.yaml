@@ -71,6 +71,12 @@ terms:
   - term: segment
     definition: "One utterance of a transcript: where it starts and ends in milliseconds from the record's start, who spoke, and what was said."
     see: [packages/docket/src/docket/vault/segments.py]
+  - term: service
+    definition: The one Docket process per user, started at logon, that serves the MCP endpoint, the REST API and the web app on one 127.0.0.1 port and runs its writes one at a time. docket serve runs it; docket service install registers it.
+    see: [packages/docket/src/docket/service/__init__.py]
+  - term: session link
+    definition: "The one-time link docket open asks the service for: good once and for a minute, it starts a browser session that lasts 12 hours at most and ends when the service stops."
+    see: [packages/docket/src/docket/service/sessions.py]
   - term: staging gate
     definition: "The checks every record passes on its way from a connector to the raw log: the never-store lists, the source rules, classification, cuts and redaction. Records wait in the vault's staging/ folder, never committed."
     see: [packages/docket/src/docket/vault/gate.py]

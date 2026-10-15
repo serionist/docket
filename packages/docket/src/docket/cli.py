@@ -3,28 +3,30 @@
 from __future__ import annotations
 
 import os
-import re
 import sys
+import webbrowser
 from collections.abc import Sequence
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
 import typer
 
-from docket import __version__, index, recall, userconfig
+from docket import __version__, index, recall, render, userconfig
 from docket.errors import DocketError
 from docket.imports import notes
+from docket.render import printable
+from docket.service.platforms import Installer
+from docket.service.token import Tokens
 from docket.sources.contract import Manifest
 from docket.sources.ingest import IngestReport, ingest_run
 from docket.sources.runner import MapperFailedError
 from docket.vault import convert, cuts
-from docket.vault.anchors import format_time
 from docket.vault.gate import Gate, Label
 from docket.vault.processed import DocRefusedError
 from docket.vault.records import RawRecord, source_name_problem
-from docket.vault.spans import WINDOW, Span
+from docket.vault.spans import WINDOW
 from docket.vault.staging import Classifier, Entry, State
 from docket.vault.vault import Vault
 from docket.vault.wizard import Given, Wizard
@@ -44,6 +46,10 @@ doc_app = typer.Typer(help="Processed docs: put one with its anchors, read it, v
 app.add_typer(doc_app, name="doc")
 index_app = typer.Typer(help="The index: built from the vault on this machine, for search.", no_args_is_help=True)
 app.add_typer(index_app, name="index")
+service_app = typer.Typer(
+    help="The service: started at your logon, serving Claude and the web app on 127.0.0.1.", no_args_is_help=True
+)
+app.add_typer(service_app, name="service")
 
 
 import_app = typer.Typer(help="Bring what already exists into the vault: a notes folder first.", no_args_is_help=True)
@@ -393,36 +399,14 @@ def _by(value: str) -> Classifier:
     raise DocketError(f"--by is user or claude, not {value!r}")
 
 
-# C0 and C1 control characters and DEL, but newline and tab: raw text printed as it is could drive the terminal
-# (OSC 52 sets the clipboard).
-CONTROL = re.compile("[\\x00-\\x08\\x0b-\\x1f\\x7f-\\x9f]")
-
-
-def printable(text: str) -> str:
-    return CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", text)
-
-
 def say(text: str) -> None:
+    """Print a line with its control characters escaped: raw text printed as it is could drive the terminal."""
     typer.echo(printable(text))
 
 
-def _span(s: Span, indent: str) -> None:
-    head = f"{indent}{s.anchor}"
-    if s.ts is not None:
-        head += f"  {s.kind} {s.ts:%Y-%m-%d %H:%M}Z"
-    if s.author:
-        head += f" {s.author}"
-    if s.versions > 1:
-        head += f" ({s.versions} versions; this is the latest)"
-    say(head)
-    if s.problem is not None:
-        say(f"{indent}  ! {s.problem}")
-    elif s.segments:
-        for seg in s.segments:
-            say(f"{indent}  {format_time(seg.start_ms // 1000)}  {seg.speaker or '?'}: {seg.text}")
-    else:
-        for line in s.text.split("\n"):
-            say(f"{indent}  {line}")
+def say_all(lines: list[str]) -> None:
+    for line in lines:
+        say(line)
 
 
 @doc_app.command("put")
@@ -444,13 +428,9 @@ def doc_put(
     try:
         result = recall.doc_put(find_vault(vault), text)
     except DocRefusedError as e:
-        for problem in e.problems:
-            say(str(problem))
-        say(f"refused: {len(e.problems)} problem(s)")
+        say_all(render.refused(e.problems))
         raise typer.Exit(1) from None
-    if result.taken_in:
-        say(f"a hand edit went in first, as rev {result.taken_in}")
-    say(f"{'put' if result.changed else 'unchanged'} {result.id} rev {result.rev}  {result.path}")
+    say_all(render.put(result))
 
 
 @doc_app.command("read")
@@ -462,25 +442,7 @@ def doc_read(
     vault: VaultOption = None,
 ) -> None:
     """A doc, or a record and the doc lines that point at it: the summary first, the raw for accuracy."""
-    result = recall.read(find_vault(vault), locator, view=view, around=around, rev=rev)
-    if result.resolved is not None and result.resolved != locator.strip():
-        say(f"read as {result.resolved}")
-    for problem in result.problems:
-        say(f"! {problem}")
-    if result.doc is not None:
-        say(f"{result.doc.id} rev {result.doc.rev}  {result.doc.path}")
-        if result.doc.superseded_by:
-            say(f"superseded by {', '.join(result.doc.superseded_by)}")
-        for line in result.doc.lines:
-            say(f"{line.n:>4}  {line.text}")
-    elif result.view != "raw" and not result.lines and not result.legacy:
-        say("no current doc points at it yet")
-    for cited in result.lines:
-        say(f"{cited.doc} rev {cited.rev} line {cited.n}: {cited.text}")
-    for ref in result.legacy:
-        say(f"{ref.id}, a legacy note, covers it: {', '.join(ref.old_paths)}")
-    for s in result.spans:
-        _span(s, "")
+    say_all(render.read(recall.read(find_vault(vault), locator, view=view, around=around, rev=rev)))
 
 
 @doc_app.command("verify")
@@ -491,14 +453,7 @@ def doc_verify(
     vault: VaultOption = None,
 ) -> None:
     """Each line of a doc next to the raw its anchors point at."""
-    result = recall.verify(find_vault(vault), doc, lines=line or None, window=window)
-    say(f"{result.doc} rev {result.rev}")
-    for checked in result.lines:
-        say(f"{checked.n:>4}  {checked.text}")
-        for problem in checked.problems:
-            say(f"        ! {problem}")
-        for s in checked.spans:
-            _span(s, "        ")
+    say_all(render.verify(recall.verify(find_vault(vault), doc, lines=line or None, window=window)))
 
 
 def _report(report: index.BuildReport) -> None:
@@ -549,15 +504,6 @@ def index_status(vault: VaultOption = None) -> None:
         raise typer.Exit(1)
 
 
-def _when(text: str | None, what: str) -> date | datetime | None:
-    if text is None:
-        return None
-    try:
-        return date.fromisoformat(text) if len(text) == len("2026-10-14") else datetime.fromisoformat(text)
-    except ValueError:
-        raise DocketError(f"{what} is a date or a time, such as 2026-10-14 or 2026-10-14T09:30") from None
-
-
 @app.command("search")
 def search_command(
     query: Annotated[list[str], typer.Argument(help='Words, "quoted phrases", names, and time words like last week.')],
@@ -586,43 +532,11 @@ def search_command(
         people=person or [],
         entities=entity or [],
         sources=source or [],
-        since=_when(since, "--since"),
-        until=_when(until, "--until"),
+        since=index.parse_when(since, "--since"),
+        until=index.parse_when(until, "--until"),
         k=k,
     )
-    tz = ZoneInfo(v.config.owner.time_zone)
-    reading = result.query
-    if reading.since is not None or reading.until is not None:
-        span = [
-            f"{word} {at.astimezone(tz):%Y-%m-%d %H:%M}"
-            for word, at in (("from", reading.since), ("to", reading.until))
-            if at is not None
-        ]
-        said = f" ({', '.join(reading.time_words)})" if reading.time_words else ""
-        say(" ".join(span) + said)
-    for found in reading.entities:
-        say(f"{found.words!r} is {found.id}")
-    if reading.unknown:
-        say(f"not found as a person or entity: {', '.join(reading.unknown)}")
-    if reading.left_out:
-        say(f"too common to search for: {', '.join(reading.left_out)}")
-    if not result.groups:
-        say("nothing found")
-    for group in result.groups:
-        when = f"  {group.first.astimezone(tz):%Y-%m-%d}" if group.first else ""
-        say(f"\n{group.kind}  {group.title}  ({group.source or 'docs'}{when})")
-        if group.summary is not None:
-            say(f"  summary  {group.summary.id} rev {group.summary.rev}: {group.summary.title}")
-        for hit in group.hits:
-            at = f"  {hit.ts.astimezone(tz):%Y-%m-%d %H:%M}" if hit.ts else ""
-            who = ", ".join(hit.speakers or hit.authors)
-            lines = f"  lines {hit.lines[0]}-{hit.lines[1]}" if hit.lines else ""
-            say(f"  {hit.rank:>3}. {hit.locator}{lines}{at}{f'  {who}' if who else ''}")
-            say(f"       {hit.snippet}")
-            for anchor in hit.anchors:
-                say(f"       -> {anchor}")
-            if hit.also:
-                say(f"       also {', '.join(hit.also)}")
+    say_all(render.search(result, ZoneInfo(v.config.owner.time_zone)))
 
 
 @import_app.command("notes")
@@ -671,6 +585,156 @@ def import_notes(
         say(f"commit   {report.commit[:12]}")
     if not report.ok:
         raise typer.Exit(1)
+
+
+PortOption = Annotated[int | None, typer.Option("--port", help="The port on 127.0.0.1; default: the config, or 8741.")]
+ServiceVaultOption = Annotated[Path | None, typer.Option("--vault", help="The vault; default: the one install chose.")]
+
+
+@app.command()
+def serve(
+    vault: ServiceVaultOption = None,
+    port: PortOption = None,
+    env_file: Annotated[
+        Path | None, typer.Option("--env-file", help="The environment install captured, applied first.")
+    ] = None,
+) -> None:
+    """Run the service in the foreground: the MCP endpoint, the REST API and the web app, on 127.0.0.1."""
+    # The service's packages (FastAPI, the MCP SDK, uvicorn) load only for the commands that need them.
+    from docket.service import install, server  # noqa: PLC0415
+
+    if env_file is not None:
+        install.apply_environment(env_file)
+    server.serve(vault.resolve() if vault else None, port, said=typer.echo)
+
+
+def _tokens() -> Tokens:
+    return Tokens()
+
+
+def _installer(tokens: Tokens) -> Installer:
+    from docket.service import install  # noqa: PLC0415
+
+    def stop_pid() -> None:
+        try:
+            token: str | None = tokens.read()
+        except DocketError:
+            token = None
+        install.stop_recorded_pid(token)
+
+    return install.installer_for(stop_pid=stop_pid)
+
+
+@service_app.command("install")
+def service_install(vault: ServiceVaultOption = None, port: PortOption = None) -> None:
+    """Register the service to start at your logon, and start it; run again after an upgrade."""
+    from docket.service import install  # noqa: PLC0415
+
+    tokens = _tokens()
+    done = install.install(
+        vault.resolve() if vault else None, port, installer=_installer(tokens), tokens=tokens, environ=os.environ
+    )
+    say(f"installed as {done.how}")
+    say(f"vault    {done.vault}")
+    say(f"port     {done.port}")
+    if done.token.moved_from is not None:
+        say(f"token    moved from the {done.token.moved_from} store to {done.store}: the old one was gone")
+    elif done.token.written:
+        say(f"token    made, in {done.store}")
+    else:
+        say(f"token    in {done.store}")
+    if done.problem is not None:
+        say(f"! {done.problem}")
+        raise typer.Exit(1)
+    say("running")
+
+
+@service_app.command("stop")
+def service_stop() -> None:
+    """Stop the service until `docket service install` starts it again."""
+    _installer(_tokens()).stop()
+    say("stopped")
+
+
+@service_app.command("uninstall")
+def service_uninstall() -> None:
+    """Stop the service and remove its registration; the token and the config stay."""
+    _installer(_tokens()).uninstall()
+    say("uninstalled")
+
+
+@service_app.command("status")
+def service_status(
+    quiet: Annotated[bool, typer.Option("--quiet", help="One line, for a hook.")] = False,
+) -> None:
+    """Whether the service is installed and running, on which vault and port, and where its token lives."""
+    from docket.service import install  # noqa: PLC0415
+
+    tokens = _tokens()
+    st = install.status(_installer(tokens), tokens)
+    if quiet:
+        say(st.line)
+    else:
+        say(f"installed  {st.installed or 'no'}")
+        say(f"running    {'yes' if st.running else 'no'}, port {st.port}")
+        for key in ("pid", "version", "started", "vault", "machine"):
+            if key in st.body:
+                say(f"{key:<10} {st.body[key]}")
+        if st.body.get("vault_problem"):
+            say(f"! {st.body['vault_problem']}")
+        say(f"token      {st.store}")
+        if st.store_problem:
+            say(f"! {st.store_problem}")
+        if "PATH" in st.environment:
+            say(f"PATH       {st.environment['PATH']}")
+        say(f"log        {userconfig.log_dir() / 'service.log'}")
+        if st.warning:
+            say(f"! {st.warning}")
+    if not st.running:
+        raise typer.Exit(1)
+
+
+@service_app.command("token")
+def service_token(
+    header: Annotated[bool, typer.Option("--header", help="As the JSON Claude Code's headersHelper reads.")] = False,
+    rotate: Annotated[bool, typer.Option("--rotate", help="Make a new token, or the first one.")] = False,
+) -> None:
+    """Print the service's token, for a client on this machine."""
+    tokens = _tokens()
+    if rotate:
+        installer = _installer(tokens)
+        registered = installer.installed() is not None
+        if registered:
+            # Stopped before the rotation: under the Run key, stopping confirms the service's pid with the old token.
+            installer.stop()
+        made = tokens.rotate()
+        if made.moved_from is not None:
+            say(f"the {made.moved_from} store was gone; the token now lives in {tokens.where()}")
+        if registered:
+            from docket.service import install  # noqa: PLC0415
+
+            installer.install(install.launch_for())
+            say("a new token; the service restarted with it")
+        else:
+            say("a new token; restart `docket serve` to use it")
+        return
+    typer.echo(tokens.header() if header else tokens.read())
+
+
+@app.command("open")
+def open_app() -> None:
+    """Open the web app in your browser, through a link good once and for a minute."""
+    from docket.service import client, sessions  # noqa: PLC0415
+
+    token = _tokens().read()
+    answer = client.call("POST", "/api/session", token=token)
+    if answer is None or answer.status != 200:
+        raise DocketError("the service isn't answering; `docket service status` says why")
+    url = str(answer.body["url"])
+    page = sessions.write_redirect(url)
+    opened = webbrowser.open(page.as_uri())
+    # Printed whether or not a browser opened: a snap or Flatpak browser can't open a file in a hidden folder.
+    say(f"{'opened Docket in your browser; ' if opened else ''}the link, good once and for a minute: {url}")
 
 
 def utf8_console() -> None:

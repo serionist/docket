@@ -8,6 +8,11 @@ Unreleased in the same PR.
 
 ### Added
 
+- The service: `docket serve`, and `docket service install` to start it at your logon on Windows, macOS and Linux.
+  It serves Claude the MCP tools `search`, `read`, `verify` and `doc_put` on 127.0.0.1, behind a token from your
+  keychain, and the same four under a REST API.
+- `docket service stop`, `uninstall`, `status` and `token`, and `docket open`, which opens the web app through a link
+  good once and for a minute.
 - `docket init`: a wizard that sets up a vault anywhere, or nested in a working folder that is its own git repo, with
   an optional private remote.
 - The vault's raw log: records written once per source and run, deduplicated, committed locally.
