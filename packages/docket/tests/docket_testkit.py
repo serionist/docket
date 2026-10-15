@@ -524,6 +524,9 @@ def logical_dump(db: Path) -> dict[str, list[tuple[Any, ...]]]:
         out = {t: sorted(conn.execute(f"SELECT * FROM {t}").fetchall()) for t in LOGICAL_TABLES}  # noqa: S608
         out["chunks"] = sorted(tuple(row[1:]) for row in conn.execute("SELECT * FROM chunks"))
         out["mentions"] = sorted((keys[c], e, h, a) for c, e, h, a in conn.execute("SELECT * FROM mentions"))
+        # Vectors by the chunk they belong to, not its row id (DR-0336).
+        for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'chunk_vec_%'"):
+            out[name] = sorted((keys[c], *rest) for c, *rest in conn.execute(f"SELECT * FROM {name}"))  # noqa: S608
         conn.execute("CREATE VIRTUAL TABLE temp.words USING fts5vocab(main, chunks_fts, 'instance')")
         out["fts"] = sorted((t, keys[d], c, o) for t, d, c, o in conn.execute("SELECT * FROM temp.words"))
         return out

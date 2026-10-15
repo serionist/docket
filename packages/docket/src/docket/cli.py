@@ -723,6 +723,8 @@ def index_status(vault: VaultOption = None) -> None:
         raise typer.Exit(1)
     say(f"languages  {', '.join(st.languages)} (columns {', '.join(st.columns)})")
     say("counts     " + "  ".join(f"{table} {n}" for table, n in st.counts.items()))
+    for coverage in st.vectors:
+        say(f"vectors    {coverage.model}  {coverage.have} of {coverage.total} chunks")
     if st.new_runs or st.changed_docs or st.entities_changed:
         entities = ", the entity files" if st.entities_changed else ""
         say(f"new since  {st.new_runs} run file(s), {st.changed_docs} doc(s){entities}: docket index update")

@@ -54,12 +54,16 @@ class Embedder:
         return sum(f.size for f in self.files)
 
     def passage(self, title: str | None, text: str) -> str:
-        """A chunk's input: the passage prefix, its title unless the text's opening holds it, then its text."""
-        head = f"{title}\n" if title and title not in text[:TITLE_IN] else ""
-        return f"{self.passage_prefix}{head}{text}"
+        return passage_input(self.passage_prefix, title, text)
 
     def query(self, text: str) -> str:
         return f"{self.query_prefix}{text}"
+
+
+def passage_input(prefix: str, title: str | None, text: str) -> str:
+    """A chunk's input: the passage prefix, its title unless the text's opening holds it, then its text."""
+    head = f"{title}\n" if title and title not in text[:TITLE_IN] else ""
+    return f"{prefix}{head}{text}"
 
 
 def input_hash(text: str) -> str:
