@@ -15,7 +15,8 @@ from docket.index.text import snowball_version
 
 # 2: the FTS5 rows hold hyphenated compounds joined (DR-0280).
 # 3: a common stem form a name's case forms explain is kept, so alias_terms and mentions change (DR-0310).
-SCHEMA_VERSION = 3
+# 4: legacy notes' old paths in old_paths (DR-0320).
+SCHEMA_VERSION = 4
 TOKENIZER = "unicode61 remove_diacritics 2"
 # remove_diacritics 2 came in SQLite 3.27.
 MIN_SQLITE = (3, 27, 0)
@@ -53,6 +54,11 @@ CREATE TABLE docs (
 CREATE TABLE doc_files (path TEXT PRIMARY KEY, sha256 TEXT NOT NULL, doc TEXT) WITHOUT ROWID;
 CREATE TABLE doc_covers (doc TEXT NOT NULL, rid TEXT NOT NULL, PRIMARY KEY (doc, rid)) WITHOUT ROWID;
 CREATE INDEX doc_covers_rid ON doc_covers (rid);
+CREATE TABLE old_paths (
+  doc TEXT NOT NULL, path TEXT NOT NULL, folded TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY (doc, path)
+) WITHOUT ROWID;
+CREATE INDEX old_paths_folded ON old_paths (folded);
+CREATE INDEX old_paths_name ON old_paths (name);
 CREATE TABLE doc_anchors (
   doc TEXT NOT NULL, line INTEGER NOT NULL, ordinal INTEGER NOT NULL, rid TEXT NOT NULL, kind TEXT NOT NULL,
   start INTEGER NOT NULL, end INTEGER, PRIMARY KEY (doc, line, ordinal)

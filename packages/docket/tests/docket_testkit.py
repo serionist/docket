@@ -458,7 +458,7 @@ def build_index_vault(root: Path) -> Vault:
 
 LOGICAL_TABLES = (
     "meta", "run_files", "records", "record_versions", "segments", "docs", "doc_files", "doc_covers", "doc_anchors",
-    "entities", "entity_files", "aliases", "alias_terms", "entity_links", "external_ids", "problems",
+    "old_paths", "entities", "entity_files", "aliases", "alias_terms", "entity_links", "external_ids", "problems",
 )  # fmt: skip
 
 

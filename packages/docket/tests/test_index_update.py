@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sqlite3
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from docket_testkit import PARENT, copy_vault, index_template, logical_dump, make_record
+from docket_testkit import PARENT, copy_vault, index_template, logical_dump, make_record, notes_template
 
 from docket import recall
 from docket.index import build, matching, rebuild, status, update
@@ -109,6 +110,62 @@ def test_a_doc_changed_and_a_doc_removed(vault: Vault) -> None:
     assert report.docs == 2
 
 
+def legacy_note(slug: str, *old_paths: str) -> str:
+    paths = "".join(f"  - {p}\n" for p in old_paths)
+    return f"---\nid: legacy-note:{slug}\ntype: legacy-note\nby: import\nold_paths:\n{paths}---\n\n# {slug}\n"
+
+
+def test_old_paths_follow_their_notes_as_a_rebuild_would(vault: Vault) -> None:
+    def put() -> None:
+        recall.doc_put(vault, legacy_note("supplier", "notes/Calls/Supplier.md", "old/notes/calls/supplier.md"))
+        recall.doc_put(vault, legacy_note("kickoff", "notes/calls/kickoff.md"))
+
+    assert same_as_rebuild(vault, put).docs == 2
+    # The fixture's own legacy note keeps an old path too.
+    assert dump(vault, "SELECT doc, path, folded, name FROM old_paths ORDER BY doc, path") == [
+        ("legacy-note:kickoff", "notes/calls/kickoff.md", "notes/calls/kickoff.md", "kickoff.md"),
+        (
+            "legacy-note:old-northwind-notes",
+            "notes/Northwind/Site Lead.md",
+            "notes/northwind/site lead.md",
+            "site lead.md",
+        ),
+        ("legacy-note:supplier", "notes/Calls/Supplier.md", "notes/calls/supplier.md", "supplier.md"),
+        ("legacy-note:supplier", "old/notes/calls/supplier.md", "old/notes/calls/supplier.md", "supplier.md"),
+    ]
+
+    def edit() -> None:
+        path = vault.root / "processed" / "legacy-note" / "supplier.md"
+        path.write_text(legacy_note("supplier", "notes/calls/supplier-call.md"), encoding="utf-8", newline="\n")
+        (vault.root / "processed" / "legacy-note" / "kickoff.md").unlink()
+
+    assert same_as_rebuild(vault, edit).docs == 2
+    assert dump(vault, "SELECT doc, path FROM old_paths ORDER BY doc") == [
+        ("legacy-note:old-northwind-notes", "notes/Northwind/Site Lead.md"),
+        ("legacy-note:supplier", "notes/calls/supplier-call.md"),
+    ]
+
+
+def test_an_import_then_an_update_equals_a_rebuild(
+    vault: Vault, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    from docket.imports.notes import import_notes
+
+    shutil.copytree(notes_template(tmp_path_factory), tmp_path / "work")
+    report = same_as_rebuild(vault, lambda: import_notes(vault, tmp_path / "work" / "notes"))
+    assert report.docs > 5
+    paths = [row[0] for row in dump(vault, "SELECT path FROM old_paths")]
+    assert "notes/calls/2026-09-10-supplier-call.md" in paths
+
+
+def dump(vault: Vault, sql: str) -> list[tuple[object, ...]]:
+    conn = sqlite3.connect(build.db_path(vault))
+    try:
+        return conn.execute(sql).fetchall()
+    finally:
+        conn.close()
+
+
 def test_an_entity_changed_recomputes_its_mentions(vault: Vault) -> None:
     def change() -> None:
         path = vault.root / "entities" / "person" / "cleo-test.yaml"
@@ -193,6 +250,17 @@ def test_an_index_of_the_schema_before_rebuilds(vault: Vault) -> None:
         report.rebuilt
         and report.reason == f"it has schema {SCHEMA_VERSION - 1}, and this Docket writes {SCHEMA_VERSION}"
     )
+    assert status(vault).stale is None
+
+
+@pytest.mark.parametrize("old", [1, 2, 3])
+def test_an_index_of_an_older_schema_rebuilds(vault: Vault, old: int) -> None:
+    conn = sqlite3.connect(build.db_path(vault))
+    conn.execute(f"PRAGMA user_version = {old}")
+    conn.commit()
+    conn.close()
+    report = update(vault)
+    assert report.rebuilt and report.reason == f"it has schema {old}, and this Docket writes {SCHEMA_VERSION}"
     assert status(vault).stale is None
 
 

@@ -13,6 +13,9 @@ Normalizing makes `\\` a `/`, drops a leading `./` and repeated `/`, and compose
 and case-folded take a relative path only: a drive, a leading `/` or a `<source>:` prefix takes part in the suffix step
 alone. Nothing here touches the file system: an old path is matched as a string, never resolved, so an absolute path
 from another machine reads the same as on this one.
+
+The index keeps every old path with its folded form and its file name (DR-0320); `keys` says which of them a locator
+could match, so the index hands `find` only those and `find` decides, as it would over all of them (DR-0322).
 """
 
 from __future__ import annotations
@@ -41,6 +44,31 @@ class OldPath:
 def old_paths(docs: Iterable[ProcessedDoc]) -> list[OldPath]:
     """Every old path the legacy notes keep."""
     return [OldPath(path, d.meta.id) for d in docs if d.meta.type == "legacy-note" for path in d.meta.old_paths]
+
+
+@dataclass(frozen=True)
+class Keys:
+    """What every old path `find` could match a locator to has: its folded form among `folded`, or its file name,
+    folded, equal to `name`."""
+
+    folded: list[str]
+    name: str | None
+
+
+def name_of(path: str) -> str:
+    """An old path's last part, case-folded: what the file-name step compares."""
+    return path.rsplit("/", 1)[-1].casefold()
+
+
+def keys(locator: str) -> Keys:
+    """The keys of the old paths a locator could resolve to, or be named as a candidate of: its folded path and each of
+    its suffixes after a `/` or a `:` (the exact, case-folded and suffix steps), and its file name when the file-name
+    step applies. Kept beside `find`, whose steps they follow."""
+    norm = normalize(locator)
+    folded = norm.casefold()
+    suffixes = {folded, *(folded[i + 1 :] for i, ch in enumerate(folded) if ch in "/:")}
+    name = _SOURCE.sub("", norm, count=1).casefold()
+    return Keys(sorted(suffixes), name if "/" not in name and not _DRIVE.match(norm) else None)
 
 
 def normalize(text: str) -> str:
@@ -90,7 +118,7 @@ def find(entries: list[OldPath], locator: str) -> str:
     name = _SOURCE.sub("", norm, count=1).casefold()
 
     def same_name(path: str) -> bool:
-        return path.rsplit("/", 1)[-1].casefold() == name
+        return name_of(path) == name
 
     if "/" not in name and not _DRIVE.match(norm):
         hit = _one(entries, same_name, locator)
