@@ -1,9 +1,10 @@
 """One way in for a source's records: `ingest_run`, which `docket ingest` and the service's ingest tool both call.
 
-In order: an import's hold files are added to the hold list; the hold list is read, and a held record waiting in
-staging stops the run; the captures are counted against the manifest; an import folder's files join them; the mapper
-runs; its output is checked, and anything under a held id is dropped and only counted; the rest goes through the gate.
-What it reports is counts, ids and short reasons, never a title.
+In order: an import's hold files are added to the hold list, less the ids the owner released (DR-0205); the hold list
+is read, and a held record waiting in staging stops the run; the captures are counted against the manifest; an import
+folder's files join them; the mapper runs; its output is checked, and anything under a held id is dropped and only
+counted; the rest goes through the gate, which applies the releases. What it reports is counts, ids and short reasons,
+never a title.
 """
 
 from __future__ import annotations
@@ -19,10 +20,11 @@ from pydantic import ValidationError
 
 from docket.errors import DocketError
 from docket.sources import runner
-from docket.sources.contract import Capture, Manifest, SetAside, Waiting, check_output, mapper_input
-from docket.vault import holds
+from docket.sources.contract import Capture, Manifest, Mapped, SetAside, Waiting, check_output, mapper_input
+from docket.vault import holds, releaselog
 from docket.vault.gate import Gate, StageResult
 from docket.vault.records import RawRecord
+from docket.vault.staging import Entry
 from docket.vault.vault import Vault
 
 HOLD_FILE = "hold.txt"
@@ -40,6 +42,10 @@ class IngestReport:
     holds_added: int = 0
     # Ids this import's hold files named that no capture had: a typo in hold.txt shows here.
     holds_unseen: list[str] = field(default_factory=list[str])
+    # Ids this import's hold files named that the owner has released: not held again.
+    holds_released: list[str] = field(default_factory=list[str])
+    # Ids both held and released: a merge brought the hold back.
+    held_again: list[str] = field(default_factory=list[str])
     on_hold: int = 0
     staged: StageResult = field(default_factory=StageResult)
     set_aside: list[SetAside] = field(default_factory=list[SetAside])
@@ -71,32 +77,22 @@ def ingest_run(
     # Every hold file is read before any is added: a bad line stops the run with nothing written.
     named = [folder / HOLD_FILE] if folder is not None and (folder / HOLD_FILE).is_file() else []
     to_hold = [i for path in [*named, *hold_files] for i in holds.read_file(path, path.name)]
+    released = set(releaselog.read(vault.root, source))
     if to_hold:
         report.holds_added = holds.add(vault, source, to_hold)
+    report.holds_released = sorted(set(to_hold) & released)
 
     held = holds.read(vault.root, source)
+    report.held_again = sorted(held & released)
     lists = holds.Holds({source: held})
     gate = Gate(vault)
-    waiting_held = [e.path for e in gate.list(source=source).entries if lists.covers(e.staged.record)]
+    waiting_held = [e for e in gate.list(source=source).entries if lists.covers(e.staged.record)]
     if waiting_held:
-        files = ", ".join(p.relative_to(vault.root).as_posix() for p in waiting_held)
-        raise HeldInStagingError(
-            f"{len(waiting_held)} record(s) on hold wait in staging; delete these files, then run the ingest again: "
-            f"{files}"
-        )
+        raise HeldInStagingError(_held_in_staging(vault, source, waiting_held, held, set(report.held_again)))
 
-    if len(captures) != manifest.captures or any(c.run != manifest.run for c in captures):
-        raise DocketError(
-            f"the manifest counts {manifest.captures} capture(s) of run {manifest.run} and {len(captures)} came, or "
-            "one came from another run; the run is dropped and nothing is staged"
-        )
-    everything = list(captures)
-    if folder is not None:
-        more, report.unreadable, report.files = read_folder(folder, manifest.run, len(everything))
-        everything += more
-
-    answer = runner.run(mapper, mapper_input(source, manifest, everything, held), time_limit=time_limit)
-    mapped = check_output(source, answer)
+    mapped, report.unreadable, report.files = map_folder(
+        mapper, source, manifest, captures, folder=folder, held=held, time_limit=time_limit
+    )
     seen = {i for i in mapped.held if i in held}
     kept: list[RawRecord] = []
     for record in mapped.records:
@@ -108,10 +104,70 @@ def ingest_run(
     report.set_aside = [e for e in mapped.set_aside if not _held(e.id, source, held, seen)]
     report.waiting = [w for w in mapped.waiting if not _held(w.id, source, held, seen)]
     report.on_hold = len(seen)
-    report.holds_unseen = sorted(set(to_hold) - seen)
+    report.holds_unseen = sorted(set(to_hold) - seen - released)
     report.staged = gate.stage(kept)
-    report.held_in_raw = sorted(rid for rid in vault.rawlog.rids() if holds.covered(rid, source, held))
+    # A record in raw under an id held again is its release's cut version, not one waiting for forget.
+    still = frozenset(held - released)
+    report.held_in_raw = sorted(rid for rid in vault.rawlog.rids() if holds.covered(rid, source, still))
     return report
+
+
+def map_folder(
+    mapper: Path,
+    source: str,
+    manifest: Manifest,
+    captures: Sequence[Capture],
+    *,
+    folder: Path | None,
+    held: frozenset[str],
+    time_limit: float = runner.TIME_LIMIT,
+) -> tuple[Mapped, list[int], int]:
+    """A run's captures, and an import folder's files, through the source's mapper with these holds: the import's
+    mapping step, which `docket hold show` and `docket hold release` share with the holds of what they show lifted.
+    Returns the checked output, the places of the files that aren't JSON, and how many files the folder had."""
+    if len(captures) != manifest.captures or any(c.run != manifest.run for c in captures):
+        raise DocketError(
+            f"the manifest counts {manifest.captures} capture(s) of run {manifest.run} and {len(captures)} came, or "
+            "one came from another run; the run is dropped and nothing is staged"
+        )
+    everything = list(captures)
+    unreadable: list[int] = []
+    files = 0
+    if folder is not None:
+        more, unreadable, files = read_folder(folder, manifest.run, len(everything))
+        everything += more
+    answer = runner.run(mapper, mapper_input(source, manifest, everything, held), time_limit=time_limit)
+    return check_output(source, answer), unreadable, files
+
+
+def _held_in_staging(vault: Vault, source: str, waiting: list[Entry], held: frozenset[str], again: set[str]) -> str:
+    """Why an ingest stops: staged records under a plain hold wait for their files to be deleted; those under an id
+    held again after its release are the release's own, cut, and the release run again takes the hold off."""
+    plain: list[str] = []
+    released: set[str] = set()
+    for entry in waiting:
+        ids = {
+            holds.holder(r, source, held)
+            for r in (entry.staged.record.rid, entry.staged.record.thread, entry.staged.record.container)
+        } - {None}
+        hit = ids & again
+        if hit:
+            released |= cast(set[str], hit)
+        else:
+            plain.append(entry.path.relative_to(vault.root).as_posix())
+    parts: list[str] = []
+    if plain:
+        parts.append(
+            f"{len(plain)} record(s) on hold wait in staging; delete these files, then run the ingest again: "
+            f"{', '.join(plain)}"
+        )
+    for native in sorted(released):
+        parts.append(
+            f"{native} is held again after its release (a merge brought the hold back) and its records wait in "
+            f"staging; take the hold off with docket hold release {source} {native} --from <folder> (any import "
+            f"folder of {source}), then run the ingest again"
+        )
+    return "; ".join(parts)
 
 
 def _held(native: str | None, source: str, held: frozenset[str], seen: set[str]) -> bool:

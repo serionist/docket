@@ -8,6 +8,13 @@ Unreleased in the same PR.
 
 ### Added
 
+- Releasing held recordings: `docket hold list`, `docket hold show` and `docket hold release`. A held recording goes
+  into staging only with the cuts you confirm, each one by typing back the code it shows at your own console, and
+  leaves the hold list once its release is committed to `state/releases/<source>.jsonl`. The gate cuts a released
+  recording on every machine; its vendor notes stay out unless you keep them. Update Docket on every machine before
+  your first release: an older one doesn't read the release log.
+- `/docket:cuts` in the plugin: Claude turns your words for each left-out stretch into time ranges on the transcript
+  and hands you the release to run in your own terminal.
 - The web app's first page, Search: the search Claude uses, with facets by source, person, entity and time, results
   grouped by recording or thread, and a panel that puts a hit's summary next to its raw and checks each line
   against it. Opened with `docket open`; light and dark, by keyboard, and offline.

@@ -104,12 +104,39 @@ Records Docket must not stage yet, such as backfilled recordings with stretches 
 `state/holds/<source>.txt` (DR-0121). Every ingest and the gate read it.
 
 - Write `hold.txt` beside the backfill files before the first import, one id a line. `docket ingest` adds it to
-  `state/holds/<source>.txt`, which is then the only truth, and commits it. Only releasing a hold (#31) removes an id.
+  `state/holds/<source>.txt`, which is then the only truth, and commits it. Only a release takes an id off.
 - A held record gets no record on any route; it is only counted.
 - When an ingest stops because a held record waits in staging, delete the files it names, then run it again.
 - `docket staging classify` refuses a held record, work or private, and `promote` leaves it waiting.
 - A held record already in raw is named on every ingest; it waits for `docket forget`.
 - A recording's id in `never_store.containers` keeps it out for good, held or not.
+
+### Releasing a held recording
+
+A held recording goes in only with the cuts you confirm (DR-0200 to DR-0206).
+
+| Command | What |
+|---|---|
+| `docket hold list [<source>]` | the held ids; one marked `held again after its release` came back with a merge |
+| `docket hold show <source> <id> --from <folder>` | the recording as its mapper reads it from the folder, a transcript one utterance a line with its times; writes nothing |
+| `docket hold release <source> <id> --from <folder> --cut 12:30-14:05 [--keep <rid>]` | one recording, its cuts and what to keep as it reads |
+| `docket hold release <source> --from <folder> --proposals <file>` | the proposals file `/docket:cuts` writes, outside any repo |
+
+- Run the release in your own terminal: it refuses Claude Code's shell, a pipe and a redirect. Each recording shows
+  each cut widened to whole utterances, its edges, and every record it keeps in full; it is released only when you
+  type back the code it shows. `n` keeps it held, `q` stops.
+- A recording needs a transcript and at least one time cut that removes an utterance; a record without segments, such
+  as the vendor's notes, is left out unless you keep it. Anything else stays held, with the reason.
+- The release line goes to `state/releases/<source>.jsonl` and is committed before the hold comes off; then the
+  versions you were shown are staged already cut, ready, and `docket staging promote` takes them to raw. Any other
+  version under the id waits as pending for you to classify.
+- A hold never comes off in git before its release line: a line whose commit failed is committed first, and a log
+  or hold list an ignore rule hides stops the release with git's own error.
+- The gate cuts a released recording by the same times wherever it is staged again, on any machine. Update Docket on
+  every machine before your first release.
+- A merge can bring a hold back: `hold list` and every ingest say so, and the next import with a hold file, or
+  `docket hold release <source> <id> --from <folder>` (one code, no cuts asked), takes it off; what that stages waits
+  as pending. `hold show` refuses such an id: its cuts are on record.
 
 ## Processed docs
 

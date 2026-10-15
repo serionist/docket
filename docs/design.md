@@ -83,6 +83,9 @@ flowchart LR
   derived text later.
 - Only then are records written to the raw log and committed. An unclassified record waits in staging; the app
   shows how many.
+- A held recording goes in only once its owner releases it, typing back a code at their own console for the cuts
+  they confirm. The release log keeps those cuts, and the gate applies them to every version of the recording, on
+  every machine (DR-0200 to DR-0203).
 - Cursors are a high-water mark plus a lookback window plus a retry set per source, so late arrivals and
   rate-limited calls are caught on the next run. Each machine commits its own cursor file, and a sync starts from the
   furthest point any machine reached. A run's window start is kept until the run finishes: a listing is newest first,
@@ -253,6 +256,7 @@ vault/
   ledger/ops/<yyyy-mm>-<machine>.jsonl                                                      -> plain git
   state/cursors-<machine>.yaml   each machine's cursors per source                         -> plain git
   state/holds/<source>.txt       ids a source must not stage yet, merged by union           -> plain git
+  state/releases/<source>.jsonl  held ids the owner let in, with their cuts, merged by union -> plain git
   index/docket.sqlite            derived; `docket index rebuild` makes it from the above    -> never committed
 ```
 
@@ -507,6 +511,12 @@ change lands on whoever uses that vendor, while the core still checks every rid 
 - Hold lists keep records out that must not be staged yet, such as backfilled recordings with stretches the owner
   left out: `state/holds/<source>.txt`, ids only, read on every ingest and by the gate, failing closed (DR-0121,
   DR-0122). A held record in staging stops every ingest of its source until its file is deleted.
+- Releasing one: `/docket:cuts` turns the owner's words for each left-out stretch into time ranges on the transcript,
+  and the owner runs `docket hold release` in their own terminal, which asks for a code typed back per recording and
+  refuses Claude Code's shell, a pipe or a redirect. The release line is committed to `state/releases/<source>.jsonl`
+  before the hold comes off; the gate then cuts the recording by those times wherever it is staged, and leaves its
+  records without segments out unless the owner kept them (DR-0200 to DR-0207). No audio is stored before #42, which
+  cuts a released recording's audio by the same times.
 - A Python connector is written only where no skill can harvest: a scheduled run with nobody's Claude session open.
 - Payloads fetched before Docket existed (an export, a backfill folder) are imported with `docket ingest <source>
   <folder>`, through the source's mapper and the same checks as a live run (DR-0128).
@@ -518,7 +528,7 @@ change lands on whoever uses that vendor, while the core still checks every rid 
 | Page | What | Phase |
 |---|---|---|
 | Search | the same search Claude uses, with facets by entity, source, person and time | 0 |
-| Staging | records waiting for the gate: classify, cut, drop | 1 |
+| Staging | records waiting for the gate: classify, cut, drop; release held recordings, asked through the browser's session | 1 |
 | Curate | the weekly batch of proposals | 1 |
 | Sync | runs, failures, cursors, rate limits, what needs a Claude session | 1 |
 | Settings | sources, never-store lists, models, the Claude API key, a spend cap, redaction rules | 1 |
@@ -574,6 +584,7 @@ Phase 0's plugin, by piece:
 | the status hook | SessionStart runs `docket hook session-start`: the service's state, the vault's, the port; Claude gets every line, the user the ones that need them (DR-0161, DR-0163) |
 | `recall` | the rules above as a method, with the read-only tools pre-approved and the command line when the service is down (DR-0164) |
 | `setup` | DR-0103's round: sources first, the vault named on every command, each override asked (DR-0165) |
+| `cuts` | the owner's words for a held recording's left-out stretches placed as time ranges, in a proposals file, and the release handed to the owner's own terminal; only `docket hold list` and `show` pre-approved (DR-0207) |
 
 - The plugin holds no scripts: its hook and token helper run the `docket` command, which must be on PATH (DR-0162).
 - A plugin can't ship a `CLAUDE.md`, so the rules live in the MCP server's instructions and the recall skill.
@@ -613,7 +624,7 @@ No big-bang switch: each piece of an existing setup is replaced only after its r
 
 | Phase | What | Usable for |
 |---|---|---|
-| 0 | the vault and its raw log behind the gate; recordings and old notes imported; full-text search with a column per language and seeded aliases; a minimal service with MCP `search`, `read`, `verify`, `doc_put`; the plugin's MCP entry, session-start status, `recall` and `setup`, and `docket source new`; the Search page | finding anything already kept, with sources, from any Claude session |
+| 0 | the vault and its raw log behind the gate; recordings and old notes imported; full-text search with a column per language and seeded aliases; a minimal service with MCP `search`, `read`, `verify`, `doc_put`; the plugin's MCP entry, session-start status, `recall`, `setup` and `cuts`, and `docket source new`; held recordings released with their cuts; the Search page | finding anything already kept, with sources, from any Claude session |
 | 1 | syncs write raw through the gate; the capture hook and the service's `ingest`; embeddings and a reranker in a worker; the question set; curate tiers; own documents; highlights; the Staging, Curate, Sync and Settings pages | recall on Hungarian and paraphrased questions; every source raw |
 | 2 | Whisper with encrypted media and `media_put`; reconciling transcripts in context; vocabulary and learned corrections; Claude sessions as a source; briefs; the decision log; corrections that propagate; the secret store; retention and forget; the Recording page | prep from ready briefs; decisions with sources and history |
 | 3 | the ledger and the day pages (Today, Queue, Ledger, Meetings, Outbox); GitHub and Azure DevOps activity; scheduled connectors and Claude inside the service | daily use; syncs without a session |

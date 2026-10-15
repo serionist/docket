@@ -91,6 +91,27 @@ def cut_segments(record: RawRecord, cuts: list[Cut]) -> RawRecord:
     return record.model_copy(update={"segments": ordered, "text": render(ordered), "native": {}})
 
 
+def widen(segs: Sequence[Segment], cut: Cut) -> Cut:
+    """A time cut taken out to every utterance it touches, and again, until no further utterance overlaps: the span a
+    release shows the owner and logs, so cutting by it again removes exactly the utterances they saw go, even where
+    two people talk over each other."""
+    if cut.unit != "ms":
+        raise DocketError("only a time cut widens over a transcript's utterances")
+    span = cut
+    while True:
+        touched = removes(segs, span)
+        start = min([span.start, *(s.start_ms for s in touched)])
+        end = max([span.end, *(s.end_ms for s in touched)])
+        if (start, end) == (span.start, span.end):
+            return span
+        span = Cut(start=start, end=end, unit="ms")
+
+
+def removes(segs: Sequence[Segment], cut: Cut) -> list[Segment]:
+    """The utterances a time cut takes out: every one it overlaps."""
+    return [s for s in segs if _overlaps(s, cut)]
+
+
 def apply(record: RawRecord, cuts: Sequence[Cut]) -> RawRecord:
     """The record with its cuts made: by time on a transcript's segments, by characters on any other text."""
     if not cuts:

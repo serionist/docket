@@ -50,6 +50,12 @@ captures, and Docket maps them when the manifest closes the run.
 A backfill run, for recordings fetched before Docket: `list_files` paged down past the oldest backfill recording, no
 other calls, its manifest naming the backfill folder. The files get their start times from that listing.
 
+Recordings with stretches their owner left out go in `hold.txt` beside the backfill files before the first import, and
+stay out until they are released with their cuts. `/docket:cuts` places the owner's words for each stretch on its
+transcript and hands over `docket hold release plaud --from <folder> --proposals <file>`, which the owner runs in their
+own terminal: each recording goes in only when they type back the code it shows. Plaud's notes of a released recording
+are left out unless the owner keeps them, since they summarise the stretch too.
+
 ## What it makes
 
 Three records per recording, each with the recording's rid as thread and container:

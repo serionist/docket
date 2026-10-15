@@ -28,6 +28,7 @@ Then add this repo as a marketplace and install the plugin, in Claude Code:
 | the session-start status | `docket hook session-start`: Claude learns whether the service runs, on which vault, and what waits in staging; you see a line only when something needs you |
 | `/docket:recall` | finds what was said or written, reads the summary, checks every fact against its raw, and answers with locators; Claude also uses it on its own when you ask what someone said |
 | `/docket:setup` | checks Docket is installed, asks which sources to set up, where the vault lives and your languages, creates the vault, and writes each source's skill and mapper with `docket source new` |
+| `/docket:cuts` | for recordings you held back, turns your words for each left-out stretch into time ranges on the transcript, writes them to a proposals file outside any repo, and hands you `docket hold release` to run in your own terminal; it tells you first where the transcripts it reads stay in Claude Code's session files |
 
 Sync, tasks and curate arrive in later phases, and the hook that captures a source's tool results with #41.
 

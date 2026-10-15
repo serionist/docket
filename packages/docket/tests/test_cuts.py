@@ -7,8 +7,8 @@ from docket_testkit import make_record
 from pydantic import ValidationError
 
 from docket.errors import DocketError
-from docket.vault.cuts import CUT_MARKER, Cut, apply, cut_text, merge, parse
-from docket.vault.records import RawRecord
+from docket.vault.cuts import CUT_MARKER, Cut, apply, cut_text, merge, parse, removes, widen
+from docket.vault.records import RawRecord, Segment
 
 SAID: list[dict[str, Any]] = [
     {"start_ms": 0, "end_ms": 4000, "speaker": "Ben Sample", "text": "Morning, Cleo."},
@@ -152,3 +152,31 @@ def test_cut_specs_parse(spec: str, cut: Cut) -> None:
 def test_bad_cut_specs_are_refused(spec: str) -> None:
     with pytest.raises(DocketError):
         parse(spec)
+
+
+def test_a_cut_widens_to_a_fixed_point_where_speech_overlaps() -> None:
+    talk = [
+        Segment(start_ms=10_000, end_ms=20_000, speaker="Ada Example", text="the weekend plans"),
+        Segment(start_ms=18_000, end_ms=30_000, speaker="Ben Sample", text="more of them"),
+        Segment(start_ms=28_000, end_ms=40_000, speaker="Ada Example", text="and the rest"),
+        Segment(start_ms=40_000, end_ms=50_000, speaker="Ben Sample", text="back to the offer"),
+    ]
+    wide = widen(talk, Cut(start=12_000, end=15_000, unit="ms"))
+    assert wide == Cut(start=10_000, end=40_000, unit="ms")
+    assert [s.text for s in removes(talk, wide)] == ["the weekend plans", "more of them", "and the rest"]
+    # Cut by the widened span, then again: the same utterances go, and the marker spans exactly the span.
+    record = transcript(segments=[s.model_dump() for s in talk])
+    once = apply(record, [wide])
+    assert texts(once) == [CUT_MARKER, "back to the offer"]
+    assert apply(once, [wide]).segments == once.segments
+    assert [(s.start_ms, s.end_ms) for s in once.segments or [] if s.text == CUT_MARKER] == [(10_000, 40_000)]
+    assert widen(talk, wide) == wide
+
+
+def test_a_cut_between_utterances_widens_to_itself_and_a_character_cut_doesn_t_widen() -> None:
+    talk = [Segment(start_ms=0, end_ms=1000, text="a"), Segment(start_ms=5000, end_ms=6000, text="b")]
+    gap = Cut(start=2000, end=3000, unit="ms")
+    assert widen(talk, gap) == gap
+    assert removes(talk, gap) == []
+    with pytest.raises(DocketError, match="only a time cut"):
+        widen(talk, Cut(start=0, end=5))

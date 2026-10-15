@@ -20,11 +20,11 @@ from docket.imports import notes
 from docket.render import printable
 from docket.service.platforms import Installer
 from docket.service.token import Tokens
-from docket.sources import scaffold
+from docket.sources import release, scaffold
 from docket.sources.contract import Manifest
 from docket.sources.ingest import IngestReport, ingest_run
 from docket.sources.runner import MapperFailedError
-from docket.vault import convert, cuts
+from docket.vault import convert, cuts, holds, releaselog
 from docket.vault.gate import Gate, Label
 from docket.vault.processed import DocRefusedError
 from docket.vault.records import RawRecord, source_name_problem
@@ -61,6 +61,11 @@ source_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(source_app, name="source")
+hold_app = typer.Typer(
+    help="Held records: list them, show one from its import folder, release one with the cuts you confirm.",
+    no_args_is_help=True,
+)
+app.add_typer(hold_app, name="hold")
 SENSITIVITIES = ("work", "mixed", "private")
 # The Claude Code plugin's hooks run these; they print what Claude Code reads, not what a person does.
 hook_app = typer.Typer(help="What the Claude Code plugin's hooks run.", no_args_is_help=True)
@@ -299,12 +304,91 @@ def source_new(
     say("next     the folder is yours to commit; Docket commits only the vault")
 
 
+FromOption = Annotated[Path, typer.Option("--from", help="The import folder the held recording is in.")]
+IdArgument = Annotated[str, typer.Argument(metavar="ID", help="The held id, as the hold list has it.")]
+
+
+@hold_app.command("list")
+def hold_list(
+    source: Annotated[str | None, typer.Argument(help="Only this source.")] = None, vault: VaultOption = None
+) -> None:
+    """The held ids, one a line; one released and held again (a merge brought the hold back) is marked."""
+    if source is not None and (problem := source_name_problem(source)) is not None:
+        raise DocketError(problem)
+    found = find_vault(vault)
+    lists = holds.read_all(found.root)
+    released = releaselog.read_all(found.root)
+    rows = [
+        f"{name}  {native}" + ("  held again after its release" if native in released.of(name) else "")
+        for name in sorted(lists.ids)
+        if source is None or name == source
+        for native in sorted(lists.of(name))
+    ]
+    say_all(rows or ["nothing held"])
+
+
+@hold_app.command("show")
+def hold_show(source: Annotated[str, typer.Argument(help="The source.")], native: IdArgument, from_: FromOption,
+              vault: VaultOption = None) -> None:  # fmt: skip
+    """A held recording as its mapper reads it from the folder, each record as intake would stage it. Writes nothing,
+    and prints what was said: run it where you want it read."""
+    say_all(release.show_lines(release.show(find_vault(vault), source, native, from_)))
+
+
+@hold_app.command("release")
+def hold_release(
+    source: Annotated[str, typer.Argument(help="The source.")],
+    native: Annotated[str | None, typer.Argument(metavar="[ID]", help="The held id; or give --proposals.")] = None,
+    *,
+    from_: FromOption,
+    cut: Annotated[list[str] | None, typer.Option("--cut", help="A time to cut, such as 12:30-14:05. Repeat.")] = None,
+    keep: Annotated[
+        list[str] | None, typer.Option("--keep", help="A record without segments to keep as it reads, by rid. Repeat.")
+    ] = None,
+    proposals: Annotated[
+        Path | None, typer.Option("--proposals", help="The cuts skill's proposals file, outside any repo.")
+    ] = None,
+    vault: VaultOption = None,
+) -> None:
+    """Release held recordings with their cuts: each shows what goes and what is kept, and is released only when you
+    type back the code it shows. Only at your own console: Claude Code's shell, a pipe or a script is refused."""
+    found = find_vault(vault)
+    if proposals is not None:
+        if native is not None or cut or keep:
+            raise DocketError("give an id with --cut and --keep, or --proposals, not both")
+        items = release.load_proposals(proposals, source)
+    elif native is None:
+        raise DocketError("name the held id to release, or give --proposals")
+    else:
+        items = [release.Proposal(native, tuple(cut or []), tuple(keep or []))]
+    report = release.release(found, source, from_, items)
+    rows = [f"released   {i}" for i in report.released]
+    rows += [f"taken off  {i}  held again after its release; its records wait as pending" for i in report.taken_off]
+    rows += [f"staged     {i}  released already; its records wait as pending" for i in report.restaged]
+    rows += [f"held       {i}  {why}" for i, why in report.held]
+    rows += [f"refused    {i}  {why}" for i, why in report.refused]
+    if report.stopped:
+        rows.append("stopped    the rest stay held")
+    if report.taken_off or report.restaged:
+        rows.append("next       docket staging list --state pending, and classify what waits, already cut")
+    if report.released:
+        rows.append("next       docket staging promote")
+    say_all(rows or ["nothing to release"])
+
+
 def _ingest_report(report: IngestReport) -> None:
     """Counts, ids and short reasons: never a title, so a never-store recording's name stays out of the terminal."""
     if report.holds_added:
         say(f"holds      {report.source}: {report.holds_added} added")
     for unseen in report.holds_unseen:
         say(f"holds      {unseen} isn't in this import; check hold.txt for a typo")
+    for released in report.holds_released:
+        say(f"holds      {released} was released with its cuts; not held again")
+    for again in report.held_again:
+        say(
+            f"holds      {again} is held again after its release; the next import with a hold file, or docket hold "
+            f"release {report.source} {again} --from <folder>, takes it off"
+        )
     staged = report.staged
     say(
         f"staged     {report.source}: {staged.pending} pending, {staged.ready} ready, "

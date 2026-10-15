@@ -16,9 +16,11 @@ from docket.errors import DocketError
 from docket.sources.contract import Capture, Manifest, SetAside, Waiting
 from docket.sources.ingest import ingest_run
 from docket.sources.runner import MapperFailedError
-from docket.vault import holds
+from docket.vault import holds, releaselog
 from docket.vault.gate import Gate
 from docket.vault.holds import HOLDS
+from docket.vault.records import RawRecord
+from docket.vault.releaselog import Kept, LoggedCut, Release
 from docket.vault.vault import Vault
 
 # Reads each capture's result, or a file's content, as one memo or a list of them. `leak` returns a held memo anyway,
@@ -304,3 +306,92 @@ def test_a_source_without_a_mapper_is_refused_before_anything_is_read(
 def test_a_folder_that_isn_t_one_is_refused(vault: Vault, tmp_path: Path) -> None:
     with pytest.raises(DocketError, match="isn't a folder"):
         ingest_run(vault, "memo", manifest(0), [], folder=tmp_path / "missing")
+
+
+def release_memo(vault: Vault, memo_id: str) -> None:
+    """The owner releases a memo, keeping it as the mapper makes it: a memo has no segments to cut."""
+    record = RawRecord.model_validate(
+        {"rid": f"memo:{memo_id}", "source": "memo", "kind": "memo", "container": f"memo:{memo_id}", "ts": TS,
+         "title": PRIVATE_TITLE, "text": f"memo {memo_id}", "fetched": TS, "via": "memo-file"}
+    )  # fmt: skip
+    view = Gate(vault).intake_view(record)
+    assert isinstance(view, RawRecord)
+    at = datetime(2026, 10, 15, 9, 12, tzinfo=UTC)
+    line = Release(id=memo_id, cuts=[LoggedCut(start=0, end=1000)], keep=[Kept(rid=view.rid, v=view.v)], at=at,
+                   machine="test-box")  # fmt: skip
+    releaselog.add(vault, "memo", line)
+
+
+def hold_back(vault: Vault, *ids: str) -> None:
+    """The hold list as a merge left it, with released ids back on it: an add would leave them out."""
+    path = vault.root / HOLDS / "memo.txt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(f"{i}\n" for i in ids), encoding="utf-8")
+
+
+def test_an_import_doesn_t_hold_a_released_id_again_and_says_so(
+    vault: Vault, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    folder = folder_with(tmp_path, {"a.json": memo("m1"), "b.json": memo("m2"), "hold.txt": b"m1\n"})
+    assert ingest(vault, folder) == 0
+    assert staged(vault) == {"memo:m2": "memo-file"}
+    release_memo(vault, "m1")
+    holds.remove(vault, "memo", ["m1"])
+    capsys.readouterr()
+    assert ingest(vault, folder) == 0
+    out = capsys.readouterr().out
+    assert "holds      m1 was released with its cuts; not held again" in out
+    assert "isn't in this import" not in out
+    assert holds.read(vault.root, "memo") == frozenset()
+    assert set(staged(vault)) == {"memo:m1", "memo:m2"}
+
+
+def test_a_hold_a_merge_brought_back_is_named_and_its_cut_version_in_raw_isn_t_waiting_for_forget(
+    vault: Vault, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    folder = folder_with(tmp_path, {"a.json": memo("m1")})
+    release_memo(vault, "m1")
+    assert ingest(vault, folder) == 0
+    gate = Gate(vault)
+    gate.classify("memo:m1", "work")
+    gate.promote()
+    hold_back(vault, "m1")
+    capsys.readouterr()
+    assert ingest(vault, folder) == 0
+    out = capsys.readouterr().out
+    assert (
+        "holds      m1 is held again after its release; the next import with a hold file, or docket hold release memo "
+        "m1 --from <folder>, takes it off"
+    ) in out
+    assert "waits for docket forget" not in out
+
+
+def test_a_staged_record_under_a_hold_brought_back_names_the_release_not_deleting_files(
+    vault: Vault, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    folder = folder_with(tmp_path, {"a.json": memo("m1"), "b.json": memo("m2")})
+    release_memo(vault, "m1")
+    assert ingest(vault, folder) == 0
+    hold_back(vault, "m1", "m2")
+    capsys.readouterr()
+    assert ingest(vault, folder) == 2
+    err = capsys.readouterr().err
+    assert "m1 is held again after its release (a merge brought the hold back)" in err
+    assert "docket hold release memo m1 --from <folder> (any import folder of memo)" in err
+    # m2 was never released: its staged file still has to go.
+    assert "1 record(s) on hold wait in staging; delete these files" in err
+    assert PRIVATE_TITLE not in err
+
+
+def test_only_released_records_waiting_under_a_hold_brought_back_ask_for_no_deletion(
+    vault: Vault, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    folder = folder_with(tmp_path, {"a.json": memo("m1")})
+    release_memo(vault, "m1")
+    assert ingest(vault, folder) == 0
+    hold_back(vault, "m1")
+    capsys.readouterr()
+    assert ingest(vault, folder) == 2
+    err = capsys.readouterr().err
+    assert "docket hold release memo m1 --from <folder> (any import folder of memo)" in err
+    assert "delete" not in err
