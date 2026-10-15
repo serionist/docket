@@ -25,6 +25,7 @@ from docket.errors import DocketError
 from docket.vault import derived
 from docket.vault.anchors import normalize_newlines, trailing_anchors
 from docket.vault.git import DOC_LINE
+from docket.vault.home import make_private
 from docket.vault.processed import (
     DocMeta,
     DocProblem,
@@ -492,8 +493,7 @@ class DocStore:
 
     def _replace(self, path: Path, data: bytes) -> None:
         """Write a file whole through a temp file and a rename; the temp file lives in .git, never in processed/."""
-        tmp_dir = self.vault.home.tmp_dir
-        tmp_dir.mkdir(parents=True, exist_ok=True)
+        tmp_dir = make_private(self.vault.home.git_dir, self.vault.home.tmp_dir)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = tmp_dir / f"{path.name}.{os.getpid()}.tmp"
         try:

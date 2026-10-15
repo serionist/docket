@@ -191,7 +191,7 @@ def commit_pending(vault: Vault, source: str, message: str | None = None) -> str
 
 
 def _replace(vault: Vault, path: Path, ids: list[str]) -> None:
-    write_replacing(vault.home.tmp_dir, path, "".join(f"{i}\n" for i in ids), f"holds-{path.stem}")
+    write_replacing(vault.home, path, "".join(f"{i}\n" for i in ids), f"holds-{path.stem}")
 
 
 def _has_union(text: str) -> bool:

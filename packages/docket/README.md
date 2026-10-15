@@ -43,7 +43,10 @@ locally, and your own git does the rest.
   and land on whichever branch is checked out; `docket vault status` warns when that isn't the remote's default.
 - Docket never fetches, pulls, stashes or pushes your repo. Your push carries the vault, media included once git-lfs
   is set up (init and convert set it up, or say what to add to a pre-push hook of your own).
-- Docket's own files sit under your repo's `.git/docket/<vault path>/`, never in your tree.
+- Docket's own files sit under your repo's `.git/docket/<vault path>/`, never in your tree. If that `.git` goes
+  missing, Docket refuses to write until it is back, and never makes one.
+- Docket opens a folder vault only when the repo around it tracks its `vault.yaml`: a vault you moved into another
+  repo opens once you commit its `vault.yaml` there.
 - `staging/` (records waiting for the gate) is ignored, so `git clean -x` deletes it; a source's next sync pulls those
   records again.
 - A clone without the audio: `git config lfs.fetchexclude "<vault path>/media/**"`.

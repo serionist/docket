@@ -3,13 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from docket_testkit import make_config
+from docket_testkit import make_config, sh
 from pydantic import ValidationError
 
 from docket.cli import main
 from docket.errors import DocketError
 from docket.vault import machine
 from docket.vault.config import SourceConfig, VaultConfig
+from docket.vault.home import Home
 
 
 def test_the_config_round_trips(tmp_path: Path) -> None:
@@ -145,10 +146,11 @@ def test_names_from_host_names_are_valid(host: str, name: str) -> None:
 def test_the_machine_comes_from_env_then_the_clone_then_the_host(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (tmp_path / ".git").mkdir()
-    assert machine.resolve(tmp_path) == "test-box"
+    sh(tmp_path, "git", "init", "-q")
+    home = Home.resolve(tmp_path, "repo")
+    assert machine.resolve(home.private) == "test-box"
     monkeypatch.delenv("DOCKET_MACHINE")
-    machine.remember(tmp_path, "work-laptop")
-    assert machine.resolve(tmp_path) == "work-laptop"
+    machine.remember(home, "work-laptop")
+    assert machine.resolve(home.private) == "work-laptop"
     monkeypatch.setattr("socket.gethostname", lambda: "HOST-A")
     assert machine.resolve(None) == "host-a"

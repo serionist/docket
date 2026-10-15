@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from docket.errors import DocketError
+from docket.vault.home import make_private
 from docket.vault.lock import VaultLock
 from docket.vault.records import RawRecord, version
 
@@ -139,7 +140,7 @@ class RawLog:
         """A new file through a temp file and a rename; the temp file lives outside raw/, so it is never committed."""
         if target.exists():
             raise DocketError(f"{target} exists; a raw file is written once")
-        self.tmp_dir.mkdir(parents=True, exist_ok=True)
+        make_private(self.lock.git_dir, self.tmp_dir)
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.tmp_dir / f"{target.name}.{os.getpid()}.tmp"
         try:

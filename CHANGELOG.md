@@ -56,7 +56,8 @@ Unreleased in the same PR.
 - Plaud as the reference source, under `examples/sources/plaud`: a skill and a mapper to copy.
 - A vault can be a folder of the repo you work in, the default inside a git repo: Docket commits only the vault's
   paths there, skips your hooks and never touches your remote. `docket init --storage folder|repo` chooses, and
-  refuses a folder in a repo anyone can read.
+  refuses a folder in a repo anyone can read. Docket opens a folder vault only when the repo around it tracks its
+  `vault.yaml`, so a repo that lost its `.git` never has its vault committed into the repo above it.
 - `docket sync`: a repo of its own fetches and rebases; a folder leaves it to your own git.
 - `docket vault convert`: a vault that is a repo of its own becomes a folder of the repo around it, history
   included, after a dry run and your yes.

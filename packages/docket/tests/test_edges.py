@@ -68,7 +68,7 @@ def test_toplevel_of_a_path_that_doesnt_exist_yet(tmp_path: Path) -> None:
 
 
 def test_a_held_lock_times_out_with_a_clear_message(tmp_path: Path) -> None:
-    (tmp_path / ".git").mkdir()
+    sh(tmp_path, "git", "init", "-q")
     held = FileLock(str(tmp_path / ".git" / "docket.lock"))
     with held, pytest.raises(DocketError, match="another docket process"), VaultLock(tmp_path / ".git", timeout=0.1):
         pass

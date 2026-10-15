@@ -36,7 +36,7 @@ from docket.errors import DocketError
 from docket.vault import host
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.git import Git, Identity
-from docket.vault.home import CONVERT_FILE, rev_parse
+from docket.vault.home import CONVERT_FILE, make_private, rev_parse
 from docket.vault.host import HostReport, Visibility, remote_visibility, same_rule
 from docket.vault.lock import VaultLock
 from docket.vault.vault import IGNORE, with_attributes
@@ -90,7 +90,7 @@ class State:
     lfs_copied: list[str] = field(default_factory=list[str])
 
     def save(self, where: Where) -> None:
-        where.private.mkdir(parents=True, exist_ok=True)
+        make_private(where.git_dir, where.private)
         where.state_file.write_text(json.dumps(asdict(self), indent=2) + "\n", encoding="utf-8")
 
     @staticmethod

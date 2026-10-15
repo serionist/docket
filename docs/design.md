@@ -266,7 +266,9 @@ vault/
 
 - `vault.yaml` says which (`storage: folder` or `repo`), and Docket checks the disk agrees before it writes.
   Docket's own files (the lock, the machine name, temp files) live in the git dir, never in the user's tree:
-  `.git/docket/` for a repo of its own, `<host git dir>/docket/<vault path>/` for a folder.
+  `.git/docket/` for a repo of its own, `<host git dir>/docket/<vault path>/` for a folder. Docket never makes the
+  git dir: a vault whose git dir went missing refuses every write until it is restored, and a folder vault opens
+  only when the repo git finds around it tracks its `vault.yaml`, so it never commits into a repo above a lost host.
 - Setup checks the host repo before it offers a folder: it refuses a remote anyone can read (an SSH remote is asked
   over https), warns when the repo looks shared (other committers), refuses a host ignore rule that would hide the
   vault, and offers a repo of its own instead.

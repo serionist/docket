@@ -25,7 +25,7 @@ from docket.errors import DocketError
 from docket.vault import machine as machines
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.git import DOC_LINE, Git, Identity, SyncResult
-from docket.vault.home import Home, stopped_convert
+from docket.vault.home import Home, is_git_dir, stopped_convert
 from docket.vault.lock import VaultLock
 from docket.vault.rawlog import RUN_FILE, RawLog, parse_run_file
 from docket.vault.records import RawRecord
@@ -36,6 +36,9 @@ log = logging.getLogger(__name__)
 SYNC_REBASE_WINDOW_SECONDS = 60
 # How long a write waits for another Docket process to let go of the vault.
 LOCK_TIMEOUT_SECONDS = 60.0
+# Folder vaults whose vault.yaml was tracked in the repo Open found, by (git dir, path in it): the service opens the
+# vault on every call, and the answer doesn't change while the repo is there (DR-0271).
+_TRACKED: set[tuple[Path, str]] = set()
 
 # Folders every vault has from the start; git keeps an empty folder only with a file in it.
 FOLDERS = ["raw", "media", "processed", "entities", "ledger/ops", "state"]
@@ -147,7 +150,7 @@ class Vault:
         vault.yaml in some repo is never taken for a vault."""
         for folder in [start.resolve(), *start.resolve().parents]:
             config = folder / CONFIG_FILE
-            if config.is_file() and ((folder / ".git").exists() or is_docket_config(config)):
+            if config.is_file() and (is_git_dir(folder / ".git") or is_docket_config(config)):
                 return folder
         return None
 
@@ -163,7 +166,11 @@ class Vault:
                 f"a convert of {root} stopped part way; run `docket vault convert` to finish it, or `docket vault "
                 "convert --abort` to undo it"
             )
-        return cls(root, VaultConfig.load(root / CONFIG_FILE), lock_timeout=lock_timeout)
+        config = VaultConfig.load(root / CONFIG_FILE)
+        home = Home.resolve(root, config.storage)
+        if home.folder:
+            _check_tracked(home)
+        return cls(root, config, home, lock_timeout=lock_timeout)
 
     @classmethod
     def init(cls, path: Path, config: VaultConfig, machine: str) -> Vault:
@@ -196,7 +203,7 @@ class Vault:
                 written.append(name)
             (path / CONFIG_FILE).write_text(config.dump(), encoding="utf-8", newline="\n")
             written.append(CONFIG_FILE)
-            machines.remember(home.private, machine)
+            machines.remember(home, machine)
             vault = cls(path, config, home)
             if not folder:
                 vault.git.lfs_install()
@@ -372,6 +379,22 @@ def is_docket_config(config: Path) -> bool:
     except (OSError, UnicodeDecodeError):
         return False
     return any(line.startswith("primary_machine:") for line in text.splitlines())
+
+
+def _check_tracked(home: Home) -> None:
+    """Refuse a folder vault whose vault.yaml the repo git found doesn't track. A folder vault has no ceiling: when its
+    host's .git goes missing, git finds whatever repo holds the host, and Docket would commit the vault there. Init and
+    convert never open a vault before its first commit, so a vault Docket made always passes (DR-0271)."""
+    key = (home.git_dir, home.prefix)
+    if key in _TRACKED:
+        return
+    if Git(home.root).run("ls-files", "--error-unmatch", "--", CONFIG_FILE, check=False).returncode != 0:
+        raise DocketError(
+            f"{home.root} is a folder vault, but {home.top}, the repo git finds around it, doesn't track its "
+            f"{CONFIG_FILE}. If the repo the vault was made in, between the two, lost its .git, restore it; if you "
+            f"moved the vault into {home.top}, commit its {CONFIG_FILE} there first"
+        )
+    _TRACKED.add(key)
 
 
 def ignored(cwd: Path, prefix: str = "", config: tuple[str, ...] = ()) -> list[tuple[str, str, str]]:

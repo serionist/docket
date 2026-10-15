@@ -65,6 +65,21 @@ class Home:
         return _folder(root)
 
 
+def is_git_dir(path: Path) -> bool:
+    """Git's own test for a git dir (`is_git_directory` in its setup.c): a HEAD file, objects/ and refs/. A .git that
+    holds only Docket's folders fails it, and git skips such a folder and looks further up (DR-0270)."""
+    return (path / "HEAD").is_file() and (path / "objects").is_dir() and (path / "refs").is_dir()
+
+
+def make_private(git_dir: Path, folder: Path) -> Path:
+    """Make a folder for Docket's own files under a git dir, never the git dir itself: the folders made on the way
+    would pass for a .git, and the vault would stop saying its history is gone (DR-0270)."""
+    if not is_git_dir(git_dir):
+        raise DocketError(f"{git_dir} is missing or isn't a git repository; Docket writes nothing until it is restored")
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
 def rev_parse(cwd: Path, *flags: str) -> list[str] | None:
     """`git rev-parse` with these flags, one answer per line; None outside a repo."""
     proc = subprocess.run(
@@ -82,9 +97,10 @@ def rev_parse(cwd: Path, *flags: str) -> list[str] | None:
 
 
 def _own_repo(root: Path) -> Home:
-    if not (root / ".git").exists():
+    if not is_git_dir(root / ".git"):
+        found = " (the .git there holds no repository, only what was left in it)" if (root / ".git").exists() else ""
         raise DocketError(
-            f"{root}/vault.yaml says storage: repo, but there is no .git in {root}; restore it, or set storage: "
+            f"{root}/vault.yaml says storage: repo, but there is no .git in {root}{found}; restore it, or set storage: "
             "folder if the vault is a folder of the repo around it"
         )
     git_dir = root / ".git"
@@ -121,7 +137,7 @@ def stopped_convert(root: Path) -> Path | None:
     """The state file of a convert that stopped part way, for a vault without a .git of its own: the host's git dir
     keeps it under the vault's path."""
     root = root.resolve()
-    if (root / ".git").exists():
+    if is_git_dir(root / ".git"):
         return None
     answer = rev_parse(root, "--absolute-git-dir", "--show-prefix")
     if answer is None or not answer[1]:

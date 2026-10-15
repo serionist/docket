@@ -4,11 +4,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from docket_testkit import make_record
+from docket_testkit import make_record, sh
 from pydantic import ValidationError
 
 from docket.vault import staging as staging_module
 from docket.vault.cuts import Cut
+from docket.vault.home import Home
 from docket.vault.records import version
 from docket.vault.staging import Staged, Staging, key_of, retry, rid_hash
 
@@ -23,8 +24,8 @@ def staged(n: int = 1, **fields: object) -> Staged:
 
 @pytest.fixture
 def store(tmp_path: Path) -> Staging:
-    (tmp_path / ".git").mkdir()
-    return Staging(tmp_path)
+    sh(tmp_path, "git", "init", "-q")
+    return Staging(tmp_path, Home.resolve(tmp_path, "repo"))
 
 
 def test_a_staged_version_is_written_read_replaced_and_deleted(store: Staging) -> None:

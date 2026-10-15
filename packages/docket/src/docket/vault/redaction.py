@@ -117,11 +117,11 @@ def set_rule(vault: Vault, rule: str, on: bool) -> Switched:
             updated = settings.model_copy(update={"patterns": patterns})
         else:
             updated = settings.model_copy(update={rule: on})
-        write_config(vault.home.tmp_dir, path, config.model_copy(update={"redaction": updated}).dump())
+        write_config(vault.home, path, config.model_copy(update={"redaction": updated}).dump())
         try:
             result.commit = vault.commit([CONFIG_FILE], f"Config: redaction {rule} {word(on)}")
         except BaseException:
-            write_config(vault.home.tmp_dir, path, text)
+            write_config(vault.home, path, text)
             raise
         result.changed = True
         return result
