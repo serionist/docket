@@ -13,6 +13,8 @@ reading:
   - { path: packages/docket/src/docket/vault/holds.py, role: contract, note: "hold lists, a one-way door: the file, how it reads and fails closed, what a hold covers" }
   - { path: packages/docket/src/docket/service/tools.py, role: contract, note: "the MCP tools' names and parameters, a one-way door (DR-0150)" }
   - { path: packages/docket/src/docket/service/security.py, role: contract, note: "what every request passes before a route: hosts, origins, the token and the session (DR-0152)" }
+  - { path: packages/docket/src/docket/web/state.py, role: contract, note: "the Search page's URL: the search tool's parameters and the panel's, in one canonical form" }
+  - { path: packages/docket/src/docket/web/templates/macros.html, role: guide, note: "the web app's components, one macro each, for every page to reuse" }
 decisions:
   - id: DR-0019
     title: The vault's layout and run-file names are fixed
@@ -728,3 +730,131 @@ decisions:
       - "The blank template only: a new user picking Plaud would rewrite a mapper that exists."
       - "The reference downloaded at the version's tag: the network, and a fetched file that then runs as a mapper."
       - "Moving the reference into the package: supersedes DR-0101 and DR-0108 for no gain a byte-identical copy doesn't give."
+  - id: DR-0170
+    title: The web app renders pages on the server with Jinja2 and swaps parts of them with htmx, every state a URL
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#9"]
+    description: "Pages are Jinja2 templates in docket/web/templates, autoescaped, with StrictUndefined so a missing value fails the render, and one macro per component in macros.html. A whole page and its fragments live at different URLs (/search, /search/results, /search/panel), so no route reads HX-Request, and a reload, a bookmark or the back button always gets a page. A fragment names the page's canonical URL: HX-Push-Url when it differs from HX-Current-URL, else HX-Replace-Url; the waiting state's retry always replaces. Every state renders without JavaScript. Routes read their own query strings and render their own errors: a DocketError is the page's error state, anything else is logged as its type and frames and answered with the error page."
+    binds:
+      - Text from records and docs goes through no |safe and becomes no link.
+      - Unknown page paths answer an HTML 404; /api and /mcp keep JSON.
+    not_chosen:
+      - "One URL answering a page or a fragment by HX-Request: a reload or back can get a fragment, and the header names changed between htmx 2 and 4."
+      - "FastAPI's typed query parameters: a bad value answers a page with JSON 422."
+  - id: DR-0171
+    title: The web app's front-end files are vendored in the package and served by the service
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#9"]
+    description: "htmx 4.0.0 (0BSD), Inter 4.1 and JetBrains Mono 2.304 (OFL-1.1) and the Lucide icons the pages use (ISC) are files in docket/web, each pinned in docket/web/assets.py by version, source and sha256 with its licence file beside it, and a test hashes each. /static/ serves only the files in the package's static folder, read at start, with content types from a fixed table, never mimetypes, and Cache-Control: no-cache with a strong ETag. The htmx script carries its pin as integrity. Nothing loads from a CDN, so the app works offline on 127.0.0.1."
+    binds:
+      - A new vendored file lands with its pin, its licence file and the test that hashes it.
+      - A file under static/ whose type isn't in the table stops the service from starting.
+    not_chosen:
+      - "A CDN: the page would need the network."
+      - "Starlette's StaticFiles: types from mimetypes, which Windows' registry can turn to text/plain for a script, and nosniff then blocks it."
+      - "htmx 2.0.11: the maintenance line, which snapshots pages into localStorage unless turned off."
+  - id: DR-0172
+    title: Pages carry a strict CSP and keep the user's words out of browser storage
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#9"]
+    description: "Every page and fragment carries Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none', and Cache-Control: no-store. No inline script, style element, style attribute, handler attribute or javascript: URL, and no htmx feature that needs new Function() (event filters, hx-on, js: values). htmx 4 keeps no history snapshot, and the browser keeps two cookies of one word each, docket_theme and docket_keys. A test walks every rendered state for these."
+    not_chosen:
+      - "The Guard's floor alone: inline styles and scripts would pass unnoticed."
+      - "unsafe-eval, or the hx-csp extension: a search page needs neither."
+      - "localStorage for the theme: a first paint in the wrong theme."
+  - id: DR-0173
+    title: The CSS is hand-written in cascade layers with light-dark() tokens, for browsers from mid-2024
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#9"]
+    description: "Four files under static/css (tokens, base, components, search) in the layers reset, tokens, base, components and pages. Every colour is a light-dark() pair, so a theme is only a color-scheme: the system's, or light or dark from the docket_theme cookie the server renders as data-theme. No preprocessor, no build, no prefixes or polyfills. Text contrasts at least 4.5:1, and borders, the focus ring and icons 3:1, in both themes, which a test checks over the tokens."
+    not_chosen:
+      - "Sass or Tailwind: a build step DR-0016 rules out."
+      - "A token block per theme: every colour written twice."
+  - id: DR-0174
+    title: The Search page's URL holds the search tool's parameters
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#9"]
+    description: "The URL's parameters are the MCP search tool's, under the same names (query, sources, people, entities, since, until, k), then the panel's: hit, a locator as read takes it; lines, repeated, each a line or a range, the verify tool's list; around, 0 to 30, default 1; and verify, 1. One canonical form: this order, defaults left out, repeated values sorted, lines by where each starts. A query that is one locator opens it in the panel instead of searching its words. Medium: bookmarks and Claude's links depend on it."
+    binds:
+      - Parameters only gain optional ones whose default keeps today's meaning; unknown ones are ignored, so an old bookmark still opens.
+    not_chosen: ["Names of our own, such as q: a link from Claude would read unlike its call."]
+  - id: DR-0175
+    title: Source and time facets narrow; person and entity facets favour
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#9"]
+    description: A facet click runs the search Claude would run. A source sets sources and a month sets since and until, which narrow; a person sets people and an entity sets entities, which favour, as the design's recall section has them, so a chunk whose speaker has no label still comes back. The chip says favour, never only. Counts are over the candidates search ranked, at most 200, and the page says so.
+    not_chosen:
+      - "All four narrowing: unlike Claude's search, and a speaker without a label hides the answer."
+      - "Counts over the whole index: a query more per facet."
+  - id: DR-0176
+    title: The navigation shows every page of the design by phase
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#9"]
+    description: "Twelve slots in three groups, by use: the day (Today, Queue, Ledger, Meetings, Outbox), finding (Search, Briefs, Recording) and keeping (Staging, Curate, Sync, Settings). A built page is a link; the others are dimmed text after one muted later label per group, with no number beside them, which would read as a count; each one's phase and the design's line about it are in its tooltip and its screen-reader text. / goes to /search until Today exists."
+    not_chosen:
+      - "Built pages only: the app's shape stays hidden until phase 3."
+      - "A placeholder page per slot: routes that only say later."
+  - id: DR-0177
+    title: Static files need no session, and the web renders the pages a stranger can reach
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#9"]
+    description: GET and HEAD under /static/ pass the Guard's session check; the Host check still applies, and a write there still needs the session. The files are the package's own, the same for everyone. The sign-in, used-link and not-found pages come from the web's templates in a bare layout, with no navigation and no footer, so they name neither the vault's folder nor the machine; a static miss is a plain-text 404. It narrows DR-0152's rule that the pages take the cookie to the pages themselves.
+    not_chosen:
+      - "Static files behind the session: the sign-in page can't load its stylesheet."
+      - "The shell on those pages: its footer names the vault's folder and the machine to anyone who reaches the port."
+  - id: DR-0178
+    title: docket open takes the page to land on after signing in
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#9"]
+    description: docket open [PATH] sends a path on this origin to /session as next, so a bookmark or a link from Claude survives signing in. The sign-in and used-link pages name the command with the path asked for, double-quoted, and whatever a shell acts on inside the quotes (a dollar sign, a backquote, an exclamation mark, a quote, a backslash) is percent-encoded, as is anything else a URL wouldn't carry as it is. A path that isn't on this origin is refused before a session is asked for.
+    not_chosen: ["docket open alone: the user lands on Search and finds the page again by hand."]
+  - id: DR-0179
+    title: The web app is tested over HTTP, plus one browser smoke test in CI
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#9"]
+    description: Render tests drive every route and state through Starlette's TestClient on the index fixture vault and parse the HTML with the standard library; an HTML check and the structural accessibility rules run over every state, and a test checks the tokens' contrast. One Playwright test drives the real service in the runner's own Chrome in a Linux CI job (DOCKET_TEST_BROWSER=chrome), with no browser downloaded; with the variable set, a browser that can't start fails it, and without it the test skips and says so.
+    not_chosen:
+      - "No browser test: CSP and htmx failures show only in a browser."
+      - "Playwright's own browsers: a large download each run."
+      - "The browser test on every system: three times the minutes for one check."
+  - id: DR-0180
+    title: The web app's packages
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#9"]
+    description: Jinja2 3.1.6 (BSD-3-Clause) with MarkupSafe at runtime; Playwright 1.63.0 (Apache-2.0), with greenlet and pyee, in the dev group, pinned exactly, its browsers never downloaded by the gate. Each package was at least a week old when locked.
+    not_chosen:
+      - "Starlette without templates: no components."
+      - "BeautifulSoup or lxml for the tests: a dependency for what a short html.parser helper does."

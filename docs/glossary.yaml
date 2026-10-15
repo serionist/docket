@@ -11,6 +11,10 @@ terms:
   - term: autonomy grant
     definition: "The maintainer's word that an agent runs a piece of work to its merge without asking. Every choice it would have asked about is recorded: as a proposed decision, and in the PR's Decided without asking."
     see: [.claude/skills/start-work/SKILL.md]
+  - term: boost
+    definition: "A person or entity a search favours: chunks that mention it rank higher, and none are dropped for not mentioning it, since a speaker without a label would otherwise hide the answer. The people and entities parameters of search, and the Search page's person and entity facets."
+    see: [packages/docket/src/docket/index/query.py]
+    close_terms: [facet]
   - term: capture
     definition: "One thing a run brought in: a source tool's result exactly as the tool gave it, posted by the capture hook, or a file from an import folder. A mapper reads captures; Claude never retypes them."
     see: [packages/docket/src/docket/sources/contract.py]
@@ -31,6 +35,10 @@ terms:
     definition: A decision, convention, term or reading line, kept as YAML and changed only through the docs tool.
     see: [docs/docs-regime.md]
     close_terms: [record (a dated plan or review)]
+  - term: facet
+    definition: "A list beside the Search page's results that narrows or favours the search by one of its parameters: sources and time narrow, people and entities favour. Its counts are over the candidates search ranked."
+    see: [packages/docket/src/docket/web/views.py]
+    close_terms: [boost]
   - term: gate
     definition: The one set of checks every change passes, `uv run gate`. The quick lane runs in seconds before every push; `gate full` is the merge rule.
     see: [tools/devkit/src/devkit/gate.py]
