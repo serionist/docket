@@ -305,6 +305,10 @@ def _ingest_report(report: IngestReport) -> None:
         say(f"holds      {report.source}: {report.holds_added} added")
     for unseen in report.holds_unseen:
         say(f"holds      {unseen} isn't in this import; check hold.txt for a typo")
+    for released in report.holds_released:
+        say(f"holds      {released} was released with its cuts; not held again")
+    for again in report.held_again:
+        say(f"holds      {again} is held again after its release; the next import or docket hold release takes it off")
     staged = report.staged
     say(
         f"staged     {report.source}: {staged.pending} pending, {staged.ready} ready, "
