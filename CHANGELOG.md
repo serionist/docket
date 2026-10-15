@@ -79,8 +79,8 @@ Unreleased in the same PR.
   and `in no chunk: <word>` names a word nothing in the vault holds. Search with key words, not the sentence.
 - Search finds a compound however it is written: `kickoff`, `kick-off` and `kick off` find each other, and so do
   `e-mail`, `email` and Hungarian's `e-mailben`. A hit holding a word only split in two ("edit or" for `editor`)
-  comes after those holding the word itself. The index rebuilds once, at the first search or service start after the
-  update.
+  comes after the hits holding as many of your words as written. The index rebuilds once, at the first search or
+  service start after the update.
 - A source's `SKILL.md` now holds only the source's own calls; the run's steps come from `run_open`. After upgrading,
   copy the reference's `SKILL.md` and `mapper.py` over your project's copy: a live run refuses a `SKILL.md` without
   the new marker line. Plaud's reference pages transcripts by 100 utterances, and finalizes only the recordings a run

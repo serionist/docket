@@ -604,6 +604,24 @@ def test_a_split_ranks_after_the_word_itself(compounds: Vault) -> None:
     assert first(visitor, compound_chat("visitor")) < first(visitor, compound_chat("visit-or"))
 
 
+def test_a_split_ranks_by_the_terms_held_in_the_any_word_stage(compounds: Vault) -> None:
+    # No chunk holds all three. The transcript holds followup only as "follow up", and crane: two terms, after the
+    # chunks holding two through their forms, above those holding crane alone.
+    result = ranked(find(compounds, "followup crane permit"))
+    rank = {h.rid: h.rank for h in result}
+    two = [rank[r] for r in (MAIL_FOLLOW, compound_chat("followup"), compound_chat("online"))]
+    one = [rank[r] for r in (compound_chat(f"editor-{n}") for n in range(EDITORS)) if r in rank]
+    assert all(h.found_by == "any" for h in result) and one
+    assert max(two) < rank[COMPOUND_FOLLOW] < min(one)
+
+
+def test_a_word_whose_splits_no_chunk_says_is_in_no_chunk(compounds: Vault) -> None:
+    # "list" and "crane" are both words of the vault, never in that order; "crane quote" is said.
+    assert find(compounds, "listcrane").query.absent == ["listcrane"]
+    quote = find(compounds, "cranequote")
+    assert quote.query.absent == [] and MAIL_FOLLOW in rids(quote)
+
+
 def test_a_title_with_a_compound_leads(compounds: Vault) -> None:
     # Its lead holds both words only when the check reads kick-off as kickoff; the checklist says kickoff twice.
     result = find(compounds, "orbex kickoff")

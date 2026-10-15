@@ -349,6 +349,13 @@ class _Search:
                 out.append((first, second, min(a, b)))
         return out
 
+    def said(self, first: str, second: str) -> bool:
+        """Whether some chunk says a split's halves in a row: both halves being words doesn't make the phrase one."""
+        row = self.conn.execute(
+            "SELECT 1 FROM chunks_fts WHERE chunks_fts MATCH ? LIMIT 1", (self._phrase([first, second]),)
+        ).fetchone()
+        return row is not None
+
     def word_groups(
         self, tokens: list[str], joins: dict[str, list[str]]
     ) -> tuple[list[tuple[str, str]], list[Word], list[str]]:
@@ -374,7 +381,8 @@ class _Search:
             self.split_terms |= {(col, terms[0], terms[1]) for split in splits for col, terms in split.columns}
             kept.append(Word(word, frozenset(forms), splits))
             self.reach[word] = max([*counts, *(n for *_, n in found)])
-            if not held and not found:
+            # Checked only for a word no form of which the index holds: one lookup per split, at most a few.
+            if not held and not any(self.said(first, second) for first, second, _ in found):
                 absent.append(word)
             columns: dict[str, list[str]] = {}
             for col, term in held or ([] if found else forms[:1]):
@@ -488,9 +496,9 @@ class _Search:
     def order(self, ids: list[int], q: _Terms, *, by_text: bool) -> list[int]:
         """A stage's candidates, BM25 order given: first the best chunk of each group whose title's lead holds more
         than half the query's terms, by the terms its lead holds, then the share of its words they are, then BM25
-        (DR-0231); then the rest, in the any-word stage by how many terms their text holds, then BM25 (DR-0232). When
-        the query has splits, the chunks holding a word only through one go after all the others, each part in its
-        order (DR-0282)."""
+        (DR-0231); then the rest, in the any-word stage by how many terms their text holds, then BM25 (DR-0232). A
+        chunk holding a word only through a split goes there after the chunks holding as many terms, and above those
+        holding fewer; in the all-words and prefix stages, after all the others, each part in its order (DR-0282)."""
         info = self.titles(ids)
         lifted: list[tuple[int, float, int, int]] = []
         groups: set[str] = set()
@@ -507,12 +515,11 @@ class _Search:
         rest = [chunk for chunk in ids if chunk not in moved]
         if not by_text and not q.checker.splits:
             return first + rest
-        held_by = self.text_terms(ids if q.checker.splits else rest, q)
+        held_by = self.text_terms(rest if by_text else ids, q)
         if by_text:
-            rest.sort(key=lambda chunk: -held_by[chunk][0])
+            rest.sort(key=lambda chunk: (-held_by[chunk][0], held_by[chunk][1]))
+            return first + rest
         ordered = first + rest
-        if not q.checker.splits:
-            return ordered
         return [c for c in ordered if not held_by[c][1]] + [c for c in ordered if held_by[c][1]]
 
     # -- hits ---------------------------------------------------------------------------------------------------
