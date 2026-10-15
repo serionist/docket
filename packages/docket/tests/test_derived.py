@@ -216,3 +216,8 @@ def test_a_put_s_by_holding_what_redaction_hides_is_refused_and_a_keyword_in_it_
     assert problem == "line 5: by: holds what the phone rule would redact; say who wrote it, nothing more"
     assert PHONE not in problem
     passes("- fine @12:08", by="claude, sync 2026-10-15", lists=NeverStore(keywords=["sync"]))
+
+
+def test_a_blank_line_in_a_hand_edit_s_frontmatter_is_read_past() -> None:
+    text = "---\nid: brief:x\ntype: brief\n\nby: claude\n---\n- fine @00:01\n"
+    assert derived.hand_edit("brief", text, text, ON, DORA).stops == []
