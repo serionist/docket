@@ -167,8 +167,9 @@ def test_queries_answer_in_well_under_a_second(vault: Vault) -> None:
         "common and rare": (f"{common} {rare}", {}),
         "3 common, 1 rare": (f"{by_doc[0][0]} {by_doc[5][0]} {by_doc[12][0]} {rare}", {}),
         "5 common, 1 none": (f"{' '.join(t for t, _ in by_doc[:5])} zzqqxx", {}),
-        # Compounds (DR-0281): a hyphenated word, two words joining into a word in most chunks, and words split into
-        # two in half and a third of the chunks, or in most of them, where the split leaves the query.
+        # Compounds (DR-0281): a hyphenated word, two words joining into a word in most chunks, where the joined word
+        # leaves the match, and words split into two in half and a third of the chunks, or in most of them, where the
+        # split leaves the query.
         "hyphen and rare": (f"{hyphenated} {rare}", {}),
         "two words join": (joins, {}),
         "a split": (middle, {}),

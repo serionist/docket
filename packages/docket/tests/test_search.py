@@ -10,6 +10,7 @@ import pytest
 import yaml
 from docket_testkit import (
     CALL,
+    COMPOUND_FILLERS,
     COMPOUND_FOLLOW,
     COMPOUND_KICK,
     CRANE,
@@ -515,7 +516,7 @@ MAIL_FOLLOW = "mail:<follow-1@orbex.example>"
 MAIL_EDIT = "mail:<edit-1@orbex.example>"
 AGREEMENT = [
     "orbex kickoff", "orbex kick-off", "orbex kick off", "crane followup", "crane follow-up", "crane follow up",
-    "email", "e-mail", "emailben", "online", "on-line", "well", "setup", "set up", "editor", "visitor",
+    "email", "e-mail", "emailben", "online", "on-line", "well", "setup", "set up", "editor", "visitor", "to day",
     # A stemmed compound, and queries where no other word screens in the split's second half ("off").
     "kickoffs", "kickoff", "crane kickoff",
 ]  # fmt: skip
@@ -549,6 +550,7 @@ def test_the_compound_vault_holds_each_spelling(compounds: Vault) -> None:
         text = conn.execute("SELECT text FROM chunks WHERE rid = ?", (MAIL_KICK,)).fetchone()[0]
         assert "kick-off" in text and "kickoff" not in text
         assert docs("folded", "set") * 2 >= total and docs("folded", "up") * 2 >= total
+        assert docs("folded", "today") * 2 >= total
     finally:
         conn.close()
 
@@ -592,6 +594,15 @@ def test_a_split_of_two_words_in_most_chunks_is_left_out(compounds: Vault) -> No
     found = rids(find(compounds, "setup"))
     assert compound_chat("setup") in found and compound_chat("set-up") not in found
     assert {compound_chat("setup"), compound_chat("set-up")} <= rids(find(compounds, "set up", k=100))
+
+
+def test_a_joined_word_in_most_chunks_is_left_out(compounds: Vault) -> None:
+    # "today" is in most chunks, so `to day` matches its own words and not their joined word, which would score every
+    # chunk saying it for next to no weight.
+    fillers = {compound_chat(f"filler-{n}") for n in range(COMPOUND_FILLERS)}
+    result = find(compounds, "to day", k=100)
+    by = {h.rid: h.found_by for h in ranked(result)}
+    assert by.get(compound_chat("to-day")) == "all" and not by.keys() & fillers and result.query.absent == []
 
 
 def test_a_split_ranks_after_the_word_itself(compounds: Vault) -> None:
