@@ -5,7 +5,7 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 
 | Command | What it does |
 |---|---|
-| `docket init` | set up a vault: asks where, who you are, this machine's name, the sources, and inside a git repo whether the vault is a folder of it (the default) or a repo of its own (`--storage folder\|repo`); every answer is also a flag, and `--yes` takes the defaults; `--no-sources` starts with none, for `docket source new` to add; the summary names each check a flag overrode (`--allow-shared`, `--remote-is-private`, `--allow-dirty-parent`) |
+| `docket init` | set up a vault: asks where, who you are, this machine's name, the sources, and inside a git repo whether the vault is a folder of it (the default) or a repo of its own (`--storage folder\|repo`); every answer is also a flag, and `--yes` takes the defaults; `--no-sources` starts with none, for `docket source new` to add; the summary names each check a flag overrode (`--allow-shared`, `--remote-is-private`, `--allow-dirty-parent`); `--no-redact-credentials` and `--redact-phone` set redaction, and the summary prints it |
 | `docket sync` | a repo of its own: fetch and rebase onto its remote; a folder: says your own git moves it, and does nothing else |
 | `docket vault status` | which vault it found and how (`--vault`, `DOCKET_VAULT`, this folder or above, `./vault`, the default vault), where it lives and on which branch, records per source, runs, run files not committed yet, the last commit |
 | `docket vault check` | whether the vault is intact: every raw file parses, nothing written once was changed, no ignore rule hides a vault path, the vault's own attributes apply, no doc rev is claimed by two commits |
@@ -16,14 +16,16 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 | `docket staging promote` | writes every ready record to the raw log, cut and redacted, one run per source, and commits; a record on hold stays in staging |
 | `docket ingest <source> <folder>` | imports payloads fetched earlier through the source's mapper: the folder's `hold.txt` first, then its JSON files; every record goes to staging, nothing on hold; `--hold <file>` adds more ids to hold, `--final` tells the mapper not to wait for more, `--mapper-errors` prints the mapper's own errors |
 | `docket source new <name>` | writes a source's skill, mapper and tests into `.claude/skills/sources/<name>/` of the repo that holds the vault, from Docket's blank template, or `--example` for a reference source (Plaud), and adds the source to `vault.yaml` with `--sensitivity` and its `--tool`s; never over a folder that exists |
-| `docket doc put <file or ->` | store a processed doc as its next rev; refused, with every problem and its line, when the frontmatter is wrong, an anchor doesn't resolve, or the doc changed since the rev it carries |
+| `docket doc put <file or ->` | store a processed doc as its next rev, redacted first, saying on which lines; refused, with every problem and its line, when the frontmatter is wrong, an anchor doesn't resolve, the doc changed since the rev it carries, or it says something on the never-store keywords list (then only the lines are named) |
+| `docket doc redact` | redact the docs already stored with the settings as they are now, as their next revs in one commit; once after upgrading, and again after turning a rule on or adding a pattern or a keyword; `--dry-run` first; a doc it can't redact is named and left, with exit 1 |
 | `docket doc read <locator>` | a doc, or a record and the doc lines that point at it; `--view raw` or `both` for the raw, `--around` for minutes, paragraphs or messages either side, `--rev` for an earlier revision |
 | `docket doc verify <doc>` | each line of a doc next to the raw its anchors point at; `--line` for chosen lines |
 | `docket search <query>` | hits grouped by recording or thread, each with its locator and the group's summary; `--since`, `--until`, `--source`, `--person`, `--entity`, `-k`; it updates the index first unless `--no-update` |
 | `docket index rebuild` | build this machine's index from the vault, from scratch |
 | `docket index update` | index what changed since; it rebuilds when it has to |
 | `docket index status` | whether the index is there and current, its languages, counts, what is new, and its problems |
-| `docket import notes <folder>` | each markdown note in an existing folder becomes a legacy note that keeps its old path, so `doc read notes/x.md` or `notes/x.md@12:08` still finds it; the folder is only read; run it again to pick up changes; `--dry-run` first, `--as` for what old paths start with |
+| `docket import notes <folder>` | each markdown note in an existing folder becomes a legacy note that keeps its old path, so `doc read notes/x.md` or `notes/x.md@12:08` still finds it; the folder is only read; run it again to pick up changes; `--dry-run` first, `--as` for what old paths start with; says how many markers redaction added |
+| `docket redaction` | which redaction rules run; `docket redaction set <credentials\|phone\|pattern name> on\|off` changes one and commits it |
 
 A command finds its vault from `--vault`, `DOCKET_VAULT`, the working folder upward, a `vault/` folder in it, or the
 default the wizard recorded. A `<ref>` is a record's rid, or at least 6 characters of the key `staging list` shows.
@@ -57,12 +59,22 @@ Every record reaches the raw log through the gate. It reads `vault.yaml` on ever
 | `never_store.people` | drops a record whose author, any recipient, or any id in its source's payload equals an entry: an exact address (`kid@example.invalid`, also inside `Kid <kid@example.invalid>`) or the source's user id (`U0KID`); case doesn't matter |
 | `never_store.containers` | drops a record from a channel, chat or folder: its id, with or without the source's prefix (`slack:C0FAMILY` or `C0FAMILY`) |
 | `never_store.keywords` | drops a record that says the words anywhere, title, text, attachment names or payload, as whole words: case, accents and curly apostrophes don't matter (`kovacs` matches `Kovács`, not `kovacsfalva`), and any punctuation may join the words; a keyword of two or more words also matches them joined by a case change or by nothing (`dora example` matches `dora-example`, `dora_example`, `DoraExample` and `doraexample`), while a one-word keyword never matches inside a word (`Max` leaves `maxRetries` alone); a name behind an encoding matches too: percent-encoded, once or wrapped again as a Safe Link does (`Dora%2520Example`), behind HTML entities, in Latin-1, or as `%u` and `\u` escapes |
-| `redaction.builtin` | `true` (the default) redacts passwords and secrets after a label (also in bold, in a table cell, or on the next line of an HTML mail), API keys and tokens, private key blocks, and phone numbers written with `+` or after a label; a `+` amount with its currency (`+12 500 000 Ft`) stays |
-| `redaction.patterns` | your own: each has a `name` (it shows in the marker) and a `pattern`, a regular expression; a group named `secret` redacts only that part (`door code (?P<secret>\d+)`) |
+| `redaction.credentials` | `true` (the default) redacts passwords and secrets after a label (also in bold, in a table cell, or on the next line of an HTML mail), API keys and tokens, and private key blocks; `builtin`, the key files written before held, reads as this one |
+| `redaction.phone` | `false` (the default); `true` redacts phone numbers written with `+` or after a label, while a `+` amount with its currency (`+12 500 000 Ft`) stays |
+| `redaction.patterns` | your own, none by default: each has a `name` (it shows in the marker), a `pattern`, a regular expression, and `enabled`, `true` unless you turn it off; a group named `secret` redacts only that part (`door code (?P<secret>\d+)`) |
 
 - A hyphen or other punctuation in a keyword also matches a space: `check-up` drops "check up" too.
 - A dropped record leaves no file and no log line, only a count.
 - What is redacted becomes `[redacted:<name>]`, and a cut stretch becomes `[cut]`; the secret itself is kept nowhere.
+- Names are never redacted. To keep a person, a topic or a chat out of the vault, list it under `never_store`: your
+  own lists, empty until you add to them. A match drops the whole record, or refuses the whole doc.
+- Processed docs and imported notes follow the same lists and the same redaction settings, line by line, so a marker
+  never moves a line or an anchor; `docket redaction set` changes a setting, and `docket doc redact` applies it to the
+  docs already there.
+- Turning a rule off leaves the markers already stored, but a record a source sends again then lands as a new version
+  holding the value, records you classified wait in staging again, and the next `docket import notes` writes a new
+  rev of each note the rule matched. Turning credentials off stores passwords, keys and tokens as written, in raw, docs and git
+  history; turning it back on doesn't take them out of raw.
 - Staging lives in the vault's `staging/` folder, on this machine only, never committed.
 - A source's name is lowercase letters, digits, dots, underscores and hyphens, and doesn't end in a dot: it names
   folders and files.

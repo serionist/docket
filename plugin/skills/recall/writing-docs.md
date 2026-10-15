@@ -4,6 +4,11 @@
 don't resolve, and lists every problem with its line, so fix them and put it again. A changed doc is stored as its next
 revision; the earlier ones stay in git.
 
+- What the user's settings redact (credentials, by default) becomes `[redacted:<rule>]` before the doc is stored, and
+  the result says on which lines. Leave the markers as they are when you edit the doc.
+- A doc that says something on the user's never-store list is refused, naming only the lines: leave that out and put
+  it again.
+
 ## The frontmatter
 
 ```yaml

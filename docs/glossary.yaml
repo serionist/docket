@@ -76,6 +76,9 @@ terms:
   - term: proposals file
     definition: "What the cuts skill writes for docket hold release, in a temp folder outside any repo: per held id, the time ranges to cut and the records to keep, or why it stays held. A proposal, never a confirmation."
     see: [plugin/skills/cuts/SKILL.md]
+  - term: redaction marker
+    definition: "[redacted:<rule>], what redaction leaves in place of a secret in a record or a doc: it names the rule and never the value, it is never matched again, and in a doc it is text, never an anchor."
+    see: [staging gate]
   - term: reference source
     definition: "A source Docket keeps working and tested in CI as an example to copy, never a dependency: Plaud, under examples/sources/plaud. docket source new --example copies it."
     see: [examples/sources/plaud/SKILL.md]
