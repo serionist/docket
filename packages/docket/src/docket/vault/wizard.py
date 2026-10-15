@@ -18,9 +18,9 @@ from typing import Literal, Protocol
 
 from docket import userconfig
 from docket.errors import DocketError
-from docket.vault import host
+from docket.vault import host, redaction
 from docket.vault import machine as machines
-from docket.vault.config import NeverStore, Owner, SourceConfig, VaultConfig
+from docket.vault.config import NeverStore, Owner, Redaction, SourceConfig, VaultConfig
 from docket.vault.git import Git, toplevel
 from docket.vault.home import Storage
 from docket.vault.host import HostReport, Visibility, remote_visibility
@@ -67,6 +67,9 @@ class Given:
     allow_shared: bool = False
     allow_dirty_parent: bool = False
     yes: bool = False
+    # Redaction: credentials on unless turned off, phone numbers off unless turned on (setup asks about both).
+    redact_credentials: bool = True
+    redact_phone: bool = False
 
 
 @dataclass
@@ -185,6 +188,7 @@ class Wizard:
                 primary_machine=machine,
                 sources=_parse_sources(source_items),
                 never_store=NeverStore(),
+                redaction=Redaction(credentials=g.redact_credentials, phone=g.redact_phone),
             )
         except ValueError as e:
             raise DocketError(str(e)) from e
@@ -307,6 +311,7 @@ class Wizard:
         return vault
 
     def _summary(self, plan: Plan) -> None:
+        r = plan.config.redaction
         if plan.host is not None:
             rel = plan.path.relative_to(plan.host.top).as_posix()
             where = [
@@ -330,6 +335,9 @@ class Wizard:
             f"time:     {plan.config.owner.time_zone}, languages {', '.join(plan.config.owner.languages)}",
             f"machine:  {plan.machine} (primary)",
             f"sources:  {', '.join(f'{k} ({v.sensitivity})' for k, v in plan.config.sources.items()) or 'none yet'}",
+            f"redact:   credentials {redaction.word(r.credentials)}, phone numbers {redaction.word(r.phone)}; "
+            "names never; change it later with docket redaction set",
+            *([f"warning:  {redaction.CREDENTIALS_OFF}"] if not r.credentials else []),
             *(f"override: {taken}" for taken in plan.overrides),
         ]
         self.p.say("\n".join(lines))

@@ -115,13 +115,25 @@ def test_setup_knows_the_sources_the_wizard_knows_and_their_references() -> None
 
 def test_setup_runs_commands_with_flags_docket_has() -> None:
     text = (PLUGIN / "skills" / "setup" / "SKILL.md").read_text(encoding="utf-8")
-    for command in (["init"], ["source", "new"], ["service", "install"], ["vault", "status"], ["ingest"]):
+    commands = (
+        ["init"],
+        ["source", "new"],
+        ["service", "install"],
+        ["vault", "status"],
+        ["ingest"],
+        ["redaction", "set"],
+    )
+    for command in commands:
         used = re.findall(rf"docket {' '.join(command)}[^`\n]*", text)
         assert used, command
         flags = {flag for line in used for flag in re.findall(r"--[a-z][a-z-]*", line)}
         assert flags <= options(*command), command
     # Every override the skill may pass is a flag init has, and the skill names each one.
     for flag in ("--allow-shared", "--remote-is-private", "--allow-dirty-parent"):
+        assert f"`{flag}`" in text
+        assert flag in options("init")
+    # The redaction answers go to init as its own flags: credentials off only on a no, phone numbers on only on a yes.
+    for flag in ("--no-redact-credentials", "--redact-phone"):
         assert f"`{flag}`" in text
         assert flag in options("init")
 

@@ -9,7 +9,6 @@ A failure on the way leaves neither a folder nor a changed vault.yaml.
 
 from __future__ import annotations
 
-import os
 import secrets
 from dataclasses import dataclass
 from importlib import resources
@@ -22,7 +21,7 @@ from pydantic import ValidationError
 
 from docket.errors import DocketError
 from docket.sources.runner import SKILLS, consuming_repo, skill_folder
-from docket.vault.config import CONFIG_FILE, SourceConfig, VaultConfig
+from docket.vault.config import CONFIG_FILE, SourceConfig, VaultConfig, write_config
 from docket.vault.staging import retry
 from docket.vault.vault import Vault, remove_tree
 from docket.vault.wizard import KNOWN_SOURCES
@@ -159,11 +158,11 @@ def _register(vault: Vault, name: str, entry: SourceConfig) -> tuple[bool, str |
         updated = config.model_copy(update={"sources": {**config.sources, name: entry}}).dump()
         if updated == text:
             return True, None, None
-        _replace(vault.home.tmp_dir, path, updated)
+        write_config(vault.home.tmp_dir, path, updated)
         try:
             commit = vault.commit([CONFIG_FILE], f"Config: source {name}")
         except BaseException:
-            _replace(vault.home.tmp_dir, path, text)
+            write_config(vault.home.tmp_dir, path, text)
             raise
         return True, None, commit
 
@@ -172,18 +171,3 @@ def block(name: str, entry: SourceConfig) -> str:
     """The entry as the lines to paste under `sources:` in vault.yaml."""
     body = yaml.safe_dump({name: entry.model_dump(mode="json")}, sort_keys=False, default_flow_style=False)
     return "".join(f"  {line}\n" for line in body.splitlines())
-
-
-def _replace(tmp_dir: Path, path: Path, text: str) -> None:
-    """Write through a temp file in Docket's private folder under the git dir and a rename, so a crash leaves the old
-    file or the new one."""
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-    tmp = tmp_dir / f"vault-yaml.{os.getpid()}.tmp"
-    try:
-        with tmp.open("w", encoding="utf-8", newline="\n") as out:
-            out.write(text)
-            out.flush()
-            os.fsync(out.fileno())
-        retry(lambda: tmp.replace(path))
-    finally:
-        tmp.unlink(missing_ok=True)
