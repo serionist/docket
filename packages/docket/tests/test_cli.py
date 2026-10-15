@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from docket_testkit import make_record, sh
+from docket_testkit import host_repo, make_config, make_record, sh
 
 from docket import __version__, userconfig
 from docket.cli import main
@@ -142,6 +142,37 @@ def test_the_vault_is_found_from_here_a_child_env_and_the_default(
     out = capsys.readouterr().out
     assert str(path.resolve()) in out
     assert "found    by DOCKET_VAULT\n" in out
+
+
+def test_source_new_takes_a_vault_found_in_the_config_or_the_environment_only_when_named(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Project A's folder vault is the default; the user works in project B.
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    a = host_repo(tmp_path / "a")
+    vault = Vault.init(a / "vault", make_config("folder"), "test-box")
+    userconfig.set_default_vault(vault.root)
+    b = host_repo(tmp_path / "b")
+    monkeypatch.chdir(b)
+    before = sh(a, "git", "rev-parse", "HEAD")
+    capsys.readouterr()
+    assert main(["source", "new", "zebra-notes"]) == 2
+    default = f"the default vault in {userconfig.config_path()}"
+    refused = f"found {vault.root} by {default}; pass --vault {vault.root} to add a source there"
+    assert refused in capsys.readouterr().err
+    monkeypatch.setenv("DOCKET_VAULT", str(vault.root))
+    assert main(["source", "new", "zebra-notes"]) == 2
+    assert f"found {vault.root} by DOCKET_VAULT; pass --vault {vault.root}" in capsys.readouterr().err
+    assert not (a / ".claude").exists()
+    assert not (b / ".claude").exists()
+    assert sh(a, "git", "rev-parse", "HEAD") == before
+    # Named, or found from the project that holds it, it is taken.
+    monkeypatch.delenv("DOCKET_VAULT")
+    monkeypatch.chdir(a)
+    assert main(["source", "new", "zebra-notes"]) == 0
+    assert main(["source", "new", "calls", "--vault", str(vault.root)]) == 0
+    assert sorted(p.name for p in (a / ".claude" / "skills" / "sources").iterdir()) == ["calls", "zebra-notes"]
 
 
 def test_with_no_vault_anywhere_the_command_says_how_to_make_one(

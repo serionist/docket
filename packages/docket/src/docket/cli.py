@@ -277,7 +277,12 @@ def source_new(
     """Write a source's skill, mapper and tests into the project that holds the vault, and add it to vault.yaml."""
     if sensitivity is not None and sensitivity not in SENSITIVITIES:
         raise DocketError(f"--sensitivity is work, mixed or private, not {sensitivity!r}")
-    made = scaffold.new_source(find_vault(vault), name, example=example, sensitivity=sensitivity, tools=tool or [])
+    found, how = locate_vault(vault)
+    # A vault found through the environment or the config can be another project's: the folder would land in its
+    # repo, and the entry be committed there. Only one named, or found from here, is taken.
+    if how == "DOCKET_VAULT" or how.startswith("the default vault"):
+        raise DocketError(f"found {found.root} by {how}; pass --vault {found.root} to add a source there")
+    made = scaffold.new_source(found, name, example=example, sensitivity=sensitivity, tools=tool or [])
     say(f"wrote    {made.folder}" + (", Docket's reference" if made.example else ", from the blank template"))
     for rel in made.files:
         say(f"         {rel}")
