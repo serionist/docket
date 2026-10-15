@@ -490,10 +490,14 @@ change lands on whoever uses that vendor, while the core still checks every rid 
   source; each capture is tagged with its run, and nothing outside an open run is posted.
 - A mapper that runs past its time limit fails the run: its captures are dropped and fetched again, as for a run that
   never closes.
-- `docket source new` scaffolds a skill, a mapper and its tests in the consuming repo; setup runs it for each source
-  the user chooses.
+- `docket source new` scaffolds a skill, a mapper and its tests in the consuming repo, from a blank template shaped
+  like Plaud's or, with `--example`, the reference itself, and adds the source to `vault.yaml`; setup runs it for each
+  source the user chooses (DR-0166). It writes only into the folder the runner takes the mapper from, checked after
+  links, and never over a folder that exists.
+- Claude Code doesn't load a `SKILL.md` under `.claude/skills/sources/` as a skill, so whatever runs a source reads it
+  by its path, the list of sources coming from `vault.yaml` (DR-0168).
 - Plaud is the reference source, under `examples/sources/plaud` and tested in CI: an example to copy, not a
-  dependency.
+  dependency. The wheel carries a byte-identical copy for `--example` (DR-0167).
 - Audio is handed over by path or URL, and the service fetches it only within limits:
   - a path under a folder `vault.yaml` names (a downloads folder) or the plugin's own drop folder;
   - a URL over https, to a host `vault.yaml` lists for that source, never a private, loopback or link-local address;
@@ -549,6 +553,19 @@ hook, `docket source new` for scaffolding a source, and the rules: answer with l
 open the raw span behind every fact you use; say when they disagree, and propose a correction. The source skills
 themselves come from the consuming project (see Sources).
 
+Phase 0's plugin, by piece:
+
+| Piece | What |
+|---|---|
+| the MCP entry | the server `docket`, http to `127.0.0.1` at `DOCKET_PORT` or 8741, the token from `docket service token --header`; its tools show as `mcp__plugin_docket_docket__<tool>` (DR-0160) |
+| the status hook | SessionStart runs `docket hook session-start`: the service's state, the vault's, the port; Claude gets every line, the user the ones that need them (DR-0161, DR-0163) |
+| `recall` | the rules above as a method, with the read-only tools pre-approved and the command line when the service is down (DR-0164) |
+| `setup` | DR-0103's round: sources first, the vault named on every command, each override asked (DR-0165) |
+
+- The plugin holds no scripts: its hook and token helper run the `docket` command, which must be on PATH (DR-0162).
+- A plugin can't ship a `CLAUDE.md`, so the rules live in the MCP server's instructions and the recall skill.
+- Sync, tasks and curate come later, and the capture hook with `ingest` in phase 1 (#41).
+
 **Claude inside the service** (phase 3) does processing, not harvesting: notes and minutes, digests, briefs,
 proposals, meeting prep, draft replies, through the Claude Agent SDK loading the same plugin. It runs on the user's
 own Anthropic API key (or Bedrock, Vertex or Foundry), never on a claude.ai login, which third-party products may not
@@ -583,7 +600,7 @@ No big-bang switch: each piece of an existing setup is replaced only after its r
 
 | Phase | What | Usable for |
 |---|---|---|
-| 0 | the vault and its raw log behind the gate; recordings and old notes imported; full-text search with a column per language and seeded aliases; a minimal service with MCP `search`, `read`, `verify`, `doc_put`; the Search page | finding anything already kept, with sources, from any Claude session |
+| 0 | the vault and its raw log behind the gate; recordings and old notes imported; full-text search with a column per language and seeded aliases; a minimal service with MCP `search`, `read`, `verify`, `doc_put`; the plugin's MCP entry, session-start status, `recall` and `setup`, and `docket source new`; the Search page | finding anything already kept, with sources, from any Claude session |
 | 1 | syncs write raw through the gate; the capture hook and the service's `ingest`; embeddings and a reranker in a worker; the question set; curate tiers; own documents; highlights; the Staging, Curate, Sync and Settings pages | recall on Hungarian and paraphrased questions; every source raw |
 | 2 | Whisper with encrypted media and `media_put`; reconciling transcripts in context; vocabulary and learned corrections; Claude sessions as a source; briefs; the decision log; corrections that propagate; the secret store; retention and forget; the Recording page | prep from ready briefs; decisions with sources and history |
 | 3 | the ledger and the day pages (Today, Queue, Ledger, Meetings, Outbox); GitHub and Azure DevOps activity; scheduled connectors and Claude inside the service | daily use; syncs without a session |

@@ -356,6 +356,16 @@ decisions:
     binds: [Every model feature is optional., Adding or removing a language rebuilds the index.]
     not_chosen:
       - "Three fixed columns (as written, Hungarian, English): a German user would get Hungarian stems."
+  - id: DR-0168
+    title: A source's SKILL.md is read by path, not loaded by Claude Code as a skill
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#12"]
+    description: "Claude Code (2.1.300) doesn't load a SKILL.md at .claude/skills/sources/<source>/ as a skill: a probe repo with one there and one at .claude/skills/<name>/ listed only the second. The layout DR-0108 and DR-0123 fixed stays, and whatever runs a source (#41's run, then sync) reads its SKILL.md by path, the list of sources coming from vault.yaml. The file keeps its frontmatter, so a later move to the top level is a rename. #41 decides for good before any live run."
+    not_chosen:
+      - "Source skills at the top level (.claude/skills/source-<name>/): supersedes DR-0108's and DR-0123's path rule and the merged runner, and source names would meet the user's own skill names."
 conventions:
   - id: CV-0001
     rule: Python code passes ruff's lint rules and its formatter, at 120 columns

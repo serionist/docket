@@ -46,7 +46,7 @@ The schema is `docs/docs-regime.yaml`, explained in `docs/docs-regime.md`.
 | Path | What |
 |------|------|
 | `packages/docket/` | the app: the vault, the service (web app, MCP endpoint, scheduler), the source contract, the `docket` command |
-| `plugin/` | the Claude Code plugin: setup, sync, tasks, recall, curate, the capture hook, `docket source new`; source skills live in the consuming project; `.claude-plugin/marketplace.json` makes the repo its marketplace |
+| `plugin/` | the Claude Code plugin: the MCP entry, the session-start status hook, the skills (recall and setup now; sync, tasks and curate later), no scripts of its own (its hooks run `docket`); source skills live in the consuming project, scaffolded by `docket source new`; `.claude-plugin/marketplace.json` makes the repo its marketplace |
 | `examples/` | reference sources to copy into a project, tested in CI and never a dependency: Plaud under `sources/plaud` |
 | `tools/devkit/` | the development kit, never published: `gate`, `docs`, `devkit` |
 | `docs/` | the design, the regime, the glossary, plans and reviews |
@@ -104,8 +104,10 @@ agrees in the issue:
   files (DR-0113), a transcript's text rendered by the core (DR-0120), hold lists (DR-0121), a cut record's fidelity
   (DR-0126), a legacy note's old paths and import hash (DR-0130), old paths as locators (DR-0131);
 - a source's mapper interface (DR-0119), and the names and keys of a source in `vault.yaml` (DR-0124, DR-0125);
-- the MCP tools' names and parameters: `search`, `read`, `verify` and `doc_put` (DR-0150); the plugin's skill
-  and hook names, once they land.
+- the MCP tools' names and parameters: `search`, `read`, `verify` and `doc_put` (DR-0150), and the plugin's server
+  key `docket` that prefixes them (DR-0160);
+- the plugin's skill and hook names: `recall`, `setup`, and the SessionStart hook running `docket hook session-start`
+  (DR-0161).
 
 Each lands with its decision in `index.yaml`, marked `cost: one-way`.
 

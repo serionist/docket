@@ -65,9 +65,15 @@ terms:
     definition: "A summary, note, digest, brief or minutes in the vault: markdown with frontmatter naming the raw records it covers, every line ending with its anchors, written through doc_put."
     see: [packages/docket/src/docket/vault/processed.py]
     close_terms: [raw record (what it is built from)]
+  - term: reference source
+    definition: "A source Docket keeps working and tested in CI as an example to copy, never a dependency: Plaud, under examples/sources/plaud. docket source new --example copies it."
+    see: [examples/sources/plaud/SKILL.md]
   - term: run manifest
     definition: "What a source skill sends when its run ends: the run's id, how many captures it made, its window and what it skipped. A run closes only when Docket holds every capture it counts."
     see: [packages/docket/src/docket/sources/contract.py]
+  - term: scaffold
+    definition: "What docket source new writes into the consuming project for a source: its skill, its mapper and their tests under .claude/skills/sources/<source>/, from Docket's blank template or a reference source."
+    see: [packages/docket/src/docket/sources/scaffold.py]
   - term: segment
     definition: "One utterance of a transcript: where it starts and ends in milliseconds from the record's start, who spoke, and what was said."
     see: [packages/docket/src/docket/vault/segments.py]
@@ -81,5 +87,8 @@ terms:
     definition: "The checks every record passes on its way from a connector to the raw log: the never-store lists, the source rules, classification, cuts and redaction. Records wait in the vault's staging/ folder, never committed."
     see: [packages/docket/src/docket/vault/gate.py]
     close_terms: [gate (the development checks)]
+  - term: status hook
+    definition: "The plugin's SessionStart hook: docket hook session-start tells Claude the service's state, the vault's and the port at each session's start, and the user only what needs them."
+    see: [packages/docket/src/docket/hooks.py]
   - term: vault
     definition: "Where Docket keeps a user's data, private and in git: by default a folder of the repo the user already works in, or a repo of its own. It holds raw records written once, encrypted media, processed docs, entities and the ledger, and is never part of this repo."

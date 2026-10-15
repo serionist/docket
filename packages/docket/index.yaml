@@ -694,3 +694,36 @@ decisions:
     sources: ["#8"]
     description: "Each MCP tool returns the lines the matching docket command prints, with control characters escaped so a record's terminal codes never reach Claude Code's screen, and its result model, unescaped, as structured content. No tool raises Claude Code's result size: past 50,000 characters Claude Code keeps a result in a file Claude reads in parts, and around, lines and k narrow it."
     not_chosen: ["The SDK's JSON dump as the text: about twice the tokens for the same transcript."]
+  - id: DR-0163
+    title: The session-start status tells Claude everything and the user only what needs them
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#12"]
+    description: "docket hook session-start prints Claude Code's SessionStart JSON: the service's line (the one docket service status --quiet prints); a warning, or a token that can't be read; whether DOCKET_PORT, else 8741, is the port the service listens on; the service's own vault problem and index state while it runs; and the vault's lines, for the service's vault, else the default vault: a vault.yaml that won't load, or the records waiting in staging. Every line goes to additionalContext; the ones that need the user (the service down, a vault problem, records waiting, the port, no vault yet) also go to systemMessage, so a healthy start shows the user nothing. Counts and paths only, through the control-character escape. The vault is read without Vault.open, so no git runs; nothing is read from stdin; any failure becomes a line naming the exception's type, and it exits 0."
+    not_chosen: ["A line to the user at every start: a line that is always there stops being read."]
+  - id: DR-0166
+    title: docket source new writes a source's folder where the runner looks, and registers the source
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#12"]
+    description: "docket source new <name> [--example] [--sensitivity] [--tool]... [--vault] writes <consuming repo>/.claude/skills/sources/<name>/ (SKILL.md, mapper.py, tests/) from the blank template, shaped like the Plaud reference with {{source}} replaced. The folder is checked after links by skill_folder, the rule find_mapper applies (in the repo, outside the vault), and never written over; the files land in a temp folder beside it, then one rename. sources.<name> in vault.yaml gets the sensitivity (the flag, else what vault.yaml has, else the reference's, else Docket's guess), the mapper .claude/skills/sources/<name>/mapper.py and the tools, committed as Config: source <name>, but only when vault.yaml's text is what Docket would write for it; otherwise the entry is printed to paste. A failure on the way removes the folder and puts vault.yaml back. The blank mapper sets every capture aside as not-mapped-yet, and the template's tests that import docket are collected only where it can be imported."
+    binds:
+      - "Docket never commits the source's folder: it lives in the user's project, theirs to commit."
+    not_chosen:
+      - "Setup editing vault.yaml itself: a hand edit can drop the user's comments or slip past the schema."
+  - id: DR-0167
+    title: The wheel carries the reference sources as scaffold data
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#12"]
+    description: packages/docket/src/docket/sources/templates/<name>/ holds each reference source byte for byte, each file with .tmpl appended so no linter, type checker or test runner takes it for the package's code. A test keeps the Plaud copy identical to examples/sources/plaud/, which stays the reference (DR-0101, DR-0108), and another that the wheel holds every template file. docket source new <name> --example copies the reference of that name under its own name, registered with its sensitivity and tools. Nothing imports it.
+    not_chosen:
+      - "The blank template only: a new user picking Plaud would rewrite a mapper that exists."
+      - "The reference downloaded at the version's tag: the network, and a fetched file that then runs as a mapper."
+      - "Moving the reference into the package: supersedes DR-0101 and DR-0108 for no gain a byte-identical copy doesn't give."
