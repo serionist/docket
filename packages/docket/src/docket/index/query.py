@@ -282,7 +282,7 @@ class _Search:
 
     def _names(self, run: list[str]) -> set[str]:
         """The entities a run of query words names: an alias as written, or through a kept stem form when the run is
-        the alias in one of its case forms, as a chunk must hold it (DR-0350); `same` stems like Sam and names no one."""
+        the alias in one of its case forms, as a chunk must hold it (DR-0350). `same` stems like Sam, and isn't him."""
         folded = tuple(fold(t) for t in run)
         hits: set[str] = set()
         for form in self._candidates_at(run):
