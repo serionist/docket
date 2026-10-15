@@ -8,7 +8,7 @@ import types
 import pytest
 
 from docket.index import text
-from docket.index.languages import code_of, hungarian_dative, language, resolve
+from docket.index.languages import code_of, hungarian_cases, hungarian_dative, language, resolve
 from docket.index.text import Analyzer, Stemmer, any_of, fold, phrase, prefix, quote, words, words_and_compounds
 
 
@@ -131,6 +131,44 @@ def test_the_hungarian_dative_lengthens_a_final_vowel_and_follows_harmony() -> N
     assert hungarian_dative("kert") == ["kertnek"]
     assert hungarian_dative("xyz") == ["xyznek"]
     assert hungarian_dative("2026") == []
+
+
+def test_hungarian_case_forms_follow_harmony_and_assimilation() -> None:
+    acme = hungarian_cases("acme")
+    # Back and front vowels both: a foreign name takes either harmony, its final vowel lengthened.
+    assert {"acménak", "acmének", "acménél", "acmét", "acmével", "acméval", "acméhoz", "acméről"} <= set(acme)
+    assert "acmet" not in acme
+    mark = hungarian_cases("mark")
+    assert {"marknak", "markkal", "markká", "markot", "markon", "marknál", "markról"} <= set(mark)
+    # Back vowels only, so the English market and marked are no case form of Mark.
+    assert not {"market", "marked", "marknek", "markkel"} & set(mark)
+    assert {"kováccsal", "kovácsot"} <= set(hungarian_cases("kovács"))
+    assert {"bellel", "bellnek"} <= set(hungarian_cases("bell"))
+    peter = hungarian_cases("péter")
+    assert {"péternek", "péterrel", "pétert", "péteren"} <= set(peter)
+    assert not any(form.endswith(("nak", "val", "ban", "on")) for form in peter)
+    assert hungarian_cases("dóra")[:2] == ["dórának", "dóránál"]
+    assert "same" not in hungarian_cases("sam")
+    assert len(set(acme)) == len(acme)
+    assert hungarian_cases("2026") == []
+    assert language("hu").cases is hungarian_cases
+    assert language("en").cases is None
+
+
+def test_hungarian_case_forms_read_a_final_y_and_old_spellings() -> None:
+    assert {"tonyval", "tonyn", "tonyvá", "tonyt", "tonynak"} <= set(hungarian_cases("tony"))
+    assert {"szalayval", "szalayt", "szalayn"} <= set(hungarian_cases("szalay"))
+    assert {"kellyvel", "kellyn"} <= set(hungarian_cases("kelly"))
+    assert "kölcseyvel" in hungarian_cases("kölcsey")
+    # A Hungarian ny still doubles: Bárány gives Báránnyal.
+    assert {"báránnyal", "bárányt"} <= set(hungarian_cases("bárány"))
+    assert {"babitscsal", "babitscsá"} <= set(hungarian_cases("babits"))
+    assert "ráczcal" in hungarian_cases("rácz")
+    assert "madáchcsal" in hungarian_cases("madách")
+    assert "kossuthtal" in hungarian_cases("kossuth")
+    assert {"maxszal", "maxot"} <= set(hungarian_cases("max"))
+    old = {*hungarian_cases("babits"), *hungarian_cases("kossuth"), *hungarian_cases("max")}
+    assert not {"babitssal", "kossuthhal", "maxxal"} & old
 
 
 def test_the_seeds_are_the_dative_stem_and_the_word() -> None:

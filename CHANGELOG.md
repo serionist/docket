@@ -84,6 +84,9 @@ Unreleased in the same PR.
   `e-mail`, `email` and Hungarian's `e-mailben`. A hit holding a word only split in two ("edit or" for `editor`)
   comes after the hits holding as many of your words as written. The index rebuilds once, at the first search or
   service start after the update.
+- A customer or person named in most of your notes is found in its Hungarian inflected forms too (`Acménél`,
+  `Acmét`), and `acménél` in a query reads as that entity; a common word that stems like a name (`már` for Mark)
+  still isn't counted as the name. The same one rebuild covers it.
 - A source's `SKILL.md` now holds only the source's own calls; the run's steps come from `run_open`. After upgrading,
   copy the reference's `SKILL.md` and `mapper.py` over your project's copy: a live run refuses a `SKILL.md` without
   the new marker line. Plaud's reference pages transcripts by 100 utterances, and finalizes only the recordings a run

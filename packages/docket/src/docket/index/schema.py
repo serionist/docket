@@ -14,7 +14,8 @@ from docket.index.languages import Languages
 from docket.index.text import snowball_version
 
 # 2: the FTS5 rows hold hyphenated compounds joined (DR-0280).
-SCHEMA_VERSION = 2
+# 3: a common stem form a name's case forms explain is kept, so alias_terms and mentions change (DR-0310).
+SCHEMA_VERSION = 3
 TOKENIZER = "unicode61 remove_diacritics 2"
 # remove_diacritics 2 came in SQLite 3.27.
 MIN_SQLITE = (3, 27, 0)
