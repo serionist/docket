@@ -60,6 +60,11 @@ def name_of(path: str) -> str:
     return path.rsplit("/", 1)[-1].casefold()
 
 
+def index_row(entry: OldPath) -> tuple[str, str, str, str]:
+    """An old path as the index's `old_paths` table keeps it: the doc, the path, its folded form, its file name."""
+    return entry.doc, entry.path, entry.path.casefold(), name_of(entry.path)
+
+
 def keys(locator: str) -> Keys:
     """The keys of the old paths a locator could resolve to, or be named as a candidate of: its folded path and each of
     its suffixes after a `/` or a `:` (the exact, case-folded and suffix steps), and its file name when the file-name

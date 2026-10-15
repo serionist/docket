@@ -343,7 +343,7 @@ class Indexer:
             )
             self.conn.executemany(
                 "INSERT INTO old_paths (doc, path, folded, name) VALUES (?, ?, ?, ?)",
-                [(e.doc, e.path, e.path.casefold(), legacy.name_of(e.path)) for e in legacy.old_paths([doc])],
+                [legacy.index_row(e) for e in legacy.old_paths([doc])],
             )
             self.conn.executemany(
                 "INSERT INTO doc_anchors (doc, line, ordinal, rid, kind, start, end) VALUES (?, ?, ?, ?, ?, ?, ?)",
