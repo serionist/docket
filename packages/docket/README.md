@@ -264,6 +264,9 @@ Runtime in a worker process of its own, on the CPU or an NVIDIA GPU.
   it has. A block Docket can't read turns models off and says why.
 - Nothing leaves the machine. The files live under your user cache and data folders, never in the vault or a repo,
   and after the install nothing touches the network.
+- Vectors need a Python whose SQLite can load extensions. uv's own Pythons can; some others can't (the one on
+  GitHub's macOS runners, for one), and `docket models install` says so. `uv tool install --python-preference
+  only-managed docket` installs Docket on uv's own.
 
 Who embeds what:
 
