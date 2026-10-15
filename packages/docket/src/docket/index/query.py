@@ -6,7 +6,8 @@
    fewer than k, any of them; if still fewer, word prefixes. In each, the best chunk of each group whose title's lead
    holds most of the query's terms goes first (DR-0231); in the any-word stage the rest go by how many terms their text
    holds (DR-0232), then by BM25. The any-word and prefix stages leave out words in half the chunks or more, which
-   BM25 gives no weight; they still count in the order.
+   BM25 gives no weight; they still count in the order, and the least common joins one more any-word query when the
+   stages leave fewer than k.
 4. Entity candidates, top 200: chunks mentioning the query's or the boosts' entities.
 5. Fuse the two lists by reciprocal rank, so a boost lifts a chunk and never drops one.
 6. Collapse hits on the same stretch, group them by recording or thread, attach each group's summary.
@@ -46,8 +47,9 @@ PREFIX_MIN = 3
 SNIPPET_BEFORE = 15
 SNIPPET_WORDS = 40
 TITLE_WORDS = 8
-# A title's lead: its text up to the first `: `, else its first 12 words (DR-0231).
+# A title's lead: its text up to the first `: ` after at least three words, else its first 12 words (DR-0231).
 LEAD_END = ": "
+LEAD_MIN = 3
 LEAD_WORDS = 12
 SUMMARY_TYPES = ("minutes", "recording-note", "thread-summary")
 QUOTED = re.compile(r'"([^"]*)"')
@@ -574,11 +576,15 @@ class _Terms:
 
 
 def lead(title: str) -> str:
-    """A title's lead (DR-0231): its text up to the first `: `, so a time such as 23:44 doesn't cut it, else its first
-    12 words. A long heading that lists everything lifts nothing with the words after its lead."""
-    head, sep, _ = title.partition(LEAD_END)
-    if sep:
-        return head
+    """A title's lead (DR-0231): its text up to the first `: ` that follows at least three words, else its first 12
+    words. A long heading that lists everything lifts nothing with the words after its lead, while a label before a
+    colon (`RE: `, `Fwd: `, `[EXT] Re: `, `Acme: `) doesn't end one. A time such as 23:44 has no space after its colon,
+    and a word is a run of text between spaces holding a letter or a digit, so a date such as 2026-10-12 is one."""
+    at = title.find(LEAD_END)
+    while at != -1:
+        if sum(1 for piece in title[:at].split() if WORD.search(piece)) >= LEAD_MIN:
+            return title[:at]
+        at = title.find(LEAD_END, at + 1)
     found = list(WORD.finditer(title))
     return title[: found[LEAD_WORDS - 1].end()] if len(found) > LEAD_WORDS else title
 
@@ -659,11 +665,10 @@ def _run(
         *(s.phrase_group(w) for w in dedupe(e.words for e in found)),
     ]
     # The any-word and prefix stages leave out the words BM25 gives no weight, which match half the chunks or more and
-    # would cost scoring them all; the word check still counts them in the order (DR-0232). When nothing else would
-    # find a chunk, the least common of them stays.
+    # would cost scoring them all; the word check still counts them in the order (DR-0232). If those stages leave
+    # fewer than k, one more any-word query adds the least common of them.
     some = [(w, g) for w, g in word_groups if s.weighs(w)]
-    if not phrase_groups and not entity_groups and not any(s.reach[w] for w, _ in some):
-        some += sorted((wg for wg in word_groups if not s.weighs(wg[0])), key=lambda wg: s.reach[wg[0]])[:1]
+    weightless = [g for w, g in sorted(word_groups, key=lambda wg: s.reach[wg[0]]) if not s.weighs(w)]
     any_groups = [*phrase_groups, *(g for _, g in some), *entity_groups]
     widened = [
         *phrase_groups,
@@ -686,10 +691,13 @@ def _run(
         if entity_groups:
             take(s.order(s.fts(" AND ".join(literal), filters, CANDIDATES), q, by_text=False), "all")
         take(s.order(s.fts(" AND ".join(groups), filters, CANDIDATES), q, by_text=False), "all")
-        if len(order) < k and len(groups) > 1:
+        if len(order) < k and len(groups) > 1 and any_groups:
             take(s.order(s.fts(" OR ".join(any_groups), filters, CANDIDATES), q, by_text=True), "any")
         if len(order) < k and widened != any_groups:
             take(s.order(s.fts(" OR ".join(widened), filters, CANDIDATES), q, by_text=False), "prefix")
+        if len(order) < k and len(groups) > 1 and weightless:
+            fallback = " OR ".join([*any_groups, weightless[0]])
+            take(s.order(s.fts(fallback, filters, CANDIDATES), q, by_text=True), "any")
     elif not all_entities:
         take(s.newest(filters), "time")
     rank = {chunk: n for n, chunk in enumerate(order, start=1)}

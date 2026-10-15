@@ -400,11 +400,14 @@ def test_the_any_word_stage_ranks_more_of_the_words_first(names: Vault) -> None:
 
 
 def test_a_word_in_half_the_chunks_leaves_the_any_word_match_and_counts_in_its_order(names: Vault) -> None:
-    # Acme is in most chunks, so BM25 gives it no weight: the any-word stage doesn't match it, and a weekly mail holding
-    # only Acme isn't a candidate, while Acme still counts in the order above.
+    # Acme is in most chunks, so BM25 gives it no weight: the any-word stage doesn't match it, so a weekly mail holding
+    # only Acme comes only from the last query that adds it, after every chunk holding another word, while Acme still
+    # counts in the order above.
     hits = ranked(find(names, "acme budget approval", k=50))
-    assert hits and not any((h.rid or "").startswith("mail:<weekly-") for h in hits)
-    # When the other words are in no chunk, the least common of the weightless ones stays: Orbex, in fewer chunks.
+    weekly = [h.rank for h in hits if (h.rid or "").startswith("mail:<weekly-")]
+    others = [h.rank for h in hits if not (h.rid or "").startswith("mail:<weekly-")]
+    assert weekly and others and max(others) < min(weekly)
+    # When the other words are in no chunk, the least common of the weightless ones joins: Orbex, in fewer chunks.
     fallback = find(names, "acme orbex zebracorn")
     assert fallback.query.absent == ["zebracorn"]
     assert {h.found_by for h in ranked(fallback)} == {"any"}
@@ -444,3 +447,51 @@ def test_the_word_check_agrees_with_stemming_every_word(vault: Vault, names: Vau
             held = checker.held(text)
             assert (set(held.words), set(held.phrases)) == (want_words, want_phrases), text
             assert checker.count(text) == len(want_words) + len(want_phrases), text
+
+
+@pytest.mark.parametrize(
+    ("title", "want"),
+    [
+        ("RE: Acme budget", "RE: Acme budget"),
+        ("Fwd: Granite pump overhaul", "Fwd: Granite pump overhaul"),
+        ("Acme: budget call", "Acme: budget call"),
+        ("[EXT] Re: Granite pump overhaul", "[EXT] Re: Granite pump overhaul"),
+        ("Válasz: Acme határidő", "Válasz: Acme határidő"),
+        ("2026-10-12: Acme kick-off", "2026-10-12: Acme kick-off"),
+        ("Re: Acme budget review: notes from the call", "Re: Acme budget review"),
+        (
+            "2026-10-12 - Mail sweep, received 11 Oct 23:44 to 12 Oct 22:50: the Acme kick-off ran, Dana sent notes",
+            "2026-10-12 - Mail sweep, received 11 Oct 23:44 to 12 Oct 22:50",
+        ),
+        (
+            "2026-10-12 - Acme kick-off with Dana (second half): no site in the plan yet",
+            "2026-10-12 - Acme kick-off with Dana (second half)",
+        ),
+        (
+            "one two three four five six seven eight nine ten eleven twelve thirteen",
+            "one two three four five six seven eight nine ten eleven twelve",
+        ),
+    ],
+)
+def test_a_title_s_lead_runs_past_a_label_before_its_colon(title: str, want: str) -> None:
+    assert search_module.lead(title) == want
+
+
+def test_a_reply_s_subject_lifts_it(names: Vault) -> None:
+    result = find(names, "granite pump overhaul")
+    assert ranked(result)[0].rid == "mail:<granite-2@acme.example>"
+
+
+def test_the_any_word_stage_adds_a_weightless_word_when_the_stages_leave_fewer_than_k(names: Vault) -> None:
+    # Crane is in chunks, but in no mail: without Acme the stages find nothing there.
+    mail = find(names, "acme crane", sources=["mail"])
+    assert len(ranked(mail)) == 20 and all((h.rid or "").startswith("mail:") for h in ranked(mail))
+    # Nor in May, when only the weekly mails were written.
+    may = find(names, "acme crane", since=date(2026, 5, 1), until=date(2026, 5, 31))
+    assert len(ranked(may)) == 20
+    # A quoted phrase no chunk holds finds nothing on its own.
+    phrase = find(names, '"zebra crossing" acme')
+    assert len(ranked(phrase)) == 20 and phrase.query.absent == []
+    # Two weightless words and a source where no chunk holds both: the least common, Orbex, finds the chat.
+    chat = find(names, "acme orbex", sources=["chat"])
+    assert [h.rid for h in ranked(chat)] == ["chat:C0NAMES/1791500001.000100"]

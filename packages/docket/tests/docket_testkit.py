@@ -506,6 +506,8 @@ NAME_MESSAGES = {
     "crane": "Borealis crane audit: crane audit done, crane audit report sent, crane audit closed.",
     "both": "Crane audit approval granted.",
     "rita": "Rita: budget, budget, budget.",
+    "granite": "Granite pump overhaul: pump overhaul, granite pump, overhaul today.",
+    "granite2": "Granite pump overhaul starts, the pump overhaul crew is ready.",
 }
 NAME_DOCS = {
     "weekly-notes": ("Weekly notes", "The acme kick-off with dana went well."),
@@ -552,6 +554,14 @@ def name_records() -> dict[str, list[RawRecord]]:
             "rid": "mail:<rita-1@acme.example>", "source": "mail", "kind": "mail", "container": "mail:rita",
             "ts": "2026-10-12T15:00:00Z", "title": "Budget call with Rita",
             "text": "A short call about the numbers for next quarter, nothing settled yet, more to follow next week.",
+        }
+    )  # fmt: skip
+    # A reply: its subject's label ends in a colon, which must not end the title's lead.
+    mail.append(
+        {
+            "rid": "mail:<granite-2@acme.example>", "source": "mail", "kind": "mail", "container": "mail:granite",
+            "ts": "2026-10-13T11:00:00Z", "title": "RE: Granite pump overhaul",
+            "text": "Agreed, we start on Monday with the crew from the yard, and the parts arrive on Tuesday.",
         }
     )  # fmt: skip
     chat = [
