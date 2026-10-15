@@ -20,8 +20,8 @@ from docket_testkit import (
 )
 
 from docket.errors import DocketError
+from docket.index import labels, rebuild, search, summary_for
 from docket.index import query as search_module
-from docket.index import rebuild, search
 from docket.index.build import languages_of, open_index
 from docket.index.query import SearchResult
 from docket.vault.records import RawRecord
@@ -267,3 +267,20 @@ def test_a_snippet_cuts_around_the_first_match(vault: Vault) -> None:
         assert reader.snippet("no match here at all") == "no match here at all"
     finally:
         conn.close()
+
+
+def test_labels_name_each_entity_in_the_owner_s_language(vault: Vault) -> None:
+    found = labels(vault, ["ben-sample", "northwind", "ben-sample", "nobody-known"])
+    assert set(found) == {"ben-sample", "northwind"}
+    assert (found["ben-sample"].type, found["ben-sample"].name) == ("person", "Ben Sample")
+    assert found["northwind"].type == "customer"
+    assert labels(vault, []) == {}
+
+
+def test_summary_for_gives_what_search_attaches_to_the_record_s_group(vault: Vault) -> None:
+    by_search = {g.key: g.summary for g in find(vault, "Nortwin", k=20).groups}
+    assert by_search[CALL] is not None
+    assert summary_for(vault, CALL) == by_search[CALL]
+    assert summary_for(vault, "calls:rec-0100-second") == by_search[CALL]
+    assert summary_for(vault, "chat:C0SIDE/1791500000.000100") is None
+    assert summary_for(vault, "chat:nowhere/1") is None

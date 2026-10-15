@@ -113,3 +113,32 @@ jobs:
         env:
           DOCKET_TEST_LIVE_SERVICE: "1"
         run: uv run pytest packages/docket/tests/test_service_install_live.py -v -rs -p no:cacheprovider
+
+  # The web app in a real browser: the runner's own Chrome, which Playwright drives without downloading a browser. It
+  # sees what render tests can't (a CSP violation, a swap that doesn't happen, a key that does nothing); its
+  # screenshots are kept with the run.
+  web:
+    name: Web app in Chrome (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync --locked
+      - name: Search, the panel, the keys and a lapsed session, in Chrome
+        env:
+          DOCKET_TEST_BROWSER: chrome
+          DOCKET_TEST_SCREENSHOTS: ${{ runner.temp }}/screenshots
+        run: uv run pytest packages/docket/tests/test_web_browser.py -v -rs -p no:cacheprovider
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web-screenshots
+          path: ${{ runner.temp }}/screenshots
+          if-no-files-found: ignore

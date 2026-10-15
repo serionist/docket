@@ -81,7 +81,8 @@ Every change is a GitHub issue on the Docket board, with a milestone per phase, 
 
 While you build:
 
-- Look up a library's API with Context7 (`.mcp.json`) before coding against it: FastAPI, Pydantic, the MCP SDK.
+- Look up a library's API with Context7 (`.mcp.json`) before coding against it: FastAPI, Pydantic, the MCP SDK,
+  Jinja2, htmx.
 - Ask the language server about a symbol first; grep is for text in config, docs and strings.
 
 ## Commits and PRs

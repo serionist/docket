@@ -804,15 +804,28 @@ def hook_session_start() -> None:
 
 
 @app.command("open")
-def open_app() -> None:
+def open_app(
+    path: Annotated[
+        str | None,
+        typer.Argument(
+            help='A page of the web app to land on, such as "/search?query=offer", as its sign-in page names it.'
+        ),
+    ] = None,
+) -> None:
     """Open the web app in your browser, through a link good once and for a minute."""
+    from urllib.parse import quote  # noqa: PLC0415
+
     from docket.service import client, sessions  # noqa: PLC0415
 
+    if path is not None and sessions.safe_next(path) != path:
+        raise DocketError(f"{path!r} isn't a page of the web app; give its path, such as /search?query=offer")
     token = _tokens().read()
     answer = client.call("POST", "/api/session", token=token)
     if answer is None or answer.status != 200:
         raise DocketError("the service isn't answering; `docket service status` says why")
     url = str(answer.body["url"])
+    if path is not None:
+        url += "&next=" + quote(path, safe="")
     page = sessions.write_redirect(url)
     opened = webbrowser.open(page.as_uri())
     # Printed whether or not a browser opened: a snap or Flatpak browser can't open a file in a hidden folder.

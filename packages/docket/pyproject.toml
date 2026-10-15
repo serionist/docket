@@ -9,6 +9,7 @@ authors = [{ name = "Soma Osvay" }]
 dependencies = [
   "fastapi>=0.142.4",
   "filelock>=4.0.7",
+  "jinja2>=3.1.6",
   "keyring>=25.7.0",
   # The SDK's API moved between 2.0 and 2.3; a new version comes in by its own reviewed bump.
   "mcp==2.3.0",

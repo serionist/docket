@@ -1,0 +1,22 @@
+<!doctype html>
+{# The pages a browser without a session can reach: no navigation, no footer, so nothing names the vault or the
+   machine. #}
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>{{ title }} - Docket</title>
+<link rel="icon" href="{{ asset('icon.svg') }}" type="image/svg+xml">
+{% for sheet in stylesheets %}
+<link rel="stylesheet" href="{{ asset(sheet) }}">
+{% endfor %}
+</head>
+<body class="bare">
+<a class="skip" href="#main">Skip to the main content</a>
+<header class="topbar"><span class="brand">Docket</span></header>
+<main id="main" class="bare-main">
+{% block main %}{% endblock %}
+</main>
+</body>
+</html>

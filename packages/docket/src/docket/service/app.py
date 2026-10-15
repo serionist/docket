@@ -1,7 +1,7 @@
 """The service's ASGI app: one port for the MCP endpoint at /mcp, the REST API under /api and the pages.
 
 A request is logged and its errors caught by `logs.Requests`, then passes the checks in `security.Guard`; /mcp then
-goes to the MCP SDK's app, the rest to FastAPI. The web app's pages (#9) add a router; `/` is a placeholder until then.
+goes to the MCP SDK's app, the rest to FastAPI, where the web app (`docket.web`) adds its pages and `/static/`.
 """
 
 from __future__ import annotations
@@ -13,21 +13,13 @@ from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from docket import __version__
+from docket import __version__, web
 from docket.service import api
 from docket.service.logs import Requests
 from docket.service.security import Guard
 from docket.service.sessions import COOKIE, Sessions, moving_on, safe_next
 from docket.service.state import Service, Settings
 from docket.service.tools import create_mcp, security
-
-START_PAGE = (
-    "<!doctype html><title>Docket</title><p>Docket is running. The web app's pages arrive with its next version.</p>\n"
-)
-USED_LINK_PAGE = (
-    "<!doctype html><title>Docket</title><p>This link was used or is over a minute old. Run "
-    "<code>docket open</code> again.</p>\n"
-)
 
 
 def create_fastapi(service: Service, lifespan: object = None) -> FastAPI:
@@ -48,17 +40,14 @@ def create_fastapi(service: Service, lifespan: object = None) -> FastAPI:
     ) -> HTMLResponse:
         started = service.sessions.redeem(code) if code else None
         if started is None:
-            return HTMLResponse(USED_LINK_PAGE, status_code=401)
+            return HTMLResponse(web.used_link_page(safe_next(after)), status_code=401)
         # A page that moves on, not a redirect: coming from a file, a redirect's navigation stays cross-site and the
         # browser would hold back the Strict cookie on it.
-        page = HTMLResponse(moving_on(safe_next(after)))
+        page = HTMLResponse(moving_on(safe_next(after), icon=web.ICON))
         page.set_cookie(COOKIE, started, httponly=True, samesite="strict", path="/")
         return page
 
-    @app.get("/", response_class=HTMLResponse)
-    def start() -> HTMLResponse:  # pyright: ignore[reportUnusedFunction]
-        return HTMLResponse(START_PAGE)
-
+    web.install(app, service)
     return app
 
 
@@ -71,7 +60,11 @@ class ServiceApp:
         self.api = api_app
         self.mcp = mcp
         guard = Guard(
-            self._dispatch, port=service.settings.port, token=service.settings.token, sessions=service.sessions
+            self._dispatch,
+            port=service.settings.port,
+            token=service.settings.token,
+            sessions=service.sessions,
+            sign_in=web.sign_in_page,
         )
         self.outer = Requests(guard)
 

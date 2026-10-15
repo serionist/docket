@@ -22,6 +22,8 @@ CODE_SECONDS = 60
 SESSION_SECONDS = 12 * 3600
 COOKIE = "docket_session"
 REDIRECT_FILE = "docket-open.html"
+# What `open_command` keeps as it is in a path: nothing a shell acts on inside double quotes.
+OPEN_SAFE = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~/?=&%+:@,")
 
 
 @dataclass
@@ -69,11 +71,24 @@ def safe_next(target: str | None) -> str:
     return target
 
 
-def moving_on(target: str, title: str = "Docket") -> str:
-    """A small page that moves the browser on by itself, with a link for when it doesn't."""
+def open_command(wanted: str) -> str:
+    """The command that opens a page after signing in: `docket open "<path>"`, or `docket open` for the start page.
+    The path is double-quoted, and whatever a shell could act on inside the quotes (`$`, a backquote, `!`, `"`, a
+    backslash) is percent-encoded, as is anything else a URL path or query wouldn't carry as it is."""
+    path = safe_next(wanted)
+    if path in ("/", "/search"):
+        return "docket open"
+    encoded = "".join(ch if ch in OPEN_SAFE else "".join(f"%{b:02X}" for b in ch.encode()) for ch in path)
+    return f'docket open "{encoded}"'
+
+
+def moving_on(target: str, title: str = "Docket", icon: str | None = None) -> str:
+    """A small page that moves the browser on by itself, with a link for when it doesn't. Served by the service, it
+    names its icon: a page that names none makes the browser ask for /favicon.ico, which isn't there."""
     href = html.escape(target, quote=True)
+    named = "" if icon is None else f'<link rel="icon" href="{html.escape(icon, quote=True)}" type="image/svg+xml">'
     return (
-        f'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>{html.escape(title)}</title>'
+        f'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>{html.escape(title)}</title>{named}'
         f'<meta http-equiv="refresh" content="0; url={href}"></head>'
         f'<body><p><a href="{href}">Open Docket</a></p></body></html>\n'
     )

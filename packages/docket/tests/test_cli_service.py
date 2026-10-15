@@ -277,6 +277,29 @@ def test_open_writes_the_redirect_opens_it_and_prints_the_link(
     assert out == f"the link, good once and for a minute: {url}\n"
 
 
+def test_open_takes_the_page_to_land_on_as_next(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    Tokens().ensure()
+    url = "http://127.0.0.1:8741/session?code=one-time-code"
+    monkeypatch.setattr(client, "call", lambda method, path, *, token=None, at=None: client.Answer(200, {"url": url}))
+    monkeypatch.setattr("webbrowser.open", lambda target: False)
+    code, out, _ = run(capsys, "open", "/search?query=day rate&hit=r:calls:rec-0100@02:30")
+    assert code == 0
+    assert out.endswith(f"{url}&next=%2Fsearch%3Fquery%3Dday%20rate%26hit%3Dr%3Acalls%3Arec-0100%4002%3A30\n")
+
+
+@pytest.mark.parametrize("path", ["search", "//evil.example/x", "https://evil.example/", "/\\evil.example"])
+def test_open_refuses_a_page_that_isnt_on_this_service(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, path: str
+) -> None:
+    Tokens().ensure()
+    monkeypatch.setattr(client, "call", lambda *a, **k: pytest.fail("no session is asked for"))
+    code, _, err = run(capsys, "open", path)
+    assert code == 2
+    assert "isn't a page of the web app" in err
+
+
 def test_open_without_a_service_says_so(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
     Tokens().ensure()
     monkeypatch.setattr(client, "call", lambda *a, **k: None)

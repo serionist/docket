@@ -24,6 +24,10 @@ log = logging.getLogger(__name__)
 UPDATE_WAIT_SECONDS = 30.0
 
 
+class IndexBuildingError(DocketError):
+    """A search waited its while and the index update goes on: a state to wait out, not a failure."""
+
+
 class Writer:
     """One thread for every write the service makes."""
 
@@ -63,7 +67,7 @@ class IndexUpdater:
         try:
             await asyncio.wait_for(asyncio.shield(waiting), self.wait_seconds)
         except TimeoutError:
-            raise DocketError("the index is being built; try again in a minute") from None
+            raise IndexBuildingError("the index is being built; try again in a minute") from None
 
     async def idle(self) -> None:
         """Wait until no update runs or waits to run: for a clean stop, and for tests."""

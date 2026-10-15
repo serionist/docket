@@ -202,7 +202,8 @@ flowchart TB
 - Models run in worker processes, each in its own environment: the embedder and reranker stay loaded; Whisper
   starts per job and ends, freeing its VRAM, and its CUDA libraries never share a process with PyTorch's.
 - Security on localhost (DR-0152): bound to 127.0.0.1; every request's Host checked; the browser gets a session
-  cookie (SameSite=Strict) from a one-time link `docket open` opens; every write checks Origin and Sec-Fetch-Site;
+  cookie (SameSite=Strict) from a one-time link `docket open` opens, and only the web app's static files go without
+  it (DR-0177); every write checks Origin and Sec-Fetch-Site;
   the API and MCP take a bearer token from the keychain, or from a file only the user can read where there is no
   keychain; the MCP endpoint also uses the MCP SDK's DNS-rebinding protection. The service runs the consuming repo's
   mappers, never code from the vault, a downloads folder or a drop folder.
@@ -528,6 +529,18 @@ change lands on whoever uses that vendor, while the core still checks every rid 
 
 Every page has the actions that belong on it. An action runs in the service, runs Claude headless, or hands the job
 to Claude Code with the command ready to paste.
+
+How it is built (DR-0170 to DR-0176):
+
+- Pages rendered by the service with Jinja2, parts of them swapped by htmx; every state is a URL that renders without
+  JavaScript, and the navigation shows every page above with its phase.
+- htmx, the fonts and the icons are files in the package, served under `/static/`; nothing comes from the network,
+  so the app works offline, under a CSP that allows no inline script or style and no eval.
+- The Search page's URL holds the `search` tool's parameters under their names, so Claude can link to its hits; a
+  hit opens beside the results, its summary next to its raw, read with `around`, and verify pairs each line with its
+  raw.
+- The user's words stay out of the browser's storage: pages aren't cached, and the browser keeps only the theme and
+  the keys switch.
 
 ## 11. Claude first
 

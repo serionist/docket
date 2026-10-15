@@ -394,17 +394,7 @@ class _Search:
         title = (record and record[0]) or (doc and doc[0]) or opening
         times = [t for t in (_time(h.ts) for h in hits) if t is not None]
         rids = sorted({rid for h in hits for rid in h.rids} | {key})
-        summary = None
-        if kind != "doc":
-            marks = ", ".join("?" * len(rids))
-            row = self.conn.execute(
-                "SELECT DISTINCT d.id, d.type, d.rev, d.title FROM docs d JOIN doc_covers c ON c.doc = d.id "  # noqa: S608 - placeholders only
-                f"WHERE d.superseded_by IS NULL AND d.type IN ('minutes', 'recording-note', 'thread-summary') AND "
-                f"(c.rid IN ({marks}) OR c.rid IN (SELECT rid FROM records WHERE thread = ?)) ORDER BY "
-                "CASE d.type WHEN 'minutes' THEN 0 WHEN 'recording-note' THEN 1 ELSE 2 END, d.id LIMIT 1",
-                [*rids, key],
-            ).fetchone()
-            summary = None if row is None else DocRef(id=row[0], type=row[1], rev=row[2], title=row[3])
+        summary = None if kind == "doc" else _summary(self.conn, rids, key)
         return Group(
             key=key,
             kind=kind,
@@ -414,6 +404,60 @@ class _Search:
             last=max(times, default=None),
             summary=summary,
         )
+
+
+def _summary(conn: sqlite3.Connection, rids: Sequence[str], key: str) -> DocRef | None:
+    """A group's current summary: a minutes, recording note or thread summary covering one of its records or a record
+    of its thread, minutes first."""
+    marks = ", ".join("?" * len(rids))
+    row = conn.execute(
+        "SELECT DISTINCT d.id, d.type, d.rev, d.title FROM docs d JOIN doc_covers c ON c.doc = d.id "  # noqa: S608 - placeholders only
+        f"WHERE d.superseded_by IS NULL AND d.type IN ('minutes', 'recording-note', 'thread-summary') AND "
+        f"(c.rid IN ({marks}) OR c.rid IN (SELECT rid FROM records WHERE thread = ?)) ORDER BY "
+        "CASE d.type WHEN 'minutes' THEN 0 WHEN 'recording-note' THEN 1 ELSE 2 END, d.id LIMIT 1",
+        [*rids, key],
+    ).fetchone()
+    return None if row is None else DocRef(id=row[0], type=row[1], rev=row[2], title=row[3])
+
+
+def summary_for(vault: Vault, rid: str) -> DocRef | None:
+    """The summary search attaches to the group a record is in, or None when no current doc summarizes it."""
+    conn = open_index(vault)
+    try:
+        row = conn.execute("SELECT grp FROM records WHERE rid = ?", (rid,)).fetchone()
+        key = rid if row is None else str(row[0])
+        return _summary(conn, sorted({rid, key}), key)
+    finally:
+        conn.close()
+
+
+class EntityLabel(BaseModel):
+    id: str
+    type: str
+    name: str
+
+
+def labels(vault: Vault, ids: Sequence[str]) -> dict[str, EntityLabel]:
+    """Each known entity's type and the name to show: in the owner's first language that has one, else English, else
+    the first given. Ids the index doesn't know are left out."""
+    wanted = sorted(set(ids))
+    if not wanted:
+        return {}
+    order = [*vault.config.owner.languages, "en"]
+    conn = open_index(vault)
+    try:
+        rows = conn.execute(
+            f"SELECT id, type, names FROM entities WHERE id IN ({', '.join('?' * len(wanted))})",  # noqa: S608 - placeholders only
+            wanted,
+        ).fetchall()
+    finally:
+        conn.close()
+    out: dict[str, EntityLabel] = {}
+    for entity, kind, names in rows:
+        given: dict[str, str] = json.loads(names)
+        name = next((given[lang] for lang in order if given.get(lang)), next(iter(given.values()), entity))
+        out[entity] = EntityLabel(id=entity, type=kind, name=name)
+    return out
 
 
 def _iso(value: datetime) -> str:

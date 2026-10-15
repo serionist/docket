@@ -1,0 +1,103 @@
+{% from "macros.html" import swap, notice, chip, locator %}
+{# The search's filters ride with the query box: a new query keeps them. They live here, so a facet click updates
+   them with the rest. #}
+<div class="carried" hidden>
+  {% for name, values in [("sources", state.sources), ("people", state.people), ("entities", state.entities)] %}
+  {% for value in values %}<input type="hidden" name="{{ name }}" value="{{ value }}" form="search-form">{% endfor %}
+  {% endfor %}
+</div>
+{% if view %}
+{% if view.reading %}<p class="reading" aria-label="How search read the query">{% for fact in view.reading %}<span>{{ fact }}</span>{% endfor %}</p>{% endif %}
+{% if view.chips %}<ul class="chips" aria-label="Filters and boosts">{% for c in view.chips %}<li>{{ chip(c) }}</li>{% endfor %}</ul>{% endif %}
+{% endif %}
+<div class="layout{% if view or problem %} with-facets{% endif %}">
+  {% if view or problem %}
+  <details class="facets" open>
+    <summary>Narrow or favour</summary>
+    {% if view %}
+    <p class="facet-note">Counts are over the {{ view.candidates }} best match{{ "es" if view.candidates != 1 else "" }}, not the whole vault.</p>
+    {% for facet in view.facets %}
+    <section class="facet" aria-labelledby="facet-{{ facet.key }}">
+      <h2 id="facet-{{ facet.key }}">{{ facet.title }}{% if facet.favours %} <span class="badge">favour</span>{% endif %}</h2>
+      <ul>
+        {% for item in facet.items %}
+        <li><a class="facet-item{% if item.on %} on{% endif %}" {{ swap(item.link, '#workspace') }}{% if item.on %} aria-current="true"{% endif %}><span class="label" dir="auto">{{ item.label }}</span>{% if item.note %}<span class="note">{{ item.note }}</span>{% endif %}<span class="count">{{ item.count }}</span></a></li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endfor %}
+    {% endif %}
+    <section class="facet" aria-labelledby="facet-dates">
+      <h2 id="facet-dates">Dates</h2>
+      <div class="dates">
+        <label>Since <input type="text" name="since" value="{{ dates.since }}" form="search-form" placeholder="2026-10-01" spellcheck="false"></label>
+        <label>Until <input type="text" name="until" value="{{ dates.until }}" form="search-form" placeholder="2026-10-31" spellcheck="false"></label>
+        <button type="submit" class="button" form="search-form">Apply</button>
+      </div>
+    </section>
+  </details>
+  {% endif %}
+  <section class="results" aria-labelledby="results-title" data-announce="{{ view.announce if view else (problem or '') }}">
+    <h2 id="results-title" class="visually-hidden">Results</h2>
+    {% if waiting %}
+    <div class="notice wait" role="status" hx-get="{{ retry }}" hx-trigger="load delay:5s" hx-target="#workspace" hx-headers='{"X-Docket-Retry": "1"}'>{{ icon('busy') }}<p>{{ problem }}. This page asks again every few seconds.</p></div>
+    {% elif problem %}
+    {{ notice('error', problem) }}
+    {% elif view and view.groups %}
+    <ol class="groups">
+      {% for g in view.groups %}
+      <li class="group kind-{{ g.kind }}">
+        <header class="group-head">
+          <span class="kind">{{ icon(g.icon) }}{{ g.kind }}</span>
+          <h3 class="group-title" dir="auto">{{ g.title }}</h3>
+          <span class="meta">{{ g.source }}{% if g.when %}, {{ g.when }}{% endif %}</span>
+        </header>
+        {% if g.summary %}
+        <p class="summary-line">{{ icon('doc') }}<a class="hit-link" {{ swap(g.summary_link, '#panel') }} data-locator="{{ g.summary.id }}" dir="auto">{{ g.summary.title }}</a><span class="meta">{{ g.summary.type }}, rev {{ g.summary.rev }}</span></p>
+        {% endif %}
+        <ol class="hits">
+          {% for h in g.hits %}
+          <li class="hit{% if h.open %} open{% endif %}">
+            <a class="hit-link" {{ swap(h.link, '#panel') }} data-locator="{{ h.locator }}">{{ icon(h.icon) }}{{ locator(h.locator) }}{% if h.stretch %}<span class="stretch">{{ h.stretch }}</span>{% endif %}</a>
+            <p class="meta">{% if h.when %}<span>{{ h.when }}</span>{% endif %}{% if h.who %}<span dir="auto">{{ h.who }}</span>{% endif %}{% if h.found %}<span class="badge">{{ h.found }}</span>{% endif %}</p>
+            <p class="snippet" dir="auto">{{ h.snippet }}</p>
+            {% if h.entities %}<p class="mentions">mentions {{ h.entities|join(', ') }}</p>{% endif %}
+            {% if h.also %}
+            <details class="also"><summary>and {{ h.also|length }} more on the same stretch</summary><ul>{% for a in h.also %}<li>{{ locator(a) }}</li>{% endfor %}</ul></details>
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ol>
+      </li>
+      {% endfor %}
+    </ol>
+    {% if view.more %}<p class="more"><a class="button" {{ swap(view.more, '#workspace') }}>Show more</a></p>{% endif %}
+    {% elif view %}
+    <div class="empty">
+      <h3>Nothing found</h3>
+      {% if view.drops %}
+      <p>Try without one of these:</p>
+      <ul class="chips">{% for c in view.drops %}<li>{{ chip(c) }}</li>{% endfor %}</ul>
+      {% else %}
+      <p>Fewer words, another spelling, or a name's alias may find it.</p>
+      {% endif %}
+    </div>
+    {% elif state.locator_query %}
+    <div class="empty"><p>Opened {{ locator(state.query) }} beside the results. Its words aren't searched; add a word to search instead.</p></div>
+    {% else %}
+    <div class="empty start">
+      <h3>Find anything you kept</h3>
+      <ul>
+        <li>words and names, in any of your languages: a name finds its aliases too</li>
+        <li>"a quoted phrase", word for word</li>
+        <li>a time: last week, yesterday, 2026-10 or 2026-10-07</li>
+        <li>a locator from Claude's answer, such as <span class="locator">r:calls:rec-0100@02:30</span>, to open it</li>
+      </ul>
+      <p class="muted">{{ index_line }}</p>
+    </div>
+    {% endif %}
+  </section>
+  <aside id="panel" class="panel-slot" aria-label="The open hit">
+    {% include "search/_panel.html" %}
+  </aside>
+</div>

@@ -8,12 +8,16 @@
 | the bearer token, compared in constant time | /mcp always, /api when there is no session |
 | the session cookie | the pages, and /api when there is no bearer token |
 
+GET and HEAD under /static/ need no session: they are the web app's own files, the same for everyone, and the sign-in
+page needs its stylesheet (DR-0177). The Host check still applies to them.
+
 No CORS header is ever sent, so no page of another origin reads an answer or adds a header a preflight would allow.
 """
 
 from __future__ import annotations
 
 import hmac
+import html
 from collections.abc import Callable
 from typing import Literal
 
@@ -22,9 +26,9 @@ from starlette.requests import HTTPConnection
 from starlette.responses import HTMLResponse, PlainTextResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from docket.service.sessions import COOKIE, Sessions
+from docket.service.sessions import COOKIE, Sessions, open_command
 
-Route = Literal["mcp", "health", "session-api", "api", "session-page", "page"]
+Route = Literal["mcp", "health", "session-api", "api", "session-page", "static", "page"]
 SAFE_METHODS = frozenset({"GET", "HEAD"})
 
 HEADERS = {
@@ -37,10 +41,14 @@ HEADERS = {
 }
 NO_STORE = ("/api", "/mcp", "/session")
 
-SIGN_IN_PAGE = (
-    '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Docket</title></head><body>'
-    "<p>Open Docket from a terminal on this machine: <code>docket open</code></p></body></html>\n"
-)
+
+def plain_sign_in(wanted: str) -> str:
+    """The sign-in page without the web app's templates: the command that opens the page asked for."""
+    return (
+        '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Docket</title></head><body>'
+        f"<p>Open Docket from a terminal on this machine: <code>{html.escape(open_command(wanted))}</code></p>"
+        "</body></html>\n"
+    )
 
 
 def route_of(path: str, method: str) -> Route:
@@ -54,14 +62,25 @@ def route_of(path: str, method: str) -> Route:
         return "api"
     if path == "/session":
         return "session-page"
+    if path.startswith("/static/") and method in SAFE_METHODS:
+        return "static"
     return "page"
 
 
 class Guard:
     """The ASGI layer in front of the app: refuses what fails a check, and adds the headers on the way out."""
 
-    def __init__(self, app: ASGIApp, *, port: int, token: Callable[[], str], sessions: Sessions) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        port: int,
+        token: Callable[[], str],
+        sessions: Sessions,
+        sign_in: Callable[[str], str] = plain_sign_in,
+    ) -> None:
         self.app = app
+        self.sign_in = sign_in
         self.hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
         self.origins = {f"http://{host}" for host in self.hosts}
         self.token = token
@@ -91,7 +110,7 @@ class Guard:
         if write and ((origin is not None and origin not in self.origins) or (site not in (None, "same-origin"))):
             return PlainTextResponse("cross-origin writes are refused", status_code=403)
         route = route_of(scope["path"], method)
-        if route in ("health", "session-page"):
+        if route in ("health", "session-page", "static"):
             return None
         bearer = self._bearer(headers)
         if bearer is False:
@@ -100,7 +119,11 @@ class Guard:
             return None if bearer else _unauthorized()
         session = self.sessions.valid(HTTPConnection(scope).cookies.get(COOKIE))
         if not bearer and not session:
-            return _unauthorized() if route == "api" else HTMLResponse(SIGN_IN_PAGE, status_code=401)
+            if route == "api":
+                return _unauthorized()
+            # The page asked for is the user's own words (a query string), so the answer isn't stored either.
+            page = self.sign_in(_wanted(scope))
+            return HTMLResponse(page, status_code=401, headers={"Cache-Control": "no-store"})
         if write and not bearer and origin is None and site is None:
             # A browser sends one of the two on every write; a write that carries a cookie and neither isn't ours.
             return PlainTextResponse("a write with the session cookie needs its Origin", status_code=403)
@@ -132,6 +155,13 @@ class Guard:
             await send(message)
 
         return sending
+
+
+def _wanted(scope: Scope) -> str:
+    """The path and query a request asked for, as the browser sent them."""
+    raw: bytes = scope.get("raw_path") or scope["path"].encode("utf-8")
+    query: bytes = scope.get("query_string", b"")
+    return raw.decode("latin-1") + (f"?{query.decode('latin-1')}" if query else "")
 
 
 def _unauthorized() -> Response:

@@ -1,0 +1,8 @@
+{% extends "bare.html" %}
+{% block main %}
+<section class="card bare-card" aria-labelledby="bare-title">
+  <h1 id="bare-title">This link was used, or is over a minute old</h1>
+  <p>Run it again from a terminal on this machine:</p>
+  <pre class="command"><code>{{ command }}</code></pre>
+</section>
+{% endblock %}

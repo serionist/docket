@@ -1,0 +1,122 @@
+"""The web app's templates: one Jinja environment, its filters, and `page()`, the response every page and fragment
+goes out as (DR-0170, DR-0172).
+
+Every value is autoescaped and a missing one fails the render (`StrictUndefined`); nothing from a record or a doc is
+marked safe. Each response carries the page CSP, stricter than the Guard's floor, and `no-store`, so the user's words
+stay out of the browser's cache.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Iterable, Mapping
+from datetime import datetime
+from importlib.resources import files
+from zoneinfo import ZoneInfo
+
+from jinja2 import Environment, PackageLoader, StrictUndefined
+from markupsafe import Markup, escape
+from starlette.responses import HTMLResponse
+
+from docket.index.text import WORD, fold
+from docket.vault.anchors import format_time
+from docket.web import assets, pages
+
+PAGE_CSP = (
+    "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; "
+    "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+)
+# htmx's settings: its own indicator CSS off (ours has it), and a 401 not swapped in, since the page reloads into the
+# sign-in page instead. Read once by htmx from a meta tag, so no script sets them.
+HTMX_CONFIG = json.dumps({"includeIndicatorCSS": False, "noSwap": [204, 304, 401]})
+STYLESHEETS = ("css/tokens.css", "css/base.css", "css/components.css", "css/search.css")
+SCRIPTS = (assets.HTMX, "js/docket.js")
+# A word of a snippet is marked when it is a query word, or starts with one this long (an inflected form).
+MARK_PREFIX = 4
+
+ICONS: dict[str, str] = json.loads(files("docket.web").joinpath("icons.json").read_text(encoding="utf-8"))
+
+
+def icon(name: str) -> Markup:
+    """An icon as inline SVG, hidden from screen readers: a word beside it says what it means."""
+    return Markup(  # noqa: S704 - the paths are the package's own icons.json, never content
+        f'<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">{ICONS[name]}</svg>'
+    )
+
+
+def at(value: datetime | None, tz: ZoneInfo, with_time: bool = True) -> str:
+    """A time in the owner's zone, as `7 Oct 2026 10:00`."""
+    if value is None:
+        return ""
+    local = value.astimezone(tz)
+    day = f"{local.day} {local:%b %Y}"
+    return f"{day} {local:%H:%M}" if with_time else day
+
+
+def clock(seconds: int | None) -> str:
+    """Seconds into a recording, as its anchors write them: `02:30`, `1:02:30`."""
+    return "" if seconds is None else format_time(seconds)
+
+
+def marked(text: str, terms: Iterable[str]) -> Markup:
+    """A snippet with the query's words marked, built from escaped pieces so a record's markup stays text."""
+    wanted = {fold(t) for t in terms if t}
+    out: list[str] = []
+    last = 0
+    for m in WORD.finditer(text):
+        word = fold(m.group(0))
+        if word in wanted or any(len(t) >= MARK_PREFIX and word.startswith(t) for t in wanted):
+            out += [str(escape(text[last : m.start()])), f"<mark>{escape(m.group(0))}</mark>"]
+            last = m.end()
+    out.append(str(escape(text[last:])))
+    return Markup("".join(out))  # noqa: S704 - every piece is escaped above
+
+
+def _environment() -> Environment:
+    env = Environment(
+        loader=PackageLoader("docket.web", "templates"),
+        autoescape=True,
+        undefined=StrictUndefined,
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    # Jinja types its two registries loosely; these are the names the templates use.
+    names: dict[str, object] = {
+        "icon": icon,
+        "asset": asset,
+        "integrity": assets.integrity,
+        "vendored": assets.VENDORED,
+        "htmx_config": HTMX_CONFIG,
+        "stylesheets": STYLESHEETS,
+        "scripts": SCRIPTS,
+        "nav": pages.NAV,
+        "keys": pages.KEYS,
+    }
+    filters: dict[str, object] = {"at": at, "clock": clock, "marked": marked}
+    for name, value in names.items():
+        env.globals[name] = value  # pyright: ignore[reportUnknownMemberType]
+    for name, value in filters.items():
+        env.filters[name] = value  # pyright: ignore[reportUnknownMemberType]
+    return env
+
+
+def asset(path: str) -> str:
+    return f"/static/{path}"
+
+
+ENV = _environment()
+
+
+def render(template: str, context: Mapping[str, object]) -> str:
+    return ENV.get_template(template).render(context)
+
+
+def page(
+    template: str, context: Mapping[str, object], *, status: int = 200, headers: Mapping[str, str] | None = None
+) -> HTMLResponse:
+    """A page or a fragment, with the page CSP and `no-store`."""
+    return HTMLResponse(
+        render(template, context),
+        status_code=status,
+        headers={"Content-Security-Policy": PAGE_CSP, "Cache-Control": "no-store", **(headers or {})},
+    )
