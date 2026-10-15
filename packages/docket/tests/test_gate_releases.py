@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import make_record
+from docket_testkit import empty_vault, make_record
 
 from docket.errors import DocketError
 from docket.vault import holds, releaselog
@@ -34,7 +34,7 @@ def vault(tmp_path: Path, config: VaultConfig) -> Vault:
     config.sources["hush"] = SourceConfig(sensitivity="private")
     config.sources["paused"] = SourceConfig(enabled=False)
     config.never_store = NeverStore(keywords=["zebrafinch"])
-    return Vault.init(tmp_path / "vault", config, "test-box")
+    return empty_vault(tmp_path, config)
 
 
 def rec(native: str = "rec-1", source: str = "calls", **fields: Any) -> RawRecord:

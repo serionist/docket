@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import make_record, sh
+from docket_testkit import empty_vault, make_record, sh
 
 from docket.errors import DocketError
 from docket.vault import releaselog
@@ -24,7 +24,7 @@ AT = datetime(2026, 10, 15, 9, 12, tzinfo=UTC)
 
 @pytest.fixture
 def vault(tmp_path: Path, config: VaultConfig) -> Vault:
-    return Vault.init(tmp_path / "vault", config, "test-box")
+    return empty_vault(tmp_path, config)
 
 
 def release(
