@@ -41,3 +41,15 @@ decisions:
       - "A margin under today's numbers: a question lost in a kind of 14 would hide in it."
       - "Printing a gain without failing, as coverage does: a floor left behind lets a later change give the gain back unseen."
       - "Floors beside the test fixtures: tools/devkit is the harness, where a loosened check needs its reason."
+  - id: DR-0339
+    title: The gate stays model-free; a models job in CI runs the question set with the embedder on a CPU against floors of its own
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#67"]
+    description: The gate's lanes run the question set keyword-only against eval-floors.json (DR-0295), and test the worker, the vector stage and the fusion with a stdlib-only fake worker that gives deterministic vectors. A models job on Linux restores the worker's environment and model files from the Actions cache, keyed by the requirements and the catalogue, installs them on a miss (0.5 GB), runs the set with DOCKET_TEST_MODELS=1, and holds each kind against tools/devkit/eval-floors-models.json by DR-0295's rules through a lane of its own, gate models; on Windows and macOS the job installs and starts the worker without floors. A CPU's fp32 vectors equal a GPU's to four decimals, so the job measures what a GPU machine gets from embeddings.
+    not_chosen:
+      - "A tiny model in the gate: its numbers say nothing about the model users run."
+      - "Floors from the maintainer's GPU: not reproducible in CI."
+      - "The gate's eval with vectors whenever a model is cached: one commit would pass on one machine and fail on another."
