@@ -127,7 +127,7 @@ sequenceDiagram
 
 - `verify` is mechanical because every line carries anchors: `@12:08` within a single-record note, or `[r:<rid>@12:08]`
   when a doc covers several records; `[r:<rid>#2]` points at a paragraph of a mail or message and `[r:<rid>]` at a whole
-  record (DR-0110).
+  record (DR-0198).
 - People and entity filters are boosts with a fallback, not hard filters: an unlabelled speaker would otherwise drop
   the very chunk that holds the answer.
 - A correction propagates. Every ledger item, decision and brief line records what it was built from

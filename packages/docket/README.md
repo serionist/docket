@@ -141,7 +141,7 @@ A held recording goes in only with the cuts you confirm (DR-0200 to DR-0206).
 ## Processed docs
 
 A processed doc's lines end with anchors: `@12:08` in a doc covering one record, `[r:<rid>@12:08]`, `[r:<rid>#2]` or
-`[r:<rid>]` across records (DR-0110). A locator is a doc's id or path, `r:<rid>@12:08`, or a rid. The same three
+`[r:<rid>]` across records (DR-0198). A locator is a doc's id or path, `r:<rid>@12:08`, or a rid. The same three
 operations are `docket.recall.doc_put`, `read` and `verify` in Python. A time resolves against the record's `segments`
 field, which the source's mapper fills (DR-0111); a record without segments takes paragraph and whole-record anchors.
 

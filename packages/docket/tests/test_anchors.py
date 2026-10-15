@@ -138,6 +138,13 @@ def test_short_anchors_and_the_written_form() -> None:
         ("- reserved [d:digest-1] @12:08", "- reserved", ["@12:08"], 1),
         ("- a bad one, then a good one @1:60 @2:00", "- a bad one, then a good one", ["@2:00"], 1),
         ("- mid-line @1:60 isn't an anchor @2:00", "- mid-line @1:60 isn't an anchor", ["@2:00"], 0),
+        # A redaction marker is text, at a line's end too; any other [<letters>:...] there is still refused.
+        ("- text [redacted:phone] @13:40", "- text [redacted:phone]", ["@13:40"], 0),
+        ("- the key [redacted:api-key]", "- the key [redacted:api-key]", [], 0),
+        ("[redacted:private-key] @00:20", "[redacted:private-key]", ["@00:20"], 0),
+        ("| Cleo | [redacted:phone] @13:40 |", "| Cleo | [redacted:phone]", ["@13:40"], 0),
+        ("- not a marker [redacted:Phone]", "- not a marker", [], 1),
+        ("- another kind [x:foo] @13:40", "- another kind", ["@13:40"], 1),
     ],
 )
 def test_the_anchors_at_the_end_of_a_line(line: str, text: str, tokens: list[str], errors: int) -> None:

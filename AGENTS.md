@@ -99,12 +99,12 @@ agrees in the issue or, under an autonomy grant, with its decision recorded as p
 
 - the names: the `docket` package and command, the plugin's and the marketplace's name `docket`;
 - the vault's format: its layout, run-file names and where Docket's own files live (DR-0141), the raw record's
-  version (DR-0020), `vault.yaml` (DR-0021) and its `storage` (DR-0140), the vault's own `.gitattributes` (DR-0142),
-  staging's files and states (DR-0024), the processed doc's format (DR-0109), the anchor grammar (DR-0110), a
-  transcript's segments as a record field (DR-0111), doc revisions as the commits that wrote them (DR-0112), entity
-  files (DR-0113), a transcript's text rendered by the core (DR-0120), hold lists (DR-0121), release logs (DR-0200), a
-  cut record's fidelity (DR-0126), a legacy note's old paths and import hash (DR-0130), old paths as locators
-  (DR-0131);
+  version (DR-0020), `vault.yaml` (DR-0021), its `storage` (DR-0140) and its redaction keys (DR-0192), the vault's
+  own `.gitattributes` (DR-0142), staging's files and states (DR-0024), the processed doc's format (DR-0109), the
+  anchor grammar (DR-0198), a transcript's segments as a record field (DR-0111), doc revisions as the commits that
+  wrote them (DR-0112), entity files (DR-0113), a transcript's text rendered by the core (DR-0120), hold lists
+  (DR-0121), release logs (DR-0200), a cut record's fidelity (DR-0126), a legacy note's old paths and import hash
+  (DR-0130), old paths as locators (DR-0131);
 - a source's mapper interface (DR-0119), and the names and keys of a source in `vault.yaml` (DR-0124, DR-0125);
 - the MCP tools' names and parameters: `search`, `read`, `verify` and `doc_put` (DR-0150), and the plugin's server
   key `docket` that prefixes them (DR-0160);
