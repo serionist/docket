@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 import pytest
 import typer.main
 
+from docket import entry
 from docket.cli import app, main
 from docket.service import client, state, writer
 from docket.service.token import Tokens
@@ -51,7 +52,7 @@ def test_the_header_helper_prints_the_header_claude_code_reads(capsys: pytest.Ca
 
 def test_the_session_start_hook_runs_a_command_docket_has() -> None:
     hooks = read_json("hooks/hooks.json")["hooks"]
-    assert list(hooks) == ["SessionStart"]
+    assert list(hooks) == ["SessionStart", "PostToolUse"]
     (group,) = hooks["SessionStart"]
     assert "matcher" not in group
     (hook,) = group["hooks"]
@@ -60,6 +61,19 @@ def test_the_session_start_hook_runs_a_command_docket_has() -> None:
     for name in hook["args"]:
         command = command.commands[name]
     assert "SessionStart" in command.help
+
+
+def test_the_capture_hook_runs_for_mcp_tools_only_and_runs_a_command_docket_has() -> None:
+    (group,) = read_json("hooks/hooks.json")["hooks"]["PostToolUse"]
+    assert group["matcher"] == "mcp__.*"
+    (hook,) = group["hooks"]
+    # Not async: a bind must land before Claude's next call, and Claude reads the hook's line beside the result.
+    assert hook == {"type": "command", "command": "docket", "args": ["hook", "post-tool-use"], "timeout": 30}
+    assert tuple(hook["args"]) == entry.HOOK
+    command: Any = typer.main.get_command(app)
+    for name in hook["args"]:
+        command = command.commands[name]
+    assert "PostToolUse" in command.help
 
 
 def test_the_plugin_is_past_its_placeholder_version() -> None:

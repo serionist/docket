@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import http.client
 import json
+import logging
 import os
 import shutil
 import socket
@@ -24,7 +25,7 @@ from starlette.testclient import TestClient
 
 from docket import userconfig
 from docket.errors import DocketError
-from docket.service import client, server
+from docket.service import client, logs, server
 from docket.service.server import Prepared, bind, prepare, socket_options
 from docket.service.token import ROTATE, Tokens
 
@@ -71,6 +72,19 @@ def test_port_zero_is_bound_by_serve_and_recorded(prepared: Prepared, vault: Pat
     ours = TestClient(prepared.app, base_url=f"http://127.0.0.1:{prepared.port}")
     assert ours.get("/api/health").status_code == 200
     assert ours.get("/api/health", headers={"Host": "127.0.0.1:0"}).status_code == 421
+
+
+def test_closing_puts_back_every_logging_level_the_service_set(vault: Path, token: str) -> None:
+    names = ("", "docket", *logs.LIBRARIES)
+    logging.getLogger("docket").setLevel(logging.DEBUG)
+    before = {name: logging.getLogger(name).level for name in names}
+    try:
+        ready = prepare(vault, 0)
+        assert logging.getLogger("docket").level == logging.INFO
+        ready.close()
+        assert {name: logging.getLogger(name).level for name in names} == before
+    finally:
+        logging.getLogger("docket").setLevel(logging.NOTSET)
 
 
 def test_a_second_service_is_refused_naming_the_first(prepared: Prepared, vault: Path) -> None:
@@ -227,7 +241,7 @@ def test_the_service_as_a_process_answers_mcp_with_the_token_and_refuses_a_forge
             http = httpx2.AsyncClient(headers={"Authorization": f"Bearer {token}"}, trust_env=False)
             async with http, Client(streamable_http_client(f"http://127.0.0.1:{port}/mcp", http_client=http)) as mcp:
                 tools = {tool.name for tool in (await mcp.list_tools()).tools}
-                assert tools == {"search", "read", "verify", "doc_put"}
+                assert tools == {"search", "read", "verify", "doc_put", "run_open", "ingest"}
                 result = await mcp.call_tool("search", {"query": "fleet dashboard battery"})
                 assert not result.is_error
                 first = result.content[0]

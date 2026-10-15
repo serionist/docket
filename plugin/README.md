@@ -24,13 +24,22 @@ Then add this repo as a marketplace and install the plugin, in Claude Code:
 
 | Part | What it does |
 |---|---|
-| the MCP server `docket` | the service at `http://127.0.0.1:8741/mcp`; its tools are `search`, `read`, `verify` and `doc_put`, shown as `mcp__plugin_docket_docket__<tool>`; the token comes from `docket service token --header` on each connect |
+| the MCP server `docket` | the service at `http://127.0.0.1:8741/mcp`; its tools are `search`, `read`, `verify`, `doc_put`, `run_open` and `ingest`, shown as `mcp__plugin_docket_docket__<tool>`; the token comes from `docket service token --header` on each connect |
 | the session-start status | `docket hook session-start`: Claude learns whether the service runs, on which vault, and what waits in staging; you see a line only when something needs you |
+| the capture hook | `docket hook post-tool-use` after every MCP call: during a sync run it hands Docket what the source's tools returned, and tells Claude which captures it kept; with no run open it reads one small file and returns |
 | `/docket:recall` | finds what was said or written, reads the summary, checks every fact against its raw, and answers with locators; Claude also uses it on its own when you ask what someone said |
 | `/docket:setup` | checks Docket is installed, asks which sources to set up, where the vault lives and your languages, creates the vault, and writes each source's skill and mapper with `docket source new` |
 | `/docket:cuts` | for recordings you held back, turns your words for each left-out stretch into time ranges on the transcript, writes them to a proposals file outside any repo, and hands you `docket hold release` to run in your own terminal; it tells you first where the transcripts it reads stay in Claude Code's session files |
 
-Sync, tasks and curate arrive in later phases, and the hook that captures a source's tool results with #41.
+To sync a source, ask Claude to sync it: Claude calls `run_open`, follows the source's skill in your project, and
+closes the run with `ingest`. Allow `mcp__plugin_docket_docket__run_open` and `mcp__plugin_docket_docket__ingest` in
+your permission rules to skip the two prompts a run asks. The `sync`, `tasks` and `curate` skills arrive in later
+phases.
+
+Upgrading: update Docket first (the install line above, with `--reinstall`), then the plugin. An older `docket`
+doesn't know `docket hook post-tool-use`, and Claude Code would show its error after every MCP call. Then copy each
+source's `SKILL.md` and `mapper.py` from the reference over your project's copies: a live run refuses a `SKILL.md`
+from before live runs.
 
 ## When it doesn't connect
 

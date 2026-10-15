@@ -16,6 +16,8 @@ reading:
   - { path: packages/docket/src/docket/web/state.py, role: contract, note: "the Search page's URL: the search tool's parameters and the panel's, in one canonical form" }
   - { path: packages/docket/src/docket/web/templates/macros.html, role: guide, note: "the web app's components, one macro each, for every page to reuse" }
   - { path: packages/docket/src/docket/vault/releaselog.py, role: contract, note: "the release log, a one-way door: the file, its lines, how several fold into one and how it fails closed" }
+  - { path: packages/docket/src/docket/vault/cursors.py, role: contract, note: "each machine's cursor file, a one-way door: its keys, how it reads and fails closed, the window, the retry and waiting sets" }
+  - { path: packages/docket/src/docket/service/runs.py, role: contract, note: "open sync runs in memory: bind, captures, close, drop, the caps, the marker the capture hook reads" }
 decisions:
   - id: DR-0019
     title: The vault's layout and run-file names are fixed
@@ -1207,3 +1209,137 @@ decisions:
       - "A ceiling for folder vaults: the host's top isn't known once its .git is gone."
       - "Recording the host's path in the vault: it would sit in the git dir that went missing, or in the user's tree."
       - "Checking on every open without keeping the answer: a git call on every service request."
+  - id: DR-0240
+    title: A sync run lives in the service's memory from run_open to ingest, and closes only whole
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#41"]
+    description: "run_open opens a run for a source; the capture hook binds it to the Claude Code session, and inside a subagent the agent, that opened it, and posts that session's results of the source's listed tools, which the service holds in memory, tagged with the run and numbered as they arrive, until ingest closes it. A close takes the run only when it isn't short and the captures that arrived equal the manifest's count. Otherwise the run is dropped, and so is one with no capture for 30 minutes, one open 6 hours, one replaced by a newer run_open of its source or by a second run bound to its session and agent, and every run when the service stops: its captures are freed, nothing is staged and the mark stays, so the next run fetches them again. A capture refused from the bound session marks the run short. A closing run is never expired or replaced; a run_open of its source is refused meanwhile. A repeated tool_use_id is ignored. Each finished run's outcome stays in memory for an hour, so a repeated ingest gets it. A run's id is run-<yyyymmddThhmmss>-<16 hex>. A close is shielded from a client that gives up: it finishes, and its outcome is kept for the next ingest."
+    binds:
+      - "Docket writes nothing of a capture to disk or to a log: no spool, no temp file, the mapper's input on its stdin."
+      - One open run per source on a machine, and one per session and agent.
+    not_chosen:
+      - "Captures spooled to disk to survive a restart: a verbatim payload would sit on disk outside the gate."
+      - "Refusing a second run_open of a source: a crashed session would block its source for 30 minutes."
+      - "A run tied to no session: another session's call of a listed tool, such as the user browsing recordings, would land in it."
+  - id: DR-0241
+    title: The service's phase 1 MCP tools are run_open and ingest, with fixed parameters
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#41"]
+    description: "run_open(source, since, final) opens a sync run: source is a key of vault.yaml's sources; since is optional, a date or a time as search takes it, and starts the window there instead of at the cursor; final, false by default, opens a final run with no window and no listing, handing over only the ids due a final try (DR-0247); since and final together are refused. It returns RunOpened: the run's id, its window, the source's SKILL.md path and listed tools, the budget, the held ids, the native ids raw and staging keep in the window and whether that list is whole (none for a run opened with since), the waiting and retry ids, notes, and the run's steps (DR-0252). ingest(run, captures, final, skipped, folder) closes a run: captures is the highest kept number the hook showed, 0 or more; final is false by default and true only on a final run; skipped is a list of {id, reason}; folder is optional; source and window come from the run. It returns RunClosed: the docket ingest report's counts and ids, the mark before and after, the retry and waiting counts, the ids that expired, and whether it repeats an earlier answer. Both are annotated as writes that destroy nothing and join packages/docket/tests/fixtures/mcp-tools.json. Extends DR-0150's door; final on run_open came before the door opened, so it widens nothing that shipped. Refines DR-0119's bind that the ingest tool uses the manifest's shape: it takes the manifest's fields less the two the run fixes. A final run_open with nothing due a final try is refused, naming why."
+    binds:
+      - Parameters only gain optional ones whose default keeps today's behaviour, enums only gain values, results only gain fields; nothing is renamed, retyped or removed without a superseding decision.
+      - The tool names run_open and ingest are a one-way door (AGENTS.md).
+    not_chosen:
+      - "One ingest that opens without a run and closes with one: two meanings under one name, and a parameter set that fits neither."
+      - "run_open(session) filled from Claude Code's session id substitution: a source's SKILL.md, read by path, gets no substitution, and Claude would copy a UUID."
+      - "final only as an ingest flag on any run: a final close could follow a listing run and move the mark, and Claude could finalize ids younger than 7 days."
+  - id: DR-0243
+    title: Runs take the bearer token only, and a capture only from its run's session, within caps
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#41"]
+    description: "The run routes under /api/runs (open, bind, capture, close, list) take the bearer token and refuse the session cookie, besides DR-0152's Host and Origin checks. A run is bound once, within 60 seconds of opening, and only a run the service opened. A capture is kept only from the bound session and agent, for a tool the source listed when the run opened, once per tool_use_id; 32 MiB a capture and 256 MiB across open runs, counted while the body streams so a body with no Content-Length stops at the cap. A capture refused from the bound session marks its run short. runs.json in the state folder holds run ids, sources, bound sessions and agents and tool names, never content; it is written through a temp file and a rename, retried as staging's writes are, before the route answers, and deleted at start and when no run is open. Any process running as the user can read the token and the marker and post into an open run, as it can write the vault (DR-0152's accepted risk): a capture it adds alone breaks the count and drops the run, and what it closes goes through the mapper, the core's checks, holds and the gate into staging."
+    binds: ["The run routes never log a body, an id list or a query string (DR-0155)."]
+    not_chosen:
+      - "The session cookie on the run routes: a page of the web app has no business opening runs or posting captures."
+  - id: DR-0244
+    title: At close the mapper runs beside the writer, for at most 90 seconds
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#41"]
+    description: "ingest_run is split into its steps, which docket ingest still runs in order. At a close the service runs the folder's hold file, staging and the cursor on the writer thread (DR-0153), and the mapper on a thread of its own for at most 90 seconds, because the plugin's MCP entry gives every Docket tool call 120 seconds (DR-0160). One close maps at a time: a second is refused at once and its run stays open. A vault lock timeout before anything is staged puts the run back to open. A mapper past its time, a crash, refused output or a held record waiting in staging drops the run and keeps the mark; the mapper's stderr is neither logged nor returned. A cursor commit that fails after staging leaves the run closed and the mark where it was, and RunClosed says so. docket ingest keeps 300 seconds. Refines DR-0123's limit for the service. A close whose final doesn't match its run is refused before anything is written, and the run stays open. A cursor written but not committed is named as a mark moved and not committed, which the next close commits; one the system couldn't write (a lock, a file another program holds) as a mark that didn't move; either way the run is closed, never dropped."
+    not_chosen:
+      - "The whole close on the writer thread: a slow mapper would hold doc_put for minutes."
+      - "The plugin's MCP timeout above 300 seconds: every hung call of any Docket tool would wait that long."
+  - id: DR-0245
+    title: Each machine's sync cursors are state/cursors-<machine>.yaml, committed
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#41"]
+    description: "The file holds schema_version 1, then sources, each with mark (a quoted UTC time), lookback_days (7 when Docket writes it), retry (items of id, reason and since, a quoted date) and waiting (items of id, for and since). Only its machine writes it, through a temp file in the private folder and a rename, never through a link, committed alone as Cursors: <source> on <machine>, naming no id, once per whole close that changed it. It merges by git's default text merge, which takes two machines' edits to different sources cleanly; a conflict needs two clones with one machine name, and then the read stops on the markers until the user keeps one side, the one with the older mark being safe. This machine's file fails closed: a bad line, an unknown key, an unquoted time, a conflict marker or a link refuses run_open, naming the file and the line number. Another machine's file that doesn't read is left out, and run_open says so, since its marks only shorten a window. Only ids YAML reads back go in: one holding U+FFFE, U+FFFF or a lone surrogate is refused as a skipped id and left out of the sets."
+    binds: [The cursor file's path and format are a one-way door (AGENTS.md).]
+    not_chosen:
+      - "The cursor, the retry or the waiting ids in the private folder: lost with a clone, and a mark taken from another machine skips what they held."
+      - "One shared file: two machines writing it conflict on every run."
+      - "merge=union: two mark keys for one source, which the read refuses."
+  - id: DR-0246
+    title: A run's window is the furthest mark less the lookback, and the mark moves only on a whole close
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#41"]
+    description: A run's window runs from the latest mark any machine's cursor file holds for its source, leaving out a mark later than this machine's clock and naming it in run_open's notes, less this machine's lookback_days, to the moment it opened; with no mark, from now less the lookback; run_open's since starts it elsewhere. A close that takes the run and kept at least one capture moves this machine's mark to the run's open time, but only when its window started no later than the default. A dropped run, a failed close, a close with no captures, a narrower since or any final close leaves the mark; a final run has no window. A source skill closes a run only after its listing reached the window's start; one that can't finish stops without closing. A run's open time is taken in whole seconds, as the mark is written.
+    not_chosen:
+      - "Moving the mark on partial progress: a listing paged newest first reaches the old end last, so a stop partway would skip it for good."
+      - "The newest item's time as the mark: it rests on the vendor's clock, and a run that finds nothing new never moves it."
+  - id: DR-0247
+    title: "The retry and waiting sets: what a whole close adds and removes, and what run_open hands over"
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#41"]
+    description: "On a whole close, retry gains each skipped entry with an id that isn't held, with its reason and first date; a re-skip takes the newer reason and keeps the first date. It loses the ids the run reached (a record under it, a waiting or set-aside entry) unless the run skipped them again, held ids, and ids whose reason isn't later after 30 days, gone among them, named in RunClosed as expired. Waiting gains the mapper's waiting ids less held ids, the ids the run skipped, which stay in retry, and the ids the run was told to skip: the window's whole kept set worked out at open and kept with the run, less the ids waiting then. It loses the ids the run reached with a record unless the mapper reports them waiting again, held ids, and on a final close every entry older than 7 days at its open, whatever it gave, named as expired. gone is the reason for an id a by-id fetch found missing at the source, not found or an error. Both sets live in the cursor file (DR-0245). run_open hands over this machine's sets and, while another machine's mark is under 30 days old, that machine's waiting entries as its file lists them and its retry entries under which raw and staging hold no record; held ids are left out of every set. A final run gets only the waiting ids and the retry ids whose reason isn't later that are older than 7 days. This replaces #10's hand-over that waiting ids stay private. A later id skipped again for another reason starts its 30 days that day. A final close expires only the waiting ids its answer showed."
+    not_chosen:
+      - "Waiting ids in the private folder, as #10 handed over: a mark taken from another machine skips them."
+      - "Expiring later ids: an id held back for the budget would be lost after a month of busy runs."
+      - "Every waiting id the mapper reports: a recording the run was told to skip comes back every other run."
+      - "Other machines' entries for as long as their files list them: a retired machine's ids would be asked for on every run, forever, on every machine."
+  - id: DR-0248
+    title: The folders docket ingest read stay in the vault's private folder
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#41"]
+    description: <private>/sync/folders.json holds the real path of each folder docket ingest read, per source, for the folder rule (DR-0250). It is per machine and never committed; losing it means running docket ingest on the folder again. The private folder is .git/docket/ in a repo of its own and <host git dir>/docket/<vault path>/ in a folder (DR-0141).
+    not_chosen: ["Committed: a folder's path belongs to one machine, and can name the user."]
+  - id: DR-0249
+    title: "run_open hands the skill what to skip: held ids, and what raw and staging keep in the window"
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#41"]
+    description: "held is the hold list's ids. kept is the native ids (the rid less <source>:) of the source's records in raw, read from the index after it is brought up to date, and in staging, whose ts falls in the window; the whole set stays with the run, and its close uses it (DR-0247), and a run opened with since is shown none. waiting and retry come with their first dates; held ids are left out of both. Each list has its room in run_open's answer: kept 8,000 characters, held 1,500, waiting and retry 3,000 each, the oldest owed first, so the answer stays under about 20,000 and far below the 50,000 past which Claude Code would hand the hook a note instead; a list past its room says it is incomplete, and the run keeps every id. The lists save calls; the core's checks, holds and the gate stay the control."
+    not_chosen:
+      - "Every rid raw holds: thousands of ids in Claude's context for a window of days."
+      - "kept on a run opened with since: a backfill's listing makes no call per item, and its window can hold thousands."
+  - id: DR-0250
+    title: A run's folder must be one docket ingest read on this machine
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#41"]
+    description: "ingest's folder is taken only when its real path, links followed, is a folder docket ingest read for that source on this machine, or sits under one, and outside the vault; otherwise it is refused, naming the command. It replaces #10's hand-over row, a folder vault.yaml names. It is no wall against a process running as the user; it keeps the MCP route from reading a folder nobody imported by hand."
+    not_chosen:
+      - "Folders named in vault.yaml: every machine shares vault.yaml, and a folder's path belongs to one."
+      - "No folder through the service: a backfill's listing must be mapped beside its files."
+  - id: DR-0252
+    title: "The run's steps: the highest kept number is the count, a missing line stops the run, a budget bounds it"
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#41"]
+    description: run_open gives every source the same steps. Call run_open alone and wait for the hook's bind line; without it, stop. Follow the source's skill for its own calls, skipping held ids and kept ids unless waiting, and fetching retry and waiting ids by id; a by-id fetch that finds nothing is skipped as gone. List to the window's start. Each successful call of a listed tool gets a kept line; a successful call of a listed tool with no docket line, or a not-kept line for any reason but too large, means stop without closing, and the run drops in 30 minutes with the mark kept. An item not kept as too large goes in skipped as too-large. Past the run's budget, 400 KB of captured results shown on each kept line, no new item is fetched and each one left goes in skipped as later; the budget never bounds the listing. Close with ingest, captures being the highest kept number seen. After closing, run_open(source, final=true) and fetch only the ids it gives, each by id, closing with final. A mapper finalizes only what a run fetched by id or read from a backfill file, and reports a listed-only item inside the manifest's window as waiting for fetch, giving nothing for one outside it, as the Plaud reference does; a backfill's listing run closes without final.
+    binds: [The hook's line prefixes are bound in DR-0242.]
+    not_chosen:
+      - "Claude counting its own calls: it miscounts over a long run, and the highest kept number is the service's own count."
+      - "A run bounded by a number of items: items differ tenfold in size, and the budget is what Claude's context feels."
+      - "final on a run that also lists: every recording it only listed would be stored bare and never fetched again."
+      - "A listed-only item giving nothing at all: an item nobody fetched, a backfill's gap or one Claude forgot to skip, would be lost once the mark moves past it."

@@ -166,5 +166,111 @@
       "idempotent_hint": true,
       "open_world_hint": false
     }
+  },
+  {
+    "name": "run_open",
+    "input_schema": {
+      "properties": {
+        "final": {
+          "default": false,
+          "type": "boolean"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "type": "object"
+    },
+    "annotations": {
+      "read_only_hint": false,
+      "destructive_hint": false,
+      "idempotent_hint": false,
+      "open_world_hint": false
+    }
+  },
+  {
+    "name": "ingest",
+    "input_schema": {
+      "$defs": {
+        "Skip": {
+          "properties": {
+            "id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason"
+          ],
+          "type": "object"
+        }
+      },
+      "properties": {
+        "captures": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "final": {
+          "default": false,
+          "type": "boolean"
+        },
+        "folder": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "run": {
+          "type": "string"
+        },
+        "skipped": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Skip"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "run",
+        "captures"
+      ],
+      "type": "object"
+    },
+    "annotations": {
+      "read_only_hint": false,
+      "destructive_hint": false,
+      "idempotent_hint": false,
+      "open_world_hint": false
+    }
   }
 ]

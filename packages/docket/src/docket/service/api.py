@@ -1,4 +1,5 @@
-"""The REST API under /api: the four calls the MCP tools make, the service's status, and the browser's one-time link.
+"""The REST API under /api: the calls the MCP tools make, the service's status, the browser's one-time link, and the
+run routes the capture hook posts to (bearer token only, DR-0243).
 
 It is Docket's own: the CLI, the plugin's hooks and the web app's pages call it, shipped from this repo together, so
 it is not a door until the first release. The MCP tools are.
@@ -6,18 +7,21 @@ it is not a door until the first release. The MCP tools are.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, FastAPI, Query, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ValidationError
 
+from docket import capture
 from docket.errors import DocketError
 from docket.index import SearchResult
 from docket.index.query import MAX_K
 from docket.recall import ReadResult, VerifyResult
-from docket.service import calls
+from docket.service import calls, sync
+from docket.service.runs import BUDGET, CAPTURE_CAP
 from docket.service.sessions import CODE_SECONDS
 from docket.service.state import Service, Status
 from docket.vault.docstore import PutResult
@@ -26,6 +30,85 @@ from docket.vault.spans import WINDOW
 
 # A doc is a few KB; anything this big isn't one. The MCP SDK caps /mcp at the same.
 MAX_BODY = 4 * 1024 * 1024
+
+
+# A run's open, bind or close is a few KB; a capture is up to CAPTURE_CAP.
+RUN_BODY = 1024 * 1024
+
+
+class OpenBody(BaseModel):
+    source: str
+    since: str | None = None
+    final: bool = False
+    session: str | None = None
+    agent: str | None = None
+
+
+class BindBody(BaseModel):
+    session: str
+    agent: str | None = None
+
+
+class CaptureBody(BaseModel):
+    session: str
+    agent: str | None = None
+    tool_name: str
+    tool_use_id: str
+    arguments: dict[str, Any] = Field(default_factory=dict[str, Any])
+    result: Any = None
+    captured: datetime | None = None
+
+
+class CloseBody(BaseModel):
+    captures: int
+    final: bool = False
+    skipped: list[sync.Skip] = Field(default_factory=list[sync.Skip])
+    folder: str | None = None
+
+
+class Bound(BaseModel):
+    run: str
+    session: str
+
+
+class KeptCapture(BaseModel):
+    capture: int
+    used: int
+    budget: int
+
+
+class OpenRuns(BaseModel):
+    runs: list[dict[str, Any]]
+
+
+def bearer_only(request: Request) -> None:
+    """The run routes take the token, never the browser's session: no page has a reason to open runs or post
+    captures. A wrong token never gets this far; the guard answers it."""
+    if request.headers.get("authorization") is None:
+        raise HTTPException(status_code=401, detail="the run routes take the bearer token only")
+
+
+async def capped_body(request: Request, cap: int) -> bytes:
+    """The body, read as it streams and refused once past the cap, whether or not it said its length."""
+    size = request.headers.get("content-length")
+    if size is not None and size.isdigit() and int(size) > cap:
+        raise HTTPException(status_code=413, detail=f"a body here is at most {cap} bytes")
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > cap:
+            raise HTTPException(status_code=413, detail=f"a body here is at most {cap} bytes")
+    return bytes(body)
+
+
+def parsed[M: BaseModel](model: type[M], body: bytes) -> M:
+    try:
+        return model.model_validate_json(body)
+    except ValidationError as e:
+        # The location and type only: a value can be anything the caller sent.
+        first = e.errors(include_url=False, include_input=False, include_context=False)[0]
+        where = ".".join(str(p) for p in first["loc"]) or "the body"
+        raise DocketError(f"{where} isn't valid ({first['type']})") from None
 
 
 class Health(BaseModel):
@@ -112,6 +195,59 @@ def router(service: Service) -> APIRouter:
             raise DocketError("a doc is UTF-8 text") from None
         stored, _ = await calls.doc_put(service, text)
         return stored
+
+    @api.get("/runs")
+    def open_runs(request: Request) -> OpenRuns:  # pyright: ignore[reportUnusedFunction]
+        bearer_only(request)
+        return OpenRuns(runs=service.runs.listing())
+
+    @api.post("/runs")
+    async def run_open(request: Request) -> sync.RunOpened:  # pyright: ignore[reportUnusedFunction]
+        bearer_only(request)
+        body = parsed(OpenBody, await capped_body(request, RUN_BODY))
+        opened, _ = await sync.run_open(
+            service, body.source, since=body.since, final=body.final, session=body.session, agent=body.agent
+        )
+        return opened
+
+    @api.post("/runs/{run}/session")
+    async def bind(run: str, request: Request) -> Bound:  # pyright: ignore[reportUnusedFunction]
+        bearer_only(request)
+        body = parsed(BindBody, await capped_body(request, RUN_BODY))
+        service.runs.bind(run, body.session, body.agent)
+        return Bound(run=run, session=body.session)
+
+    @api.post("/runs/{run}/captures")
+    async def post_capture(run: str, request: Request) -> KeptCapture:  # pyright: ignore[reportUnusedFunction]
+        bearer_only(request)
+        try:
+            raw = await capped_body(request, CAPTURE_CAP)
+        except HTTPException:
+            service.runs.mark_short(run, f"a capture past {CAPTURE_CAP // (1024 * 1024)} MiB")
+            raise
+        body = parsed(CaptureBody, raw)
+        size = len(json.dumps(body.result, ensure_ascii=False).encode("utf-8"))
+        kept = service.runs.capture(
+            run,
+            session=body.session,
+            agent=body.agent,
+            tool=capture.own_name(body.tool_name) or body.tool_name,
+            tool_use_id=body.tool_use_id,
+            arguments=body.arguments,
+            result=body.result,
+            captured=body.captured if body.captured and body.captured.tzinfo else datetime.now(UTC),
+            size=size,
+        )
+        return KeptCapture(capture=kept.number, used=kept.used, budget=BUDGET)
+
+    @api.post("/runs/{run}/close")
+    async def close(run: str, request: Request) -> sync.RunClosed:  # pyright: ignore[reportUnusedFunction]
+        bearer_only(request)
+        body = parsed(CloseBody, await capped_body(request, RUN_BODY))
+        closed, _ = await sync.ingest(
+            service, run, captures=body.captures, final=body.final, skipped=body.skipped, folder=body.folder
+        )
+        return closed
 
     return api
 

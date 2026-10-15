@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 import yaml
-from platformdirs import user_config_path, user_log_path, user_state_path
+from platformdirs import user_config_path, user_log_path
 
+from docket import paths
 from docket.errors import DocketError
 
 TokenStore = Literal["keyring", "file"]
@@ -25,9 +26,8 @@ def config_path() -> Path:
 
 
 def state_dir() -> Path:
-    """Where the service keeps its pid file, its lock and `docket open`'s redirect page."""
-    env = os.environ.get("DOCKET_STATE_DIR")
-    return Path(env) if env else user_state_path("docket", appauthor=False)
+    """Where the service keeps its pid file, its lock, its open runs' marker and `docket open`'s redirect page."""
+    return paths.state_dir()
 
 
 def log_dir() -> Path:

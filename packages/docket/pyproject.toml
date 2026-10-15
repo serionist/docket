@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.scripts]
-docket = "docket.cli:main"
+docket = "docket.entry:main"
 
 [project.urls]
 Repository = "https://github.com/serionist/docket"

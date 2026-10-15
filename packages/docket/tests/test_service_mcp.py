@@ -95,6 +95,8 @@ def test_the_tools_names_parameters_and_annotations_match_the_golden_file(servic
         "read": True,
         "verify": True,
         "doc_put": True,
+        "run_open": True,
+        "ingest": True,
     }
 
 

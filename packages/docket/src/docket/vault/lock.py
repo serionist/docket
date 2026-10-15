@@ -19,6 +19,10 @@ log = logging.getLogger(__name__)
 STALE_INDEX_LOCK_SECONDS = 600
 
 
+class LockBusyError(DocketError):
+    """Another Docket process held the vault past the wait: nothing was written, and the same call can be made again."""
+
+
 class VaultLock:
     def __init__(
         self, git_dir: Path, timeout: float = 60.0, *, lock_file: Path | None = None, clear_stale_index: bool = True
@@ -35,7 +39,7 @@ class VaultLock:
         try:
             self._lock.acquire()
         except Timeout as e:
-            raise DocketError(f"another docket process holds {self.path}; try again") from e
+            raise LockBusyError(f"another docket process holds {self.path}; try again") from e
         if not self.clear_stale_index:
             return self
         try:

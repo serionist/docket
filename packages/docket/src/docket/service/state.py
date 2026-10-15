@@ -11,9 +11,10 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from docket import __version__, index
+from docket import __version__, index, userconfig
 from docket.errors import DocketError
 from docket.index import IndexStatus
+from docket.service.runs import Runs
 from docket.service.sessions import Sessions
 from docket.service.writer import IndexUpdater, Writer
 from docket.vault.vault import Vault
@@ -60,6 +61,8 @@ class Service:
         self.settings = settings
         self.sessions = sessions or Sessions()
         self.writer = Writer()
+        # Open sync runs, in memory only; the hook's marker goes in the state folder (DR-0240).
+        self.runs = Runs(userconfig.state_dir())
         self.updater = IndexUpdater(self._update)
         # Kept for the web app's footer: index.status() hashes every doc and entity file, too much for each page.
         self.last_update: LastUpdate | None = None

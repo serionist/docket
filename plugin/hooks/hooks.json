@@ -11,6 +11,19 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "docket",
+            "args": ["hook", "post-tool-use"],
+            "timeout": 30
+          }
+        ]
+      }
     ]
   }
 }

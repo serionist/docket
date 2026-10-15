@@ -79,7 +79,12 @@ def test_signed_links_go_at_any_depth(mapper: ModuleType) -> None:
 
 
 def test_a_recording_waits_for_its_notes_and_is_stored_once_under_the_new_name(mapper: ModuleType) -> None:
-    first = mapper.map_run(Run().listing(meta(SHORT, "Recording 2026-10-14")).payload())
+    first = mapper.map_run(
+        Run()
+        .listing(meta(SHORT, "Recording 2026-10-14"))
+        .add("get_file", structured(meta(SHORT, "Recording 2026-10-14")), file_id=SHORT)
+        .payload()
+    )
     assert first["records"] == []
     assert first["waiting"] == [{"id": SHORT, "for": "summary"}]
     later = Run().listing(meta(SHORT, "Recording 2026-10-14")).note(SHORT).listing(meta(SHORT, "Quick sync"))
@@ -87,10 +92,26 @@ def test_a_recording_waits_for_its_notes_and_is_stored_once_under_the_new_name(m
     assert records[f"plaud:{SHORT}"]["title"] == "Quick sync"
 
 
-def test_a_final_recording_without_notes_is_stored_under_the_name_it_has(mapper: ModuleType) -> None:
-    out = mapper.map_run(Run(final=True).listing(meta(SHORT, "Recording 2026-10-14")).payload())
+def test_a_recording_only_listed_waits_to_be_fetched_inside_the_window_and_gives_nothing_outside(
+    mapper: ModuleType,
+) -> None:
+    listed = meta(SHORT, "Recording 2026-10-14")
+    inside = {"since": "2026-10-08T00:00:00Z", "until": "2026-10-15T09:12:00Z"}
+    outside = {"since": "2026-10-15T00:00:00Z", "until": "2026-10-15T09:12:00Z"}
+    assert mapper.map_run(Run(window=inside).listing(listed).payload())["waiting"] == [{"id": SHORT, "for": "fetch"}]
+    for run in (Run(window=outside), Run(), Run(window={"since": None, "until": "2026-10-13T00:00:00Z"})):
+        out = mapper.map_run(run.listing(listed).payload())
+        assert (out["records"], out["waiting"]) == ([], [])
+
+
+def test_a_final_run_stores_what_it_fetched_by_id_and_nothing_it_only_listed(mapper: ModuleType) -> None:
+    fetched = Run(final=True).add("get_file", structured(meta(SHORT, "Recording 2026-10-14")), file_id=SHORT)
+    out = mapper.map_run(fetched.payload())
     assert [(r["kind"], r["title"]) for r in out["records"]] == [("recording", "Recording 2026-10-14")]
     assert out["waiting"] == []
+    window = {"since": "2026-10-08T00:00:00Z", "until": "2026-10-15T09:12:00Z"}
+    listed = mapper.map_run(Run(final=True, window=window).listing(meta(CALL, "Supplier call")).payload())
+    assert listed["records"] == []
 
 
 def test_an_untranscribed_recording_stages_nothing_until_its_transcript_comes(mapper: ModuleType) -> None:
@@ -143,7 +164,7 @@ def test_a_held_recording_is_never_parsed_or_named(mapper: ModuleType) -> None:
     text = json.dumps({k: v for k, v in out.items() if k != "held"})
     assert HELD not in text
     assert PRIVATE_TITLE not in text
-    assert out["waiting"] == [{"id": SHORT, "for": "summary"}]
+    assert out["waiting"] == []
 
 
 def test_what_isn_t_usable_is_set_aside_with_a_token_never_a_title(mapper: ModuleType) -> None:
@@ -223,3 +244,16 @@ def test_times_with_a_zone_and_in_milliseconds(mapper: ModuleType) -> None:
     assert mapper.parse_time(True) is None
     assert mapper.parse_time(None) is None
     assert mapper.first_json("[unclosed {also") is None
+
+
+def test_a_page_of_100_utterances_stays_under_claude_codes_file_threshold() -> None:
+    # A long utterance, in Plaud's segment shape: under 50,000 characters a page, Claude Code hands the hook the result
+    # itself rather than a note about a file it saved it to.
+    utterance = "We agreed the supplier ships the invented parts on Friday, and Ben Sample checks the invoice. " * 3
+    page = {
+        "file_id": CALL,
+        "block": "transaction_polish",
+        "segments": [segment(n * 4000, n * 4000 + 3900, "Ada Example", utterance) for n in range(100)],
+        "next_cursor": "c-next-page-0001",
+    }
+    assert len(json.dumps(page)) < 50_000

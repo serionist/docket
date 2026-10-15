@@ -90,6 +90,8 @@ def create_app(settings: Settings, *, sessions: Sessions | None = None) -> Servi
     async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         async with AsyncExitStack() as stack:
             stack.callback(service.writer.close)
+            # Open runs live in memory: a stopping service drops them and takes its marker away.
+            stack.callback(service.runs.close_all)
             await stack.enter_async_context(server.session_manager.run())
             # The index is brought up to date at start, and built when there is none; nobody waits for it here.
             service.updater.poke()

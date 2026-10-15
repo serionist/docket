@@ -457,6 +457,7 @@ def test_the_first_import(vault: Vault, folder: Path) -> None:
 
 def test_a_screened_note_leaves_no_trace(vault: Vault, folder: Path, caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
+    caplog.set_level(logging.DEBUG, logger="docket")
     report = run(vault, folder)
     stored = [p.read_text(encoding="utf-8").casefold() for p in (vault.root / "processed").rglob("*.md")]
     history = sh(vault.root, "git", "log", "-p", "--all").casefold()
@@ -465,7 +466,8 @@ def test_a_screened_note_leaves_no_trace(vault: Vault, folder: Path, caplog: pyt
         assert name not in history
         assert name not in report.model_dump_json().casefold()
         assert name not in caplog.text.casefold()
-    assert "import: 14 file(s) listed" in caplog.text
+    listed = [r.getMessage() for r in caplog.records if r.name == "docket.imports.notes"]
+    assert "import: 14 file(s) listed" in listed
 
 
 def test_a_dry_run_writes_nothing(vault: Vault, folder: Path) -> None:

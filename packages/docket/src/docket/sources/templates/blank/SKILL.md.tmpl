@@ -3,6 +3,8 @@ name: {{source}}
 description: Harvest {{source}} into Docket with the user's own tools. Use when a sync runs the {{source}} source, or the user asks to fetch, catch up on or import from {{source}}.
 ---
 
+<!-- docket: steps from run_open -->
+
 # {{source}}, a Docket source
 
 Reads {{source}} with the user's own tools and hands what they returned to Docket untouched; `mapper.py` next to
@@ -10,28 +12,27 @@ this file turns a run's captures into records. `docket source new` wrote this fo
 fill in each section below, then the mapping in `mapper.py`. Docket's Plaud reference shows a whole source:
 https://github.com/serionist/docket/tree/main/examples/sources/plaud
 
-Claude Code doesn't load this file as a skill from `.claude/skills/sources/{{source}}/`: whatever runs the source
-reads it by its path.
+Claude Code doesn't load this file as a skill from `.claude/skills/sources/{{source}}/`: `run_open("{{source}}")`
+names it and gives the run's steps. Keep the marker line at the top: Docket refuses a run of a `SKILL.md` without it.
 
 ## What it reads
 
 Which tools read {{source}} (an MCP server, a plugin, the browser), and which of them return its content. The ones the
 capture hook posts are listed in `vault.yaml` under `sources.{{source}}.tools`, by their own names, without the
-host's `mcp__` prefix.
+host's `mcp__` prefix. Only MCP tools are captured.
 
 ## A run
 
-The capture hook posts each tool's result as it came; Claude never retypes a payload. The run's manifest counts the
-captures, and Docket maps them when the manifest closes the run.
+Docket gives the run's steps: what to skip, what is owed, the budget and how to close. Claude never retypes a payload;
+the capture hook hands Docket what each call returned. This file holds only what is {{source}}'s own.
 
-| Step | What |
+| Part | What |
 |---|---|
 | Sign in | what "not signed in" looks like, and the way back in |
-| Skip | the held ids, and what raw and staging already hold, read through the service; skip those, to save calls |
 | List | newest first, without date filters, until a page's oldest item is before the window's start |
-| Each item | the calls that fetch it whole |
-| Rate limits | what a limit looks like; pause and retry with growing pauses; still limited, end the run, and the kept window resumes it |
-| Waiting | what the mapper reports as waiting, and when it is asked for again |
+| Each item | the calls that fetch it whole, each page under 50,000 characters: past that, Claude Code hands the hook a file note instead of the result |
+| By id | how one item is fetched by its id, for the retry and waiting ids, and what "gone" looks like |
+| Rate limits | what a limit looks like; pause and retry with growing pauses; still limited in the listing, stop without closing |
 
 Recordings and mail fetched before Docket go in with `docket ingest {{source}} <folder> --vault <vault>`, through the
 same mapper.
@@ -42,7 +43,8 @@ same mapper.
 |---|---|---|
 | each item | `{{source}}:<its own id>` | what makes it complete |
 
-A held item is skipped before anything of it is parsed, and nothing the mapper reports carries a title.
+A held item is skipped before anything of it is parsed, and nothing the mapper reports carries a title. An item the
+run only listed waits to be fetched (`for: fetch`) when it falls in the run's window.
 
 ## Changing the mapper
 
