@@ -162,10 +162,22 @@ makes its branches with git there. No test is deleted or weakened; the devkit co
 | Risk | Status |
 |---|---|
 | Someone opens an `index.yaml` by hand and misses the newer entries in `index.d/` | accepted: `AGENTS.md` sends readers to `docs door`, `list` and `show`, which read both |
-| Open branches that appended to `index.yaml` conflict with each other once more | accepted: at its next rebase each takes main's `index.yaml` and adds its entries again, as on 15 Oct, and they land in `index.d/` |
+| Open branches that appended to `index.yaml` conflict with each other once more | accepted: at its next rebase each moves its entries with `docs move`, or takes main's `index.yaml` and `docs move --from ORIG_HEAD` |
 | Two branches add reading entries to one folder, or terms that sort side by side | accepted: the same conflict as today, and rarer than decisions |
 | `plugin/index.d/` ships inside the plugin | resolved: `plugin/index.yaml` ships today, and step 2 runs the plugin validation with an entry there |
 | A later change adds `merge=union` to the entry files to stop a conflict | resolved: `docs-regime.md` says what the probe found |
+
+## Taken while building
+
+| Decided | Not taken |
+|---|---|
+| dot files in `index.d/` are passed over: the writer's own temp files and a system's, such as `.DS_Store` | every file there reported |
+| `door` prints `<folder>/index.d/` for a folder whose entries all have files of their own | leaving such a folder out of the door |
+| `docs move --from` refuses a key still in the tree, so it never overwrites what the rebase kept | taking the revision's text over the tree's |
+| CV-0003 gains a `why` naming where entry files are; its `decision` stays DR-0005 | a second decision field |
+
+The rebase test also ran with the old layout, and fails there. `claude plugin validate --strict plugin` passes with an
+entry in `plugin/index.d/` (tried, removed).
 
 ## Plan review
 
