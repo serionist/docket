@@ -392,6 +392,7 @@ conventions:
     rule: Entry files change only through uv run docs
     area: docs
     enforced_by: "gate: docs (the canonical form)"
+    why: Entry files are each folder's index.yaml, the files of their own in its index.d/ (DR-0360) and docs/glossary.yaml.
     decision: DR-0005
   - id: CV-0004
     rule: Commits, PR titles and PR bodies carry no tool attribution

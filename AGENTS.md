@@ -11,7 +11,8 @@ Structured docs are YAML entries that the docs tool manages; prose stays markdow
 
 | What | Where |
 |---|---|
-| decisions (`DR-`), conventions (`CV-`), reading lists | the `index.yaml` of the folder they bind |
+| decisions (`DR-`), conventions (`CV-`) | a file each, `index.d/<id>.yaml` in the folder they bind; older ones in its `index.yaml` |
+| reading lists | the `index.yaml` of the folder they bind |
 | terms | `docs/glossary.yaml` |
 | plans and reviews | `docs/plans/`, `docs/reviews/`: dated records, history, never current truth |
 | the design | `docs/design.md`: how the parts fit, and the phases |
@@ -26,7 +27,7 @@ Before you plan, change, review or answer questions about a path:
 The rules:
 
 - one fact in one place, cited by id;
-- entries change only through `uv run docs add`, `set`, `supersede` and `remove`, never by hand;
+- entries change only through `uv run docs add`, `set`, `supersede`, `remove` and `move`, never by hand;
 - ids are never reused: a changed decision is superseded by a new one, a removed entry stays with its date and why;
 - a decision an agent records stays `proposed` until the maintainer confirms it;
 - every convention names the check that enforces it, or says `review_only`.
@@ -53,7 +54,8 @@ The schema is `docs/docs-regime.yaml`, explained in `docs/docs-regime.md`.
 | `.claude/skills/` | the work loop: `start-work`, `review-plan`, `review-code`, `finish-work` |
 | `.github/` | CI, the PR text check, CodeQL, Dependabot, issue forms, the PR template |
 | `.githooks/` | `commit-msg` strips tool attribution, `pre-push` runs `gate quick` |
-| `index.yaml` | the root's reading list, decisions and conventions |
+| `index.yaml` | the root's reading list, and its decisions and conventions from before `index.d/` |
+| `index.d/` | the root's newer decisions and conventions, a file each |
 | `REVIEW.md` | what a finding is, and the questions every review answers |
 
 A new top-level folder adds its row in the same change.
@@ -116,7 +118,7 @@ agrees in the issue or, under an autonomy grant, with its decision recorded as p
   hook session-start` (DR-0161), and the PostToolUse hook running `docket hook post-tool-use` for `mcp__.*`, with
   its line prefixes (DR-0242).
 
-Each lands with its decision in `index.yaml`, marked `cost: one-way`.
+Each lands with its decision entry, marked `cost: one-way`.
 
 ## Never
 

@@ -1,0 +1,13 @@
+decisions:
+  - id: DR-0361
+    title: Entries already in an index.yaml stay there; nothing moves in bulk
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#81"]
+    description: "The docs tool reads a folder's index.yaml and its index.d/ together, so the 180 entries written before #81 stay where they are, and set, supersede and remove edit them in place. Moving them would start each one's git blame again and give every open branch that edits one a modify/delete conflict. A move, if one is wanted, is a change of its own, made when no branch is open."
+    binds:
+      - docs add never writes a decision or convention to an index.yaml.
+      - docs move is for a branch's own entries that main doesn't have yet.
+    not_chosen: [Every entry moved into index.d/ in the change that brings it.]

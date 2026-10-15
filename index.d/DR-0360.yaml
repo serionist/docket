@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0360
+    title: A new decision or convention is a YAML entry in a file of its own, index.d/<id>.yaml in the folder it binds
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#81"]
+    description: "A decision or convention added from #81 on is a YAML entry in a file of its own, index.d/<id>.yaml in the folder it binds, holding that one entry in the index.yaml format and the same canonical form, managed by the same tool. It keeps DR-0005: entries change only through uv run docs, which checks every edit, and a fact lives in one place under an id that never changes. Reading lists stay in the folder's index.yaml and terms in docs/glossary.yaml. Two branches that add entries add two files, so a rebase and GitHub's own merge of a PR apply both with no conflict."
+    binds:
+      - docs check fails a file in index.d/ that holds more than one entry, an entry of another kind, or a name other than its key.
+      - Entry files carry no merge attribute.
+    not_chosen:
+      - "merge=union on the entry files: git refines the conflict, so two appended entries interleave; with diff3, a list item added to main's last entry lands under the other branch's entry and docs check passes."
+      - "A merge driver that merges entry by entry: GitHub runs no custom driver, so a PR behind main still conflicts there, and every clone has to register it."
+      - "Blank lines, separators or entries sorted by id: both branches still insert at one point."
+      - "One central folder of entries: a decision binds the folder it sits in."

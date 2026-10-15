@@ -23,7 +23,7 @@ Three parts:
   keywords and run the ledger; its setup asks what the user wants to set up. The consuming project's own source skills
   do the harvesting, with the user's own MCPs and plugins (see Sources).
 
-The binding choices are entries in `index.yaml` (`uv run docs list decisions`); this page explains how the parts fit.
+The binding choices are decision entries (`uv run docs list decisions`); this page explains how the parts fit.
 
 ## 1. What it has to do
 

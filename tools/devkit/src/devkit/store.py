@@ -30,7 +30,7 @@ class Problem:
 
 @dataclass
 class EntryFile:
-    """One index.yaml or table file, as read."""
+    """One index.yaml, one entry's file in an index.d/ folder (`single`), or a table file, as read."""
 
     rel: str
     folder: str | None
@@ -40,6 +40,7 @@ class EntryFile:
     error: str | None = None
     created: bool = False
     dirty: bool = False
+    single: bool = False
 
 
 @dataclass
@@ -143,6 +144,17 @@ class Store:
     def folder_file(self, folder: str) -> str:
         return f"{folder}/{self.regime.folder_file}" if folder else self.regime.folder_file
 
+    def folder_files(self, folder: str) -> list[EntryFile]:
+        """A folder's index.yaml and the files in its index.d/: everything that binds it."""
+        return [f for f in self.files.values() if f.folder == folder]
+
+    def entry_path(self, folder: str, key: str) -> str:
+        """Where an entry of an `entry_kinds` kind lives when it has a file of its own."""
+        if not self.regime.entry_dir:
+            raise KitError("the regime names no entry_dir, so no entry has a file of its own")
+        rel = f"{self.regime.entry_dir}/{key}.yaml"
+        return f"{folder}/{rel}" if folder else rel
+
     # -- checking ------------------------------------------------------------------------------------------------
 
     def check(self, *, citations: bool = True) -> list[Problem]:
@@ -158,7 +170,12 @@ class Store:
     def _check_file(self, f: EntryFile) -> list[Problem]:
         if f.error:
             return [Problem(f.rel, f.error)]
+        misplaced = _misplaced(self.regime, f.rel, single=f.single)
+        if misplaced:
+            return [Problem(f.rel, misplaced)]
         out: list[Problem] = []
+        if f.single:
+            out.extend(Problem(f.rel, m) for m in self._check_single(f))
         for line in f.comments.stray:
             out.append(Problem(f"{f.rel}:{line}", "a comment here is lost by the canonical form; move it into a field"))
         for kname, items in f.sections.items():
@@ -174,6 +191,17 @@ class Store:
                 if rendered != f.raw and not f.dirty:
                     out.append(Problem(f.rel, "not in canonical form; run `uv run docs format`"))
         return out
+
+    def _check_single(self, f: EntryFile) -> list[str]:
+        """A file in an index.d/ folder holds exactly one entry and is named by its key."""
+        held = [(self.regime.kinds[k], e) for k, items in f.sections.items() for e in items]
+        if len(held) != 1:
+            return [f"holds {len(held)} entries; a file in {self.regime.entry_dir}/ holds one"]
+        kind, e = held[0]
+        key = e.get(kind.key)
+        if f.rel.rsplit("/", 1)[-1] != f"{key}.yaml":
+            return [f"holds {key}, so its name is {key}.yaml"]
+        return []
 
     def _check_entry(self, kind: Kind, f: EntryFile, e: dict[str, Any]) -> list[str]:
         out: list[str] = []
@@ -352,9 +380,14 @@ class Store:
             raise KitError(f"{f.rel}: the canonical form would change a value; nothing was written")
 
 
+def exclusions(regime: Regime) -> list[re.Pattern[str]]:
+    """The regime's `exclude` globs, each matching the folder and everything under it."""
+    return [glob_regex(g) for g in regime.exclude] + [glob_regex(f"{g}/**") for g in regime.exclude]
+
+
 def _discover(regime: Regime) -> list[str]:
     root = regime.root
-    excluded = [glob_regex(g) for g in regime.exclude] + [glob_regex(f"{g}/**") for g in regime.exclude]
+    excluded = exclusions(regime)
     found: set[str] = set()
     for dirpath, dirnames, filenames in os.walk(root):
         rel_dir = Path(dirpath).relative_to(root).as_posix()
@@ -362,17 +395,41 @@ def _discover(regime: Regime) -> list[str]:
         dirnames[:] = [d for d in dirnames if not any(x.match(f"{rel_dir}/{d}".lstrip("/")) for x in excluded)]
         if regime.folder_file in filenames:
             found.add(f"{rel_dir}/{regime.folder_file}".lstrip("/"))
+        if regime.entry_dir and regime.entry_dir in rel_dir.split("/"):
+            # Every file here is read, so a stray one is reported rather than passed over; dot files are the
+            # system's and the writer's own temp files.
+            found.update(f"{rel_dir}/{name}".lstrip("/") for name in filenames if not name.startswith("."))
     for table in regime.table_files:
         if (root / table).is_file():
             found.add(table)
     return sorted(found)
 
 
+def _misplaced(regime: Regime, rel: str, *, single: bool) -> str | None:
+    """Why a file under an index.d/ folder doesn't belong there: only one entry's <id>.yaml sits right inside it."""
+    parts = rel.split("/")
+    if not regime.entry_dir or regime.entry_dir not in parts[:-1]:
+        return None
+    at = parts.index(regime.entry_dir)
+    if single and at == len(parts) - 2 and parts[-1].endswith(".yaml"):
+        return None
+    return f"only <id>.yaml files belong in {regime.entry_dir}/, right inside it"
+
+
 def _read(regime: Regime, rel: str) -> EntryFile:
-    raw = (regime.root / rel).read_text(encoding="utf-8")
     table_kind = regime.table_files.get(rel)
-    folder = None if table_kind else rel.rpartition("/")[0]
-    f = EntryFile(rel=rel, folder=folder, raw=raw, comments=scan_comments(raw))
+    parts = rel.split("/")
+    single = bool(regime.entry_dir) and regime.entry_dir in parts[:-1]
+    folder: str | None
+    if single:
+        folder = "/".join(parts[: parts.index(str(regime.entry_dir))])
+        error = _misplaced(regime, rel, single=True)
+        if error:
+            return EntryFile(rel=rel, folder=folder, raw="", single=True, error=error)
+    else:
+        folder = None if table_kind else rel.rpartition("/")[0]
+    raw = (regime.root / rel).read_text(encoding="utf-8")
+    f = EntryFile(rel=rel, folder=folder, raw=raw, comments=scan_comments(raw), single=single)
     try:
         data: Any = load_yaml(raw)
     except Exception as e:
@@ -383,7 +440,7 @@ def _read(regime: Regime, rel: str) -> EntryFile:
     if not isinstance(data, dict):
         f.error = "must be a mapping of kinds to lists of entries"
         return f
-    allowed = [table_kind] if table_kind else regime.folder_kinds
+    allowed = [table_kind] if table_kind else (regime.entry_kinds if single else regime.folder_kinds)
     for key, items in data.items():  # pyright: ignore[reportUnknownVariableType]
         if key not in allowed:
             f.error = f"top-level key {key!r} isn't one of {', '.join(allowed)}"
@@ -395,4 +452,4 @@ def _read(regime: Regime, rel: str) -> EntryFile:
     return f
 
 
-__all__ = ["SOFT_DELETE", "EntryFile", "Located", "Problem", "Store"]
+__all__ = ["SOFT_DELETE", "EntryFile", "Located", "Problem", "Store", "exclusions", "glob_regex"]
