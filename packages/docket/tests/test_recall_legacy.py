@@ -4,12 +4,22 @@ import shutil
 from pathlib import Path
 
 import pytest
-from docket_testkit import REC, at, imported_template, make_record, notes_template, template_vault
+from docket_testkit import (
+    READ_ROUTES,
+    REC,
+    at,
+    imported_template,
+    make_record,
+    notes_template,
+    read_route,
+    template_vault,
+)
 
-from docket import recall
+from docket import index, recall
 from docket.errors import DocketError
 from docket.vault.docstore import DocStore
-from docket.vault.processed import ProcessedDoc
+from docket.vault.processed import ProcessedDoc, doc_path
+from docket.vault.spans import RawLookup
 from docket.vault.vault import Vault
 
 CALL = "notes/calls/2026-09-10-supplier-call.md"
@@ -25,9 +35,15 @@ def imported(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.fixture
-def vault(imported: Path, tmp_path: Path) -> Vault:
+def plain(imported: Path, tmp_path: Path) -> Vault:
     shutil.copytree(imported / "vault", tmp_path / "vault")
     return Vault.open(tmp_path / "vault")
+
+
+@pytest.fixture(params=READ_ROUTES)
+def vault(plain: Vault, request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> Vault:
+    read_route(request.param, monkeypatch)
+    return plain
 
 
 def test_an_old_path_reads_its_legacy_note(vault: Vault) -> None:
@@ -133,3 +149,48 @@ def test_verify_takes_a_doc_inside_processed_only(vault: Vault) -> None:
         recall.verify(vault, "raw/notes.md")
     with pytest.raises(DocketError, match="no doc at"):
         recall.verify(vault, "processed/brief/nobody.md")
+
+
+def test_two_notes_claiming_one_old_path_are_both_named(vault: Vault) -> None:
+    doc = DocStore(vault).get(CALL_ID)
+    assert doc is not None
+    twin = doc.meta.model_copy(update={"id": "legacy-note:twin", "rev": 0, "covers": []})
+    recall.doc_put(vault, ProcessedDoc(twin, "# Twin\n", 0).render())
+    with pytest.raises(DocketError, match=f"could be any of {CALL_ID}, legacy-note:twin; give more of its path"):
+        recall.read(vault, CALL)
+
+
+def test_a_note_edited_after_the_update_takes_the_parse_route(plain: Vault) -> None:
+    index.update(plain)
+    path = plain.root / doc_path(CALL_ID)
+    path.write_text(path.read_text(encoding="utf-8").replace(CALL, "notes/calls/renamed.md"), encoding="utf-8")
+    with pytest.raises(DocketError, match="no legacy note has the old path"):
+        recall.read(plain, CALL)
+    found = recall.read(plain, "notes/calls/renamed.md")
+    assert found.resolved == CALL_ID
+
+
+@pytest.mark.parametrize(("current", "parses"), [(True, 0), (False, 1)])
+def test_a_read_parses_every_doc_once_at_most_and_loads_a_source_once(
+    plain: Vault, monkeypatch: pytest.MonkeyPatch, current: bool, parses: int
+) -> None:
+    index.update(plain)
+    if not current:
+        (plain.root / doc_path("legacy-note:hand-written")).write_text("# By hand\n", encoding="utf-8")
+    calls: list[str] = []
+    every, load = DocStore.all, RawLookup._source  # pyright: ignore[reportPrivateUsage]
+
+    def counted_all(self: DocStore) -> list[ProcessedDoc]:
+        calls.append("all")
+        return every(self)
+
+    def counted_load(self: RawLookup, source: str) -> dict[str, list[object]]:
+        if source not in self._sources:  # pyright: ignore[reportPrivateUsage]
+            calls.append(source)
+        return load(self, source)  # type: ignore[return-value]
+
+    monkeypatch.setattr(DocStore, "all", counted_all)
+    monkeypatch.setattr(RawLookup, "_source", counted_load)
+    both = recall.read(plain, f"calls:{CALL}@12:08", view="both")
+    assert both.resolved == "r:calls:rec-0042@12:08"
+    assert sorted(calls) == sorted(["calls", *["all"] * parses])

@@ -161,13 +161,21 @@ class DocStore:
     def all(self) -> list[ProcessedDoc]:
         """Every doc under processed/ whose file is where its id says. One that doesn't parse is skipped and logged."""
         folder = self.root / "processed"
+        return self.at_paths(sorted(folder.rglob("*.md")) if folder.is_dir() else [])
+
+    def at_paths(self, paths: list[Path]) -> list[ProcessedDoc]:
+        """The docs in these files, in this order, read as `all` reads them: one that is gone, doesn't parse or isn't
+        where its id says is skipped and logged."""
         docs: list[ProcessedDoc] = []
-        for path in sorted(folder.rglob("*.md")) if folder.is_dir() else []:
+        for path in paths:
             rel = path.relative_to(self.root).as_posix()
             try:
                 doc = parse_doc(self.read_file(path), lenient=True)
             except DocketError as e:
                 log.warning("skipping %s: %s", rel, e)
+                continue
+            except OSError as e:
+                log.warning("skipping %s: %s", rel, e.strerror or type(e).__name__)
                 continue
             if doc_path(doc.meta.id).as_posix() != rel:
                 log.warning("skipping %s: its id %s belongs at %s", rel, doc.meta.id, doc_path(doc.meta.id))
