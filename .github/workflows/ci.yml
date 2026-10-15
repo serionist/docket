@@ -80,6 +80,54 @@ jobs:
       - name: Types and tests
         run: uv run gate os
 
+  # The models for real: `docket models install --device cpu` builds the worker's environment and fetches the
+  # embedder's pinned files, which come from the cache when they can; a miss downloads them, so an outage of the hub
+  # holds merges until it ends. Linux runs the question set with the embedder against its own floors (`gate models`,
+  # DR-0339); Windows and macOS start the worker and check what it says. Required for merge.
+  models:
+    name: Models (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, name: Linux, floors: true }
+          - { os: windows-latest, name: Windows, floors: false }
+          - { os: macos-latest, name: macOS, floors: false }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync --locked
+      # Only the model files: the environment is rebuilt each run, since it points at the runner's own Python.
+      - name: The model files
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/docket-models/files
+          key: docket-models-${{ hashFiles('packages/docket/src/docket/models/catalogue.py') }}
+      # The runner context, which names the temp folder, reaches steps only.
+      - name: The models
+        env:
+          DOCKET_MODELS_DIR: ${{ runner.temp }}/docket-models
+          DOCKET_CONFIG_DIR: ${{ runner.temp }}/docket-config
+        run: uv run docket models install --device cpu
+      - name: The question set with the embedder
+        if: matrix.floors
+        env:
+          DOCKET_TEST_MODELS: ${{ runner.temp }}/docket-models
+        run: uv run gate models
+      - name: The worker
+        if: ${{ !matrix.floors }}
+        env:
+          DOCKET_MODELS_DIR: ${{ runner.temp }}/docket-models
+          DOCKET_CONFIG_DIR: ${{ runner.temp }}/docket-config
+        run: uv run docket models status --check
+
   # The service registered for real on each system, killed, back again, stopped and uninstalled, under a name of its
   # own and on a temp vault. A runner whose user session can't hold the registration skips it, and the PR says which ran.
   service:

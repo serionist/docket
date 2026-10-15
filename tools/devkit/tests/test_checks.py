@@ -493,3 +493,40 @@ def test_models_lock_says_why_it_failed(
     monkeypatch.setattr(subprocess, "run", lambda cmd, **_: subprocess.CompletedProcess(cmd, 1, "", "no solution"))
     assert cli.main(["models-lock"]) == 2
     assert "no solution" in capsys.readouterr().err
+
+
+def test_the_models_lane_needs_the_models_and_holds_their_floors(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
+    from devkit import evalfloors, gate
+
+    ctx = gate.Ctx(root=repo, lane="models", ci=False, base=None, pr=None)
+    monkeypatch.delenv(gate.MODELS_ENV, raising=False)
+    assert gate.step_models(ctx).status == "fail"
+    monkeypatch.setenv(gate.MODELS_ENV, str(repo / "models"))
+    floors = repo / evalfloors.FLOORS_MODELS
+    floors.parent.mkdir(parents=True)
+    floors.write_text(json.dumps({"$above": "print", "typo": {"recall": 0.5, "mrr": 0.4}}), encoding="utf-8")
+
+    def ran(_ctx: gate.Ctx, cmd: list[str], *, env: dict[str, str] | None = None) -> tuple[int, list[str]]:
+        assert env is not None and "embedder" in cmd
+        Path(env[evalfloors.REPORT_MODELS_ENV]).write_text(
+            json.dumps({"typo": {"recall": 0.5, "mrr": 0.4}}), encoding="utf-8"
+        )
+        return 0, ["1 passed"]
+
+    monkeypatch.setattr(gate, "_run", ran)
+    out = gate.step_models(ctx)
+    assert out.status == "ok" and "typo 0.50/0.40" in out.detail[0]
+    monkeypatch.setattr(gate, "_run", lambda _ctx, cmd, *, env=None: (1, ["a test failed"]))
+    assert gate.step_models(ctx).status == "fail"
+
+    def below(_ctx: gate.Ctx, cmd: list[str], *, env: dict[str, str] | None = None) -> tuple[int, list[str]]:
+        assert env is not None
+        Path(env[evalfloors.REPORT_MODELS_ENV]).write_text(
+            json.dumps({"typo": {"recall": 0.4, "mrr": 0.4}}), encoding="utf-8"
+        )
+        return 0, ["1 passed"]
+
+    monkeypatch.setattr(gate, "_run", below)
+    assert gate.step_models(ctx).status == "fail"
