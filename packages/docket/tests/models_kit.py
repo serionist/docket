@@ -100,6 +100,11 @@ class InProcess:
         self.why: str | None = None
         self.batches: list[list[str]] = []
         self.queries: list[str] = []
+        self.ensured = 0
+
+    def ensure(self) -> bool:
+        self.ensured += 1
+        return self.up
 
     def query(self, text: str) -> bytes | str:
         self.queries.append(text)

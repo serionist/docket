@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import socket
 import sys
+import time
 import webbrowser
-from collections.abc import Sequence
+from collections.abc import Generator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, cast
 from zoneinfo import ZoneInfo
 
 import typer
@@ -18,7 +21,11 @@ from docket import __version__, index, questions, recall, render, userconfig
 from docket.errors import DocketError
 from docket.imports import notes
 from docket.index.build import db_path
+from docket.index.embedpass import fill
+from docket.models.provider import Models, Off
+from docket.models.runtime import open_models
 from docket.render import printable
+from docket.service import client
 from docket.service.platforms import Installer
 from docket.service.token import Tokens
 from docket.sources import release, scaffold
@@ -83,7 +90,10 @@ models_app = typer.Typer(
 )
 app.add_typer(models_app, name="models")
 
+# How often the embedding pass says how far it got.
+PROGRESS_SECONDS = 10.0
 VaultOption = Annotated[Path | None, typer.Option("--vault", help="The vault; default: DOCKET_VAULT, here, ./vault")]
+NoModels = Annotated[bool, typer.Option("--no-models", help="Keyword search alone: start no models' worker.")]
 
 
 class TyperPrompter:
@@ -685,6 +695,63 @@ def doc_redact(
         raise typer.Exit(1)
 
 
+@contextlib.contextmanager
+def _query_models(no_models: bool) -> Generator[Models | Off | None]:
+    """The models for a command that only asks queries: a worker on the CPU, started for the command and stopped at
+    its end; None with --no-models."""
+    if no_models:
+        yield None
+        return
+    models = open_models(queries_only=True)
+    try:
+        yield models
+    finally:
+        if isinstance(models, Models):
+            models.close()
+
+
+def _service_embeds(vault: Vault) -> bool:
+    """Whether the service runs for this vault: then it runs the pass, and the command leaves it to the service."""
+    found = client.recorded()
+    named = found.get("vault") if found else None
+    if not isinstance(named, str) or Path(named).resolve() != vault.root.resolve():
+        return False
+    with contextlib.suppress(OSError), socket.create_connection(("127.0.0.1", client.port()), timeout=0.5):
+        return True
+    return False
+
+
+def _embed(vault: Vault, no_models: bool) -> None:
+    """The embedding pass after an update or a rebuild, with a progress line now and then (DR-0336)."""
+    if no_models:
+        return
+    if _service_embeds(vault):
+        say("vectors    the service embeds what is new")
+        return
+    models = open_models()
+    if isinstance(models, Off):
+        if models.why:
+            say(f"! {models.why}")
+        return
+    try:
+        if models.why is not None:
+            say(f"! {models.why}")
+            return
+        shown = [time.monotonic()]
+
+        def progress(have: int, total: int) -> None:
+            if time.monotonic() - shown[0] >= PROGRESS_SECONDS:
+                shown[0] = time.monotonic()
+                say(f"vectors    {have} of {total} chunks")
+
+        report = fill(vault, models, progress=progress)
+        say(f"vectors    {report.model}  {report.have} of {report.total} chunks ({report.embedded} embedded)")
+        if report.why:
+            say(f"! {report.why}")
+    finally:
+        models.close()
+
+
 def _report(report: index.BuildReport) -> None:
     if report.rebuilt:
         say(f"rebuilt{f' ({report.reason})' if report.reason else ''} in {report.seconds:.1f} s")
@@ -699,15 +766,19 @@ def _report(report: index.BuildReport) -> None:
 
 
 @index_app.command("rebuild")
-def index_rebuild(vault: VaultOption = None) -> None:
-    """Build this machine's index from the vault, from scratch."""
-    _report(index.rebuild(find_vault(vault)))
+def index_rebuild(no_models: NoModels = False, vault: VaultOption = None) -> None:
+    """Build this machine's index from the vault, from scratch, then embed what has no vector."""
+    v = find_vault(vault)
+    _report(index.rebuild(v))
+    _embed(v, no_models)
 
 
 @index_app.command("update")
-def index_update(vault: VaultOption = None) -> None:
-    """Index what changed in the vault since the last build; rebuild when it has to."""
-    _report(index.update(find_vault(vault)))
+def index_update(no_models: NoModels = False, vault: VaultOption = None) -> None:
+    """Index what changed in the vault since the last build, rebuilding when it has to, then embed what is new."""
+    v = find_vault(vault)
+    _report(index.update(v))
+    _embed(v, no_models)
 
 
 @index_app.command("status")
@@ -746,6 +817,7 @@ def search_command(
     entity: Annotated[list[str] | None, typer.Option("--entity", help="Lift what mentions this (repeat).")] = None,
     k: Annotated[int, typer.Option("-k", help="How many hits, 1 to 100.")] = 20,
     no_update: Annotated[bool, typer.Option("--no-update", help="Search the index as it is.")] = False,
+    no_models: NoModels = False,
     vault: VaultOption = None,
 ) -> None:
     """Search everything kept: hits grouped by recording or thread, each with its locator for docket doc read."""
@@ -757,16 +829,18 @@ def search_command(
             for problem in report.problems:
                 if problem.startswith("vault.yaml"):
                     say(f"! {problem}")
-    result = index.search(
-        v,
-        " ".join(query),
-        people=person or [],
-        entities=entity or [],
-        sources=source or [],
-        since=index.parse_when(since, "--since"),
-        until=index.parse_when(until, "--until"),
-        k=k,
-    )
+    with _query_models(no_models) as models:
+        result = index.search(
+            v,
+            " ".join(query),
+            people=person or [],
+            entities=entity or [],
+            sources=source or [],
+            since=index.parse_when(since, "--since"),
+            until=index.parse_when(until, "--until"),
+            k=k,
+            models=models,
+        )
     say_all(render.search(result, ZoneInfo(v.config.owner.time_zone)))
 
 
@@ -776,11 +850,14 @@ def eval_command(
     *,
     k: Annotated[int, typer.Option("-k", "--k", help="Score the top k hits, 1 to 100.")] = questions.K,
     as_json: Annotated[bool, typer.Option("--json", help="The numbers and each question's ranks, as JSON.")] = False,
+    no_models: NoModels = False,
     vault: VaultOption = None,
 ) -> None:
     """Measure search with your own questions: recall at k and MRR per kind of question. Writes nothing."""
     v = find_vault(vault)
-    report = questions.run(v, questions.load(file, ZoneInfo(v.config.owner.time_zone)), k=k)
+    asked = questions.load(file, ZoneInfo(v.config.owner.time_zone))
+    with _query_models(no_models) as models:
+        report = questions.run(v, asked, k=k, models=models)
     if as_json:
         # ASCII only: a question's text can't put a terminal code on the screen.
         typer.echo(json.dumps(report.model_dump(mode="json"), indent=2))
@@ -931,6 +1008,12 @@ def service_status(
         for key in ("pid", "version", "started", "vault", "machine"):
             if key in st.body:
                 say(f"{key:<10} {st.body[key]}")
+        found: object = st.body.get("models")
+        models = cast(dict[str, object], found) if isinstance(found, dict) else {}
+        if models.get("state", "off") != "off" or models.get("why"):
+            state = f"{models.get('model')}, {models.get('state')}" if models.get("model") else "off"
+            why = models.get("why")
+            say(f"models     {state}{f': {why}' if why else ''}")
         if st.body.get("vault_problem"):
             say(f"! {st.body['vault_problem']}")
         say(f"token      {st.store}")
