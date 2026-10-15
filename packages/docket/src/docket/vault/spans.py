@@ -13,7 +13,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from docket.vault.anchors import Anchor, encode_rid, format_time, normalize_newlines, paragraphs
+from docket.vault.anchors import Anchor, encode_rid, format_anchor, format_time, normalize_newlines, paragraphs
 from docket.vault.rawlog import parse_run_file
 from docket.vault.records import RID, RawRecord
 from docket.vault.segments import Segment, segments, time_range
@@ -40,6 +40,18 @@ class Span(BaseModel):
     segments: list[Segment] = Field(default_factory=list[Segment])
     text: str = ""
     problem: str | None = None
+
+
+def over(record: RawRecord) -> list[str]:
+    """The rids of its own source a record names as its thread or its container, other than its own, sorted: the
+    records it is under (DR-0117)."""
+    named = {rid for rid in (record.thread, record.container) if rid and rid != record.rid}
+    return sorted(rid for rid in named if (m := RID.match(rid)) and m.group(1) == record.source)
+
+
+def is_transcript(record: RawRecord) -> bool:
+    """A record a time on the record it is under is placed on: of kind transcript, with segments (DR-0370)."""
+    return record.kind == "transcript" and bool(segments(record))
 
 
 class RawLookup:
@@ -79,7 +91,28 @@ class RawLookup:
         m = RID.match(rid)
         by_rid = self._source(m.group(1)) if m else {}
         latest = (v[-1] for other, v in by_rid.items() if other != rid)
-        return sorted((r for r in latest if rid in (r.thread, r.container)), key=lambda r: r.rid)
+        return sorted((r for r in latest if rid in over(r)), key=lambda r: r.rid)
+
+    def transcripts(self, rid: str) -> list[str]:
+        """The transcripts under rid, by rid: where a time on a record without segments of its own lands (DR-0370)."""
+        return [r.rid for r in self.under(rid) if is_transcript(r)]
+
+    def timed(self, rids: list[str]) -> list[str]:
+        """Where a time on these records can be placed (DR-0370): those with segments of their own; when none has any,
+        the transcripts under them, so a time on a recording lands on the transcript its source keeps as a record of
+        its own."""
+        own = [rid for rid in rids if any(segments(r) for r in self.versions(rid)[-1:])]
+        if own:
+            return own
+        return list(dict.fromkeys(t for rid in rids for t in self.transcripts(rid)))
+
+    def recordings(self, record: RawRecord) -> list[str]:
+        """The records in the raw log a transcript is under, by rid: its recording, read as one with it (DR-0391). A
+        record that isn't a transcript is under none."""
+        if not is_transcript(record):
+            return []
+        by_rid = self._source(record.source)
+        return [rid for rid in over(record) if rid in by_rid]
 
     def neighbours(self, record: RawRecord, n: int) -> list[RawRecord]:
         """The record and up to n messages either side in its thread (its container when it has none), in time
@@ -93,8 +126,9 @@ class RawLookup:
         return group[max(0, i - n) : i + n + 1]
 
 
-def problem(anchor: Anchor, record: RawRecord) -> str | None:
-    """Why an anchor doesn't resolve against a record, or None when it does."""
+def problem(anchor: Anchor, record: RawRecord, lookup: RawLookup | None = None) -> str | None:
+    """Why an anchor doesn't resolve against a record, or None when it does. With the lookup, a time on a record
+    without segments names the transcripts under it (DR-0391)."""
     if anchor.kind == "record":
         return None
     if anchor.kind == "part":
@@ -104,7 +138,7 @@ def problem(anchor: Anchor, record: RawRecord) -> str | None:
         return None
     bounds = time_range(segments(record))
     if bounds is None:
-        return f"{record.rid} has no transcript segments; anchor the whole record: [r:{encode_rid(record.rid)}]"
+        return _no_segments(anchor, record, lookup)
     lo, hi = bounds
     for t in (anchor.start, anchor.last):
         if not lo <= t <= hi:
@@ -112,12 +146,30 @@ def problem(anchor: Anchor, record: RawRecord) -> str | None:
     return None
 
 
+def _no_segments(anchor: Anchor, record: RawRecord, lookup: RawLookup | None) -> str:
+    under = lookup.transcripts(record.rid) if lookup is not None else []
+    head = f"{record.rid} has no transcript segments"
+    if not under:
+        return f"{head}; anchor the whole record: [r:{encode_rid(record.rid)}]"
+    written = " or ".join(format_anchor(rid, "time", anchor.start, anchor.end) for rid in under)
+    if len(under) == 1:
+        return f"{head}; its transcript {under[0]} has them: write {written}, with {under[0]} in covers"
+    return f"{head}; its transcripts {', '.join(under)} have them: write {written}, with that one in covers"
+
+
 def span(
-    anchor: Anchor, record: RawRecord, versions: int, *, window: int = WINDOW, around: int = 0, written: str = ""
+    anchor: Anchor,
+    record: RawRecord,
+    versions: int,
+    *,
+    window: int = WINDOW,
+    around: int = 0,
+    written: str = "",
+    lookup: RawLookup | None = None,
 ) -> Span:
     """The raw an anchor points at. A point in time shows the segments overlapping the next `window` seconds, a
     stretch the segments overlapping it, a paragraph its text; `around` widens a time by minutes and paragraphs by
-    paragraphs, either side."""
+    paragraphs, either side. The lookup lets a problem name the transcripts under a record (DR-0391)."""
     head = Span(
         rid=record.rid,
         anchor=written or anchor.token or anchor.text,
@@ -127,7 +179,7 @@ def span(
         title=record.title,
         versions=versions,
     )
-    why = problem(anchor, record)
+    why = problem(anchor, record, lookup)
     if why is not None:
         return head.model_copy(update={"problem": why})
     if anchor.kind == "part":

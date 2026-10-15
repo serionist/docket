@@ -32,6 +32,7 @@ from starlette.testclient import TestClient
 
 from docket import capture, recall
 from docket.cli import main
+from docket.imports.notes import import_notes
 from docket.service.app import ServiceApp, create_app
 from docket.service.state import Settings
 from docket.sources import release as releasing
@@ -113,6 +114,18 @@ def test_a_time_on_a_note_covering_a_recording_is_read_on_its_transcript(mapper:
         found = recall.read(vault, locator, view="raw")
         assert found.resolved == f"r:plaud:{CALL}/transaction_polish@12:08"
         assert [s.text for s in found.spans[0].segments] == ["So ten million, for the whole quarter."]
+
+
+def test_a_note_named_by_its_title_and_day_covers_the_recording(mapper: ModuleType, tmp_path: Path) -> None:
+    # The notes import matches the recording's title and the transcript's segments as one recording.
+    vault = project_with_the_example(tmp_path)
+    vault.write_run("plaud", list(checked(mapper, live_call(Run())).values()))
+    folder = tmp_path / "work" / "notes"
+    (folder / "plaud").mkdir(parents=True)
+    (folder / "plaud" / "2026-10-14-supplier-call.md").write_text("# Supplier call\n\nTen million.\n", encoding="utf-8")
+    assert import_notes(vault, folder).covered == 1
+    found = recall.read(vault, "notes/plaud/2026-10-14-supplier-call.md@12:08", view="raw")
+    assert found.resolved == f"r:plaud:{CALL}/transaction_polish@12:08"
 
 
 # -- docket ingest, end to end ---------------------------------------------------------------------------------------

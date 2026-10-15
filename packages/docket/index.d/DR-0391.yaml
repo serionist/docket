@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0391
+    title: A transcript is read as one with the recording it is under
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#86"]
+    description: "Reading a transcript's rid (r:<rid> or the bare rid, with or without a time), as the web panel does for a search hit, lists the lines of current docs anchored on the recording it is under after the transcript's own, once each, and names the legacy notes covering either. The recording is a record of the transcript's source that it names as its thread or container (DR-0117); only a record of kind transcript with segments has one. doc_put and verify still refuse a time on a record without segments, and when transcripts are under that record the problem names each, with the anchor to write ([r:<transcript>@<time>]), instead of saying to anchor the whole record. This is DR-0370's other direction: a recording's time read on its transcript already names the recording's notes."
+    binds:
+      - What a transcript is under comes from the raw log of its own source, never the index, as for DR-0370.
+    not_chosen:
+      - "Any record read with its thread or container: a chat reply would list every line on the message it answers."
+      - "doc_put storing a time on a recording on its transcript instead: the doc would hold an anchor other than the one written."
