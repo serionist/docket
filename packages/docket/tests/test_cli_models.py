@@ -53,9 +53,13 @@ def test_status_shows_the_choice_the_environment_and_the_files(
     assert "! the models aren't installed for cpu on this machine; run docket models install" in out
     make_env("cpu")
     monkeypatch.setattr(runtime, "worker_for", lambda choice, device: Worker(fake_command()))
+    monkeypatch.setattr(install, "vectors_problem", lambda: None)
     code, out = run(capsys, "status", "--check")
     assert code == 0 and "env cpu    ready, batches of 8,192 characters" in out
-    assert "worker     up: CPUExecutionProvider, 64 dims" in out
+    assert "worker     up: CPUExecutionProvider, 64 dims" in out and "search     uses the vectors" in out
+    monkeypatch.setattr(install, "vectors_problem", lambda: "the Python Docket runs on can't load SQLite extensions")
+    code, out = run(capsys, "status")
+    assert "search     ! the Python Docket runs on can't load SQLite extensions" in out
 
 
 def test_a_check_that_fails_shows_the_workers_last_lines(
