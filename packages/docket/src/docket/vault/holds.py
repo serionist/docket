@@ -131,9 +131,11 @@ def add(vault: Vault, source: str, ids: Iterable[str]) -> int:
     with vault.writing():
         path = list_path(vault.root, source)
         # The log first: a release line a failed commit left on disk reaches git before its id comes off the list, or
-        # the add stops here with the list as it was. No machine may see a hold gone without its release.
-        releaselog.commit_pending(vault, source)
+        # the add stops here with the list as it was. No machine may see a hold gone without its release. It is read
+        # before it is committed: a log that doesn't parse is refused here, never committed for every machine to choke
+        # on.
         released = set(releaselog.read(vault.root, source))
+        releaselog.commit_pending(vault, source)
         current = read(vault.root, source)
         added = new - current - released
         if added or current & released:
@@ -154,8 +156,9 @@ def remove(vault: Vault, source: str, ids: Iterable[str]) -> int:
     gone = set(ids)
     with vault.writing():
         path = list_path(vault.root, source)
+        granted = set(releaselog.read(vault.root, source))
         releaselog.commit_pending(vault, source)
-        unreleased = sorted(gone - set(releaselog.read(vault.root, source)))
+        unreleased = sorted(gone - granted)
         if unreleased:
             raise DocketError(
                 f"{', '.join(unreleased)}: no release line, so the hold stays; a hold comes off only through docket "

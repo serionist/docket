@@ -343,8 +343,11 @@ def release(vault: Vault, source: str, folder: Path, proposals: Sequence[Proposa
     if problem is not None:
         raise DocketError(problem)
     report = ReleaseReport()
-    # A line or a list a crash left on disk uncommitted reaches git before anything else is decided on it.
+    # A line or a list a crash left on disk uncommitted reaches git before anything else is decided on it, each read
+    # first, so one that doesn't parse is refused, never committed.
     with vault.writing():
+        releaselog.read(vault.root, source)
+        holds.read(vault.root, source)
         releaselog.commit_pending(vault, source)
         holds.commit_pending(vault, source)
     held = holds.read(vault.root, source)

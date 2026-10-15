@@ -319,6 +319,21 @@ def test_an_add_whose_log_commit_fails_takes_no_hold_off(vault: Vault) -> None:
     assert hold_follows_its_release(vault, "plaud", HELD)
 
 
+def test_a_log_that_doesn_t_read_is_never_committed_by_an_add_or_a_removal(vault: Vault) -> None:
+    holds.add(vault, "plaud", [HELD, OTHER])
+    released(vault, HELD)
+    rel = f"{releaselog.RELEASES}/plaud.jsonl"
+    before = in_head(vault, rel)
+    # Broken by hand on disk: every machine that pulled it would fail closed.
+    (vault.root / rel).write_text(f"{before}{PRIVATE_TITLE}\n", encoding="utf-8")
+    for change in (lambda: holds.add(vault, "plaud", ["of_new"]), lambda: holds.remove(vault, "plaud", [HELD])):
+        with pytest.raises(DocketError, match="line 2 isn't a release"):
+            change()
+        assert in_head(vault, rel) == before
+    assert holds.read(vault.root, "plaud") == {HELD, OTHER}
+    assert not any("committed" in s for s in subjects(vault)[:1])
+
+
 def test_a_removal_commits_the_release_line_first(vault: Vault) -> None:
     holds.add(vault, "plaud", [HELD])
     line_on_disk(vault, "plaud", HELD)

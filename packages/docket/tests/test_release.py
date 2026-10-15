@@ -422,6 +422,29 @@ def test_with_a_console_on_both_sides_and_outside_claude_code_the_question_is_as
     assert releasing._console_problem() is None  # pyright: ignore[reportPrivateUsage]
 
 
+@pytest.mark.parametrize(
+    "case",
+    [
+        (f"{RELEASES}/rec.jsonl", "not a release\n", "isn't a release"),
+        (f"{HOLDS}/rec.txt", "two words\n", "isn't an id"),
+    ],
+)
+def test_a_log_or_list_that_doesn_t_read_is_refused_before_it_is_committed(
+    vault: Vault, folder: Path, owner: Callable[..., Owner], case: tuple[str, str, str]
+) -> None:
+    rel, broken, message = case
+    ingest(vault, folder)
+    person = owner("code")
+    head = sh(vault.root, "git", "rev-parse", "HEAD")
+    path = vault.root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(broken, encoding="utf-8")
+    with pytest.raises(DocketError, match=message):
+        releasing.release(vault, "rec", folder, [cut_01()])
+    assert sh(vault.root, "git", "rev-parse", "HEAD") == head
+    assert person.prompts == []
+
+
 def test_a_disabled_source_stops_before_the_question(vault: Vault, folder: Path, owner: Callable[..., Owner]) -> None:
     ingest(vault, folder)
     path = vault.root / "vault.yaml"
