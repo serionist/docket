@@ -223,8 +223,14 @@ def _read(call: _Call, locator: str, view: View, around: int, rev: int | None) -
     if view != "raw":
         docs = call.covering(record.rid)
         result.lines = _citing(docs, call.superseded(), record.rid, anchor, around)
-        # A recording's time read on its transcript still names the notes that cover the recording.
-        named = docs if record.rid == asked else [*call.covering(asked), *docs]
+        named = docs
+        if record.rid != asked:
+            # A recording's time read on its transcript still lists the lines on the whole recording, and its notes.
+            on_asked = call.covering(asked)
+            seen = {(c.doc, c.n) for c in result.lines}
+            more = _citing(on_asked, call.superseded(), asked, anchor, around)
+            result.lines += [c for c in more if (c.doc, c.n) not in seen]
+            named = [*on_asked, *docs]
         notes = {d.meta.id: d for d in named if d.meta.type == "legacy-note"}
         result.legacy = [LegacyRef(id=d.meta.id, old_paths=d.meta.old_paths) for d in notes.values()]
     return result

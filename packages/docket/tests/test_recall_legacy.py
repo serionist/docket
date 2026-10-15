@@ -154,6 +154,19 @@ def test_a_time_on_a_recording_is_read_on_its_transcript(vault: Vault, locator: 
     assert (both.doc.id if both.doc else None, [ref.id for ref in both.legacy]) == (doc, [] if doc else [SYNC_ID])
 
 
+def test_a_recording_s_time_still_lists_the_lines_on_the_whole_recording(vault: Vault) -> None:
+    with_plaud(vault, "transaction_polish")
+    whole = "recording-note:2026-10-14-whole"
+    about, both = f"- About the call. [r:{PLAUD}]", f"- Ten million. [r:{PLAUD}] [r:{POLISHED}@10:42]"
+    recall.doc_put(vault, note(whole, covers=[PLAUD, POLISHED], lines=[about, both]))
+    cited = recall.read(vault, f"r:{PLAUD}@10:42").lines
+    assert [(c.doc, c.text) for c in cited] == [
+        (MINUTES, "- Cleo agreed to ten million. @10:42"),
+        (whole, both),
+        (whole, about),
+    ]
+
+
 def test_two_transcripts_of_a_recording_are_named_to_choose_from(vault: Vault) -> None:
     with_plaud(vault, "transaction", "transaction_polish")
     options = f"r:{PLAUD}/transaction@10:42, r:{POLISHED}@10:42"
