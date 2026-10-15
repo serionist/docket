@@ -67,6 +67,8 @@ class Regime:
     exclude: list[str]
     kinds: dict[str, Kind]
     citation_free: list[str]
+    entry_dir: str | None = None
+    entry_kinds: list[str] = field(default_factory=list[str])
 
     @staticmethod
     def load(root: Path) -> Regime:
@@ -92,6 +94,15 @@ class Regime:
         for k in [*folder_kinds, *tables]:
             if k not in kinds:
                 raise KitError(f"{REGIME_PATH}: locations name kind {k!r}, which kinds doesn't define")
+        entry_dir = loc.get("entry_dir")
+        entry_kinds = _strs(loc.get("entry_kinds"), "locations.entry_kinds")
+        if entry_dir is not None and (not isinstance(entry_dir, str) or not entry_dir or "/" in entry_dir):
+            raise KitError(f"{REGIME_PATH}: locations.entry_dir must be one folder name")
+        if bool(entry_dir) != bool(entry_kinds):
+            raise KitError(f"{REGIME_PATH}: locations.entry_dir and entry_kinds go together")
+        for k in entry_kinds:
+            if k not in folder_kinds or not kinds[k].numbered:
+                raise KitError(f"{REGIME_PATH}: entry_kinds names {k!r}, which isn't a numbered folder kind")
         return Regime(
             root=root,
             folder_file=str(loc.get("folder_file") or "index.yaml"),
@@ -99,6 +110,8 @@ class Regime:
             exclude=_strs(loc.get("exclude"), "locations.exclude"),
             kinds=kinds,
             citation_free=_strs(data.get("citation_free"), "citation_free"),
+            entry_dir=entry_dir if isinstance(entry_dir, str) else None,
+            entry_kinds=entry_kinds,
         )
 
     def kind(self, name: str) -> Kind:

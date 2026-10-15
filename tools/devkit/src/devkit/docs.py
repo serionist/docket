@@ -14,10 +14,12 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from devkit.regime import Kind, Regime
-from devkit.repo import KitError, repo_root, user_name, utf8_stdio
-from devkit.store import EntryFile, Located, Store
-from devkit.yamlio import Comments, emit_entry
+from devkit.repo import KitError, git, repo_root, user_name, utf8_stdio
+from devkit.store import EntryFile, Located, Store, exclusions
+from devkit.yamlio import Comments, as_list, as_map, emit_entry, load_yaml
 
 _ID_SHAPE = re.compile(r"^\^([A-Z]+-)\[0-9\]\{([0-9]+)\}\$$")
 
@@ -69,22 +71,27 @@ def cmd_door(args: argparse.Namespace) -> int:
     chain = store.chain(args.path)
     binding = {"decisions": 0, "proposed": 0, "conventions": 0}
     for folder in chain:
-        f = store.files.get(store.folder_file(folder))
-        if f is None:
+        files = store.folder_files(folder)
+        if not files:
             continue
-        print(f"{f.rel}")
-        for e in f.sections.get("reading", []):
-            loc = Located(store.regime.kind("reading"), f, e)
-            if loc.living:
-                print(f"  {_line(loc)}")
-        for e in f.sections.get("decisions", []):
-            loc = Located(store.regime.kind("decisions"), f, e)
-            if loc.living:
-                binding["decisions"] += 1
-                binding["proposed"] += e.get("status") == "proposed"
-        binding["conventions"] += sum(
-            1 for e in f.sections.get("conventions", []) if Located(store.regime.kind("conventions"), f, e).living
-        )
+        index = store.files.get(store.folder_file(folder))
+        if index is None:
+            print(f"{folder}/{store.regime.entry_dir}/" if folder else f"{store.regime.entry_dir}/")
+        else:
+            print(index.rel)
+            for e in index.sections.get("reading", []):
+                loc = Located(store.regime.kind("reading"), index, e)
+                if loc.living:
+                    print(f"  {_line(loc)}")
+        for f in files:
+            for e in f.sections.get("decisions", []):
+                loc = Located(store.regime.kind("decisions"), f, e)
+                if loc.living:
+                    binding["decisions"] += 1
+                    binding["proposed"] += e.get("status") == "proposed"
+            binding["conventions"] += sum(
+                1 for e in f.sections.get("conventions", []) if Located(store.regime.kind("conventions"), f, e).living
+            )
     proposed = f" ({binding['proposed']} proposed, not yet confirmed)" if binding["proposed"] else ""
     print(f"binding here: {binding['decisions']} decisions{proposed}, {binding['conventions']} conventions")
     print(f"  uv run docs list decisions --path {args.path}   uv run docs list conventions --path {args.path}")
@@ -229,16 +236,34 @@ def _next_id(store: Store, kind: Kind) -> str:
     return f"{prefix}{(max(numbers) + 1 if numbers else 1):0{width}d}"
 
 
-def _target_file(store: Store, kind: Kind, folder: str | None) -> EntryFile:
+def _folder_value(store: Store, kind: Kind, folder: str | None) -> str:
+    if folder is None:
+        raise KitError(f"{kind.name} bind a folder: give --in <folder> ('.' for the root)")
+    value = "" if folder in (".", "") else Path(folder).as_posix().strip("/")
+    if not (store.root / value).is_dir():
+        raise KitError(f"{folder} isn't a folder")
+    return value
+
+
+def _own_file(store: Store, kind: Kind, folder: str, key: str) -> EntryFile:
+    """A new file for one entry in the folder's index.d/."""
+    rel = store.entry_path(folder, key)
+    if rel in store.files or (store.root / rel).exists():
+        raise KitError(f"{rel} exists already")
+    f = EntryFile(rel=rel, folder=folder, raw="", created=True, single=True)
+    f.sections[kind.name] = []
+    store.files[rel] = f
+    return f
+
+
+def _target_file(store: Store, kind: Kind, folder: str | None, key: str | None = None) -> EntryFile:
     if kind.table:
         rel = kind.table
         folder_value: str | None = None
     else:
-        if folder is None:
-            raise KitError(f"{kind.name} bind a folder: give --in <folder> ('.' for the root)")
-        folder_value = "" if folder in (".", "") else Path(folder).as_posix().strip("/")
-        if not (store.root / folder_value).is_dir():
-            raise KitError(f"{folder} isn't a folder")
+        folder_value = _folder_value(store, kind, folder)
+        if kind.name in store.regime.entry_kinds and key is not None:
+            return _own_file(store, kind, folder_value, key)
         rel = store.folder_file(folder_value)
     f = store.files.get(rel)
     if f is None:
@@ -258,13 +283,14 @@ def cmd_add(args: argparse.Namespace) -> int:
     kind = store.regime.kind(args.kind)
 
     def change(work: Store) -> set[str]:
-        f = _target_file(work, kind, args.folder)
         entry: dict[str, Any] = {}
         if kind.numbered and not any(n == kind.key for n, _ in _pairs(args.set)):
             entry[kind.key] = _next_id(work, kind)
         for name, default in kind.defaults.items():
             entry[name] = {"today": date.today().isoformat(), "git-user": user_name(work.root)}.get(default, default)
         _apply(kind, entry, args)
+        key = entry.get(kind.key)
+        f = _target_file(work, kind, args.folder, key if isinstance(key, str) and key else None)
         items = f.sections.setdefault(kind.name, [])
         if kind.name == "terms":
             items.append(entry)
@@ -325,6 +351,61 @@ def cmd_remove(args: argparse.Namespace) -> int:
 
     _report(_mutate(store, change))
     _living_citations(_load(), args.key)
+    return 0
+
+
+def _entry_at(store: Store, rev: str, key: str) -> tuple[Kind, str, dict[str, Any]]:
+    """An entry as it stood at a revision: its kind, the folder that held it, and its fields."""
+    regime = store.regime
+    excluded = exclusions(regime)
+    for rel in git(store.root, "ls-tree", "-r", "-z", "--name-only", rev, "--").split("\0"):
+        parts = rel.split("/")
+        own = parts[-2:-1] == [regime.entry_dir] and parts[-1] == f"{key}.yaml"
+        if not (own or parts[-1] == regime.folder_file) or any(x.match(rel) for x in excluded):
+            continue
+        try:
+            data = as_map(load_yaml(git(store.root, "show", f"{rev}:{rel}")))
+        except yaml.YAMLError:
+            continue
+        for kname in regime.entry_kinds:
+            for raw in as_list(data.get(kname)):
+                e = as_map(raw)
+                if e.get(regime.kinds[kname].key) == key:
+                    return regime.kinds[kname], "/".join(parts[: -2 if own else -1]), e
+    raise KitError(f"no decision or convention {key} at {rev}")
+
+
+def cmd_move(args: argparse.Namespace) -> int:
+    store = _load()
+    if not store.regime.entry_dir:
+        raise KitError("the regime names no entry_dir to move entries into")
+
+    def change(work: Store) -> set[str]:
+        touched: set[str] = set()
+        for key in args.keys:
+            if args.rev:
+                if any(loc.key == key for loc in work.entries()):
+                    raise KitError(f"{key} is in the tree already; move it without --from")
+                kind, folder, entry = _entry_at(work, args.rev, key)
+                if not (work.root / folder).is_dir():
+                    raise KitError(f"{key} bound {folder}, which isn't a folder here")
+            else:
+                loc = work.find(key)
+                kind, folder, entry = loc.kind, loc.file.folder or "", loc.entry
+                if loc.file.single:
+                    raise KitError(f"{key} has a file of its own already: {loc.file.rel}")
+                if kind.name not in work.regime.entry_kinds:
+                    raise KitError(f"{kind.name} stay where they are; only {', '.join(work.regime.entry_kinds)} move")
+                items = loc.file.sections[kind.name]
+                del items[next(i for i, e in enumerate(items) if e is entry)]
+                touched.add(loc.file.rel)
+            f = _own_file(work, kind, folder, key)
+            f.sections[kind.name].append(entry)
+            touched.add(f.rel)
+            print(f"moved {key} to {f.rel}")
+        return touched
+
+    _report(_mutate(store, change))
     return 0
 
 
@@ -419,6 +500,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--why", required=True)
     s.add_argument("--in", dest="folder")
     s.set_defaults(func=cmd_remove)
+
+    s = sub.add_parser("move", help="move decisions or conventions out of an index.yaml into files of their own")
+    s.add_argument("keys", nargs="+", metavar="key")
+    s.add_argument("--from", dest="rev", help="take each entry as it stood at this revision, e.g. ORIG_HEAD")
+    s.set_defaults(func=cmd_move)
 
     sub.add_parser("check", help="check every entry file against the regime").set_defaults(func=cmd_check)
     sub.add_parser("format", help="rewrite every entry file in canonical form").set_defaults(func=cmd_format)

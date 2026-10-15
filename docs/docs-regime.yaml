@@ -8,6 +8,10 @@ locations:
   # down. A decision binds its folder and everything under it.
   folder_file: index.yaml
   folder_kinds: [reading, decisions, conventions]
+  # A new decision or convention is a file of its own in its folder's index.d/, named by its id and holding that one
+  # entry, so two branches that add entries never touch the same file. Those written before stay in index.yaml.
+  entry_dir: index.d
+  entry_kinds: [decisions, conventions]
   # Table kinds sit in one file each.
   tables:
     terms: docs/glossary.yaml
