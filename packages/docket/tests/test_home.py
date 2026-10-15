@@ -13,7 +13,8 @@ import pytest
 from docket_testkit import empty_vault, folder_vault, git, host_repo, make_config, make_record
 
 from docket.errors import DocketError
-from docket.vault import machine
+from docket.sources import local
+from docket.vault import cursors, machine
 from docket.vault.config import CONFIG_FILE, VaultConfig, write_config
 from docket.vault.convert import State, Where
 from docket.vault.docstore import DocStore
@@ -223,8 +224,22 @@ def _lock(vault: Vault) -> None:
         lambda vault: machine.remember(vault.home, "other-box"),
         lambda vault: vault.git.run("status", hooks=False),
         _convert_state,
+        lambda vault: cursors.save(vault, "chat", cursors.Cursor()),
+        lambda vault: local.record(vault, "chat", vault.root.parent),
     ],
-    ids=["lock", "raw log", "staging", "replace", "vault.yaml", "doc", "machine", "hooks-off", "convert"],
+    ids=[
+        "lock",
+        "raw log",
+        "staging",
+        "replace",
+        "vault.yaml",
+        "doc",
+        "machine",
+        "hooks-off",
+        "convert",
+        "cursor",
+        "imported folders",
+    ],
 )
 def test_no_writer_of_docket_s_own_files_remakes_a_missing_git_dir(
     tmp_path: Path, config: VaultConfig, write: Callable[[Vault], object]

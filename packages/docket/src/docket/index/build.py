@@ -16,6 +16,8 @@ import os
 import sqlite3
 import time
 from collections import defaultdict
+from collections.abc import Iterable
+from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 from zoneinfo import ZoneInfo
@@ -595,3 +597,38 @@ def locate(vault: Vault, rid: str) -> RecordLocation | None:
     finally:
         conn.close()
     return None if row is None else RecordLocation(rid=rid, path=row[0], line=row[1], versions=row[2])
+
+
+def kept(vault: Vault, source: str, since: datetime, until: datetime) -> list[str]:
+    """The rids of a source's records in raw whose time falls in a window, from the index: what a sync run can skip."""
+    conn = open_index(vault)
+    try:
+        rows = conn.execute(
+            "SELECT rid FROM records WHERE source = ? AND ts >= ? AND ts <= ? ORDER BY rid",
+            (source, iso(since), iso(until)),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [str(row[0]) for row in rows]
+
+
+def stored_under(vault: Vault, source: str, natives: Iterable[str]) -> set[str]:
+    """The native ids under which raw holds a record of a source: its rid, thread or container is `<source>:<id>` or
+    sits under it."""
+    conn = open_index(vault)
+    found: set[str] = set()
+    try:
+        for native in natives:
+            ref = f"{source}:{native}"
+            # LIKE with `!` as its escape, so an id's own % and _ match only themselves.
+            under = ref.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "/%"
+            row = conn.execute(
+                "SELECT 1 FROM records WHERE source = ? AND (rid = ? OR container = ? OR thread = ? "
+                "OR rid LIKE ? ESCAPE '!' OR container LIKE ? ESCAPE '!' OR thread LIKE ? ESCAPE '!') LIMIT 1",
+                (source, ref, ref, ref, under, under, under),
+            ).fetchone()
+            if row is not None:
+                found.add(native)
+    finally:
+        conn.close()
+    return found

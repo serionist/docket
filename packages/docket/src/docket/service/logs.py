@@ -66,10 +66,18 @@ class NoMessages(logging.Formatter):
         return line
 
 
-def configure(log_file: Path) -> logging.Handler:
+class ServiceLog(RotatingFileHandler):
+    """The service's log file, and the levels its setup changed, so taking it down puts them back."""
+
+    def __init__(self, log_file: Path) -> None:
+        super().__init__(log_file, maxBytes=LOG_BYTES, backupCount=LOG_FILES, encoding="utf-8")
+        self.levels = {name: logging.getLogger(name).level for name in ("", "docket", *LIBRARIES)}
+
+
+def configure(log_file: Path) -> ServiceLog:
     """The service's logging: a rotated file, Docket at INFO, the libraries at WARNING, the formatter above."""
     log_file.parent.mkdir(parents=True, exist_ok=True)
-    handler = RotatingFileHandler(log_file, maxBytes=LOG_BYTES, backupCount=LOG_FILES, encoding="utf-8")
+    handler = ServiceLog(log_file)
     handler.setFormatter(NoMessages())
     root = logging.getLogger()
     root.addHandler(handler)
@@ -78,6 +86,15 @@ def configure(log_file: Path) -> logging.Handler:
     for name in LIBRARIES:
         logging.getLogger(name).setLevel(logging.WARNING)
     return handler
+
+
+def release(handler: ServiceLog) -> None:
+    """Take the service's logging down: its file closed and every level its setup changed put back, so a service run
+    inside another program, a test among them, leaves that program's logging as it found it."""
+    logging.getLogger().removeHandler(handler)
+    handler.close()
+    for name, level in handler.levels.items():
+        logging.getLogger(name).setLevel(level)
 
 
 def _route(scope: Scope) -> str:

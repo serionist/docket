@@ -24,6 +24,7 @@ from docket.service.token import Tokens
 from docket.sources import release, scaffold
 from docket.sources.contract import Manifest
 from docket.sources.ingest import IngestReport, ingest_run
+from docket.sources.local import record as record_import_folder
 from docket.sources.runner import MapperFailedError
 from docket.vault import convert, cuts, holds, redaction, releaselog
 from docket.vault.docstore import DocStore
@@ -268,6 +269,9 @@ def ingest(
     if problem is not None:
         raise DocketError(problem)
     found = find_vault(vault)
+    if folder.is_dir():
+        # A live run's close may name this folder from now on (DR-0250).
+        record_import_folder(found, source, folder)
     run = f"import-{datetime.now(UTC):%Y%m%dT%H%M%S}"
     manifest = Manifest(run=run, source=source, captures=0, final=final, folder=str(folder))
     try:
@@ -956,6 +960,16 @@ def hook_session_start() -> None:
 
     # ASCII on the wire, whatever the console's code page: JSON escapes every other character.
     typer.echo(json.dumps(hooks.session_start(status, os.environ)))
+
+
+@hook_app.command("post-tool-use")
+def hook_post_tool_use() -> None:
+    """The capture hook, as JSON for Claude Code's PostToolUse hook: it ties a run to its session and posts the
+    captures an open run wants. `docket.entry` answers it before the CLI loads; this is the same hook, for help and
+    tests. It always exits 0."""
+    from docket import capture  # noqa: PLC0415
+
+    capture.main()
 
 
 @app.command("open")

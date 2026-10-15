@@ -18,9 +18,15 @@ terms:
   - term: capture
     definition: "One thing a run brought in: a source tool's result exactly as the tool gave it, posted by the capture hook, or a file from an import folder. A mapper reads captures; Claude never retypes them."
     see: [packages/docket/src/docket/sources/contract.py]
+  - term: capture hook
+    definition: "The plugin's PostToolUse hook, docket hook post-tool-use: it ties a sync run to the Claude Code session that opened it and posts the session's results of the source's listed tools to the service, as given. With no run open it reads one small file and returns."
+    see: [packages/docket/src/docket/capture.py]
   - term: chunk
     definition: "The unit search finds: a stretch of a transcript, a message, a thread window, part of a record, or a section of a processed doc, with the locator read takes."
     see: [packages/docket/src/docket/index/chunks.py]
+  - term: cursor
+    definition: "Where one machine's syncs of a source reached, in state/cursors-<machine>.yaml: the mark, the lookback, the retry set and the waiting set. A run's window starts at the furthest mark any machine reached, less the lookback."
+    see: [packages/docket/src/docket/vault/cursors.py]
   - term: deny list
     definition: The private list of names this public repo must never carry, kept outside it (~/.config/docket-dev/denylist.txt, and a secret in CI). A name matches as whole words, across a line break too.
     see: [tools/devkit/src/devkit/content.py]
@@ -88,6 +94,9 @@ terms:
   - term: release log
     definition: "state/releases/<source>.jsonl in the vault: each released id with its cuts in milliseconds and the records kept as they read, merged by union. The gate cuts a released recording by it wherever it is staged."
     see: [packages/docket/src/docket/vault/releaselog.py]
+  - term: retry set
+    definition: The ids a sync run skipped with a reason (later, too-large, gone, rate-limited), fetched by id on later runs. An id held back for the budget waits as long as it takes; any other leaves after 30 days.
+    see: [packages/docket/src/docket/vault/cursors.py]
   - term: run manifest
     definition: "What a source skill sends when its run ends: the run's id, how many captures it made, its window and what it skipped. A run closes only when Docket holds every capture it counts."
     see: [packages/docket/src/docket/sources/contract.py]
@@ -110,5 +119,12 @@ terms:
   - term: status hook
     definition: "The plugin's SessionStart hook: docket hook session-start tells Claude the service's state, the vault's and the port at each session's start, and the user only what needs them."
     see: [packages/docket/src/docket/hooks.py]
+  - term: sync run
+    definition: "One harvest of one source from a Claude Code session: opened by run_open, fed by the capture hook, closed by ingest. It lives in the service's memory, closes only whole, and is dropped otherwise, with nothing staged and the mark kept."
+    see: [packages/docket/src/docket/service/runs.py]
+    close_terms: [run]
   - term: vault
     definition: "Where Docket keeps a user's data, private and in git: by default a folder of the repo the user already works in, or a repo of its own. It holds raw records written once, encrypted media, processed docs, entities and the ledger, and is never part of this repo."
+  - term: waiting set
+    definition: The ids a source's mapper said wait for something more (a summary, a transcript, a fetch), asked for again on later runs and, after a week, in a final run that never moves the mark.
+    see: [packages/docket/src/docket/vault/cursors.py]

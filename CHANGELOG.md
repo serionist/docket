@@ -8,6 +8,12 @@ Unreleased in the same PR.
 
 ### Added
 
+- Live syncs through the service: ask Claude to sync a source, and it opens a run with the MCP tool `run_open`,
+  follows the source's skill and closes the run with `ingest`. The plugin's capture hook hands Docket what the
+  source's tools returned, so nothing is retyped, and a run that comes up short is dropped and fetched again. Update
+  Docket before the plugin: an older `docket` doesn't know the hook's command.
+- Each machine's sync cursor, committed in `state/cursors-<machine>.yaml`: where its syncs reached, and the ids still
+  owed. A run starts from the furthest point any machine reached.
 - Releasing held recordings: `docket hold list`, `docket hold show` and `docket hold release`. A held recording goes
   into staging only with the cuts you confirm, each one by typing back the code it shows at your own console, and
   leaves the hold list once its release is committed to `state/releases/<source>.jsonl`. The gate cuts a released
@@ -71,6 +77,10 @@ Unreleased in the same PR.
 - Search keeps every word of a query, however common, so a customer named in most of your notes still narrows it; a
   doc, mail or recording whose title leads with most of your words comes first. `too common to search for` is gone,
   and `in no chunk: <word>` names a word nothing in the vault holds. Search with key words, not the sentence.
+- A source's `SKILL.md` now holds only the source's own calls; the run's steps come from `run_open`. After upgrading,
+  copy the reference's `SKILL.md` and `mapper.py` over your project's copy: a live run refuses a `SKILL.md` without
+  the new marker line. Plaud's reference pages transcripts by 100 utterances, and finalizes only the recordings a run
+  fetched.
 - Redaction is yours to set, rule by rule in `vault.yaml`: credentials (passwords, keys and tokens) on, phone numbers
   off, each of your own patterns on unless its `enabled` is false. Phone numbers are no longer redacted unless you
   turn them on: `docket redaction set phone on`. Names are never redacted; the never-store lists keep them out.

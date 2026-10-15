@@ -102,20 +102,42 @@ source to `vault.yaml` (DR-0166); the plugin's `/docket:setup` runs it for each 
   otherwise it prints the lines to add under `sources:`. The folder is yours to commit.
 - Without `--vault` it takes only a vault found from the project that holds it. One found through the default vault
   or `DOCKET_VAULT` can be another project's, so it is refused, with the `--vault` to pass.
-- Claude Code doesn't load a `SKILL.md` from `.claude/skills/sources/` as a skill: whatever runs the source reads it
-  by its path (DR-0168).
+- Claude Code doesn't load a `SKILL.md` from `.claude/skills/sources/` as a skill: `run_open` names it by its path
+  and gives the run's steps, so a `SKILL.md` holds only the source's own calls, paging and limits (DR-0251). It
+  carries a marker line, `<!-- docket: steps from run_open -->`, and a live run refuses one without it: after
+  upgrading Docket, copy the reference's `SKILL.md` and `mapper.py` over yours.
 - Run a source's tests where it lives: `python -m pytest .claude/skills/sources/<name>/tests`, one source folder at a
   time, or with `--import-mode=importlib`, since every source has a `tests/test_mapper.py`. The tests that go through
   Docket's own checks run only where `docket` can be imported (a Python environment Docket is installed in);
   elsewhere they are left out and the mapper's own tests still run.
 - The mapper is `map_run(run)` in `mapper.py`: a run's captures and its manifest in, records out, as plain JSON.
-- Docket runs it in its own process, for at most 300 seconds and 256 MiB of output. A failure stages nothing, and the
-  run's captures are fetched again.
+- Docket runs it in its own process, for at most 300 seconds (90 in a live run) and 256 MiB of output. A failure
+  stages nothing, and the run's captures are fetched again.
 - Docket checks every rid, sorts a transcript's segments and renders its text, and computes every version: a mapper
   can't break ids or decide what counts as new.
 - Changing a mapper: keep its output stable, since every record the lookback reads again gets a new version when it
   changes; pin golden versions in its tests, as the example does; pull the project on every machine before its next
   sync.
+
+## Live runs
+
+A source syncs from any Claude Code session with the plugin: ask Claude to sync it, and it calls `run_open`, follows
+the source's skill, and closes the run with `ingest` (DR-0240 to DR-0252). The plugin's capture hook hands Docket what
+each of the source's tools returned, so Claude never retypes a payload.
+
+| Part | What |
+|---|---|
+| a run | held in the service's memory from `run_open` to `ingest`, tied to the session that opened it; nothing of it on disk |
+| a dropped run | one that comes up short, fails its close, sits 30 minutes with no capture, or meets a service restart: nothing is staged, the mark stays, and the next sync fetches the window again |
+| the window | from the latest mark any machine reached, less 7 days (`lookback_days`), to now; `run_open(since=...)` starts it elsewhere |
+| the cursor | `state/cursors-<machine>.yaml`, committed: the mark, the lookback, the ids to retry and the ids still waiting, ids and times only |
+| a final run | `run_open(source, final=true)` for the ids that waited a week: fetched by id, no listing, the mark untouched |
+| a folder | a live run reads a backfill folder only when `docket ingest` read it on this machine first |
+
+- Each machine commits its cursor file when a whole run changes it: one commit per run, `Cursors: <source> on
+  <machine>`, naming no id.
+- A cursor file that doesn't read stops this machine's runs, naming the line; another machine's is left out with a
+  note, since its marks only shorten a window.
 
 ## Hold lists
 
@@ -244,8 +266,9 @@ Claude Code connects through the Docket plugin, or by hand:
 ```
 
 The plugin's session-start hook runs `docket hook session-start`, which prints the service's state, the vault's and
-the port check as the JSON Claude Code reads (DR-0163). It is hidden from `docket --help`: it is for the plugin, not
-for people.
+the port check as the JSON Claude Code reads (DR-0163). Its capture hook runs `docket hook post-tool-use` after every
+MCP call: with no run open it reads one small file and returns (DR-0242). Both are hidden from `docket --help`: they
+are for the plugin, not for people.
 
 What the service refuses, and what it doesn't:
 
@@ -253,6 +276,9 @@ What the service refuses, and what it doesn't:
   127.0.0.1 gets nothing.
 - A write from another origin or site, and any caller without the token (the pages take a session cookie instead).
   No answer carries a CORS header.
+- A run's routes take only the token, never the browser's session, and a capture only from the session the run is
+  bound to. Any program running as you could post into an open run, as it could write the vault; what it adds alone
+  breaks the run's count and drops it (DR-0243).
 - Another user of the machine can reach the port and see that Docket answers, and, while the service is down, could
   bind the port first. Any program running as you can read the token, from the keychain or the file.
 - The log keeps no content: route templates, status codes and exception types, never your words.

@@ -4,6 +4,8 @@ under examples/sources/plaud, which stays the reference."""
 from __future__ import annotations
 
 import importlib.util
+import json
+import re
 import shutil
 import sys
 import zipfile
@@ -102,3 +104,16 @@ def test_the_wheel_carries_every_template(tmp_path: Path) -> None:
     for kind in ("blank", "plaud"):
         for rel in scaffold.template_files(kind):
             assert f"docket/sources/templates/{kind}/{rel}.tmpl" in names
+
+
+@pytest.mark.parametrize("name", ["plaud", "blank"])
+def test_a_skill_names_only_the_tools_parameters_and_the_hooks_line_prefixes(name: str) -> None:
+    text = scaffold.template_files(name)["SKILL.md"].decode("utf-8")
+    assert "<!-- docket: steps from run_open -->" in text
+    golden = json.loads((REPO / "packages/docket/tests/fixtures/mcp-tools.json").read_text(encoding="utf-8"))
+    params = {tool["name"]: set(tool["input_schema"]["properties"]) for tool in golden}
+    for tool, args in re.findall(r"\b(run_open|ingest)\(([^)]*)\)", text):
+        named = set(re.findall(r"\b([a-z_]+)=", args))
+        assert named <= params[tool], (tool, named)
+    for said in re.findall(r"docket: [a-z ]+", text):
+        assert said.startswith(("docket: run", "docket: kept capture", "docket: not kept", "docket: steps")), said

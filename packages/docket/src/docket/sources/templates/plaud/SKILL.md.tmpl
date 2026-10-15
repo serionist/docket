@@ -3,6 +3,8 @@ name: plaud
 description: Harvest Plaud recordings into Docket with the user's own Plaud MCP. Use when a sync runs the Plaud source, or the user asks to fetch, catch up on or import Plaud recordings.
 ---
 
+<!-- docket: steps from run_open -->
+
 # Plaud, Docket's reference source
 
 Reads Plaud with the user's own Plaud MCP and hands what it returned to Docket untouched; `mapper.py` next to this
@@ -28,27 +30,32 @@ sources:
 Then run its tests where it was copied: `pytest .claude/skills/sources/plaud/tests`. The tests that go through
 Docket's own checks run only where `docket` can be imported, and are left out elsewhere.
 
-Claude Code doesn't load this file as a skill from `.claude/skills/sources/plaud/`: whatever runs the source reads it
-by its path. A live run needs Docket's service and capture hook; until then, recordings already fetched go in with
-`docket ingest plaud <folder> --vault <vault>`.
+After upgrading Docket, copy this folder's `SKILL.md` and `mapper.py` over your copy: Docket refuses a run of a
+`SKILL.md` without the marker line at its top.
 
 ## A run
 
-The capture hook posts each tool's result as it came; Claude never retypes a payload. The run's manifest counts the
-captures, and Docket maps them when the manifest closes the run.
+Docket gives the run's steps: `run_open("plaud")` opens the run, names this file and says what to skip, what is owed,
+the budget and how to close. Claude never retypes a payload; the capture hook hands Docket what each call returned.
+This file holds only what is Plaud's own.
 
-| Step | What |
+| Part | What |
 |---|---|
 | Sign in | "not authenticated" means the server's `login` tool |
-| Skip | read the held ids and what raw and staging already hold through the service; skip those, to save calls |
-| List | `list_files` newest first, without date filters, until a page's oldest `start_at` is before the window's start |
-| Per recording | every page of `get_transcript` for `transaction_polish` (`limit` 500, following `next_cursor`), else for `transaction`; then `get_note` |
+| List | `list_files` newest first, without date filters (they aren't exact), until a page's oldest `start_at` is before the window's start |
+| Each recording | every page of `get_transcript` for `transaction_polish` with `limit` 100, following `next_cursor`, else for `transaction`; then `get_note` |
 | List again | `list_files` once more after the last `get_note`: Plaud renames a recording when it writes its notes, and the newest listing wins |
-| Rate limits | `429 Too Many Requests`: pause and retry with growing pauses; still limited, end the run, and the kept window resumes it |
-| Waiting | an id the mapper reports waiting is asked for again on later runs, and after 7 days as final |
+| By id | for a retry or waiting id: `get_file`, then its transcript and its notes as above; "not found" or an error means it is gone: skip it as `gone` |
+| Rate limits | `429 Too Many Requests`: pause and retry with growing pauses; still limited in the listing, stop without closing; on one recording, skip it as `rate-limited` |
 
-A backfill run, for recordings fetched before Docket: `list_files` paged down past the oldest backfill recording, no
-other calls, its manifest naming the backfill folder. The files get their start times from that listing.
+A page of 100 utterances stays under the 50,000 characters past which Claude Code hands the hook a file note instead
+of the result; a larger `limit` makes long calls too large to keep.
+
+A backfill, for recordings fetched before Docket: first `docket ingest plaud <folder> --vault <vault>` in the user's
+own terminal, which reads the folder's `hold.txt` and lets a run name the folder. Then `run_open("plaud",
+since=<the oldest backfill day>)`, `list_files` paged down past the oldest backfill recording and no other call, and
+`ingest(run, captures=<n>, folder=<folder>)`, without `final`: the files get their start times from that listing, and a
+backfill file is final by itself. A recording the listing shows and the folder lacks waits to be fetched by id.
 
 Recordings with stretches their owner left out go in `hold.txt` beside the backfill files before the first import, and
 stay out until they are released with their cuts. `/docket:cuts` places the owner's words for each stretch on its
@@ -66,7 +73,9 @@ Three records per recording, each with the recording's rid as thread and contain
 | its transcript | `plaud:<file id>/<block>` | when its page chain is complete; an empty one stages nothing |
 | Plaud's notes | `plaud:<file id>/summary` | when a tab has content |
 
-Held recordings are skipped before anything of them is parsed, and nothing the mapper reports carries a title.
+Only a recording the run fetched by id, or read from a backfill file, gives records, and only those are ever final. One
+the run only listed waits to be fetched when it falls in the run's window, and gives nothing outside it. Held
+recordings are skipped before anything of them is parsed, and nothing the mapper reports carries a title.
 
 ## Changing the mapper
 

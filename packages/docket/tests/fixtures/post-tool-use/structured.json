@@ -1,0 +1,22 @@
+{
+  "session_id": "5e55a0e1-0000-4000-8000-000000000041",
+  "transcript_path": "C:\\Users\\ada\\.claude\\projects\\C--work-probe\\5e55a0e1-0000-4000-8000-000000000041.jsonl",
+  "cwd": "C:\\work\\probe",
+  "prompt_id": "9f0e0000-0000-4000-8000-000000000041",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "mcp__probe__small",
+  "tool_input": {
+    "file_id": "of_00c0ffee"
+  },
+  "tool_response": "{\"id\":\"of_00c0ffee\",\"name\":\"Invented standup\",\"speakers\":[\"Ada Example\",\"Ben Sample\"]}",
+  "tool_use_id": "toolu_01SJt6fa8oFNsSCdZbJz3As5",
+  "duration_ms": 4,
+  "mcp_server": {
+    "name": "probe",
+    "source": "dynamic"
+  }
+}

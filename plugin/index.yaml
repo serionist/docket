@@ -4,7 +4,7 @@
 reading:
   - { path: plugin/README.md, role: guide, note: "installing docket and the plugin, and what each part does" }
   - { path: plugin/.mcp.json, role: contract, note: "the MCP entry: its server key names every tool Claude Code shows, a one-way door" }
-  - { path: plugin/hooks/hooks.json, role: contract, note: "the SessionStart hook and the command it runs: a one-way door" }
+  - { path: plugin/hooks/hooks.json, role: contract, note: "the SessionStart hook and the PostToolUse capture hook, and the commands they run: a one-way door" }
 decisions:
   - id: DR-0160
     title: The plugin registers the service as the MCP server docket
@@ -71,6 +71,25 @@ decisions:
     not_chosen:
       - "release: the same method serves a staged recording's private stretch when the Staging page and sync arrive."
       - "The skill in the consuming project: the method is the same for every source with transcripts; only where the owner's words live differs, and the skill asks."
+  - id: DR-0242
+    title: The plugin's PostToolUse hook runs docket hook post-tool-use for MCP tools and captures a run's results
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#41"]
+    description: "hooks/hooks.json gains PostToolUse with matcher mcp__.* running docket hook post-tool-use in exec form, with a 30-second timeout, not async. On a tool named run_open under any server prefix whose result has the shape of docket's RunOpened (mcp__plugin_docket_docket__run_open from the plugin, or a user's own entry's name), it posts the bind with Claude Code's session_id and agent_id, and the service binds only a run it opened. On any other MCP tool it reads runs.json in Docket's state folder, retrying a failed read for 100 ms, and goes on only when an open run bound to this session and agent lists the tool's own name, the part after mcp__<server>__; then, when the result is whole, it reads the token and posts tool_input as arguments and tool_response as result, unchanged, with tool_use_id and the time. A result Claude Code didn't hand over whole (a file reference, a truncated result) is not posted. Claude gets one line in additionalContext: docket: run <id> is this session's; docket: kept capture <n> of run <id> (<tool>), <used> of <budget>; or docket: not kept: <tool> (<reason>), too large among the reasons. Nothing when no run of its session wants the tool. It never prints a result, never blocks or replaces the output, and exits 0."
+    binds:
+      - The hook's event, matcher and command are a one-way door (AGENTS.md), beside DR-0161's.
+      - "The line prefixes docket: run, docket: kept capture and docket: not kept are part of the door: run_open's steps quote them."
+      - "The console script is docket.entry:main, which answers the no-run path with the standard library and platformdirs only: the state folder found without yaml, docket.__version__ lazy so importlib.metadata isn't read, one small file read, no keychain, no network."
+    not_chosen:
+      - "Matcher .*: a process for every Read, Edit and Bash call."
+      - "async: the bind must land before the next call, and Claude needs the line."
+      - "PostToolBatch as a barrier for the bind: another hook for a race the steps avoid by calling run_open alone."
+      - "updatedToolOutput stubs for captured results: the skill reads lists and page cursors from results, and what it needs differs per source."
+      - "docket hook capture: hooks are named by their event, like session-start, so one process serves an event if it grows."
+      - "docket.cli:main for the hook: typer, keyring, pydantic and the index load on every MCP call of every session, about 0.4 s on Windows."
 conventions:
   - id: CV-0012
     rule: A change under plugin/ bumps the version in plugin/.claude-plugin/plugin.json

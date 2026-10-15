@@ -8,6 +8,10 @@ reads are the ones its tests pin; when Plaud changes them, change this file and 
 Three records per recording, all with the recording's rid as thread and container: the recording (`plaud:<id>`), its
 transcript (`plaud:<id>/<block>`) and Plaud's notes (`plaud:<id>/summary`). The recording waits for its notes,
 because Plaud renames a recording when it writes them.
+
+Only a recording the run fetched by id (`get_file`, `get_transcript`, `get_note`), or read from a backfill file, gives
+records, and only those are ever final. One the run only listed gives none: inside the run's window it waits to be
+fetched (`for: fetch`), and outside it, or with no window, the listing only gave its name.
 """
 
 from __future__ import annotations
@@ -38,6 +42,8 @@ class Seen:
     pages: dict[str, dict[str | None, tuple[str, int, Any]]] = field(default_factory=dict)
     notes: list[tuple[str, int, list[tuple[str, str, str]], Any]] = field(default_factory=list)
     backfill: tuple[str, int, dict[str, Any]] | None = None
+    # The run fetched it by id: get_file, get_transcript or get_note.
+    by_id: bool = False
 
 
 @dataclass
@@ -54,6 +60,7 @@ class Out:
 def map_run(run: dict[str, Any]) -> dict[str, Any]:
     held = set(run.get("holds") or [])
     final = bool(run["manifest"].get("final"))
+    window = run["manifest"].get("window")
     seen: dict[str, Seen] = {}
     out = Out()
     for capture in sorted(run["captures"], key=lambda c: c["seq"]):
@@ -62,7 +69,7 @@ def map_run(run: dict[str, Any]) -> dict[str, Any]:
         else:
             _tool(capture, held, seen, out)
     for file_id in sorted(seen):
-        _assemble(file_id, seen[file_id], final, out)
+        _assemble(file_id, seen[file_id], final, window, out)
     return {
         "contract": CONTRACT,
         "records": out.records,
@@ -107,11 +114,12 @@ def _tool(capture: dict[str, Any], held: set[str], seen: dict[str, Seen], out: O
     file_id = _usable(arguments.get("file_id"), held, out, tool, "file_id")
     if file_id is None:
         return
+    recording = seen.setdefault(file_id, Seen())
+    recording.by_id = True
     payload = unwrap(capture.get("result"))
     if payload is None:
         out.aside(file_id, "no-json", tool)
         return
-    recording = seen.setdefault(file_id, Seen())
     if tool == "get_file":
         if isinstance(payload, dict):
             recording.metas.append((when, seq, payload))
@@ -207,7 +215,7 @@ def _backfill_tabs(summary: Any) -> list[tuple[str, str, str]]:
 # -- assembling a recording ------------------------------------------------------------------------------------------
 
 
-def _assemble(file_id: str, seen: Seen, final: bool, out: Out) -> None:
+def _assemble(file_id: str, seen: Seen, final: bool, window: Any, out: Out) -> None:
     rid = f"{SOURCE}:{file_id}"
     # The newest meta wins, so a listing captured after the run's notes gives the renamed recording.
     meta_at = max(seen.metas, key=lambda m: (m[0], m[1]), default=None)
@@ -215,6 +223,11 @@ def _assemble(file_id: str, seen: Seen, final: bool, out: Out) -> None:
     ts = parse_time(meta.get("start_at"))
     if meta_at is None or ts is None:
         out.aside(file_id, "no-meta", None, "start_at")
+        return
+    if not seen.by_id and seen.backfill is None:
+        # Only listed: a final run never stores it bare, and an old item on a listing's last page never waits.
+        if _inside(ts, window):
+            out.waiting.append({"id": file_id, "for": "fetch"})
         return
     base = {"source": SOURCE, "container": rid, "thread": rid, "ts": ts, "fidelity": "verbatim"}
     final = final or seen.backfill is not None
@@ -260,6 +273,19 @@ def _transcript(file_id: str, seen: Seen, out: Out) -> dict[str, Any] | None:
         if raw:
             return _transcript_record(file_id, block, raw, out, fetched=chain[-1][0], via="plaud-mcp")
     return None
+
+
+def _inside(ts: str, window: Any) -> bool:
+    """Whether a recording's start falls in the run's window; a run with no window has none."""
+    if not isinstance(window, dict):
+        return False
+    at = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    since, until = _moment(parse_time(window.get("since"))), _moment(parse_time(window.get("until")))
+    return (since is None or since <= at) and (until is None or at <= until)
+
+
+def _moment(text: str | None) -> datetime | None:
+    return datetime.fromisoformat(text.replace("Z", "+00:00")) if text else None
 
 
 def _asked_for_transcript(seen: Seen) -> bool:

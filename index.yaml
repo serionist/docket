@@ -366,6 +366,19 @@ decisions:
     description: "Claude Code (2.1.300) doesn't load a SKILL.md at .claude/skills/sources/<source>/ as a skill: a probe repo with one there and one at .claude/skills/<name>/ listed only the second. The layout DR-0108 and DR-0123 fixed stays, and whatever runs a source (#41's run, then sync) reads its SKILL.md by path, the list of sources coming from vault.yaml. The file keeps its frontmatter, so a later move to the top level is a rename. #41 decides for good before any live run."
     not_chosen:
       - "Source skills at the top level (.claude/skills/source-<name>/): supersedes DR-0108's and DR-0123's path rule and the merged runner, and source names would meet the user's own skill names."
+  - id: DR-0251
+    title: A source's skill is reached through run_open, and holds only the source's own calls
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#41"]
+    description: "Settles DR-0168 for live runs. A source's skill stays at .claude/skills/sources/<source>/SKILL.md in the consuming repo of the service's vault, read by path. run_open answers with that path and with the run's steps, the same for every source (DR-0252); the MCP server's instructions say to sync a source by calling run_open with its name. A SKILL.md holds only what is the source's own: signing in, listing, fetching one item whole and by its id, what a missing item looks like, page sizes, rate limits, a backfill. The reference and the template carry the marker line <!-- docket: steps from run_open -->, and run_open refuses a SKILL.md without it before any work: copy the reference's SKILL.md and mapper.py over yours, or for a source with no reference the blank template's run sections. The plugin's sync skill comes with the ledger (phase 3) and takes the same route."
+    not_chosen:
+      - "/docket:sync now: a skill name is a door, and sync's job includes the ledger."
+      - "Source skills at the top level of .claude/skills/: DR-0168's reasons stand."
+      - "The run's steps in every SKILL.md: each copy goes stale, and docket source new never writes over one."
+      - "A note for a SKILL.md without the marker, the run going on: an old copy pages at limit 500, which the hook refuses as too large, so long meetings ride retry until they expire."
 conventions:
   - id: CV-0001
     rule: Python code passes ruff's lint rules and its formatter, at 120 columns

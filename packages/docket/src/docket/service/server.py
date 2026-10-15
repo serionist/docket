@@ -43,7 +43,7 @@ class Prepared:
     sock: socket.socket
     port: int
     lock: FileLock
-    handler: logging.Handler
+    handler: logs.ServiceLog
 
     def close(self) -> None:
         mine = client.recorded()
@@ -138,9 +138,8 @@ def prepare(vault: Path | None = None, port: int | None = None, *, tokens: Token
     return Prepared(app=app, sock=sock, port=actual, lock=lock, handler=handler)
 
 
-def _drop(handler: logging.Handler) -> None:
-    logging.getLogger().removeHandler(handler)
-    handler.close()
+def _drop(handler: logs.ServiceLog) -> None:
+    logs.release(handler)
 
 
 def serve(

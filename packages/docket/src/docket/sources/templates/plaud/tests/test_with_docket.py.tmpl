@@ -7,6 +7,7 @@ import json
 import re
 import shutil
 import subprocess
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -27,8 +28,12 @@ from plaud_payloads import (
     segment,
     structured,
 )
+from starlette.testclient import TestClient
 
+from docket import capture
 from docket.cli import main
+from docket.service.app import ServiceApp, create_app
+from docket.service.state import Settings
 from docket.sources import release as releasing
 from docket.sources.contract import check_output
 from docket.vault.config import Owner, SourceConfig, VaultConfig
@@ -242,3 +247,80 @@ def test_a_held_recording_goes_in_only_with_the_cuts_its_owner_confirms(
     assert "plaud:rec-cut-01/summary" not in stored
     assert main(["hold", "list", "plaud", "--vault", root]) == 0
     assert capsys.readouterr().out == "plaud  rec-cut-03\n"
+
+
+def hooked(result: dict[str, Any]) -> Any:
+    """A result as Claude Code hands it to the capture hook (seen on 2.1.300): structured content as its JSON text,
+    else the content blocks."""
+    if "structuredContent" in result:
+        return json.dumps(result["structuredContent"])
+    return result["content"]
+
+
+def test_a_live_run_goes_through_the_service_and_the_capture_hook(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = project_with_the_example(tmp_path)
+    now = datetime(2026, 10, 15, 9, 12, tzinfo=UTC)
+    bearer = {"Authorization": "Bearer t0ken-for-tests-only"}
+    app = create_app(Settings(port=8750, vault=vault.root, token=lambda: "t0ken-for-tests-only"))
+    assert isinstance(app, ServiceApp)
+    app.service.runs.clock = lambda: now
+    with TestClient(app, base_url="http://127.0.0.1:8750") as http:
+
+        def through(method: str, path: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+            answer = http.request(method, path, json=body, headers=bearer)
+            return answer.status_code, answer.json()
+
+        monkeypatch.setattr(capture, "_call", through)
+        calls = 0
+
+        def run_once(run: Run) -> dict[str, Any]:
+            nonlocal calls
+            opened = http.post("/api/runs", json={"source": "plaud"}, headers=bearer).json()
+            said = capture.handle(
+                {
+                    "session_id": "s1",
+                    "hook_event_name": "PostToolUse",
+                    "tool_name": "mcp__plugin_docket_docket__run_open",
+                    "tool_input": {"source": "plaud"},
+                    "tool_response": json.dumps(opened),
+                    "tool_use_id": "toolu_open",
+                }
+            )
+            assert said is not None
+            kept = 0
+            for c in run.captures:
+                calls += 1
+                said = capture.handle(
+                    {
+                        "session_id": "s1",
+                        "hook_event_name": "PostToolUse",
+                        "tool_name": f"mcp__plaud__{c['tool']}",
+                        "tool_input": c["arguments"],
+                        "tool_response": hooked(c["result"]),
+                        "tool_use_id": f"toolu_{calls}",
+                    }
+                )
+                assert said is not None
+                assert "docket: kept capture" in said["hookSpecificOutput"]["additionalContext"]
+                kept += 1
+            closed = http.post(f"/api/runs/{opened['run']}/close", json={"captures": kept}, headers=bearer)
+            assert closed.status_code == 200, closed.text
+            return {"opened": opened, "closed": closed.json()}
+
+        first = run_once(live_call(Run()))
+        assert (first["closed"]["pending"], first["closed"]["moved"]) == (3, True)
+        # Later runs list the call again and skip it: the mapper reports it waiting to be fetched, and the core drops
+        # that, since the run was told to skip it.
+        second = run_once(Run().listing(meta(CALL, "Supplier call")))
+        assert CALL in second["opened"]["kept"]
+        third = run_once(Run().listing(meta(CALL, "Supplier call")))
+        assert (third["opened"]["waiting"], third["opened"]["retry"]) == ([], [])
+        # A run stopped without closing drops after its idle time, and the mark stays where it was.
+        mark = third["closed"]["mark_after"]
+        stopped = http.post("/api/runs", json={"source": "plaud"}, headers=bearer).json()
+        app.service.runs.clock = lambda: now + timedelta(minutes=31)
+        dropped = http.post(f"/api/runs/{stopped['run']}/close", json={"captures": 0}, headers=bearer).json()
+        assert "the capture hook never tied it to a session" in dropped["error"]
+        assert http.post("/api/runs", json={"source": "plaud"}, headers=bearer).json()["since"] < mark

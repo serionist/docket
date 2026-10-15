@@ -5,6 +5,7 @@ under a new name; one whose transcript isn't ready; one held. Nothing here comes
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import Any
 
 CALL = "of_00c0ffee00c0ffee00c0ffee00c0ffee"
@@ -72,9 +73,10 @@ def as_text(payload: Any) -> dict[str, Any]:
 class Run:
     """A run's captures as the core hands them to the mapper."""
 
-    def __init__(self, *, final: bool = False) -> None:
+    def __init__(self, *, final: bool = False, window: Mapping[str, str | None] | None = None) -> None:
         self.captures: list[dict[str, Any]] = []
         self.final = final
+        self.window = window
 
     def add(self, tool: str | None, result: Any, *, file: str | None = None, **arguments: Any) -> Run:
         seq = len(self.captures)
@@ -105,7 +107,7 @@ class Run:
         result: Any = None,
     ) -> Run:
         page = {"file_id": file_id, "block": block, "segments": segments, "next_cursor": next_cursor}
-        arguments: dict[str, Any] = {"file_id": file_id, "block": block, "limit": 500}
+        arguments: dict[str, Any] = {"file_id": file_id, "block": block, "limit": 100}
         if cursor is not None:
             arguments["cursor"] = cursor
         return self.add("get_transcript", structured(page) if result is None else result, **arguments)
@@ -125,7 +127,13 @@ class Run:
         return self.add(None, content, file=f"{file_id}.json")
 
     def payload(self, holds: list[str] | None = None) -> dict[str, Any]:
-        manifest = {"run": "r1", "source": "plaud", "captures": len(self.captures), "final": self.final}
+        manifest = {
+            "run": "r1",
+            "source": "plaud",
+            "captures": len(self.captures),
+            "final": self.final,
+            "window": self.window,
+        }
         return {"contract": 1, "source": "plaud", "manifest": manifest, "captures": self.captures, "holds": holds or []}
 
 

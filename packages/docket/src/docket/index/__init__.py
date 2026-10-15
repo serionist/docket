@@ -4,7 +4,17 @@
 `summary_for` are what the web app (#9) adds around a search.
 """
 
-from docket.index.build import BuildReport, IndexStatus, RecordLocation, locate, rebuild, status, update
+from docket.index.build import (
+    BuildReport,
+    IndexStatus,
+    RecordLocation,
+    kept,
+    locate,
+    rebuild,
+    status,
+    stored_under,
+    update,
+)
 from docket.index.query import (
     DocRef,
     EntityLabel,
@@ -28,12 +38,14 @@ __all__ = [
     "QueryReading",
     "RecordLocation",
     "SearchResult",
+    "kept",
     "labels",
     "locate",
     "parse_when",
     "rebuild",
     "search",
     "status",
+    "stored_under",
     "summary_for",
     "update",
 ]

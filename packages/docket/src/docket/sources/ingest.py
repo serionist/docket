@@ -54,6 +54,9 @@ class IngestReport:
     # Files in the import folder that aren't JSON, by their place in name order: a file's name can be a title.
     unreadable: list[int] = field(default_factory=list[int])
     files: int = 0
+    # The native refs (rid, thread, container less `<source>:`) of the records the mapper returned and the holds let
+    # through: what a run reached, for its cursor.
+    refs: frozenset[str] = field(default_factory=frozenset[str])
 
 
 def ingest_run(
@@ -67,6 +70,28 @@ def ingest_run(
     time_limit: float = runner.TIME_LIMIT,
 ) -> IngestReport:
     """Map a run's captures, and an import folder's files, with the source's mapper, and stage what comes back."""
+    prepared = prepare(vault, source, manifest, folder=folder, hold_files=hold_files)
+    mapped = map_prepared(prepared, manifest, captures, folder=folder, time_limit=time_limit)
+    return stage(vault, prepared, mapped)
+
+
+@dataclass
+class Prepared:
+    """A run ready for its mapper: the hold files added, the hold list read, nothing held waiting in staging. The
+    service maps it off its writer thread, then stages it on the writer (DR-0244)."""
+
+    source: str
+    mapper: Path
+    held: frozenset[str]
+    released: frozenset[str]
+    to_hold: list[str]
+    report: IngestReport
+
+
+def prepare(
+    vault: Vault, source: str, manifest: Manifest, *, folder: Path | None = None, hold_files: Sequence[Path] = ()
+) -> Prepared:
+    """The steps before the mapper: they write only the hold files' ids."""
     if manifest.source != source:
         raise DocketError(f"the manifest is for {manifest.source}, not {source}")
     mapper = runner.find_mapper(vault, source)
@@ -77,22 +102,58 @@ def ingest_run(
     # Every hold file is read before any is added: a bad line stops the run with nothing written.
     named = [folder / HOLD_FILE] if folder is not None and (folder / HOLD_FILE).is_file() else []
     to_hold = [i for path in [*named, *hold_files] for i in holds.read_file(path, path.name)]
-    released = set(releaselog.read(vault.root, source))
+    released = frozenset(releaselog.read(vault.root, source))
     if to_hold:
         report.holds_added = holds.add(vault, source, to_hold)
     report.holds_released = sorted(set(to_hold) & released)
 
     held = holds.read(vault.root, source)
     report.held_again = sorted(held & released)
-    lists = holds.Holds({source: held})
-    gate = Gate(vault)
-    waiting_held = [e for e in gate.list(source=source).entries if lists.covers(e.staged.record)]
-    if waiting_held:
-        raise HeldInStagingError(_held_in_staging(vault, source, waiting_held, held, set(report.held_again)))
+    check_staging(vault, source, held, frozenset(report.held_again))
+    return Prepared(source, mapper, held, released, to_hold, report)
 
-    mapped, report.unreadable, report.files = map_folder(
-        mapper, source, manifest, captures, folder=folder, held=held, time_limit=time_limit
+
+def check_staging(vault: Vault, source: str, held: frozenset[str], again: frozenset[str]) -> None:
+    """Stop when a record under a held id waits in staging: the run, and a live run before it opens."""
+    lists = holds.Holds({source: held})
+    waiting_held = [e for e in Gate(vault).list(source=source).entries if lists.covers(e.staged.record)]
+    if waiting_held:
+        raise HeldInStagingError(_held_in_staging(vault, source, waiting_held, held, set(again)))
+
+
+@dataclass(frozen=True)
+class MappedRun:
+    mapped: Mapped
+    unreadable: list[int]
+    files: int
+
+
+def map_prepared(
+    prepared: Prepared,
+    manifest: Manifest,
+    captures: Sequence[Capture],
+    *,
+    folder: Path | None = None,
+    time_limit: float = runner.TIME_LIMIT,
+) -> MappedRun:
+    """The mapper over the run: it writes nothing, so the service runs it off its writer thread."""
+    mapped, unreadable, files = map_folder(
+        prepared.mapper,
+        prepared.source,
+        manifest,
+        captures,
+        folder=folder,
+        held=prepared.held,
+        time_limit=time_limit,
     )
+    return MappedRun(mapped, unreadable, files)
+
+
+def stage(vault: Vault, prepared: Prepared, run: MappedRun) -> IngestReport:
+    """What the mapper returned, less what is held, through the gate."""
+    source, held, released, report = prepared.source, prepared.held, prepared.released, prepared.report
+    mapped = run.mapped
+    report.unreadable, report.files = run.unreadable, run.files
     seen = {i for i in mapped.held if i in held}
     kept: list[RawRecord] = []
     for record in mapped.records:
@@ -104,8 +165,15 @@ def ingest_run(
     report.set_aside = [e for e in mapped.set_aside if not _held(e.id, source, held, seen)]
     report.waiting = [w for w in mapped.waiting if not _held(w.id, source, held, seen)]
     report.on_hold = len(seen)
-    report.holds_unseen = sorted(set(to_hold) - seen - released)
-    report.staged = gate.stage(kept)
+    report.holds_unseen = sorted(set(prepared.to_hold) - seen - released)
+    prefix = f"{source}:"
+    report.refs = frozenset(
+        ref[len(prefix) :]
+        for record in kept
+        for ref in (record.rid, record.thread, record.container)
+        if ref is not None and ref.startswith(prefix)
+    )
+    report.staged = Gate(vault).stage(kept)
     # A record in raw under an id held again is its release's cut version, not one waiting for forget.
     still = frozenset(held - released)
     report.held_in_raw = sorted(rid for rid in vault.rawlog.rids() if holds.covered(rid, source, still))

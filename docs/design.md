@@ -87,14 +87,26 @@ flowchart LR
 - A held recording goes in only once its owner releases it, typing back a code at their own console for the cuts
   they confirm. The release log keeps those cuts, and the gate applies them to every version of the recording, on
   every machine (DR-0200 to DR-0203).
-- Cursors are a high-water mark plus a lookback window plus a retry set per source, so late arrivals and
-  rate-limited calls are caught on the next run. Each machine commits its own cursor file, and a sync starts from the
-  furthest point any machine reached. A run's window start is kept until the run finishes: a listing is newest first,
-  so moving the mark on partial progress would skip the older part for good.
-- Source skills don't retype anything. The plugin's PostToolUse capture hook posts what the source's tools return,
-  verbatim, to the service; Claude only sends a run manifest (the window, the counts, what it skipped). The source's
-  mapper turns the run's captures into records, and the core checks every rid and computes the versions. A Python
-  connector exists only where no skill can harvest (see Sources).
+- Cursors are a high-water mark plus a lookback window plus a retry set and a waiting set per source, so late
+  arrivals and rate-limited calls are caught on the next run. Each machine commits its own cursor file,
+  `state/cursors-<machine>.yaml` (DR-0245), and a run's window starts at the furthest mark any machine reached, less
+  the lookback (DR-0246). The mark moves only on a whole close, to the moment the run opened: a listing is newest
+  first, so moving it on partial progress would skip the older part for good. What a run skipped waits in the retry
+  set, what its mapper still waits for in the waiting set, and both pass to another machine (DR-0247).
+- Source skills don't retype anything. A sync run (DR-0240) goes:
+
+  | Step | Who | What |
+  |---|---|---|
+  | open | Claude | `run_open(source)`: the run, its window, the source's skill, what to skip and what is owed, the steps |
+  | bind | the capture hook | ties the run to the Claude Code session that opened it |
+  | fetch | Claude | the source's own tools, as its skill says, within the run's budget |
+  | capture | the capture hook | posts each listed call's input and result as given into the service's memory |
+  | close | Claude | `ingest(run, captures)`, the count being the highest the hook confirmed |
+  | map | the service | the source's mapper in its own process, then the core's checks, holds and the gate into staging |
+
+  A run that comes up short, fails or never closes is dropped, nothing of it is staged, and its window is fetched
+  again. Ids that waited a week get a final run of their own, `run_open(source, final=true)`, which never moves the
+  mark (DR-0252). A Python connector exists only where no skill can harvest (see Sources).
 
 ### 3.2 Processing
 
@@ -211,6 +223,10 @@ flowchart TB
   the API and MCP take a bearer token from the keychain, or from a file only the user can read where there is no
   keychain; the MCP endpoint also uses the MCP SDK's DNS-rebinding protection. The service runs the consuming repo's
   mappers, never code from the vault, a downloads folder or a drop folder.
+- Sync runs live in the service's memory from `run_open` to `ingest`, and nothing of a capture is written to disk or
+  to a log (DR-0240). The run routes under `/api/runs` take the bearer token only, never the browser's session, and a
+  capture only from the session its run is bound to, within caps (DR-0243). A close maps on a thread of its own for at
+  most 90 seconds, under the plugin's 120-second tool timeout, and writes through the writer (DR-0244).
 - Any number of machines; git is the source of truth. Each machine's index is a cache, rebuilt from the repo. Raw
   run files carry the machine's name, cursors are kept per machine, the machine that harvested a record processes it,
   and a record seen twice is dropped by id and content hash. Ledger ids are ULIDs (with short numbers handed out when
@@ -258,7 +274,7 @@ vault/
   entities/<type>/<slug>.yaml    the keyword layer                                          -> plain git
   entities/_proposals-<machine>.jsonl                                                       -> plain git
   ledger/ops/<yyyy-mm>-<machine>.jsonl                                                      -> plain git
-  state/cursors-<machine>.yaml   each machine's cursors per source                         -> plain git
+  state/cursors-<machine>.yaml   each machine's mark, lookback, retry and waiting per source -> plain git
   state/holds/<source>.txt       ids a source must not stage yet, merged by union           -> plain git
   state/releases/<source>.jsonl  held ids the owner let in, with their cuts, merged by union -> plain git
   index/docket.sqlite            derived; `docket index rebuild` makes it from the above    -> never committed
@@ -503,7 +519,14 @@ change lands on whoever uses that vendor, while the core still checks every rid 
 - A PostToolUse hook in the plugin posts what the source's tools return to the service verbatim, so a long transcript
   never passes through Claude's output; Claude sends a manifest (the window, the counts, what it skipped).
 - The hook posts only while a run the skill opened is open, and only for the tools `vault.yaml` lists for the
-  source; each capture is tagged with its run, and nothing outside an open run is posted.
+  source; each capture is tagged with its run, and nothing outside an open run is posted. It runs `docket hook
+  post-tool-use` for MCP tools, binds a run on `run_open`'s result and gives Claude one line per capture
+  (DR-0242). A result Claude Code saved to a file instead of handing it over is never kept.
+- A session reaches a source's skill through `run_open`, which names its path and gives the run's steps, the same for
+  every source; a source's `SKILL.md` holds only the source's own calls, paging and limits, under a marker line
+  `run_open` checks (DR-0251, DR-0252).
+- A live run reads a folder, such as a backfill's beside its listing, only when `docket ingest` read that folder on
+  this machine first (DR-0250).
 - A mapper that runs past its time limit fails the run: its captures are dropped and fetched again, as for a run that
   never closes.
 - `docket source new` scaffolds a skill, a mapper and its tests in the consuming repo, from a blank template shaped
@@ -576,7 +599,8 @@ MCP tools:
 | `entity` | canonical name, aliases, related, ids, last seen, open items |
 | `doc_put` | write a processed doc; checks the frontmatter and that every anchor resolves |
 | `propose` | a ledger item, a decision, an alias, a correction, into the review tiers |
-| `ingest` | a run's captures (the hook's verbatim tool output) and its manifest; the source's mapper makes normalized records, the core checks their rids and computes their versions, and they go to staging (phase 1, #41) |
+| `run_open` | opens a sync run of a source: its window, its skill, what to skip and what is owed, the steps (DR-0241) |
+| `ingest` | closes a run: the captures the hook kept and the manifest; the source's mapper makes normalized records, the core checks their rids and computes their versions, and they go to staging (DR-0241) |
 | `media_put` | audio or an attachment by path or URL, within the limits in Sources (named folders, https to the hosts `vault.yaml` lists for the source, no private addresses, few redirects, a size cap); the service fetches, encrypts and stores it (phase 2, #42) |
 | `transcribe` | run speech recognition on a stored recording (phase 2, when a model is installed) |
 | `ledger` | snapshot, history queries, batch ops, queue, meetings, points |
@@ -596,10 +620,11 @@ Phase 0's plugin, by piece:
 | `recall` | the rules above as a method, with the read-only tools pre-approved and the command line when the service is down (DR-0164) |
 | `setup` | DR-0103's round: sources first, the vault named on every command, each override asked (DR-0165) |
 | `cuts` | the owner's words for a held recording's left-out stretches placed as time ranges, in a proposals file, and the release handed to the owner's own terminal; only `docket hold list` and `show` pre-approved (DR-0207) |
+| the capture hook | PostToolUse for `mcp__.*` runs `docket hook post-tool-use`: binds a run, posts the captures an open run of this session wants, one line to Claude each (DR-0242) |
 
 - The plugin holds no scripts: its hook and token helper run the `docket` command, which must be on PATH (DR-0162).
 - A plugin can't ship a `CLAUDE.md`, so the rules live in the MCP server's instructions and the recall skill.
-- Sync, tasks and curate come later, and the capture hook with `ingest` in phase 1 (#41).
+- Sync, tasks and curate come later; a sync starts today with `run_open` (DR-0251).
 
 **Claude inside the service** (phase 3) does processing, not harvesting: notes and minutes, digests, briefs,
 proposals, meeting prep, draft replies, through the Claude Agent SDK loading the same plugin. It runs on the user's
