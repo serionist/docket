@@ -218,6 +218,6 @@ def commit_pending(vault: Vault, source: str, message: str | None = None) -> str
     if not (vault.root / rel).exists():
         return None
     git = vault.git
-    if not (git.untracked(rel) or git.untracked(rel, ignored=True) or git.changed_against_head(rel)):
+    if not (git.untracked(rel, ignored_too=True) or git.changed_against_head(rel)):
         return None
     return vault.commit([rel], message or f"Releases: {source}, the log committed on {vault.machine}")

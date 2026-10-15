@@ -26,6 +26,11 @@ You need [uv](https://docs.astral.sh/uv/), git and [gitleaks](https://github.com
 validates the plugin with [Claude Code](https://claude.com/claude-code). Without a private deny list the content check
 skips on your machine; CI runs it.
 
+A test that needs a vault takes a copy from `packages/docket/tests/docket_testkit.py` (`empty_vault`, `folder_vault`,
+`host_repo`, the `template_*` builders and `copy_vault`) and writes only its copy: templates are built once per run for
+every worker, and a run fails if a test wrote into one. A template is built when a test first asks for it, so a test
+that patches something builds its copy before patching. Tests about `Vault.init` itself call it.
+
 ## Open the pull request
 
 1. Fork, and branch from `main` as `<issue>-<slug>`, such as `42-search-paging`.
