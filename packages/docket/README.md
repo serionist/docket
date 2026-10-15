@@ -81,6 +81,8 @@ source to `vault.yaml` (DR-0166); the plugin's `/docket:setup` runs it for each 
 - It writes only into that folder of the repo around the vault, never through a link out of it or into the vault, and
   never over a folder that exists. It changes `vault.yaml` only when the file is as Docket wrote it, and commits it;
   otherwise it prints the lines to add under `sources:`. The folder is yours to commit.
+- Without `--vault` it takes only a vault found from the project that holds it. One found through the default vault
+  or `DOCKET_VAULT` can be another project's, so it is refused, with the `--vault` to pass.
 - Claude Code doesn't load a `SKILL.md` from `.claude/skills/sources/` as a skill: whatever runs the source reads it
   by its path (DR-0168).
 - Run a source's tests where it lives: `python -m pytest .claude/skills/sources/<name>/tests`, one source folder at a

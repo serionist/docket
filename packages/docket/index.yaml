@@ -713,6 +713,7 @@ decisions:
     description: "docket source new <name> [--example] [--sensitivity] [--tool]... [--vault] writes <consuming repo>/.claude/skills/sources/<name>/ (SKILL.md, mapper.py, tests/) from the blank template, shaped like the Plaud reference with {{source}} replaced. The folder is checked after links by skill_folder, the rule find_mapper applies (in the repo, outside the vault), and never written over; the files land in a temp folder beside it, then one rename. sources.<name> in vault.yaml gets the sensitivity (the flag, else what vault.yaml has, else the reference's, else Docket's guess), the mapper .claude/skills/sources/<name>/mapper.py and the tools, committed as Config: source <name>, but only when vault.yaml's text is what Docket would write for it; otherwise the entry is printed to paste. A failure on the way removes the folder and puts vault.yaml back. The blank mapper sets every capture aside as not-mapped-yet, and the template's tests that import docket are collected only where it can be imported."
     binds:
       - "Docket never commits the source's folder: it lives in the user's project, theirs to commit."
+      - Without --vault it takes only a vault found from the project that holds it; one found only through the default vault or DOCKET_VAULT can be another project's, and is refused with the --vault to pass.
     not_chosen:
       - "Setup editing vault.yaml itself: a hand edit can drop the user's comments or slip past the schema."
   - id: DR-0167
