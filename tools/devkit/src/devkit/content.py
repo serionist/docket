@@ -10,10 +10,13 @@ from __future__ import annotations
 
 import bisect
 import codecs
+import importlib
 import os
 import re
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
+from typing import Any
 
 # Not ~/.config/docket: on Linux that is the app's own config folder.
 DEFAULT_PATH = Path.home() / ".config" / "docket-dev" / "denylist.txt"
@@ -84,8 +87,36 @@ def decode(data: bytes) -> str | None:
     return data.decode("utf-8-sig", errors="replace")
 
 
+@cache
+def _case_table(module: str = "re._casefix") -> dict[int, str] | None:
+    """Each character `re.IGNORECASE` counts as the same as another lowercase one (dotless i and i, long s and s),
+    mapped to one of them; None where this Python's `re` doesn't say, and then every name's pattern runs on every
+    file."""
+    try:
+        extra: Any = importlib.import_module(module)._EXTRA_CASES
+    except (ImportError, AttributeError):
+        return None
+    group: dict[int, set[int]] = {}
+    for low, others in extra.items():
+        members = {low, *others}
+        for code in list(members):
+            members |= group.get(code, set())
+        for code in members:
+            group[code] = members
+    return {code: chr(min(members)) for code, members in group.items()}
+
+
+def fold(text: str) -> str | None:
+    """Text with each character folded the way `re.IGNORECASE` compares it: its simple lowercase (capital dotted I is
+    the one character whose full lowercase is two), then one of each group the regex counts as equal. One character
+    in, one out, so a name's regex can match only where its first word, folded, is in the folded text."""
+    table = _case_table()
+    return None if table is None else text.replace("\u0130", "i").lower().translate(table)
+
+
 def scan_files(root: Path, files: list[str], names: list[Name]) -> list[Hit]:
     hits: list[Hit] = []
+    keys = [fold(name.text.split()[0]) for name in names]
     for rel in files:
         for name in names:
             if name.pattern.search(rel):
@@ -94,6 +125,11 @@ def scan_files(root: Path, files: list[str], names: list[Name]) -> list[Hit]:
             text = decode((root / rel).read_bytes())
         except OSError:
             continue
-        if text is not None:
-            hits.extend(scan_text(text, names, rel))
+        if text is None:
+            continue
+        # One pass over the folded text decides which names could be in it; only their patterns run.
+        folded = fold(text)
+        maybe = [n for n, k in zip(names, keys, strict=True) if folded is None or k is None or k in folded]
+        if maybe:
+            hits.extend(scan_text(text, maybe, rel))
     return hits

@@ -1070,3 +1070,30 @@ decisions:
       - "Only on each doc's next rev: a doc nobody touches keeps its secret in the tree for good."
       - "At service start or index rebuild: a write nobody asked for."
       - "An MCP tool: a terminal one-off, like the import."
+  - id: DR-0220
+    title: The tests build each vault template once per run for every worker, and each test works on a copy
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#43"]
+    description: "docket_testkit builds its templates (the fixture vault, the index fixture, a consuming project, the notes repo, an imported vault, a plain vault per config, a folder vault in its host, a host with its origin, convert's nested vault) once per pytest session: the first xdist worker to ask builds it under a file lock in the session's shared temp folder and under the tests' isolation, clearing whatever a failed build left, and writes a done marker last; the others wait and reuse it. A template is keyed by its builder's module and qualified name and its arguments, the folder named by the whole key's digest. Its index is refreshed once, a second after its last write. A test gets a copy (copytree, which keeps the files' times; each repo's index refreshed; each remote set to the copy's own path with git remote set-url) and never writes into a template: once all workers have finished, the controller walks every path under each template against the manifest taken when it was built, and an added, removed or changed path or link fails the run; caches a reader leaves (__pycache__, SQLite's -wal and -shm) don't count. Tests about init itself still call Vault.init. Before, each worker built a module's template again: 99 builds of 29 templates, 28% of a run's worker time."
+    binds:
+      - A test writes only its copy; a write into a template fails the run.
+      - A test on another branch that uses the kit's builders gets copies unedited.
+    not_chosen:
+      - "Module-scoped templates per worker, as before: each worker builds them again."
+      - "--dist loadfile: one module per worker, and the largest modules become the tail."
+      - "Templates kept on disk between runs: a change to the vault code would be tested against a vault the old code built."
+  - id: DR-0221
+    title: The tests' git runs without background housekeeping, and a template's copies ignore creation times
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#43"]
+    description: "The global gitconfig the tests run under, one constant that conftest.py, isolated_git and the template builders share, sets maintenance.auto=false and gc.auto=0: git's housekeeping after a commit, a fetch or a push never finds work worth doing in a test repo, and run in the background it could repack a template while a test copies it (a copy on a PR's Linux run once failed on a vanished object). A template's own .git/config sets core.trustctime=false, so its copies, whose files keep their times but not their creation times, stay clean on Windows without git hashing them again (hashing media/.gitkeep starts git-lfs's filter, about 0.6 s there); only copies differ from a user's git, and git still compares sizes, whole and sub-second times and, on Linux and macOS, inodes, so a same-size rewrite in the second of a Docket commit is seen, by a test on all three systems. Hooks, fsmonitor, line endings and git's template folder stay git's defaults, so the tests see what a user's git does, git-lfs included."
+    not_chosen:
+      - "core.checkStat=minimal: it also keeps copies clean on Linux and macOS, but on a git that compares sub-second times it could hide a same-size rewrite within the second of a commit."
+      - "core.hooksPath at an empty folder: git lfs install writes its hooks into whatever hooks path is set, so it saved nothing, and a test about hooks would pass without its hook."
+      - "Tests without git-lfs by default: three times faster on every vault operation, but users and every CI runner have git-lfs, and the tests would stop running against its filter and hooks."

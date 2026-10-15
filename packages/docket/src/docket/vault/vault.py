@@ -229,7 +229,7 @@ class Vault:
     def uncommitted_runs(self) -> list[str]:
         """Run files not in HEAD: untracked, or staged by an add whose commit never came. One an ignore rule hides
         counts too, so its add fails loudly instead of the file staying out of git unseen."""
-        found = [*self.git.untracked("raw"), *self.git.untracked("raw", ignored=True), *self.git.staged_new("raw")]
+        found = [*self.git.untracked("raw", ignored_too=True), *self.git.staged_new("raw")]
         return sorted({p for p in found if RUN_FILE.match(Path(p).name)})
 
     def sync(self) -> SyncResult:

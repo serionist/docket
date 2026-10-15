@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -251,3 +252,84 @@ def test_only_the_pr_text_run_checks_the_title(
     monkeypatch.setenv("DOCKET_PR_TEXT", "1")
     assert gate.run("quick", ["commits"]) == 1
     assert "PR title is" in capsys.readouterr().out
+
+
+# Names and texts where case folding is tricky: dotless i, a capital dotted I in a name's first word and in a text, long
+# s, the Kelvin sign, sharp s, a name split across lines, a name in a path.
+# Spelled by code point: the linter rightly flags look-alike letters written as themselves.
+DOTLESS_I, DOTTED_CAPITAL_I, LONG_S, KELVIN, SHARP_S = chr(0x131), chr(0x130), chr(0x17F), chr(0x212A), chr(0xDF)
+CASE_NAMES = f"Kis Ilona\n{DOTTED_CAPITAL_I}stanbul Partners\nIzmir Trade\nStrauss\nKelvin Labs\nSigma Works\n"
+CASE_TEXTS = {
+    "a.md": f"met kis {DOTLESS_I}lona today",
+    "b.md": f"K{DOTLESS_I}s Ilona called",
+    "c.md": "istanbul partners and ISTANBUL PARTNERS",
+    "d.md": f"{DOTTED_CAPITAL_I}zmir trade fair",
+    "e.md": f"Strau{LONG_S}{LONG_S} was there",
+    "f.md": f"{KELVIN}elvin labs report",
+    "g.md": f"Strau{SHARP_S} alone",
+    "h.md": "the sigma\nworks team",
+    "strauss.md": "nothing here",
+    "i.md": "nothing to see",
+}
+
+
+def test_the_folded_scan_finds_exactly_what_each_pattern_finds(tmp_path: Path) -> None:
+    names = content.parse(CASE_NAMES)
+    for rel, text in CASE_TEXTS.items():
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+    files = sorted(CASE_TEXTS)
+    every: list[content.Hit] = []
+    for rel in files:
+        every += [content.Hit(f"{rel} (its path)", n) for n in names if n.pattern.search(rel)]
+        every += content.scan_text(CASE_TEXTS[rel], names, rel)
+    # A binary file and one that went missing are read for their paths only, as before.
+    (tmp_path / "strauss.bin").write_bytes(b"Strauss\0")
+    found = content.scan_files(tmp_path, [*files, "strauss.bin", "gone-strauss.md"], names)
+    every += [content.Hit(f"{rel} (its path)", names[3]) for rel in ("strauss.bin", "gone-strauss.md")]
+    assert [h.show(masked=False) for h in found] == [h.show(masked=False) for h in every]
+    assert {h.where.split(":")[0].split(" ")[0] for h in found} == {
+        "a.md", "b.md", "c.md", "d.md", "e.md", "f.md", "h.md", "strauss.md", "strauss.bin", "gone-strauss.md"
+    }  # fmt: skip
+
+
+def test_without_re_s_case_table_every_pattern_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert content._case_table("no.such.module") is None
+    monkeypatch.setattr(content, "_case_table", lambda: None)
+    (tmp_path / "a.md").write_text(f"K{DOTLESS_I}s Ilona called", encoding="utf-8")
+    hits = content.scan_files(tmp_path, ["a.md"], content.parse(CASE_NAMES))
+    assert [h.where for h in hits] == ["a.md:1"]
+
+
+def test_slowest_tests_are_read_from_pytest_s_output() -> None:
+    lines = [
+        "============ slowest 15 durations ============",
+        "12.34s call     packages/x/test_a.py::test_one",
+        "  0.50s setup    t.py::test_two",
+        "1 passed in 3.00s",
+    ]
+    assert gate.slowest(lines) == [
+        "slowest: 12.34s call     packages/x/test_a.py::test_one",
+        "slowest: 0.50s setup    t.py::test_two",
+    ]
+
+
+def test_a_lane_runs_its_tests_beside_its_other_steps(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    started = threading.Event()
+
+    def tests(_ctx: gate.Ctx) -> gate.Outcome:
+        started.set()
+        return gate.Outcome.fail("1 failed")
+
+    def types(_ctx: gate.Ctx) -> gate.Outcome:
+        # Run one after the other, the tests would start only after this step returned.
+        return gate.Outcome.fail("types broke" if started.wait(10) else "the tests never started")
+
+    steps = [gate.Step("types", ("os",), "", types), gate.Step("tests", ("os",), "", tests)]
+    monkeypatch.setattr(gate, "STEPS", steps)
+    assert gate.run("os") == 1
+    out = capsys.readouterr().out
+    assert "types broke" in out
+    assert out.index("FAIL types") < out.index("FAIL tests")
+    assert "gate os: failed (types, tests)" in out

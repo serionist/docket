@@ -2,20 +2,30 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import re
 import shutil
 import sqlite3
 import subprocess
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
 import pytest
+from filelock import FileLock
 
 from docket.vault.config import NeverStore, Owner, SourceConfig, VaultConfig
 from docket.vault.records import RawRecord, version
-from docket.vault.vault import Vault
+from docket.vault.vault import Vault, remove_tree
+
+# The tests' global git config: empty but for git's own housekeeping after a commit, a fetch or a push (maintenance,
+# and gc --auto where a git still runs it), which never finds work worth doing in a test repo and, run in the
+# background, could repack a template while a test copies it (DR-0221).
+TEST_GITCONFIG = "[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n"
 
 # The fixture vault's records: a call over an hour long, a recording in a vendor's own shape, a chat thread, two
 # side messages, and a mail whose rid holds @, % and ].
@@ -150,19 +160,143 @@ def fixture_vault(tmp_path: Path) -> Vault:
     return vault
 
 
+# -- templates built once per session ---------------------------------------------------------------------------------
+
+# Copies of a template are what tests write; a reader's caches in a template are not a write.
+_CACHES = re.compile(r"(-wal|-shm|-journal|\.pyc)$")
+_FACTORY: list[pytest.TempPathFactory] = []
+
+
+def use_factory(factory: pytest.TempPathFactory) -> None:
+    """conftest.py hands over the session's temp factory, so builders without one of their own find the templates."""
+    _FACTORY[:] = [factory]
+
+
+def shared_root(factory: pytest.TempPathFactory) -> Path:
+    """The folder every worker of this session shares: under xdist, the one holding each worker's own base temp."""
+    base = factory.getbasetemp()
+    return base.parent if os.environ.get("PYTEST_XDIST_WORKER") else base
+
+
+def digest(*parts: str) -> str:
+    return hashlib.sha256("\0".join(parts).encode()).hexdigest()[:12]
+
+
+def _template(build: Callable[[Path], Path], key: str, factory: pytest.TempPathFactory | None) -> tuple[Path, str]:
+    """The folder a template was built in and the path in it `build` returned: built by the first worker to ask, under
+    a lock, the tests' isolation and a git home of its own; the others wait and reuse it (DR-0220)."""
+    # A readable tail, short enough for Windows' path limit, and the whole key's digest, so two keys never share one.
+    name = re.sub(r"[^A-Za-z0-9_.-]", "-", key)[-32:].lstrip(".-") + "-" + digest(key)
+    templates = shared_root(factory or _FACTORY[0]) / "templates"
+    templates.mkdir(parents=True, exist_ok=True)
+    folder, done = templates / name, templates / f"{name}.done"
+    with FileLock(str(templates / f"{name}.lock")):
+        if done.is_file():
+            return folder, done.read_text(encoding="utf-8")
+        # A build that failed part way left what it wrote; the next one starts clean and fails, if it does, on its own.
+        if folder.exists():
+            remove_tree(folder)
+        folder.mkdir()
+        with pytest.MonkeyPatch.context() as mp:
+            isolated_git(mp, templates / f"{name}.home")
+            made = build(folder)
+            settle(folder)
+        (templates / f"{name}.manifest.json").write_text(json.dumps(manifest(folder)), encoding="utf-8")
+        rel = made.resolve().relative_to(folder.resolve()).as_posix()
+        done.write_text(rel, encoding="utf-8")
+        return folder, rel
+
+
+def shared(build: Callable[[Path], Path], key: str, factory: pytest.TempPathFactory | None = None) -> Path:
+    """What `build` makes in an empty folder, built once per session; never write into it, copy it."""
+    folder, rel = _template(build, key, factory)
+    return folder / rel
+
+
+def copied(tmp_path: Path, build: Callable[[Path], Path], key: str) -> Path:
+    """A copy of a shared template in tmp_path, ready as a fresh build would be: the path `build` returned, there."""
+    folder, rel = _template(build, key, None)
+    shutil.copytree(folder, tmp_path, dirs_exist_ok=True)
+    for repo in _repos(folder):
+        _fit(folder, tmp_path / repo.relative_to(folder), tmp_path)
+    return tmp_path / rel
+
+
+def _repos(folder: Path) -> list[Path]:
+    """The repos with a work tree in a folder: those with a .git of their own. A bare origin has none."""
+    return sorted({p.parent for p in folder.rglob(".git")})
+
+
+def settle(folder: Path) -> None:
+    """Each repo in a template refreshed a second after the build's last write, so no index entry is as new as its index
+    (git hashes those again, and hashing media/.gitkeep starts git-lfs's filter), and set to ignore creation times,
+    which a copy can't keep; size, modification times and inodes still count (DR-0221)."""
+    repos = _repos(folder)
+    if not repos:
+        return
+    time.sleep(1.05)
+    for repo in repos:
+        sh(repo, "git", "config", "core.trustctime", "false")
+        sh(repo, "git", "update-index", "-q", "--refresh", check=False)
+
+
+def _fit(template: Path, repo: Path, copy: Path) -> None:
+    """A copied repo made to look as a fresh build would: its index refreshed, so a test that compares the index's
+    bytes sees git's first status leave them alone (a copy's inodes differ on Linux and macOS; on Windows nothing
+    changes), and each remote that led into the template pointed at the same place in the copy. The remote with git's
+    own command: a Windows path in .git/config has its backslashes doubled, which a text replace would miss."""
+    sh(repo, "git", "update-index", "-q", "--refresh", check=False)
+    if "[remote " not in (repo / ".git" / "config").read_text(encoding="utf-8"):
+        return
+    urls = sh(repo, "git", "config", "--get-regexp", "^remote[.].*[.]url$", check=False)
+    for line in urls.splitlines():
+        key, _, url = line.partition(" ")
+        target = Path(url)
+        if target.is_absolute() and target.resolve().is_relative_to(template.resolve()):
+            moved = copy / target.resolve().relative_to(template.resolve())
+            sh(repo, "git", "remote", "set-url", key.removeprefix("remote.").removesuffix(".url"), str(moved))
+
+
+def manifest(folder: Path) -> dict[str, list[Any]]:
+    """Every path under a template, links included and not followed: its kind, and a file's size and time."""
+    found: dict[str, list[Any]] = {}
+    for top, dirs, files in os.walk(folder):
+        dirs[:] = [d for d in dirs if d != "__pycache__"]
+        for entry in [*dirs, *files]:
+            path = Path(top) / entry
+            rel = path.relative_to(folder).as_posix()
+            if _CACHES.search(entry):
+                continue
+            if path.is_symlink():
+                found[rel] = ["link", str(path.readlink())]
+            elif path.is_dir():
+                found[rel] = ["dir"]
+            else:
+                stat = path.stat()
+                found[rel] = ["file", stat.st_size, stat.st_mtime_ns]
+    return found
+
+
+def template_changes(root: Path) -> list[str]:
+    """What tests wrote into the session's templates: each path added, removed or changed since its build."""
+    problems: list[str] = []
+    templates = root / "templates"
+    for recorded in sorted(templates.glob("*.manifest.json")) if templates.is_dir() else []:
+        folder = templates / recorded.name.removesuffix(".manifest.json")
+        before, after = json.loads(recorded.read_text(encoding="utf-8")), manifest(folder)
+        for rel in sorted(set(before) | set(after)):
+            if rel not in after:
+                problems.append(f"{folder.name}/{rel}: removed")
+            elif rel not in before:
+                problems.append(f"{folder.name}/{rel}: added")
+            elif before[rel] != after[rel]:
+                problems.append(f"{folder.name}/{rel}: changed")
+    return problems
+
+
 def template_vault(factory: pytest.TempPathFactory) -> Path:
-    """The fixture vault built once for a test module, under the same isolated git settings conftest gives each test
-    (a module's fixtures run before them), so each test copies it instead of paying for git init and a commit."""
-    home = factory.mktemp("template-home")
-    (home / "gitconfig").write_text("", encoding="utf-8")
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setenv("GIT_CONFIG_GLOBAL", str(home / "gitconfig"))
-        mp.setenv("GIT_CONFIG_NOSYSTEM", "1")
-        mp.setenv("DOCKET_CONFIG_DIR", str(home / "docket"))
-        mp.setenv("DOCKET_MACHINE", "test-box")
-        for name in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
-            mp.delenv(name, raising=False)
-        return fixture_vault(factory.mktemp("template")).root
+    """The fixture vault, built once per session; each test copies it instead of paying for git init and a commit."""
+    return shared(lambda d: fixture_vault(d).root, "fixture-vault", factory)
 
 
 def copy_vault(template: Path, tmp_path: Path) -> Vault:
@@ -172,18 +306,10 @@ def copy_vault(template: Path, tmp_path: Path) -> Vault:
 
 
 def template_project(factory: pytest.TempPathFactory, mappers: dict[str, str]) -> Path:
-    """A consuming project with its vault, built once for a test module under conftest's git settings; each test
-    copies it with copy_project."""
-    home = factory.mktemp("template-home")
-    (home / "gitconfig").write_text("", encoding="utf-8")
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setenv("GIT_CONFIG_GLOBAL", str(home / "gitconfig"))
-        mp.setenv("GIT_CONFIG_NOSYSTEM", "1")
-        mp.setenv("DOCKET_CONFIG_DIR", str(home / "docket"))
-        mp.setenv("DOCKET_MACHINE", "test-box")
-        for name in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
-            mp.delenv(name, raising=False)
-        return consuming_project(factory.mktemp("template-project"), mappers).root.parent
+    """A consuming project with its vault, built once per session for these mappers; each test copies it with
+    copy_project."""
+    key = "project-" + digest(repr(sorted(mappers.items())))
+    return shared(lambda d: consuming_project(d, mappers).root.parent, key, factory)
 
 
 def copy_project(template: Path, tmp_path: Path) -> Vault:
@@ -214,7 +340,12 @@ def configure(
 
 
 def host_repo(tmp_path: Path) -> Path:
-    """A user's repo with two files in one commit and a bare origin it pushed to: the host a folder vault lives in."""
+    """A user's repo with two files in one commit and a bare origin it pushed to: the host a folder vault lives in. A
+    copy of one built once per session."""
+    return copied(tmp_path, _build_host_repo, "host-repo")
+
+
+def _build_host_repo(tmp_path: Path) -> Path:
     sh(tmp_path, "git", "init", "-q", "--bare", "-b", "main", "origin.git")
     top = tmp_path / "host"
     top.mkdir()
@@ -230,15 +361,28 @@ def host_repo(tmp_path: Path) -> Path:
 
 def folder_vault(tmp_path: Path) -> Vault:
     """A folder vault at notes/vault of a host repo, two levels down so a path bug can't hide, with the user's own
-    work around it: a staged change, an unstaged one, and a staged hand-made file inside the vault."""
-    top = host_repo(tmp_path)
+    work around it: a staged change, an unstaged one, and a staged hand-made file inside the vault. A copy of one built
+    once per session."""
+    return Vault.open(copied(tmp_path, _build_folder_vault, "folder-vault"))
+
+
+def empty_vault(tmp_path: Path, config: VaultConfig, name: str = "vault") -> Vault:
+    """A new vault of its own repo at tmp_path/name, as Vault.init makes it for this config: a copy of one built once
+    per session. Tests about init itself call Vault.init."""
+    assert config.storage == "repo", "a folder vault needs its host: folder_vault"
+    key = f"empty-{name}-" + digest(config.dump())
+    return Vault.open(copied(tmp_path, lambda d: Vault.init(d / name, config, "test-box").root, key))
+
+
+def _build_folder_vault(tmp_path: Path) -> Path:
+    top = _build_host_repo(tmp_path)
     vault = Vault.init(top / "notes" / "vault", make_config("folder"), "test-box")
     (top / "README.md").write_text("hello, staged\n", encoding="utf-8")
     git(top, "add", "README.md")
     (top / "other.txt").write_text("other, unstaged\n", encoding="utf-8")
     (vault.root / "processed" / "mine.md").write_text("my own note\n", encoding="utf-8")
     git(top, "add", "notes/vault/processed/mine.md")
-    return vault
+    return vault.root
 
 
 def users_work(top: Path) -> tuple[str, str]:
@@ -335,21 +479,12 @@ def logical_dump(db: Path) -> dict[str, list[tuple[Any, ...]]]:
 
 
 def template_with(factory: pytest.TempPathFactory, make: Callable[[Path], Vault]) -> Path:
-    """A vault built once for a test module, under the isolated git settings conftest gives each test; tests copy it."""
-    home = factory.mktemp("template-home")
-    (home / "gitconfig").write_text("", encoding="utf-8")
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setenv("GIT_CONFIG_GLOBAL", str(home / "gitconfig"))
-        mp.setenv("GIT_CONFIG_NOSYSTEM", "1")
-        mp.setenv("DOCKET_CONFIG_DIR", str(home / "docket"))
-        mp.setenv("DOCKET_MACHINE", "test-box")
-        for name in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
-            mp.delenv(name, raising=False)
-        return make(factory.mktemp("template")).root
+    """A vault `make` builds, once per session, keyed by its module and name; tests copy it."""
+    return shared(lambda d: make(d).root, f"{make.__module__}.{make.__qualname__}", factory)
 
 
 def index_template(factory: pytest.TempPathFactory) -> Path:
-    """The index fixture built once for a test module; tests copy it."""
+    """The index fixture, built once per session; tests copy it."""
     return template_with(factory, build_index_vault)
 
 
@@ -400,12 +535,16 @@ def make_notes_repo(root: Path) -> Path:
 
 
 def isolated_git(mp: pytest.MonkeyPatch, home: Path) -> None:
-    """The git and Docket settings conftest gives each test, for a fixture built once per module."""
-    (home / "gitconfig").write_text("", encoding="utf-8")
+    """The git and Docket settings conftest gives each test, for a template built once per session."""
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "gitconfig").write_text(TEST_GITCONFIG, encoding="utf-8")
     mp.setenv("GIT_CONFIG_GLOBAL", str(home / "gitconfig"))
     mp.setenv("GIT_CONFIG_NOSYSTEM", "1")
     mp.setenv("DOCKET_CONFIG_DIR", str(home / "docket"))
+    mp.setenv("DOCKET_STATE_DIR", str(home / "docket-state"))
+    mp.setenv("PYTHON_KEYRING_BACKEND", "keyring.backends.fail.Keyring")
     mp.setenv("DOCKET_MACHINE", "test-box")
+    mp.delenv("DOCKET_VAULT", raising=False)
     for name in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
         mp.delenv(name, raising=False)
 
@@ -418,21 +557,19 @@ def screening(vault: Vault) -> Vault:
 
 
 def notes_template(factory: pytest.TempPathFactory) -> Path:
-    """The invented notes repo built once for a module; returns the repo (its notes folder is notes/)."""
-    with pytest.MonkeyPatch.context() as mp:
-        isolated_git(mp, factory.mktemp("notes-home"))
-        return make_notes_repo(factory.mktemp("notes")).parent
+    """The invented notes repo, built once per session; returns the repo (its notes folder is notes/)."""
+    return shared(lambda d: make_notes_repo(d).parent, "notes-repo", factory)
 
 
 def imported_template(factory: pytest.TempPathFactory, vault_template: Path, repo_template: Path) -> Path:
-    """A vault after importing the invented notes folder, and the folder beside it, built once for a module: returns
+    """A vault after importing the invented notes folder, and the folder beside it, built once per session: returns
     the folder holding both (vault/ and work/)."""
     from docket.imports.notes import import_notes
 
-    base = factory.mktemp("imported")
-    with pytest.MonkeyPatch.context() as mp:
-        isolated_git(mp, factory.mktemp("imported-home"))
+    def build(base: Path) -> Path:
         vault = screening(copy_vault(vault_template, base))
         shutil.copytree(repo_template, base / "work")
         import_notes(vault, base / "work" / "notes")
-    return base
+        return base
+
+    return shared(build, "imported-" + digest(str(vault_template), str(repo_template)), factory)

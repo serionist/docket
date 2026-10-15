@@ -3,3 +3,27 @@
 
 reading:
   - { path: tools/devkit/src/devkit/gate.py, role: contract, note: "the gate's steps and lanes: what passes here is the merge rule" }
+decisions:
+  - id: DR-0222
+    title: The content step folds each file once and runs a name's pattern only where its first word is
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#43"]
+    description: The deny-list scan folds each file's text once the way re.IGNORECASE folds (the simple lowercase, plus the extra equivalences Python's re adds) and runs a name's regex only on a file holding the name's first word folded the same way. A file the fold passes over is one the regex finds nothing in, so the step reports exactly the hits it reported before, by a test that runs both scans. 273 names over 294 files took 17.9 s; the same scan with the fold took 0.5 s in a trial.
+    binds:
+      - "The step's hits stay those of one pattern per name: whole words, any case, across line breaks (DR-0008)."
+    not_chosen:
+      - "One pattern of all the names together: 13 s, since the look-behind still blocks a fast search."
+  - id: DR-0223
+    title: Every lane runs the whole suite on every system, and runs its other steps beside the tests
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#43"]
+    description: "gate os on Windows and macOS runs every test, as gate full does on Linux: the slowest tests are the git- and process-heavy ones, which are the ones that differ between systems, and test_index_perf's time limit is checked only without coverage, so only in gate os. A lane with tests starts them first and runs its other steps meanwhile (in the full lane lock, ruff, format, types, docs, commits, content, secrets and the harness; in the os lane types), printing each step's line in the usual order. The tests step prints the 15 slowest tests on every run, so each system's are in its CI log."
+    binds: [A slow test moves or speeds up; it is never skipped on a system to save time.]
+    not_chosen:
+      - "Only the modules that differ by system on Windows and macOS: little saved, and what those jobs are for lost."

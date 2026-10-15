@@ -181,7 +181,7 @@ def commit_pending(vault: Vault, source: str, message: str | None = None) -> str
     if not (vault.root / rel).exists():
         return None
     git = vault.git
-    pending = git.untracked(rel) or git.untracked(rel, ignored=True) or git.changed_against_head(rel)
+    pending = git.untracked(rel, ignored_too=True) or git.changed_against_head(rel)
     paths = [rel] if pending else []
     if _union_uncommitted(vault):
         paths.append(".gitattributes")

@@ -4,21 +4,27 @@ from collections.abc import Callable
 
 import keyring
 import pytest
-from docket_testkit import make_config, make_record
+from docket_testkit import TEST_GITCONFIG, make_config, make_record, use_factory
 from keyring.backends.fail import Keyring as FailKeyring
 
 from docket.vault.config import VaultConfig
 from docket.vault.records import RawRecord
 
 
+@pytest.fixture(scope="session", autouse=True)
+def kit_templates(tmp_path_factory: pytest.TempPathFactory) -> None:
+    """The kit's builders find the session's shared templates through this factory (DR-0220)."""
+    use_factory(tmp_path_factory)
+
+
 @pytest.fixture(autouse=True)
 def isolated(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every test runs git with an empty config of its own, so the developer's identity, signing, hooks or line-ending
-    settings can't change a result, and the user's Docket config is a temp folder."""
+    """Every test runs git with a config of its own, empty but for auto maintenance, so the developer's identity,
+    signing, hooks or line-ending settings can't change a result, and the user's Docket config is a temp folder."""
     home = tmp_path_factory.mktemp("home")
-    empty = home / "gitconfig"
-    empty.write_text("", encoding="utf-8")
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty))
+    gitconfig = home / "gitconfig"
+    gitconfig.write_text(TEST_GITCONFIG, encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(gitconfig))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("DOCKET_CONFIG_DIR", str(home / "docket"))
     monkeypatch.setenv("DOCKET_STATE_DIR", str(home / "docket-state"))
