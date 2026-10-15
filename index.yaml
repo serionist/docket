@@ -380,15 +380,14 @@ decisions:
       - "The run's steps in every SKILL.md: each copy goes stale, and docket source new never writes over one."
       - "A note for a SKILL.md without the marker, the run going on: an old copy pages at limit 500, which the hook refuses as too large, so long meetings ride retry until they expire."
   - id: DR-0360
-    title: Structured docs are YAML entries the docs tool manages, a new decision or convention in a file of its own; prose stays markdown
+    title: A new decision or convention is a YAML entry in a file of its own, index.d/<id>.yaml in the folder it binds
     status: proposed
     at: "2026-10-15"
     by: Claude (autonomy grant)
     cost: medium
-    sources: ["#1", "#81"]
-    description: Decisions, conventions, terms and reading lists are entries changed only through uv run docs, which checks every edit and writes one canonical form. A decision or convention added from now on is a file of its own, index.d/<id>.yaml in the folder it binds, holding that one entry in the index.yaml format; reading lists stay in the folder's index.yaml and terms in docs/glossary.yaml. Two branches that add entries add two files, so a rebase and GitHub's own merge of a PR apply both with no conflict. A session reads the one entry it needs; a fact lives in one place under an id that never changes.
+    sources: ["#81"]
+    description: "A decision or convention added from #81 on is a YAML entry in a file of its own, index.d/<id>.yaml in the folder it binds, holding that one entry in the index.yaml format and the same canonical form, managed by the same tool. It keeps DR-0005: entries change only through uv run docs, which checks every edit, and a fact lives in one place under an id that never changes. Reading lists stay in the folder's index.yaml and terms in docs/glossary.yaml. Two branches that add entries add two files, so a rebase and GitHub's own merge of a PR apply both with no conflict."
     binds:
-      - The gate checks every entry file and every DR- and CV- citation.
       - docs check fails a file in index.d/ that holds more than one entry, an entry of another kind, or a name other than its key.
       - Entry files carry no merge attribute.
     not_chosen:
@@ -396,8 +395,6 @@ decisions:
       - "A merge driver that merges entry by entry: GitHub runs no custom driver, so a PR behind main still conflicts there, and every clone has to register it."
       - "Blank lines, separators or entries sorted by id: both branches still insert at one point."
       - "One central folder of entries: a decision binds the folder it sits in."
-      - One markdown file per decision.
-      - Decisions kept only in plans and the design document.
   - id: DR-0361
     title: Entries already in an index.yaml stay there; nothing moves in bulk
     status: proposed
@@ -406,7 +403,9 @@ decisions:
     cost: cheap
     sources: ["#81"]
     description: "The docs tool reads a folder's index.yaml and its index.d/ together, so the 180 entries written before #81 stay where they are, and set, supersede and remove edit them in place. Moving them would start each one's git blame again and give every open branch that edits one a modify/delete conflict. A move, if one is wanted, is a change of its own, made when no branch is open."
-    binds: [docs add never writes a decision or convention to an index.yaml.]
+    binds:
+      - docs add never writes a decision or convention to an index.yaml.
+      - docs move is for a branch's own entries that main doesn't have yet.
     not_chosen: [Every entry moved into index.d/ in the change that brings it.]
 conventions:
   - id: CV-0001

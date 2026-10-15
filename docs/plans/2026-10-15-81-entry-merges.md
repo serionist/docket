@@ -1,9 +1,9 @@
 ---
 title: Give each new decision and convention a file of its own
 issue: "#81"
-status: draft
-approved_by:
-approved_at:
+status: approved
+approved_by: claude (autonomy grant)
+approved_at: 2026-10-15
 ---
 
 # Give each new decision and convention a file of its own
@@ -14,8 +14,8 @@ Two branches that each add a decision never touch the same file, so `git rebase`
 apply them with no conflict and no hand work. Today every branch appends to the end of the decisions in
 `packages/docket/index.yaml`, any two open branches conflict there, and on 15 Oct nearly every PR needed a hand rebase.
 
-- In scope: where `docs add` writes a decision or a convention, how the docs tool reads and checks it, a merge test
-  with real git, the regime's docs.
+- In scope: where `docs add` writes a decision or a convention, how the docs tool reads and checks it, `docs move`
+  for the branches open now, a merge test with real git, the regime's docs.
 - Out of scope:
   - moving the 180 entries already in `index.yaml` files (DR-0361);
   - reading lists and terms: they conflict only when two branches add next to each other in one list, and terms are
@@ -61,6 +61,23 @@ The tool:
   a folder that has entries but no `index.yaml`.
 - `docs check` keeps every check it has, on both places, and adds three for a file in `index.d/`: it holds exactly one
   entry, of a kind in `entry_kinds`, and is named `<key>.yaml`. Any other file there is a problem too.
+- `docs move <key>...` moves a branch's own decisions and conventions from an `index.yaml` into `index.d/`, unchanged.
+  With `--from <rev>` it takes each entry from that revision instead, for an entry a rebase dropped when its
+  `index.yaml` conflict was settled by taking main's side; it refuses a key that is already in the tree.
+
+The branches open now (#77, #82, #67) move their entries at their next rebase:
+
+```sh
+git fetch origin && git rebase origin/main
+# only if it stops on an index.yaml, at each stop:
+git checkout --ours -- <that index.yaml> && git add <that index.yaml> && git rebase --continue
+uv run docs move <your ids>                    # entries still in an index.yaml
+uv run docs move <your ids> --from ORIG_HEAD   # or: entries the conflict took out
+uv run docs check
+```
+
+A change the branch made to an older entry in a file settled that way is made again with `docs set` or `supersede`;
+`docs check` names a broken supersede link.
 
 How each merge comes out:
 
@@ -88,9 +105,9 @@ Not taken:
 None of `AGENTS.md`'s one-way doors: they are about users and their vaults, and this moves the repo's own docs. No
 user data.
 
-It supersedes a decided entry: DR-0005 says the entries live in `index.yaml` files, and lists "One markdown file per
-decision" as not chosen. DR-0360 restates it with the new layout and supersedes it, proposed, for the maintainer's
-review; CV-0003's `decision` moves to DR-0360.
+It extends a decided entry and leaves it standing: DR-0005 rules that structured docs are YAML entries the docs tool
+manages, and rules out one markdown file per decision. DR-0360 keeps that rule, cites it, and adds where a new entry
+sits. DR-0005 stays as it is; CV-0003 keeps its `decision` and gains a `why` naming DR-0360 for the new location.
 
 The harness (`REVIEW.md`): the change is in `tools/devkit`, `docs/` and `AGENTS.md`. Every check still runs on every
 `index.yaml`, the same checks run on `index.d/` files, and three are added; nothing loosens.
@@ -100,7 +117,7 @@ the root's `index.yaml` with this plan, the way today's tool writes; step 4 move
 
 | Id | Decision | Cost |
 |---|---|---|
-| DR-0360 | Structured docs are YAML entries the docs tool manages, a new decision or convention in a file of its own; prose stays markdown (supersedes DR-0005 in the build) | medium |
+| DR-0360 | A new decision or convention is a YAML entry in a file of its own, `index.d/<id>.yaml` in the folder it binds; it keeps DR-0005 | medium |
 | DR-0361 | Entries already in an `index.yaml` stay there; nothing moves in bulk | cheap |
 
 ## Steps
@@ -113,12 +130,15 @@ the root's `index.yaml` with this plan, the way today's tool writes; step 4 move
    `<folder>/index.d/<id>.yaml` and leaves `index.yaml` as it was; `set`, `supersede` and `remove` work on an entry in
    either place; `door` counts both from the root down. The existing tests that read `index.yaml` after adding a
    decision read the new file. An entry under `plugin/index.d/` passes the gate's plugin validation (tried, not kept).
+   `docs move`: an entry moves out of an `index.yaml` unchanged; with `--from`, a rebase settled by taking main's side
+   gets its entry back from `ORIG_HEAD`; a reading entry, a term, a key already in `index.d/` and, with `--from`, a
+   key already in the tree are refused.
 3. The merge test, in the `repo` fixture with real git: two branches from one base each `docs add` a decision, `git
    rebase` of one onto the other exits 0, and `docs check` passes. Beside it: the same id in one folder stops the
    rebase; the same id in two folders rebases and `docs check` fails; one branch adds an entry while the other sets an
    old entry's status, and both apply.
-4. This branch's two decisions moved: the root's `index.yaml` taken from main, both added again with `docs add --set
-   id=...`. DR-0005 superseded by DR-0360, CV-0003's `decision` set to DR-0360, the docs below.
+4. This branch's two decisions moved with `docs move`. DR-0360 restated to extend DR-0005, CV-0003's `why`, the docs
+   below.
 5. `finish-work`: `gate full`, a draft PR, `review-code`.
 
 ## Tests
@@ -135,6 +155,7 @@ makes its branches with git there. No test is deleted or weakened; the devkit co
   says "its decision entry" for "its decision in `index.yaml`".
 - `docs/design.md`: the line that names `index.yaml` as where the decisions are.
 - `CHANGELOG.md`: none; users don't see the repo's docs.
+- The PR: how an open branch moves its entries, the commands above.
 
 ## Risks
 
@@ -148,4 +169,5 @@ makes its branches with git there. No test is deleted or weakened; the devkit co
 
 ## Plan review
 
-Not run yet: the lead approves the direction first, then `review-plan`.
+Round 1, 15 Oct 2026, the lead reviewed the plan without agents: approved with DR-0005 extended, not superseded. The
+review also asked for one `docs` command that moves an open branch's entries; that is `docs move`.
