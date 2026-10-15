@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0382
+    title: The Staging page lists held recordings and names the commands that release them at the owner's console; no page or route releases
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#71"]
+    description: "For each source the held part shows the held ids from its hold list, marks one the release log also has as held again after its release, counts the staged records a hold covers, and gives docket hold show and docket hold release with --from filled when docket ingest read one folder for the source on this machine, and the words that hand the cuts to Claude's cuts skill. The release stays as DR-0202 has it: at the owner's console, refused in Claude Code's shell, with a code typed back. A code shown and typed back in a page stops nothing: a browser agent reads and types it in normal use, and Claude gets a session through docket open or the token, while at the console it has to clear CLAUDECODE and fake a console on purpose. This amends the design's Staging row and #31's note that the page can ask the same question in the browser."
+    binds:
+      - Only cli.py imports docket.sources.release, and only sources/release.py calls releaselog.add and holds.remove; tests scan for both.
+      - A held recording's text is never shown in the web app.
+    not_chosen:
+      - "The code shown and typed back in the page: Claude in Chrome or Playwright does that in normal use."
+      - "The code in a desktop notification: a shell reads the notification history, a screen-reading agent sees it, and a headless session shows nothing."
+      - "The page asks and a console command shows the code: the console release with one more command."
+      - "An OS prompt (Windows Hello, Touch ID, polkit): a human-only factor, for the console too; three native APIs, an issue of its own."
