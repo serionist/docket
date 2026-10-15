@@ -6,20 +6,24 @@ listed never to store.
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Hashable
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from docket.errors import DocketError
 from docket.vault.machine import validate as validate_machine
 from docket.vault.records import source_name_problem
+from docket.vault.staging import retry
 
 CONFIG_FILE = "vault.yaml"
+# The one redaction switch vault.yaml held before credentials and phone numbers were split.
+LEGACY_BUILTIN = "builtin"
 
 
 class UniqueKeyLoader(yaml.SafeLoader):
@@ -117,6 +121,7 @@ class NeverStore(_Model):
 class RedactionPattern(_Model):
     name: str
     pattern: str
+    enabled: bool = True
 
     @field_validator("pattern")
     @classmethod
@@ -129,8 +134,35 @@ class RedactionPattern(_Model):
 
 
 class Redaction(_Model):
-    builtin: bool = True
+    """Which redaction rules run. Credentials (passwords, API keys and tokens, private key blocks) are on unless the
+    user turns them off; phone numbers are off unless the user turns them on. Names are never redacted: keeping one
+    out is the never-store lists' job."""
+
+    credentials: bool = True
+    phone: bool = False
     patterns: list[RedactionPattern] = Field(default_factory=list[RedactionPattern])
+
+    @model_validator(mode="before")
+    @classmethod
+    def _builtin(cls, data: Any) -> Any:
+        """`builtin`, the one switch every vault.yaml written before held, reads as `credentials`."""
+        if not isinstance(data, dict):
+            return data
+        fields = dict(cast(dict[str, Any], data))
+        if LEGACY_BUILTIN not in fields:
+            return fields
+        if "credentials" in fields:
+            raise ValueError("builtin is the old name of credentials; keep credentials and delete builtin")
+        fields["credentials"] = fields.pop(LEGACY_BUILTIN)
+        return fields
+
+    def legacy(self) -> dict[str, Any] | None:
+        """This block as a vault.yaml written before the switches were split held it, or None when that form can't
+        say it: phone on, or a pattern turned off."""
+        if self.phone or not all(p.enabled for p in self.patterns):
+            return None
+        patterns = [{"name": p.name, "pattern": p.pattern} for p in self.patterns]
+        return {LEGACY_BUILTIN: self.credentials, "patterns": patterns}
 
 
 class VaultConfig(_Model):
@@ -175,8 +207,32 @@ class VaultConfig(_Model):
             raise DocketError(f"{path}: {problems}") from e
 
     def dump(self) -> str:
-        header = "# The vault's settings. docket reads this on every run; unknown keys are refused.\n"
-        body = yaml.safe_dump(
-            self.model_dump(mode="json"), sort_keys=False, allow_unicode=True, default_flow_style=False, width=100
-        )
-        return header + body
+        return _dump(self.model_dump(mode="json"))
+
+    def written_by_docket(self, text: str) -> bool:
+        """Whether a vault.yaml's text is exactly what Docket writes for these settings, now or before the redaction
+        switches were split, so Docket may rewrite it without losing anything the user wrote by hand."""
+        if text == self.dump():
+            return True
+        legacy = self.redaction.legacy()
+        return legacy is not None and text == _dump({**self.model_dump(mode="json"), "redaction": legacy})
+
+
+def _dump(data: dict[str, Any]) -> str:
+    header = "# The vault's settings. docket reads this on every run; unknown keys are refused.\n"
+    return header + yaml.safe_dump(data, sort_keys=False, allow_unicode=True, default_flow_style=False, width=100)
+
+
+def write_config(tmp_dir: Path, path: Path, text: str) -> None:
+    """Write vault.yaml through a temp file in Docket's private folder under the git dir and a rename, so a crash
+    leaves the old file or the new one."""
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    tmp = tmp_dir / f"vault-yaml.{os.getpid()}.tmp"
+    try:
+        with tmp.open("w", encoding="utf-8", newline="\n") as out:
+            out.write(text)
+            out.flush()
+            os.fsync(out.fileno())
+        retry(lambda: tmp.replace(path))
+    finally:
+        tmp.unlink(missing_ok=True)

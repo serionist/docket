@@ -114,11 +114,12 @@ decisions:
       - "Containers with their prefix only: a bare id the user wrote would store what they listed."
   - id: DR-0027
     title: Redaction marks each match in place as [redacted:<rule>] and never keeps the secret
-    status: proposed
+    status: superseded
     at: "2026-10-14"
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#5"]
+    superseded_by: [DR-0190]
     description: "The built-in rules (password, api-key, private-key, phone) and the user's patterns run over text, title, attachment names and refs, a transcript's segments, and every key and value in native. A segment's speaker is redacted on its own; the segments' texts are redacted joined by line breaks, so a label at the end of one utterance and its value at the start of the next still match, and a match that runs over a boundary turns each segment it touches into its marker whole. A label counts quoted, inside an identifier in any case style (DB_PASSWORD, client-secret, clientSecret, refresh_token), wrapped in emphasis or table marks (*Password:*, | Password: |), or with line breaks, HTML tags (long ones and ones wrapped over lines too) and entities before its value; an unquoted value needs a letter or a digit, and the filler is read possessively so a long run can't make matching slow. A native key that is a label has its value redacted whole. A phone number needs a + or a phone label, and a + number followed by a currency or a percent is an amount, not a phone number. Ids (rid, container, thread, author, to) are never redacted. A match becomes [redacted:<rule>]; text inside a marker is never matched again, so redacting twice is once; a run reports how many markers of each rule it holds. A user pattern replaces its match, or only its secret group."
     binds: [The raw record gains no field for redactions; the markers are the record of them.]
     not_chosen:
@@ -155,11 +156,12 @@ decisions:
       - "Strict reads: an older machine couldn't rebuild from a newer machine's docs."
   - id: DR-0110
     title: Every content line of a doc ends with anchors in one grammar
-    status: proposed
+    status: superseded
     at: "2026-10-14"
     by: Claude (autonomy grant)
     cost: one-way
     sources: ["#6"]
+    superseded_by: [DR-0198]
     description: "Every content line of a doc ends with its anchors: @mm:ss, @h:mm:ss or @a-b for the one record the doc covers; [r:<rid>@mm:ss] for any covered record; [r:<rid>#n] or #n-m for paragraphs of a record's text; [r:<rid>] for the whole record. Times are whole seconds from the record's start. In an anchor a rid writes % as %25 and ] as %5D, and its last @ or # as %40 or %23 only when its tail would read as a position; the parser splits at the last @ or # whose rest is a whole position. Blank lines, headings, thematic breaks, fenced code, HTML comments and a table's header and separator rows need no anchor, and a legacy note's body isn't read for them. An anchor's rid is in covers and resolves against the record's latest version: a time inside its range, a paragraph that exists, or the record. A locator, what read takes, is a doc's id or path, r: and a record part (or the same in brackets), or a bare rid."
     binds:
       - Lines split on LF only, after CRLF and CR become LF; a blank line holds only spaces, tabs and no-break spaces; a paragraph is a run of non-blank lines.
@@ -939,3 +941,132 @@ decisions:
     cost: cheap
     sources: ["#31"]
     description: "What the cuts skill proposes, for docket hold release --proposals: YAML with source and recordings, each with id and either cuts (time ranges as quoted strings), keep (rids) and note, or held (why it stays held). A proposal, never a confirmation: the command checks every entry again and asks. It is refused inside any git work tree, where a commit could take it, and with an unknown key, another source or an unquoted time, which YAML reads as a number. Its notes and reasons are printed on the screen only, never stored or logged."
+  - id: DR-0190
+    title: Redaction marks each match in place as [redacted:<rule>]; credentials are on and phone numbers off by default
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#24"]
+    supersedes: [DR-0027]
+    description: "The built-in rules run as two switches in vault.yaml (DR-0192): credentials, the password, api-key and private-key rules with a native key labelled as one of them, on by default; and phone, the phone rule with a native key labelled as a phone, off by default. Each of the user's patterns runs unless its enabled is false. The gate and every derived text follow the same settings (DR-0195), and markers already stored stay when a rule is turned off (DR-0191). Names are never redacted (DR-0194). The built-in rules and the user's patterns run over text, title, attachment names and refs, a transcript's segments, and every key and value in native. A segment's speaker is redacted on its own; the segments' texts are redacted joined by line breaks, so a label at the end of one utterance and its value at the start of the next still match, and a match that runs over a boundary turns each segment it touches into its marker whole. A label counts quoted, inside an identifier in any case style (DB_PASSWORD, client-secret, clientSecret, refresh_token), wrapped in emphasis or table marks (*Password:*, | Password: |), or with line breaks, HTML tags (long ones and ones wrapped over lines too) and entities before its value; an unquoted value needs a letter or a digit, and the filler is read possessively so a long run can't make matching slow. A native key that is a label has its value redacted whole. A phone number needs a + or a phone label, and a + number followed by a currency or a percent is an amount, not a phone number. Ids (rid, container, thread, author, to) are never redacted. A match becomes [redacted:<rule>]; text inside a marker is never matched again, so redacting twice is once; a run reports how many markers of each rule it holds. A user pattern replaces its match, or only its secret group."
+    binds: [The raw record gains no field for redactions; the markers are the record of them.]
+    not_chosen:
+      - "A redactions field on the raw record: changes the model DR-0020 fixes."
+      - "Any long run of digits as a phone number: it redacts amounts, tickets and timestamps."
+      - "Each segment on its own: a label in one utterance and its value in the next would reach the raw log."
+      - "One builtin switch for all four rules: phone numbers couldn't be off while credentials are on."
+      - "A switch per credential rule: users decide on credentials as one thing."
+  - id: DR-0191
+    title: Turning a redaction rule off churns once, with no skip logic
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#24"]
+    description: "A rule turned off (phone numbers, for every vault upgraded from the one builtin switch) changes what Docket writes for what it already stored. Markers already stored stay. A record a source sends again gets a new version under the new rules, since the gate skips only a version it already has (DR-0025), and lands in raw as a second version holding the value as written. A mixed source's records wait in pending again, and so do records classified private or cut, a cut one uncut in staging, since a record decided by hand waits for the user. The next docket import notes writes a new rev of each note the rule matched, and reports a note also edited in the vault as kept (DR-0132). Turning a rule on works the same way the other way: a record sent again lands as a redacted new version."
+    not_chosen:
+      - "Skip logic comparing a record's versions under the old and new rules: the values are wanted, the churn happens once per vault, and it would add version comparison to the gate for a one-time effect."
+  - id: DR-0192
+    title: vault.yaml's redaction block holds credentials, phone and a pattern's enabled
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#24"]
+    description: "redaction.credentials (default true), redaction.phone (default false) and a pattern's enabled (default true) are optional keys in schema 1 (DR-0021): a file without them loads with the defaults. redaction.builtin, the one switch every vault.yaml written before held, reads as credentials, and a file holding both is refused. Docket writes credentials and phone from now on; a file in the old form still counts as Docket's own, so docket source new and docket redaction set rewrite it in the new form. An older Docket refuses a file with the new keys, as it refuses any key it doesn't know; before the rewrite it loads the old form and keeps redacting phone numbers, so it redacts more, never less."
+    binds: [A later schema keeps reading builtin as credentials.]
+    not_chosen:
+      - "A schema 2: every file would need migrating for keys that are optional."
+      - "Keeping builtin as the credentials key: its name hides that phone numbers are apart."
+  - id: DR-0193
+    title: Redaction is chosen at setup and changed with docket redaction
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#24"]
+    description: "docket init takes --redact-credentials or --no-redact-credentials (on by default) and --redact-phone or --no-redact-phone (off by default), and its summary prints the settings. The plugin's setup skill asks whether to redact credentials, yes recommended, names phone numbers as a second option, and passes the answers as these flags. docket redaction prints the settings; docket redaction set <rule> on|off, the rule credentials, phone or a pattern's name, changes one under the vault lock and commits it as Config: redaction <rule> on|off, rewriting vault.yaml only when Docket wrote it as it stands and otherwise printing the line to change (DR-0166). A name it can't place is refused: no such rule, a pattern named credentials or phone, or two patterns sharing a name. Turning credentials off prints that passwords, keys and tokens are stored as written in raw, docs and git history from the next sync, and that turning it back on doesn't remove them from raw; turning a rule on says to run docket doc redact, and that raw stored while it was off keeps what it holds."
+    not_chosen: ["Asking in init's own prompts: the setup skill runs init with flags (DR-0103)."]
+  - id: DR-0194
+    title: Names are never redacted; the never-store lists stay the user's opt-in lists
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#24"]
+    description: "No redaction rule matches names, now or as a default. Keeping a person, a topic or a chat out of the vault is the never-store lists' job (DR-0026): the user's own lists in vault.yaml, empty by default, which drop a record or refuse a doc whole rather than leave a marker in it."
+    not_chosen:
+      - "A rule for names: the words around a name still tell who it was, and names are what recall searches by."
+  - id: DR-0195
+    title: Every doc Docket commits passes the never-store keywords and the redaction settings first
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#24"]
+    description: "doc_put over MCP, REST and the CLI, put_many and the notes import, the take-in of a hand edit, and docket doc redact all go through DocStore, which screens and redacts each text before it is written, with the never-store lists and the redaction rules vault.yaml has at the call. In a put, by, the frontmatter's one free text, is checked against the redaction rules and refuses the doc on a match; it isn't screened for keywords. In a take-in and in the pass, the frontmatter is screened as written: comments and keys this Docket doesn't know whole, their names included; the id's slug, entities, supersedes and old_paths, each <type>: prefix left out; and by and covers where the hand edit changed them. The comments, the unknown keys and every changed line are checked against the redaction rules too, whole, so a key that is a label counts. Lines are read on their own and in runs of neighbours, as a body is, so a label or a keyword split over two lines still counts. The one rev line a take-in rewrites (rev: and a number) is left out; any other rev line is read like a changed one. A match refuses the take-in, and so the put, and the pass leaves the doc and names it: no marker is ever written into YAML. The pass also leaves a doc whose file changed while it ran."
+    binds:
+      - A test sends an invented credential and phone number through each route with phone redaction on and finds neither in the vault's files or in any commit's tree or message, but the one that plays an older Docket writing a doc unredacted for the pass to redact.
+    not_chosen:
+      - "Redaction on raw records at the gate only: a credential Claude copies into a note, or one in an old note, would reach the vault."
+  - id: DR-0196
+    title: A doc that says something on the never-store keywords list is refused
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#24"]
+    description: "The screen runs on the text as it would be committed, after redaction, before any anchor is checked: every body line without its trailing anchors (a legacy note's lines, and free and skip lines, whole), the id's slug, entities, the slugs in supersedes, and old_paths. The type, covers, rev, by and import_hash aren't screened. The built-in rules' markers are left out, their words being Docket's own; a user pattern's marker is screened like any text, so a pattern named after a keyword refuses the docs it fires on, and the problem says the pattern needs another name. A match refuses the whole doc: each problem names a line (both lines when a keyword runs over a line break) or a frontmatter key and the list, carries no excerpt and never names the keyword; nothing is written, committed or logged."
+    not_chosen:
+      - "Redacting the keyword: its context stays, and the marker says something private was there."
+      - "Dropping the lines: a summary changes silently and its line numbers move."
+  - id: DR-0197
+    title: A doc's lines are redacted with their count and anchors kept
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#24"]
+    description: "Each content line splits into its text and its trailing run of anchors, as trailing_anchors reads it; the run is kept byte for byte with the spaces before it. A line whose run holds a malformed anchor, a legacy note's line, and a free or skip line are all text. The text parts are redacted joined by line breaks, as a transcript's segments are (DR-0190): a label at the end of one line and its value on the next still match, and a match that runs over a line break turns each line it touches into its marker whole. A line whose text was empty and became a marker gets one space before its anchors. The frontmatter is never redacted: its values are ids, locators and the writer, as a record's ids are."
+    not_chosen:
+      - "Redactor.text over the whole body: a key block's lines fold into one marker, every later line number moves, and the anchors on the folded lines are lost."
+      - "Each line alone: a label on one line and its value on the next would be stored."
+  - id: DR-0198
+    title: Every content line of a doc ends with anchors in one grammar, and a redaction marker is text
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#24"]
+    supersedes: [DR-0110]
+    description: "Every content line of a doc ends with its anchors: @mm:ss, @h:mm:ss or @a-b for the one record the doc covers; [r:<rid>@mm:ss] for any covered record; [r:<rid>#n] or #n-m for paragraphs of a record's text; [r:<rid>] for the whole record. Times are whole seconds from the record's start. In an anchor a rid writes % as %25 and ] as %5D, and its last @ or # as %40 or %23 only when its tail would read as a position; the parser splits at the last @ or # whose rest is a whole position. Blank lines, headings, thematic breaks, fenced code, HTML comments and a table's header and separator rows need no anchor, and a legacy note's body isn't read for them. An anchor's rid is in covers and resolves against the record's latest version: a time inside its range, a paragraph that exists, or the record. A locator, what read takes, is a doc's id or path, r: and a record part (or the same in brackets), or a bare rid. A redaction marker, [redacted:<rule>] (DR-0190), is text wherever it stands, at a line's end too, and no anchor kind is ever named redacted."
+    binds:
+      - Lines split on LF only, after CRLF and CR become LF; a blank line holds only spaces, tabs and no-break spaces; a paragraph is a run of non-blank lines.
+      - A record's time range runs from its smallest segment start rounded down to its greatest end rounded up; gaps count.
+      - "[<letters>:...] other than r and a redaction marker is kept for later anchor kinds and refused at the end of a line."
+    not_chosen:
+      - "Anchors anywhere in a line: prose like 'meet at @10:00' would read as one."
+      - "Encoding every @ in a rid: every mail anchor would be unreadable."
+      - "#n as a segment index: it shifts when a transcript is segmented again."
+      - "A second marker shape in docs, such as (redacted: phone): two forms, and redacting twice would no longer be once."
+  - id: DR-0199
+    title: doc_put says what it redacted in PutResult's redactions and redacted_lines
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#24"]
+    description: PutResult gains redactions, the markers a put added per rule, and redacted_lines, the lines they are on, numbered as read numbers the stored doc; the compact text adds a line naming the lines and the counts, on an unchanged put too. No redacted value is ever echoed. Under DR-0150 both fields are kept for good.
+  - id: DR-0210
+    title: docket doc redact redacts the docs already stored
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#24"]
+    description: "Under the vault lock, every doc under processed/ is screened and redacted with the current settings. A doc whose file differs from its last rev goes in first through the take-in; the rest that change are written as their next rev in one commit, Redact docs: <n>, with a Doc: <id> rev <n> line each (DR-0112). Only the body is redacted, in the file's own text, with the rev line set, so a doc from a newer Docket keeps what this one doesn't know. A doc the never-store lists forbid, one whose frontmatter as written holds a keyword or what redaction hides, and a file that doesn't parse or sits where its id doesn't say are left as they are and named, with exit 1, and so is a doc whose file changed while the pass ran, rather than written over. --dry-run writes nothing. The output says that earlier revs keep the old text in history, and the index is rebuilt when anything was written."
+    not_chosen:
+      - "Only on each doc's next rev: a doc nobody touches keeps its secret in the tree for good."
+      - "At service start or index rebuild: a write nobody asked for."
+      - "An MCP tool: a terminal one-off, like the import."

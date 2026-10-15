@@ -19,9 +19,10 @@ import re
 import time
 from pathlib import Path, PurePosixPath
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from docket.errors import DocketError
+from docket.vault import derived
 from docket.vault.anchors import normalize_newlines, trailing_anchors
 from docket.vault.git import DOC_LINE
 from docket.vault.processed import (
@@ -35,6 +36,7 @@ from docket.vault.processed import (
     parse_doc,
 )
 from docket.vault.records import RawRecord
+from docket.vault.redact import Redactor
 from docket.vault.spans import RawLookup, problem
 from docket.vault.vault import Vault
 
@@ -48,8 +50,9 @@ _POSITION_TAIL = re.compile(r"[@#][\d:-]+$")
 
 
 class PutResult(BaseModel):
-    """What a put did: the doc's rev now, its path, whether anything was written, the commit, and the rev a hand
-    edit was taken in as first, if there was one."""
+    """What a put did: the doc's rev now, its path, whether anything was written, the commit, the rev a hand edit was
+    taken in as first, if there was one, and the markers redaction added to the doc as given, per rule and by line,
+    numbered as `read` numbers the stored doc (DR-0199). No redacted value is ever in it."""
 
     id: str
     rev: int
@@ -57,12 +60,45 @@ class PutResult(BaseModel):
     changed: bool
     commit: str | None = None
     taken_in: int | None = None
+    redactions: dict[str, int] = Field(default_factory=dict[str, int])
+    redacted_lines: list[int] = Field(default_factory=list[int])
+
+
+class Redacting(BaseModel):
+    """A doc the pass redacted (or would, in a dry run): its id, the rev it went in as, the markers per rule, and
+    whether it went in through the take-in of a hand edit."""
+
+    id: str
+    rev: int
+    redactions: dict[str, int]
+    by_hand: bool = False
+
+
+class RedactReport(BaseModel):
+    """What `docket doc redact` did: the docs it redacted, the files it left with why (paths and line numbers, never
+    a value), and the commit."""
+
+    dry_run: bool
+    docs: list[Redacting] = Field(default_factory=list[Redacting])
+    left: list[str] = Field(default_factory=list[str])
+    commit: str | None = None
+
+    @property
+    def counts(self) -> dict[str, int]:
+        total: dict[str, int] = {}
+        for doc in self.docs:
+            for rule, n in doc.redactions.items():
+                total[rule] = total.get(rule, 0) + n
+        return dict(sorted(total.items()))
 
 
 class DocStore:
     def __init__(self, vault: Vault) -> None:
         self.vault = vault
         self.root = vault.root
+        # The rules vault.yaml has as the vault was opened: every text this store commits passes them (DR-0195).
+        self.redactor = Redactor.from_config(vault.config.redaction)
+        self.lists = vault.config.never_store
 
     # -- reading ---------------------------------------------------------------------------------------------------
 
@@ -154,11 +190,12 @@ class DocStore:
         if not _reads_back(doc):
             message = "the frontmatter can't be written so that it reads back the same; a value holds what YAML can't"
             raise DocRefusedError([DocProblem(None, message)])
+        doc, redacted = derived.check(doc, head[1 : doc.head_lines - 1], self.redactor, self.lists)
         problems = self._against_raw(doc, head)
         if problems:
             raise DocRefusedError(problems)
         with self.vault.writing():
-            return self._put_locked(doc, head)
+            return self._put_locked(doc, head, redacted)
 
     def _against_raw(self, doc: ProcessedDoc, head: list[str]) -> list[DocProblem]:
         """What the raw log decides: every covered rid is in it, and every content line's anchors resolve."""
@@ -202,8 +239,8 @@ class DocStore:
                     problems.append(DocProblem(n, f"{anchor.token}: {why}", line))
         return problems
 
-    def _put_locked(self, doc: ProcessedDoc, head: list[str]) -> PutResult:
-        result, text = self._check_locked(doc, head)
+    def _put_locked(self, doc: ProcessedDoc, head: list[str], redacted: derived.Redacted) -> PutResult:
+        result, text = self._check_locked(doc, head, redacted)
         if text is None:
             return result
         commit = self._write_all_and_commit([(result.path, text)], f"Doc: {result.id} rev {result.rev}")
@@ -214,30 +251,32 @@ class DocStore:
         ones are written and committed together, the commit's body holding a `Doc: <id> rev <n>` line for each. If a
         write or the commit fails, every file goes back as it was and nothing stays staged."""
         out: list[PutResult | DocRefusedError | None] = [None] * len(texts)
-        ready: list[tuple[int, ProcessedDoc, list[str]]] = []
+        ready: list[tuple[int, ProcessedDoc, list[str], derived.Redacted]] = []
         for i, text in enumerate(texts):
             head = normalize_newlines(text.removeprefix("﻿")).split("\n")
             try:
                 doc = parse_doc(text)
-                problems = [] if _reads_back(doc) else [DocProblem(None, "the frontmatter can't be written back")]
-                problems += self._against_raw(doc, head)
+                if not _reads_back(doc):
+                    raise DocRefusedError([DocProblem(None, "the frontmatter can't be written back")])
+                doc, redacted = derived.check(doc, head[1 : doc.head_lines - 1], self.redactor, self.lists)
+                problems = self._against_raw(doc, head)
             except DocRefusedError as e:
                 out[i] = e
                 continue
             if problems:
                 out[i] = DocRefusedError(problems)
             else:
-                ready.append((i, doc, head))
+                ready.append((i, doc, head, redacted))
         writes: list[tuple[int, PutResult, str]] = []
         with self.vault.writing():
             seen: set[str] = set()
-            for i, doc, head in ready:
+            for i, doc, head, redacted in ready:
                 if doc.meta.id in seen:
                     out[i] = DocRefusedError([DocProblem(None, f"{doc.meta.id} is in this batch twice")])
                     continue
                 seen.add(doc.meta.id)
                 try:
-                    result, text = self._check_locked(doc, head)
+                    result, text = self._check_locked(doc, head, redacted)
                 except DocRefusedError as e:
                     out[i] = e
                     continue
@@ -262,23 +301,34 @@ class DocStore:
                 revs[m.group(1)] = max(revs.get(m.group(1), 0), int(m.group(2)))
         return revs
 
-    def _check_locked(self, doc: ProcessedDoc, head: list[str]) -> tuple[PutResult, str | None]:
+    def _check_locked(
+        self, doc: ProcessedDoc, head: list[str], redacted: derived.Redacted
+    ) -> tuple[PutResult, str | None]:
         """Under the lock: take in a hand edit, then check the rev and supersedes. The result, and the text to write at
-        the next rev, or None when nothing changed."""
+        the next rev, or None when nothing changed. `doc` is redacted already, and `redacted` says what changed."""
         meta = doc.meta
         rel = doc_path(meta.id).as_posix()
         path = self.root / rel
         history = self.history(meta.id)
         stored = max((n for n, _ in history), default=0)
         taken_in: int | None = None
+        counts, lines = _told(redacted, doc.render(rev=0))
         on_disk = self.read_file(path) if path.is_file() else None
         if on_disk is not None:
             written = normalize_newlines(self._blob(history[0][1], meta.id)) if history else None
             if normalize_newlines(on_disk) != written:
-                taken_in, on_disk = self._take_in(meta.id, path, on_disk, stored)
+                taken_in, on_disk = self._take_in(meta.id, path, on_disk, stored, written)
                 stored = taken_in
         if on_disk is not None and parse_doc(on_disk, lenient=True).render(rev=0) == doc.render(rev=0):
-            return PutResult(id=meta.id, rev=stored, path=rel, changed=False, taken_in=taken_in), None
+            return PutResult(
+                id=meta.id,
+                rev=stored,
+                path=rel,
+                changed=False,
+                taken_in=taken_in,
+                redactions=counts,
+                redacted_lines=lines,
+            ), None
         problems: list[DocProblem] = []
         rev_line = key_line(head[1 : doc.head_lines - 1], "rev")
         if not stored and meta.rev:
@@ -291,7 +341,10 @@ class DocStore:
         if problems:
             raise DocRefusedError(problems)
         rev = stored + 1
-        return PutResult(id=meta.id, rev=rev, path=rel, changed=True, taken_in=taken_in), doc.render(rev=rev)
+        result = PutResult(
+            id=meta.id, rev=rev, path=rel, changed=True, taken_in=taken_in, redactions=counts, redacted_lines=lines
+        )
+        return result, doc.render(rev=rev)
 
     def _supersedes_problems(self, meta: DocMeta, head: list[str], head_lines: int) -> list[DocProblem]:
         line = key_line(head[1 : head_lines - 1], "supersedes")
@@ -317,8 +370,10 @@ class DocStore:
             stack.extend(found.meta.supersedes if found is not None else [])
         return False
 
-    def _take_in(self, doc_id: str, path: Path, on_disk: str, stored: int) -> tuple[int, str]:
-        """Commit a hand edit as the next rev, changing only its rev line, so a put made before it can't overwrite it.
+    def _take_in(self, doc_id: str, path: Path, on_disk: str, stored: int, last: str | None) -> tuple[int, str]:
+        """Commit a hand edit as the next rev, so a put made before it can't overwrite it: its body redacted, its
+        frontmatter as written with only the rev line set. Refused when it says a never-store keyword, or its
+        frontmatter holds what redaction would hide, since no marker goes into YAML (DR-0195); the edit stays on disk.
         The rev is one past both the stored rev and the file's own, so the rev line always changes and the commit is
         never empty, even when the user raised it by hand. If the commit fails, the user's bytes go back as they were
         and nothing stays staged."""
@@ -328,9 +383,19 @@ class DocStore:
         except DocRefusedError:
             message = f"{rel} was edited by hand and its frontmatter no longer parses; fix it or check it out again"
             raise DocRefusedError([DocProblem(None, message)]) from None
+        edit = derived.hand_edit(edited.meta.type, on_disk, last, self.redactor, self.lists)
+        if edit.stops:
+            raise DocRefusedError(
+                [
+                    DocProblem(
+                        None, f"{rel} was edited by hand, and its line {n} {what}; edit it or check it out again"
+                    )
+                    for n, what in edit.stops
+                ]
+            )
         rev = max(stored, edited.meta.rev) + 1
         original = path.read_bytes()
-        text = _with_rev(on_disk, rev)
+        text = _with_rev(edit.text, rev)
         self._replace(path, text.encode("utf-8"))
         try:
             self.vault.commit([rel], f"Doc: {doc_id} rev {rev} (edited by hand)")
@@ -339,6 +404,69 @@ class DocStore:
             self._replace(path, original)
             raise
         return rev, text
+
+    # -- the pass ------------------------------------------------------------------------------------------------------
+
+    def redact_all(self, dry_run: bool = False) -> RedactReport:
+        """Redact the docs already stored with the settings as they are now (DR-0210): each doc redaction would change
+        is written as its next rev, all in one commit, its body redacted in the file's own text and only its rev line
+        set, so a doc from a newer Docket keeps what this one doesn't know. A hand edit goes in first through the
+        take-in. A doc the never-store lists forbid, one whose frontmatter as written holds a keyword or what
+        redaction would hide, and a file that doesn't parse or sits where its id doesn't say are left and named."""
+        report = RedactReport(dry_run=dry_run)
+        folder = self.root / "processed"
+        # Each doc to write: its path, the bytes it was read as, the text to write, and what the report says of it.
+        pending: list[tuple[str, bytes, str, Redacting]] = []
+        with self.vault.writing():
+            for path in sorted(folder.rglob("*.md")) if folder.is_dir() else []:
+                rel = path.relative_to(self.root).as_posix()
+                data = path.read_bytes()
+                try:
+                    text = data.decode("utf-8")
+                    doc = parse_doc(text, lenient=True)
+                except (UnicodeDecodeError, DocketError):
+                    report.left.append(f"{rel}: it doesn't parse as a doc; fix it")
+                    continue
+                meta = doc.meta
+                if doc_path(meta.id).as_posix() != rel:
+                    report.left.append(f"{rel}: its id {meta.id} belongs at {doc_path(meta.id)}")
+                    continue
+                history = self.history(meta.id)
+                last = normalize_newlines(self._blob(history[0][1], meta.id)) if history else None
+                stored = max((n for n, _ in history), default=0)
+                edit = derived.hand_edit(meta.type, text, last, self.redactor, self.lists)
+                if edit.stops:
+                    report.left += [f"{rel}: line {n} {what}" for n, what in edit.stops]
+                    continue
+                if not edit.redacted.lines:
+                    continue
+                counts = dict(sorted(edit.redacted.counts.items()))
+                if normalize_newlines(text) != last:
+                    rev = max(stored, meta.rev) + 1
+                    if not dry_run:
+                        rev, _ = self._take_in(meta.id, path, text, stored, last)
+                    report.docs.append(Redacting(id=meta.id, rev=rev, redactions=counts, by_hand=True))
+                    continue
+                pending.append(
+                    (
+                        rel,
+                        data,
+                        _with_rev(edit.text, stored + 1),
+                        Redacting(id=meta.id, rev=stored + 1, redactions=counts),
+                    )
+                )
+            writes: list[tuple[str, str]] = []
+            for rel, data, new, redacting in pending:
+                # A hand edit saved while the pass ran isn't the text it redacted: leave it rather than write over it.
+                if (self.root / rel).read_bytes() != data:
+                    report.left.append(f"{rel}: it changed while the pass ran; run docket doc redact again")
+                    continue
+                report.docs.append(redacting)
+                writes.append((rel, new))
+            if writes and not dry_run:
+                lines = "\n".join(f"Doc: {r.id} rev {r.rev}" for r in report.docs if not r.by_hand)
+                report.commit = self._write_all_and_commit(writes, f"Redact docs: {len(writes)}\n\n{lines}")
+        return report
 
     def _write_all_and_commit(self, files: list[tuple[str, str]], message: str) -> str | None:
         """Write each (path, text) and commit them together. If a write or the commit fails, every file written goes
@@ -407,3 +535,11 @@ def _with_rev(text: str, rev: int) -> str:
     after = next((i for i in range(1, close) if lines[i].startswith("type:")), 0)
     lines.insert(after + 1, f"rev: {rev}")
     return "\n".join(lines)
+
+
+def _told(redacted: derived.Redacted, text: str) -> tuple[dict[str, int], list[int]]:
+    """What a put tells its writer about redaction: the markers added per rule, and the lines of the stored doc they
+    are on, never what they hid."""
+    close = normalize_newlines(text).split("\n").index("---", 1)
+    # The body starts on the line after the closing ---: index close is line close + 1, so body line i is close + 2 + i.
+    return dict(sorted(redacted.counts.items())), [close + 2 + i for i in redacted.lines]

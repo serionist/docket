@@ -10,7 +10,9 @@ A content line ends with its anchors, separated by spaces or tabs:
 Times are offsets from the record's start in whole seconds: `m:ss` or `mm:ss` (minutes up to 99), or `h:mm:ss`. In an
 anchor a rid is written with `%` as `%25` and `]` as `%5D`, and its last `@` or `#` as `%40` or `%23` only when the
 rid's own tail would read as a position; the parser splits at the last `@` or `#` whose rest is a whole position, then
-decodes those four codes and nothing else. Docs in users' vaults depend on all of this: it is a one-way door (DR-0110).
+decodes those four codes and nothing else. A redaction marker, `[redacted:<rule>]`, is text wherever it stands, so a
+secret redacted right before a line's anchors leaves them anchors. Docs in users' vaults depend on all of this: it is
+a one-way door (DR-0198).
 
 Lines and paragraphs are counted the same way for a doc and a record: CRLF and a lone CR read as LF, a line is the text
 between two LFs, a blank line holds only spaces, tabs and no-break spaces, and a paragraph is a run of non-blank lines.
@@ -24,6 +26,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from docket.vault.records import RID
+from docket.vault.redact import MARKER
 
 Kind = Literal["time", "part", "record"]
 
@@ -223,13 +226,14 @@ def _anchor_like(token: str) -> bool:
     return (
         (len(token) > 1 and token[0] == "@" and token[1] in "0123456789")
         or token.startswith("[r:")
-        or _RESERVED.fullmatch(token) is not None
+        or (_RESERVED.fullmatch(token) is not None and MARKER.fullmatch(token) is None)
     )
 
 
 def trailing_anchors(line: str) -> Trailing:
     """The anchors at the end of a line. A table row puts them at the end of its last cell. A token at the end that
-    starts like an anchor but doesn't parse is an error, and so is `[<letters>:...]`, kept for later anchor kinds."""
+    starts like an anchor but doesn't parse is an error, and so is `[<letters>:...]`, kept for later anchor kinds; a
+    redaction marker is text."""
     body = line.rstrip(" \t")
     if body.lstrip(" \t").startswith("|") and body.endswith("|") and len(body.strip(" \t")) > 1:
         body = body[:-1].rstrip(" \t")
@@ -276,7 +280,7 @@ def parse_locator(text: str, doc_types: Collection[str]) -> Locator:
 def split_path_locator(text: str) -> tuple[str, Anchor | None] | None:
     """A path locator, `path [ "@" times ]`: a markdown file's path (`.md` or `.markdown` in any case) and an optional
     time, split at the last `@` whose rest is a whole time. None when the text isn't one. Which doc the path names is
-    for `read` to find: a doc in the vault, else a legacy note's old path (DR-0110 and the old-path locator)."""
+    for `read` to find: a doc in the vault, else a legacy note's old path (DR-0198 and the old-path locator)."""
     value = text.strip()
     path, anchor = value, None
     i = value.rfind("@")

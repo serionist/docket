@@ -36,7 +36,8 @@ Unreleased in the same PR.
 - The vault's raw log: records written once per source and run, deduplicated, committed locally.
 - `docket vault status` and `docket vault check`.
 - The staging gate: every record reaches the raw log through it. Never-store lists and private sources drop records
-  without a trace, mixed sources wait to be classified, and credentials, keys and phone numbers are redacted.
+  without a trace, mixed sources wait to be classified, and credentials and keys are redacted, phone numbers when you
+  turn them on.
 - `docket staging list`, `show`, `classify` (work or private, with cuts) and `promote`.
 - Processed docs with anchors: `docket doc put` stores a summary only when every line points at raw that exists, and
   keeps each change as a revision; `docket doc read` and `docket doc verify` show a doc or a record next to its raw.
@@ -59,3 +60,25 @@ Unreleased in the same PR.
 - `docket sync`: a repo of its own fetches and rebases; a folder leaves it to your own git.
 - `docket vault convert`: a vault that is a repo of its own becomes a folder of the repo around it, history
   included, after a dry run and your yes.
+- `docket redaction` shows which redaction rules run, and `docket redaction set <rule> on|off` changes one;
+  `docket init --no-redact-credentials` and `--redact-phone` choose at setup, and `/docket:setup` asks.
+- `docket doc redact`: the docs already stored, redacted with the settings as they are now. Run it once on every
+  vault after every machine runs this version, and again after turning a rule on or adding a pattern or a keyword.
+
+### Changed
+
+- Redaction is yours to set, rule by rule in `vault.yaml`: credentials (passwords, keys and tokens) on, phone numbers
+  off, each of your own patterns on unless its `enabled` is false. Phone numbers are no longer redacted unless you
+  turn them on: `docket redaction set phone on`. Names are never redacted; the never-store lists keep them out.
+- Turning a rule off leaves the markers already stored, but a record a source sends again lands as a new version
+  holding the value, records you classified wait in staging again, and the next `docket import notes` writes a new
+  rev of each note the rule matched; every vault does this for phone numbers once, after this upgrade.
+- Turning credentials off stores passwords, keys and tokens as written, in raw, docs and git history; turning it back
+  on doesn't remove them from raw.
+- `doc_put` and `docket doc put` redact a doc before storing it, line by line so no anchor moves, and say on which
+  lines; a doc that says something on the never-store keywords list is refused, naming only the lines. The notes
+  import redacts the same way and says how much.
+- A redaction marker before a line's anchors is text, not a bad anchor.
+- Update every machine first: an older Docket keeps redacting phone numbers while `vault.yaml` is in its old form,
+  can't load it once Docket writes the new keys, writes docs unredacted, and refuses to put back a doc holding a
+  marker.

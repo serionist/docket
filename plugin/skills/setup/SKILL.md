@@ -49,6 +49,9 @@ One AskUserQuestion round, your recommendation first in each question:
   repo of its own nested in it. If the session isn't in a git repo at all, say so before going on: a vault there takes
   no sources.
 - **Languages**: the ones they work in, such as `en` and `hu`.
+- **Redaction**: redact credentials (passwords and secrets after a label, API keys and tokens, private keys) before
+  anything is stored? Yes is recommended. As a second option, say that phone numbers can be redacted too: off unless
+  they turn it on. Names are never redacted; a name to keep out goes on the never-store lists in `vault.yaml`.
 
 Show what comes from git and the system, so the user can correct it: their name and emails (`git config user.name`,
 `git config user.email`), the time zone, this machine's name.
@@ -59,7 +62,9 @@ Show what comes from git and the system, so the user can correct it: their name 
 docket init --yes --no-sources --path <path> --storage <folder|repo> --remote none --owner <name> --email <email> --language <code> --time-zone <zone> --machine <name>
 ```
 
-One `--email` and one `--language` per value. Show the user the summary init prints.
+One `--email` and one `--language` per value. Add `--no-redact-credentials` only on the user's no to credentials,
+and `--redact-phone` only on their yes to phone numbers. Show the user the summary init prints. Either can change
+later: `docket redaction set <credentials|phone> <on|off> --vault <path>`.
 
 **A refusal.** Init refuses a folder in a repo that looks shared, a remote it can't check, or a parent repo with
 uncommitted changes. Show the refusal exactly as Docket wrote it and ask about that one check in its own

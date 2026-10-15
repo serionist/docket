@@ -48,6 +48,7 @@ from docket.imports.notes import (
     slug_for,
     words,
 )
+from docket.vault import derived
 from docket.vault.config import NeverStore
 from docket.vault.docstore import DocStore
 from docket.vault.neverstore import matches_text
@@ -823,3 +824,85 @@ def test_a_name_behind_a_safe_link_or_an_old_encoding_reaches_no_doc(vault: Vaul
     for needle in ("dora", "kov", "erd", "safelinks"):
         assert not any(needle in text for text in stored)
         assert needle not in history
+
+
+# -- redaction settings (DR-0190, DR-0191, DR-0197) -----------------------------------------------------------------
+
+PHONE_NOTE = "notes/calls/2026-09-20-cleo-s-line.md"
+PHONE_ID = "legacy-note:2026-09-20-cleo-s-line"
+KEY_NOTE = "notes/keys.md"
+KEY_ID = "legacy-note:keys"
+KEY_BLOCK = "PRIVATE " + "KEY-----"
+
+
+def with_redaction_notes(folder: Path) -> None:
+    """A note holding an invented phone number and one holding a key block over lines, not committed yet."""
+    (folder / "calls" / "2026-09-20-cleo-s-line.md").write_text(
+        "# Cleo's line\n\nShe is on +1 555 010 0188 until Friday.\n", encoding="utf-8"
+    )
+    key = f"# Keys\n\n-----BEGIN OPENSSH {KEY_BLOCK}\nb3BlbnNzaC1rZXktdjEAAAAA\n-----END OPENSSH {KEY_BLOCK}\nafter\n"
+    (folder / "keys.md").write_text(key, encoding="utf-8")
+
+
+def redacting(vault: Vault, **settings: bool) -> Vault:
+    """The vault with redaction switched in memory, as the import reads it."""
+    vault.config = vault.config.model_copy(update={"redaction": vault.config.redaction.model_copy(update=settings)})
+    return vault
+
+
+def test_the_import_counts_what_it_redacted_and_a_key_block_keeps_its_lines(vault: Vault, folder: Path) -> None:
+    with_redaction_notes(folder)
+    report = run(vault, folder)
+    assert report.redactions == {"password": 1, "private-key": 3}
+    store = DocStore(vault)
+    phone = store.get(PHONE_ID)
+    assert phone is not None
+    assert "+1 555 010 0188" in phone.body
+    keys = store.get(KEY_ID)
+    assert keys is not None
+    assert keys.body == "# Keys\n\n" + "[redacted:private-key]\n" * 3 + "after\n"
+    assert run(vault, folder).redactions == {}
+
+
+def test_a_dry_run_counts_what_it_would_redact(vault: Vault, folder: Path) -> None:
+    with_redaction_notes(folder)
+    assert run(vault, folder, dry_run=True).redactions == {"password": 1, "private-key": 3}
+
+
+@pytest.mark.parametrize("edited", [False, True], ids=["as-imported", "edited-in-the-vault"])
+def test_an_import_after_phone_goes_off_writes_one_new_rev_of_a_note_holding_a_number(
+    vault: Vault, folder: Path, monkeypatch: pytest.MonkeyPatch, edited: bool
+) -> None:
+    with_redaction_notes(folder)
+
+    def whole_text(_doc_type: str, body: str, redactor: Any) -> Any:
+        # The import before this change: one redaction over the whole body, a key block folded into one marker.
+        counts: Counter[str] = Counter()
+        return derived.Redacted(redactor.text(body, counts), counts, [])
+
+    with monkeypatch.context() as patched:
+        patched.setattr(derived, "redact", whole_text)
+        first = run(redacting(vault, phone=True), folder)
+    assert first.new == 11
+    if edited:
+        set_body(vault, PHONE_ID, "# Cleo's line\n\nShe is on [redacted:phone], edited in the vault.\n")
+    report = run(redacting(vault, phone=False), folder)
+    # The key block's note moves to the redaction that keeps lines; the phone number's, to the number as written.
+    assert (report.updated, report.new) == (1 if edited else 2, 0)
+    assert [kept.doc for kept in report.kept] == ([PHONE_ID] if edited else [])
+    store = DocStore(vault)
+    phone = store.get(PHONE_ID)
+    keys = store.get(KEY_ID)
+    assert phone is not None and keys is not None
+    assert ("edited in the vault" in phone.body) if edited else ("+1 555 010 0188" in phone.body)
+    assert keys.body.count("[redacted:private-key]") == 3
+
+
+def test_turning_phone_on_writes_each_note_holding_a_number_as_its_next_rev(vault: Vault, folder: Path) -> None:
+    with_redaction_notes(folder)
+    run(vault, folder)
+    report = run(redacting(vault, phone=True), folder)
+    assert (report.updated, report.redactions) == (1, {"phone": 1})
+    phone = DocStore(vault).get(PHONE_ID)
+    assert phone is not None
+    assert "[redacted:phone]" in phone.body

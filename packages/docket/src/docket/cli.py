@@ -17,6 +17,7 @@ import typer
 from docket import __version__, index, recall, render, userconfig
 from docket.errors import DocketError
 from docket.imports import notes
+from docket.index.build import db_path
 from docket.render import printable
 from docket.service.platforms import Installer
 from docket.service.token import Tokens
@@ -24,7 +25,8 @@ from docket.sources import release, scaffold
 from docket.sources.contract import Manifest
 from docket.sources.ingest import IngestReport, ingest_run
 from docket.sources.runner import MapperFailedError
-from docket.vault import convert, cuts, holds, releaselog
+from docket.vault import convert, cuts, holds, redaction, releaselog
+from docket.vault.docstore import DocStore
 from docket.vault.gate import Gate, Label
 from docket.vault.processed import DocRefusedError
 from docket.vault.records import RawRecord, source_name_problem
@@ -66,6 +68,10 @@ hold_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(hold_app, name="hold")
+redaction_app = typer.Typer(
+    help="Which redaction rules run: credentials (on by default), phone numbers (off), your own patterns.",
+)
+app.add_typer(redaction_app, name="redaction")
 SENSITIVITIES = ("work", "mixed", "private")
 # The Claude Code plugin's hooks run these; they print what Claude Code reads, not what a person does.
 hook_app = typer.Typer(help="What the Claude Code plugin's hooks run.", no_args_is_help=True)
@@ -168,6 +174,16 @@ def init(
     allow_shared: Annotated[bool, typer.Option(help="Keep a folder vault in a repo others commit to.")] = False,
     allow_dirty_parent: Annotated[bool, typer.Option(help="Nest in a repo with uncommitted changes.")] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Take the defaults and don't ask.")] = False,
+    redact_credentials: Annotated[
+        bool,
+        typer.Option(
+            "--redact-credentials/--no-redact-credentials",
+            help="Redact passwords, keys and tokens before anything is stored; on by default.",
+        ),
+    ] = True,
+    redact_phone: Annotated[
+        bool, typer.Option("--redact-phone/--no-redact-phone", help="Redact phone numbers too; off by default.")
+    ] = False,
 ) -> None:
     """Set up a vault: a folder of the repo you work in, or a repo of its own."""
     given = Given(
@@ -185,6 +201,8 @@ def init(
         allow_shared=allow_shared,
         allow_dirty_parent=allow_dirty_parent,
         yes=yes,
+        redact_credentials=redact_credentials,
+        redact_phone=redact_phone,
     )
     Wizard(TyperPrompter(), given).run()
 
@@ -374,6 +392,39 @@ def hold_release(
     if report.released:
         rows.append("next       docket staging promote")
     say_all(rows or ["nothing to release"])
+
+
+@redaction_app.callback(invoke_without_command=True)
+def redaction_show(ctx: typer.Context, vault: VaultOption = None) -> None:
+    """Which redaction rules run: credentials, phone numbers, your own patterns. Names are never redacted."""
+    # `docket redaction --vault <path> set ...` names the vault before the subcommand: set takes it from here.
+    ctx.obj = vault
+    if ctx.invoked_subcommand is None:
+        say_all(redaction.describe(find_vault(vault).config.redaction))
+
+
+@redaction_app.command("set")
+def redaction_set(
+    ctx: typer.Context,
+    rule: Annotated[str, typer.Argument(help="credentials, phone, or one of your patterns by its name.")],
+    state: Annotated[str, typer.Argument(help="on or off.")],
+    vault: VaultOption = None,
+) -> None:
+    """Turn one redaction rule on or off in vault.yaml, and commit it."""
+    if state not in ("on", "off"):
+        raise DocketError(f"the setting is on or off, not {state!r}")
+    named: Path | None = vault if vault is not None else ctx.obj
+    done = redaction.set_rule(find_vault(named), rule, state == "on")
+    if done.by_hand is not None:
+        say(f"vault.yaml has comments or a layout of your own, so it is left as it is; set it there: {done.by_hand}")
+    elif done.changed:
+        say(f"redact   {rule} {state}" + (f", committed {done.commit[:12]}" if done.commit else ""))
+    else:
+        say(f"redact   {rule} is {state} already")
+    for note in done.notes:
+        say(f"note     {note}")
+    if done.by_hand is not None:
+        raise typer.Exit(1)
 
 
 def _ingest_report(report: IngestReport) -> None:
@@ -607,6 +658,24 @@ def doc_verify(
     say_all(render.verify(recall.verify(find_vault(vault), doc, lines=line or None, window=window)))
 
 
+@doc_app.command("redact")
+def doc_redact(
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Say what would change, and write nothing.")] = False,
+    vault: VaultOption = None,
+) -> None:
+    """Redact the docs already stored, with vault.yaml's settings as they are now: once after upgrading, and again
+    after turning a rule on or adding a pattern or a never-store keyword."""
+    found = find_vault(vault)
+    report = DocStore(found).redact_all(dry_run=dry_run)
+    say_all(render.redacted(report, found.config.storage))
+    if report.docs and not dry_run and db_path(found).exists():
+        # A new file, so the old text isn't left in free pages or the full-text index's deleted entries.
+        index.rebuild(found, "docs were redacted")
+        say("index    rebuilt here; on another machine, run docket index rebuild after it pulls")
+    if report.left:
+        raise typer.Exit(1)
+
+
 def _report(report: index.BuildReport) -> None:
     if report.rebuilt:
         say(f"rebuilt{f' ({report.reason})' if report.reason else ''} in {report.seconds:.1f} s")
@@ -730,6 +799,8 @@ def import_notes(
         say("skipped  " + ", ".join(f"{why} {n}" for why, n in report.skipped.items()))
     for line in report.reported:
         say(f"         {line}")
+    if report.redactions:
+        say("redacted " + ", ".join(f"{n} {rule}" for rule, n in report.redactions.items()))
     if report.dry_run:
         say("dry run: nothing written")
     elif report.commit:

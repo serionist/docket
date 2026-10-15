@@ -16,6 +16,7 @@ from docket import recall
 from docket.errors import DocketError
 from docket.vault import processed
 from docket.vault.anchors import format_anchor
+from docket.vault.config import VaultConfig
 from docket.vault.docstore import DocStore
 from docket.vault.processed import DocRefusedError, double_quoted
 from docket.vault.vault import Vault
@@ -465,12 +466,13 @@ def test_a_frontmatter_that_wouldnt_read_back_is_refused(
     rid = "mail:<a\x7fb@example.invalid>"
     vault.write_run("mail", [make_record(rid=rid, source="mail", kind="mail", text="junk")], run_at=at(12))
     monkeypatch.setattr(processed, "_scalar", broken)
-    problems = refused(
-        vault, note("digest:2026-10-14-junk", covers=[double_quoted(rid)], lines=[f"- junk {format_anchor(rid)}"])
-    )
-    assert problems == [
+    text = note("digest:2026-10-14-junk", covers=[double_quoted(rid)], lines=[f"- junk {format_anchor(rid)}"])
+    assert refused(vault, text) == [
         "doc: the frontmatter can't be written so that it reads back the same; a value holds what YAML can't"
     ]
+    [many] = DocStore(vault).put_many([text], "x")
+    assert isinstance(many, DocRefusedError)
+    assert [str(p) for p in many.problems] == ["doc: the frontmatter can't be written back"]
 
 
 def test_doc_blobs_dont_go_through_git_show(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -598,3 +600,148 @@ def test_put_many_puts_every_file_back_when_the_commit_fails(vault: Vault, monke
     assert one.read_bytes() == before
     assert not (vault.root / "processed" / "legacy-note" / "two.md").exists()
     assert staged(vault) == ""
+
+
+# -- redaction and never-store (DR-0195) ---------------------------------------------------------------------------
+
+PHONE = "+1 555 010 0188"
+SECRET = "hunter2-" + "Example"
+TOKEN = "abc123" + "def456"
+
+
+def with_settings(vault: Vault, phone: bool = True, keywords: list[str] | None = None) -> Vault:
+    """The vault with phone redaction and the keywords set in vault.yaml, committed, opened again."""
+    path = vault.root / "vault.yaml"
+    config = VaultConfig.load(path)
+    config.redaction.phone = phone
+    config.never_store.keywords = keywords or []
+    path.write_text(config.dump(), encoding="utf-8", newline="\n")
+    hand_commit(vault, "settings")
+    return Vault.open(vault.root)
+
+
+def log_p(vault: Vault) -> str:
+    return sh(vault.root, "git", "log", "-p", "--all")
+
+
+def test_a_put_stores_markers_and_says_where_never_what(vault: Vault) -> None:
+    vault = with_settings(vault)
+    lines = [f"- Cleo's direct line is {PHONE} @12:08", f"- the wifi password: {SECRET} @14:30"]
+    result = recall.doc_put(vault, note(lines=lines))
+    stored = (vault.root / NOTE_PATH).read_text(encoding="utf-8")
+    assert stored.endswith(
+        "- Cleo's direct line is [redacted:phone] @12:08\n- the wifi password: [redacted:password] @14:30\n"
+    )
+    assert (result.redactions, result.redacted_lines) == ({"password": 1, "phone": 1}, [14, 15])
+    assert stored.split("\n")[13] == "- Cleo's direct line is [redacted:phone] @12:08"
+    assert PHONE not in log_p(vault)
+    assert SECRET not in log_p(vault)
+    again = recall.doc_put(vault, note(rev="1", lines=lines))
+    assert (again.changed, again.rev, again.redacted_lines) == (False, 1, [14, 15])
+
+
+def test_the_defaults_keep_a_phone_number(vault: Vault) -> None:
+    result = recall.doc_put(vault, note(lines=[f"- Cleo's direct line is {PHONE} @12:08"]))
+    assert (result.redactions, result.redacted_lines) == ({}, [])
+    assert PHONE in (vault.root / NOTE_PATH).read_text(encoding="utf-8")
+
+
+def test_a_never_store_doc_is_refused_and_writes_nothing(vault: Vault) -> None:
+    vault = with_settings(vault, keywords=["dora example"])
+    before = head(vault)
+    problems = refused(vault, note(lines=["- Dora Example called @12:08", "- a bad anchor @1:60"]))
+    assert problems == ["line 11: says something on the never-store keywords list; leave it out"]
+    assert head(vault) == before
+    assert not (vault.root / NOTE_PATH).exists()
+    assert "dora" not in log_p(vault).lower().replace("dora example", "")
+
+
+def test_an_anchor_problem_quotes_the_redacted_line(vault: Vault) -> None:
+    vault = with_settings(vault)
+    problems = refused(vault, note(lines=[f"- Cleo on {PHONE}, no anchor"]))
+    assert problems == [
+        'line 11 ("- Cleo on [redacted:phone], no anchor"): no anchors at the end of the line: @mm:ss or [r:<rid>]'
+    ]
+
+
+def test_put_many_screens_and_redacts_each_doc(vault: Vault) -> None:
+    vault = with_settings(vault, keywords=["dora example"])
+    store = DocStore(vault)
+    kept, refused_one = store.put_many([legacy("one", f"Call {PHONE}."), legacy("two", "About Dora Example.")], "x")
+    assert not isinstance(kept, DocRefusedError)
+    assert kept.redactions == {"phone": 1}
+    assert isinstance(refused_one, DocRefusedError)
+    assert (
+        (vault.root / "processed" / "legacy-note" / "one.md")
+        .read_text(encoding="utf-8")
+        .endswith("Call [redacted:phone].\n")
+    )
+
+
+def test_a_hand_edit_with_a_credential_is_taken_in_redacted(vault: Vault) -> None:
+    vault = with_settings(vault)
+    recall.doc_put(vault, note())
+    hand_edit(vault, "10 million forints.", f"10 million forints, password: {SECRET}")
+    assert any("is at rev 2 now" in p for p in refused(vault, note(rev="1", lines=["- stale @12:08"])))
+    assert sh(vault.root, "git", "log", "-1", "--format=%s") == f"Doc: {NOTE_ID} rev 2 (edited by hand)\n"
+    assert "password: [redacted:password] @12:08" in (vault.root / NOTE_PATH).read_text(encoding="utf-8")
+    assert SECRET not in log_p(vault)
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "what"),
+    [
+        ("10 million forints.", "10 million forints, Dora Example said.", "says something on the never-store"),
+        ("by: claude-test", "# a call with Dora Example\nby: claude-test", "says something on the never-store"),
+        ("by: claude-test", "entities: []  # Dora Example asked\nby: claude-test", "says something on the never-store"),
+        ("by: claude-test", "title: Dora Example supplier call\nby: claude-test", "says something on the never-store"),
+        ("by: claude-test, sync 2026-10-14T16:07", "by: Dora Example", "says something on the never-store"),
+        ("by: claude-test", f"# her line {PHONE}\nby: claude-test", "holds what the phone rule would redact"),
+        ("  - calls:rec-0042", "  - calls:rec-0042\n  - calls:+15550100188", "holds what the phone rule would redact"),
+        # A key that is a label is read with its value, and a key this Docket doesn't know is screened with its name.
+        ("by: claude-test", f"password: {SECRET}\nby: claude-test", "holds what the password rule would redact"),
+        ("by: claude-test", f"db_password: {SECRET}\nby: claude-test", "holds what the password rule would redact"),
+        ("by: claude-test", f"token: {TOKEN}\nby: claude-test", "holds what the api-key rule would redact"),
+        ("by: claude-test", "phone: 555 010 0188\nby: claude-test", "holds what the phone rule would redact"),
+        ("by: claude-test", "dora_example: yes\nby: claude-test", "says something on the never-store"),
+        ("supersedes: []", "supersedes: []  # a call with Dora Example", "says something on the never-store"),
+        ("supersedes: []", "supersedes:  # a call with Dora Example", "says something on the never-store"),
+        # A label and its value, or a keyword's words, over two lines.
+        ("by: claude-test", f"notes: |\n  the wifi password:\n  {SECRET}\nby: claude-test", "the password rule"),
+        (
+            "by: claude-test",
+            "# notes on the dora\n# example call\nby: claude-test",
+            "says something on the never-store",
+        ),
+        # Only the rev line the take-in rewrites is left out.
+        ("rev: 1\n", f"rev : 1  # password: {SECRET}\n", "holds what the password rule would redact"),
+        ("rev: 1\n", f"rev: 1\nrev: 1  # password: {SECRET}\n", "holds what the password rule would redact"),
+    ],
+)
+def test_a_hand_edit_that_says_a_keyword_or_holds_a_secret_in_its_frontmatter_is_refused(
+    vault: Vault, old: str, new: str, what: str
+) -> None:
+    vault = with_settings(vault, keywords=["dora example"])
+    recall.doc_put(vault, note())
+    before = head(vault)
+    hand_edit(vault, old, new)
+    edited = (vault.root / NOTE_PATH).read_text(encoding="utf-8")
+    problems = refused(vault, note(rev="1", lines=["- an edit @12:08"]))
+    assert problems
+    for problem in problems:
+        assert problem.startswith(f"doc: {NOTE_PATH} was edited by hand, and its line ")
+        assert what in problem
+        assert problem.endswith("; edit it or check it out again")
+        assert "dora" not in problem.lower()
+        assert SECRET not in problem
+    assert head(vault) == before
+    assert (vault.root / NOTE_PATH).read_text(encoding="utf-8") == edited
+    assert "[redacted" not in edited.split("---")[1]
+
+
+def test_frontmatter_left_as_docket_wrote_it_passes(vault: Vault) -> None:
+    vault = with_settings(vault, keywords=["dora example"])
+    recall.doc_put(vault, note(by="claude-test 2026"))
+    hand_edit(vault, "10 million forints.", "10 million forints, net.")
+    refused(vault, note(rev="1", lines=["- stale @12:08"]))
+    assert sh(vault.root, "git", "log", "-1", "--format=%s") == f"Doc: {NOTE_ID} rev 2 (edited by hand)\n"

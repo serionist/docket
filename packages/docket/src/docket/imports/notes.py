@@ -3,7 +3,8 @@
 The folder is only read. In a git repo it is listed through git's own ignore rules, with git told not to refresh that
 repo's index, so a note the user kept out of git never reaches the vault and nothing in the repo changes; outside a
 repo it is walked, dot folders left out. Every listed path is screened against the never-store keywords before
-anything logs, reports or reads it, then each note's text is screened and redacted.
+anything logs, reports or reads it, then each note's text is screened and redacted, line by line as every doc is
+(DR-0197).
 
 A legacy doc follows its note: `import_hash` is the hash of the body the import last wrote, so a re-run writes a new
 rev only when the note changed, new covers were found, or a new redaction rule changes the body. An edit made in the
@@ -21,7 +22,7 @@ import subprocess
 import unicodedata
 from collections import Counter
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Literal
@@ -30,6 +31,7 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field
 
 from docket.errors import DocketError
+from docket.vault import derived
 from docket.vault.anchors import normalize_newlines
 from docket.vault.config import NeverStore
 from docket.vault.docstore import DocStore
@@ -117,6 +119,8 @@ class ImportReport(BaseModel):
     refused: list[str] = Field(default_factory=list[str])
     reported: list[str] = Field(default_factory=list[str])
     skipped: dict[str, int] = Field(default_factory=dict[str, int])
+    # The markers redaction added to the notes this run writes (or would, in a dry run), per rule.
+    redactions: dict[str, int] = Field(default_factory=dict[str, int])
     commit: str | None = None
 
     @property
@@ -150,6 +154,7 @@ class Plan:
     rev: int
     text: str
     count: str
+    redacted: Counter[str] = field(default_factory=Counter[str])
 
 
 # -- the folder ---------------------------------------------------------------------------------------------------
@@ -398,7 +403,8 @@ def import_notes(
         if matches_text(body, lists):
             skipped["never-store"] += 1
             continue
-        new_body = canonical(redactor.text(body))
+        redacted = derived.redact(derived.LEGACY, body, redactor)
+        new_body = canonical(redacted.body)
         new_hash = body_hash(new_body)
         found = names.covers(item, new_body)
         report.covered += bool(found)
@@ -412,7 +418,8 @@ def import_notes(
             if gone_id is not None:
                 if take is not None and take.side == "note" and take.hash == short(new_hash):
                     meta = _meta(gone_id, found, [item.old_path], new_hash)
-                    plans.append(Plan(item, gone_id, revs[gone_id], _text(meta, new_body, revs[gone_id]), "updated"))
+                    text = _text(meta, new_body, revs[gone_id])
+                    plans.append(Plan(item, gone_id, revs[gone_id], text, "updated", redacted.counts))
                     continue
                 if take is not None:
                     why = "only note brings back a deleted doc" if take.side == "vault" else "the note changed since"
@@ -425,7 +432,7 @@ def import_notes(
                 continue
             taken.add(doc_id)
             meta = _meta(doc_id, found, [item.old_path], new_hash)
-            plans.append(Plan(item, doc_id, 0, _text(meta, new_body, 0), "new"))
+            plans.append(Plan(item, doc_id, 0, _text(meta, new_body, 0), "new", redacted.counts))
             continue
         plan = _decide(
             item,
@@ -437,6 +444,7 @@ def import_notes(
             take=take,
             report=report,
             dirty=dirty,
+            redacted=redacted.counts,
         )
         if plan is not None:
             plans.append(plan)
@@ -526,8 +534,10 @@ def _decide(
     take: Take | None,
     report: ImportReport,
     dirty: set[str],
+    redacted: Counter[str] | None = None,
 ) -> Plan | None:
-    """The Re-running table, for a note whose doc exists: what to write, or None."""
+    """The Re-running table, for a note whose doc exists: what to write, or None. `redacted` is what redaction added
+    to the note's body, counted when that body is the one written."""
     meta = doc.meta
     rev = revs.get(meta.id, 0)
     stored_body = canonical(doc.body)
@@ -538,7 +548,8 @@ def _decide(
     def plan(body: str, by: str, import_hash: str, count: str) -> Plan:
         fields = {**keep, "by": by}
         updated = _meta(meta.id, covers, meta.old_paths, import_hash, **fields)
-        return Plan(item, meta.id, rev, _text(updated, body, rev), count)
+        added = Counter(redacted) if redacted is not None and body is new_body else Counter[str]()
+        return Plan(item, meta.id, rev, _text(updated, body, rev), count, added)
 
     if new_hash == meta.import_hash:
         if covers != meta.covers:
@@ -570,8 +581,9 @@ def _write(store: DocStore, plans: list[Plan], report: ImportReport, prefix: str
     on disk first) is decided once more at its new rev; a second refusal is reported."""
     counts = Counter(p.count for p in plans)
     if report.dry_run or not plans:
-        _tally(report, counts)
+        _tally(report, counts, sum((p.redacted for p in plans), Counter[str]()))
         return
+    redacted = Counter[str]()
     subject = f"Import notes: {counts['new']} new, {len(plans) - counts['new']} updated from {prefix or '.'}"
     results = store.put_many([p.text for p in plans], subject)
     retry: list[Plan] = []
@@ -582,8 +594,9 @@ def _write(store: DocStore, plans: list[Plan], report: ImportReport, prefix: str
             else:
                 counts[p.count] -= 1
                 report.refused.append(f"{p.listed.old_path}: {result}")
-        elif result.commit is not None:
-            report.commit = result.commit
+        else:
+            redacted += p.redacted
+            report.commit = result.commit or report.commit
     for p in retry:
         counts[p.count] -= 1
     again = _again(store, retry, report, takes)
@@ -592,8 +605,9 @@ def _write(store: DocStore, plans: list[Plan], report: ImportReport, prefix: str
             report.refused.append(f"{p.listed.old_path}: {result}")
             continue
         counts[p.count] += 1
+        redacted += p.redacted
         report.commit = result.commit or report.commit
-    _tally(report, counts)
+    _tally(report, counts, redacted)
 
 
 def _again(store: DocStore, retry: list[Plan], report: ImportReport, takes: dict[str, Take]) -> list[Plan]:
@@ -618,13 +632,15 @@ def _again(store: DocStore, retry: list[Plan], report: ImportReport, takes: dict
             take=takes.get(p.listed.old_path),
             report=report,
             dirty=set(),
+            redacted=p.redacted,
         )
         if decided is not None:
             out.append(decided)
     return out
 
 
-def _tally(report: ImportReport, counts: Counter[str]) -> None:
+def _tally(report: ImportReport, counts: Counter[str], redacted: Counter[str]) -> None:
+    report.redactions = dict(sorted((+redacted).items()))
     report.new += counts["new"]
     report.updated += counts["updated"]
     report.covers += counts["covers"]

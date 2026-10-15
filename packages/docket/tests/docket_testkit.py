@@ -197,6 +197,22 @@ def git(cwd: Path, *args: str) -> str:
     return sh(cwd, "git", "-c", "user.name=Ada Example", "-c", "user.email=ada@example.invalid", *args)
 
 
+def configure(
+    root: Path, *, credentials: bool | None = None, phone: bool | None = None, keywords: list[str] | None = None
+) -> None:
+    """A vault's redaction and never-store settings changed in its vault.yaml and committed, as the user would."""
+    path = root / "vault.yaml"
+    config = VaultConfig.load(path)
+    if credentials is not None:
+        config.redaction.credentials = credentials
+    if phone is not None:
+        config.redaction.phone = phone
+    if keywords is not None:
+        config.never_store.keywords = keywords
+    path.write_text(config.dump(), encoding="utf-8", newline="\n")
+    git(root, "commit", "-qm", "Settings", "--", "vault.yaml")
+
+
 def host_repo(tmp_path: Path) -> Path:
     """A user's repo with two files in one commit and a bare origin it pushed to: the host a folder vault lives in."""
     sh(tmp_path, "git", "init", "-q", "--bare", "-b", "main", "origin.git")

@@ -79,8 +79,9 @@ flowchart LR
 - The gate applies, in order: the never-store lists in `vault.yaml` (people, channels, chats, keywords); rules per
   source (a recorder's folder or tag, a work calendar); then, for sources that can carry private content (call
   recordings), a classification by Claude or by the user. Cuts of non-work stretches are applied to the transcript and
-  the audio here. Redaction (credentials, phone numbers, the user's rules) runs here on every text, and again on every
-  derived text later.
+  the audio here. Redaction runs here on every text, and again on every derived text later: credentials by default,
+  phone numbers and the user's own patterns when the user turns them on, each switched in `vault.yaml` (DR-0190).
+  Names are never redacted; the never-store lists keep them out (DR-0194).
 - Only then are records written to the raw log and committed. An unclassified record waits in staging; the app
   shows how many.
 - A held recording goes in only once its owner releases it, typing back a code at their own console for the cuts
@@ -127,7 +128,7 @@ sequenceDiagram
 
 - `verify` is mechanical because every line carries anchors: `@12:08` within a single-record note, or `[r:<rid>@12:08]`
   when a doc covers several records; `[r:<rid>#2]` points at a paragraph of a mail or message and `[r:<rid>]` at a whole
-  record (DR-0110).
+  record (DR-0198).
 - People and entity filters are boosts with a fallback, not hard filters: an unlabelled speaker would otherwise drop
   the very chunk that holds the answer.
 - A correction propagates. Every ledger item, decision and brief line records what it was built from
@@ -327,9 +328,12 @@ supersedes: []
 entities: [marco, northwind, fleet-management]
 ```
 
-Every bullet ends with its anchors. Docs are written through the `doc_put` tool, which checks the frontmatter and that
-every anchor resolves before it accepts the doc. A doc lives at `processed/<type>/<yyyy>/<mm>/<slug>.md` when its slug
-starts with a date, else `processed/<type>/<slug>.md` (DR-0109). A changed doc is its next rev, and git history keeps
+Every bullet ends with its anchors. Docs are written through the `doc_put` tool, which redacts the doc line by line,
+refuses one that says something on the never-store keywords list, then checks the frontmatter and that every anchor
+resolves before it accepts the doc (DR-0195). The notes import and a hand edit taken in pass the same rules, and
+`docket doc redact` applies them to the docs already stored (DR-0210). A doc lives at
+`processed/<type>/<yyyy>/<mm>/<slug>.md` when its slug starts with a date, else `processed/<type>/<slug>.md`
+(DR-0109). A changed doc is its next rev, and git history keeps
 the earlier ones (DR-0112).
 
 ### 5.4 The index database

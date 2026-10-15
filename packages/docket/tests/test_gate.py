@@ -244,6 +244,63 @@ def test_a_cut_lands_where_the_user_chose_when_the_rules_change_before_promotion
     assert in_raw(vault)[0].text == f"[redacted:project] notes. {CUT_MARKER}done."
 
 
+# -- the redaction settings ----------------------------------------------------------------------------------------
+
+PHONE = "+1 555 010 0199"
+
+
+def phone(on: bool) -> Callable[[VaultConfig], object]:
+    return lambda c: setattr(c.redaction, "phone", on)
+
+
+def test_the_defaults_redact_a_password_and_keep_a_phone_number(gate: Gate, vault: Vault) -> None:
+    gate.stage([make_record(1, text=f"password: {SECRET}, call {PHONE}", native={"password": SECRET, "mobile": PHONE})])
+    gate.promote()
+    [record] = in_raw(vault)
+    assert record.text == f"password: [redacted:password], call {PHONE}"
+    assert record.native == {"password": "[redacted:password]", "mobile": PHONE}
+
+
+def test_phone_on_redacts_both_and_credentials_off_keeps_a_password(gate: Gate, vault: Vault) -> None:
+    rewrite(vault, phone(True))
+    gate.stage([make_record(1, text=f"password: {SECRET}, call {PHONE}", native={"mobile": PHONE})])
+    gate.promote()
+    rewrite(vault, lambda c: setattr(c.redaction, "credentials", False))
+    gate.stage([make_record(2, text=f"password: {SECRET}, call {PHONE}", native={"password": SECRET})])
+    gate.promote()
+    first, second = in_raw(vault)
+    assert (first.text, first.native) == (
+        "password: [redacted:password], call [redacted:phone]",
+        {"mobile": "[redacted:phone]"},
+    )
+    assert (second.text, second.native) == (f"password: {SECRET}, call [redacted:phone]", {"password": SECRET})
+
+
+def test_phone_turned_off_makes_a_record_sent_again_a_new_version_holding_the_number(gate: Gate, vault: Vault) -> None:
+    rewrite(vault, phone(True))
+    record = make_record(1, text=f"call {PHONE}")
+    gate.stage([record])
+    gate.promote()
+    rewrite(vault, phone(False))
+    again = gate.stage([record])
+    assert (again.ready, again.skipped) == (1, 0)
+    gate.promote()
+    assert [r.text for r in in_raw(vault)] == ["call [redacted:phone]", f"call {PHONE}"]
+
+
+def test_phone_turned_off_sends_classified_records_back_to_pending(gate: Gate) -> None:
+    rewrite(gate.vault, phone(True))
+    mixed = call(1, text=f"call {PHONE}")
+    private = make_record(2, text=f"call {PHONE} about the holiday")
+    gate.stage([mixed, private])
+    gate.classify("calls:rec-1", "work")
+    gate.classify("chat:C0TEST/1791000002.000100", "private")
+    gate.promote()
+    rewrite(gate.vault, phone(False))
+    again = gate.stage([mixed, private])
+    assert (again.pending, again.ready, again.skipped) == (2, 0, 0)
+
+
 # -- the sweep -----------------------------------------------------------------------------------------------------
 
 

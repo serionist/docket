@@ -186,6 +186,8 @@ KEY_LABELS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("password", _key_label(PASSWORD_LABELS)),
     ("phone", _key_label(PHONE_LABELS)),
 )
+# The marker names of the built-in rules: Docket's own words, whatever the settings.
+BUILTIN_NAMES = frozenset(rule.name for rule in BUILTIN)
 _PHONE_DIGITS = 7
 
 
@@ -196,9 +198,15 @@ class Redactor:
 
     @classmethod
     def from_config(cls, config: Redaction) -> Redactor:
-        rules = list(BUILTIN) if config.builtin else []
-        rules += [Rule(slug(p.name), (re.compile(p.pattern),)) for p in config.patterns]
-        return cls(rules, KEY_LABELS if config.builtin else ())
+        """The rules vault.yaml turns on: the credential rules (password, api-key, private-key) and the phone rule as
+        two switches, each with its native key labels, and each of the user's patterns that is enabled."""
+
+        def on(name: str) -> bool:
+            return config.phone if name == PHONE.name else config.credentials
+
+        rules = [r for r in BUILTIN if on(r.name)]
+        rules += [Rule(slug(p.name), (re.compile(p.pattern),)) for p in config.patterns if p.enabled]
+        return cls(rules, [(name, label) for name, label in KEY_LABELS if on(name)])
 
     def text(self, text: str, counts: Counter[str] | None = None) -> str:
         counts = counts if counts is not None else Counter[str]()
