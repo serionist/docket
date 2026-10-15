@@ -2,8 +2,8 @@
 
 1. Read the query: quoted phrases, words, time words (a range), and names or aliases found in it (its entities).
 2. Each word becomes an OR of its forms across the columns, its joined words' forms (two query words in a row, the
-   stretches of a hyphenated one) and its splits, two words in a row the index holds (DR-0281); each entity an OR of its
-   aliases' forms.
+   stretches of a hyphenated one) and its splits, two words in a row the index holds, leaving out a joined word in half
+   the chunks or more and a split of two such words (DR-0281); each entity an OR of its aliases' forms.
 3. FTS candidates, top 200 by BM25, filters applied inside the query: all words required, however common (DR-0230); if
    fewer than k, any of them; if still fewer, word prefixes. In each, the best chunk of each group whose title's lead
    holds most of the query's terms goes first (DR-0231); in the any-word stage the rest go by how many terms their text
@@ -247,9 +247,14 @@ class _Search:
         """How many chunks there are, read once, and only for a query that has an any-word stage."""
         return int(self.conn.execute("SELECT count(*) FROM chunks").fetchone()[0])
 
+    def common(self, chunks: int) -> bool:
+        """Whether a term in so many chunks is one BM25 doesn't weigh: FTS5 gives one in half the chunks or more no
+        weight at all."""
+        return chunks * 2 >= self.total
+
     def weighs(self, word: str) -> bool:
-        """Whether BM25 still weighs a word: FTS5 gives a term in half the chunks or more no weight at all."""
-        return self.reach[word] * 2 < self.total
+        """Whether BM25 still weighs a query word, by the most chunks any of its terms is in."""
+        return not self.common(self.reach[word])
 
     # -- reading the query --------------------------------------------------------------------------------------
 
@@ -370,7 +375,7 @@ class _Search:
                 continue
             a = self._half(first)
             b = self._half(second) if a else 0
-            if a and b and not (a * 2 >= self.total and b * 2 >= self.total):
+            if a and b and not (self.common(a) and self.common(b)):
                 out.append((first, second, min(a, b)))
         return out
 
@@ -389,14 +394,18 @@ class _Search:
         holds; and the words no chunk holds in any form or split.
 
         The expression leaves out a form its column doesn't hold, which matches nothing, and puts a term several
-        columns hold in one phrase: a common word's every phrase costs BM25 a pass over its rows."""
+        columns hold in one phrase: a common word's every phrase costs BM25 a pass over its rows. A joined word in half
+        the chunks or more is left out, as a split of two such words is: BM25 gives it no weight, and matching it would
+        score every chunk it is in. The word itself stays."""
         groups: list[tuple[str, str]] = []
         kept: list[Word] = []
         absent: list[str] = []
         for word in dedupe(tokens):
             forms = self.word_forms(word)
             for joined in dedupe(joins.get(word, [])):
-                forms += self.word_forms(joined)
+                theirs = self.word_forms(joined)
+                if not self.common(max(self._docs(col, term) for col, term in theirs)):
+                    forms += theirs
             forms = list(dict.fromkeys(forms))
             self.terms |= {term for _, term in forms}
             counts = [self._docs(col, term) for col, term in forms]

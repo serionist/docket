@@ -732,6 +732,7 @@ COMPOUND_MESSAGES = {
     **{f"edit-or-{n}": f"Edit or delete row {n} of the crane list." for n in range(2)},
     "visitor": "The visitor signed the crane log.",
     "visit-or": "Visit or call the yard before noon.",
+    "to-day": "The pour moves to day two.",
     **{f"filler-{n}": f"We set the pallets up today, round {n}." for n in range(COMPOUND_FILLERS)},
 }
 
