@@ -68,9 +68,9 @@ Every record reaches the raw log through the gate. It reads `vault.yaml` on ever
 - What is redacted becomes `[redacted:<name>]`, and a cut stretch becomes `[cut]`; the secret itself is kept nowhere.
 - Names are never redacted. To keep a person, a topic or a chat out of the vault, list it under `never_store`: your
   own lists, empty until you add to them. A match drops the whole record, or refuses the whole doc.
-- Processed docs and imported notes follow the same lists and the same redaction settings, line by line, so a marker
-  never moves a line or an anchor; `docket redaction set` changes a setting, and `docket doc redact` applies it to the
-  docs already there.
+- Processed docs and imported notes follow the never-store keywords list and the same redaction settings, line by
+  line, so a marker never moves a line or an anchor; a person's name to keep out of docs goes under `keywords`.
+  `docket redaction set` changes a setting, and `docket doc redact` applies it to the docs already there.
 - Turning a rule off leaves the markers already stored, but a record a source sends again then lands as a new version
   holding the value, records you classified wait in staging again, and the next `docket import notes` writes a new
   rev of each note the rule matched. Turning credentials off stores passwords, keys and tokens as written, in raw,

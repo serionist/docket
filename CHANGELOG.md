@@ -36,7 +36,8 @@ Unreleased in the same PR.
 - The vault's raw log: records written once per source and run, deduplicated, committed locally.
 - `docket vault status` and `docket vault check`.
 - The staging gate: every record reaches the raw log through it. Never-store lists and private sources drop records
-  without a trace, mixed sources wait to be classified, and credentials, keys and phone numbers are redacted.
+  without a trace, mixed sources wait to be classified, and credentials and keys are redacted, phone numbers when you
+  turn them on.
 - `docket staging list`, `show`, `classify` (work or private, with cuts) and `promote`.
 - Processed docs with anchors: `docket doc put` stores a summary only when every line points at raw that exists, and
   keeps each change as a revision; `docket doc read` and `docket doc verify` show a doc or a record next to its raw.
