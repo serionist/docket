@@ -1,12 +1,13 @@
 """Matching entities into chunks: each alias's forms, the judging of stem forms, the fuzzy walk, and mentions.
 
 An alias matches as written in `folded`, and in its case forms in languages that give them (Hungarian), matched
-folded, while one of its stem forms in that language's column is kept. Each stem form is judged on its own: one under
-three letters, or one the index holds in over ten times as many chunks as the alias as written (counting that as at
-least five), is dropped and kept in `alias_terms` as dropped; with every one dropped the case forms don't count (Rob's
-`rob` while `robot`, Rob with -ot, is everywhere). The stem forms aren't matched themselves: `same` stems like Sam, and
-is none of his case forms. An `asr` alias also matches through vocabulary words within one edit of a word of 5 to 7
-letters, two of 8 or more, found per word by a bounded Levenshtein walk (DR-0350).
+folded, beside one of its kept stem forms in that language's column: a stem form alone meets ordinary words that stem
+the same (`same` for Sam), and a case form alone ordinary words that fold the same (`benne` for Ben's `benné`). A case
+form the stemmer leaves whole (`Nimishsel`) counts on its own while a stem form is kept. Each stem form is judged on its
+own: one under three letters, or one the index holds in over ten times as many chunks as the alias as written (counting
+that as at least five), is dropped and kept in `alias_terms` as dropped; with every one dropped the case forms don't
+count (Rob's `rob` while `robot`, Rob with -ot, is everywhere). An `asr` alias also matches through vocabulary words
+within one edit of a word of 5 to 7 letters, two of 8 or more, found per word by a bounded Levenshtein walk (DR-0350).
 """
 
 from __future__ import annotations
@@ -18,9 +19,10 @@ import sqlite3
 from bisect import bisect_left
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from typing import NamedTuple
 
 from docket.index.languages import Language
-from docket.index.text import Analyzer, any_of, dedupe, fold, phrase, words
+from docket.index.text import Analyzer, any_of, fold, phrase, words
 from docket.vault.entities import Entities, Entity
 
 SHORT = 3
@@ -188,17 +190,25 @@ def alias_langs(analyzer: Analyzer) -> list[Language]:
     return [lang for lang in analyzer.languages if lang.cases is not None]
 
 
-def explaining(ws: list[str], lang: Language) -> list[tuple[str, ...]]:
-    """An alias as written and in each of its case forms in a language, folded: only its last word inflects."""
+class Cases(NamedTuple):
+    """An alias's case forms in a language, folded, by whether the stemmer cuts them to one of its stem forms."""
+
+    reached: tuple[tuple[str, ...], ...]
+    alone: tuple[tuple[str, ...], ...]
+
+
+def cases_of(analyzer: Analyzer, ws: list[str], lang: Language) -> Cases:
+    """An alias's case forms in a language, folded; only its last word inflects. One the stemmer cuts to one of the
+    alias's stem forms counts only beside a kept stem form: an ordinary word can fold to it and stem elsewhere (`benné`,
+    Ben's translative, folds to the Hungarian `benne`, which stems to `benn`). One the stemmer leaves whole
+    (`Nimishsel`) counts on its own (DR-0350)."""
     head = tuple(fold(w) for w in ws[:-1])
-    cases = lang.cases(ws[-1]) if lang.cases is not None else []
-    return [(*head, last) for last in dedupe(fold(w) for w in [ws[-1], *cases])]
-
-
-def case_forms(ws: list[str], lang: Language) -> str | None:
-    """An alias's case forms as an FTS5 expression in `folded`, or None when it has none (a number)."""
-    cases = explaining(ws, lang)[1:]
-    return any_of(phrase("folded", form) for form in cases) if cases else None
+    stems = {form[-1] for form in _stem_forms(analyzer, ws, lang)}
+    reached: dict[tuple[str, ...], bool] = {}
+    for case in lang.cases(ws[-1]) if lang.cases is not None else []:
+        form = (*head, fold(case))
+        reached[form] = reached.get(form, False) or analyzer.stem(case, lang) in stems
+    return Cases(tuple(f for f, r in reached.items() if r), tuple(f for f, r in reached.items() if not r))
 
 
 def judge_forms(conn: sqlite3.Connection, analyzer: Analyzer, aliases: list[AliasRow]) -> None:
@@ -275,9 +285,9 @@ def prune(conn: sqlite3.Connection) -> None:
 def expressions(
     conn: sqlite3.Connection, analyzer: Analyzer, entities: Sequence[str] | None = None, *, needs: bool = True
 ) -> dict[tuple[str, int], str]:
-    """Each alias's FTS5 expression: its form as written, its case forms in each language where one of its stem forms
-    is kept, and for an `asr` alias up to 20 phrases from its misspellings. Only the entities given, when given;
-    without aliases that have `needs`, when needs is False."""
+    """Each alias's FTS5 expression: its form as written, its case forms beside its kept stem forms (or alone where the
+    stemmer leaves them whole), and for an `asr` alias up to 20 phrases from its misspellings. Only the entities given,
+    when given; without aliases that have `needs`, when needs is False."""
     sql = (
         "SELECT t.entity, t.ordinal, t.col, t.word, t.term, t.how, t.distance, a.text FROM alias_terms t "
         "JOIN aliases a ON a.entity = t.entity AND a.ordinal = t.ordinal WHERE (? OR a.needs = '[]')"
@@ -288,7 +298,7 @@ def expressions(
         args += list(entities)
     langs = {lang.column: lang for lang in alias_langs(analyzer)}
     forms: dict[tuple[str, int], list[str]] = {}
-    inflected: dict[tuple[str, int, str], str] = {}
+    stems: dict[tuple[str, int, str], tuple[str, list[str]]] = {}
     variants: dict[tuple[str, int, str], dict[int, list[tuple[int, str]]]] = {}
     for entity, ordinal, col, word, term, how, distance, text in conn.execute(
         sql + " ORDER BY t.entity, t.ordinal, t.col, t.word, t.distance, t.term", args
@@ -298,16 +308,19 @@ def expressions(
             if how == "written":
                 forms.setdefault(key, []).append(phrase(col, term.split()))
             else:
-                inflected[(entity, ordinal, col)] = text
+                stems.setdefault((entity, ordinal, col), (text, []))[1].append(phrase(col, term.split()))
             variants.setdefault((entity, ordinal, col), {}).setdefault(-1, []).append((0, term))
         elif word >= 0:
             variants.setdefault((entity, ordinal, col), {}).setdefault(word, []).append((distance, term))
-    # A stem form also meets ordinary words that stem the same (`same` for Sam) and misses case forms the stemmer
-    # leaves whole (`Nimishsel`), so the case forms count in its place while one of its stem forms is kept.
-    for (entity, ordinal, col), text in inflected.items():
-        cases = case_forms(words(text), langs[col])
-        if cases is not None:
-            forms.setdefault((entity, ordinal), []).append(cases)
+    # A stem form alone meets ordinary words that stem the same (`same` for Sam), and a case form alone ordinary words
+    # that fold the same (`benne` for Benné): each counts beside the other, and a case form the stemmer leaves whole
+    # (`Nimishsel`) on its own.
+    for (entity, ordinal, col), (text, parts) in stems.items():
+        cases = cases_of(analyzer, words(text), langs[col])
+        alias = forms.setdefault((entity, ordinal), [])
+        if cases.reached:
+            alias.append(f"({any_of(parts)} AND {any_of(phrase('folded', form) for form in cases.reached)})")
+        alias += [phrase("folded", form) for form in cases.alone]
     for (entity, ordinal, col), by_word in sorted(variants.items()):
         if not any(p >= 0 for p in by_word):
             continue

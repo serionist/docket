@@ -76,6 +76,9 @@ QUOTED = re.compile(r'"([^"]*)"')
 # The open ends of a range given only one side: far enough, and still printable in any time zone.
 FAR_PAST = datetime(1900, 1, 1, tzinfo=UTC)
 FAR_FUTURE = datetime(9000, 1, 1, tzinfo=UTC)
+# Query words, folded, to the entities they name; an alias's kept stem forms.
+Names = dict[tuple[str, ...], set[str]]
+Stems = frozenset[tuple[str, ...]]
 
 
 class EntityFound(BaseModel):
@@ -219,9 +222,9 @@ def _overlaps(a: _Row, b: _Row) -> bool:
 
 
 @functools.lru_cache(maxsize=8192)
-def _case_forms(text: str, lang: Language) -> tuple[tuple[str, ...], ...]:
+def _cases(text: str, lang: Language) -> matching.Cases:
     """An alias's case forms, folded: every search reads them, and the service keeps them between searches."""
-    return tuple(matching.explaining(words(text), lang)[1:])
+    return matching.cases_of(Analyzer(Languages((lang,), ())), words(text), lang)
 
 
 class _Search:
@@ -231,7 +234,8 @@ class _Search:
         self.analyzer = Analyzer(langs)
         self.tz = ZoneInfo(vault.config.owner.time_zone)
         self.terms: set[str] = set()
-        self.lookup, self.cases, self.longest = self._lookups()
+        self.alias_langs = {lang.column: lang for lang in matching.alias_langs(self.analyzer)}
+        self.lookup, self.alone, self.reached, self.longest = self._lookups()
         # Per query word, the most chunks any of its forms is in.
         self.reach: dict[str, int] = {}
         # How many chunks hold a split's half, and the admitted splits' column terms, where a snippet may start.
@@ -249,13 +253,13 @@ class _Search:
 
     # -- reading the query --------------------------------------------------------------------------------------
 
-    def _lookups(self) -> tuple[dict[tuple[str, ...], set[str]], dict[tuple[str, ...], set[str]], int]:
-        """Each alias as written, folded, to its entities, and each of its case forms in a language where one of its
-        stem forms is kept, as a chunk must hold it (DR-0350); aliases with `needs` left out, they count only in
+    def _lookups(self) -> tuple[Names, Names, dict[tuple[str, ...], list[tuple[str, str, Stems]]], int]:
+        """Each alias as written, folded, to its entities, and its case forms in a language where one of its stem forms
+        is kept: those the stemmer leaves whole to their entities, the others to their entities, columns and kept stem
+        forms, which a query word must stem to as well (DR-0350). Aliases with `needs` left out, they count only in
         chunks."""
-        langs = {lang.column: lang for lang in matching.alias_langs(self.analyzer)}
-        lookup: dict[tuple[str, ...], set[str]] = {}
-        inflected: set[tuple[str, str, str]] = set()
+        lookup: Names = {}
+        kept: dict[tuple[str, str, str], set[tuple[str, ...]]] = {}
         for entity, col, term, how, text in self.conn.execute(
             "SELECT t.entity, t.col, t.term, t.how, a.text FROM alias_terms t JOIN aliases a ON a.entity = t.entity "
             "AND a.ordinal = t.ordinal WHERE t.word = -1 AND t.how IN ('written', 'stem') AND a.needs = '[]'"
@@ -263,18 +267,27 @@ class _Search:
             if how == "written":
                 lookup.setdefault(tuple(term.split()), set()).add(entity)
             else:
-                inflected.add((entity, col, text))
-        cases: dict[tuple[str, ...], set[str]] = {}
-        for entity, col, text in inflected:
-            for form in _case_forms(text, langs[col]):
-                cases.setdefault(form, set()).add(entity)
-        return lookup, cases, max((len(form) for form in lookup), default=0)
+                kept.setdefault((entity, col, text), set()).add(tuple(term.split()))
+        alone: Names = {}
+        reached: dict[tuple[str, ...], list[tuple[str, str, Stems]]] = {}
+        for (entity, col, text), stems in kept.items():
+            cases = _cases(text, self.alias_langs[col])
+            for form in cases.alone:
+                alone.setdefault(form, set()).add(entity)
+            for form in cases.reached:
+                reached.setdefault(form, []).append((entity, col, frozenset(stems)))
+        return lookup, alone, reached, max((len(form) for form in lookup), default=0)
 
     def _names(self, run: list[str]) -> set[str]:
-        """The entities a run of query words names: an alias as written or in one of its case forms. `same` stems like
-        Sam and is none of his case forms, so it stays a word."""
+        """The entities a run of query words names: an alias as written, or in one of its case forms as a chunk must
+        hold it. `same` stems like Sam and is none of his case forms; `benne` folds like Ben's `benné` and stems to
+        `benn`, none of his stem forms."""
         folded = tuple(fold(t) for t in run)
-        return self.lookup.get(folded, set()) | self.cases.get(folded, set())
+        hits = self.lookup.get(folded, set()) | self.alone.get(folded, set())
+        for entity, col, stems in self.reached.get(folded, []):
+            if tuple(self.analyzer.stem(t, self.alias_langs[col]) for t in run) in stems:
+                hits.add(entity)
+        return hits
 
     def entity_spans(self, tokens: list[str]) -> list[tuple[int, int, set[str]]]:
         """The runs of words that are a name or an alias, longest first, with the entities each names."""

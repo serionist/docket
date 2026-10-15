@@ -184,6 +184,9 @@ def test_hungarian_case_forms_let_a_foreign_name_sound_front() -> None:
         "ryan": {"ryannel", "ryannek", "ryanről", "ryannal"},
         "jason": {"jasonnel", "jasonnek", "jasonben"},
         "frank": {"frankkel", "franknek"},
+        # A final y read as a vowel, as Tonyval reads it: Andyvel, Garyvel.
+        "andy": {"andyvel", "andyvé", "andynek", "andyval"},
+        "gary": {"garyvel", "garynek"},
     }.items():
         assert forms <= set(hungarian_cases(name)), name
     # Only the endings that start with a consonant: Sam with -et would be samet, Jack's jacket.
@@ -196,10 +199,11 @@ def test_only_languages_with_case_forms_match_aliases_on_stems() -> None:
     # Without case forms an alias matches as written only (DR-0350).
     assert [lang.code for lang in matching.alias_langs(Analyzer(resolve(["en", "hu", "de"])))] == ["hu"]
     # Only the last word inflects.
-    forms = matching.explaining(["northwind", "traders"], language("hu"))
-    assert forms[:2] == [("northwind", "traders"), ("northwind", "tradersnak")]
-    assert all(form[0] == "northwind" for form in forms)
-    assert matching.explaining(["mark"], language("en")) == [("mark",)]
+    analyzer = Analyzer(resolve(["en", "hu"]))
+    cases = matching.cases_of(analyzer, ["northwind", "traders"], language("hu"))
+    assert cases.reached[0] == ("northwind", "tradersnak")
+    assert all(form[0] == "northwind" for form in (*cases.reached, *cases.alone))
+    assert matching.cases_of(analyzer, ["mark"], language("en")) == matching.Cases((), ())
 
 
 def test_the_seeds_are_the_dative_stem_and_the_word() -> None:

@@ -50,9 +50,9 @@ class Language:
     # Only the first: English changes the third (`dry` to `dri`) and its exceptions the second (`dying` to `die`). Some
     # Snowball stemmers cut prefixes (Indonesian, Irish), so a language says so only once someone has checked it.
     keeps_start: bool = False
-    # A name's case forms (lowercased, as written). Aliases match in them where one of their stem forms in this
-    # language is kept, and never through a stem form itself: an ordinary word that stems like a name (`same` for Sam)
-    # is none of its case forms (DR-0350).
+    # A name's case forms (lowercased, as written). Aliases match in them beside a kept stem form in this language,
+    # and never through a stem form alone: an ordinary word that stems like a name (`same` for Sam) is none of its
+    # case forms (DR-0350).
     cases: Callable[[str], list[str]] | None = None
 
     @property
@@ -162,6 +162,9 @@ def hungarian_cases(word: str) -> list[str]:
         out += [word + e for e in (*every, *after_consonant)] + [_doubled(word) + e for e in doubling]
     if not front and word[-1] not in _BACK:
         out += [word + e for e in _SOUNDED_FRONT] + [_doubled(word) + "el"]
+        if word[-1] == "y":
+            # Read as a vowel, as the back endings read Tonyval: Andyvel.
+            out += [word + "vel", word + "vé"]
     return list(dict.fromkeys(out))
 
 

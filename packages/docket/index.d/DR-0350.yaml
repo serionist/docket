@@ -1,0 +1,26 @@
+decisions:
+  - id: DR-0350
+    title: Chunks are cut per kind, and aliases match as written and in the case forms of languages that give them, beside a kept stem form
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#77"]
+    supersedes: [DR-0310]
+    description: "Transcripts are cut into windows that grow to 60 s and stop before 90 s or 350 words, sharing one utterance; a message is a chunk alone and its thread gets windows of the parent and up to 10 replies, sharing one; other records carry their title on top and split above 500 words between paragraphs; processed docs split per section, their anchors cut from the text and kept. An alias matches its words as written, or in its case forms in the languages that give them (Hungarian, not English), matched folded: its last word followed by each of Hungarian's case endings, back or front by the word's vowels and both for a word holding both (Acménél, Acmét, Markkal). A word with back vowels only that ends in a consonant also takes the front endings that start with one, as a foreign name read by its sound does (Sammel, Ryannel, Jasonnek, and Andyvel with its y read as a vowel), and not -et, -en, -öt or -ön, since Mark with -et is the English market. A final y takes the endings after a vowel as well (Tonyval), and an old spelling or a foreign letter keeps its letters before the doubled sound (Babitscsal, Kossuthtal, Maxszal, Nimishsel). A case form counts beside one of the alias's kept stem forms (its stem, its dative's stem, itself) in that language's column, since a stem form alone meets ordinary words that stem the same (same for Sam) and a case form alone words that fold the same and stem elsewhere (benne, patrol and Robert fold like Ben's benné, Pat's patról and Rob's robért). A case form the stemmer cuts to none of the alias's stem forms (Nimishsel) counts on its own while one of them is kept. A stem form under three letters, or in over ten times as many chunks as the alias as written (counting that as at least five), is dropped, and with every one dropped the case forms don't count, so robot, Rob with -ot, isn't Rob while it is everywhere; no stem form is dropped for its share of the chunks. A query word names an entity on the same terms. So Sammal and Sammel count as Sam and the English same doesn't, marked and market don't count as Mark, a customer named in most chunks keeps its inflected mentions, and Nimishsel counts as Nimish. On 1,000 invented chunks, same gave Sam 71 wrong mentions and marked and market gave Mark 100 before, none after; the mention pass on the perf test's 100,000 chunks takes about half a second, as before, and the test holds it under 2 s. An asr alias also matches vocabulary words within one edit of a word of 5 to 7 letters, two of 8 or more; an alias with needs counts only beside an unconditional mention. Speakers, authors (by ids) and a doc's entities are mentions too. The index's schema version went up with it, so an existing index rebuilds at its next update (DR-0115)."
+    binds:
+      - No entity name enters chunk text, so editing an entity never re-chunks.
+      - A chunk or a query names an alias only as written, in a case form beside a kept stem form, or in a case form the stemmer leaves whole while a stem form is kept.
+    not_chosen:
+      - "English stems for aliases: Mark would match every marking."
+      - "A minimum alias length instead of judging stem forms: Kata would lose Katának."
+      - "The case forms checked only for a form in over a fifth of the chunks, as DR-0310 had it: below that share, same gave Sam 71 wrong mentions and marked and market gave Mark 100 on 1,000 invented chunks."
+      - "DR-0310's check for every form, dropping one when over a tenth of its chunks hold none of the name's forms: Sam lost every Sammal, 60 of 80 found."
+      - "The share rule kept beside the case forms: már in 38% of the chunks still cost Mark his Marknak, 50 of 60 found."
+      - "Every case form only beside a stem form, as first built: Nimishsel, which the stemmer leaves whole, met no stem form."
+      - "Every case form on its own, as the first review fix had it: benné folds to the Hungarian benne, patról to patrol, robért to Robert."
+      - "Front endings that start with a vowel for a name with back vowels only: Mark with -et is the English market."
+      - "Any word starting with the alias as the explanation: same starts with sam, market and marked with mark."
+      - "Possessives among the case forms: Hungarian's Samé folds to the English same."
+      - "Today's rule for a language without case forms: the leak again."
+      - "A capital letter as the sign of a name: chat is often written in lower case."

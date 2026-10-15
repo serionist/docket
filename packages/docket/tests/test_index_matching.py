@@ -230,8 +230,10 @@ def test_a_common_word_sharing_a_name_s_stem_never_counts_as_the_name(one_custom
 
 
 # A team vault where no stem form is in a fifth of the chunks, so only the check per chunk tells Sam from the English
-# same, and Mark from marked and market. Bálint is named only inflected; Ryan, Jason and Sam take front endings by
-# sound, and Nimish's -sh doubles as s.
+# same, and Mark from marked and market. Bálint is named only inflected; Ryan, Jason, Sam, Andy and Gary take front
+# endings by sound, and Nimish's -sh doubles as s. Ben, Len, Pat, Herb, Des and Rob have case forms that fold to
+# ordinary words: benné to benne, lenné to lenne, patról to patrol, herbért to Herbert, desért to desert, robért to
+# Robert, who is someone else.
 TEAM = {
     "person/mark.yaml": "id: mark\ntype: person\nname: {en: Mark}\n",
     "person/sam.yaml": "id: sam\ntype: person\nname: {en: Sam}\n",
@@ -239,6 +241,15 @@ TEAM = {
     "person/ryan.yaml": "id: ryan\ntype: person\nname: {en: Ryan}\n",
     "person/jason.yaml": "id: jason\ntype: person\nname: {en: Jason}\n",
     "person/nimish.yaml": "id: nimish\ntype: person\nname: {en: Nimish}\n",
+    "person/andy.yaml": "id: andy\ntype: person\nname: {en: Andy}\n",
+    "person/gary.yaml": "id: gary\ntype: person\nname: {en: Gary}\n",
+    "person/ben.yaml": "id: ben\ntype: person\nname: {en: Ben}\n",
+    "person/len.yaml": "id: len\ntype: person\nname: {en: Len}\n",
+    "person/pat.yaml": "id: pat\ntype: person\nname: {en: Pat}\n",
+    "person/herb.yaml": "id: herb\ntype: person\nname: {en: Herb}\n",
+    "person/des.yaml": "id: des\ntype: person\nname: {en: Des}\n",
+    "person/rob.yaml": "id: rob\ntype: person\nname: {en: Rob}\n",
+    "person/robert.yaml": "id: robert\ntype: person\nname: {en: Robert}\n",
 }
 TEAM_LINES = [
     # The messages it is in (n % mod == rest), the line, and the person it names.
@@ -259,6 +270,20 @@ TEAM_LINES = [
     (100, 86, "Jasonnel megbeszéltük.", "jason"),
     (100, 41, "Nimishsel beszéltem.", "nimish"),
     (100, 91, "Nimishnek szóltam.", "nimish"),
+    (50, 14, "Andyvel beszéltem.", "andy"),
+    (50, 47, "Gary hívott.", "gary"),
+    (50, 6, "Ben hívott.", "ben"),
+    (25, 13, "Nincs benne a számla.", None),
+    (50, 31, "Len szerint kész.", "len"),
+    (25, 18, "Jó lenne holnap.", None),
+    (50, 8, "Pat hívott.", "pat"),
+    (25, 16, "The patrol route is ready.", None),
+    (50, 27, "Herb is here.", "herb"),
+    (25, 22, "Herbert sent the plan.", None),
+    (50, 38, "Des hívott.", "des"),
+    (25, 24, "The desert road is closed.", None),
+    (50, 2, "Rob hívott.", "rob"),
+    (25, 1, "Robert szerint kész.", "robert"),
 ]
 
 
@@ -292,10 +317,10 @@ def test_an_english_word_stemming_like_a_name_is_no_mention(team: Vault) -> None
     # The forms are kept: under a fifth of the chunks, and each name as written in over a tenth as many.
     forms = query(team, "SELECT entity, term, how FROM alias_terms WHERE col = 'stem_hu'")
     assert {("sam", "sam", "stem"), ("mark", "mar", "stem")} <= set(forms)
-    for entity in ("sam", "mark", "balint", "ryan", "jason", "nimish"):
-        # Sammal, Sammel, Sam's, Marknak, Markot, Ryannel, Jasonnek, Nimishsel and every Bálint in; no chunk saying only
-        # the same, marked or market.
-        assert mentions_of(team, entity) == {n for n in range(400) if entity in team_message(n)[1]}
+    for entity in {e.split("/")[1].removesuffix(".yaml") for e in TEAM}:
+        # Sammal, Sammel, Sam's, Marknak, Markot, Ryannel, Jasonnek, Nimishsel, Andyvel and every Bálint in; no chunk
+        # saying only the same, marked, market, benne, lenne, patrol, Herbert or desert, and Robert only as Robert.
+        assert mentions_of(team, entity) == {n for n in range(400) if entity in team_message(n)[1]}, entity
 
 
 def test_a_query_word_stemming_like_a_name_stays_a_word(team: Vault) -> None:
@@ -306,9 +331,17 @@ def test_a_query_word_stemming_like_a_name_stays_a_word(team: Vault) -> None:
     both = search(team, "same sammal", now=now).query
     assert [(e.id, e.words) for e in both.entities] == [("sam", "sammal")]
     assert both.words == ["same"]
-    for word, entity in [("markot", "mark"), ("sammel", "sam"), ("ryannel", "ryan"), ("jasonnek", "jason")]:
+    named = [
+        ("markot", "mark"), ("sammel", "sam"), ("ryannel", "ryan"), ("jasonnek", "jason"), ("nimishsel", "nimish"),
+        ("andyvel", "andy"), ("garyvel", "gary"), ("robert", "robert"),
+    ]  # fmt: skip
+    for word, entity in named:
         assert [e.id for e in search(team, word, now=now).query.entities] == [entity], word
-    assert [e.id for e in search(team, "nimishsel", now=now).query.entities] == ["nimish"]
+    # A word that folds like a case form and stems elsewhere stays a word.
+    for text, word in [("mi van benne", "benne"), ("the patrol route", "patrol"), ("jó lenne", "lenne")]:
+        reading = search(team, text, now=now).query
+        assert reading.entities == [], text
+        assert word in reading.words, text
     # A search for Sam leads with his own chunks. The word sam still meets the same through its Hungarian stem, as any
     # word meets its inflections, but only his chunks mention him too.
     his = {make_record(n).rid for n in range(400) if "sam" in team_message(n)[1]}
@@ -429,18 +462,25 @@ def test_an_entity_with_only_needs_aliases_has_no_query_expression() -> None:
     assert matching.expressions(conn, Analyzer(resolve(["en"])), ["e"]) == {("e", 0): 'folded : "cond"'}
 
 
-def test_an_alias_s_case_forms_count_in_place_of_its_stem_forms() -> None:
+def test_a_case_form_counts_beside_a_stem_form_or_where_the_stemmer_leaves_it_whole() -> None:
     conn = sqlite3.connect(":memory:")
     create(conn, resolve(["en", "hu"]))
     conn.executemany(
         "INSERT INTO aliases VALUES (?, 0, ?, 'name', NULL, '[]', ?)",
-        [("sam", "Sam", "sam"), ("rel", "Release 2026", "release 2026"), ("rob", "Rob", "rob")],
+        [
+            ("sam", "Sam", "sam"),
+            ("nim", "Nimish", "nimish"),
+            ("rel", "Release 2026", "release 2026"),
+            ("rob", "Rob", "rob"),
+        ],
     )
     conn.executemany(
         "INSERT INTO alias_terms VALUES (?, 0, ?, -1, ?, ?, 0)",
         [
             ("sam", "folded", "sam", "written"),
             ("sam", "stem_hu", "sam", "stem"),
+            ("nim", "folded", "nimish", "written"),
+            ("nim", "stem_hu", "nimish", "stem"),
             ("rel", "folded", "release 2026", "written"),
             ("rel", "stem_hu", "releas 2026", "stem"),
             ("rob", "folded", "rob", "written"),
@@ -449,9 +489,12 @@ def test_an_alias_s_case_forms_count_in_place_of_its_stem_forms() -> None:
     )
     exprs = matching.expressions(conn, Analyzer(resolve(["en", "hu"])))
     sam = exprs[("sam", 0)]
-    assert sam.startswith('(folded : "sam" OR (folded : "samnak" OR ')
-    assert 'folded : "sammal" OR ' in sam and 'folded : "sammel"))' in sam
-    assert "stem_hu" not in sam
+    assert sam.startswith('(folded : "sam" OR (stem_hu : "sam" AND (folded : "samnak" OR ')
+    assert sam.endswith('folded : "sammel")))')
+    # The stemmer cuts Nimishnek to nimish, and leaves Nimishsel whole: that one counts on its own.
+    nimish = exprs[("nim", 0)]
+    assert '(stem_hu : "nimish" AND (folded : "nimishnek" OR ' in nimish
+    assert nimish.endswith(') OR folded : "nimishsel" OR folded : "nimishse")')
     # A number has no case forms; and with every stem form dropped (robot everywhere), the case forms don't count.
     assert exprs[("rel", 0)] == 'folded : "release 2026"'
     assert exprs[("rob", 0)] == 'folded : "rob"'
