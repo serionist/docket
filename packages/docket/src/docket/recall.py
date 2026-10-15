@@ -6,7 +6,9 @@ doc next to the raw its anchors point at. Text from docs and records comes back 
 here acts on what it says.
 
 `read` also takes the path other files cite a legacy note by (its old path), with an optional time: the note, and the
-raw at that time in the recording it covered. A rid in the raw log stays a rid, and `r:` is always raw.
+raw at that time in the recording it covered. A rid in the raw log stays a rid, and `r:` is always raw. A time on a
+record without segments of its own, such as a recording whose source keeps its transcript as a record of its own, is
+placed on the one transcript under it (DR-0370).
 
 What a read asks about docs other than the one it shows (an old path's note, the docs superseding it, the docs covering
 a record) comes from the index when it is current for processed/, else from one parse of every doc for the whole call;
@@ -79,8 +81,9 @@ class LegacyRef(BaseModel):
 
 
 class ReadResult(BaseModel):
-    """What `read` found. `resolved` is the canonical locator a path led to (a doc id, or `r:<rid>@<time>` for an old
-    path with a time), so an answer cites that; `problems` says what couldn't be placed."""
+    """What `read` found. `resolved` is the canonical locator a path or a recording's time led to (a doc id, or
+    `r:<rid>@<time>` on the transcript the time was placed on), so an answer cites that; `problems` says what couldn't
+    be placed."""
 
     locator: str
     view: View
@@ -203,17 +206,27 @@ def _read(call: _Call, locator: str, view: View, around: int, rev: int | None) -
     if not versions:
         hint = " (for a position, write r:<rid>@mm:ss)" if "@" in loc.value or "#" in loc.value else ""
         raise DocketError(f"no record {loc.value} in the raw log{hint}")
-    record = versions[-1]
-    anchor = loc.anchor or Anchor(record.rid, "record")
+    asked = versions[-1].rid
+    anchor = loc.anchor or Anchor(asked, "record")
     result = ReadResult(locator=locator, view=view)
+    if anchor.kind == "time":
+        timed = _timed(call.raw, [asked])
+        if len(timed) > 1:
+            raise DocketError(f"{asked} has {len(timed)} transcripts; read one of {_options(timed, anchor)}")
+        if timed and timed[0] != asked:
+            anchor = _placed(timed[0], anchor)
+            versions = call.raw.versions(timed[0])
+            result.resolved = anchor.token[1:-1]
+    record = versions[-1]
     if view != "summary":
         result.spans = _raw_spans(call.raw, record, anchor, len(versions), around)
     if view != "raw":
         docs = call.covering(record.rid)
         result.lines = _citing(docs, call.superseded(), record.rid, anchor, around)
-        result.legacy = [
-            LegacyRef(id=d.meta.id, old_paths=d.meta.old_paths) for d in docs if d.meta.type == "legacy-note"
-        ]
+        # A recording's time read on its transcript still names the notes that cover the recording.
+        named = docs if record.rid == asked else [*call.covering(asked), *docs]
+        notes = {d.meta.id: d for d in named if d.meta.type == "legacy-note"}
+        result.legacy = [LegacyRef(id=d.meta.id, old_paths=d.meta.old_paths) for d in notes.values()]
     return result
 
 
@@ -221,7 +234,7 @@ def _read_path(
     call: _Call, locator: str, *, found: tuple[str, Anchor | None], view: View, around: int, rev: int | None
 ) -> ReadResult:
     """A doc by a path: one in the vault's processed/ folder, else a legacy note by its old path; with a time, the
-    raw at that time in the one recording it covers."""
+    raw at that time in the one transcript it covers, or that is under a recording it covers (DR-0370)."""
     path, at = found
     store = call.store
     processed = (store.root / "processed").resolve()
@@ -235,19 +248,18 @@ def _read_path(
     if at is None:
         return result
     lookup = call.raw
-    timed = [rid for rid in doc.meta.covers if any(segments(r) for r in lookup.versions(rid)[-1:])]
+    timed = _timed(lookup, doc.meta.covers)
     if len(timed) != 1:
         if timed:
-            options = ", ".join(format_anchor(rid, at.kind, at.start, at.end)[1:-1] for rid in timed)
-            result.problems.append(f"{doc.meta.id} covers {len(timed)} recordings; read one of {options}")
+            result.problems.append(f"{doc.meta.id} covers {len(timed)} transcripts; read one of {_options(timed, at)}")
         else:
             result.problems.append(
-                f"{doc.meta.id} covers no recording in the raw log, so {at.token} can't be placed; "
+                f"{doc.meta.id} covers no recording with a transcript in the raw log, so {at.token} can't be placed; "
                 "import the recording, then run docket import notes again"
             )
         return result
     rid = timed[0]
-    anchor = Anchor(rid, at.kind, at.start, at.end, format_anchor(rid, at.kind, at.start, at.end))
+    anchor = _placed(rid, at)
     result.resolved = anchor.token[1:-1]
     versions = lookup.versions(rid)
     if view != "raw":
@@ -258,6 +270,25 @@ def _read_path(
     if view != "summary":
         result.spans = [] if found_span.problem is not None else [found_span]
     return result
+
+
+def _timed(lookup: RawLookup, rids: list[str]) -> list[str]:
+    """Where a time on these records can be placed (DR-0370): those with segments of their own; when none has any, the
+    transcripts under them, so a time on a recording lands on the transcript its source keeps as a record of its
+    own."""
+    own = [rid for rid in rids if any(segments(r) for r in lookup.versions(rid)[-1:])]
+    if own:
+        return own
+    under = (r.rid for rid in rids for r in lookup.under(rid) if r.kind == "transcript" and segments(r))
+    return list(dict.fromkeys(under))
+
+
+def _placed(rid: str, at: Anchor) -> Anchor:
+    return Anchor(rid, at.kind, at.start, at.end, format_anchor(rid, at.kind, at.start, at.end))
+
+
+def _options(rids: list[str], at: Anchor) -> str:
+    return ", ".join(_placed(rid, at).token[1:-1] for rid in rids)
 
 
 def verify(vault: Vault, doc: str, lines: list[int] | None = None, window: int = WINDOW) -> VerifyResult:

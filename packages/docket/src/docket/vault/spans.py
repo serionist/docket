@@ -73,6 +73,14 @@ class RawLookup:
         versions = self.versions(rid)
         return versions[-1] if versions else None
 
+    def under(self, rid: str) -> list[RawRecord]:
+        """The other records of rid's source whose thread or container is rid, each at its latest version, by rid: a
+        recording's transcripts and notes, which name the recording as their thread (DR-0117)."""
+        m = RID.match(rid)
+        by_rid = self._source(m.group(1)) if m else {}
+        latest = (v[-1] for other, v in by_rid.items() if other != rid)
+        return sorted((r for r in latest if rid in (r.thread, r.container)), key=lambda r: r.rid)
+
     def neighbours(self, record: RawRecord, n: int) -> list[RawRecord]:
         """The record and up to n messages either side in its thread (its container when it has none), in time
         order, each at its latest version."""
