@@ -1124,9 +1124,9 @@ decisions:
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#55"]
-    description: "In a repo of its own, docket sync's fetch and rebase, and a rebase --abort (sync's own, or the recovery check's after a killed sync), run with the hooks path DR-0260 sets. The rebase writes Docket's commits again, and git runs pre-rebase, post-checkout, post-commit for every commit it picks, and post-rewrite: a user's pre-rebase that refuses would stop every sync, and git-lfs's post-commit costs about 0.4 s a picked commit on Windows. Media the rebase checks out still arrives through git-lfs's smudge filter, which no hook drives. Sync rebases and never merges, so post-merge doesn't come up. A push keeps the hooks: git-lfs's pre-push is what uploads media, and a push that skipped it leaves the objects off the remote, where a later push of the same ref doesn't send them. Git.run keeps hooks unless a call passes hooks=False."
+    description: "In a repo of its own, docket sync's fetch and rebase, and a rebase --abort (sync's own, or the recovery check's after a killed sync), run with the hooks path DR-0260 sets. The rebase writes Docket's commits again, and git runs pre-rebase, post-checkout, post-commit for every commit it picks, and post-rewrite: a user's pre-rebase that refuses would stop every sync, and git-lfs's post-commit costs about 0.4 s a picked commit on Windows. Media the rebase checks out still arrives through git-lfs's smudge filter, which no hook drives. Sync rebases and never merges, so post-merge doesn't come up. A push keeps the hooks: git-lfs's pre-push is what uploads media, and a push that skipped it leaves the objects off the remote, where a later push of the same ref doesn't send them. Sync doesn't push yet (#58); its push, like every push Docket makes, keeps the hooks. Git.run keeps hooks unless a call passes hooks=False."
     binds:
-      - Every push Docket makes runs the repo's hooks, sync's own push included once there is one.
+      - Every push Docket makes runs the repo's hooks, sync's own push (#58) included.
       - A git call skips hooks only when it says so (hooks=False); none is off by default.
     not_chosen:
       - "Hooks off by default in Git.run and on for a push: a push written later without the flag would leave media off the remote."
