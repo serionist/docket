@@ -231,10 +231,10 @@ def test_a_run_the_hook_never_bound_is_dropped_at_its_close(client: TestClient) 
 def test_a_mapper_past_its_time_drops_the_run(
     client: TestClient, vault: Vault, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(sync, "MAPPER_SECONDS", 1.0)
+    monkeypatch.setattr(sync, "MAPPER_SECONDS", 0.3)
     run = Session(client)
     run.open()
-    run.fetch(memo("a8", sleep=5))
+    run.fetch(memo("a8", sleep=30))
     answer = run.close()
     assert answer.status_code == 400
     error = answer.json()["error"]
@@ -883,7 +883,8 @@ def test_a_close_whose_caller_gives_up_finishes_and_keeps_its_outcome(vault: Vau
     async def scenario() -> tuple[Any, Any]:
         service = Service(Settings(port=8751, vault=vault.root, token=lambda: TOKEN))
         opened, _ = await sync.run_open(service, "memo", session="s1")
-        item = memo("z1", sleep=2)
+        # Long enough that the close is still mapping when its caller gives up, on a slow runner too.
+        item = memo("z1", sleep=1.5)
         service.runs.capture(
             opened.run,
             session="s1",
@@ -896,7 +897,7 @@ def test_a_close_whose_caller_gives_up_finishes_and_keeps_its_outcome(vault: Vau
             size=10,
         )
         task = asyncio.ensure_future(sync.ingest(service, opened.run, captures=1))
-        await asyncio.sleep(0.8)
+        await asyncio.sleep(0.4)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
