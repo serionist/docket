@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en"{% if theme %} data-theme="{{ theme }}"{% endif %} data-keys="{{ 'off' if keys_off else 'on' }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="htmx-config" content="{{ htmx_config }}">
+<title>{{ title }} - Docket</title>
+<link rel="icon" href="{{ asset('icon.svg') }}" type="image/svg+xml">
+{% for sheet in stylesheets %}
+<link rel="stylesheet" href="{{ asset(sheet) }}">
+{% endfor %}
+{% for script in scripts %}
+<script src="{{ asset(script) }}"{% if script in vendored %} integrity="{{ integrity(script) }}"{% endif %} defer></script>
+{% endfor %}
+</head>
+<body>
+<a class="skip" href="#main">Skip to the main content</a>
+<header class="topbar">
+  <a class="brand" href="/search">Docket</a>
+  <nav class="nav" aria-label="Pages">
+    {% for group in nav %}
+    <ul class="nav-group" aria-label="{{ group.title }}">
+      {% for page in group.pages %}
+      <li>
+        {% if page.built %}
+        <a class="nav-link" href="{{ page.path }}"{% if page.key == current %} aria-current="page"{% endif %}>{{ page.title }}</a>
+        {% else %}
+        <span class="nav-slot" title="{{ page.title }}: {{ page.what }}">{{ page.title }}<span class="phase" aria-hidden="true">{{ page.phase }}</span><span class="visually-hidden">, arrives in phase {{ page.phase }}: {{ page.what }}</span></span>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% endfor %}
+  </nav>
+  <div class="tools">
+    <span class="busy" aria-hidden="true">{{ icon('busy') }}</span>
+    <button type="button" class="icon-button theme-switch" data-action="theme" title="Theme: system, light or dark">
+      <span class="theme-system">{{ icon('system') }}<span class="visually-hidden">Theme: follows the system</span></span>
+      <span class="theme-light">{{ icon('light') }}<span class="visually-hidden">Theme: light</span></span>
+      <span class="theme-dark">{{ icon('dark') }}<span class="visually-hidden">Theme: dark</span></span>
+    </button>
+    <button type="button" class="icon-button" data-action="keys" aria-haspopup="dialog" title="Keys">{{ icon('keys') }}<span class="visually-hidden">Keys</span></button>
+  </div>
+</header>
+<main id="main" hx-history-elt>
+{% block main %}{% endblock %}
+</main>
+<footer class="statusbar">
+  <span class="where">{{ vault_name }}{% if machine %} on {{ machine }}{% endif %}</span>
+  <span class="index">{{ index_line }}</span>
+  <span class="hints"><kbd>/</kbd> search <kbd>j</kbd><kbd>k</kbd> move <kbd>Enter</kbd> open <kbd>?</kbd> keys</span>
+</footer>
+<p id="announce" class="visually-hidden" role="status" aria-live="polite"></p>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<dialog id="keys-dialog" class="dialog" aria-labelledby="keys-title">
+  <h2 id="keys-title">Keys</h2>
+  <dl class="keys">
+    {% for names, what in keys %}
+    <div><dt>{% for key in names %}<kbd data-key="{{ key }}">{{ 'Esc' if key == 'Escape' else key }}</kbd>{% endfor %}</dt><dd>{{ what }}</dd></div>
+    {% endfor %}
+  </dl>
+  <label class="switch"><input type="checkbox" data-action="keys-switch"{% if not keys_off %} checked{% endif %}> Single-key shortcuts</label>
+  <p class="hint">Turn them off when they get in the way of your screen reader's keys; <kbd>Esc</kbd> still closes the panel.</p>
+  <div class="dialog-actions"><button type="button" class="button" data-action="close-dialog">Close</button></div>
+</dialog>
+</body>
+</html>

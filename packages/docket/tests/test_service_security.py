@@ -14,7 +14,15 @@ from docket import userconfig
 from docket.service import system
 from docket.service.app import create_app
 from docket.service.security import HEADERS, Guard
-from docket.service.sessions import CODE_SECONDS, COOKIE, SESSION_SECONDS, Sessions, safe_next, write_redirect
+from docket.service.sessions import (
+    CODE_SECONDS,
+    COOKIE,
+    SESSION_SECONDS,
+    Sessions,
+    open_command,
+    safe_next,
+    write_redirect,
+)
 from docket.service.state import Settings
 from docket.vault.config import VaultConfig
 from docket.vault.vault import Vault
@@ -63,7 +71,7 @@ def a_session(sessions: Sessions) -> dict[str, str]:
 # -- the table of checks ---------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("path", ["/", "/api/status", "/mcp", "/session", "/api/health"])
+@pytest.mark.parametrize("path", ["/", "/api/status", "/mcp", "/session", "/api/health", "/static/css/base.css"])
 @pytest.mark.parametrize("method", ["GET", "POST"])
 def test_a_forged_host_is_refused_everywhere(guarded: TestClient, path: str, method: str) -> None:
     for host in ("evil.example", f"evil.example:{PORT}", "127.0.0.1:9999", "127.0.0.1"):
@@ -133,6 +141,41 @@ def test_the_session_link_takes_only_the_token(guarded: TestClient, sessions: Se
     assert guarded.post("/api/session", headers=BEARER).text == "reached POST /api/session"
 
 
+def test_static_files_need_no_session_but_only_to_be_read(guarded: TestClient) -> None:
+    assert guarded.get("/static/css/base.css").text == "reached GET /static/css/base.css"
+    assert guarded.head("/static/css/base.css").status_code == 200
+    assert guarded.post("/static/css/base.css").status_code == 401
+    assert guarded.get("/staticky").status_code == 401
+    assert guarded.get("/static").status_code == 401
+
+
+def test_the_sign_in_page_names_the_command_for_the_page_asked_for(guarded: TestClient) -> None:
+    page = guarded.get(r'/search?query=day rate $HOME `id` !x \y "z"&sources=calls')
+    assert page.status_code == 401
+    assert page.headers["Cache-Control"] == "no-store"
+    command = (
+        "docket open &quot;/search?query=day%20rate%20%24HOME%20%60id%60%20%21x%20%5Cy%20%22z%22"
+        "&amp;sources=calls&quot;"
+    )
+    assert command in page.text
+    assert "docket open</code>" in guarded.get("/search").text
+
+
+@pytest.mark.parametrize(
+    ("wanted", "command"),
+    [
+        ("/", "docket open"),
+        ("/search", "docket open"),
+        ("//evil.example", "docket open"),
+        ("/search?query=a+b&hit=r:calls:rec-0100@02:30", 'docket open "/search?query=a+b&hit=r:calls:rec-0100@02:30"'),
+        ("/search?query=Árvíz", 'docket open "/search?query=%C3%81rv%C3%ADz"'),
+        ("/search?query='x'", 'docket open "/search?query=%27x%27"'),
+    ],
+)
+def test_the_command_quotes_what_a_shell_would_act_on(wanted: str, command: str) -> None:
+    assert open_command(wanted) == command
+
+
 def test_health_and_the_session_page_need_nothing(guarded: TestClient) -> None:
     assert guarded.get("/api/health").is_success
     assert guarded.get("/session?code=x").is_success
@@ -198,7 +241,8 @@ def test_a_code_starts_one_session_and_moves_on_with_a_page(app_client: TestClie
     assert "Secure" not in cookie
     session = re.match(f"{COOKIE}=([^;]+)", cookie)
     assert session is not None
-    assert app_client.get("/", headers={"Cookie": f"{COOKIE}={session.group(1)}"}).status_code == 200
+    # Signed in, `/` moves on to Search; without the session it is the sign-in page.
+    assert app_client.get("/", headers={"Cookie": f"{COOKIE}={session.group(1)}"}).status_code == 303
     assert app_client.get(f"/session?code={code}").status_code == 401
 
 
@@ -210,9 +254,9 @@ def test_a_code_is_good_for_a_minute(app_client: TestClient, clock: Clock) -> No
 
 def test_a_session_ends_after_twelve_hours(app_client: TestClient, sessions: Sessions, clock: Clock) -> None:
     headers = a_session(sessions)
-    assert app_client.get("/", headers=headers).status_code == 200
+    assert app_client.get("/", headers=headers).status_code == 303
     clock.now += SESSION_SECONDS - 1
-    assert app_client.get("/", headers=headers).status_code == 200
+    assert app_client.get("/", headers=headers).status_code == 303
     clock.now += 2
     assert app_client.get("/", headers=headers).status_code == 401
     assert not sessions.valid(headers["Cookie"].split("=", 1)[1])

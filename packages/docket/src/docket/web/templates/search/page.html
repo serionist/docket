@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block main %}
+<h1 class="visually-hidden">Search</h1>
+<form id="search-form" class="query" action="/search" method="get" role="search" hx-get="/search/results" hx-target="#workspace">
+  <label class="visually-hidden" for="query">Search what you kept</label>
+  <span class="query-icon">{{ icon('search') }}</span>
+  <input id="query" name="query" type="search" value="{{ state.query }}" autocomplete="off" spellcheck="false" placeholder="Words, names, &quot;a phrase&quot;, last week, 2026-10-07, or a locator">
+  <button type="submit" class="button primary">Search</button>
+</form>
+<div id="workspace" class="workspace">
+{% include "search/_workspace.html" %}
+</div>
+{% endblock %}

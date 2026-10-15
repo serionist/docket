@@ -16,6 +16,8 @@ dev = [
   "docket",
   "docket-devkit",
   "ruff==0.16.10",
+  # The web app's browser smoke test; it drives the system's Chrome or Edge and never downloads a browser.
+  "playwright==1.63.0",
   "pyright[nodejs]==1.1.414",
   "pytest==9.1.1",
   "pytest-cov==7.1.0",

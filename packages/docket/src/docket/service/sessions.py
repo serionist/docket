@@ -22,6 +22,8 @@ CODE_SECONDS = 60
 SESSION_SECONDS = 12 * 3600
 COOKIE = "docket_session"
 REDIRECT_FILE = "docket-open.html"
+# What `open_command` keeps as it is in a path: nothing a shell acts on inside double quotes.
+OPEN_SAFE = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~/?=&%+:@,")
 
 
 @dataclass
@@ -67,6 +69,17 @@ def safe_next(target: str | None) -> str:
     if not target or not target.startswith("/") or target.startswith(("//", "/\\")) or any(c in target for c in "\r\n"):
         return "/"
     return target
+
+
+def open_command(wanted: str) -> str:
+    """The command that opens a page after signing in: `docket open "<path>"`, or `docket open` for the start page.
+    The path is double-quoted, and whatever a shell could act on inside the quotes (`$`, a backquote, `!`, `"`, a
+    backslash) is percent-encoded, as is anything else a URL path or query wouldn't carry as it is."""
+    path = safe_next(wanted)
+    if path in ("/", "/search"):
+        return "docket open"
+    encoded = "".join(ch if ch in OPEN_SAFE else "".join(f"%{b:02X}" for b in ch.encode()) for ch in path)
+    return f'docket open "{encoded}"'
 
 
 def moving_on(target: str, title: str = "Docket") -> str:

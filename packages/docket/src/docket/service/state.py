@@ -47,12 +47,26 @@ class Status(BaseModel):
     index: IndexStatus | None = None
 
 
+@dataclass(frozen=True)
+class LastUpdate:
+    """The last index update the service ran: when it ended, and the rows it left."""
+
+    at: datetime
+    counts: dict[str, int]
+
+
 class Service:
     def __init__(self, settings: Settings, sessions: Sessions | None = None) -> None:
         self.settings = settings
         self.sessions = sessions or Sessions()
         self.writer = Writer()
-        self.updater = IndexUpdater(lambda: index.update(self.vault()))
+        self.updater = IndexUpdater(self._update)
+        # Kept for the web app's footer: index.status() hashes every doc and entity file, too much for each page.
+        self.last_update: LastUpdate | None = None
+
+    def _update(self) -> None:
+        report = index.update(self.vault())
+        self.last_update = LastUpdate(datetime.now(UTC), dict(report.counts))
 
     def vault(self) -> Vault:
         """The vault, opened for this call, so an edit to vault.yaml applies at once."""
