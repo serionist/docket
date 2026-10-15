@@ -49,15 +49,17 @@ def test_the_header_helper_prints_the_header_claude_code_reads(capsys: pytest.Ca
     assert json.loads(capsys.readouterr().out) == {"Authorization": f"Bearer {token}"}
 
 
-def test_the_session_start_hook_runs_a_command_docket_has(capsys: pytest.CaptureFixture[str]) -> None:
+def test_the_session_start_hook_runs_a_command_docket_has() -> None:
     hooks = read_json("hooks/hooks.json")["hooks"]
     assert list(hooks) == ["SessionStart"]
     (group,) = hooks["SessionStart"]
     assert "matcher" not in group
     (hook,) = group["hooks"]
     assert hook == {"type": "command", "command": "docket", "args": ["hook", "session-start"], "timeout": 15}
-    assert main([*hook["args"], "--help"]) == 0
-    assert "SessionStart" in capsys.readouterr().out
+    command: Any = typer.main.get_command(app)
+    for name in hook["args"]:
+        command = command.commands[name]
+    assert "SessionStart" in command.help
 
 
 def test_the_plugin_is_past_its_placeholder_version() -> None:

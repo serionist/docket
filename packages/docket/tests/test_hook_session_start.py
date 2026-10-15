@@ -9,10 +9,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import typer.main
 from docket_testkit import host_repo, make_config
 
 from docket import hooks, userconfig
-from docket.cli import main
+from docket.cli import app, main
 from docket.errors import DocketError
 from docket.service import install
 from docket.service.install import ServiceStatus
@@ -210,8 +211,8 @@ def test_the_command_prints_the_json_and_exits_0(
     assert json.loads(capsys.readouterr().out)["systemMessage"] == "docket: the status check failed (OSError)"
 
 
-def test_the_hook_group_is_hidden_from_help(capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(["--help"]) == 0
-    out = capsys.readouterr().out
-    assert " hook " not in out
-    assert " source " in out
+def test_the_hook_group_is_hidden_from_help() -> None:
+    # Read from the command itself: the help text's colours and width depend on the terminal.
+    group: Any = typer.main.get_command(app)
+    assert group.commands["hook"].hidden
+    assert not group.commands["source"].hidden
