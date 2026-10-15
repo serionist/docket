@@ -59,6 +59,8 @@ class Given:
     time_zone: str | None = None
     machine: str | None = None
     sources: list[str] = field(default_factory=list[str])
+    # No sources at all, where --yes would otherwise take every known one: Claude's setup adds each with its folder.
+    no_sources: bool = False
     storage: str | None = None
     remote: str | None = None
     remote_is_private: bool = False
@@ -76,6 +78,9 @@ class Plan:
     remote: str | None
     new_github_repo: str | None
     host: HostReport | None = None
+    # Each host check a flag let through, and why it would have stopped: the summary names them, so a run that
+    # nobody watched still leaves the override in its output.
+    overrides: list[str] = field(default_factory=list[str])
 
 
 def _git_config(key: str) -> str:
@@ -112,13 +117,17 @@ def _parse_sources(items: list[str]) -> dict[str, SourceConfig]:
     return out
 
 
-def confirm_private(prompter: Prompter, urls: list[str], given_private: bool, yes: bool) -> None:
-    """Each remote Docket can't check anonymously needs the user's word that it is private."""
+def confirm_private(prompter: Prompter, urls: list[str], given_private: bool, yes: bool) -> list[str]:
+    """Each remote Docket can't check anonymously needs the user's word that it is private. Returns the ones taken on
+    --remote-is-private's word."""
+    taken: list[str] = []
     for url in urls:
         if given_private:
+            taken.append(url)
             continue
         if yes or not prompter.confirm(f"Docket can't check {url} itself. Private?", False):
             raise DocketError(f"can't confirm {url} is private; pass --remote-is-private if it is")
+    return taken
 
 
 class Wizard:
@@ -126,6 +135,7 @@ class Wizard:
         self.p = prompter
         self.given = given
         self.visibility = visibility
+        self.overrides: list[str] = []
 
     def _answer(self, value: str | None, question: str, default: str | None) -> str:
         if value is not None:
@@ -138,6 +148,9 @@ class Wizard:
 
     def plan(self) -> Plan:
         g = self.given
+        if g.no_sources and g.sources:
+            raise DocketError("--no-sources and --source don't go together")
+        self.overrides = []
         here = Path.cwd()
         repo = toplevel(here)
         default_path = str((repo or here) / "vault")
@@ -158,9 +171,12 @@ class Wizard:
         zone = self._answer(g.time_zone, "Your time zone (IANA, such as Europe/Budapest)", local_time_zone())
         machine = machines.validate(self._answer(g.machine, "This machine's name", machines.resolve(None)))
         source_default = ",".join(KNOWN_SOURCES)
-        source_items = g.sources or self._answer(
-            None, "Sources to enable (name or name=work|mixed|private)", source_default
-        ).split(",")
+        source_items: list[str] = (
+            []
+            if g.no_sources
+            else g.sources
+            or self._answer(None, "Sources to enable (name or name=work|mixed|private)", source_default).split(",")
+        )
         storage, report = self._storage(path, around, emails)
         try:
             config = VaultConfig(
@@ -173,10 +189,10 @@ class Wizard:
         except ValueError as e:
             raise DocketError(str(e)) from e
         if storage == "folder":
-            return Plan(path, None, config, machine, None, None, report)
+            return Plan(path, None, config, machine, None, None, report, self.overrides)
         parent = self._check_dirty(around) if around is not None else None
         remote, new_repo = self._remote()
-        return Plan(path, parent, config, machine, remote, new_repo)
+        return Plan(path, parent, config, machine, remote, new_repo, overrides=self.overrides)
 
     def _storage(self, path: Path, around: Path | None, emails: list[str]) -> tuple[Storage, HostReport | None]:
         """Folder or repo: the host checks set the default, refuse folder mode outright, or warn."""
@@ -213,7 +229,10 @@ class Wizard:
                 f"{around} looks shared ({', '.join(report.shared)}); pass --allow-shared to keep the vault there "
                 "anyway, or --storage repo"
             )
-        confirm_private(self.p, report.unknown, g.remote_is_private, g.yes)
+        if report.shared and g.allow_shared:
+            self.overrides.append(f"--allow-shared: {around} looks shared")
+        for url in confirm_private(self.p, report.unknown, g.remote_is_private, g.yes):
+            self.overrides.append(f"--remote-is-private: Docket can't check {url} itself")
         return "folder", report
 
     def _check_dirty(self, parent: Path) -> Path:
@@ -223,6 +242,8 @@ class Wizard:
                 f"{parent} has uncommitted changes. Commit them first, so the vault's arrival is a clean point in its "
                 "history (or pass --allow-dirty-parent)."
             )
+        if dirty:
+            self.overrides.append(f"--allow-dirty-parent: {parent} has uncommitted changes")
         return parent
 
     def _remote(self) -> tuple[str | None, str | None]:
@@ -240,7 +261,8 @@ class Wizard:
         if visibility == "public":
             raise DocketError(f"{answer} can be read without signing in; a vault never goes to a public repo")
         if visibility == "unknown":
-            confirm_private(self.p, [answer], g.remote_is_private, g.yes)
+            for url in confirm_private(self.p, [answer], g.remote_is_private, g.yes):
+                self.overrides.append(f"--remote-is-private: Docket can't check {url} itself")
         return answer, None
 
     def run(self) -> Vault:
@@ -308,6 +330,7 @@ class Wizard:
             f"time:     {plan.config.owner.time_zone}, languages {', '.join(plan.config.owner.languages)}",
             f"machine:  {plan.machine} (primary)",
             f"sources:  {', '.join(f'{k} ({v.sensitivity})' for k, v in plan.config.sources.items()) or 'none yet'}",
+            *(f"override: {taken}" for taken in plan.overrides),
         ]
         self.p.say("\n".join(lines))
 

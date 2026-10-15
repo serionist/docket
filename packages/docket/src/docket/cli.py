@@ -72,14 +72,24 @@ class TyperPrompter:
 def find_vault(explicit: Path | None) -> Vault:
     """The vault a command works on: --vault, DOCKET_VAULT, the working folder upward, a vault/ child of it, or the
     default vault the wizard recorded."""
+    return locate_vault(explicit)[0]
+
+
+def locate_vault(explicit: Path | None) -> tuple[Vault, str]:
+    """The vault a command works on, and how it was found: a vault found in another project's config must be
+    recognisable as such before anything writes to it."""
     env = os.environ.get("DOCKET_VAULT")
-    for candidate in (explicit, Path(env) if env else None):
+    for candidate, how in ((explicit, "--vault"), (Path(env) if env else None, "DOCKET_VAULT")):
         if candidate is not None:
-            return Vault.open(candidate)
+            return Vault.open(candidate), how
     here = Path.cwd()
-    for candidate in (here, here / "vault", userconfig.default_vault()):
+    for candidate, how in (
+        (here, "this folder or one above it"),
+        (here / "vault", "./vault"),
+        (userconfig.default_vault(), f"the default vault in {userconfig.config_path()}"),
+    ):
         if candidate is not None and Vault.find(candidate) is not None:
-            return Vault.open(candidate)
+            return Vault.open(candidate), how
     raise DocketError("no vault here; pass --vault, set DOCKET_VAULT, or create one with `docket init`")
 
 
@@ -131,6 +141,9 @@ def init(
     source: Annotated[
         list[str] | None, typer.Option(help="A source to enable: name, or name=work|mixed|private (repeat).")
     ] = None,
+    no_sources: Annotated[
+        bool, typer.Option("--no-sources", help="Start with no sources; add each with `docket source new`.")
+    ] = False,
     storage: Annotated[
         str | None, typer.Option(help="folder (a folder of the repo around it) or repo (a repo of its own).")
     ] = None,
@@ -149,6 +162,7 @@ def init(
         time_zone=time_zone,
         machine=machine,
         sources=source or [],
+        no_sources=no_sources,
         storage=storage,
         remote=remote,
         remote_is_private=remote_is_private,
@@ -171,8 +185,10 @@ def sync(vault: VaultOption = None) -> None:
 @vault_app.command("status")
 def vault_status(vault: VaultOption = None) -> None:
     """Records per source, runs, and what isn't committed yet."""
-    s = find_vault(vault).status()
+    found, how = locate_vault(vault)
+    s = found.status()
     typer.echo(f"vault    {s.root}")
+    typer.echo(f"found    by {how}")
     typer.echo(f"storage  {f'a folder of {s.host}' if s.host else 'a repo of its own'}, on {s.branch}")
     if s.branch_warning:
         typer.echo(f"warning  {s.branch_warning}")

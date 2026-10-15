@@ -124,13 +124,24 @@ def test_the_vault_is_found_from_here_a_child_env_and_the_default(
     path = tmp_path / "vault"
     main(["init", "--yes", "--path", str(path), "--remote", "none", *FLAGS])
     assert userconfig.default_vault() == path.resolve()
-    for where in (tmp_path, path / "raw", tmp_path / "elsewhere"):
+    capsys.readouterr()
+    # vault status says how it found the vault, so a setup can tell another project's default vault from its own.
+    for where, how in (
+        (tmp_path, "./vault"),
+        (path / "raw", "this folder or one above it"),
+        (tmp_path / "elsewhere", f"the default vault in {userconfig.config_path()}"),
+    ):
         where.mkdir(exist_ok=True)
         monkeypatch.chdir(where)
         assert main(["vault", "status"]) == 0
+        assert f"found    by {how}\n" in capsys.readouterr().out
+    assert main(["vault", "status", "--vault", str(path)]) == 0
+    assert "found    by --vault\n" in capsys.readouterr().out
     monkeypatch.setenv("DOCKET_VAULT", str(path))
     assert main(["vault", "status"]) == 0
-    assert str(path.resolve()) in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert str(path.resolve()) in out
+    assert "found    by DOCKET_VAULT\n" in out
 
 
 def test_with_no_vault_anywhere_the_command_says_how_to_make_one(
@@ -184,8 +195,10 @@ def test_a_dirty_parent_is_refused(tmp_path: Path) -> None:
     with pytest.raises(DocketError, match="uncommitted changes"):
         Wizard(Script(), given(parent / "vault", yes=True, storage="repo")).run()
     assert not (parent / "vault").exists()
-    Wizard(Script(), given(parent / "vault", yes=True, storage="repo", allow_dirty_parent=True)).run()
+    script = Script()
+    Wizard(script, given(parent / "vault", yes=True, storage="repo", allow_dirty_parent=True)).run()
     assert (parent / "vault" / "vault.yaml").is_file()
+    assert f"override: --allow-dirty-parent: {parent} has uncommitted changes" in script.said[0].splitlines()
 
 
 def test_a_folder_the_parent_tracks_is_refused(tmp_path: Path) -> None:
@@ -213,7 +226,9 @@ def test_a_remote_docket_cant_check_needs_the_user_s_word(tmp_path: Path) -> Non
     asked = Wizard(Script(confirms=[True, True]), given(tmp_path / "b", remote=url), unknown).run()  # type: ignore[arg-type]
     assert asked.git.has_remote()
     flagged = given(tmp_path / "c", yes=True, remote=url, remote_is_private=True)
-    assert Wizard(Script(), flagged, unknown).run().git.has_remote()  # type: ignore[arg-type]
+    script = Script()
+    assert Wizard(script, flagged, unknown).run().git.has_remote()  # type: ignore[arg-type]
+    assert f"override: --remote-is-private: Docket can't check {url} itself" in script.said[0].splitlines()
 
 
 def test_a_local_remote_is_fine(tmp_path: Path) -> None:

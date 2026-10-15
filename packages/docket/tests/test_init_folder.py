@@ -125,6 +125,42 @@ def test_a_shared_host_warns_and_defaults_to_a_repo(tmp_path: Path) -> None:
     assert chosen.config.storage == "folder"
 
 
+def summary_of(script: Script) -> str:
+    return next(line for line in script.said if line.startswith("vault:    "))
+
+
+def test_the_summary_names_each_override_a_flag_let_through(tmp_path: Path) -> None:
+    top = host_repo(tmp_path)
+    plain = Script()
+    # A flag given where nothing needed it is no override.
+    Wizard(plain, given(top / "a", storage="folder", allow_shared=True), local).run()
+    assert "override:" not in summary_of(plain)
+    (top / "theirs.txt").write_text("x\n", encoding="utf-8")
+    git(top, "add", "-A")
+    git(top, "commit", "-qm", "theirs", "--author=Ben Sample <ben@example.invalid>")
+    script = Script()
+    flags = given(top / "b", storage="folder", allow_shared=True, remote_is_private=True)
+    Wizard(script, flags, seen_as("unknown")).run()  # type: ignore[arg-type]
+    overrides = [line for line in summary_of(script).splitlines() if line.startswith("override: ")]
+    assert overrides == [
+        f"override: --allow-shared: {top} looks shared",
+        f"override: --remote-is-private: Docket can't check {tmp_path / 'origin.git'} itself",
+    ]
+
+
+def test_no_sources_starts_with_none_and_never_beside_a_source(tmp_path: Path) -> None:
+    top = host_repo(tmp_path)
+    script = Script()
+    vault = Wizard(script, given(top / "a", sources=[], no_sources=True), local).run()
+    assert vault.config.sources == {}
+    assert "sources:  none yet" in summary_of(script)
+    with pytest.raises(DocketError, match="don't go together"):
+        Wizard(Script(), given(top / "b", no_sources=True), local).run()
+    assert not (top / "b").exists()
+    assert main(["init", "--yes", "--path", str(top / "c"), "--no-sources", "--source", "chat"]) == 2
+    assert not (top / "c").exists()
+
+
 def test_a_host_rule_that_ignores_the_vault_refuses_a_folder(tmp_path: Path) -> None:
     top = host_repo(tmp_path)
     (top / ".gitignore").write_text("*.jsonl\n", encoding="utf-8")
