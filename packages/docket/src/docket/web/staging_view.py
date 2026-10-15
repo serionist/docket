@@ -1,0 +1,778 @@
+"""The Staging page's parts (DR-0380 to DR-0384): what waits at the staging gate by source and age, an open record as
+promotion would write it, the cuts chosen on it, and the held recordings with the commands that release them at the
+owner's console.
+
+`StagingState` is the URL. `build_list`, `build_panel` and `build_held` take what the gate and the vault said and do
+no I/O, so every rule here is tested on invented records. Nothing here releases a hold or shows a held recording's
+text (DR-0382): a held id is shown by its id alone, and a staged record a hold covers by its key, rid, kind and time.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from collections import Counter
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta
+from urllib.parse import urlencode
+
+from starlette.datastructures import QueryParams
+
+from docket.errors import DocketError
+from docket.vault import cuts as cutting
+from docket.vault.anchors import format_time
+from docket.vault.cuts import Cut
+from docket.vault.gate import Listing, Shown, Why
+from docket.vault.holds import Holds
+from docket.vault.records import RawRecord, source_name_problem
+from docket.vault.redact import Redactor
+from docket.vault.releaselog import Releases
+from docket.vault.segments import segments
+from docket.vault.staging import Entry, Staged, State
+
+PATH = "/staging"
+PANEL = "/staging/panel"
+CLASSIFY = "/staging/classify"
+PROMOTE = "/staging/promote"
+DEFAULT_K = 50
+MORE = 50
+MAX_K = 1000
+TITLE_CHARS = 80
+# The most numbers a selection of utterances or lines may hold, so a crafted URL can't make the page count to a billion.
+MAX_PICK = 100_000
+
+KEY = re.compile(r"^[0-9a-f]{32}$")
+DONE = re.compile(
+    r"^(?:(?P<label>work|private)-(?P<key>[0-9a-f]{12})|promoted-(?P<written>\d{1,7})-(?P<held>\d{1,7}))$"
+)
+PICK = re.compile(r"^(\d{1,6})(?:-(\d{1,6}))?$")
+# What a shell acts on inside double quotes: bash and PowerShell expand $ and the backquote, cmd expands %, bash's
+# history takes !, and a backslash before the closing quote, or two of them, change what bash reads.
+_SHELL = re.compile(r'["$`%!\x00-\x1f\x7f]|\\\\|\\$')
+
+KIND_ICON = {
+    "transcript": "recording",
+    "recording": "recording",
+    "message": "thread",
+    "thread": "thread",
+    "event": "event",
+    "doc": "doc",
+}
+
+# The line each reason shows beside a record (DR-0380). `{source}` is the record's source.
+WHY_LINE: dict[str, str] = {
+    "on-hold": "on hold: it stops every ingest of {source}; delete its file, or release the hold",
+    "held-back": "held back at the last promotion: {problem}",
+    "released": "released with its cuts: classify what is left",
+    "by-hand": "an earlier version was decided by hand: work or private?",
+    "mixed": "a mixed source: work or private?",
+    "work": "a work source: it goes at the next promotion",
+    "classified": "classified work by {by}{cuts}: it goes at the next promotion",
+}
+
+
+class StagingStateError(DocketError):
+    """A parameter of the Staging page's URL, or of a form it posts, that can't be read; the message names it."""
+
+
+Pick = tuple[tuple[int, int], ...]
+
+
+@dataclass(frozen=True)
+class StagingState:
+    """The Staging page's URL (DR-0384), in one canonical form, defaults left out."""
+
+    source: str | None = None
+    state: State | None = None
+    k: int = DEFAULT_K
+    open: str | None = None
+    u: Pick = ()
+    line: Pick = ()
+    cut: tuple[str, ...] = ()
+    confirm: bool = False
+    done: str | None = None
+
+    @staticmethod
+    def read(params: QueryParams | Mapping[str, str]) -> StagingState:
+        def first(name: str) -> str | None:
+            return (params.get(name) or "").strip() or None
+
+        def every(name: str) -> list[str]:
+            got = params.getlist(name) if isinstance(params, QueryParams) else [params.get(name) or ""]
+            return [v.strip() for v in got if v.strip()]
+
+        source = first("source")
+        if source is not None and source_name_problem(source) is not None:
+            raise StagingStateError(f"source is a source's name, such as calls, not {source!r}")
+        state = first("state")
+        if state is not None and state not in ("pending", "ready"):
+            raise StagingStateError(f"state is pending or ready, not {state!r}")
+        given = first("k") or ""
+        # isdigit alone takes a superscript two, which int() refuses.
+        if given and (not (given.isascii() and given.isdigit()) or not 1 <= int(given) <= MAX_K):
+            raise StagingStateError(f"k is a whole number from 1 to {MAX_K}, not {given!r}")
+        key = first("open")
+        if key is not None and not KEY.match(key):
+            raise StagingStateError(f"open is a staged record's key, 32 hex characters, not {key!r}")
+        confirm = first("confirm")
+        if confirm is not None and confirm != "private":
+            raise StagingStateError(f"confirm is private, not {confirm!r}")
+        done = first("done")
+        if done is not None and not DONE.match(done):
+            raise StagingStateError(f"done is what the last change did, such as work-3f9a1c2e4b5d, not {done!r}")
+        specs = [s for v in every("cut") for s in re.split(r"[,\s]+", v) if s]
+        for spec in specs:
+            try:
+                cutting.parse(spec)
+            except DocketError as e:
+                raise StagingStateError(f"cut: {e}") from None
+        return StagingState(
+            source=source,
+            state=state,
+            k=int(given) if given else DEFAULT_K,
+            open=key,
+            u=_picks(every("u"), "u"),
+            line=_picks(every("line"), "line"),
+            cut=tuple(sorted(set(specs))),
+            confirm=confirm is not None,
+            done=done,
+        ).canonical()
+
+    def canonical(self) -> StagingState:
+        """Selections and the drop's question only with an open record."""
+        if self.open is None:
+            return replace(self, u=(), line=(), cut=(), confirm=False)
+        return self
+
+    def pairs(self, *, done: bool = False) -> list[tuple[str, str]]:
+        out: list[tuple[str, str]] = []
+        out += [("source", self.source)] if self.source else []
+        out += [("state", self.state)] if self.state else []
+        out += [("k", str(self.k))] if self.k != DEFAULT_K else []
+        out += [("open", self.open)] if self.open else []
+        out += [("u", _pick(p)) for p in self.u]
+        out += [("line", _pick(p)) for p in self.line]
+        out += [("cut", c) for c in self.cut]
+        out += [("confirm", "private")] if self.confirm else []
+        out += [("done", self.done)] if done and self.done else []
+        return out
+
+    def url(self, path: str = PATH, *, done: bool = False) -> str:
+        query = urlencode(self.pairs(done=done))
+        return f"{path}?{query}" if query else path
+
+    def listing(self) -> StagingState:
+        """The list as this state narrows it, nothing open."""
+        return StagingState(source=self.source, state=self.state, k=self.k)
+
+    def opened(self, key: str) -> StagingState:
+        return replace(self.listing(), open=key)
+
+    def selected(self) -> bool:
+        return bool(self.u or self.line or self.cut)
+
+
+def _picks(values: Sequence[str], name: str) -> Pick:
+    out: set[tuple[int, int]] = set()
+    for value in values:
+        m = PICK.match(value)
+        first, last = (int(m.group(1)), int(m.group(2) or m.group(1))) if m else (0, 0)
+        if not m or first < 1 or last < first or last - first >= MAX_PICK:
+            raise StagingStateError(f"{name} is a number from 1, or a range such as 4-9, not {value!r}")
+        out.add((first, last))
+    return tuple(sorted(out))
+
+
+def _pick(p: tuple[int, int]) -> str:
+    return str(p[0]) if p[0] == p[1] else f"{p[0]}-{p[1]}"
+
+
+def numbers(picks: Pick) -> list[int]:
+    return sorted({n for first, last in picks for n in range(first, last + 1)})
+
+
+def canonical(url: str) -> str | None:
+    """A Staging page URL in its canonical form, or None for one that isn't the page's or doesn't read."""
+    path, _, query = url.partition("?")
+    if not (path.endswith(PATH) or path.endswith(PANEL)):
+        return None
+    try:
+        return StagingState.read(QueryParams(query)).url()
+    except DocketError:
+        return None
+
+
+# -- the record as the page shows it ---------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Reading:
+    """A staged record and what promotion would write of it with no cut: the view, redacted by the current rules."""
+
+    record: RawRecord
+    view: RawRecord
+    # The staged text's lines, each its first character and where it ends, a line break's carriage return left out.
+    spans: list[tuple[int, int]]
+    # The view's lines, one for each staged line; None when the rules join lines, so numbers wouldn't match.
+    lines: list[str] | None
+    # Whether the view's text has the staged text's length, so a character range read off it lands where it reads.
+    same_length: bool
+
+    @property
+    def changed(self) -> bool:
+        return self.view.model_dump(exclude={"v"}) != self.record.model_dump(exclude={"v"})
+
+
+def read_record(record: RawRecord, redactor: Redactor) -> Reading:
+    view, _ = redactor.record(record)
+    spans: list[tuple[int, int]] = []
+    offset = 0
+    for line in record.text.split("\n"):
+        spans.append((offset, offset + len(line.removesuffix("\r"))))
+        offset += len(line) + 1
+    shown = view.text.split("\n")
+    lines = [line.removesuffix("\r") for line in shown] if len(shown) == len(spans) else None
+    return Reading(record, view, spans, lines, len(view.text) == len(record.text))
+
+
+def chosen_cuts(reading: Reading, state: StagingState) -> list[Cut]:
+    """The cuts the checked utterances and lines and the typed ranges make, exactly where the staged record has them.
+    A selection that doesn't fit the record is refused, naming what doesn't."""
+    record = reading.record
+    said = segments(record)
+    out: list[Cut] = []
+    picked = numbers(state.u)
+    if picked and not said:
+        raise StagingStateError("u picks utterances, and this record has no transcript; check its lines")
+    for n in picked:
+        if n > len(said):
+            raise StagingStateError(f"u names utterance {n}, and this transcript has {len(said)}")
+        s = said[n - 1]
+        # An utterance with no length still sits at a moment, as cuts reads it: the cut takes that millisecond.
+        out.append(Cut(start=s.start_ms, end=max(s.end_ms, s.start_ms + 1), unit="ms"))
+    lines = numbers(state.line)
+    if lines and said:
+        raise StagingStateError("line picks lines of a text, and this record is a transcript; check its utterances")
+    if lines and reading.lines is None:
+        raise StagingStateError(_JOINED)
+    for n in lines:
+        if n > len(reading.spans):
+            raise StagingStateError(f"line names line {n}, and this text has {len(reading.spans)}")
+    for run in _runs(lines):
+        start, end = reading.spans[run[0] - 1][0], reading.spans[run[-1] - 1][1]
+        if end > start:
+            out.append(Cut(start=start, end=end, unit="char"))
+    for spec in state.cut:
+        cut = cutting.parse(spec)
+        if cut.unit == "char" and not reading.same_length:
+            raise StagingStateError(
+                f"cut {spec} counts characters, and the redaction rules changed this text's length since it was "
+                "staged, so a range read off the page would land elsewhere: check its lines, or cut it with docket "
+                "staging show and docket staging classify --cut in a terminal"
+            )
+        out.append(cut)
+    return cutting.merge(out)
+
+
+_JOINED = (
+    "the redaction rules join lines of this text since it was staged, so its line numbers aren't the staged text's: "
+    "cut it with docket staging show and docket staging classify --cut in a terminal, or classify it whole"
+)
+
+
+def _runs(numbers_: list[int]) -> list[list[int]]:
+    """Numbers next to each other, together: lines next to each other make one cut, with the break between."""
+    runs: list[list[int]] = []
+    for n in numbers_:
+        if runs and n == runs[-1][-1] + 1:
+            runs[-1].append(n)
+        else:
+            runs.append([n])
+    return runs
+
+
+def seen(staged: Staged) -> dict[str, str]:
+    """What a panel showed of a staged record, posted back with a classification so a change since is caught."""
+    return {
+        "shown_state": staged.state,
+        "shown_by": staged.classified_by or "",
+        "shown_cuts": ",".join(f"{c.unit}:{c.start}-{c.end}" for c in staged.cuts),
+    }
+
+
+# -- the list --------------------------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Chip:
+    label: str
+    url: str
+    on: bool
+
+
+@dataclass(frozen=True)
+class Row:
+    key: str
+    short: str
+    rid: str
+    source: str
+    kind: str
+    icon: str
+    title: str
+    when: datetime
+    waited: str
+    state: str
+    why: Why
+    line: str
+    on_hold: bool
+    open: bool
+    url: str
+    fragment: str
+
+
+@dataclass(frozen=True)
+class Group:
+    source: str
+    rows: list[Row]
+    counts: str
+
+
+@dataclass(frozen=True)
+class ListView:
+    lead: str
+    source_chips: list[Chip]
+    state_chips: list[Chip]
+    ready: list[tuple[str, int]]
+    groups: list[Group]
+    more: str | None
+    unreadable: list[tuple[str, str]]
+    done: str | None
+    narrowed: bool
+
+
+def build_list(
+    listing: Listing,
+    redactor: Redactor,
+    state: StagingState,
+    now: datetime,
+    *,
+    held_ids: int = 0,
+    held_sources: Sequence[str] = (),
+) -> ListView:
+    entries = listing.entries
+    why = listing.why
+    pending = sum(1 for e in entries if e.staged.state == "pending" and why.get(e.key) != "on-hold")
+    ready_entries = [e for e in entries if e.staged.state == "ready" and why.get(e.key) != "on-hold"]
+    on_hold = sum(1 for e in entries if why.get(e.key) == "on-hold")
+    shown = [e for e in entries if _keeps(e, state)]
+    rows = [_row(e, why.get(e.key, "mixed"), redactor, state, now) for e in shown[: state.k]]
+    groups: dict[str, list[Row]] = {}
+    for row in sorted(rows, key=lambda r: r.source):
+        groups.setdefault(row.source, []).append(row)
+    sources = sorted({e.staged.record.source for e in entries} | set(held_sources))
+    ready = Counter(e.staged.record.source for e in ready_entries if state.source in (None, e.staged.record.source))
+    return ListView(
+        lead=_lead(pending, len(ready_entries), on_hold, held_ids),
+        source_chips=[
+            Chip("All sources", replace(state.listing(), source=None).url(), state.source is None),
+            *(Chip(s, replace(state.listing(), source=s).url(), state.source == s) for s in sources),
+        ],
+        state_chips=[
+            Chip(label, replace(state.listing(), state=value).url(), state.state == value)
+            for label, value in (("Pending and ready", None), ("Pending", "pending"), ("Ready", "ready"))
+        ],
+        ready=sorted(ready.items()),
+        groups=[Group(s, rs, _group_counts(rs)) for s, rs in groups.items()],
+        more=replace(state, k=min(MAX_K, state.k + MORE)).url() if len(shown) > state.k else None,
+        unreadable=[(str(path), message) for path, message in listing.unreadable],
+        done=done_line(state.done),
+        narrowed=state.source is not None or state.state is not None,
+    )
+
+
+def _keeps(entry: Entry, state: StagingState) -> bool:
+    record = entry.staged.record
+    return state.source in (None, record.source) and state.state in (None, entry.staged.state)
+
+
+def _lead(pending: int, ready: int, on_hold: int, held: int) -> str:
+    parts = [f"{pending} for you to classify", f"{ready} ready to promote"]
+    if on_hold:
+        parts.append(f"{on_hold} on hold")
+    waiting = pending + ready + on_hold
+    head = (
+        f"{waiting} record{_s(waiting)} wait at the gate: " + ", ".join(parts)
+        if waiting
+        else "Nothing waits at the gate"
+    )
+    return f"{head}; {held} recording{_s(held)} held" if held else head
+
+
+def _group_counts(rows: list[Row]) -> str:
+    counts = Counter(r.state for r in rows)
+    return ", ".join(f"{counts[s]} {s}" for s in ("pending", "ready") if counts[s])
+
+
+def _row(entry: Entry, why: Why, redactor: Redactor, state: StagingState, now: datetime) -> Row:
+    staged = entry.staged
+    record = staged.record
+    held = why == "on-hold"
+    target = state.opened(entry.key)
+    return Row(
+        key=entry.key,
+        short=entry.key[:12],
+        rid=record.rid,
+        source=record.source,
+        kind=record.kind,
+        icon=KIND_ICON.get(record.kind, "record"),
+        # Nothing that reports a hold names a title (DR-0121); the rest as promotion would write it, one line.
+        title="" if held else _one_line(redactor.text(record.title or "")),
+        when=record.ts,
+        waited=waited(now - staged.staged_at),
+        state=staged.state,
+        why=why,
+        line=why_line(why, staged),
+        on_hold=held,
+        open=entry.key == state.open,
+        url=target.url(),
+        fragment=target.url(PANEL),
+    )
+
+
+def _one_line(text: str) -> str:
+    flat = " ".join(text.split())
+    return flat if len(flat) <= TITLE_CHARS else flat[: TITLE_CHARS - 1].rstrip() + "\N{HORIZONTAL ELLIPSIS}"
+
+
+def why_line(why: Why, staged: Staged) -> str:
+    by = {"user": "you", "claude": "Claude"}.get(staged.classified_by or "", "you")
+    n = len(staged.cuts)
+    cuts = f", with {n} cut{_s(n)}" if n else ""
+    return WHY_LINE[why].format(source=staged.record.source, problem=staged.problem or "", by=by, cuts=cuts)
+
+
+def waited(delta: timedelta) -> str:
+    minutes = max(0, int(delta.total_seconds() // 60))
+    if minutes < 1:
+        return "under a minute"
+    if minutes < 60:
+        return f"{minutes} min"
+    hours = minutes // 60
+    if hours < 48:
+        return f"{hours} h"
+    days = hours // 24
+    return f"{days} days"
+
+
+def done_line(done: str | None) -> str | None:
+    m = DONE.match(done or "")
+    if m is None:
+        return None
+    if m.group("label") == "work":
+        return f"{m.group('key')} classified work: it goes to raw at the next promotion."
+    if m.group("label") == "private":
+        return f"{m.group('key')} dropped as private: a later pull of the same version is skipped."
+    written, held = int(m.group("written")), int(m.group("held"))
+    line = f"Promoted: {written} record{_s(written)} written to raw and committed"
+    return line + (f"; {held} held back, each with its problem in the list." if held else ".")
+
+
+def _s(n: int) -> str:
+    return "" if n == 1 else "s"
+
+
+# -- the panel -------------------------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Utterance:
+    n: int
+    span: str
+    speaker: str
+    text: str
+    checked: bool
+    going: bool
+    was_cut: bool
+
+
+@dataclass(frozen=True)
+class TextLine:
+    n: int
+    offset: int
+    text: str
+    checked: bool
+
+
+@dataclass(frozen=True)
+class Preview:
+    summary: str
+    text: str | None
+
+
+@dataclass(frozen=True)
+class Panel:
+    key: str
+    rid: str
+    kind: str
+    title: str
+    source: str
+    when: datetime
+    staged_at: datetime
+    state: str
+    by: str
+    cuts: list[str]
+    why_line: str
+    on_hold: bool
+    utterances: list[Utterance] | None
+    lines: list[TextLine] | None
+    text: str
+    facts: list[tuple[str, str]]
+    native: str
+    cut_before: tuple[str, str] | None
+    notes: list[str]
+    problem: str | None
+    preview: Preview | None
+    typed: str
+    work_label: str
+    can_work: bool
+    confirm: bool
+    hidden: list[tuple[str, str]]
+    close_url: str
+    close_fragment: str
+    confirm_url: str
+    confirm_fragment: str
+    back_url: str
+    back_fragment: str
+
+
+@dataclass(frozen=True)
+class Missing:
+    """An open key nothing is staged under any more."""
+
+    key: str
+    note: str
+    close_url: str
+    close_fragment: str
+
+
+def missing(state: StagingState) -> Missing:
+    key = state.open or ""
+    note = f"Nothing is staged as {key[:12]} any more: it was promoted, dropped, or swept by a never-store list."
+    closed = state.listing()
+    return Missing(key, note, closed.url(), closed.url(PANEL))
+
+
+def build_panel(shown: Shown, redactor: Redactor, state: StagingState) -> Panel:
+    staged = shown.entry.staged
+    record = staged.record
+    key = shown.entry.key
+    held = shown.why == "on-hold"
+    reading = read_record(record, redactor)
+    view = reading.view
+    notes: list[str] = []
+    if reading.changed and not held:
+        notes.append(
+            "The redaction rules changed since this was staged: it shows as promotion will write it, and the staged "
+            "file keeps what it had until then."
+        )
+    problem: str | None = None
+    chosen: list[Cut] = []
+    try:
+        chosen = chosen_cuts(reading, state)
+    except DocketError as e:
+        problem = str(e)
+    preview: Preview | None = None
+    going: set[int] = set()
+    if chosen and problem is None:
+        try:
+            preview, going = _preview(reading, chosen, redactor)
+        except DocketError as e:
+            problem = str(e)
+    said = segments(record)
+    view_said = segments(view)
+    picked = set(numbers(state.u))
+    utterances = (
+        [
+            Utterance(
+                n=n,
+                span=_range(s.start_ms, s.end_ms),
+                speaker=v.speaker or "",
+                text=" ".join(v.text.split()),
+                checked=n in picked,
+                going=n in going,
+                was_cut=s.text == cutting.CUT_MARKER,
+            )
+            for n, (s, v) in enumerate(zip(said, view_said, strict=True), start=1)
+        ]
+        if said and not held
+        else None
+    )
+    checked_lines = set(numbers(state.line))
+    lines = (
+        [
+            TextLine(n=n, offset=span[0], text=text, checked=n in checked_lines)
+            for n, (span, text) in enumerate(zip(reading.spans, reading.lines, strict=True), start=1)
+        ]
+        if not said and reading.lines is not None and not held
+        else None
+    )
+    if not said and reading.lines is None and not held:
+        notes.append(_JOINED[0].upper() + _JOINED[1:] + ".")
+    n = len(chosen) if problem is None else 0
+    closed = state.listing()
+    confirm = replace(state.opened(key), confirm=True)
+    back = state.opened(key)
+    return Panel(
+        key=key,
+        rid=record.rid,
+        kind=record.kind,
+        title="" if held else " ".join((view.title or "").split()),
+        source=record.source,
+        when=record.ts,
+        staged_at=staged.staged_at,
+        state=staged.state,
+        by={"user": "you", "claude": "Claude"}.get(staged.classified_by or "", "nobody yet"),
+        cuts=[_cut_text(c) for c in staged.cuts],
+        why_line=why_line(shown.why, staged),
+        on_hold=held,
+        utterances=utterances,
+        lines=lines,
+        text="" if held or said else view.text,
+        facts=[] if held else _facts(view),
+        native="" if held or not view.native else json.dumps(view.native, indent=2, ensure_ascii=False, default=str),
+        cut_before=None if held or shown.cut_before is None else (shown.cut_before.run, shown.cut_before.text),
+        notes=notes,
+        problem=problem,
+        preview=preview,
+        typed=", ".join(state.cut),
+        work_label=f"Work, with {n} cut{_s(n)}" if n else "Work, whole",
+        can_work=not held and problem is None,
+        confirm=state.confirm and not held,
+        hidden=[("open", key), *seen(staged).items(), *state.listing().pairs()],
+        close_url=closed.url(),
+        close_fragment=closed.url(PANEL),
+        confirm_url=confirm.url(),
+        confirm_fragment=confirm.url(PANEL),
+        back_url=back.url(),
+        back_fragment=back.url(PANEL),
+    )
+
+
+def _preview(reading: Reading, chosen: list[Cut], redactor: Redactor) -> tuple[Preview, set[int]]:
+    """Promotion's order: cut, then redact. A transcript names the utterances that go, those an overlapping one takes
+    along included; a text shows what stays."""
+    after, _ = redactor.record(cutting.apply(reading.record, chosen))
+    said = segments(reading.record)
+    if said:
+        gone = {id(s) for cut in chosen for s in cutting.removes(said, cut)}
+        going = {n for n, s in enumerate(said, start=1) if id(s) in gone}
+        spans = [_range(c.start, c.end) for c in chosen]
+        summary = f"Removes {len(going)} utterance{_s(len(going))}: {', '.join(spans)}."
+        return Preview(summary, None), going
+    removed = sum(c.end - c.start for c in chosen)
+    summary = f"Cuts {removed} character{_s(removed)} in {len(chosen)} stretch{'es' if len(chosen) != 1 else ''}."
+    return Preview(summary, after.text), set()
+
+
+def _facts(view: RawRecord) -> list[tuple[str, str]]:
+    facts: list[tuple[str, str]] = []
+    facts += [("author", view.author)] if view.author else []
+    facts += [("to", ", ".join(view.to))] if view.to else []
+    facts += [("container", view.container)] if view.container else []
+    facts += [("thread", view.thread)] if view.thread else []
+    facts += [("attachments", ", ".join(a.name for a in view.attachments))] if view.attachments else []
+    return facts
+
+
+def _range(start_ms: int, end_ms: int) -> str:
+    """A stretch rounded outward to whole seconds, so it covers what it names."""
+    return f"{format_time(start_ms // 1000)}-{format_time(-(-end_ms // 1000))}"
+
+
+def _cut_text(cut: Cut) -> str:
+    return _range(cut.start, cut.end) if cut.unit == "ms" else f"characters {cut.start}-{cut.end}"
+
+
+# -- held recordings -------------------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Command:
+    label: str
+    text: str
+
+
+@dataclass(frozen=True)
+class HeldId:
+    id: str
+    again: str | None
+    commands: list[Command]
+
+
+@dataclass(frozen=True)
+class HeldSource:
+    source: str
+    ids: list[HeldId]
+    on_hold: int
+    unfilled: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+    paste: str = ""
+
+
+def build_held(
+    holds: Holds,
+    releases: Releases,
+    state: StagingState,
+    *,
+    folders: Mapping[str, list[str]],
+    root: str,
+    on_hold: Mapping[str, int],
+) -> list[HeldSource]:
+    """Each source's held ids and the commands that read and release one at the owner's console (DR-0382): ids only,
+    never anything from an import folder."""
+    out: list[HeldSource] = []
+    for source in sorted(holds.ids):
+        if state.source not in (None, source) or not holds.of(source):
+            continue
+        unfilled: list[tuple[str, str]] = []
+        known = folders.get(source, [])
+        folder = _filled(known[0], "folder", unfilled) if len(known) == 1 else "<folder>"
+        if len(known) != 1:
+            unfilled += [("folder", f) for f in known]
+        vault = _filled(root, "vault", unfilled)
+        granted = releases.of(source)
+        ids: list[HeldId] = []
+        for native in sorted(holds.of(source)):
+            name = _filled(native, "id", unfilled)
+            where = f'--from "{folder}" --vault "{vault}"'
+            again = granted.get(native)
+            if again is not None:
+                first = again.first
+                note = f"released {first.at:%Y-%m-%d %H:%M} UTC on {first.machine}, and held again after a merge"
+                commands = [Command("take the hold off", f'docket hold release {source} "{name}" {where}')]
+            else:
+                note = None
+                commands = [
+                    Command("read it", f'docket hold show {source} "{name}" {where}'),
+                    Command("release it", f'docket hold release {source} "{name}" {where} --cut <mm:ss-mm:ss>'),
+                ]
+            ids.append(HeldId(native, note, commands))
+        out.append(
+            HeldSource(
+                source,
+                ids,
+                on_hold.get(source, 0),
+                sorted(set(unfilled)),
+                f"Go through my held {source} recordings with /docket:cuts.",
+            )
+        )
+    return out
+
+
+def _filled(value: str, name: str, unfilled: list[tuple[str, str]]) -> str:
+    """A value as the command can carry it in double quotes, or its placeholder when a shell would act on it: then the
+    value is listed beside the command, to put in by hand."""
+    if _SHELL.search(value):
+        unfilled.append((name, value))
+        return f"<{name}>"
+    return value

@@ -1,0 +1,9 @@
+{# The Staging page's own pieces. Every value is escaped: a staged record's text is data. #}
+
+{% macro back(state) %}
+{% for name, value in state.listing().pairs() %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+{% endmacro %}
+
+{% macro hidden(pairs) %}
+{% for name, value in pairs %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+{% endmacro %}

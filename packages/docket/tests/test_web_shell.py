@@ -78,15 +78,25 @@ def test_the_navigation_has_a_slot_for_every_page_and_links_the_built_ones(clien
     assert [li.text() for li in nav.find_all("li", class_="nav-later")] == ["later"] * 3
     assert all(li.attrs["aria-hidden"] == "true" for li in nav.find_all("li", class_="nav-later"))
     assert not any(ch.isdigit() for s in slots for ch in "".join(c for c in s.children if isinstance(c, str)))
-    staging = next(s for s in slots if s.text().startswith("Staging"))
-    assert "arrives in phase 1" in staging.text()
-    assert staging.attrs["title"] == "Staging: records waiting for the gate: classify, cut, drop; arrives in phase 1"
+    curate = next(s for s in slots if s.text().startswith("Curate"))
+    assert "arrives in phase 1" in curate.text()
+    assert curate.attrs["title"] == "Curate: the weekly batch of proposals; arrives in phase 1"
     finding = nav.find_all("ul", class_="nav-group")[1]
     assert [c.text() for c in finding.find_all("li")][:2] == ["Search", "later"]
 
 
 @pytest.mark.parametrize(
-    "path", ["/search", "/search?query=fleet", "/search/results?query=fleet", "/search/panel", "/sync", "/sync/runs"]
+    "path",
+    [
+        "/search",
+        "/search?query=fleet",
+        "/search/results?query=fleet",
+        "/search/panel",
+        "/sync",
+        "/sync/runs",
+        "/staging",
+        "/staging/panel",
+    ],
 )
 def test_every_page_and_fragment_carries_the_page_csp_and_no_store(client: TestClient, path: str) -> None:
     answer = client.get(path)
@@ -98,7 +108,7 @@ def test_every_page_and_fragment_carries_the_page_csp_and_no_store(client: TestC
 
 
 def test_a_page_that_isnt_there_is_html_and_the_api_keeps_json(client: TestClient) -> None:
-    page = client.get("/staging")
+    page = client.get("/curate")
     assert page.status_code == 404
     assert "There is no page here" in page.text
     assert page.headers["Content-Security-Policy"] == PAGE_CSP
@@ -177,7 +187,7 @@ def test_the_pages_a_stranger_reaches_name_neither_the_vault_nor_the_machine(
     assert 'docket open "/search?query=x"' in parse(used.text).find("code").text()
     assert stranger.get("/static/nope.css").text == "not found"
     with signed_in(template, tmp_path / "other") as client:
-        missing = client.get("/staging")
+        missing = client.get("/curate")
         shell = client.get("/search")
     for answer in (sign_in, used, missing):
         assert FOLDER not in answer.text

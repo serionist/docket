@@ -54,7 +54,14 @@ NAV: tuple[Group, ...] = (
     Group(
         "Keeping",
         (
-            Page("staging", "Staging", "/staging", 1, "records waiting for the gate: classify, cut, drop"),
+            Page(
+                "staging",
+                "Staging",
+                "/staging",
+                1,
+                "records waiting for the gate: classify, cut, drop, promote",
+                built=True,
+            ),
             Page("curate", "Curate", "/curate", 1, "the weekly batch of proposals"),
             Page(
                 "sync",
@@ -85,10 +92,18 @@ KEYS: Keys = (
     (("?",), "these keys"),
 )
 SYNC_KEYS: Keys = ((("?",), "these keys"),)
+# The Staging page's list and panel answer Search's keys for moving and opening; no key writes.
+STAGING_KEYS: Keys = (
+    (("j", "k"), "next, previous record"),
+    (("Enter", "o"), "open the record beside the list"),
+    (("Escape",), "close the record"),
+    (("?",), "these keys"),
+)
 
 # The keys each page answers, which its dialog lists, and the few its footer names, as (keys, a word).
-PAGE_KEYS: dict[str, Keys] = {"search": KEYS, "sync": SYNC_KEYS}
+PAGE_KEYS: dict[str, Keys] = {"search": KEYS, "sync": SYNC_KEYS, "staging": STAGING_KEYS}
 HINTS: dict[str, Keys] = {
     "search": ((("/",), "search"), (("j", "k"), "move"), (("Enter",), "open"), (("?",), "keys")),
     "sync": ((("?",), "keys"),),
+    "staging": ((("j", "k"), "move"), (("Enter",), "open"), (("?",), "keys")),
 }

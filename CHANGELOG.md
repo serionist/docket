@@ -31,6 +31,9 @@ Unreleased in the same PR.
 - The Sync page: what to ask Claude to sync, with the words to paste; failed runs and skipped ids, each with what to do;
   the runs open and ended; each machine's cursor. Recent runs survive a restart, as ids and counts in the vault's
   private folder.
+- The Staging page: what waits at the gate by source and age, with why it waits; open a record to read it as it will
+  be written, check utterances or lines to cut, preview, then classify it work or drop it as private; promote what is
+  ready. Held recordings are listed with the commands that release them in your own terminal.
 - The Claude Code plugin's first version: it registers the service as the MCP server `docket`, tells each session at
   its start whether Docket runs and what waits in staging, and brings `/docket:recall`, which answers from the raw with
   locators, and `/docket:setup`, which asks which sources to set up, creates the vault and writes each source's folder.

@@ -6,7 +6,7 @@ decisions:
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#71"]
-    description: "/staging shows the records staging holds, pending and ready, by source and oldest first: kind, title, the record's time, how long it has waited, its state and why it waits, which Gate.list now gives for each entry from the sweep's own facts (on hold, held back by a promotion, under a release, decided by hand before, a mixed source, ready by its source's rule, classified). Counts per source and state lead the page, and the held part lists each source's held ids (DR-0382). A record's text, transcript, people, attachments and native fields show only in its panel, opened by a click. A record a hold covers shows its key, rid, kind and time, and doesn't open."
+    description: "/staging shows the records staging holds, pending and ready, by source and oldest first: kind, title, the record's time, how long it has waited, its state and why it waits, which Gate.list and Gate.show now give from the sweep's own facts (on hold, held back by a promotion, under a release, decided by hand before, a mixed source, ready by its source's rule, classified). A title is redacted by the current rules, then cut to one line of at most 80 characters. Counts per source and state lead the page, and the held part lists each source's held ids (DR-0382). A record's text, transcript, people, attachments and native fields show only in its panel, opened by a click. A record a hold covers shows its key, rid, kind and time, and doesn't open."
     binds:
       - Nothing reporting a hold names a title (DR-0121).
       - The list never shows a record's text, not even the first words docket staging list prints.

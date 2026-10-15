@@ -26,6 +26,10 @@ PAGES = [
     "/sync?source=calls&k=40",
     "/sync?run=run-20261015T000000-ffffffffffffffff",
     "/sync?k=0",
+    "/staging",
+    "/staging?source=calls&state=pending&k=100",
+    "/staging?open=" + "0" * 32,
+    "/staging?k=0",
 ]
 FRAGMENTS = [
     "/search/results?query=pallet+labels",
@@ -33,6 +37,9 @@ FRAGMENTS = [
     "/search/panel?hit=legacy-note:old-northwind-notes",
     "/sync/runs",
     "/sync/runs?k=0",
+    "/staging/panel",
+    "/staging/panel?open=" + "0" * 32,
+    "/staging/panel?open=nope",
 ]
 
 
@@ -72,10 +79,12 @@ def test_the_results_say_what_came_back_for_the_live_region(client: TestClient) 
     assert single.attrs["data-announce"] == "1 hit in 1 group"
 
 
-def test_the_keys_dialog_lists_every_key_and_the_script_handles_each(client: TestClient) -> None:
-    dialog = parse(client.get("/search").text).find("dialog", id="keys-dialog")
+@pytest.mark.parametrize("page", sorted(pages.PAGE_KEYS))
+def test_the_keys_dialog_lists_every_key_and_the_script_handles_each(client: TestClient, page: str) -> None:
+    path = next(p.path for p in pages.PAGES if p.key == page)
+    dialog = parse(client.get(path).text).find("dialog", id="keys-dialog")
     listed = [kbd.attrs["data-key"] for kbd in dialog.find_all("kbd") if "data-key" in kbd.attrs]
-    assert listed == [key for names, _ in pages.KEYS for key in names]
+    assert listed == [key for names, _ in pages.PAGE_KEYS[page] for key in names]
     script = assets.ASSETS["js/docket.js"].data.decode("utf-8")
     for key in listed:
         if key != "Enter":  # a focused link opens on Enter by itself

@@ -37,6 +37,10 @@ from docket.vault.vault import Vault
 log = logging.getLogger(__name__)
 
 Label = Literal["work", "private"]
+# Why a staged record waits, as the gate knows it (DR-0380): a hold covers it; the last promotion held it back; it is
+# pending under a release, after an earlier version was decided by hand, or from a mixed source; or it is ready by its
+# source's rule, or classified.
+Why = Literal["on-hold", "held-back", "released", "by-hand", "mixed", "work", "classified"]
 MIN_KEY_PREFIX = 6
 
 
@@ -79,6 +83,8 @@ class PromoteResult:
 class Listing:
     entries: list[Entry]
     unreadable: list[tuple[Path, str]]
+    # Each entry's reason, by its key.
+    why: dict[str, Why] = field(default_factory=dict[str, Why])
 
     def counts(self) -> Counter[str]:
         return Counter(e.staged.state for e in self.entries)
@@ -88,6 +94,7 @@ class Listing:
 class Shown:
     entry: Entry
     cut_before: RawRecord | None
+    why: Why = "mixed"
 
 
 class Gate:
@@ -169,10 +176,13 @@ class Gate:
         """One staged record, and the version of it in raw that was cut, when there is one."""
         with self.vault.lock:
             self._sweep(self._config())
-            entry = _resolve(ref, self.staging.scan().entries)
+            scan = self.staging.scan()
+            entry = _resolve(ref, scan.entries)
             rid = entry.staged.record.rid
             cut = [r for r in self.vault.rawlog.read(rid) if CUT_MARKER in r.text]
-            return Shown(entry, cut[-1] if cut else None)
+            return Shown(
+                entry, cut[-1] if cut else None, self._why(entry.staged, self.staging.decided(), _cut_rids(scan))
+            )
 
     def classify(self, ref: str, label: Label, cuts: Sequence[Cut] = (), by: Classifier = "user") -> Staged | None:
         """Work makes a staged record ready, with its cuts; private drops it. Returns the record, or None if dropped."""
@@ -404,6 +414,8 @@ class Gate:
         with self.vault.lock:
             self._sweep(self._config())
             scan = self.staging.scan()
+            decided, cut_in_staging = self.staging.decided(), _cut_rids(scan)
+            why: dict[str, Why] = {e.key: self._why(e.staged, decided, cut_in_staging) for e in scan.entries}
         entries = sorted(
             (
                 e
@@ -412,7 +424,20 @@ class Gate:
             ),
             key=lambda e: (e.staged.record.ts, e.key),
         )
-        return Listing(entries, scan.unreadable)
+        return Listing(entries, scan.unreadable, {e.key: why[e.key] for e in entries})
+
+    def _why(self, staged: Staged, decided: Decided, cut_in_staging: set[str]) -> Why:
+        """Why a staged record waits, from the facts the sweep just read."""
+        record = staged.record
+        if self._holds.covers(record):
+            return "on-hold"
+        if staged.problem is not None:
+            return "held-back"
+        if staged.state == "ready":
+            return "work" if staged.classified_by is None else "classified"
+        if self._releases.covering(record) is not None:
+            return "released"
+        return "by-hand" if self._by_hand(record, decided, cut_in_staging) else "mixed"
 
 
 def _cut_rids(scan: Scan) -> set[str]:

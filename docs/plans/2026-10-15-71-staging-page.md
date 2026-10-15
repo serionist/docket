@@ -371,6 +371,25 @@ Asked of the lead; the answers, from round 1, are in the last column.
 | Promote on the page, which the brief has and the issue doesn't? | yes | without it the user classifies here and promotes in a terminal | promote stays |
 | A held recording's text in the page, to pick its cuts there, the release still at the console? | later, an issue of its own, after the console path has had a week of use | a third place that prints held text (DR-0204), and a folder mapped by the service | out; in Decided as not taken |
 
+### Taken while building
+
+Departures from the plan above, each small; the decisions' entries say the same.
+
+| Decided | Not taken | Why |
+|---|---|---|
+| Preview posts the panel's one form and is answered with a 303 to its own URL, writing nothing | a GET form for Preview | one form holds the checkboxes, Preview and Work; a GET would put the `shown_*` fields in the address bar |
+| the classification's check holds one vault's lock around `Gate.show` and `Gate.classify`, which take that same lock again | the two calls each under their own hold of the lock, or a second lock object | nothing can write between the check and the call; a second `VaultLock` on the same file would wait on itself, so there is none |
+| `Gate.show` gives the reason too | a second scan of staging for the panel | the panel needs it, and the sweep's facts are at hand |
+| the Guard's cases against the real app in `test_web_staging.py` | `test_service_security.py`, whose app is an echo | they check the page's own routes |
+| a value the hold commands leave as a placeholder also holds `!`, a control character, two backslashes or a trailing one | the review's four characters only | bash's history takes `!`, and a backslash before the closing quote escapes it |
+| an empty form may come with no body and no type; a body must be urlencoded | the type on every post | a Promote form with nothing to narrow has no fields, and a browser may send it bare |
+| the chips say "All sources" and "Pending and ready" | "All" twice | two rows of chips each began with "All" |
+| the keys test runs for every page in `pages.PAGE_KEYS` | Search's keys only | each page lists its own |
+| a reading entry for `web/staging.py` as a contract | none | its two writes and its lack of a release are what a later change must keep |
+
+The `Origin: null` the plan named was seen, not assumed: the browser flow run once with the pages' policy left at
+`no-referrer` got a 403 on its first post, and passes with `same-origin`.
+
 ## Plan review
 
 Round 1, 15 Oct 2026, Opus standard: six minors folded, the owner call kept; approved.

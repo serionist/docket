@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% from "macros.html" import notice, locator, paste %}
+{% from "staging/macros.html" import back %}
+{% block main %}
+<div class="staging">
+<header class="staging-head">
+  <h1>Staging</h1>
+  {% if view %}
+  <nav aria-label="Sources">
+    <ul class="chips">
+      {% for c in view.source_chips %}
+      <li><a class="chip source-chip{% if c.on %} on{% endif %}" href="{{ c.url }}"{% if c.on %} aria-current="true"{% endif %}>{{ c.label }}</a></li>
+      {% endfor %}
+    </ul>
+  </nav>
+  <nav aria-label="States">
+    <ul class="chips">
+      {% for c in view.state_chips %}
+      <li><a class="chip source-chip{% if c.on %} on{% endif %}" href="{{ c.url }}"{% if c.on %} aria-current="true"{% endif %}>{{ c.label }}</a></li>
+      {% endfor %}
+    </ul>
+  </nav>
+  {% endif %}
+</header>
+{% if problem %}{{ notice('error', problem) }}{% endif %}
+{% if changed %}{{ notice('warn', changed) }}{% endif %}
+{% if view %}
+<p class="lead">{{ view.lead }}</p>
+{% if view.done %}{{ notice('info', view.done) }}{% endif %}
+
+<section class="part" aria-labelledby="ready-title">
+  <h2 id="ready-title">Ready</h2>
+  {% if view.ready %}
+  <div class="promote">
+    <p class="promote-counts">{% for name, n in view.ready %}<span>{{ name }} {{ n }}</span>{% endfor %}</p>
+    <div class="promote-buttons">
+      {% for name, n in view.ready %}
+      <form method="post" action="/staging/promote">{{ back(state) }}<input type="hidden" name="promote" value="{{ name }}"><button type="submit" class="button">Promote {{ name }}</button></form>
+      {% endfor %}
+      {% if view.ready|length > 1 %}
+      <form class="promote-all" method="post" action="/staging/promote">{{ back(state) }}<button type="submit" class="button primary">Promote all</button></form>
+      {% endif %}
+    </div>
+  </div>
+  <p class="hint">Promotion cuts each record, redacts it with the current rules and commits it to the raw log.</p>
+  {% else %}
+  <p class="empty-line">Nothing is ready to promote.</p>
+  {% endif %}
+</section>
+
+<section class="part" aria-labelledby="waiting-title">
+  <h2 id="waiting-title">Waiting</h2>
+  <div class="layout">
+    <section class="results" aria-label="Records at the gate">
+      {% for g in view.groups %}
+      <h3 class="group-source"><span class="source">{{ g.source }}</span> <span class="meta">{{ g.counts }}</span></h3>
+      <ol class="records">
+        {% for r in g.rows %}
+        <li class="record state-{{ r.state }} why-{{ r.why }}{% if r.open %} open{% endif %}">
+          {% if r.on_hold %}
+          <p class="record-head"><span class="kind">{{ icon(r.icon) }}{{ r.kind }}</span>{{ locator(r.rid) }}<span class="badge">on hold</span></p>
+          {% else %}
+          <a class="hit-link record-link" href="{{ r.url }}" hx-get="{{ r.fragment }}" hx-target="#panel" data-locator="{{ r.key }}"><span class="kind">{{ icon(r.icon) }}{{ r.kind }}</span><span class="record-title" dir="auto">{{ r.title or "(no title)" }}</span></a>
+          {% endif %}
+          <p class="meta"><time datetime="{{ r.when.isoformat() }}">{{ r.when|at(tz) }}</time><span>waiting {{ r.waited }}</span><span class="badge">{{ r.state }}</span><span class="locator key">{{ r.short }}</span></p>
+          <p class="why">{{ r.line }}</p>
+        </li>
+        {% endfor %}
+      </ol>
+      {% else %}
+      <p class="empty-line">{{ "Nothing here waits at the gate." if view.narrowed else "Nothing waits at the gate. Records a sync or an import stages show here." }}</p>
+      {% endfor %}
+      {% if view.more %}<p class="more"><a class="button" href="{{ view.more }}">Show more</a></p>{% endif %}
+    </section>
+    <aside id="panel" class="panel-slot" aria-label="The open record">
+      {% include "staging/_panel.html" %}
+    </aside>
+  </div>
+</section>
+
+<section class="part" aria-labelledby="held-title">
+  <h2 id="held-title">Held</h2>
+  {% for h in held %}
+  <article class="held">
+    <h3 class="held-head"><span class="source">{{ h.source }}</span> <span class="meta">{{ h.ids|length }} recording{{ "s" if h.ids|length != 1 else "" }} held{% if h.on_hold %}; {{ h.on_hold }} staged record{{ "s" if h.on_hold != 1 else "" }} on hold, which stop{{ "s" if h.on_hold == 1 else "" }} every ingest of {{ h.source }}{% endif %}</span></h3>
+    <p class="hint">A release is yours to confirm: run the command in your own terminal, where it shows each cut and asks you to type back a code. Claude can place the cuts for you:</p>
+    {{ paste(h.paste, 'the words that hand ' ~ h.source ~ "'s held recordings to Claude") }}
+    {% if h.unfilled %}
+    <dl class="unfilled">
+      {% for name, value in h.unfilled %}<div><dt>&lt;{{ name }}&gt;</dt><dd><span class="locator">{{ value }}</span></dd></div>{% endfor %}
+    </dl>
+    {% endif %}
+    <ul class="held-ids">
+      {% for i in h.ids %}
+      <li class="held-id">
+        <p class="held-id-head">{{ locator(i.id) }}{% if i.again %}<span class="badge">held again after its release</span>{% endif %}</p>
+        {% if i.again %}<p class="meta">{{ i.again }}</p>{% endif %}
+        <details class="commands">
+          <summary>Commands</summary>
+          {% for c in i.commands %}
+          <p class="command-label">{{ c.label }}</p>
+          {{ paste(c.text, c.label ~ ' ' ~ i.id) }}
+          {% endfor %}
+        </details>
+      </li>
+      {% endfor %}
+    </ul>
+  </article>
+  {% else %}
+  <p class="empty-line">No recording is held.</p>
+  {% endfor %}
+</section>
+
+{% if view.unreadable %}
+<section class="part" aria-labelledby="unreadable-title">
+  <h2 id="unreadable-title">Files that don't read</h2>
+  <ul class="unreadable">
+    {% for path, message in view.unreadable %}<li><span class="locator">{{ path }}</span>: {{ message }}</li>{% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endif %}
+</div>
+{% endblock %}

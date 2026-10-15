@@ -322,8 +322,8 @@ What the service refuses, and what it doesn't:
 
 ## The web app
 
-`docket open` signs your browser in to the service's own pages. In this version that is Search and Sync; the
-navigation shows the pages still to come, with the phase each arrives in.
+`docket open` signs your browser in to the service's own pages. In this version that is Search, Sync and Staging;
+the navigation shows the pages still to come, with the phase each arrives in.
 
 - Search runs the search Claude runs: the same words, names, time words and dates. Sources and a month narrow it;
   people and entities favour the hits that mention them, as Claude's boosts do. Facet counts are within the top 200.
@@ -356,6 +356,25 @@ drops or closes a run.
   under `.git/docket/` (or the host's git dir for a folder vault). Ids and counts only, per machine, never committed;
   deleting it loses only the page's list.
 - The page shows ids, counts, times and Docket's own messages, never a title or anything a source's tool returned.
+
+### The Staging page
+
+`/staging` is what waits at the gate, worked in the browser through the same calls as `docket staging` (DR-0380 to
+DR-0384).
+
+| Part | Shows and does |
+|---|---|
+| Ready | what goes at the next promotion, per source, with a Promote button per source and one for all |
+| Waiting | each record by source, oldest first: kind, title, when, how long it waited, and why it waits; a record's text only once you open it |
+| The open record | as promotion would write it, redacted by today's rules: check utterances or lines to cut, or type a range (`12:30-14:05`, `120-340`), Preview, then Work; or Private, which asks once more and drops it |
+| Held | each source's held ids, and the commands that read and release one in your terminal, quoted, with `--from` and `--vault` filled |
+
+- Releases stay at your console: the page names the command, and no page releases a hold (DR-0382).
+- A record the CLI, Claude or another tab changed since you opened it isn't overwritten: the page says so and shows it
+  as it stands.
+- Its URL holds `source`, `state`, `k`, the open record (`open`), what you checked (`u`, `line`), typed cuts (`cut`)
+  and the drop's question (`confirm=private`).
+- Keys: `j` and `k` through the records, `Enter` to open one, `Esc` to close it, `?`. No key writes.
 
 The pages' browser test runs on CI. To run it here, against your own Chrome or Edge:
 `DOCKET_TEST_BROWSER=chrome uv run pytest packages/docket/tests/test_web_browser.py` (or `msedge`).

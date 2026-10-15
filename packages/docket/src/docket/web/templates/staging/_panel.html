@@ -1,0 +1,101 @@
+{% from "macros.html" import notice, locator, copy %}
+{% from "staging/macros.html" import hidden %}
+{% if error is defined and error %}
+<section class="panel" aria-labelledby="panel-title">
+  <header class="panel-head"><h2 id="panel-title" tabindex="-1">The open record</h2></header>
+  {{ notice('error', error) }}
+</section>
+{% elif missing %}
+<section class="panel" aria-labelledby="panel-title">
+  <header class="panel-head">
+    <h2 id="panel-title" tabindex="-1">Not staged any more</h2>
+    <a class="icon-button close" data-key="Escape" href="{{ missing.close_url }}" hx-get="{{ missing.close_fragment }}" hx-target="#panel" title="Close">{{ icon('close') }}<span class="visually-hidden">Close</span></a>
+  </header>
+  {{ notice('warn', missing.note) }}
+</section>
+{% elif panel %}
+<section class="panel staged-record" aria-labelledby="panel-title">
+  <header class="panel-head">
+    <h2 id="panel-title" tabindex="-1" dir="auto">{{ ("on hold: " ~ panel.kind) if panel.on_hold else (panel.title or "(no title)") }}</h2>
+    <a class="icon-button close" data-key="Escape" href="{{ panel.close_url }}" hx-get="{{ panel.close_fragment }}" hx-target="#panel" title="Close the record">{{ icon('close') }}<span class="visually-hidden">Close the record</span></a>
+    <p class="panel-locator">{{ locator(panel.rid) }}{{ copy(panel.rid) }}</p>
+  </header>
+  <dl class="record-facts">
+    <div><dt>kind</dt><dd>{{ panel.kind }}</dd></div>
+    <div><dt>source</dt><dd>{{ panel.source }}</dd></div>
+    <div><dt>said</dt><dd><time datetime="{{ panel.when.isoformat() }}">{{ panel.when|at(tz) }}</time></dd></div>
+    <div><dt>staged</dt><dd><time datetime="{{ panel.staged_at.isoformat() }}">{{ panel.staged_at|at(tz) }}</time></dd></div>
+    <div><dt>state</dt><dd>{{ panel.state }}, classified by {{ panel.by }}{% if panel.cuts %}; cuts {{ panel.cuts|join(', ') }}{% endif %}</dd></div>
+    <div><dt>key</dt><dd><span class="locator">{{ panel.key }}</span></dd></div>
+  </dl>
+  <p class="why">{{ panel.why_line }}</p>
+  {% if not panel.on_hold %}
+  {% for n in panel.notes %}{{ notice('warn', n) }}{% endfor %}
+  {% if panel.problem %}{{ notice('error', panel.problem) }}{% endif %}
+  {% if panel.confirm %}
+  <div class="confirm">
+    <p>Drop this {{ panel.kind }} for good? It leaves staging, and a later pull of this version is skipped. Nothing of it reaches the raw log.</p>
+    <div class="actions">
+      <form class="confirm-form" method="post" action="/staging/classify">{{ hidden(panel.hidden) }}<input type="hidden" name="label" value="private"><button type="submit" class="button danger">Drop it as private</button></form>
+      <a class="button" href="{{ panel.back_url }}" hx-get="{{ panel.back_fragment }}" hx-target="#panel">Keep it</a>
+    </div>
+  </div>
+  {% else %}
+  <form class="cut-form" method="post" action="/staging/classify">
+    {{ hidden(panel.hidden) }}
+    {% if panel.utterances %}
+    <fieldset>
+      <legend>Check the utterances to cut</legend>
+      <ol class="utterances">
+        {% for u in panel.utterances %}
+        <li class="utterance{% if u.going %} going{% endif %}{% if u.was_cut %} was-cut{% endif %}">
+          {% if u.was_cut %}
+          <span class="time">{{ u.span }}</span><span class="text">[cut]</span>
+          {% else %}
+          <label><input type="checkbox" name="u" value="{{ u.n }}"{% if u.checked %} checked{% endif %}><span class="time">{{ u.span }}</span><span class="speaker" dir="auto">{{ u.speaker }}</span><span class="text" dir="auto">{{ u.text }}</span>{% if u.going %}<span class="visually-hidden"> (goes with these cuts)</span>{% endif %}</label>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ol>
+    </fieldset>
+    {% elif panel.lines %}
+    <fieldset>
+      <legend>Check the lines to cut; each starts at the character beside it</legend>
+      <ol class="text-lines">
+        {% for l in panel.lines %}
+        <li class="text-line"><label><input type="checkbox" name="line" value="{{ l.n }}"{% if l.checked %} checked{% endif %}><span class="offset">{{ l.offset }}</span><span class="text" dir="auto">{{ l.text }}</span></label></li>
+        {% endfor %}
+      </ol>
+    </fieldset>
+    {% elif panel.text %}
+    <pre class="record-text" dir="auto">{{ panel.text }}</pre>
+    {% endif %}
+    <label class="typed">Also cut <input type="text" name="cut" value="{{ panel.typed }}" placeholder="{{ '12:30-14:05' if panel.utterances else '120-340' }}" spellcheck="false" autocomplete="off"></label>
+    <div class="actions">
+      <button type="submit" class="button" name="act" value="preview">Preview</button>
+      {% if panel.can_work %}<button type="submit" class="button primary" name="label" value="work">{{ panel.work_label }}</button>{% endif %}
+      <a class="button" href="{{ panel.confirm_url }}" hx-get="{{ panel.confirm_fragment }}" hx-target="#panel">Private: drop it</a>
+    </div>
+  </form>
+  {% if panel.preview %}
+  <section class="preview" aria-labelledby="preview-title">
+    <h3 id="preview-title">After the cuts</h3>
+    <p>{{ panel.preview.summary }}</p>
+    {% if panel.preview.text is not none %}<pre class="record-text" dir="auto">{{ panel.preview.text }}</pre>{% endif %}
+  </section>
+  {% endif %}
+  {% endif %}
+  {% if panel.facts %}
+  <dl class="record-facts more-facts">
+    {% for name, value in panel.facts %}<div><dt>{{ name }}</dt><dd dir="auto">{{ value }}</dd></div>{% endfor %}
+  </dl>
+  {% endif %}
+  {% if panel.native %}
+  <details class="native"><summary>Native fields, as the source gave them</summary><pre class="record-text">{{ panel.native }}</pre></details>
+  {% endif %}
+  {% if panel.cut_before %}
+  <details class="cut-before"><summary>The version in raw that was cut before, run {{ panel.cut_before[0] }}</summary><pre class="record-text" dir="auto">{{ panel.cut_before[1] }}</pre></details>
+  {% endif %}
+  {% endif %}
+</section>
+{% endif %}

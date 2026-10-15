@@ -35,7 +35,17 @@ PAGE_CSP = (
 # htmx's settings: its own indicator CSS off (ours has it), and a 401 not swapped in, since the page reloads into the
 # sign-in page instead. Read once by htmx from a meta tag, so no script sets them.
 HTMX_CONFIG = json.dumps({"includeIndicatorCSS": False, "noSwap": [204, 304, 401]})
-STYLESHEETS = ("css/tokens.css", "css/base.css", "css/components.css", "css/search.css", "css/sync.css")
+STYLESHEETS = (
+    "css/tokens.css",
+    "css/base.css",
+    "css/components.css",
+    "css/search.css",
+    "css/sync.css",
+    "css/staging.css",
+)
+# A page that posts a form says so: under the service's floor, no-referrer, a browser sends Origin: null on a
+# same-origin post (Fetch's rule for serializing a request's origin), and the Guard refuses that as cross-origin.
+POSTS_FORMS = "same-origin"
 SCRIPTS = (assets.HTMX, "js/docket.js")
 # A word of a snippet is marked when it is a query word, or starts with one this long (an inflected form).
 MARK_PREFIX = 4
@@ -156,11 +166,17 @@ async def safely(
 
 
 def page(
-    template: str, context: Mapping[str, object], *, status: int = 200, headers: Mapping[str, str] | None = None
+    template: str,
+    context: Mapping[str, object],
+    *,
+    status: int = 200,
+    headers: Mapping[str, str] | None = None,
+    referrer: str | None = None,
 ) -> HTMLResponse:
-    """A page or a fragment, with the page CSP and `no-store`."""
+    """A page or a fragment, with the page CSP and `no-store`; a page with a form passes `referrer=POSTS_FORMS`."""
+    own = {"Referrer-Policy": referrer} if referrer is not None else {}
     return HTMLResponse(
         render(template, context),
         status_code=status,
-        headers={"Content-Security-Policy": PAGE_CSP, "Cache-Control": "no-store", **(headers or {})},
+        headers={"Content-Security-Policy": PAGE_CSP, "Cache-Control": "no-store", **own, **(headers or {})},
     )

@@ -45,18 +45,6 @@
   .ids { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 2px var(--space-2); }
   .run-id { color: var(--ink); }
 
-  .paste { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-2); }
-  .paste-text {
-    flex: 1 1 320px;
-    min-width: 0;
-    padding: 6px 10px;
-    font-size: var(--text-sm);
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    background: var(--surface-2);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-  }
   .need-all { margin-top: var(--space-2); }
 
   .run-facts { display: flex; flex-wrap: wrap; gap: 2px var(--space-3); margin-top: 4px; font-size: var(--text-sm); color: var(--muted); }
@@ -78,6 +66,5 @@
   @media (max-width: 600px) {
     .machine-facts { grid-template-columns: minmax(0, 1fr); }
     .machine-facts div { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: var(--space-2); }
-    .paste .button { width: 100%; justify-content: center; }
   }
 }
