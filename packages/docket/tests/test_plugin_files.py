@@ -4,16 +4,20 @@ before it reaches a user. Claude Code validates the files themselves in the full
 from __future__ import annotations
 
 import json
+import re
 import shlex
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
+import typer.main
 
-from docket.cli import main
+from docket.cli import app, main
 from docket.service import client, state, writer
 from docket.service.token import Tokens
+from docket.sources import scaffold
+from docket.vault.wizard import KNOWN_SOURCES
 
 REPO = Path(__file__).resolve().parents[3]
 PLUGIN = REPO / "plugin"
@@ -79,15 +83,42 @@ def test_recall_pre_approves_only_docket_s_read_only_tools() -> None:
     assert list(read_json(".mcp.json")["mcpServers"]) == ["docket"]
 
 
-def test_recall_names_command_line_options_docket_has(capsys: pytest.CaptureFixture[str]) -> None:
+def options(*path: str) -> set[str]:
+    """A docket command's options, read from the command itself: its help text cuts long names to the terminal."""
+    command: Any = typer.main.get_command(app)
+    for name in path:
+        command = command.commands[name]
+    return {opt for param in command.params for opt in (*param.opts, *param.secondary_opts)}
+
+
+def test_recall_names_command_line_options_docket_has() -> None:
     text = (PLUGIN / "skills" / "recall" / "SKILL.md").read_text(encoding="utf-8")
-    for command, options in (
-        (["search"], ["--person", "--entity", "--since", "--until", "-k", "--vault"]),
-        (["doc", "read"], ["--view", "--around", "--vault"]),
-        (["doc", "verify"], ["--line", "--vault"]),
+    for command, wanted in (
+        (["search"], {"--person", "--entity", "--since", "--until", "-k", "--vault"}),
+        (["doc", "read"], {"--view", "--around", "--vault"}),
+        (["doc", "verify"], {"--line", "--vault"}),
     ):
         assert f"docket {' '.join(command)}" in text
-        assert main([*command, "--help"]) == 0
-        shown = capsys.readouterr().out
-        for option in options:
-            assert option in shown, (command, option)
+        assert wanted <= options(*command), command
+
+
+def test_setup_knows_the_sources_the_wizard_knows_and_their_references() -> None:
+    text = (PLUGIN / "skills" / "setup" / "sources.md").read_text(encoding="utf-8")
+    rows = re.findall(r"^\| `([a-z0-9._-]+)` \| (work|mixed|private) \| .+ \| (yes|no) \|$", text, re.MULTILINE)
+    assert {name: level for name, level, _ in rows} == KNOWN_SOURCES
+    assert {name for name, _, ref in rows if ref == "yes"} == set(scaffold.REFERENCES)
+    for name in scaffold.REFERENCES:
+        assert scaffold.template_files(name)
+
+
+def test_setup_runs_commands_with_flags_docket_has() -> None:
+    text = (PLUGIN / "skills" / "setup" / "SKILL.md").read_text(encoding="utf-8")
+    for command in (["init"], ["source", "new"], ["service", "install"], ["vault", "status"], ["ingest"]):
+        used = re.findall(rf"docket {' '.join(command)}[^`\n]*", text)
+        assert used, command
+        flags = {flag for line in used for flag in re.findall(r"--[a-z][a-z-]*", line)}
+        assert flags <= options(*command), command
+    # Every override the skill may pass is a flag init has, and the skill names each one.
+    for flag in ("--allow-shared", "--remote-is-private", "--allow-dirty-parent"):
+        assert f"`{flag}`" in text
+        assert flag in options("init")
