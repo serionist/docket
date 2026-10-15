@@ -10,6 +10,7 @@ from docket_testkit import (
     POLISHED,
     READ_ROUTES,
     REC,
+    SAID,
     at,
     imported_template,
     make_record,
@@ -188,33 +189,57 @@ def test_a_transcript_s_read_names_what_covers_its_recording(vault: Vault, locat
 
 
 @pytest.mark.parametrize(
-    ("blocks", "hint"),
+    ("blocks", "time", "hint"),
     [
         (
             ["transaction_polish"],
-            f"its transcript {POLISHED} has them: write [r:{POLISHED}@10:42-10:50], with {POLISHED} in covers",
+            "@10:42-10:50",
+            f"the time is on its transcript {POLISHED}: write [r:{POLISHED}@10:42-10:50], with {POLISHED} in covers",
         ),
         (
             ["transaction", "transaction_polish"],
-            f"its transcripts {PLAUD}/transaction, {POLISHED} have them: "
+            "@10:42-10:50",
+            f"the time is on its transcripts {PLAUD}/transaction, {POLISHED}: "
             f"write [r:{PLAUD}/transaction@10:42-10:50] or [r:{POLISHED}@10:42-10:50], with that one in covers",
         ),
-        ([], f"anchor the whole record: [r:{PLAUD}]"),
+        ([], "@10:42-10:50", f"anchor the whole record: [r:{PLAUD}]"),
+        # A time past the transcript's end gets no anchor that would be refused in turn, only why.
+        (["transaction_polish"], "@1:39:00", f"1:39:00 is outside {POLISHED}, which runs from 00:00 to 15:05"),
+        (
+            ["transaction", "transaction_polish"],
+            "@1:39:00",
+            f"1:39:00 is outside {PLAUD}/transaction, which runs from 00:00 to 15:05; "
+            f"1:39:00 is outside {POLISHED}, which runs from 00:00 to 15:05",
+        ),
     ],
 )
-def test_a_time_on_a_recording_is_refused_naming_its_transcripts(vault: Vault, blocks: list[str], hint: str) -> None:
+def test_a_time_on_a_recording_is_refused_naming_its_transcripts(
+    vault: Vault, blocks: list[str], time: str, hint: str
+) -> None:
     with_plaud(vault, *blocks)
     doc_id = "recording-note:2026-10-14-on-the-recording"
-    doc = note(doc_id, covers=[PLAUD], lines=["- Ten million. @10:42-10:50"])
+    doc = note(doc_id, covers=[PLAUD], lines=[f"- Ten million. {time}"])
     with pytest.raises(DocRefusedError) as refused:
         recall.doc_put(vault, doc)
-    assert [p.message for p in refused.value.problems] == [f"@10:42-10:50: {PLAUD} has no transcript segments; {hint}"]
+    assert [p.message for p in refused.value.problems] == [f"{time}: {PLAUD} has no transcript segments; {hint}"]
     # The same doc written by hand: verify says the same.
     path = vault.root / doc_path(doc_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(doc, encoding="utf-8", newline="\n")
     checked = recall.verify(vault, doc_id).lines
     assert [s.problem for line in checked for s in line.spans] == [f"{PLAUD} has no transcript segments; {hint}"]
+
+
+def test_a_hint_names_only_the_transcripts_that_hold_the_time(vault: Vault) -> None:
+    under = {"source": "plaud", "container": PLAUD, "thread": PLAUD, "author": None}
+    raw = make_record(rid=f"{PLAUD}/transaction", kind="transcript", segments=SAID[:1], text="Morning, Cleo.", **under)
+    vault.write_run("plaud", [*plaud_records("transaction_polish"), raw], run_at=at(12))
+    with pytest.raises(DocRefusedError) as refused:
+        recall.doc_put(vault, note("recording-note:2026-10-14-x", covers=[PLAUD], lines=["- Ten million. @10:42"]))
+    assert [p.message for p in refused.value.problems] == [
+        f"@10:42: {PLAUD} has no transcript segments; "
+        f"the time is on its transcript {POLISHED}: write [r:{POLISHED}@10:42], with {POLISHED} in covers"
+    ]
 
 
 def test_a_stretch_that_runs_backwards_is_refused(vault: Vault) -> None:

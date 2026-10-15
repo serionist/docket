@@ -93,9 +93,9 @@ class RawLookup:
         latest = (v[-1] for other, v in by_rid.items() if other != rid)
         return sorted((r for r in latest if rid in over(r)), key=lambda r: r.rid)
 
-    def transcripts(self, rid: str) -> list[str]:
+    def transcripts(self, rid: str) -> list[RawRecord]:
         """The transcripts under rid, by rid: where a time on a record without segments of its own lands (DR-0370)."""
-        return [r.rid for r in self.under(rid) if is_transcript(r)]
+        return [r for r in self.under(rid) if is_transcript(r)]
 
     def timed(self, rids: list[str]) -> list[str]:
         """Where a time on these records can be placed (DR-0370): those with segments of their own; when none has any,
@@ -104,7 +104,7 @@ class RawLookup:
         own = [rid for rid in rids if any(segments(r) for r in self.versions(rid)[-1:])]
         if own:
             return own
-        return list(dict.fromkeys(t for rid in rids for t in self.transcripts(rid)))
+        return list(dict.fromkeys(t.rid for rid in rids for t in self.transcripts(rid)))
 
     def recordings(self, record: RawRecord) -> list[str]:
         """The records in the raw log a transcript is under, by rid: its recording, read as one with it (DR-0391). A
@@ -147,14 +147,20 @@ def problem(anchor: Anchor, record: RawRecord, lookup: RawLookup | None = None) 
 
 
 def _no_segments(anchor: Anchor, record: RawRecord, lookup: RawLookup | None) -> str:
-    under = lookup.transcripts(record.rid) if lookup is not None else []
+    """Why a time on a record without segments doesn't resolve: the transcripts under it that hold the time, each with
+    the anchor to write, else why the time falls outside each of them, so a hint never suggests a refused anchor."""
     head = f"{record.rid} has no transcript segments"
+    under = lookup.transcripts(record.rid) if lookup is not None else []
     if not under:
         return f"{head}; anchor the whole record: [r:{encode_rid(record.rid)}]"
-    written = " or ".join(format_anchor(rid, "time", anchor.start, anchor.end) for rid in under)
-    if len(under) == 1:
-        return f"{head}; its transcript {under[0]} has them: write {written}, with {under[0]} in covers"
-    return f"{head}; its transcripts {', '.join(under)} have them: write {written}, with that one in covers"
+    why = {t.rid: problem(Anchor(t.rid, "time", anchor.start, anchor.end), t) for t in under}
+    fits = [rid for rid, outside in why.items() if outside is None]
+    if not fits:
+        return "; ".join([head, *(outside for outside in why.values() if outside)])
+    written = " or ".join(format_anchor(rid, "time", anchor.start, anchor.end) for rid in fits)
+    if len(fits) == 1:
+        return f"{head}; the time is on its transcript {fits[0]}: write {written}, with {fits[0]} in covers"
+    return f"{head}; the time is on its transcripts {', '.join(fits)}: write {written}, with that one in covers"
 
 
 def span(
