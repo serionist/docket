@@ -251,8 +251,9 @@ TEAM = {
     "person/rob.yaml": "id: rob\ntype: person\nname: {en: Rob}\n",
     "person/robert.yaml": "id: robert\ntype: person\nname: {en: Robert}\n",
 }
-TEAM_LINES = [
-    # The messages it is in (n % mod == rest), the line, and the person it names.
+# The messages a line is in (n % mod == rest), the line, and the person it names.
+Line = tuple[int, int, str, str | None]
+TEAM_LINES: list[Line] = [
     (25, 3, "Sam is on site.", "sam"),
     (25, 11, "Sammal beszéltem.", "sam"),
     (50, 19, "Sam's truck is here.", "sam"),
@@ -287,22 +288,31 @@ TEAM_LINES = [
 ]
 
 
+def lines_message(lines: list[Line], n: int) -> tuple[str, set[str]]:
+    """Message n's text and the people it names, from lines given as (mod, rest, line, person)."""
+    picked = [(line, who) for mod, rest, line, who in lines if n % mod == rest]
+    return " ".join([f"A raktárban minden rendben, {n}.", *(line for line, _ in picked)]), {w for _, w in picked if w}
+
+
 def team_message(n: int) -> tuple[str, set[str]]:
     """Message n's text and the people it names."""
-    lines = [(line, who) for mod, rest, line, who in TEAM_LINES if n % mod == rest]
-    return " ".join([f"A raktárban minden rendben, {n}.", *(line for line, _ in lines)]), {w for _, w in lines if w}
+    return lines_message(TEAM_LINES, n)
 
 
-def make_team_vault(root: Path) -> Vault:
+def people_vault(root: Path, people: dict[str, str], lines: list[Line]) -> Vault:
+    """400 messages made of the lines, and the people's entity files."""
     vault = Vault.init(root / "vault", index_config(), "test-box")
-    vault.write_run(
-        "chat", [make_record(n, text=team_message(n)[0]) for n in range(400)], datetime(2026, 10, 14, 7, tzinfo=UTC)
-    )
-    for rel, text in TEAM.items():
+    records = [make_record(n, text=lines_message(lines, n)[0]) for n in range(400)]
+    vault.write_run("chat", records, datetime(2026, 10, 14, 7, tzinfo=UTC))
+    for rel, text in people.items():
         path = vault.root / "entities" / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
     return vault
+
+
+def make_team_vault(root: Path) -> Vault:
+    return people_vault(root, TEAM, TEAM_LINES)
 
 
 @pytest.fixture(scope="module")
@@ -347,6 +357,55 @@ def test_a_query_word_stemming_like_a_name_stays_a_word(team: Vault) -> None:
     his = {make_record(n).rid for n in range(400) if "sam" in team_message(n)[1]}
     sam = search(team, "Sam", k=len(his), now=now)
     assert {h.rid for g in sam.groups for h in g.hits} == his
+
+
+# A vault where a common word crowds out the stem form a name's case forms are cut to: már stems to mar, as Markkal,
+# Marknak and Markot do, and bele to bel, as Bélával, Bélának and Béláról do, each in over ten times as many chunks as
+# the name as written. No word stems to mark or bela, so each name keeps a stem form.
+CROWDED = {
+    "person/mark.yaml": "id: mark\ntype: person\nname: {en: Mark}\n",
+    "person/bela.yaml": "id: bela\ntype: person\nname: {hu: Béla}\n",
+}
+CROWDED_LINES: list[Line] = [
+    (3, 0, "Már kész a terv.", None),
+    (3, 1, "Bele kell nézni.", None),
+    (200, 2, "Mark szerint jó.", "mark"),
+    (100, 5, "Markkal megbeszéltük.", "mark"),
+    (100, 17, "Marknak szóltam.", "mark"),
+    (100, 29, "Markot hívtam.", "mark"),
+    (200, 8, "Béla szerint jó.", "bela"),
+    (100, 11, "Bélával beszéltem.", "bela"),
+    (100, 23, "Bélának elküldtem.", "bela"),
+    (100, 41, "Béláról beszéltünk.", "bela"),
+]
+
+
+def make_crowded_vault(root: Path) -> Vault:
+    return people_vault(root, CROWDED, CROWDED_LINES)
+
+
+@pytest.fixture(scope="module")
+def crowded(tmp_path_factory: pytest.TempPathFactory) -> Vault:
+    template = template_with(tmp_path_factory, make_crowded_vault)
+    v = copy_vault(template, tmp_path_factory.mktemp("crowded"))
+    rebuild(v)
+    return v
+
+
+def test_a_case_form_counts_beside_the_stem_form_it_is_cut_to_while_a_common_word_crowds_that_out(
+    crowded: Vault,
+) -> None:
+    forms = set(query(crowded, "SELECT entity, term, how FROM alias_terms WHERE col = 'stem_hu'"))
+    assert {("mark", "mar", "common"), ("mark", "mark", "stem")} <= forms
+    assert {("bela", "bel", "common"), ("bela", "bela", "stem")} <= forms
+    for entity in ("mark", "bela"):
+        # Markkal, Marknak, Markot, Bélával, Bélának and Béláról in; no chunk saying only "Már kész" or "Bele kell".
+        assert mentions_of(crowded, entity) == {n for n in range(400) if entity in lines_message(CROWDED_LINES, n)[1]}
+    now = datetime(2026, 10, 15, tzinfo=UTC)
+    for word, entity in [("markkal", "mark"), ("marknak", "mark"), ("markot", "mark"), ("bélával", "bela")]:
+        assert [e.id for e in search(crowded, word, now=now).query.entities] == [entity], word
+    for text in ("már kész", "bele kell"):
+        assert search(crowded, text, now=now).query.entities == [], text
 
 
 def test_a_name_ending_in_y_keeps_its_inflected_mentions(one_customer: Vault) -> None:
@@ -462,7 +521,7 @@ def test_an_entity_with_only_needs_aliases_has_no_query_expression() -> None:
     assert matching.expressions(conn, Analyzer(resolve(["en"])), ["e"]) == {("e", 0): 'folded : "cond"'}
 
 
-def test_a_case_form_counts_beside_a_stem_form_or_where_the_stemmer_leaves_it_whole() -> None:
+def test_a_case_form_counts_beside_the_stem_form_it_is_cut_to_or_where_the_stemmer_leaves_it_whole() -> None:
     conn = sqlite3.connect(":memory:")
     create(conn, resolve(["en", "hu"]))
     conn.executemany(
@@ -472,6 +531,8 @@ def test_a_case_form_counts_beside_a_stem_form_or_where_the_stemmer_leaves_it_wh
             ("nim", "Nimish", "nimish"),
             ("rel", "Release 2026", "release 2026"),
             ("rob", "Rob", "rob"),
+            ("mark", "Mark", "mark"),
+            ("bal", "Bálint", "balint"),
         ],
     )
     conn.executemany(
@@ -485,6 +546,12 @@ def test_a_case_form_counts_beside_a_stem_form_or_where_the_stemmer_leaves_it_wh
             ("rel", "stem_hu", "releas 2026", "stem"),
             ("rob", "folded", "rob", "written"),
             ("rob", "stem_hu", "rob", "common"),
+            ("mark", "folded", "mark", "written"),
+            ("mark", "stem_hu", "mar", "common"),
+            ("mark", "stem_hu", "mark", "stem"),
+            ("bal", "folded", "balint", "written"),
+            ("bal", "stem_hu", "balin", "stem"),
+            ("bal", "stem_hu", "balint", "stem"),
         ],
     )
     exprs = matching.expressions(conn, Analyzer(resolve(["en", "hu"])))
@@ -498,3 +565,12 @@ def test_a_case_form_counts_beside_a_stem_form_or_where_the_stemmer_leaves_it_wh
     # A number has no case forms; and with every stem form dropped (robot everywhere), the case forms don't count.
     assert exprs[("rel", 0)] == 'folded : "release 2026"'
     assert exprs[("rob", 0)] == 'folded : "rob"'
+    # Mark's case forms are all cut to mar, which már crowds out: they count beside mar while his mark is kept.
+    mark = exprs[("mark", 0)]
+    assert mark.startswith('(folded : "mark" OR (stem_hu : "mar" AND (folded : "marknak" OR ')
+    assert 'stem_hu : "mark"' not in mark
+    # Bálint's are cut to two stem forms, and each goes beside its own.
+    balint = exprs[("bal", 0)]
+    assert balint.count(" AND ") == 2
+    assert '(stem_hu : "balint" AND (folded : "balintnak" OR ' in balint
+    assert '(stem_hu : "balin" AND ' in balint

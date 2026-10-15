@@ -442,10 +442,12 @@ role: the customer's site lead
   (DR-0281).
 - Aliases match as written, and in their case forms in languages that give them (Hungarian, not English: `Mark`
   would match `marking`): `Acménél`, `Sammal`, and `Sammel` as Hungarian says a foreign name by its sound. A case
-  form counts beside one of the name's kept stem forms, in a chunk or a query: a stem form alone meets "the same",
-  which the Hungarian stemmer cuts to Sam's `sam`, and a case form alone `benne`, which folds like Ben's `benné`. One
-  the stemmer leaves whole (`Nimishsel`) counts on its own. A stem form under three letters, or one that floods the
-  index (`Rob` stems to `rob`, which `robot` gives too), is dropped and listed for curation (DR-0350).
+  form counts beside the stem form the stemmer cuts it to, in a chunk or a query: a stem form alone meets "the same",
+  which the Hungarian stemmer cuts to Sam's `sam`, and a case form alone `benne`, which folds like Ben's `benné` and
+  stems to `benn`. One the stemmer leaves whole (`Nimishsel`) counts on its own. A stem form under three letters, or
+  one that floods the index (`Rob` stems to `rob`, which `robot` gives too), is dropped and listed for curation; the
+  case forms count while any stem form of the name is kept, so `Markkal`, cut to `mar`, counts while `már` floods it,
+  and with every one dropped they don't (DR-0350).
 - Aliases marked `asr` also match vocabulary words within one edit of a word of 5 to 7 letters, two of 8 or more.
 - Aliases with `needs` count only when one of the named entities is in the same chunk.
 - A diarized speaker, or an author whose id an entity lists, counts as a mention of that person.

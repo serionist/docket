@@ -50,9 +50,9 @@ class Language:
     # Only the first: English changes the third (`dry` to `dri`) and its exceptions the second (`dying` to `die`). Some
     # Snowball stemmers cut prefixes (Indonesian, Irish), so a language says so only once someone has checked it.
     keeps_start: bool = False
-    # A name's case forms (lowercased, as written). Aliases match in them beside a kept stem form in this language,
-    # and never through a stem form alone: an ordinary word that stems like a name (`same` for Sam) is none of its
-    # case forms (DR-0350).
+    # A name's case forms (lowercased, as written). Aliases match in them beside the stem form each is cut to in this
+    # language, while one is kept, and never through a stem form alone: an ordinary word that stems like a name
+    # (`same` for Sam) is none of its case forms (DR-0350).
     cases: Callable[[str], list[str]] | None = None
 
     @property
