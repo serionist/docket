@@ -331,8 +331,9 @@ entities: [marco, northwind, fleet-management]
 Every bullet ends with its anchors. Docs are written through the `doc_put` tool, which redacts the doc line by line,
 refuses one that says something on the never-store keywords list, then checks the frontmatter and that every anchor
 resolves before it accepts the doc (DR-0195). The notes import and a hand edit taken in pass the same rules, and
-`docket doc redact` applies them to the docs already stored (DR-0200). A doc lives at `processed/<type>/<yyyy>/<mm>/<slug>.md` when its slug
-starts with a date, else `processed/<type>/<slug>.md` (DR-0109). A changed doc is its next rev, and git history keeps
+`docket doc redact` applies them to the docs already stored (DR-0210). A doc lives at
+`processed/<type>/<yyyy>/<mm>/<slug>.md` when its slug starts with a date, else `processed/<type>/<slug>.md`
+(DR-0109). A changed doc is its next rev, and git history keeps
 the earlier ones (DR-0112).
 
 ### 5.4 The index database

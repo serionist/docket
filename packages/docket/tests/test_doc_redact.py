@@ -1,4 +1,4 @@
-"""`docket doc redact`: the docs already stored, redacted with the settings as they are now (DR-0200). Secret-shaped
+"""`docket doc redact`: the docs already stored, redacted with the settings as they are now (DR-0210). Secret-shaped
 strings are assembled from parts, as in test_redact.py; people and numbers are invented."""
 
 from __future__ import annotations

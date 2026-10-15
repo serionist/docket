@@ -73,8 +73,8 @@ Every record reaches the raw log through the gate. It reads `vault.yaml` on ever
   docs already there.
 - Turning a rule off leaves the markers already stored, but a record a source sends again then lands as a new version
   holding the value, records you classified wait in staging again, and the next `docket import notes` writes a new
-  rev of each note the rule matched. Turning credentials off stores passwords, keys and tokens as written, in raw, docs and git
-  history; turning it back on doesn't take them out of raw.
+  rev of each note the rule matched. Turning credentials off stores passwords, keys and tokens as written, in raw,
+  docs and git history; turning it back on doesn't take them out of raw.
 - Staging lives in the vault's `staging/` folder, on this machine only, never committed.
 - A source's name is lowercase letters, digits, dots, underscores and hyphens, and doesn't end in a dot: it names
   folders and files.

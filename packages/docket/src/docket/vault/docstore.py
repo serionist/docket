@@ -408,7 +408,7 @@ class DocStore:
     # -- the pass ------------------------------------------------------------------------------------------------------
 
     def redact_all(self, dry_run: bool = False) -> RedactReport:
-        """Redact the docs already stored with the settings as they are now (DR-0200): each doc redaction would change
+        """Redact the docs already stored with the settings as they are now (DR-0210): each doc redaction would change
         is written as its next rev, all in one commit, its body redacted in the file's own text and only its rev line
         set, so a doc from a newer Docket keeps what this one doesn't know. A hand edit goes in first through the
         take-in. A doc the never-store lists forbid, one whose frontmatter as written holds a keyword or what
