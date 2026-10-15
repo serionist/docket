@@ -105,8 +105,11 @@ Unreleased in the same PR.
   (`Sammel`, `Ryannel`, `Nimishsel`). A word that only stems like a name no longer counts as
   the name, in your notes or in a query: not `már` for Mark, and not the English `same` for Sam or `marked` and
   `market` for Mark. A name's inflected forms still count when a common word stems like it: `Markkal` however
-  often `már` comes up, and `Bélával` however often `bele` does. A name written only in a Hungarian possessive (`Markéhoz`) no
-  longer counts on its own. The same one rebuild covers it.
+  often `már` comes up, and `Bélával` however often `bele` does. Short names' inflected forms now count too
+  (`Évával`, `Évának`, `Evével`, `Edivel`, `Beával`), and inflected forms written without accents still do
+  (`Zoltannak`, `Istvant`). An inflected form that is also a common word in your notes doesn't count: not `annál`
+  for Ann, `évet` for Eve, `edit` for Edi, `belát` for Béla or `Evan` for Éva. A name written only in a Hungarian
+  possessive (`Markéhoz`) no longer counts on its own. The same one rebuild covers it.
 - A source's `SKILL.md` now holds only the source's own calls; the run's steps come from `run_open`. After upgrading,
   copy the reference's `SKILL.md` and `mapper.py` over your project's copy: a live run refuses a `SKILL.md` without
   the new marker line. Plaud's reference pages transcripts by 100 utterances, and finalizes only the recordings a run

@@ -207,6 +207,9 @@ def test_only_languages_with_case_forms_match_aliases_on_stems() -> None:
     # Ödönnel and Ödönnél fold alike and are cut to two stem forms: the folded form is listed with each.
     odon = matching.cases_of(analyzer, ["ödön"], language("hu"))
     assert {stem for form, stem in odon.reached if form == ("odonnel",)} == {("od",), ("odon",)}
+    # Zoltánnak is cut to zolt, and Zoltannak, as chat writes it without accents, to zoltan: both are listed.
+    zoltan = matching.cases_of(analyzer, ["zoltán"], language("hu"))
+    assert {stem for form, stem in zoltan.reached if form == ("zoltannak",)} == {("zolt",), ("zoltan",)}
 
 
 def test_the_seeds_are_the_dative_stem_and_the_word() -> None:

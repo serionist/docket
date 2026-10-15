@@ -1,15 +1,16 @@
 """Matching entities into chunks: each alias's forms, the judging of stem forms, the fuzzy walk, and mentions.
 
 An alias matches as written in `folded`, and in its case forms in languages that give them (Hungarian), matched
-folded, each beside the stem form the stemmer cuts it to in that language's column: a stem form alone meets ordinary
-words that stem the same (`same` for Sam), and a case form alone ordinary words that fold the same (`benne` for Ben's
-`benné`). A case form the stemmer leaves whole (`Nimishsel`) counts on its own. Each stem form is judged on its own:
-one under three letters, or one the index holds in over ten times as many chunks as the alias as written (counting that
-as at least five), is dropped and kept in `alias_terms` as dropped. The case forms count while one stem form is kept,
-whichever they are cut to (Mark's `Markkal` is cut to `mar`, which `már` crowds out, while his `mark` is kept); with
-every one dropped they don't (Rob's `rob` while `robot`, Rob with -ot, is everywhere). An `asr` alias also matches
-through vocabulary words within one edit of a word of 5 to 7 letters, two of 8 or more, found per word by a bounded
-Levenshtein walk (DR-0350).
+folded, each beside a stem form the stemmer cuts it to, with or without its accents, in that language's column: a stem
+form alone meets ordinary words that stem the same (`same` for Sam), and a case form alone ordinary words that fold the
+same (`benne` for Ben's `benné`). A case form the stemmer leaves whole (`Nimishsel`) counts on its own. Each stem form
+is judged on its own: one under three letters, or one the index holds in over ten times as many chunks as the alias as
+written (counting that as at least five), is dropped and kept in `alias_terms` as dropped. The case forms count while
+one stem form is kept, whichever they are cut to (Mark's `Markkal` is cut to `mar`, which `már` crowds out, while his
+`mark` is kept); with every one dropped they don't (Rob's `rob` while `robot`, Rob with -ot, is everywhere). A case
+form is judged by the ratio rule too, folded, so one that is also a common word doesn't count (`annál` for Ann's
+`Annál`, `évet` for Eve's `Evét`). An `asr` alias also matches through vocabulary words within one edit of a word of 5
+to 7 letters, two of 8 or more, found per word by a bounded Levenshtein walk (DR-0350).
 """
 
 from __future__ import annotations
@@ -199,21 +200,28 @@ class Cases(NamedTuple):
     reached: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...]
     alone: tuple[tuple[str, ...], ...]
 
+    def forms(self) -> list[tuple[str, ...]]:
+        """Every case form once."""
+        return list(dict.fromkeys([*(form for form, _ in self.reached), *self.alone]))
+
 
 def cases_of(analyzer: Analyzer, ws: list[str], lang: Language) -> Cases:
     """An alias's case forms in a language, folded; only its last word inflects. One the stemmer cuts to one of the
     alias's stem forms counts only beside that stem form: an ordinary word can fold to it and stem elsewhere (`benné`,
     Ben's translative, folds to the Hungarian `benne`, which stems to `benn`), and the stem form it is cut to may be
-    crowded out while another is kept (Mark's `mar` by `már`, his `mark` kept). A form two endings fold to is listed
-    with each stem form they are cut to. One the stemmer leaves whole (`Nimishsel`) counts on its own (DR-0350)."""
+    crowded out while another is kept (Mark's `mar` by `már`, his `mark` kept). The form is cut with its accents and
+    without, since chat often drops them and Snowball cuts the two apart (`zoltánnak` to `zolt`, `zoltannak` to
+    `zoltan`); a form two endings fold to is cut for each. It is listed with every stem form these reach. One the
+    stemmer leaves whole (`Nimishsel`) counts on its own (DR-0350)."""
     head = tuple(fold(w) for w in ws[:-1])
     stem_forms = {form[-1]: form for form in _stem_forms(analyzer, ws, lang)}
     cut_to: dict[tuple[str, ...], list[tuple[str, ...]]] = {}
     for case in lang.cases(ws[-1]) if lang.cases is not None else []:
         stems = cut_to.setdefault((*head, fold(case)), [])
-        stem = stem_forms.get(analyzer.stem(case, lang))
-        if stem is not None and stem not in stems:
-            stems.append(stem)
+        for cut in (analyzer.stem(case, lang), analyzer.stem(fold(case), lang)):
+            stem = stem_forms.get(cut)
+            if stem is not None and stem not in stems:
+                stems.append(stem)
     return Cases(
         tuple((form, stem) for form, stems in cut_to.items() for stem in stems),
         tuple(form for form, stems in cut_to.items() if not stems),
@@ -221,7 +229,9 @@ def cases_of(analyzer: Analyzer, ws: list[str], lang: Language) -> Cases:
 
 
 def judge_forms(conn: sqlite3.Connection, analyzer: Analyzer, aliases: list[AliasRow]) -> None:
-    """Every alias's forms as written and its stem forms, kept or dropped, in alias_terms (word -1)."""
+    """Every alias's forms as written and its stem forms, kept or dropped, in alias_terms (word -1), and its case forms
+    the ratio rule drops, folded: a case form that is also a common word (`annál` for Ann's `Annál`) would count as the
+    name in every chunk holding the word, since the word stems as the case form does."""
     conn.execute("DELETE FROM alias_terms WHERE word = -1")
     cache: dict[str, int] = {}
     rows: set[tuple[str, int, str, int, str, str, int]] = set()
@@ -241,6 +251,9 @@ def judge_forms(conn: sqlite3.Connection, analyzer: Analyzer, aliases: list[Alia
                 else:
                     how = "stem"
                 rows.add((alias.entity, alias.ordinal, lang.column, -1, " ".join(form), how, 0))
+            for form in cases_of(analyzer, ws, lang).forms():
+                if _count(conn, phrase("folded", form), cache) > COMMON_TIMES * floor:
+                    rows.add((alias.entity, alias.ordinal, "folded", -1, " ".join(form), "common", 0))
     conn.executemany(
         TERMS_SQL,
         sorted(rows),
@@ -294,10 +307,10 @@ def prune(conn: sqlite3.Connection) -> None:
 def expressions(
     conn: sqlite3.Connection, analyzer: Analyzer, entities: Sequence[str] | None = None, *, needs: bool = True
 ) -> dict[tuple[str, int], str]:
-    """Each alias's FTS5 expression: its form as written, while one of its stem forms is kept its case forms beside the
-    stem form each is cut to (or alone where the stemmer leaves them whole), and for an `asr` alias up to 20 phrases
-    from its misspellings. Only the entities given, when given; without aliases that have `needs`, when needs is
-    False."""
+    """Each alias's FTS5 expression: its form as written, while one of its stem forms is kept its case forms but the
+    common ones, each beside the stem forms it is cut to (or alone where the stemmer leaves it whole), and for an `asr`
+    alias up to 20 phrases from its misspellings. Only the entities given, when given; without aliases that have
+    `needs`, when needs is False."""
     sql = (
         "SELECT t.entity, t.ordinal, t.col, t.word, t.term, t.how, t.distance, a.text FROM alias_terms t "
         "JOIN aliases a ON a.entity = t.entity AND a.ordinal = t.ordinal WHERE (? OR a.needs = '[]')"
@@ -309,6 +322,7 @@ def expressions(
     langs = {lang.column: lang for lang in alias_langs(analyzer)}
     forms: dict[tuple[str, int], list[str]] = {}
     kept: dict[tuple[str, int, str], str] = {}
+    common: dict[tuple[str, int], set[tuple[str, ...]]] = {}
     variants: dict[tuple[str, int, str], dict[int, list[tuple[int, str]]]] = {}
     for entity, ordinal, col, word, term, how, distance, text in conn.execute(
         sql + " ORDER BY t.entity, t.ordinal, t.col, t.word, t.distance, t.term", args
@@ -320,19 +334,23 @@ def expressions(
             else:
                 kept[(entity, ordinal, col)] = text
             variants.setdefault((entity, ordinal, col), {}).setdefault(-1, []).append((0, term))
+        elif word < 0 and col == "folded" and how == "common":
+            common.setdefault(key, set()).add(tuple(term.split()))
         elif word >= 0:
             variants.setdefault((entity, ordinal, col), {}).setdefault(word, []).append((distance, term))
     # A stem form alone meets ordinary words that stem the same (`same` for Sam), and a case form alone ordinary words
-    # that fold the same (`benne` for Benné): each case form counts beside the stem form it is cut to, even one crowded
+    # that fold the same (`benne` for Benné): each case form counts beside the stem forms it is cut to, even one crowded
     # out (Mark's `mar` by `már`), and one the stemmer leaves whole (`Nimishsel`) on its own.
     for (entity, ordinal, col), text in kept.items():
         cases = cases_of(analyzer, words(text), langs[col])
+        dropped = common.get((entity, ordinal), set())
         by_stem: dict[tuple[str, ...], list[str]] = {}
         for form, stem in cases.reached:
-            by_stem.setdefault(stem, []).append(phrase("folded", form))
+            if form not in dropped:
+                by_stem.setdefault(stem, []).append(phrase("folded", form))
         alias = forms.setdefault((entity, ordinal), [])
         alias += [f"({phrase(col, stem)} AND {any_of(parts)})" for stem, parts in by_stem.items()]
-        alias += [phrase("folded", form) for form in cases.alone]
+        alias += [phrase("folded", form) for form in cases.alone if form not in dropped]
     for (entity, ordinal, col), by_word in sorted(variants.items()):
         if not any(p >= 0 for p in by_word):
             continue

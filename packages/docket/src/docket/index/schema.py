@@ -18,7 +18,8 @@ from docket.index.text import snowball_version
 # 4: legacy notes' old paths in old_paths (DR-0320).
 # 5: a stem form counts only beside the alias as written or in a case form, so alias_terms and mentions change
 # (DR-0350).
-# 6: a case form counts beside the stem form it is cut to, while any is kept, so mentions change (DR-0350).
+# 6: a case form counts beside a stem form it is cut to, with or without accents, while any is kept, and not when it is
+# a common word, so alias_terms and mentions change (DR-0350).
 SCHEMA_VERSION = 6
 TOKENIZER = "unicode61 remove_diacritics 2"
 # remove_diacritics 2 came in SQLite 3.27.

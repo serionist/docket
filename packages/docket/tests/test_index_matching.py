@@ -233,7 +233,8 @@ def test_a_common_word_sharing_a_name_s_stem_never_counts_as_the_name(one_custom
 # same, and Mark from marked and market. Bálint is named only inflected; Ryan, Jason, Sam, Andy and Gary take front
 # endings by sound, and Nimish's -sh doubles as s. Ben, Len, Pat, Herb, Des and Rob have case forms that fold to
 # ordinary words: benné to benne, lenné to lenne, patról to patrol, herbért to Herbert, desért to desert, robért to
-# Robert, who is someone else.
+# Robert, who is someone else. Zoltán, István, Milán and Csaba are written without accents too, which Snowball cuts
+# apart from the accented forms (zoltannak to zoltan, zoltánnak to zolt).
 TEAM = {
     "person/mark.yaml": "id: mark\ntype: person\nname: {en: Mark}\n",
     "person/sam.yaml": "id: sam\ntype: person\nname: {en: Sam}\n",
@@ -250,6 +251,10 @@ TEAM = {
     "person/des.yaml": "id: des\ntype: person\nname: {en: Des}\n",
     "person/rob.yaml": "id: rob\ntype: person\nname: {en: Rob}\n",
     "person/robert.yaml": "id: robert\ntype: person\nname: {en: Robert}\n",
+    "person/zoltan.yaml": "id: zoltan\ntype: person\nname: {hu: Zoltán}\n",
+    "person/istvan.yaml": "id: istvan\ntype: person\nname: {hu: István}\n",
+    "person/milan.yaml": "id: milan\ntype: person\nname: {hu: Milán}\n",
+    "person/csaba.yaml": "id: csaba\ntype: person\nname: {hu: Csaba}\n",
 }
 # The messages a line is in (n % mod == rest), the line, and the person it names.
 Line = tuple[int, int, str, str | None]
@@ -285,6 +290,13 @@ TEAM_LINES: list[Line] = [
     (25, 24, "The desert road is closed.", None),
     (50, 2, "Rob hívott.", "rob"),
     (25, 1, "Robert szerint kész.", "robert"),
+    (50, 3, "Zoltannak irtam.", "zoltan"),
+    (100, 9, "Zoltant kerdeztem.", "zoltan"),
+    (100, 59, "Zoltánnal beszéltem.", "zoltan"),
+    (50, 9, "Istvant kerdeztem.", "istvan"),
+    (100, 12, "Istvánnak szóltam.", "istvan"),
+    (50, 11, "Milannak szoltam.", "milan"),
+    (50, 26, "Csaban mulik.", "csaba"),
 ]
 
 
@@ -328,8 +340,9 @@ def test_an_english_word_stemming_like_a_name_is_no_mention(team: Vault) -> None
     forms = query(team, "SELECT entity, term, how FROM alias_terms WHERE col = 'stem_hu'")
     assert {("sam", "sam", "stem"), ("mark", "mar", "stem")} <= set(forms)
     for entity in {e.split("/")[1].removesuffix(".yaml") for e in TEAM}:
-        # Sammal, Sammel, Sam's, Marknak, Markot, Ryannel, Jasonnek, Nimishsel, Andyvel and every Bálint in; no chunk
-        # saying only the same, marked, market, benne, lenne, patrol, Herbert or desert, and Robert only as Robert.
+        # Sammal, Sammel, Sam's, Marknak, Markot, Ryannel, Jasonnek, Nimishsel, Andyvel, every Bálint and Zoltannak,
+        # Istvant, Milannak and Csaban without accents in; no chunk saying only the same, marked, market, benne, lenne,
+        # patrol, Herbert or desert, and Robert only as Robert.
         assert mentions_of(team, entity) == {n for n in range(400) if entity in team_message(n)[1]}, entity
 
 
@@ -343,7 +356,8 @@ def test_a_query_word_stemming_like_a_name_stays_a_word(team: Vault) -> None:
     assert both.words == ["same"]
     named = [
         ("markot", "mark"), ("sammel", "sam"), ("ryannel", "ryan"), ("jasonnek", "jason"), ("nimishsel", "nimish"),
-        ("andyvel", "andy"), ("garyvel", "gary"), ("robert", "robert"),
+        ("andyvel", "andy"), ("garyvel", "gary"), ("robert", "robert"), ("zoltannak", "zoltan"),
+        ("zoltánnak", "zoltan"), ("istvant", "istvan"), ("milannak", "milan"),
     ]  # fmt: skip
     for word, entity in named:
         assert [e.id for e in search(team, word, now=now).query.entities] == [entity], word
@@ -406,6 +420,80 @@ def test_a_case_form_counts_beside_the_stem_form_it_is_cut_to_while_a_common_wor
         assert [e.id for e in search(crowded, word, now=now).query.entities] == [entity], word
     for text in ("már kész", "bele kell"):
         assert search(crowded, text, now=now).query.entities == [], text
+
+
+# A vault where a name's case form is also a common word, in over ten times as many chunks as the name as written:
+# annál for Ann's Annál, évet for Eve's Evét, edit for Edi's Edit, belát for Béla's Bélát, the English name Evan for
+# Éva's Éván, bent for Ben's Bent and dönt for Don's Dont. The first five are cut to a stem form the short or the ratio
+# rule drops, while another is kept. Ann's, Eve's, Edi's, Éva's, Béla's and Bea's other case forms are named.
+COMMON_WORDS = {
+    "person/ann.yaml": "id: ann\ntype: person\nname: {en: Ann}\n",
+    "person/eve.yaml": "id: eve\ntype: person\nname: {en: Eve}\n",
+    "person/edi.yaml": "id: edi\ntype: person\nname: {hu: Edi}\n",
+    "person/eva.yaml": "id: eva\ntype: person\nname: {hu: Éva}\n",
+    "person/bela.yaml": "id: bela\ntype: person\nname: {hu: Béla}\n",
+    "person/bea.yaml": "id: bea\ntype: person\nname: {hu: Bea}\n",
+    "person/ben.yaml": "id: ben\ntype: person\nname: {en: Ben}\n",
+    "person/don.yaml": "id: don\ntype: person\nname: {en: Don}\n",
+}
+COMMON_WORD_LINES: list[Line] = [
+    (7, 0, "Annál jobb, ha holnap jön.", None),
+    (7, 1, "Egy évet vártunk rá.", None),
+    (7, 2, "Please edit the doc today.", None),
+    (7, 3, "Ezt mindenki belát.", None),
+    (7, 4, "Evan sent the plan.", None),
+    (7, 5, "Bent vagyok az irodában.", None),
+    (7, 6, "Holnap dönt a bizottság.", None),
+    (200, 10, "Ann szerint jó.", "ann"),
+    (100, 11, "Annhoz megyek, Anntól kaptam.", "ann"),
+    (200, 12, "Eve szerint jó.", "eve"),
+    (100, 13, "Evével beszéltem, Evének írtam.", "eve"),
+    (200, 14, "Edi szerint jó.", "edi"),
+    (100, 15, "Edivel beszéltem, Edinek írtam.", "edi"),
+    (200, 16, "Éva szerint jó.", "eva"),
+    (100, 17, "Évával beszéltem, Évának írtam.", "eva"),
+    (200, 18, "Béla szerint jó.", "bela"),
+    (100, 19, "Bélával beszéltem, Bélának írtam.", "bela"),
+    (200, 20, "Bea szerint jó.", "bea"),
+    (100, 21, "Beával beszéltem, Beának írtam.", "bea"),
+    (200, 22, "Ben hívott.", "ben"),
+    (200, 23, "Don hívott.", "don"),
+]
+
+
+def make_common_words_vault(root: Path) -> Vault:
+    return people_vault(root, COMMON_WORDS, COMMON_WORD_LINES)
+
+
+@pytest.fixture(scope="module")
+def common_words(tmp_path_factory: pytest.TempPathFactory) -> Vault:
+    template = template_with(tmp_path_factory, make_common_words_vault)
+    v = copy_vault(template, tmp_path_factory.mktemp("common-words"))
+    rebuild(v)
+    return v
+
+
+def test_a_case_form_that_is_a_common_word_never_counts_as_the_name(common_words: Vault) -> None:
+    dropped = set(query(common_words, "SELECT entity, term FROM alias_terms WHERE col = 'folded' AND how = 'common'"))
+    assert {("ann", "annal"), ("eve", "evet"), ("edi", "edit"), ("bela", "belat"), ("eva", "evan")} <= dropped
+    # Ben's and Don's only stem form goes first, by the ratio rule as on main: bent stems to ben and dönt to don.
+    stems = set(query(common_words, "SELECT entity, term, how FROM alias_terms WHERE col = 'stem_hu'"))
+    assert {("ben", "ben", "common"), ("don", "don", "common")} <= stems
+    for entity in {e.split("/")[1].removesuffix(".yaml") for e in COMMON_WORDS}:
+        # Annhoz, Evével, Edivel, Évával, Bélával and Beával in; no chunk saying only annál, évet, edit, belát, Evan,
+        # bent or dönt.
+        assert mentions_of(common_words, entity) == {
+            n for n in range(400) if entity in lines_message(COMMON_WORD_LINES, n)[1]
+        }, entity
+    now = datetime(2026, 10, 15, tzinfo=UTC)
+    for text in ("annál jobb", "egy évet", "edit the doc", "mindenki belát", "evan sent", "bent vagyok", "dönt"):
+        assert search(common_words, text, now=now).query.entities == [], text
+    named = [
+        ("annhoz", "ann"), ("evével", "eve"), ("edivel", "edi"), ("évával", "eva"), ("bélával", "bela"),
+        ("beával", "bea"),
+    ]  # fmt: skip
+    for word, entity in named:
+        assert [e.id for e in search(common_words, word, now=now).query.entities] == [entity], word
 
 
 def test_a_name_ending_in_y_keeps_its_inflected_mentions(one_customer: Vault) -> None:
@@ -568,7 +656,8 @@ def test_a_case_form_counts_beside_the_stem_form_it_is_cut_to_or_where_the_stemm
     # Mark's case forms are all cut to mar, which már crowds out: they count beside mar while his mark is kept.
     mark = exprs[("mark", 0)]
     assert mark.startswith('(folded : "mark" OR (stem_hu : "mar" AND (folded : "marknak" OR ')
-    assert 'stem_hu : "mark"' not in mark
+    # Markká without its accent, markka, is cut to mark.
+    assert mark.endswith(' OR (stem_hu : "mark" AND folded : "markka"))')
     # Bálint's are cut to two stem forms, and each goes beside its own.
     balint = exprs[("bal", 0)]
     assert balint.count(" AND ") == 2
