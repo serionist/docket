@@ -380,7 +380,7 @@ class Gate:
             return "private source"
         if neverstore.match(record, config.never_store):
             return "never-store"
-        # Redaction follows the vault's own settings; #24 makes each rule optional there.
+        # The rules vault.yaml turns on, as intake applies them (DR-0190), so a held record reads as it would be staged.
         redacted, _ = Redactor.from_config(config.redaction).record(record)
         return redacted.model_copy(update={"v": version(redacted), "run": ""})
 
