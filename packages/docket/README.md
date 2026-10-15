@@ -170,7 +170,7 @@ runs its writes one at a time; the commands above keep writing directly, under t
 | `docket service stop` | stops it until the next `install` |
 | `docket service uninstall` | stops it and removes the registration; the token and the config stay |
 | `docket service token [--header] [--rotate]` | prints the token, or the header Claude Code's `headersHelper` reads; `--rotate` makes a new one and restarts the service |
-| `docket open` | opens the web app through a link good once and for a minute, and prints the link |
+| `docket open [PATH]` | opens the web app through a link good once and for a minute, and prints the link; with a path, such as the one its sign-in page names, it lands there |
 | `docket serve [--vault] [--port]` | runs the service in the foreground, where install can't register it (WSL without systemd) |
 
 - Install from a tool environment (`uv tool install`), not a development checkout: the service runs whatever code
@@ -204,3 +204,25 @@ What the service refuses, and what it doesn't:
 - Another user of the machine can reach the port and see that Docket answers, and, while the service is down, could
   bind the port first. Any program running as you can read the token, from the keychain or the file.
 - The log keeps no content: route templates, status codes and exception types, never your words.
+
+## The web app
+
+`docket open` signs your browser in to the service's own pages. In this version that is Search; the navigation shows
+the pages still to come, with the phase each arrives in.
+
+- Search runs the search Claude runs: the same words, names, time words and dates. Sources and a month narrow it;
+  people and entities favour the hits that mention them, as Claude's boosts do. Facet counts are within the top 200.
+- A hit opens beside the results: its summary, with the lines pointing at it marked, next to the raw it came from.
+  Widen or narrow the raw with `[` and `]`; `v` checks each line of the summary against its raw.
+- A search's URL holds the search tool's parameters (`query`, `sources`, `people`, `entities`, `since`, `until`,
+  `k`) and the open hit (`hit`, `lines`, `around`, `verify`), so a bookmark reopens it. Paste a locator from Claude's
+  answer into the box to open it.
+- Keys: `/` the box, `j` and `k` through the hits, `Enter` to open one, `Esc` to close it, `c` to copy a locator,
+  `?` for the rest. The keys dialog turns the single keys off.
+- Nothing loads from the network: htmx, the fonts and the icons come with Docket, and the pages work offline. Any
+  browser from mid-2024 on.
+- A session lasts 12 hours, and ends when the service restarts; the sign-in page then names the `docket open` command
+  that brings you back to the page you were on.
+
+The pages' browser test runs on CI. To run it here, against your own Chrome or Edge:
+`DOCKET_TEST_BROWSER=chrome uv run pytest packages/docket/tests/test_web_browser.py` (or `msedge`).
