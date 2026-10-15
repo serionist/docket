@@ -24,7 +24,7 @@ import json
 import re
 import sqlite3
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -254,11 +254,18 @@ def _question(n: int, item: object, asked: datetime, tz: ZoneInfo) -> Question:
     if not isinstance(want_raw, list) or not want_raw:
         raise DocketError("want is one or more locators a good answer cites")
     wanted: list[Wanted] = []
+    seen: set[Wanted] = set()
     for value in cast(list[Any], want_raw):
         try:
-            wanted.append(parse_wanted(_text(value, "a wanted locator")))
+            w = parse_wanted(_text(value, "a wanted locator"))
         except AnchorError as e:
             raise DocketError(str(e)) from None
+        # A locator listed twice would count twice in the question's recall, however it is spelled.
+        same = replace(w, text="")
+        if same in seen:
+            raise DocketError(f"want lists {w.text} twice")
+        seen.add(same)
+        wanted.append(w)
     kind = _text(fields.get("kind"), "kind")
     if kind not in KINDS:
         raise DocketError(f"kind is one of {', '.join(KINDS)}, not {kind!r}")
@@ -338,8 +345,9 @@ def _members(conn: sqlite3.Connection, group: str, locator: str) -> frozenset[st
 
 
 def found_in(conn: sqlite3.Connection, result: SearchResult) -> list[Found]:
-    """Every locator a search's hits give, at their ranks. A locator collapsed under a message is a thread window
-    holding it, and one under a window is a message, since only those two kinds collapse into each other."""
+    """Every locator a search's hits give, at their ranks. Two kinds of pair collapse: overlapping transcripts of
+    different records, and a message with a thread window holding it. So a locator collapsed under a message is a
+    window holding it, and one under a window or a transcript holds nothing more than itself."""
     out: list[Found] = []
     for group in result.groups:
         for hit in group.hits:

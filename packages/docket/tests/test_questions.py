@@ -88,6 +88,14 @@ def test_a_time_without_an_offset_is_in_the_owner_s_zone() -> None:
         (HEAD + ONE + ONE.replace("kind:", "wnat: [x]\n    kind:"), "question 2: unknown key 'wnat'"),
         (HEAD + ONE.replace("want: [r:calls:rec-0100]", "want: []"), "question 1: want is one or more"),
         (HEAD + ONE.replace("    want: [r:calls:rec-0100]\n", ""), "question 1: want is one or more"),
+        (
+            HEAD + ONE.replace("[r:calls:rec-0100]", "[r:calls:rec-0100, r:calls:rec-0200, ' r:calls:rec-0100']"),
+            "question 1: want lists r:calls:rec-0100 twice",
+        ),
+        (
+            HEAD + ONE.replace("[r:calls:rec-0100]", "['r:calls:rec-0100@02:30', 'r:calls:rec-0100@2:30']"),
+            "question 1: want lists r:calls:rec-0100@2:30 twice",
+        ),
         (HEAD + ONE.replace("r:calls:rec-0100", "calls:rec-0100"), "question 1: 'calls:rec-0100' is r:<rid>"),
         (HEAD + ONE.replace("r:calls:rec-0100", "'r:calls:rec 0100'"), "has no spaces"),
         (HEAD + ONE.replace("r:calls:rec-0100", "'thread:nothing'"), "'nothing' isn't a rid"),
