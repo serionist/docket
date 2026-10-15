@@ -60,14 +60,14 @@ def _lines(st: ServiceStatus, environ: Mapping[str, str]) -> list[Line]:
     lines = [Line(st.line, not st.running)]
     if st.warning:
         lines.append(Line(f"docket: {st.warning}", True))
-    if st.store_problem:
-        rotate = "`docket service token --rotate`"
-        lines.append(Line(f"docket: the token can't be read ({st.store_problem}); {rotate}", True))
+    # Before install there is no token yet, and the service's line already says to install.
+    if st.store_problem and (st.installed or st.running):
+        lines.append(Line(f"docket: the token can't be read: {st.store_problem}", True))
     wanted = environ.get(PORT_VARIABLE) or str(client.DEFAULT_PORT)
     if wanted != str(st.port):
         lines.append(
             Line(
-                f"docket: Claude Code connects to port {wanted}, the service listens on {st.port}; set "
+                f"docket: Claude Code connects to port {wanted}, the service's port is {st.port}; set "
                 f"{PORT_VARIABLE}={st.port} where Claude Code starts",
                 True,
             )

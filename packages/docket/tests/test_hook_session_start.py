@@ -114,7 +114,7 @@ def test_a_vault_yaml_that_won_t_load_and_a_vault_that_s_gone(tmp_path: Path) ->
 def test_the_port_claude_code_connects_to_is_checked(tmp_path: Path) -> None:
     folder_vault(tmp_path)
     wrong = start(status(port=8750))
-    hint = "docket: Claude Code connects to port 8741, the service listens on 8750; set DOCKET_PORT=8750 where"
+    hint = "docket: Claude Code connects to port 8741, the service's port is 8750; set DOCKET_PORT=8750 where"
     assert any(line.startswith(hint) for line in wrong["systemMessage"].splitlines())
     assert "systemMessage" not in start(status(port=8750), {"DOCKET_PORT": "8750"})
     assert "systemMessage" in start(status(), {"DOCKET_PORT": "8750"})
@@ -122,11 +122,14 @@ def test_the_port_claude_code_connects_to_is_checked(tmp_path: Path) -> None:
 
 def test_a_warning_and_a_token_that_can_t_be_read_reach_the_user(tmp_path: Path) -> None:
     folder_vault(tmp_path)
-    locked, warning = "the keyring is locked", "what answers isn't ours"
+    locked, warning = "the keyring is locked; run `docket service token --rotate`", "what answers isn't ours"
     st = ServiceStatus("task Docket", False, 8741, {}, "keyring", locked, {}, warning)
     shown = start(st)["systemMessage"].splitlines()
     assert "docket: what answers isn't ours" in shown
-    assert "docket: the token can't be read (the keyring is locked); `docket service token --rotate`" in shown
+    assert f"docket: the token can't be read: {locked}" in shown
+    # Before install there is no token yet: the service's own line already says to install.
+    fresh = ServiceStatus(None, False, 8741, {}, "file", "there is no service token yet", {}, None)
+    assert "token" not in start(fresh)["systemMessage"]
 
 
 def test_a_failure_is_a_line_with_its_type_never_its_message() -> None:
