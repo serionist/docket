@@ -43,6 +43,16 @@ def is_native_id(value: str) -> bool:
     )
 
 
+def owning_id(ref: str | None, source: str, ids: frozenset[str]) -> str | None:
+    """The id among a source's `ids` that a rid is, or sits under: `plaud:<id>` and `plaud:<id>/summary`, never
+    `plaud:<id>x`. Hold lists and release logs both cover records this way."""
+    prefix = f"{source}:"
+    if ref is None or not ref.startswith(prefix) or not ids:
+        return None
+    parts = ref[len(prefix) :].split("/")
+    return next(("/".join(parts[:n]) for n in range(1, len(parts) + 1) if "/".join(parts[:n]) in ids), None)
+
+
 class Attachment(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 

@@ -15,6 +15,7 @@ reading:
   - { path: packages/docket/src/docket/service/security.py, role: contract, note: "what every request passes before a route: hosts, origins, the token and the session (DR-0152)" }
   - { path: packages/docket/src/docket/web/state.py, role: contract, note: "the Search page's URL: the search tool's parameters and the panel's, in one canonical form" }
   - { path: packages/docket/src/docket/web/templates/macros.html, role: guide, note: "the web app's components, one macro each, for every page to reuse" }
+  - { path: packages/docket/src/docket/vault/releaselog.py, role: contract, note: "the release log, a one-way door: the file, its lines, how several fold into one and how it fails closed" }
 decisions:
   - id: DR-0019
     title: The vault's layout and run-file names are fixed
@@ -858,3 +859,81 @@ decisions:
     not_chosen:
       - "Starlette without templates: no components."
       - "BeautifulSoup or lxml for the tests: a dependency for what a short html.parser helper does."
+  - id: DR-0200
+    title: A release log records each released id and its cuts
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#31"]
+    description: "state/releases/<source>.jsonl is committed, one JSON line per release: schema_version 1, id (the native id), cuts (start and end in milliseconds on the recording's timeline, each confirmed range widened to a fixed point over the transcript's utterances), keep (the rid and version of each record without segments the owner kept), at (UTC) and machine. Ids and times only, never content. It merges by union through *.jsonl merge=union; several lines for one id give the union of their cuts and keep only what every line keeps. It is written through a temp file in Docket's private folder and a rename, never through a link, and committed alone as Releases: <source>, 1 added on <machine>, naming no id. Every ingest and gate call reads it, failing closed: a line that isn't a release, named by its number only, a log or folder that is a link, or a file whose name isn't a source's stops the call."
+    binds:
+      - The log line is committed before the hold's removal, so a machine that has the removal has the line.
+      - Changing a line's shape needs a new schema_version and a reader for every earlier one.
+    not_chosen:
+      - "Removing the hold with no log: a machine that pulls the removal stages a later pull of the recording uncut, and the times are lost for the audio (#42)."
+      - "A cuts or release field in staging's files: staging's format is a one-way door (DR-0024), and a record staged already cut needs none."
+  - id: DR-0201
+    title: The gate applies a release on every route, and a hold beats it
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#31"]
+    description: A release covers a record whose rid, thread or container is <source>:<id> or sits under it, as a hold does. At intake such a record with segments is cut by the release's times before it is redacted and versioned; one without segments is staged only when the release keeps its rid at that version. Anything else, a record whose cut can't be made included, is dropped in memory and counted left-out, never an error that stops the batch. The sweep deletes a staged record the release leaves out, classify's dry run and promotion add the release's cuts to the staged ones, and a released rid waits as pending whatever its source. A record both held and released is on hold. Refines DR-0122 and DR-0025.
+    not_chosen:
+      - "A release that overrides a hold: it changes what a hold means (DR-0121, DR-0122), and hold first keeps a merge's leftover safe."
+      - "Staging the record uncut with the cuts beside it: every machine would ask about each later pull again; cut at intake, a pull matches what is staged or in raw and is skipped."
+  - id: DR-0202
+    title: Only the owner releases, at a console, by typing back a code
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#31"]
+    description: "docket hold release asks its own question inside docket.sources.release, and release() has no parameter that answers it. Before it reads the folder it refuses when CLAUDECODE is set (the shell is Claude Code's) and without a console on both stdin and stdout: on Windows GetConsoleMode must succeed on both handles, since a redirect from NUL passes isatty there; elsewhere both must be terminals. The yes is a four-letter random code drawn fresh for each recording, shown and typed back; n keeps the recording held, q stops, and anything else keeps it held. No flag, environment variable or MCP tool skips the question, and no MCP tool releases a hold. The release line records the yes: when, and on which machine."
+    binds:
+      - Inside the package only cli.py calls release(); a test scans for it.
+      - "Not a wall against a process running as the user: it makes a release a deliberate act, which the cuts skill forbids Claude."
+    not_chosen:
+      - "--yes, or --by user as on classify: Claude passes a flag as easily as the owner."
+      - "A y to a y/N question: a pipe or a pseudo-terminal answers it unread."
+      - "isatty alone: on Windows a redirect from NUL passes it."
+      - "A confirm parameter on release(): any Python one-liner passes one that says yes."
+  - id: DR-0203
+    title: A release needs a usable time cut and nothing in raw, and commits its log line before the hold
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#31"]
+    description: "docket hold release maps the import folder once, with the holds of the ids it releases lifted in memory (the mapper's holds input less those ids, so contract 1 doesn't change), and keeps only the records under them. An id needs at least one transcript and one time cut; each cut starts before the transcripts end, removes at least one utterance and is widened to a fixed point before the screen; each keep names a record under the id without segments; and, for an id never released, nothing under it is in raw. Anything else stays held, and the rest of a batch goes on. On the code: under the vault lock the hold list and the log are read again; the log line is committed, then the id taken off the hold list and committed as Holds: <source>, 1 released on <machine>; then the records are staged through the gate and classified work by the user. An id held and released only asks to take the hold off again, and one released and off the hold is staged without a question."
+    binds:
+      - Each record kept uncut is printed whole, title and text, redacted and escaped, before the question.
+    not_chosen:
+      - "The log line and the hold's removal in one commit: no safer, and committing the line first means a machine sees the id held, released, or both, never off the hold without its line."
+      - "Promoting as part of the release: the log already protects every machine, and promotion stays one step for every record."
+  - id: DR-0204
+    title: docket hold show and the release's screen print a held recording to the terminal that asked
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#31"]
+    description: "docket hold show <source> <id> --from <folder> maps the folder with that one hold lifted in memory, runs each record under the id through the gate's intake checks (a private source, never-store, then redaction by the vault's settings), and prints it with control characters escaped: rid, kind, title, text, and a transcript as [mm:ss-mm:ss] speaker: text, the start rounded down and the end up. A record intake would drop is named as dropped, not printed. It writes nothing and logs nothing. Refines DR-0121's bind that nothing reporting a hold names a title, for these two views; every other report about holds stays ids and counts."
+  - id: DR-0205
+    title: A hold list's add leaves released ids out
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#31"]
+    description: "holds.add never adds an id the release log holds, and drops such ids from the list it writes, rewriting it for that even when nothing new is added: an import's hold.txt doesn't hold a released recording again, and the next import with a hold file clears a hold a merge brought back. Until then docket hold list and every ingest name the id as held again after its release, and HeldInStagingError for it names docket hold release instead of telling the user to delete the staged, cut files. holds.remove takes ids off, for a release only. Refines DR-0121's \"Docket only adds ids\"."
+  - id: DR-0206
+    title: The proposals file
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#31"]
+    description: "What the cuts skill proposes, for docket hold release --proposals: YAML with source and recordings, each with id and either cuts (time ranges as quoted strings), keep (rids) and note, or held (why it stays held). A proposal, never a confirmation: the command checks every entry again and asks. It is refused inside any git work tree, where a commit could take it, and with an unknown key, another source or an unquoted time, which YAML reads as a number. Its notes and reasons are printed on the screen only, never stored or logged."

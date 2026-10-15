@@ -59,6 +59,18 @@ decisions:
     description: "The setup skill runs DR-0103's round through the docket command's flags. It counts a vault found outside the session's project (docket vault status says how it found one) only on the user's word, and asks for sources before the vault's place, so a vault that takes sources sits in this project's git repo (DR-0123). It runs docket init --yes --no-sources, then names the vault with --vault on every later command: docket source new per source, --example where a reference exists, the docket ingest line it hands over, and docket service install, which it offers and asks about because install replaces the user's one registration. A host-check override (--allow-shared, --remote-is-private, --allow-dirty-parent) is its own question quoting Docket's refusal, added alone on a re-run, and init's summary names each override taken. Its allowed-tools cover only docket --version, docket vault status and docket service status."
     binds:
       - "Accepted: in auto mode the skill's text is the control on an override; init's summary leaves each one in the transcript."
+  - id: DR-0207
+    title: The plugin's cuts skill
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#31"]
+    description: /docket:cuts turns the owner's words for a held recording's left-out stretches into time ranges. It lists the holds; tells the owner where docket hold show's output will stay (Claude Code's session log and tool-results files, a bridged claude.ai session, for cleanupPeriodDays, 30 days by default) and goes on only on their word; places each stretch on the transcript; leaves the vendor summary out unless it plainly doesn't touch the stretch; writes the proposals file in a temp folder outside any git work tree; and hands the owner the docket hold release command to run in their own terminal. It pre-approves docket hold list and docket hold show only, and never runs, pipes into or wraps the release. The name extends DR-0161's door.
+    binds: [The skill name cuts is a one-way door (AGENTS.md).]
+    not_chosen:
+      - "release: the same method serves a staged recording's private stretch when the Staging page and sync arrive."
+      - "The skill in the consuming project: the method is the same for every source with transcripts; only where the owner's words live differs, and the skill asks."
 conventions:
   - id: CV-0012
     rule: A change under plugin/ bumps the version in plugin/.claude-plugin/plugin.json

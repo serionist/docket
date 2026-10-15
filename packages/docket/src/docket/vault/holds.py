@@ -4,22 +4,24 @@
 with or without a BOM, lines stripped, blank lines skipped, any order and duplicates allowed. A hold on `<id>` covers a
 record whose rid, thread or container is `<source>:<id>` or sits under `<source>:<id>/`. The list fails closed: a line
 that isn't an id, or a list that is a link, stops every ingest and every gate call until it is fixed, because skipping
-it would stage what the user held back. Docket only adds ids; releasing one is a separate step (#31).
+it would stage what the user held back. Docket adds ids from an import's hold files, and takes one off only when the
+owner releases it with its cuts (DR-0200); an add leaves released ids out (DR-0205).
 
 Two machines can add at once, so the lists merge by union (`state/holds/*.txt merge=union`), and the next add sorts the
-list and drops duplicates.
+list and drops duplicates. A release merged against another machine's add can bring an id back, which fails safe: the
+recording stays held until the next add, or the release run again, takes it off.
 """
 
 from __future__ import annotations
 
-import os
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from docket.errors import DocketError
-from docket.vault.records import RawRecord, is_native_id, source_name_problem
-from docket.vault.staging import retry
+from docket.vault import releaselog
+from docket.vault.records import RawRecord, is_native_id, owning_id, source_name_problem
+from docket.vault.staging import write_replacing
 from docket.vault.vault import Vault
 
 HOLDS = "state/holds"
@@ -43,11 +45,7 @@ class Holds:
 
 def holder(ref: str | None, source: str, ids: frozenset[str]) -> str | None:
     """The held id a rid of a source is, or sits under: `plaud:<id>` and `plaud:<id>/summary`, never `plaud:<id>x`."""
-    prefix = f"{source}:"
-    if ref is None or not ref.startswith(prefix):
-        return None
-    parts = ref[len(prefix) :].split("/")
-    return next(("/".join(parts[:n]) for n in range(1, len(parts) + 1) if "/".join(parts[:n]) in ids), None)
+    return owning_id(ref, source, ids)
 
 
 def covered(ref: str | None, source: str, ids: frozenset[str]) -> bool:
@@ -124,47 +122,59 @@ def read_all(root: Path) -> Holds:
 
 
 def add(vault: Vault, source: str, ids: Iterable[str]) -> int:
-    """Hold more ids of a source: the list sorted, without duplicates, committed with a message that names none.
-    Returns how many were new."""
+    """Hold more ids of a source: the list sorted, without duplicates and without the ids the owner released, committed
+    with a message that names none. Returns how many were new. A released id is never held again by an import's hold
+    file, and one a merge brought back leaves the list here, even when nothing new is added (DR-0205)."""
     new = set(ids)
     if not all(is_native_id(i) for i in new):
         raise DocketError("an id to hold isn't an id")
     with vault.writing():
         path = list_path(vault.root, source)
+        released = set(releaselog.read(vault.root, source))
         current = read(vault.root, source)
-        added = new - current
-        if added:
+        added = new - current - released
+        if added or current & released:
             path.parent.mkdir(parents=True, exist_ok=True)
-            _replace(vault.home.tmp_dir, path, "".join(f"{i}\n" for i in sorted(current | added)))
+            _replace(vault, path, sorted((current | added) - released))
         if not path.exists():
             return 0
         _union_line(vault.root)
-        # Committed whenever the list or its merge rule differs from HEAD, new ids or not: an add whose commit failed
-        # (another git held the index) left them on disk, and a re-run that finds nothing new must still commit them,
-        # or the hold never reaches another machine.
-        rel = f"{HOLDS}/{source}.txt"
-        paths = [rel] if vault.git.untracked(rel) or vault.git.changed_against_head(rel) else []
-        if _union_uncommitted(vault):
-            paths.append(".gitattributes")
-        if paths:
-            what = f"{len(added)} added" if added else "the list committed"
-            vault.commit(paths, f"Holds: {source}, {what} on {vault.machine}")
+        what = f"{len(added)} added" if added else "the list committed"
+        commit_pending(vault, source, f"Holds: {source}, {what} on {vault.machine}")
         return len(added)
 
 
-def _replace(tmp_dir: Path, path: Path, text: str) -> None:
-    """Write through a temp file in Docket's private folder under the git dir and a rename, so a crash leaves the old
-    list or the new, and a link planted at the list's path is replaced, never written through."""
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-    tmp = tmp_dir / f"holds-{path.stem}.{os.getpid()}.tmp"
-    try:
-        with tmp.open("w", encoding="utf-8", newline="\n") as out:
-            out.write(text)
-            out.flush()
-            os.fsync(out.fileno())
-        retry(lambda: tmp.replace(path))
-    finally:
-        tmp.unlink(missing_ok=True)
+def remove(vault: Vault, source: str, ids: Iterable[str]) -> int:
+    """Take ids off a source's list, committed with a message that names none. Only a release calls this, once its
+    line is committed. Returns how many came off."""
+    gone = set(ids)
+    with vault.writing():
+        path = list_path(vault.root, source)
+        current = read(vault.root, source)
+        off = current & gone
+        if off:
+            _replace(vault, path, sorted(current - off))
+        commit_pending(vault, source, f"Holds: {source}, {len(off)} released on {vault.machine}")
+        return len(off)
+
+
+def commit_pending(vault: Vault, source: str, message: str | None = None) -> str | None:
+    """Commit the list, and the merge rule when .gitattributes gained it, whenever either differs from HEAD: a change
+    whose commit failed (another git held the index) left it on disk, and a re-run that finds nothing new must still
+    commit it, or it never reaches another machine."""
+    rel = f"{HOLDS}/{source}.txt"
+    if not (vault.root / rel).exists():
+        return None
+    paths = [rel] if vault.git.untracked(rel) or vault.git.changed_against_head(rel) else []
+    if _union_uncommitted(vault):
+        paths.append(".gitattributes")
+    if not paths:
+        return None
+    return vault.commit(paths, message or f"Holds: {source}, the list committed on {vault.machine}")
+
+
+def _replace(vault: Vault, path: Path, ids: list[str]) -> None:
+    write_replacing(vault.home.tmp_dir, path, "".join(f"{i}\n" for i in ids), f"holds-{path.stem}")
 
 
 def _has_union(text: str) -> bool:

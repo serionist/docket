@@ -111,6 +111,21 @@ def retry(op: Callable[[], object]) -> None:
             time.sleep(_RETRY_PAUSE)
 
 
+def write_replacing(tmp_dir: Path, path: Path, text: str, tmp_name: str) -> None:
+    """Write a vault file through a temp file in Docket's private folder and a rename, so a crash leaves the old file
+    or the new, and a link planted at the path is replaced, never written through."""
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    tmp = tmp_dir / f"{tmp_name}.{os.getpid()}.tmp"
+    try:
+        with tmp.open("w", encoding="utf-8", newline="\n") as out:
+            out.write(text)
+            out.flush()
+            os.fsync(out.fileno())
+        retry(lambda: tmp.replace(path))
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 class Staging:
     def __init__(self, root: Path, tmp_dir: Path | None = None) -> None:
         self.dir = root / STAGING

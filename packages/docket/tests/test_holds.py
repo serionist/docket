@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from docket_testkit import make_record, sh
 
 from docket.errors import DocketError
-from docket.vault import holds
+from docket.vault import holds, releaselog
 from docket.vault.config import VaultConfig
 from docket.vault.holds import HOLDS, UNION, Holds, covered
+from docket.vault.releaselog import LoggedCut, Release
 from docket.vault.vault import GITATTRIBUTES, Vault
 
 HELD = "of_00c0ffee00c0ffee00c0ffee00c0ffee"
@@ -213,3 +215,52 @@ def test_a_holds_folder_that_is_a_link_is_refused_on_read_and_on_add(vault: Vaul
     with pytest.raises(DocketError, match="state/holds is a link"):
         holds.add(vault, "plaud", [HELD])
     assert list(outside.iterdir()) == []
+
+
+def released(vault: Vault, native: str) -> None:
+    at = datetime(2026, 10, 15, 9, 12, tzinfo=UTC)
+    releaselog.add(vault, "plaud", Release(id=native, cuts=[LoggedCut(start=0, end=1000)], at=at, machine="test-box"))
+
+
+def test_removing_takes_ids_off_and_commits_without_an_id(vault: Vault) -> None:
+    holds.add(vault, "plaud", [HELD, OTHER])
+    assert holds.remove(vault, "plaud", [HELD, "of_never_held"]) == 1
+    assert holds.read(vault.root, "plaud") == {OTHER}
+    assert subjects(vault)[0] == "Holds: plaud, 1 released on test-box"
+    assert HELD not in sh(vault.root, "git", "log", "-1", "--format=%B")
+    count = len(subjects(vault))
+    assert holds.remove(vault, "plaud", [HELD]) == 0
+    assert len(subjects(vault)) == count
+    assert holds.remove(vault, "calls", [HELD]) == 0
+
+
+def test_an_add_never_holds_a_released_id_again(vault: Vault) -> None:
+    holds.add(vault, "plaud", [HELD])
+    released(vault, HELD)
+    holds.remove(vault, "plaud", [HELD])
+    assert holds.add(vault, "plaud", [HELD, OTHER]) == 1
+    assert holds.read(vault.root, "plaud") == {OTHER}
+
+
+def test_a_release_merged_against_another_clone_s_add_brings_the_hold_back_until_the_next_add(
+    tmp_path: Path, vault: Vault
+) -> None:
+    holds.add(vault, "plaud", [HELD])
+    sh(tmp_path, "git", "init", "-q", "--bare", "remote.git")
+    vault.git.run("remote", "add", "origin", str(tmp_path / "remote.git"))
+    vault.git.run("push", "-q", "origin", "main")
+    sh(tmp_path, "git", "clone", "-q", "-b", "main", str(tmp_path / "remote.git"), str(tmp_path / "other"))
+    other = Vault.open(tmp_path / "other")
+    released(vault, HELD)
+    assert holds.remove(vault, "plaud", [HELD]) == 1
+    # The other clone adds an id that sorts just before the released one, so the two changes meet in one hunk.
+    assert holds.add(other, "plaud", [OTHER]) == 1
+    vault.git.run("push", "-q", "origin", "main")
+    result = other.sync()
+    assert result.rebased, result.message
+    assert holds.read(other.root, "plaud") == {HELD, OTHER}
+    assert set(releaselog.read(other.root, "plaud")) == {HELD}
+    assert holds.add(other, "plaud", []) == 0
+    assert holds.read(other.root, "plaud") == {OTHER}
+    assert subjects(other)[0] == "Holds: plaud, the list committed on test-box"
+    assert sh(other.root, "git", "status", "--porcelain").strip() == ""
