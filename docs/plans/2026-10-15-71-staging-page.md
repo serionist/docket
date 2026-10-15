@@ -1,9 +1,9 @@
 ---
 title: "Add the Staging page: classify, cut, drop and promote in the browser"
 issue: "#71"
-status: draft
-approved_by:
-approved_at:
+status: approved
+approved_by: claude (autonomy grant)
+approved_at: 2026-10-15
 ---
 
 # Add the Staging page: classify, cut, drop and promote in the browser
@@ -19,7 +19,7 @@ DR-0202 puts it (Release, below).
 |---|---|---|
 | List | pending and ready records by source and age, with kind, title and why they wait | as asked, with counts per source and state; the reason comes from the gate |
 | Act | classify work or private, cut by time or characters, drop; the CLI's gate calls | as asked: `Gate.classify` for all three (private is the gate's drop), and promote through `Gate.promote` |
-| Held | held recordings listed; a release asked through the browser's session, the code typed back | listed, with the commands; **no release in the browser**, a change to this row the lead is asked to agree (Open questions) |
+| Held | held recordings listed; a release asked through the browser's session, the code typed back | listed, with the commands; **no release in the browser**: the row was amended in the issue to match, agreed in review |
 | Safety | every write checks Origin and the session; nothing private shown before it is opened | the Guard on every post, as on every write; text only in an opened record; a fix for the `Origin: null` a same-origin post carries |
 
 - In scope: `/staging`, its panel fragment and two post routes; the gate saying why each record waits; the held
@@ -107,7 +107,7 @@ Titles and counts first; a record's text only once it is opened.
 
 | Where | Shows | Never |
 |---|---|---|
-| the list | kind, title (one line, at most 80 characters), source, times, state, reason | text, speakers, recipients, `native`, the first words `staging list` prints |
+| the list | kind, title (redacted by the current rules, then cut to one line of at most 80 characters), source, times, state, reason | text, speakers, recipients, `native`, the first words `staging list` prints |
 | the list, a record on hold | key, rid, kind, time | its title (DR-0121) or an open link; `open=` with its key says it is on hold |
 | the panel | rid, kind, title, source, times, state, who classified, cuts, problem; the transcript or the text; author, recipients, container, thread, attachment names; `native` folded; the version in raw that was cut before | |
 | the held part | ids, "held again after its release", counts, the commands, this machine's import folders | anything from an import folder |
@@ -124,7 +124,7 @@ A cut is chosen on what the panel shows, previewed, then classified with it.
 
 | Record | Chosen by | Becomes |
 |---|---|---|
-| a transcript | a checkbox per utterance (`u`) | a time cut at that segment's start and end in milliseconds; neighbours made one by `cuts.merge` |
+| a transcript | a checkbox per utterance (`u`) | a time cut from that segment's start to its end in milliseconds, at least one millisecond long, as `cuts` reads a segment with no length; neighbours made one by `cuts.merge` |
 | a text | a checkbox per line (`line`), each line's first character shown beside it | that line's characters in the staged text; lines next to each other one cut, the line break between included |
 | either | a typed range (`cut`), as `--cut` takes it | `cuts.parse` |
 
@@ -135,6 +135,9 @@ A cut is chosen on what the panel shows, previewed, then classified with it.
 - A text the current rules would join lines in (a match across a line break) takes no character cut in the page,
   since its line numbers would no longer be the staged text's; the panel names `docket staging show` and `classify
   --cut`. Time cuts aren't affected.
+- Typed character cuts count in the staged text. When the redacted view's text differs in length from the staged
+  text, typed character cuts are refused on that record the same way, since a range read off the view would land
+  elsewhere; checked lines still work while the line count matches.
 
 ### Writes
 
@@ -154,6 +157,10 @@ Each act is the CLI's own gate call, run on the service's writer thread under th
   runs: the key 32 hex characters, the label, numbers in range. A bad body, or a `DocketError` (a record the CLI
   promoted meanwhile, a lock not given within 15 seconds), renders the page with its message and writes nothing.
 - `classified_by` is `user` for every classification the page makes, as the CLI's default.
+- A classification checks what the page showed: the form carries the state, who classified and the cuts the panel
+  showed, and the writer job compares them with `Gate.show(key)` just before `Gate.classify`. On a difference (another
+  tab, the CLI or Claude made the record ready with a cut since), nothing is written and the page says "this record
+  changed since you opened it" above the fresh panel, so a Work click from an older page never drops a cut.
 
 ### Safety
 
@@ -192,11 +199,13 @@ The held part, per source:
 - the held ids from `state/holds/<source>.txt`, ids only; one the release log also has is marked "held again after
   its release";
 - how many staged records a hold covers: they stop that source's ingests (the reason "on hold" above);
-- `docket hold show <source> <id> --from <folder>`, to read one in a terminal, and `docket hold release <source> <id>
-  --from <folder> --cut <mm:ss-mm:ss>`, to release it, each with a copy button; for one held again, the release
-  without `--cut`, which only asks to take the hold off;
+- `docket hold show <source> "<id>" --from "<folder>" --vault "<root>"`, to read one in a terminal, and `docket hold
+  release <source> "<id>" --from "<folder>" --cut <mm:ss-mm:ss> --vault "<root>"`, to release it, each with a copy
+  button; for one held again, the release without `--cut`, which only asks to take the hold off;
 - `<folder>` filled when `docket ingest` read one folder for the source on this machine (`local.imported`), else
-  those folders listed beside it;
+  those folders listed beside it; the id, the folder and the vault double-quoted, and a value holding `"`, `$`, a
+  backquote or `%` left as its placeholder with the value listed beside the command, as `open_command` keeps a shell
+  from acting on a path;
 - the words that hand the cuts to Claude: `Go through my held calls recordings with /docket:cuts.`
 
 ### The URL
@@ -251,6 +260,8 @@ Taken under the autonomy grant; the Entry column names the decision each folds i
 | a list-and-panel page with Search's keys | a page per record: back and forth for each of a backfill's records | DR-0384 |
 | `k` of 50, Show more adds 50 | everything at once: a backfill's hundreds of rows | DR-0384 |
 | `paste` moves to `macros.html` | a copy per page | - |
+| a held recording stays out of the page | picking its cuts in the page, the release still at the console: a third place that prints held text (DR-0204), and a folder mapped by the service | DR-0382 |
+| a classification refused when the record changed since the panel showed it | the request's cuts alone: a Work click from an older page made a cut record ready with none, and promotion wrote the stretch | DR-0381 |
 
 ## Doors and data
 
@@ -258,7 +269,7 @@ No one-way door changes. Named because the plan touches them:
 
 | Door | What this plan does |
 |---|---|
-| the release's yes (DR-0202) | recorded `medium` and not on AGENTS.md's list, but it guards a one-way act: what a release lets in reaches raw, every clone and git history, and only `docket forget` (phase 2) and a history rewrite take it back. This plan treats it as a door and leaves it shut: no route releases, and a scan keeps the web away from the release's writers |
+| the release's yes (DR-0202) | it guards a one-way act: what a release lets in reaches raw, every clone and git history, and only `docket forget` (phase 2) and a history rewrite take it back. Kept shut: no route releases, and a scan keeps the web away from the release's writers. Added to AGENTS.md's doors in this change, agreed in review, its entry marked `cost: one-way` |
 | staging's files (DR-0024) | read and written only through `Gate.list`, `show`, `classify` and `promote`; the format doesn't change |
 | hold lists (DR-0121), release logs (DR-0200) | read only; a record on hold shows no title |
 | the MCP tools (DR-0150, DR-0241), the plugin's names | unchanged; no tool added |
@@ -286,7 +297,9 @@ Each step builds and passes `uv run gate` on its own.
 2. The view. `web/staging_view.py`. `test_web_staging_view.py`: `StagingState` written back canonical, its errors,
    `u`, `line` and `cut` dropped without `open`, unknown parameters ignored; utterances 2 and 3 become one cut at
    their segments' exact milliseconds; two lines next to each other one character cut, two apart two; a typed `cut`
-   beside checked utterances merged; the redacted view and its notice; the lines-joined refusal; the held part's
+   beside checked utterances merged; an utterance with no length becomes a one-millisecond cut, not an error; the
+   redacted view and its notice; the lines-joined refusal; typed character cuts refused when the redacted view
+   changed the text's length; the held part's
    folder filled for one import folder and listed for two; each reason's line.
 3. The shell. Staging built in `pages.py` with its keys; `paste` moved to `macros.html`; `page()` takes the
    referrer policy. `test_web_shell.py` (counting from `pages.NAV`) and the Sync page's tests pass unchanged.
@@ -308,7 +321,7 @@ through `Gate.stage`; a hold list, a release line and `folders.json` written thr
 | File | What it proves |
 |---|---|
 | `test_gate.py`, `test_web_staging_view.py` | steps 1 and 2 above |
-| `test_web_staging.py` | signed in over HTTP: pending and ready by source, oldest first, with titles, and no text, speaker or `native` string in the list; `source=`, `state=` and `k=` narrow; a transcript opens with its utterances and a mail with its lines and offsets; the raw version cut before; a record on hold has no open link, and `open=` with its key says it is on hold without its title; a phone number staged before the phone rule was turned on shows `[redacted:phone]` and the notice, while the staged file still holds it; the preview of `u=2&u=3` names those utterances and the one an overlap takes along; a post of work with `u` answers 303 with `done`, and the staged file is ready, `classified_by: user`, its cuts the segments' milliseconds; private through its confirm view leaves no file and one line in `_decided.jsonl`, and neither the response nor the service log holds the record's title or text; promote writes and commits a run and pokes the updater; a record held back shows its problem; the held ids per source, held again marked, the commands with `--from` filled, the words to paste, and no title of a held recording anywhere (one planted in the import folder); a hold list with a bad line gives the page's error naming its line; a key the CLI promoted between the page and the post, and a vault lock held past a short patched wait, each give the page's error with nothing written; `<script>`, `<img onerror>` and a `javascript:` URL in a title and a text render escaped; GET on the post routes answers 405 |
+| `test_web_staging.py` | signed in over HTTP: pending and ready by source, oldest first, with titles, and no text, speaker or `native` string in the list; `source=`, `state=` and `k=` narrow; a transcript opens with its utterances and a mail with its lines and offsets; the raw version cut before; a record on hold has no open link, and `open=` with its key says it is on hold without its title; a phone number in a title and a text, staged before the phone rule was turned on, shows `[redacted:phone]` in the list and the panel, with the notice, while the staged file still holds it; a Work post carrying the state and cuts of an older panel, after the record was classified with a cut, writes nothing and shows the record changed with the fresh panel; the preview of `u=2&u=3` names those utterances and the one an overlap takes along; a post of work with `u` answers 303 with `done`, and the staged file is ready, `classified_by: user`, its cuts the segments' milliseconds; private through its confirm view leaves no file and one line in `_decided.jsonl`, and neither the response nor the service log holds the record's title or text; promote writes and commits a run and pokes the updater; a record held back shows its problem; the held ids per source, held again marked, the commands with the id, `--from` and `--vault` double-quoted and filled, a folder with a space in it included, and one holding `$` left as its placeholder and listed, the words to paste, and no title of a held recording anywhere (one planted in the import folder); a hold list with a bad line gives the page's error naming its line; a key the CLI promoted between the page and the post, and a vault lock held past a short patched wait, each give the page's error with nothing written; `<script>`, `<img onerror>` and a `javascript:` URL in a title and a text render escaped; GET on the post routes answers 405 |
 | `test_service_security.py` | posts to `/staging/classify`: without a session 401; `Origin` of another site 403; `Sec-Fetch-Site: cross-site` 403; neither header 403; `Origin: null` 403; this origin 303 |
 | `test_release.py` | the scan: `releaselog.add` and `holds.remove` are called only in `sources/release.py`, beside the scan that only `cli.py` imports `sources.release` |
 | `test_web_shell.py`, `test_web_a11y.py` | the Staging states under the CSP, HTML and a11y checks; its keys dialog lists `j`, `k`, `Enter`, `o`, `Esc` and `?` |
@@ -325,35 +338,50 @@ through `Gate.stage`; a hold list, a release line and `folders.json` written thr
   page with its ids.
 - `packages/docket/README.md`, the web app section: the Staging page, its URL, and that releases stay at the console.
 - `CHANGELOG.md` under Added: the Staging page.
-- Glossary and `AGENTS.md`: nothing, unless the second open question is answered yes, in a change of its own.
+- `AGENTS.md`: the doors list gains the release's yes at the owner's console (DR-0202, DR-0382); DR-0202's cost set to
+  `one-way` with `docs set`.
+- Glossary: nothing.
 
 ## Risks
 
 | Risk | Status |
 |---|---|
-| Claude drives the page (Claude in Chrome, Playwright, curl with a session) to classify, drop or promote | accepted: the CLI gives it the same calls; the page records the user, as the CLI's default `--by user` does |
+| Claude drives the page (Claude in Chrome, Playwright, curl with a session) to classify, drop or promote | accepted, the owner's call: the CLI's classify, private and promote ask nothing either, and a typed confirmation stops no agent; the page records the user, as the CLI's default `--by user` does. A console-only drop or promote would be an issue of its own |
+| a browser agent acts through the page without Claude Code's per-command prompt | accepted, the owner's call: the page makes the calls the CLI makes, which the user's permission rules gate only in Claude Code's shell |
+| a record's text sits next to the write buttons, where an agent reading it could be steered | accepted, the owner's call: content is data (DR-0170), autoescaped and never a link, and no button acts on what a record says |
 | Claude drives the page to release | resolved: no route releases; the command it can copy is refused in its shell (DR-0202) |
 | a pending record's title says what a private recording is about | accepted: the list needs something to tell records apart, as `staging list` shows; the text waits for a click |
 | a same-origin post carries `Origin: null` and the Guard refuses it | resolved: pages with a form send `same-origin`; the browser flow posts through a real browser |
 | a slip on Private drops a work record for good | resolved: the drop asks once more on a view that names the record |
 | the rules changed since intake, and the staged text holds what they now redact | resolved: shown redacted, promotion redacts again; character cuts off where lines join |
-| the page and the CLI act on one record at once | resolved: the vault lock; a record gone meanwhile is the page's error, nothing written |
+| the page and the CLI act on one record at once | resolved: the vault lock; a record gone meanwhile is the page's error, and one whose state, classifier or cuts changed since the panel showed it is refused with the fresh panel, nothing written |
 | a long CLI promotion holds the lock | accepted: the page waits 15 seconds, then says so |
 | a backfill of hundreds of transcripts makes every load read every staged file | accepted: as `staging list` does; `k` bounds what renders |
-| the owner wanted the release in the browser | open: the first question below |
+| the owner wanted the release in the browser | agreed: the issue's Held row was amended in review |
 | #73 changes `pages.py` and the shell at the same time | accepted: the tests count from `pages.NAV`; whichever merges later rebases |
 
 ## Open questions
 
-For the lead, each with the recommendation.
+Asked of the lead; the answers, from round 1, are in the last column.
 
-| Question | Recommended | Why |
-|---|---|---|
-| The issue's Held row: amend it to "held recordings listed, with the command that releases each at the owner's console"? | yes | a code in the page is no check against a browser agent (Release) |
-| Should the console's yes (DR-0202) join AGENTS.md's doors, so no later page or tool loosens it under the autonomy grant? | yes, in a harness change of its own | the act it guards can't be undone; DR-0012 already holds a looser check for the maintainer, but the list is where reviewers look |
-| Promote on the page, which the brief has and the issue doesn't? | yes | without it the user classifies here and promotes in a terminal |
-| A held recording's text in the page, to pick its cuts there, the release still at the console? | later, an issue of its own, after the console path has had a week of use | a third place that prints held text (DR-0204), and a folder mapped by the service |
+| Question | Recommended | Why | Answer |
+|---|---|---|---|
+| The issue's Held row: amend it to "held recordings listed, with the command that releases each at the owner's console"? | yes | a code in the page is no check against a browser agent (Release) | agreed: amended in the issue, which was retitled to match |
+| Should the console's yes (DR-0202) join AGENTS.md's doors, so no later page or tool loosens it under the autonomy grant? | yes, in a harness change of its own | the act it guards can't be undone; DR-0012 already holds a looser check for the maintainer, but the list is where reviewers look | yes, in this change |
+| Promote on the page, which the brief has and the issue doesn't? | yes | without it the user classifies here and promotes in a terminal | promote stays |
+| A held recording's text in the page, to pick its cuts there, the release still at the console? | later, an issue of its own, after the console path has had a week of use | a third place that prints held text (DR-0204), and a folder mapped by the service | out; in Decided as not taken |
 
 ## Plan review
 
-Not reviewed yet.
+Round 1, 15 Oct 2026, Opus standard: six minors folded, the owner call kept; approved.
+
+| Id | Severity | Finding | Status |
+|---|---|---|---|
+| P1 | minor | titles in the list skipped the current redaction rules, so a phone number in a title showed before any click | fixed: list titles go through the redactor before they are cut to 80 characters; the planted-phone test covers the list |
+| P2 | minor | a Work click from a stale page replaced the cuts another tab, the CLI or Claude had made | fixed: the form carries what the panel showed, compared with `Gate.show` before `Gate.classify`; a test |
+| P3 | minor | the copied hold commands weren't quoted and didn't name the vault | fixed: id, folder and vault double-quoted, `--vault` added, a value a shell could act on left as its placeholder; a test with a space in the folder |
+| P4 | minor | checking an utterance with no length crashed the page (a cut must end after it starts) | fixed: cut to at least one millisecond, as `cuts` reads such a segment; a case in `test_web_staging_view.py` |
+| P5 | minor | typed character cuts count in the staged text while the panel shows it redacted | fixed: refused when the redacted view changed the text's length |
+| P6 | minor | the plan was stale after the issue's amendment | fixed: the Held row, the first question and its Risks row marked agreed |
+
+The owner's call on Claude acting through the page: kept as planned, with two rows added to Risks as accepted.
