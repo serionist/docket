@@ -131,7 +131,8 @@ def client(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[Test
 def test_the_service_searches_with_vectors_once_its_pass_has_run(client: tuple[TestClient, Any]) -> None:
     http, worker = client
     service = http.app.service  # type: ignore[attr-defined]
-    wait_for(lambda: service.models.last is not None and service.models.last.have == service.models.last.total)
+    # The first pass can run before the index exists and find nothing: wait for one that embedded every chunk.
+    wait_for(lambda: (last := service.models.last) is not None and last.total > 0 and last.have == last.total)
     answer = http.get("/api/search", params={"query": "zebbra migrashun"}, headers=BEARER)
     assert answer.status_code == 200, answer.text
     body = answer.json()
