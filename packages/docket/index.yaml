@@ -1607,3 +1607,18 @@ decisions:
     not_chosen:
       - "Every part refreshed: the cursor files, staging and the index read every 5 seconds, and every open list closed."
       - "Server-sent events: a held connection and another CSP rule, for a page open a few minutes."
+  - id: DR-0370
+    title: A time on a record without segments is placed on the one transcript under it
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#82"]
+    description: "A time read on records without segments of their own (an old path's covered records, DR-0131, or r:<rid>@times) is placed on the transcripts under them: the records of the same source whose thread or container is that rid, of kind transcript, with segments (DR-0117). Covered records with segments of their own come first, as before. One transcript is read and resolved names it; several are named to choose from, as a problem for an old path and an error for r:. A recording's time read on its transcript still names the legacy notes covering the recording. This refines DR-0131's placement for sources that keep a recording, its transcript and its notes as three records, as Plaud's mapper does."
+    binds:
+      - A locator that placed a time before this places it on the same record.
+      - What is under a record comes from the raw log of its own source, never the index.
+    not_chosen:
+      - "The import covering the transcript too: every note imported so far would need a new rev, and r: on the recording would still fail."
+      - "The index's records table for what is under a recording: read trusts the index for processed/ only (DR-0321), so a transcript stored since its last update would be missed."
+      - "Every transcript under a recording at once: a polished and a raw transcript of one call say the same thing twice, and resolved names one locator."

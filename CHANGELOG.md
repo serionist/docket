@@ -58,7 +58,8 @@ Unreleased in the same PR.
 - `docket index rebuild | update | status`: the search index on each machine, built from the vault.
 - Entity files under `entities/`: names, aliases and ids that search matches into everything kept.
 - `docket import notes`: an existing notes folder becomes legacy notes that keep their old paths, so references like
-  `notes/calls/x.md@12:08` still resolve, with the time placed in the recording a note covered.
+  `notes/calls/x.md@12:08` still resolve, with the time placed in the recording a note covered, or in its transcript
+  when the source keeps that as a record of its own, as Plaud does. `r:<recording>@12:08` reads that transcript too.
 - `docket ingest <source> <folder>`: imports payloads fetched earlier through the source's mapper, which lives in your
   project under `.claude/skills/sources/<source>/`; Docket runs it in its own process and checks every record.
 - Hold lists: `state/holds/<source>.txt` keeps records out of staging and raw until a hold is released, on every

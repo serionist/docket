@@ -30,7 +30,7 @@ from plaud_payloads import (
 )
 from starlette.testclient import TestClient
 
-from docket import capture
+from docket import capture, recall
 from docket.cli import main
 from docket.service.app import ServiceApp, create_app
 from docket.service.state import Settings
@@ -38,6 +38,7 @@ from docket.sources import release as releasing
 from docket.sources.contract import check_output
 from docket.vault.config import Owner, SourceConfig, VaultConfig
 from docket.vault.gate import Gate
+from docket.vault.processed import DocMeta, ProcessedDoc
 from docket.vault.records import RawRecord, version
 from docket.vault.vault import Vault
 
@@ -96,6 +97,22 @@ def test_a_new_name_a_renamed_speaker_or_an_edited_tab_is_a_new_version(mapper: 
     )
     for rid in base:
         assert version(changed[rid]) != version(base[rid])
+
+
+def test_a_time_on_a_note_covering_a_recording_is_read_on_its_transcript(mapper: ModuleType, tmp_path: Path) -> None:
+    # The mapper keeps the segments on the transcript, not on the recording a legacy note covers.
+    vault = project_with_the_example(tmp_path)
+    vault.write_run("plaud", list(checked(mapper, live_call(Run())).values()))
+    old = "notes/calls/2026-10-14-supplier-call.md"
+    covers = [f"plaud:{CALL}"]
+    head = DocMeta(
+        id="legacy-note:2026-10-14-supplier-call", type="legacy-note", covers=covers, by="test", old_paths=[old]
+    )
+    recall.doc_put(vault, ProcessedDoc(head, "# Supplier call\n\nTen million for the quarter.\n", 0).render())
+    for locator in (f"{old}@12:08", f"plaud:{old}@12:08", f"r:plaud:{CALL}@12:08"):
+        found = recall.read(vault, locator, view="raw")
+        assert found.resolved == f"r:plaud:{CALL}/transaction_polish@12:08"
+        assert [s.text for s in found.spans[0].segments] == ["So ten million, for the whole quarter."]
 
 
 # -- docket ingest, end to end ---------------------------------------------------------------------------------------
