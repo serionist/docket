@@ -34,9 +34,10 @@ import yaml
 from pydantic import BaseModel
 
 from docket.errors import DocketError
-from docket.index import SearchResult, parse_when, search, status
+from docket.index import SearchResult, parse_when, search, status, vectors
 from docket.index.build import open_index
 from docket.index.query import MAX_K
+from docket.models.provider import Off
 from docket.vault.anchors import Anchor, AnchorError, parse_anchor
 from docket.vault.processed import DOC_TYPES, id_problem
 from docket.vault.records import RID
@@ -120,10 +121,22 @@ class QuestionResult(BaseModel):
     refused: str | None = None
 
 
+class EvalVectors(BaseModel):
+    """What the vector stage had to work with: its model, the chunks with a vector of how many, and how many questions
+    ran without it, with why for the first."""
+
+    model: str
+    have: int
+    total: int
+    skipped: int = 0
+    why: str | None = None
+
+
 class EvalReport(BaseModel):
     file: str
     k: int
     behind: str | None = None
+    vectors: EvalVectors | None = None
     all: Score
     kinds: dict[str, Score]
     langs: dict[str, Score]
@@ -426,24 +439,37 @@ def summarize(path: str, k: int, results: list[QuestionResult], unknown: list[st
     )
 
 
-def run(vault: Vault, questions: QuestionSet, k: int = K) -> EvalReport:
-    """Every question through search at k, with its asked as now, scored; nothing is written."""
+def run(
+    vault: Vault, questions: QuestionSet, k: int = K, models: vectors.QueryVectors | Off | None = None
+) -> EvalReport:
+    """Every question through search at k, with its asked as now, scored; nothing is written. With models, the report
+    says what the vectors covered and how many questions ran without them."""
     if not 1 <= k <= MAX_K:
         raise DocketError(f"k is from 1 to {MAX_K}")
     late = behind(vault)
     conn = open_index(vault)
+    seen: EvalVectors | None = None
     try:
+        if models is not None and not isinstance(models, Off):
+            table = vectors.table_of(models.embedder)
+            have, total = vectors.coverage(conn, table) if vectors.holds(conn, "main", table.name) else (0, 0)
+            seen = EvalVectors(model=models.embedder.name, have=have, total=total)
         wanted = {w.text: w for q in questions.questions for w in q.want}
         unknown = [text for text, w in wanted.items() if not _exists(conn, w)]
         results: list[QuestionResult] = []
         for question in questions.questions:
             try:
-                result = search(vault, question.q, k=k, now=question.asked)
+                result = search(vault, question.q, k=k, now=question.asked, models=models)
             except DocketError as e:
                 missed = score_question(question, [], k)
                 results.append(missed.model_copy(update={"refused": str(e)}))
                 continue
+            if seen is not None and result.models.state == "skipped":
+                seen.skipped += 1
+                seen.why = seen.why or result.models.why
             results.append(score_question(question, found_in(conn, result), k))
     finally:
         conn.close()
-    return summarize(questions.path, k, results, unknown, late)
+    report = summarize(questions.path, k, results, unknown, late)
+    report.vectors = seen
+    return report

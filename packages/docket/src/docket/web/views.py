@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 from markupsafe import Markup
 
 from docket.index import EntityLabel, SearchResult
-from docket.index.query import DocRef, Group, Hit, QueryReading
+from docket.index.query import DocRef, Group, Hit, QueryReading, VectorsRun
 from docket.index.text import words
 from docket.vault.anchors import parse_locator
 from docket.vault.processed import DOC_TYPES
@@ -158,6 +158,11 @@ def reading_line(reading: QueryReading, names: dict[str, EntityLabel], tz: ZoneI
     if reading.absent:
         out.append(f"in no chunk: {', '.join(reading.absent)}")
     return out
+
+
+def vectors_line(run: VectorsRun) -> list[str]:
+    """A line only when models are on here and this search went without vectors, with why."""
+    return [f"no vectors in this search: {run.why}"] if run.state == "skipped" and run.why else []
 
 
 def resolved(
@@ -338,7 +343,7 @@ def _when(group: Group, tz: ZoneInfo) -> str:
 def build(result: SearchResult, state: SearchState, names: dict[str, EntityLabel], tz: ZoneInfo) -> SearchView:
     marks = terms(result.query)
     view = SearchView(
-        reading=reading_line(result.query, names, tz),
+        reading=[*reading_line(result.query, names, tz), *vectors_line(result.models)],
         chips=chips(state, names, result.query),
         facets=facets(result, state, names),
         candidates=result.candidates,

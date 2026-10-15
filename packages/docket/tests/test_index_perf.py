@@ -9,6 +9,7 @@ word check's split scans are counted instead.
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import itertools
 import random
@@ -19,15 +20,18 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import numpy as np
 import pytest
 from docket_testkit import fts_and_check, index_config, query_words, stem_every_word, template_with
+from models_kit import FAKE
 
-from docket.index import build, matching, search
+from docket.index import build, matching, search, vectors
 from docket.index import text as text_module
 from docket.index.chunks import Chunk, iso
 from docket.index.schema import create
 from docket.index.terms import Checker, Word, phrase_of
 from docket.index.text import Analyzer, fold, words_and_compounds
+from docket.models.catalogue import Embedder, input_hash
 from docket.vault.entities import Alias, Entities, Entity
 from docket.vault.vault import Vault
 
@@ -125,8 +129,44 @@ def make_perf_vault(root: Path) -> Vault:
     matching.refresh(conn, Analyzer(langs), full=True)
     conn.execute("COMMIT")
     conn.execute("INSERT INTO chunks_fts (chunks_fts) VALUES ('optimize')")
+    write_vectors(conn)
     conn.close()
     return vault
+
+
+# The vector stage's load (DR-0337): a seeded unit vector of the embedder's 384 dims per chunk, written in one pass
+# after the chunks as the embedding pass writes them, and a seeded query vector.
+PERF = dataclasses.replace(FAKE, name="perf", dims=384)
+
+
+def unit_rows(count: int, seed: int) -> np.ndarray:
+    rows = np.random.default_rng(seed).standard_normal((count, PERF.dims), dtype=np.float32)
+    return rows / np.linalg.norm(rows, axis=1, keepdims=True)
+
+
+def write_vectors(conn: sqlite3.Connection) -> None:
+    table = vectors.table_of(PERF)
+    found = conn.execute("SELECT id, title, text, ts, source FROM chunks ORDER BY id").fetchall()
+    rows = unit_rows(len(found), 67)
+    conn.execute("BEGIN")
+    vectors.create(conn, table)
+    conn.executemany(
+        f"INSERT INTO {table.name} (chunk, input_hash, ts, source, vec) VALUES (?, ?, ?, ?, ?)",  # noqa: S608
+        [
+            (chunk, input_hash(table.input(title, text)), ts, source, rows[n].astype("<f4").tobytes())
+            for n, (chunk, title, text, ts, source) in enumerate(found)
+        ],
+    )
+    conn.execute("COMMIT")
+
+
+class PerfModels:
+    """A query's vector, written directly: the worker's own time is a few milliseconds, measured apart."""
+
+    embedder: Embedder = PERF
+
+    def query_vector(self, words: str) -> bytes | str:
+        return unit_rows(1, len(words))[0].astype("<f4").tobytes()
 
 
 @pytest.fixture(scope="module")
@@ -181,10 +221,12 @@ def test_queries_answer_in_well_under_a_second(vault: Vault) -> None:
     }
     for name, (query, kwargs) in shapes.items():
         seconds, found = timed(vault, query, **kwargs)
-        print(f"{name:16} {seconds * 1000:7.1f} ms  {found} hits  {query!a}")
-        assert found, name
+        # The same with the vector stage on, its scan over 100,000 vectors running beside the FTS stages.
+        with_vectors, found_too = timed(vault, query, models=PerfModels(), **kwargs)
+        print(f"{name:16} {seconds * 1000:7.1f} ms, {with_vectors * 1000:7.1f} with vectors  {found} hits  {query!a}")
+        assert found and found_too, name
         if not traced():
-            assert seconds < SECONDS, name
+            assert seconds < SECONDS and with_vectors < SECONDS, name
     result = search(vault, f"{common} múlt héten", now=NOW)
     since, until = result.query.since, result.query.until
     assert since is not None and until is not None

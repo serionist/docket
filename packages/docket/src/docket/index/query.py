@@ -23,17 +23,20 @@ import functools
 import json
 import re
 import sqlite3
+import threading
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
+from pathlib import Path
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel
 
 from docket.errors import DocketError
-from docket.index import matching
-from docket.index.build import languages_of, open_index
+from docket.index import matching, vectors
+from docket.index.build import db_path, languages_of, open_index
 from docket.index.languages import Language, Languages
 from docket.index.terms import Checker, Word, phrase_of, tokens
 from docket.index.text import (
@@ -52,11 +55,18 @@ from docket.index.text import (
     words_and_compounds,
 )
 from docket.index.timewords import Range, read_time
+from docket.models.catalogue import input_hash
+from docket.models.provider import Off
 from docket.vault.vault import Vault
 
 CANDIDATES = 200
 ENTITY_ROWS = 2000
 RRF = 60
+# The vector list counts half in the fusion: on the invented set that kept the paraphrase and typo lift and every kind's
+# MRR within 0.01 of keyword search's, where a full weight cost names and inflections (DR-0338).
+VECTOR_WEIGHT = 0.5
+# The query's vector waits at most 2 s in the worker's client; the scan itself is bounded by this.
+VECTOR_SECONDS = 10.0
 MAX_K = 100
 STEMMED_WEIGHT = 0.6
 PREFIX_MIN = 3
@@ -147,11 +157,20 @@ class Group(BaseModel):
     hits: list[Hit] = []
 
 
+class VectorsRun(BaseModel):
+    """Whether the vector stage ran: off (no models here), on, or skipped with why."""
+
+    state: Literal["off", "on", "skipped"] = "off"
+    model: str | None = None
+    why: str | None = None
+
+
 class SearchResult(BaseModel):
     query: QueryReading
     groups: list[Group] = []
     facets: dict[str, dict[str, int]] = {}
     candidates: int = 0
+    models: VectorsRun = VectorsRun()
 
 
 @dataclass
@@ -231,6 +250,7 @@ def _cases(text: str, lang: Language) -> matching.Cases:
 class _Search:
     def __init__(self, conn: sqlite3.Connection, vault: Vault, langs: Languages) -> None:
         self.conn = conn
+        self.db = db_path(vault)
         self.langs = langs
         self.analyzer = Analyzer(langs)
         self.tz = ZoneInfo(vault.config.owner.time_zone)
@@ -742,6 +762,63 @@ def _joins(tokens: list[str], compounds: list[Joined], kept: list[int]) -> dict[
     return joins
 
 
+class _VectorStage:
+    """The vector stage, run in a thread beside the FTS stages (DR-0337, DR-0338): the query's vector from the worker,
+    then the scan on a connection of its own, which Python's sqlite3 runs while the other holds no GIL."""
+
+    def __init__(self, models: vectors.QueryVectors, db: Path, text: str, filters: tuple[str, list[object]]) -> None:
+        self.table = vectors.table_of(models.embedder)
+        self.found: list[tuple[int, str]] = []
+        self.why: str | None = None
+        self._thread = threading.Thread(target=self._run, args=(models, db, text, filters), daemon=True)
+        self._thread.start()
+
+    def _run(self, models: vectors.QueryVectors, db: Path, text: str, filters: tuple[str, list[object]]) -> None:
+        vector = models.query_vector(text)
+        if isinstance(vector, str):
+            self.why = vector
+            return
+        found = vectors.scan(db, self.table, vector, filters)
+        if isinstance(found, str):
+            self.why = found
+        else:
+            self.found = found
+
+    def ids(self, conn: sqlite3.Connection) -> list[int]:
+        """The scan's chunks that this search's connection holds with the input their vector was made from: the
+        scan's own connection can see a moment before or after an update that this one doesn't."""
+        self._thread.join(VECTOR_SECONDS)
+        if self._thread.is_alive():
+            self.why = f"the vector stage took more than {VECTOR_SECONDS:g} s"
+            return []
+        wanted = dict(self.found)
+        held: set[int] = set()
+        ids = list(wanted)
+        for start in range(0, len(ids), 500):
+            part = ids[start : start + 500]
+            for chunk, title, text in conn.execute(
+                f"SELECT id, title, text FROM chunks WHERE id IN ({', '.join('?' * len(part))})",  # noqa: S608 - placeholders only
+                part,
+            ):
+                if input_hash(self.table.input(title, text)) == wanted[chunk]:
+                    held.add(chunk)
+        return [chunk for chunk, _ in self.found if chunk in held]
+
+
+def _start_vectors(
+    models: vectors.QueryVectors | Off | None, db: Path, text: str, filters: tuple[str, list[object]]
+) -> tuple[_VectorStage | None, VectorsRun]:
+    if models is None:
+        return None, VectorsRun()
+    if isinstance(models, Off):
+        return None, VectorsRun(state="off" if models.why is None else "skipped", why=models.why)
+    run = VectorsRun(state="on", model=models.embedder.name)
+    if not text:
+        run.state, run.why = "skipped", "nothing to embed: the query is only time words or filters"
+        return None, run
+    return _VectorStage(models, db, text, filters), run
+
+
 def _iso(value: datetime) -> str:
     at = value.astimezone(UTC)
     return f"{at:%Y-%m-%dT%H:%M:%S}.{at.microsecond // 1000:03d}Z"
@@ -758,14 +835,19 @@ def search(
     until: datetime | date | None = None,
     k: int = 20,
     now: datetime | None = None,
+    models: vectors.QueryVectors | Off | None = None,
 ) -> SearchResult:
-    """Find chunks for a query; see the module's docstring for how."""
+    """Find chunks for a query; see the module's docstring for how. With models, a vector stage runs beside the FTS
+    stages, and is skipped, with the reason in the result, whenever it can't run."""
     if not 1 <= k <= MAX_K:
         raise DocketError(f"k is from 1 to {MAX_K}")
     conn = open_index(vault)
     try:
         s = _Search(conn, vault, languages_of(vault))
-        return _run(s, query, people=people, entities=entities, sources=sources, since=since, until=until, k=k, now=now)
+        return _run(
+            s, query, people=people, entities=entities, sources=sources, since=since, until=until, k=k, now=now,
+            models=models,
+        )  # fmt: skip
     finally:
         conn.close()
 
@@ -781,6 +863,7 @@ def _run(
     until: datetime | date | None,
     k: int,
     now: datetime | None,
+    models: vectors.QueryVectors | Off | None = None,
 ) -> SearchResult:
     reading = QueryReading(text=query)
     reading.phrases = [p.strip() for p in QUOTED.findall(query) if words(p)]
@@ -803,6 +886,8 @@ def _run(
         reading.since = None if span.since == FAR_PAST else span.since
         reading.until = None if span.until == FAR_FUTURE else span.until
     filters = s.filters(span, sources)
+    asked = " ".join([*reading.phrases, *time.rest.split()])
+    stage, run = _start_vectors(models, s.db, asked, filters)
     phrase_groups = [s.phrase_group(p) for p in reading.phrases]
     word_groups, word_terms, reading.absent = s.word_groups(rest, _joins(tokens_read, compounds, kept_at))
     reading.words = [w for w, _ in word_groups]
@@ -863,6 +948,12 @@ def _run(
     for n, chunk in enumerate(by_entity, start=1):
         score[chunk] = score.get(chunk, 0.0) + 1 / (RRF + n)
         found_by.setdefault(chunk, "entity")
+    if stage is not None:
+        for n, chunk in enumerate(stage.ids(s.conn), start=1):
+            score[chunk] = score.get(chunk, 0.0) + VECTOR_WEIGHT / (RRF + n)
+            found_by.setdefault(chunk, "vector")
+        if stage.why is not None:
+            run.state, run.why = "skipped", stage.why
     ranked = sorted(score, key=lambda c: (-score[c], c))
     rows = s.rows(ranked)
     mentioned: dict[int, set[str]] = {}
@@ -883,7 +974,7 @@ def _run(
             kept.append(row)
         else:
             break
-    result = SearchResult(query=reading, candidates=len(ranked))
+    result = SearchResult(query=reading, candidates=len(ranked), models=run)
     hit_rank = {row.id: n for n, row in enumerate(kept, start=1)}
     by_group: dict[str, list[_Row]] = {}
     for row in kept:
@@ -913,7 +1004,9 @@ def _run(
                 )
             )
         result.groups.append(group)
-    candidates = [rows[c] for c in ranked]
+    # The vector list's tail would swamp the counts: a chunk only it found counts when it made the top k.
+    shown = {row.id for row in kept}
+    candidates = [rows[c] for c in ranked if found_by[c] != "vector" or c in shown]
     result.facets = {
         "sources": dict(sorted(Counter(r.source for r in candidates if r.source).items())),
         "entities": dict(sorted(Counter(e for r in candidates for e in mentioned.get(r.id, set())).items())),
