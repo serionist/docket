@@ -60,6 +60,10 @@ Unreleased in the same PR.
 - `docket import notes`: an existing notes folder becomes legacy notes that keep their old paths, so references like
   `notes/calls/x.md@12:08` still resolve, with the time placed in the recording a note covered, or in its transcript
   when the source keeps that as a record of its own, as Plaud does. `r:<recording>@12:08` reads that transcript too.
+  A note whose head names no recording matches one of those by its title and day as well: run the import again, and
+  each note that gains its recording is written as a new rev, counted under `covers`. Reading the transcript, as the
+  Search panel does for a hit, names the legacy notes and doc lines on its recording, and a doc that puts a time on
+  the recording is refused with the transcript's anchor to write instead.
 - `docket ingest <source> <folder>`: imports payloads fetched earlier through the source's mapper, which lives in your
   project under `.claude/skills/sources/<source>/`; Docket runs it in its own process and checks every record.
 - Hold lists: `state/holds/<source>.txt` keeps records out of staging and raw until a hold is released, on every

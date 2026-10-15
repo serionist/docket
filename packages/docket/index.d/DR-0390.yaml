@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0390
+    title: The notes import's fallback reads a recording and the transcripts under it as one
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#85"]
+    description: "DR-0134's fallback takes a record as a candidate when a time on it can be placed: on segments of its own, or on a transcript under it (DR-0370: a record of its source, of kind transcript, with segments, naming it as thread or container). The title and the day are the recording's own, so a note about a Plaud recording, named by its title and day, covers the recording, as a head naming the recording would. A transcript that matches as well, titled as its recording, is that recording's and doesn't count as a second match. A note imported before this gains the cover at the next docket import notes, as a new rev counted under covers (DR-0132). This refines DR-0134."
+    binds:
+      - Under a record means what it means for a time read on it (DR-0370); the import and read share the rule (spans.over, spans.is_transcript).
+      - A record with segments of its own is a candidate as before, and covers are only added, so no note loses a cover.
+    not_chosen:
+      - "Covering the transcript: a head naming the recording covers the recording, and a time on the recording already lands on its transcript (DR-0370)."
+      - "RawLookup.under for each candidate: the import has every record loaded already, and under scans the whole source on each call."

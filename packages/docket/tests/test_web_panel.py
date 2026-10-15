@@ -5,10 +5,12 @@ from pathlib import Path
 from urllib.parse import quote
 
 import pytest
-from docket_testkit import index_template, make_record
+from docket_testkit import PLAUD, POLISHED, index_template, make_record, note, plaud_records
 from docket_webkit import a11y_problems, html_problems, parse, signed_in
 from starlette.testclient import TestClient
 
+from docket import recall
+from docket.vault.processed import DocMeta, ProcessedDoc
 from docket.vault.vault import Vault
 
 CALL = "r:calls:rec-0100@01:50-03:20"
@@ -170,6 +172,22 @@ def test_a_record_with_two_versions_says_the_latest_is_shown(client: TestClient,
     tree = parse(panel(client, "r:chat:C0TEST/1791000003.000100"))
     assert "2 versions; this is the latest" in tree.text()
     assert "second words" in tree.text()
+
+
+def test_a_transcript_hit_names_what_covers_its_recording(client: TestClient, tmp_path: Path) -> None:
+    vault = Vault.open(tmp_path / "vault")
+    vault.write_run("plaud", plaud_records("transaction_polish"))
+    old = "notes/plaud/2026-10-14-supplier-sync.md"
+    head = DocMeta(
+        id="legacy-note:supplier-sync", type="legacy-note", covers=[PLAUD], by="claude-test", old_paths=[old]
+    )
+    recall.doc_put(vault, ProcessedDoc(head, "# Supplier sync\n\nPrice agreed.\n", 0).render())
+    recall.doc_put(vault, note("recording-note:2026-10-14-sync", covers=[PLAUD], lines=[f"- The call. [r:{PLAUD}]"]))
+    tree = parse(panel(client, f"r:{POLISHED}@10:42"))
+    summary = tree.find("section", class_="summary-column")
+    assert "recording-note:2026-10-14-sync, recording-note, rev 1" in summary.text()
+    assert [line.attrs["data-line"] for line in summary.find_all("div", class_="cited")] == ["14"]
+    assert f"Legacy notes that cover it: legacy-note:supplier-sync: {old}" in summary.text()
 
 
 def test_the_whole_page_opens_with_the_panel(client: TestClient) -> None:

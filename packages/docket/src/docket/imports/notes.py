@@ -51,6 +51,7 @@ from docket.vault.processed import (
 from docket.vault.records import RawRecord
 from docket.vault.redact import Redactor
 from docket.vault.segments import segments
+from docket.vault.spans import is_transcript, over
 from docket.vault.vault import Vault
 
 log = logging.getLogger(__name__)
@@ -137,12 +138,14 @@ class Listed:
 
 @dataclass(frozen=True)
 class Light:
-    """What a cover is matched on: generic record fields only, never a source's own."""
+    """What a cover is matched on: generic record fields only, never a source's own. `timed` says a time on the record
+    can be placed, on its own segments or on a transcript under it; `of` holds the records a transcript is under."""
 
     source: str
     ts_day: str
     title: frozenset[str]
     timed: bool
+    of: frozenset[str] = frozenset()
 
 
 @dataclass
@@ -299,14 +302,22 @@ def words(text: str) -> frozenset[str]:
 
 class Names:
     """The raw log seen through the generic fields a note can name a record by: its rid, its id, the id's last long
-    run of letters and digits; and for the fallback its source, the day it happened and its title's words."""
+    run of letters and digits; and for the fallback its source, the day it happened and its title's words, with a
+    recording and the transcripts under it read as one."""
 
     def __init__(self, records: Iterable[RawRecord], zone: ZoneInfo) -> None:
         self.by_name: dict[str, set[str]] = {}
         self.light: dict[str, Light] = {}
-        for record in records:
+        latest = list(records)
+        # A recording and the transcripts under it are read as one (DR-0370, DR-0390): the recording keeps the title,
+        # the transcript the segments.
+        of = {r.rid: frozenset(over(r)) for r in latest if is_transcript(r)}
+        transcribed = {rid for under in of.values() for rid in under}
+        for record in latest:
             day = record.ts.astimezone(zone).date().isoformat()
-            self.light[record.rid] = Light(record.source, day, words(record.title or ""), bool(segments(record)))
+            timed = bool(segments(record)) or record.rid in transcribed
+            title = words(record.title or "")
+            self.light[record.rid] = Light(record.source, day, title, timed, of.get(record.rid, frozenset()))
         for rid in self.light:
             ident = rid.partition(":")[2]
             runs = _RUNS.findall(ident)
@@ -336,6 +347,9 @@ class Names:
             for rid, light in self.light.items()
             if light.timed and light.ts_day == day and fold(light.source) in folders and light.title in titles
         ]
+        # A transcript titled as its recording is that recording's: the note covers the recording, as a head naming it
+        # would.
+        found = [rid for rid in found if not self.light[rid].of & set(found)]
         return found if len(found) == 1 else []
 
 

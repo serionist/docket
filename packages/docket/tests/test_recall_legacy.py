@@ -6,13 +6,17 @@ from pathlib import Path
 
 import pytest
 from docket_testkit import (
+    PLAUD,
+    POLISHED,
     READ_ROUTES,
     REC,
+    SAID,
     at,
     imported_template,
     make_record,
     note,
     notes_template,
+    plaud_records,
     read_route,
     template_vault,
 )
@@ -20,8 +24,7 @@ from docket_testkit import (
 from docket import index, recall
 from docket.errors import DocketError
 from docket.vault.docstore import DocStore
-from docket.vault.processed import DocMeta, ProcessedDoc, doc_path
-from docket.vault.records import RawRecord
+from docket.vault.processed import DocMeta, DocRefusedError, ProcessedDoc, doc_path
 from docket.vault.spans import RawLookup
 from docket.vault.vault import Vault
 
@@ -107,28 +110,10 @@ def test_a_time_the_note_cant_place_is_a_problem(vault: Vault) -> None:
     assert past.problems == ["1:39:00 is outside calls:rec-0042, which runs from 00:00 to 1:02:10"]
 
 
-# A recording kept as Plaud's mapper keeps one: the recording, its transcript and its notes, three records whose thread
-# and container are the recording's rid, and only the transcript has segments. The note covers the recording.
-PLAUD = "plaud:of_00feed0000feed0000feed0000feed00"
-POLISHED = f"{PLAUD}/transaction_polish"
+# A recording in Plaud's shape (PLAUD), with the legacy note covering the recording.
 SYNC = "notes/plaud/2026-10-14-supplier-sync.md"
 SYNC_ID = "legacy-note:2026-10-14-supplier-sync"
 MINUTES = "recording-note:2026-10-14-supplier-sync"
-SAID = [
-    {"start_ms": 0, "end_ms": 4000, "speaker": "Ben Sample", "text": "Morning, Cleo."},
-    {"start_ms": 642_000, "end_ms": 650_000, "speaker": "Cleo Test", "text": "Ten million, signed by Friday."},
-    {"start_ms": 900_000, "end_ms": 905_000, "speaker": "Ben Sample", "text": "Thanks, bye."},
-]
-
-
-def plaud_records(*blocks: str) -> list[RawRecord]:
-    under = {"source": "plaud", "container": PLAUD, "thread": PLAUD, "author": None}
-    said = "\n".join(f"{s['speaker']}: {s['text']}" for s in SAID)
-    return [
-        make_record(rid=PLAUD, kind="recording", title="Supplier sync", text="", **under),
-        *(make_record(rid=f"{PLAUD}/{b}", kind="transcript", segments=SAID, text=said, **under) for b in blocks),
-        make_record(rid=f"{PLAUD}/summary", kind="vendor-summary", text="## Summary\n\nPrice agreed.", **under),
-    ]
 
 
 def with_plaud(vault: Vault, *blocks: str) -> None:
@@ -187,6 +172,74 @@ def test_a_recording_with_no_transcript_under_it_places_no_time(vault: Vault) ->
     ]
     with pytest.raises(DocketError, match="has no transcript segments"):
         recall.read(vault, f"r:{PLAUD}@10:42", view="raw")
+
+
+@pytest.mark.parametrize("locator", [f"r:{POLISHED}", POLISHED, f"r:{POLISHED}@10:42"])
+def test_a_transcript_s_read_names_what_covers_its_recording(vault: Vault, locator: str) -> None:
+    # A search hit on the transcript, as the web panel opens it, names the legacy note and the lines on the recording.
+    with_plaud(vault, "transaction_polish")
+    whole = "recording-note:2026-10-14-whole"
+    about = f"- About the call. [r:{PLAUD}]"
+    recall.doc_put(vault, note(whole, covers=[PLAUD], lines=[about]))
+    found = recall.read(vault, locator, view="both")
+    assert ([s.rid for s in found.spans], found.resolved, found.problems) == ([POLISHED], None, [])
+    assert [(c.doc, c.text) for c in found.lines] == [(MINUTES, "- Cleo agreed to ten million. @10:42"), (whole, about)]
+    assert [(ref.id, ref.old_paths) for ref in found.legacy] == [(SYNC_ID, [SYNC])]
+    assert [ref.id for ref in recall.read(vault, f"r:{PLAUD}/summary").legacy] == []
+
+
+@pytest.mark.parametrize(
+    ("blocks", "time", "hint"),
+    [
+        (
+            ["transaction_polish"],
+            "@10:42-10:50",
+            f"the time is on its transcript {POLISHED}: write [r:{POLISHED}@10:42-10:50], with {POLISHED} in covers",
+        ),
+        (
+            ["transaction", "transaction_polish"],
+            "@10:42-10:50",
+            f"the time is on its transcripts {PLAUD}/transaction, {POLISHED}: "
+            f"write [r:{PLAUD}/transaction@10:42-10:50] or [r:{POLISHED}@10:42-10:50], with that one in covers",
+        ),
+        ([], "@10:42-10:50", f"anchor the whole record: [r:{PLAUD}]"),
+        # A time past the transcript's end gets no anchor that would be refused in turn, only why.
+        (["transaction_polish"], "@1:39:00", f"1:39:00 is outside {POLISHED}, which runs from 00:00 to 15:05"),
+        (
+            ["transaction", "transaction_polish"],
+            "@1:39:00",
+            f"1:39:00 is outside {PLAUD}/transaction, which runs from 00:00 to 15:05; "
+            f"1:39:00 is outside {POLISHED}, which runs from 00:00 to 15:05",
+        ),
+    ],
+)
+def test_a_time_on_a_recording_is_refused_naming_its_transcripts(
+    vault: Vault, blocks: list[str], time: str, hint: str
+) -> None:
+    with_plaud(vault, *blocks)
+    doc_id = "recording-note:2026-10-14-on-the-recording"
+    doc = note(doc_id, covers=[PLAUD], lines=[f"- Ten million. {time}"])
+    with pytest.raises(DocRefusedError) as refused:
+        recall.doc_put(vault, doc)
+    assert [p.message for p in refused.value.problems] == [f"{time}: {PLAUD} has no transcript segments; {hint}"]
+    # The same doc written by hand: verify says the same.
+    path = vault.root / doc_path(doc_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(doc, encoding="utf-8", newline="\n")
+    checked = recall.verify(vault, doc_id).lines
+    assert [s.problem for line in checked for s in line.spans] == [f"{PLAUD} has no transcript segments; {hint}"]
+
+
+def test_a_hint_names_only_the_transcripts_that_hold_the_time(vault: Vault) -> None:
+    under = {"source": "plaud", "container": PLAUD, "thread": PLAUD, "author": None}
+    raw = make_record(rid=f"{PLAUD}/transaction", kind="transcript", segments=SAID[:1], text="Morning, Cleo.", **under)
+    vault.write_run("plaud", [*plaud_records("transaction_polish"), raw], run_at=at(12))
+    with pytest.raises(DocRefusedError) as refused:
+        recall.doc_put(vault, note("recording-note:2026-10-14-x", covers=[PLAUD], lines=["- Ten million. @10:42"]))
+    assert [p.message for p in refused.value.problems] == [
+        f"@10:42: {PLAUD} has no transcript segments; "
+        f"the time is on its transcript {POLISHED}: write [r:{POLISHED}@10:42], with {POLISHED} in covers"
+    ]
 
 
 def test_a_stretch_that_runs_backwards_is_refused(vault: Vault) -> None:

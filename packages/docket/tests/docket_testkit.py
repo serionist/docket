@@ -94,6 +94,28 @@ def at(hour: int, minute: int = 0) -> datetime:
     return datetime(2026, 10, 14, hour, minute, tzinfo=UTC)
 
 
+# A recording kept as Plaud's mapper keeps one: the recording with its title, its transcript with the segments and no
+# title, and its notes, three records whose thread and container are the recording's rid.
+PLAUD = "plaud:of_00feed0000feed0000feed0000feed00"
+POLISHED = f"{PLAUD}/transaction_polish"
+SAID: list[dict[str, Any]] = [
+    {"start_ms": 0, "end_ms": 4000, "speaker": "Ben Sample", "text": "Morning, Cleo."},
+    {"start_ms": 642_000, "end_ms": 650_000, "speaker": "Cleo Test", "text": "Ten million, signed by Friday."},
+    {"start_ms": 900_000, "end_ms": 905_000, "speaker": "Ben Sample", "text": "Thanks, bye."},
+]
+
+
+def plaud_records(*blocks: str, title: str = "Supplier sync") -> list[RawRecord]:
+    """The recording, a transcript per block and its notes, on 14 October."""
+    under = {"source": "plaud", "container": PLAUD, "thread": PLAUD, "author": None}
+    said = "\n".join(f"{s['speaker']}: {s['text']}" for s in SAID)
+    return [
+        make_record(rid=PLAUD, kind="recording", title=title, text="", **under),
+        *(make_record(rid=f"{PLAUD}/{b}", kind="transcript", segments=SAID, text=said, **under) for b in blocks),
+        make_record(rid=f"{PLAUD}/summary", kind="vendor-summary", text="## Summary\n\nPrice agreed.", **under),
+    ]
+
+
 def consuming_project(tmp_path: Path, mappers: dict[str, str]) -> Vault:
     """A git repo with a mapper per source under .claude/skills/sources/, and a vault nested in it whose vault.yaml
     names each mapper; each source is mixed."""

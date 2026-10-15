@@ -14,7 +14,11 @@ import pytest
 from docket_testkit import (
     ADA,
     NEVER_STORE_KEYWORDS,
+    PLAUD,
+    POLISHED,
+    READ_ROUTES,
     REC,
+    SAID,
     UNTRACKED_NOTE,
     VENDOR,
     at,
@@ -22,6 +26,8 @@ from docket_testkit import (
     imported_template,
     make_record,
     notes_template,
+    plaud_records,
+    read_route,
     screening,
     sh,
     template_vault,
@@ -65,6 +71,8 @@ LATER = "notes/calls/2026-09-14-later.md"
 LATER_ID = "legacy-note:2026-09-14-later"
 OFFER = "notes/mail/2026-09-11-offer.md"
 OFFER_ID = "legacy-note:2026-09-11-offer"
+SYNC = "notes/plaud/2026-10-14-supplier-sync.md"
+SYNC_ID = "legacy-note:2026-10-14-supplier-sync"
 LISTS = NeverStore(keywords=NEVER_STORE_KEYWORDS)
 
 
@@ -234,6 +242,22 @@ def test_covers_by_day_source_folder_and_title_when_the_head_names_none() -> Non
     assert covers("notes/calls/supplier-call.md") == []
     two = Names([record("calls:rec-1", "Supplier call"), record("calls:rec-9", "Supplier call")], zone)
     assert two.covers(Listed("notes/calls/2026-10-14-supplier-call.md", Path("x")), "# x\n") == []
+
+
+def test_the_fallback_reads_a_recording_and_its_transcripts_as_one() -> None:
+    # Plaud's shape: the title is on the recording, the segments on the transcript under it.
+    def covers(records: list[RawRecord]) -> list[str]:
+        names = Names(records, ZoneInfo("Europe/Budapest"))
+        return names.covers(Listed(SYNC, Path("x")), "# x\n\nno ids\n")
+
+    assert covers(plaud_records("transaction_polish")) == [PLAUD]
+    assert covers(plaud_records("transaction", "transaction_polish")) == [PLAUD]
+    assert covers(plaud_records()) == []
+    titled = [r.model_copy(update={"title": "Supplier sync"}) for r in plaud_records("transaction_polish")]
+    assert covers(titled) == [PLAUD]
+    # Under a recording means of its own source, as for a time read on it.
+    stray = make_record(rid="other:t-1", source="other", kind="transcript", segments=SAID, thread=PLAUD)
+    assert covers([*plaud_records(), stray]) == []
 
 
 @pytest.mark.parametrize(
@@ -507,6 +531,50 @@ def test_a_recording_arriving_later_adds_a_cover_only(after: tuple[Vault, Path])
     doc = DocStore(vault).get(LATER_ID)
     assert doc is not None
     assert (doc.meta.covers, doc.meta.rev) == (["calls:rec-0050"], 2)
+
+
+def plaud_notes(tmp_path: Path) -> Path:
+    """A notes folder outside git with one note about the Plaud recording; its head names no record."""
+    folder = tmp_path / "plaud-notes" / "notes"
+    (folder / "plaud").mkdir(parents=True)
+    note = folder / "plaud" / "2026-10-14-supplier-sync.md"
+    note.write_text("# Supplier sync\n\nPrice agreed, signed by Friday.\n", encoding="utf-8")
+    return folder
+
+
+@pytest.mark.parametrize("route", READ_ROUTES)
+def test_a_note_named_by_title_and_day_covers_a_recording_through_its_transcript(
+    vault: Vault, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, route: str
+) -> None:
+    vault.write_run("plaud", plaud_records("transaction_polish"), run_at=at(12))
+    report = run(vault, plaud_notes(tmp_path))
+    assert (report.new, report.covered) == (1, 1)
+    doc = DocStore(vault).get(SYNC_ID)
+    assert doc is not None
+    assert (doc.meta.covers, doc.meta.old_paths) == ([PLAUD], [SYNC])
+    read_route(route, monkeypatch)
+    found = recall.read(vault, f"{SYNC}@10:42", view="both")
+    assert (found.resolved, found.problems) == (f"r:{POLISHED}@10:42", [])
+    assert [s.text for s in found.spans[0].segments] == ["Ten million, signed by Friday."]
+
+
+def test_a_note_imported_before_it_could_match_gains_the_recording_as_its_next_rev(
+    vault: Vault, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault.write_run("plaud", plaud_records("transaction_polish"), run_at=at(12))
+    folder = plaud_notes(tmp_path)
+    with monkeypatch.context() as before:
+        # The fallback as it was: a recording's transcript never made the recording a match.
+        before.setattr(notes, "is_transcript", lambda _record: False)
+        first = run(vault, folder)
+    assert (first.new, first.covered) == (1, 0)
+    report = run(vault, folder)
+    assert (report.covers, report.updated, report.same) == (1, 0, 0)
+    doc = DocStore(vault).get(SYNC_ID)
+    assert doc is not None
+    assert (doc.meta.covers, doc.meta.rev) == ([PLAUD], 2)
+    again = run(vault, folder)
+    assert (again.covers, again.same) == (0, 1)
 
 
 def test_an_edit_in_the_vault_is_kept_while_the_note_is_the_same(after: tuple[Vault, Path]) -> None:

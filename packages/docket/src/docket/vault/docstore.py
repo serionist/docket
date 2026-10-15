@@ -243,7 +243,7 @@ class DocStore:
                     problems.append(DocProblem(n, f"{rid} isn't in covers; add it there{hint}", line))
                     continue
                 record = records.get(rid)
-                why = problem(anchor, record) if record is not None else None
+                why = problem(anchor, record, lookup) if record is not None else None
                 if why is not None:
                     problems.append(DocProblem(n, f"{anchor.token}: {why}", line))
         return problems

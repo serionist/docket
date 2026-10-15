@@ -8,7 +8,8 @@ here acts on what it says.
 `read` also takes the path other files cite a legacy note by (its old path), with an optional time: the note, and the
 raw at that time in the recording it covered. A rid in the raw log stays a rid, and `r:` is always raw. A time on a
 record without segments of its own, such as a recording whose source keeps its transcript as a record of its own, is
-placed on the one transcript under it (DR-0370).
+placed on the one transcript under it (DR-0370), and a transcript's read lists the lines and the legacy notes on the
+recording it is under too (DR-0391).
 
 What a read asks about docs other than the one it shows (an old path's note, the docs superseding it, the docs covering
 a record) comes from the index when it is current for processed/, else from one parse of every doc for the whole call;
@@ -210,7 +211,7 @@ def _read(call: _Call, locator: str, view: View, around: int, rev: int | None) -
     anchor = loc.anchor or Anchor(asked, "record")
     result = ReadResult(locator=locator, view=view)
     if anchor.kind == "time":
-        timed = _timed(call.raw, [asked])
+        timed = call.raw.timed([asked])
         if len(timed) > 1:
             raise DocketError(f"{asked} has {len(timed)} transcripts; read one of {_options(timed, anchor)}")
         if timed and timed[0] != asked:
@@ -221,17 +222,18 @@ def _read(call: _Call, locator: str, view: View, around: int, rev: int | None) -
     if view != "summary":
         result.spans = _raw_spans(call.raw, record, anchor, len(versions), around)
     if view != "raw":
-        docs = call.covering(record.rid)
-        result.lines = _citing(docs, call.superseded(), record.rid, anchor, around)
-        named = docs
-        if record.rid != asked:
-            # A recording's time read on its transcript still lists the lines on the whole recording, and its notes.
-            on_asked = call.covering(asked)
-            seen = {(c.doc, c.n) for c in result.lines}
-            more = _citing(on_asked, call.superseded(), asked, anchor, around)
-            result.lines += [c for c in more if (c.doc, c.n) not in seen]
-            named = [*on_asked, *docs]
-        notes = {d.meta.id: d for d in named if d.meta.type == "legacy-note"}
+        # A transcript is read as one with its recording: the recording a time was placed from (DR-0370), or the one
+        # it is under (DR-0391). The lines on either are listed, the transcript's first, and the notes covering either.
+        rids = list(dict.fromkeys([record.rid, asked, *call.raw.recordings(record)]))
+        seen: set[tuple[str, int]] = set()
+        notes: dict[str, ProcessedDoc] = {}
+        for rid in rids:
+            docs = call.covering(rid)
+            for cited in _citing(docs, call.superseded(), rid, anchor, around):
+                if (cited.doc, cited.n) not in seen:
+                    seen.add((cited.doc, cited.n))
+                    result.lines.append(cited)
+            notes.update((d.meta.id, d) for d in docs if d.meta.type == "legacy-note")
         result.legacy = [LegacyRef(id=d.meta.id, old_paths=d.meta.old_paths) for d in notes.values()]
     return result
 
@@ -254,7 +256,7 @@ def _read_path(
     if at is None:
         return result
     lookup = call.raw
-    timed = _timed(lookup, doc.meta.covers)
+    timed = lookup.timed(doc.meta.covers)
     if len(timed) != 1:
         if timed:
             result.problems.append(f"{doc.meta.id} covers {len(timed)} transcripts; read one of {_options(timed, at)}")
@@ -276,17 +278,6 @@ def _read_path(
     if view != "summary":
         result.spans = [] if found_span.problem is not None else [found_span]
     return result
-
-
-def _timed(lookup: RawLookup, rids: list[str]) -> list[str]:
-    """Where a time on these records can be placed (DR-0370): those with segments of their own; when none has any, the
-    transcripts under them, so a time on a recording lands on the transcript its source keeps as a record of its
-    own."""
-    own = [rid for rid in rids if any(segments(r) for r in lookup.versions(rid)[-1:])]
-    if own:
-        return own
-    under = (r.rid for rid in rids for r in lookup.under(rid) if r.kind == "transcript" and segments(r))
-    return list(dict.fromkeys(under))
 
 
 def _placed(rid: str, at: Anchor) -> Anchor:
@@ -344,7 +335,7 @@ def _verify_one(lookup: RawLookup, anchor: Anchor, covers: list[str], window: in
     versions = lookup.versions(rid)
     if not versions:
         return Span(rid=rid, anchor=anchor.token, problem=f"{rid} isn't in the raw log")
-    return span(anchor, versions[-1], len(versions), window=window)
+    return span(anchor, versions[-1], len(versions), window=window, lookup=lookup)
 
 
 def _load(store: DocStore, kind: str, value: str, rev: int | None) -> ProcessedDoc:
