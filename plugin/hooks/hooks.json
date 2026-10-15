@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "docket",
+            "args": ["hook", "session-start"],
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

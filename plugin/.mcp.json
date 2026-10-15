@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "docket": {
+      "type": "http",
+      "url": "http://127.0.0.1:${DOCKET_PORT:-8741}/mcp",
+      "headersHelper": "docket service token --header",
+      "timeout": 120000
+    }
+  }
+}
