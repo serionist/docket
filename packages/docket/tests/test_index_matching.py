@@ -287,6 +287,22 @@ def test_an_english_word_stemming_like_a_name_is_no_mention(team: Vault) -> None
         assert mentions_of(team, entity) == {n for n in range(400) if entity in team_message(n)[1]}
 
 
+def test_a_query_word_stemming_like_a_name_stays_a_word(team: Vault) -> None:
+    now = datetime(2026, 10, 15, tzinfo=UTC)
+    same = search(team, "the same crane", now=now)
+    assert same.query.entities == []
+    assert "same" in same.query.words
+    both = search(team, "same sammal", now=now).query
+    assert [(e.id, e.words) for e in both.entities] == [("sam", "sammal")]
+    assert both.words == ["same"]
+    assert [e.id for e in search(team, "markot", now=now).query.entities] == ["mark"]
+    # A search for Sam leads with his 40 chunks. The word sam still meets the same through its Hungarian stem, as any
+    # word meets its inflections, but only his chunks mention him too.
+    sam = search(team, "Sam", k=40, now=now)
+    found = {h.rid for g in sam.groups for h in g.hits}
+    assert found == {make_record(n).rid for n in range(400) if "sam" in team_message(n)[1]}
+
+
 def test_a_name_ending_in_y_keeps_its_inflected_mentions(one_customer: Vault) -> None:
     # Tony is in 120 chunks, a third of them Tonyval: a y read as a vowel takes -val, not a doubled consonant.
     assert mentions_of(one_customer, "tony") == {n for n in range(400) if n % 10 in (0, 3, 9)}

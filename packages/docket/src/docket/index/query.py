@@ -76,6 +76,8 @@ QUOTED = re.compile(r'"([^"]*)"')
 # The open ends of a range given only one side: far enough, and still printable in any time zone.
 FAR_PAST = datetime(1900, 1, 1, tzinfo=UTC)
 FAR_FUTURE = datetime(9000, 1, 1, tzinfo=UTC)
+# An alias form: its column and its words there.
+Form = tuple[str, tuple[str, ...]]
 
 
 class EntityFound(BaseModel):
@@ -225,7 +227,10 @@ class _Search:
         self.analyzer = Analyzer(langs)
         self.tz = ZoneInfo(vault.config.owner.time_zone)
         self.terms: set[str] = set()
-        self.lookup, self.longest = self._lookups()
+        self.lookup, self.stems, self.longest = self._lookups()
+        self.alias_langs = {lang.column: lang for lang in matching.alias_langs(self.analyzer)}
+        # Per column and alias, its words as written and in its case forms, folded, worked out when a stem form hits.
+        self.case_runs: dict[tuple[str, str], set[tuple[str, ...]]] = {}
         # Per query word, the most chunks any of its forms is in.
         self.reach: dict[str, int] = {}
         # How many chunks hold a split's half, and the admitted splits' column terms, where a snippet may start.
@@ -243,20 +248,25 @@ class _Search:
 
     # -- reading the query --------------------------------------------------------------------------------------
 
-    def _lookups(self) -> tuple[dict[tuple[str, tuple[str, ...]], set[str]], int]:
-        """Each alias form (column, words) to its entities; aliases with `needs` left out, they count only in chunks."""
-        lookup: dict[tuple[str, tuple[str, ...]], set[str]] = {}
+    def _lookups(self) -> tuple[dict[Form, set[str]], dict[Form, set[tuple[str, str]]], int]:
+        """Each alias form as written to its entities, and each kept stem form to its entities and aliases' texts;
+        aliases with `needs` left out, they count only in chunks."""
+        lookup: dict[Form, set[str]] = {}
+        stems: dict[Form, set[tuple[str, str]]] = {}
         longest = 0
-        for entity, col, term in self.conn.execute(
-            "SELECT t.entity, t.col, t.term FROM alias_terms t JOIN aliases a ON a.entity = t.entity "
+        for entity, col, term, how, text in self.conn.execute(
+            "SELECT t.entity, t.col, t.term, t.how, a.text FROM alias_terms t JOIN aliases a ON a.entity = t.entity "
             "AND a.ordinal = t.ordinal WHERE t.word = -1 AND t.how IN ('written', 'stem') AND a.needs = '[]'"
         ):
-            key: tuple[str, tuple[str, ...]] = (col, tuple(term.split()))
-            lookup.setdefault(key, set()).add(entity)
+            key: Form = (col, tuple(term.split()))
+            if how == "written":
+                lookup.setdefault(key, set()).add(entity)
+            else:
+                stems.setdefault(key, set()).add((entity, text))
             longest = max(longest, len(key[1]))
-        return lookup, longest
+        return lookup, stems, longest
 
-    def _candidates_at(self, tokens: list[str]) -> list[tuple[str, tuple[str, ...]]]:
+    def _candidates_at(self, tokens: list[str]) -> list[Form]:
         """The forms a run of query words takes: as written, and stemmed per language whose aliases use stems."""
         out = [("folded", tuple(fold(t) for t in tokens))]
         for lang in matching.alias_langs(self.analyzer):
@@ -264,13 +274,29 @@ class _Search:
             out += [(lang.column, (*head, form)) for form in self.analyzer.forms(tokens[-1], lang)]
         return out
 
+    def _explains(self, col: str, text: str, run: tuple[str, ...]) -> bool:
+        """Whether a run of folded query words is an alias as written or in one of its case forms."""
+        if (col, text) not in self.case_runs:
+            self.case_runs[(col, text)] = set(matching.explaining(words(text), self.alias_langs[col]))
+        return run in self.case_runs[(col, text)]
+
+    def _names(self, run: list[str]) -> set[str]:
+        """The entities a run of query words names: an alias as written, or through a kept stem form when the run is
+        the alias in one of its case forms, as a chunk must hold it (DR-0350); `same` stems like Sam and names no one."""
+        folded = tuple(fold(t) for t in run)
+        hits: set[str] = set()
+        for form in self._candidates_at(run):
+            hits |= self.lookup.get(form, set())
+            hits |= {e for e, text in self.stems.get(form, set()) if self._explains(form[0], text, folded)}
+        return hits
+
     def entity_spans(self, tokens: list[str]) -> list[tuple[int, int, set[str]]]:
         """The runs of words that are a name or an alias, longest first, with the entities each names."""
         spans: list[tuple[int, int, set[str]]] = []
         i = 0
         while i < len(tokens):
             for size in range(min(self.longest, len(tokens) - i), 0, -1):
-                hits = set[str]().union(*(self.lookup.get(c, set()) for c in self._candidates_at(tokens[i : i + size])))
+                hits = self._names(tokens[i : i + size])
                 if hits:
                     spans.append((i, i + size, hits))
                     i += size
