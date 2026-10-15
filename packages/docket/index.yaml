@@ -1132,3 +1132,46 @@ decisions:
     not_chosen:
       - "Hooks off by default in Git.run and on for a push: a push written later without the flag would leave media off the remote."
       - "Hooks on for sync's rebase: a user's pre-rebase could refuse every sync, and git-lfs's post-commit runs once per picked commit."
+  - id: DR-0230
+    title: Every word of a query stays in it with all its forms, however common; a word in no chunk is said
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#57"]
+    description: "A query word is an OR of all its forms in every column, and the all-words stage requires every word. The rule that left out a form in over a fifth of the chunks and over 100 is gone, with the \"too common to search for\" line: in a vault about one customer it dropped the customer's name, and a form no chunk held counted as rare, so a common word whose stem differs from it emptied the all-words stage unreported. QueryReading.left_out stays in the result, always empty, because DR-0150 keeps every result field. A word whose every form is in no chunk goes into QueryReading.absent, printed as \"in no chunk: <word>\" in the CLI, the MCP text and the Search page. FTS5's BM25 weighs a word by how rare it is and gives one in half the chunks or more no weight, so a common word narrows the all-words stage and barely moves the order inside it. The expression leaves out a form its column doesn't hold, which matches nothing, and writes a term several columns hold as one phrase, since BM25 passes over a common term's rows once per phrase. The recall skill and the README ask for key words (names, nouns, numbers), not the sentence. On the perf test's 100,000 chunks, three common words and a rare one take no longer than one common word alone (140 and 188 ms on the maintainer's desktop)."
+    binds:
+      - "A word is never left out of a query for being common: a speed fix narrows the candidates, not the words."
+    not_chosen:
+      - "Common words optional in the match and counted in the rank only: a name in over half the chunks gets an IDF of almost zero and changes nothing."
+      - "A higher share or a stopword list per language: a one-customer vault holds its name about as often as \"the\", and a list is one more to keep up."
+  - id: DR-0231
+    title: Within each stage of FTS candidates, a title whose lead holds most of the query's terms puts its group's best chunk first
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#57"]
+    description: "A chunk's title is its doc's title (the first # heading, else the id's slug), else its own title (chunks.title: a subject, a recording's name), else the title of the record its group is named after (a transcript's or Plaud notes' recording, a thread window's parent). The rule reads a title's lead: its text up to the first \": \" (a colon and a space, so 23:44 doesn't cut it) that follows at least three words, else its first 12 words. A word there is a run of text between spaces holding a letter or a digit, so 2026-10-12 is one. So a long sweep heading lifts nothing with the words after its lead, while a label before a colon (RE:, Fwd:, [EXT] Re:, Acme:) ends no lead, and a reply's or a forward's subject lifts it. A lead holds a word when one of its words, folded or stemmed in an owner language, is one of the word's forms; a phrase when its words come in order; a name when it holds one of the entity's names or aliases. In each candidate list (all words, any word, prefixes), the best chunk of each group whose lead holds more than half the query's words, phrases and names moves ahead, ordered by the terms its lead holds, then by the share of the lead's words that are query terms, then by BM25; the rest keep their stage's order, and the lists fuse by rank as before (DR-0117). Titles are read at search time; the index holds no title column."
+    binds: [A title orders hits within a stage and never lifts one into an earlier stage.]
+    not_chosen:
+      - "A title column in FTS5: a column more per language and a rebuild, and every window of a recording would match its name."
+      - "A third list in the rank fusion: a title holding some of the words would lift a hit above one holding all of them."
+      - "Every titled chunk first: one long doc's sections would fill the top k."
+      - "The whole title, however long: a sweep note's heading that lists everything is lifted for any word in it."
+      - "The first colon and a space, whatever comes before it: RE:, Fwd: and Acme: would end the lead, so replies and forwards never lift."
+  - id: DR-0232
+    title: The any-word stage matches the words BM25 weighs and ranks chunks holding more of the query's terms first
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#57"]
+    description: "In the any-word stage BM25 gives a word in half the chunks or more no weight, so a common name weighs nothing there. That stage and the prefix stage leave such a word out of their match, since an OR with it scores every chunk it is in (1.36 s on CI's Windows runner for three common words and a rare one); when those stages leave fewer than k, under filters too, one more any-word query adds the least common such word. The stage's candidates (the top 200 by BM25) are ordered by how many of the query's words, phrases and names their text holds, the words left out of the match included, then by BM25, after the chunks their titles lift (DR-0231). The check that tells which terms a text holds is the one the title order uses: a word through its forms, folded or stemmed; a phrase in order; a name through the chunk's mentions. It stems only the text's words whose folded first letter is one some form starts with, when every language's stemmer keeps a word's first letter (English and Hungarian do; three letters would miss dry to dri and dying to die), and a test holds it to stemming every word. On 200 candidates of 350 words and six query words it took 171 ms with a cold stem cache and 41 ms warm, against 426 and 87 ms stemming every word; asking FTS5 per word, restricted to the candidates' row ids, took 390 ms."
+    binds: [The order inside a stage never moves a chunk into an earlier stage.]
+    not_chosen:
+      - "BM25 alone in the any-word stage: a name in over half the chunks weighs nothing there."
+      - "Stemming every word of each candidate: up to 426 ms per stage in a fresh process."
+      - "A screen on the first three letters: English stems dry to dri and dying to die, so it misses them."
+      - "FTS5 per word restricted to the candidates' row ids: 390 ms."
+      - "Every word in the any-word match: an OR with a word in most chunks scores every chunk it is in."

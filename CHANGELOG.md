@@ -67,6 +67,9 @@ Unreleased in the same PR.
 
 ### Changed
 
+- Search keeps every word of a query, however common, so a customer named in most of your notes still narrows it; a
+  doc, mail or recording whose title leads with most of your words comes first. `too common to search for` is gone,
+  and `in no chunk: <word>` names a word nothing in the vault holds. Search with key words, not the sentence.
 - Redaction is yours to set, rule by rule in `vault.yaml`: credentials (passwords, keys and tokens) on, phone numbers
   off, each of your own patterns on unless its `enabled` is false. Phone numbers are no longer redacted unless you
   turn them on: `docket redaction set phone on`. Names are never redacted; the never-store lists keep them out.

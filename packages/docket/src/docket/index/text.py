@@ -11,7 +11,7 @@ import importlib
 import re
 import threading
 import unicodedata
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from importlib import metadata
 from typing import Any
 
@@ -127,6 +127,12 @@ def quote(term: str) -> str:
 
 def phrase(column: str, terms: Iterable[str]) -> str:
     return f"{column} : {quote(' '.join(terms))}"
+
+
+def in_columns(columns: Sequence[str], term: str) -> str:
+    """One term in several columns as one phrase: FTS5 reads its rows once, where a phrase per column reads them per
+    column, and BM25 counts each phrase's rows once more."""
+    return phrase(columns[0], [term]) if len(columns) == 1 else f"{{{' '.join(columns)}}} : {quote(term)}"
 
 
 def prefix(column: str, term: str) -> str:

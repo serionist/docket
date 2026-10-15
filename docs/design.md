@@ -451,8 +451,10 @@ The dashboard shows review minutes per week, a number to keep down.
 
 1. Read the query: entities expand to their aliases in both languages and their ASR forms; time words ("last week",
    "múlt héten") become a filter; people and entities become boosts.
-2. Candidates, filters applied inside each: FTS5 (BM25 over the columns; all words, then any, then prefixes) top 200,
-   the vector index top 200, chunks that mention the query's entities.
+2. Candidates, filters applied inside each: FTS5 (BM25 over the columns; all words however common, then any, then
+   prefixes) top 200, the vector index top 200, chunks that mention the query's entities. In each FTS stage, a title
+   whose lead holds most of the query's words goes first; the any-word stage matches the words BM25 still weighs and
+   ranks chunks holding more of the words first.
 3. Fuse by reciprocal rank; rerank the top 50 with a small cross-encoder; keep the top k.
 4. Group by container (a recording, a thread, a mail conversation), attach its summary, return locators.
 
