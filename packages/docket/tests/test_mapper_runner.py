@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 import pytest
-from docket_testkit import template_project, write_mapper
+from docket_testkit import copy_project, template_project, write_mapper
 
 from docket.errors import DocketError
 from docket.sources import child, runner
@@ -79,7 +79,9 @@ def test_a_source_without_a_mapper_or_its_file_is_refused(vault: Vault) -> None:
         find_mapper(vault, "calls")
 
 
-def test_a_mapper_linked_from_outside_is_refused(vault: Vault, tmp_path: Path) -> None:
+def test_a_mapper_linked_from_outside_is_refused(project: Vault, tmp_path: Path) -> None:
+    # It writes a folder and links into the project, so it works on a copy of the shared one.
+    vault = copy_project(repo_of(project), tmp_path)
     downloads = tmp_path / "downloads"
     downloads.mkdir()
     (downloads / "mapper.py").write_text(ECHO, encoding="utf-8")

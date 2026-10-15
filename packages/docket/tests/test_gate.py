@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import make_record, sh
+from docket_testkit import empty_vault, make_record, sh
 
 from docket.errors import DocketError
 from docket.vault.config import RedactionPattern, SourceConfig, VaultConfig
@@ -31,7 +31,7 @@ def vault(tmp_path: Path, config: VaultConfig) -> Vault:
     config.sources["notes"] = SourceConfig()
     config.sources["diary"] = SourceConfig(sensitivity="private")
     config.sources["old"] = SourceConfig(enabled=False)
-    return Vault.init(tmp_path / "vault", config, "test-box")
+    return empty_vault(tmp_path, config)
 
 
 @pytest.fixture

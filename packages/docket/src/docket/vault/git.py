@@ -102,9 +102,14 @@ class Git:
         return self.run(*args).stdout
 
     def has_identity(self) -> bool:
-        name = self.run("config", "user.name", check=False).stdout.strip()
-        email = self.run("config", "user.email", check=False).stdout.strip()
-        return bool(name and email)
+        # Both keys in one call. git lists a key's values from every level, the one it uses last, as `git config
+        # user.name` would answer.
+        out = self.run("config", "--get-regexp", "^user[.](name|email)$", check=False).stdout
+        found: dict[str, str] = {}
+        for line in out.splitlines():
+            key, _, value = line.partition(" ")
+            found[key] = value.strip()
+        return bool(found.get("user.name") and found.get("user.email"))
 
     def init(self) -> None:
         self.run("init", "-q", "-b", "main")
@@ -146,11 +151,11 @@ class Git:
         """Names git printed from the repo's top, made relative to the vault."""
         return [p.removeprefix(self.prefix) for p in out.split("\0") if p]
 
-    def untracked(self, under: str, *, ignored: bool = False) -> list[str]:
-        """Files under a path git doesn't track: those its ignore rules let through, or with `ignored` the ones they
-        hide."""
-        hidden = ["--ignored"] if ignored else []
-        out = self.out("ls-files", "-z", "--others", *hidden, "--exclude-standard", "--", under)
+    def untracked(self, under: str, *, ignored_too: bool = False) -> list[str]:
+        """Files under a path git doesn't track that its ignore rules let through, or with `ignored_too` every one,
+        hidden or not, in one call."""
+        rules = [] if ignored_too else ["--exclude-standard"]
+        out = self.out("ls-files", "-z", "--others", *rules, "--", under)
         return [p for p in out.split("\0") if p]
 
     def staged_new(self, under: str) -> list[str]:

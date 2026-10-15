@@ -7,6 +7,8 @@ Lanes:
          validated by Claude Code itself. CI runs it on Linux; finish-work runs it before a PR.
   os     types and tests, for the other operating systems CI runs.
 
+In a lane with tests, the tests start first and the other steps run beside them; each run prints its slowest tests.
+
 `gate check-text <file>` checks a text that is about to be posted (an issue or PR body) for private names and tool
 attribution.
 """
@@ -22,6 +24,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -250,12 +253,22 @@ def _manifest_problems(root: Path) -> list[str]:
     return bad
 
 
+SLOWEST = 15
+# pytest's --durations lines: "12.34s call     path::test".
+_DURATION = re.compile(r"^\d+\.\d+s (setup|call|teardown) ")
+
+
+def slowest(lines: list[str]) -> list[str]:
+    """The slowest tests' lines from pytest's output, so each run's log, CI's on every system included, names them."""
+    return [f"slowest: {ln.strip()}" for ln in lines if _DURATION.match(ln.strip())]
+
+
 def step_tests(ctx: Ctx) -> Outcome:
     report = ctx.root / ".local" / "coverage.json"
     report.parent.mkdir(exist_ok=True)
     report.unlink(missing_ok=True)
     # One worker per core: most of the time goes to git subprocesses that would otherwise wait on each other.
-    cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-n", "auto"]
+    cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-n", "auto", f"--durations={SLOWEST}"]
     if ctx.lane == "full":
         cmd += ["--cov", f"--cov-report=json:{report.as_posix()}", "--cov-report=term:skip-covered"]
     code, lines = _run(ctx, cmd)
@@ -263,13 +276,13 @@ def step_tests(ctx: Ctx) -> Outcome:
         return Outcome.fail(*lines[-80:])
     summary = next((ln for ln in reversed(lines) if " passed" in ln or " failed" in ln), "")
     if ctx.lane != "full":
-        return Outcome.ok(summary.strip("= "))
+        return Outcome.ok(summary.strip("= "), *slowest(lines))
     measures = coverage.measure(json.loads(report.read_text(encoding="utf-8")))
     failures, rise = coverage.judge(measures, coverage.load_floors(ctx.root))
     if failures:
         return Outcome.fail(*failures, *rise)
     per = ", ".join(f"{m.module} {m.percent:.1f}%" for m in measures.values())
-    return Outcome.ok(summary.strip("= "), per, *rise)
+    return Outcome.ok(summary.strip("= "), per, *rise, *slowest(lines))
 
 
 STEPS = [
@@ -301,26 +314,35 @@ def run(lane: str, only: Sequence[str] | None = None) -> int:
     if unknown:
         raise KitError(f"no step {', '.join(unknown)}; `gate list` shows them")
     failed: list[str] = []
-    for step in steps:
-        start = time.monotonic()
-        try:
-            out = step.run(ctx)
-        except KitError as e:
-            out = Outcome.fail(str(e))
-        took = time.monotonic() - start
-        label = {"ok": "ok  ", "fail": "FAIL", "skip": "skip"}[out.status]
-        first = f"  {out.detail[0]}" if out.detail and out.status != "fail" else ""
-        print(f"{label} {step.name:<8} {took:5.1f}s{first}", flush=True)
-        rest = out.detail if out.status == "fail" else out.detail[1:]
-        for line in rest:
-            print(f"       {line}", flush=True)
-        if out.status == "fail":
-            failed.append(step.name)
+    # The tests take most of the time and need none of the other steps, so they start first and run beside them; the
+    # lines still print in the steps' order.
+    tests = next((s for s in steps if s.name == "tests"), None) if len(steps) > 1 else None
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        running = pool.submit(_timed, tests, ctx) if tests is not None else None
+        for step in steps:
+            out, took = running.result() if step is tests and running is not None else _timed(step, ctx)
+            label = {"ok": "ok  ", "fail": "FAIL", "skip": "skip"}[out.status]
+            first = f"  {out.detail[0]}" if out.detail and out.status != "fail" else ""
+            print(f"{label} {step.name:<8} {took:5.1f}s{first}", flush=True)
+            rest = out.detail if out.status == "fail" else out.detail[1:]
+            for line in rest:
+                print(f"       {line}", flush=True)
+            if out.status == "fail":
+                failed.append(step.name)
     if failed:
         print(f"gate {lane}: failed ({', '.join(failed)})")
         return 1
     print(f"gate {lane}: passed")
     return 0
+
+
+def _timed(step: Step, ctx: Ctx) -> tuple[Outcome, float]:
+    start = time.monotonic()
+    try:
+        out = step.run(ctx)
+    except KitError as e:
+        out = Outcome.fail(str(e))
+    return out, time.monotonic() - start
 
 
 def check_text(path: Path) -> int:

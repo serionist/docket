@@ -10,9 +10,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import REC, git, host_repo, make_record, note, sh, users_work, write_raw
+from docket_testkit import REC, copied, git, host_repo, make_record, note, sh, users_work, write_raw
 from filelock import FileLock
 
+from docket import userconfig
 from docket.cli import main
 from docket.errors import DocketError
 from docket.vault import convert as cv
@@ -49,7 +50,16 @@ def local(_url: str) -> Visibility:
 def nested(tmp_path: Path) -> tuple[Path, Path]:
     """The shape `docket init` made before folders: a vault that is a repo of its own, with no remote, inside a host
     whose .gitignore and .ignore keep it out; raw runs, a doc at rev 2, an LFS object, a record waiting in staging,
-    and the user's own staged and unstaged work in the host."""
+    and the user's own staged and unstaged work in the host. A copy of one built once per session."""
+    top = copied(tmp_path, _build_nested, "convert-nested")
+    root = (top / "notes" / "vault").resolve()
+    # What the wizard also did when it made the vault: the default vault, in this test's own Docket config.
+    if userconfig.default_vault() is None:
+        userconfig.set_default_vault(root)
+    return top, root
+
+
+def _build_nested(tmp_path: Path) -> Path:
     top = host_repo(tmp_path)
     given = Given(
         path=top / "notes" / "vault", owner="Ada Example", emails=["ada@example.invalid"], languages=["en"],
@@ -72,7 +82,7 @@ def nested(tmp_path: Path) -> tuple[Path, Path]:
     (top / "README.md").write_text("hello, staged\n", encoding="utf-8")
     git(top, "add", "README.md")
     (top / "other.txt").write_text("other, unstaged\n", encoding="utf-8")
-    return top, vault.root
+    return top
 
 
 def run(root: Path, script: Script | None = None, **opts: Any) -> Script:

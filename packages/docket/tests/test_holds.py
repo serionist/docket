@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from docket_testkit import folder_vault, make_record, sh
+from docket_testkit import empty_vault, folder_vault, make_record, sh
 
 from docket.errors import DocketError
 from docket.vault import holds, releaselog
@@ -22,7 +22,7 @@ PRIVATE_TITLE = "Dentist with Cleo"
 
 @pytest.fixture
 def vault(tmp_path: Path, config: VaultConfig) -> Vault:
-    return Vault.init(tmp_path / "vault", config, "test-box")
+    return empty_vault(tmp_path, config)
 
 
 def write_list(vault: Vault, source: str, data: bytes) -> Path:

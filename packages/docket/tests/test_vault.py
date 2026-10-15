@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
-from docket_testkit import make_record, sh
+from docket_testkit import empty_vault, make_record, sh
 
 from docket.errors import DocketError
 from docket.vault.config import VaultConfig
@@ -21,7 +23,8 @@ RUN_AT = datetime(2026, 10, 14, 15, 50, tzinfo=UTC)
 
 
 def new_vault(tmp_path: Path, config: VaultConfig, name: str = "vault") -> Vault:
-    return Vault.init(tmp_path / name, config, "test-box")
+    # A copy of a vault built once per session; the tests about init itself call Vault.init.
+    return empty_vault(tmp_path, config, name)
 
 
 def tracked(root: Path) -> list[str]:
@@ -32,7 +35,7 @@ def tracked(root: Path) -> list[str]:
 
 
 def test_init_writes_the_layout_and_commits_only_its_own_files(tmp_path: Path, config: VaultConfig) -> None:
-    vault = new_vault(tmp_path, config)
+    vault = Vault.init(tmp_path / "vault", config, "test-box")
     assert tracked(vault.root) == sorted(
         [
             ".gitattributes",
@@ -74,7 +77,7 @@ def test_a_failed_init_leaves_nothing(tmp_path: Path, config: VaultConfig, monke
 
     monkeypatch.setattr("docket.vault.git.Git.commit", boom)
     with pytest.raises(DocketError, match="disk full"):
-        new_vault(tmp_path, config)
+        Vault.init(tmp_path / "vault", config, "test-box")
     assert not (tmp_path / "vault").exists()
     (tmp_path / "empty").mkdir()
     with pytest.raises(DocketError):
@@ -388,14 +391,14 @@ def test_an_init_whose_real_commit_fails_leaves_nothing(tmp_path: Path, config: 
     gitconfig = Path(os.environ["GIT_CONFIG_GLOBAL"])
     gitconfig.write_text(f"[core]\n\thooksPath = {hooks.as_posix()}\n", encoding="utf-8")
     with pytest.raises(DocketError, match="git commit"):
-        new_vault(tmp_path, config)
+        Vault.init(tmp_path / "vault", config, "test-box")
     assert not (tmp_path / "vault").exists()
     (tmp_path / "empty").mkdir()
     with pytest.raises(DocketError):
         Vault.init(tmp_path / "empty", config, "test-box")
     assert list((tmp_path / "empty").iterdir()) == []
     gitconfig.write_text("", encoding="utf-8")
-    assert new_vault(tmp_path, config).root == (tmp_path / "vault").resolve()
+    assert Vault.init(tmp_path / "vault", config, "test-box").root == (tmp_path / "vault").resolve()
 
 
 def test_a_rebase_left_in_progress_is_undone_before_the_next_commit(tmp_path: Path, config: VaultConfig) -> None:
@@ -548,3 +551,40 @@ def test_what_the_user_staged_stays_out_of_docket_s_commits(tmp_path: Path, conf
 def test_a_commit_of_unchanged_paths_is_none(tmp_path: Path, config: VaultConfig) -> None:
     vault = new_vault(tmp_path, config)
     assert vault.commit(["vault.yaml"], "nothing changed") is None
+
+
+@pytest.mark.parametrize(
+    ("global_config", "local", "expected"),
+    [
+        ("", {}, False),
+        ("[user]\n\tname = Ada Example\n", {"user.email": "ada@example.invalid"}, True),
+        ("[user]\n\tname =\n\temail = ada@example.invalid\n", {}, False),
+        ("[user]\n\tname = Ada Example\n\temail = ada@example.invalid\n", {"user.name": ""}, False),
+        ("[user]\n\tname = Ada Example\n\temail = ada@example.invalid\n", {"user.name": "Ben Sample"}, True),
+    ],
+)
+def test_the_identity_check_reads_both_keys_and_git_s_own_precedence(
+    tmp_path: Path, config: VaultConfig, global_config: str, local: dict[str, str], expected: bool
+) -> None:
+    vault = new_vault(tmp_path, config)
+    Path(os.environ["GIT_CONFIG_GLOBAL"]).write_text(global_config, encoding="utf-8")
+    for key, value in local.items():
+        vault.git.run("config", key, value)
+    assert vault.git.has_identity() is expected
+
+
+def test_a_commit_starts_nine_git_processes(
+    tmp_path: Path, config: VaultConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = new_vault(tmp_path, config)
+    started: list[str] = []
+    real = subprocess.run
+
+    def counting(args: list[str], *rest: Any, **kw: Any) -> Any:
+        if Path(str(args[0])).stem == "git":
+            started.append(" ".join(args[1:3]))
+        return real(args, *rest, **kw)
+
+    monkeypatch.setattr(subprocess, "run", counting)
+    vault.write_run("chat", [make_record(1)], RUN_AT)
+    assert len(started) == 9, started
