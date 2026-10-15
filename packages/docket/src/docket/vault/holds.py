@@ -130,6 +130,9 @@ def add(vault: Vault, source: str, ids: Iterable[str]) -> int:
         raise DocketError("an id to hold isn't an id")
     with vault.writing():
         path = list_path(vault.root, source)
+        # The log first: a release line a failed commit left on disk reaches git before its id comes off the list, or
+        # the add stops here with the list as it was. No machine may see a hold gone without its release.
+        releaselog.commit_pending(vault, source)
         released = set(releaselog.read(vault.root, source))
         current = read(vault.root, source)
         added = new - current - released
@@ -145,11 +148,19 @@ def add(vault: Vault, source: str, ids: Iterable[str]) -> int:
 
 
 def remove(vault: Vault, source: str, ids: Iterable[str]) -> int:
-    """Take ids off a source's list, committed with a message that names none. Only a release calls this, once its
-    line is committed. Returns how many came off."""
+    """Take released ids off a source's list, committed with a message that names none. The release log is committed
+    first, and an id with no line in it is refused, so a hold never comes off in git before its release. Returns how
+    many came off."""
     gone = set(ids)
     with vault.writing():
         path = list_path(vault.root, source)
+        releaselog.commit_pending(vault, source)
+        unreleased = sorted(gone - set(releaselog.read(vault.root, source)))
+        if unreleased:
+            raise DocketError(
+                f"{', '.join(unreleased)}: no release line, so the hold stays; a hold comes off only through docket "
+                "hold release"
+            )
         current = read(vault.root, source)
         off = current & gone
         if off:
@@ -161,11 +172,14 @@ def remove(vault: Vault, source: str, ids: Iterable[str]) -> int:
 def commit_pending(vault: Vault, source: str, message: str | None = None) -> str | None:
     """Commit the list, and the merge rule when .gitattributes gained it, whenever either differs from HEAD: a change
     whose commit failed (another git held the index) left it on disk, and a re-run that finds nothing new must still
-    commit it, or it never reaches another machine."""
+    commit it, or it never reaches another machine. A list an ignore rule hides counts too, so its add fails loudly
+    instead of the list staying out of git unseen."""
     rel = f"{HOLDS}/{source}.txt"
     if not (vault.root / rel).exists():
         return None
-    paths = [rel] if vault.git.untracked(rel) or vault.git.changed_against_head(rel) else []
+    git = vault.git
+    pending = git.untracked(rel) or git.untracked(rel, ignored=True) or git.changed_against_head(rel)
+    paths = [rel] if pending else []
     if _union_uncommitted(vault):
         paths.append(".gitattributes")
     if not paths:

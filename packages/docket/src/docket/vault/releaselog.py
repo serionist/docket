@@ -212,10 +212,12 @@ def add(vault: Vault, source: str, release: Release) -> None:
 
 def commit_pending(vault: Vault, source: str, message: str | None = None) -> str | None:
     """Commit the log when it differs from HEAD: a release whose commit failed (another git held the index) is
-    committed by the next call, or it never reaches another machine."""
+    committed by the next call, or it never reaches another machine. A log an ignore rule hides counts too, so its
+    add fails loudly before any hold comes off, instead of the line staying out of git unseen."""
     rel = f"{RELEASES}/{source}{SUFFIX}"
     if not (vault.root / rel).exists():
         return None
-    if not (vault.git.untracked(rel) or vault.git.changed_against_head(rel)):
+    git = vault.git
+    if not (git.untracked(rel) or git.untracked(rel, ignored=True) or git.changed_against_head(rel)):
         return None
     return vault.commit([rel], message or f"Releases: {source}, the log committed on {vault.machine}")

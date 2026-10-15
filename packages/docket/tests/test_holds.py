@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from docket_testkit import make_record, sh
+from docket_testkit import folder_vault, make_record, sh
 
 from docket.errors import DocketError
 from docket.vault import holds, releaselog
@@ -222,16 +222,21 @@ def released(vault: Vault, native: str) -> None:
     releaselog.add(vault, "plaud", Release(id=native, cuts=[LoggedCut(start=0, end=1000)], at=at, machine="test-box"))
 
 
-def test_removing_takes_ids_off_and_commits_without_an_id(vault: Vault) -> None:
+def test_removing_takes_released_ids_off_and_commits_without_an_id(vault: Vault) -> None:
     holds.add(vault, "plaud", [HELD, OTHER])
-    assert holds.remove(vault, "plaud", [HELD, "of_never_held"]) == 1
+    released(vault, HELD)
+    # One id without a release line refuses the whole removal: nothing comes off.
+    with pytest.raises(DocketError, match=rf"^{OTHER}: no release line, so the hold stays"):
+        holds.remove(vault, "plaud", [HELD, OTHER])
+    assert holds.read(vault.root, "plaud") == {HELD, OTHER}
+    assert holds.remove(vault, "plaud", [HELD]) == 1
     assert holds.read(vault.root, "plaud") == {OTHER}
     assert subjects(vault)[0] == "Holds: plaud, 1 released on test-box"
     assert HELD not in sh(vault.root, "git", "log", "-1", "--format=%B")
     count = len(subjects(vault))
     assert holds.remove(vault, "plaud", [HELD]) == 0
     assert len(subjects(vault)) == count
-    assert holds.remove(vault, "calls", [HELD]) == 0
+    assert holds.commit_pending(vault, "calls") is None
 
 
 def test_an_add_never_holds_a_released_id_again(vault: Vault) -> None:
@@ -264,3 +269,82 @@ def test_a_release_merged_against_another_clone_s_add_brings_the_hold_back_until
     assert holds.read(other.root, "plaud") == {OTHER}
     assert subjects(other)[0] == "Holds: plaud, the list committed on test-box"
     assert sh(other.root, "git", "status", "--porcelain").strip() == ""
+
+
+# -- a hold never comes off in git before its release line ---------------------------------------------------------
+
+
+def line_on_disk(vault: Vault, source: str, native: str) -> None:
+    """A release line written, its commit never made: a stale index.lock, a kill."""
+    at = datetime(2026, 10, 15, 9, 12, tzinfo=UTC)
+    path = vault.root / releaselog.RELEASES / f"{source}.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    line = Release(id=native, cuts=[LoggedCut(start=0, end=1000)], at=at, machine="test-box").line()
+    path.write_text(f"{line}\n", encoding="utf-8")
+
+
+def in_head(vault: Vault, rel: str) -> str:
+    return sh(vault.root, "git", "show", f"HEAD:./{rel}", check=False)
+
+
+def hold_follows_its_release(vault: Vault, source: str, native: str) -> bool:
+    """Whenever HEAD's list lacks the id, HEAD's log has its line."""
+    return native in in_head(vault, f"{HOLDS}/{source}.txt") or native in in_head(
+        vault, f"state/releases/{source}.jsonl"
+    )
+
+
+def test_an_add_commits_a_release_line_left_on_disk_before_its_hold_comes_off(vault: Vault) -> None:
+    holds.add(vault, "plaud", [HELD])
+    line_on_disk(vault, "plaud", HELD)
+    assert holds.add(vault, "plaud", [OTHER]) == 1
+    assert HELD not in in_head(vault, f"{HOLDS}/plaud.txt")
+    assert hold_follows_its_release(vault, "plaud", HELD)
+    assert subjects(vault)[:2] == [
+        "Holds: plaud, 1 added on test-box",
+        "Releases: plaud, the log committed on test-box",
+    ]
+
+
+def test_an_add_whose_log_commit_fails_takes_no_hold_off(vault: Vault) -> None:
+    holds.add(vault, "plaud", [HELD])
+    line_on_disk(vault, "plaud", HELD)
+    lock = vault.root / ".git" / "index.lock"
+    lock.write_text("", encoding="utf-8")
+    with pytest.raises(DocketError):
+        holds.add(vault, "plaud", [OTHER])
+    lock.unlink()
+    assert holds.read(vault.root, "plaud") == {HELD}
+    assert HELD in in_head(vault, f"{HOLDS}/plaud.txt")
+    assert hold_follows_its_release(vault, "plaud", HELD)
+
+
+def test_a_removal_commits_the_release_line_first(vault: Vault) -> None:
+    holds.add(vault, "plaud", [HELD])
+    line_on_disk(vault, "plaud", HELD)
+    assert holds.remove(vault, "plaud", [HELD]) == 1
+    assert subjects(vault)[:2] == [
+        "Holds: plaud, 1 released on test-box",
+        "Releases: plaud, the log committed on test-box",
+    ]
+    assert hold_follows_its_release(vault, "plaud", HELD)
+
+
+def test_a_log_or_a_list_an_ignore_rule_hides_fails_loudly_and_no_hold_comes_off(tmp_path: Path) -> None:
+    vault = folder_vault(tmp_path)
+    top = vault.home.top
+    holds.add(vault, "calls", [HELD])
+    # A host's build-output rule hides the vault's release logs.
+    (top / ".gitignore").write_text("releases/\n", encoding="utf-8")
+    line = Release(id=HELD, cuts=[LoggedCut(start=0, end=1000)], at=datetime.now(UTC), machine="test-box")
+    with pytest.raises(DocketError, match="ignored"):
+        releaselog.add(vault, "calls", line)
+    for take_off in (lambda: holds.remove(vault, "calls", [HELD]), lambda: holds.add(vault, "calls", [OTHER])):
+        with pytest.raises(DocketError, match="ignored"):
+            take_off()
+    assert holds.read(vault.root, "calls") == {HELD}
+    assert hold_follows_its_release(vault, "calls", HELD)
+    # A hold list such a rule hides doesn't stay out of git unseen either.
+    (top / ".gitignore").write_text("holds/\n", encoding="utf-8")
+    with pytest.raises(DocketError, match="ignored"):
+        holds.add(vault, "chat", [OTHER])
