@@ -372,8 +372,11 @@ DR-0384).
 - Releases stay at your console: the page names the command, and no page releases a hold (DR-0382).
 - A record the CLI, Claude or another tab changed since you opened it isn't overwritten: the page says so and shows it
   as it stands.
-- Its URL holds `source`, `state`, `k`, the open record (`open`), what you checked (`u`, `line`), typed cuts (`cut`)
-  and the drop's question (`confirm=private`).
+- A record that already has cuts opens with them checked, and Work keeps them unless you uncheck them. Utterances its
+  recording's release cuts show as gone, with no text.
+- A typed time can carry milliseconds, `0:30.400`, as `--cut` takes it everywhere.
+- Its URL holds `source`, `state`, `k`, the open record (`open`), what you checked (`u`, `line`), typed cuts (`cut`),
+  `picked=1` when you cleared a record's cuts on purpose, and the drop's question (`confirm=private`).
 - Keys: `j` and `k` through the records, `Enter` to open one, `Esc` to close it, `?`. No key writes.
 
 The pages' browser test runs on CI. To run it here, against your own Chrome or Edge:

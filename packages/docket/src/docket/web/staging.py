@@ -176,7 +176,7 @@ def router(service: Service) -> APIRouter:
                     raise StagingStateError("the form names no record: open is missing")
                 if form.get("act") == "preview":
                     # Nothing is written: the preview is the page's own state, at its own URL.
-                    return RedirectResponse(state.url(), status_code=303)
+                    return RedirectResponse(state.chosen().url(), status_code=303)
                 label = form.get("label")
                 if label not in ("work", "private"):
                     raise StagingStateError(f"label is work or private, not {label!r}")
@@ -187,6 +187,9 @@ def router(service: Service) -> APIRouter:
                 return await whole(request, StagingState(), status=400, problem=str(e))
             try:
                 changed = await service.writer.run(lambda: _classify(service, key, label, state, shown))
+            except StagingStateError:
+                # What was checked or typed doesn't fit the record: the panel names it, beside every check kept.
+                return await whole(request, state.chosen(), status=400)
             except DocketError as e:
                 return await whole(request, back.opened(key), status=400, problem=str(e))
             if changed:

@@ -41,15 +41,21 @@ MAX_K = 1000
 TITLE_CHARS = 80
 # The most numbers a selection of utterances or lines may hold, so a crafted URL can't make the page count to a billion.
 MAX_PICK = 100_000
+# The most typed cuts, and the longest one, a URL may hold.
+MAX_TYPED = 200
+MAX_SPEC = 40
 
 KEY = re.compile(r"^[0-9a-f]{32}$")
 DONE = re.compile(
     r"^(?:(?P<label>work|private)-(?P<key>[0-9a-f]{12})|promoted-(?P<written>\d{1,7})-(?P<held>\d{1,7}))$"
 )
 PICK = re.compile(r"^(\d{1,6})(?:-(\d{1,6}))?$")
-# What a shell acts on inside double quotes: bash and PowerShell expand $ and the backquote, cmd expands %, bash's
-# history takes !, and a backslash before the closing quote, or two of them, change what bash reads.
-_SHELL = re.compile(r'["$`%!\x00-\x1f\x7f]|\\\\|\\$')
+# What a value in a copied command may hold, inside double quotes: letters and digits in any script, and these. An
+# allow-list, since shells read more than they show: PowerShell takes the curly quotes for a quote too, so a held id
+# holding one would end the string and run what follows it.
+_SAFE = frozenset(" ._-:/\\@+,~")
+# On top: a backslash before the closing quote, or two of them, change what bash reads.
+_BACKSLASHES = re.compile(r"\\\\|\\$")
 
 KIND_ICON = {
     "transcript": "recording",
@@ -92,6 +98,9 @@ class StagingState:
     cut: tuple[str, ...] = ()
     confirm: bool = False
     done: str | None = None
+    # The selection is the user's, even an empty one. Without it, a record opened with nothing selected starts from
+    # the cuts its staged file holds, so Work never drops a cut made earlier (by Claude, the CLI or another tab).
+    picked: bool = False
 
     @staticmethod
     def read(params: QueryParams | Mapping[str, str]) -> StagingState:
@@ -121,12 +130,14 @@ class StagingState:
         done = first("done")
         if done is not None and not DONE.match(done):
             raise StagingStateError(f"done is what the last change did, such as work-3f9a1c2e4b5d, not {done!r}")
+        # A typed cut that doesn't read stays in the state, so the panel names it beside what was checked: the record
+        # and the checks aren't lost to one slip in the field. Only its size is held here.
         specs = [s for v in every("cut") for s in re.split(r"[,\s]+", v) if s]
-        for spec in specs:
-            try:
-                cutting.parse(spec)
-            except DocketError as e:
-                raise StagingStateError(f"cut: {e}") from None
+        if len(specs) > MAX_TYPED or any(len(s) > MAX_SPEC for s in specs):
+            raise StagingStateError(f"cut is at most {MAX_TYPED} ranges such as 12:30-14:05, each a short one")
+        picked = first("picked")
+        if picked is not None and picked != "1":
+            raise StagingStateError(f"picked is 1, not {picked!r}")
         return StagingState(
             source=source,
             state=state,
@@ -137,13 +148,15 @@ class StagingState:
             cut=tuple(sorted(set(specs))),
             confirm=confirm is not None,
             done=done,
+            picked=picked is not None,
         ).canonical()
 
     def canonical(self) -> StagingState:
-        """Selections and the drop's question only with an open record."""
+        """Selections and the drop's question only with an open record; `picked` only where it says something, with
+        nothing selected."""
         if self.open is None:
-            return replace(self, u=(), line=(), cut=(), confirm=False)
-        return self
+            return replace(self, u=(), line=(), cut=(), confirm=False, picked=False)
+        return replace(self, picked=self.picked and not self.selected())
 
     def pairs(self, *, done: bool = False) -> list[tuple[str, str]]:
         out: list[tuple[str, str]] = []
@@ -154,6 +167,7 @@ class StagingState:
         out += [("u", _pick(p)) for p in self.u]
         out += [("line", _pick(p)) for p in self.line]
         out += [("cut", c) for c in self.cut]
+        out += [("picked", "1")] if self.picked else []
         out += [("confirm", "private")] if self.confirm else []
         out += [("done", self.done)] if done and self.done else []
         return out
@@ -171,6 +185,10 @@ class StagingState:
 
     def selected(self) -> bool:
         return bool(self.u or self.line or self.cut)
+
+    def chosen(self) -> StagingState:
+        """This selection marked as the user's: what a preview's URL holds, even when nothing is checked."""
+        return replace(self, picked=not self.selected())
 
 
 def _picks(values: Sequence[str], name: str) -> Pick:
@@ -264,7 +282,10 @@ def chosen_cuts(reading: Reading, state: StagingState) -> list[Cut]:
         if end > start:
             out.append(Cut(start=start, end=end, unit="char"))
     for spec in state.cut:
-        cut = cutting.parse(spec)
+        try:
+            cut = cutting.parse(spec)
+        except DocketError as e:
+            raise StagingStateError(f"cut {spec}: {e}") from None
         if cut.unit == "char" and not reading.same_length:
             raise StagingStateError(
                 f"cut {spec} counts characters, and the redaction rules changed this text's length since it was "
@@ -279,6 +300,51 @@ _JOINED = (
     "the redaction rules join lines of this text since it was staged, so its line numbers aren't the staged text's: "
     "cut it with docket staging show and docket staging classify --cut in a terminal, or classify it whole"
 )
+
+
+def stored(reading: Reading, cuts: Sequence[Cut]) -> tuple[Pick, Pick, tuple[str, ...]]:
+    """The checks and typed ranges that make the cuts a staged file holds: each utterance or line a cut covers whole is
+    checked, and what of the cut they leave is typed exactly, so a panel opened on a cut record keeps its cuts."""
+    said = segments(reading.record)
+    utterances: set[int] = set()
+    lines: set[int] = set()
+    typed: list[Cut] = []
+    for cut in cuts:
+        if cut.unit == "ms" and said:
+            covered = [
+                n
+                for n, s in enumerate(said, start=1)
+                if s.text != cutting.CUT_MARKER and cut.start <= s.start_ms and max(s.end_ms, s.start_ms + 1) <= cut.end
+            ]
+            utterances |= set(covered)
+            blocks = [(said[n - 1].start_ms, max(said[n - 1].end_ms, said[n - 1].start_ms + 1)) for n in covered]
+        elif cut.unit == "char" and not said and reading.lines is not None:
+            covered = [n for n, (a, b) in enumerate(reading.spans, start=1) if cut.start <= a and b <= cut.end]
+            lines |= set(covered)
+            # Lines next to each other make one cut with the break between, as `chosen_cuts` makes them.
+            blocks = [(reading.spans[run[0] - 1][0], reading.spans[run[-1] - 1][1]) for run in _runs(covered)]
+        else:
+            typed.append(cut)
+            continue
+        typed += [Cut(start=a, end=b, unit=cut.unit) for a, b in _gaps(cut, blocks)]
+    return _as_picks(utterances), _as_picks(lines), tuple(sorted({cutting.spec(c) for c in typed}))
+
+
+def _gaps(cut: Cut, blocks: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """What of a cut the blocks inside it leave."""
+    out: list[tuple[int, int]] = []
+    at = cut.start
+    for a, b in sorted(blocks):
+        if a > at:
+            out.append((at, a))
+        at = max(at, b)
+    if at < cut.end:
+        out.append((at, cut.end))
+    return out
+
+
+def _as_picks(found: set[int]) -> Pick:
+    return tuple((run[0], run[-1]) for run in _runs(sorted(found)))
 
 
 def _runs(numbers_: list[int]) -> list[list[int]]:
@@ -494,6 +560,8 @@ class Utterance:
     checked: bool
     going: bool
     was_cut: bool
+    # Its recording's release cuts it at classification and promotion, whatever is checked (DR-0201).
+    released: bool = False
 
 
 @dataclass(frozen=True)
@@ -570,11 +638,23 @@ def build_panel(shown: Shown, redactor: Redactor, state: StagingState) -> Panel:
     held = shown.why == "on-hold"
     reading = read_record(record, redactor)
     view = reading.view
+    if staged.cuts and not state.selected() and not state.picked:
+        # Opened with nothing chosen: start from the cuts its file holds, so Work keeps them unless they are unchecked.
+        u, line, cut = stored(reading, staged.cuts)
+        state = replace(state, u=u, line=line, cut=cut)
+    said = segments(record)
+    released = {id(s) for c in shown.release_cuts for s in cutting.removes(said, c)}
     notes: list[str] = []
     if reading.changed and not held:
         notes.append(
             "The redaction rules changed since this was staged: it shows as promotion will write it, and the staged "
             "file keeps what it had until then."
+        )
+    if released and not held:
+        n = len(released)
+        notes.append(
+            f"Its recording's release cuts {n} utterance{_s(n)}, marked below: they go whatever is checked, as you "
+            "confirmed them at your console."
         )
     problem: str | None = None
     chosen: list[Cut] = []
@@ -586,10 +666,9 @@ def build_panel(shown: Shown, redactor: Redactor, state: StagingState) -> Panel:
     going: set[int] = set()
     if chosen and problem is None:
         try:
-            preview, going = _preview(reading, chosen, redactor)
+            preview, going = _preview(reading, chosen, redactor, shown.release_cuts)
         except DocketError as e:
             problem = str(e)
-    said = segments(record)
     view_said = segments(view)
     picked = set(numbers(state.u))
     utterances = (
@@ -600,8 +679,9 @@ def build_panel(shown: Shown, redactor: Redactor, state: StagingState) -> Panel:
                 speaker=v.speaker or "",
                 text=" ".join(v.text.split()),
                 checked=n in picked,
-                going=n in going,
+                going=n in going or id(s) in released,
                 was_cut=s.text == cutting.CUT_MARKER,
+                released=id(s) in released,
             )
             for n, (s, v) in enumerate(zip(said, view_said, strict=True), start=1)
         ]
@@ -659,10 +739,13 @@ def build_panel(shown: Shown, redactor: Redactor, state: StagingState) -> Panel:
     )
 
 
-def _preview(reading: Reading, chosen: list[Cut], redactor: Redactor) -> tuple[Preview, set[int]]:
-    """Promotion's order: cut, then redact. A transcript names the utterances that go, those an overlapping one takes
-    along included; a text shows what stays."""
-    after, _ = redactor.record(cutting.apply(reading.record, chosen))
+def _preview(
+    reading: Reading, chosen: list[Cut], redactor: Redactor, release: Sequence[Cut] = ()
+) -> tuple[Preview, set[int]]:
+    """Promotion's order: cut, the release's cuts with the chosen ones as classification and promotion add them, then
+    redact. A transcript names the utterances the chosen cuts take, those an overlapping one takes along included; a
+    text shows what stays."""
+    after, _ = redactor.record(cutting.apply(reading.record, [*chosen, *release]))
     said = segments(reading.record)
     if said:
         gone = {id(s) for cut in chosen for s in cutting.removes(said, cut)}
@@ -770,9 +853,10 @@ def build_held(
 
 
 def _filled(value: str, name: str, unfilled: list[tuple[str, str]]) -> str:
-    """A value as the command can carry it in double quotes, or its placeholder when a shell would act on it: then the
-    value is listed beside the command, to put in by hand."""
-    if _SHELL.search(value):
+    """A value as the command can carry it in double quotes, or its placeholder when it holds anything but letters,
+    digits and the few characters every shell reads as themselves: then the value is listed beside the command, to put
+    in by hand."""
+    if not all(ch.isalnum() or ch in _SAFE for ch in value) or _BACKSLASHES.search(value):
         unfilled.append((name, value))
         return f"<{name}>"
     return value

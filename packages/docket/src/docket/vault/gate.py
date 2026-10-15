@@ -95,6 +95,8 @@ class Shown:
     entry: Entry
     cut_before: RawRecord | None
     why: Why = "mixed"
+    # The cuts a release adds to it at classification and promotion, whatever the staged file holds (DR-0201).
+    release_cuts: tuple[Cut, ...] = ()
 
 
 class Gate:
@@ -173,16 +175,16 @@ class Gate:
             return result
 
     def show(self, ref: str) -> Shown:
-        """One staged record, and the version of it in raw that was cut, when there is one."""
+        """One staged record, why it waits, the cuts a release adds to it, and the version of it in raw that was cut,
+        when there is one."""
         with self.vault.lock:
             self._sweep(self._config())
             scan = self.staging.scan()
             entry = _resolve(ref, scan.entries)
-            rid = entry.staged.record.rid
-            cut = [r for r in self.vault.rawlog.read(rid) if CUT_MARKER in r.text]
-            return Shown(
-                entry, cut[-1] if cut else None, self._why(entry.staged, self.staging.decided(), _cut_rids(scan))
-            )
+            record = entry.staged.record
+            cut = [r for r in self.vault.rawlog.read(record.rid) if CUT_MARKER in r.text]
+            why = self._why(entry.staged, self.staging.decided(), _cut_rids(scan))
+            return Shown(entry, cut[-1] if cut else None, why, tuple(self._release_cuts(record)))
 
     def classify(self, ref: str, label: Label, cuts: Sequence[Cut] = (), by: Classifier = "user") -> Staged | None:
         """Work makes a staged record ready, with its cuts; private drops it. Returns the record, or None if dropped."""

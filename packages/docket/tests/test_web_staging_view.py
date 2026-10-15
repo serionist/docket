@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from staging_kit import MAIL, PHONE, mail, memo, transcript
+from staging_kit import MAIL, PHONE, TALK, mail, memo, transcript
 from starlette.datastructures import QueryParams
 
 from docket.errors import DocketError
@@ -32,6 +32,7 @@ from docket.web.staging_view import (
     done_line,
     read_record,
     seen,
+    stored,
     waited,
     why_line,
 )
@@ -71,6 +72,20 @@ def test_the_url_is_written_back_in_one_canonical_form() -> None:
     assert canonical(f"http://127.0.0.1:1/staging/panel?u=2&open={OPENED}") == f"/staging?open={OPENED}&u=2"
     assert canonical("http://127.0.0.1:1/search?query=x") is None
     assert canonical("http://127.0.0.1:1/staging?k=0") is None
+    # picked says an empty selection is the user's; with anything selected it says nothing, and it needs a record.
+    assert state(f"open={OPENED}&picked=1").url() == f"/staging?open={OPENED}&picked=1"
+    assert state(f"open={OPENED}&picked=1&u=2").url() == f"/staging?open={OPENED}&u=2"
+    assert state("picked=1").url() == "/staging"
+    assert state(f"open={OPENED}").chosen().url() == f"/staging?open={OPENED}&picked=1"
+
+
+def test_a_typed_cut_that_doesnt_read_stays_for_the_panel_to_name() -> None:
+    read = state(f"open={OPENED}&u=2&cut=12.30-14.05")
+    assert (read.u, read.cut) == (((2, 2),), ("12.30-14.05",))
+    panel = build_panel(shown(transcript()), CREDENTIALS, state(f"open={OPENED}&u=2&cut=12:30"))
+    assert panel.problem is not None and panel.problem.startswith("cut 12:30: a cut is <start>-<end>")
+    assert panel.utterances is not None and [u.n for u in panel.utterances if u.checked] == [2]
+    assert panel.typed == "12:30" and not panel.can_work
 
 
 @pytest.mark.parametrize(
@@ -85,7 +100,8 @@ def test_the_url_is_written_back_in_one_canonical_form() -> None:
         (f"open={OPENED}&u=0", "u"),
         (f"open={OPENED}&u=9-4", "u"),
         (f"open={OPENED}&line=x", "line"),
-        (f"open={OPENED}&cut=12:30", "cut"),
+        (f"open={OPENED}&cut=" + "1" * 41, "cut"),
+        (f"open={OPENED}&picked=yes", "picked"),
         ("confirm=yes", "confirm"),
         ("done=work-xyz", "done"),
     ],
@@ -159,6 +175,8 @@ def test_lines_the_rules_join_take_no_character_cut() -> None:
     assert any(n.startswith("The redaction rules join lines of this text") for n in panel.notes)
     with_line = build_panel(shown(record), CREDENTIALS, state(f"open={OPENED}&line=1"))
     assert with_line.problem is not None and not with_line.can_work
+    # A stored cut on such a text can't be shown as lines: it is typed whole.
+    assert stored(reading, [Cut(start=0, end=4)]) == ((), (), ("0-4",))
 
 
 def test_a_cut_the_record_cant_take_is_the_previews_problem() -> None:
@@ -204,6 +222,63 @@ def test_a_selection_the_record_cant_take_is_the_panels_problem_and_offers_no_wo
     assert not panel.can_work and panel.preview is None
 
 
+def test_an_utterance_with_no_length_at_the_end_can_be_cut() -> None:
+    talk = [*TALK, {"start_ms": 60_000, "end_ms": 60_000, "speaker": "Ada Example", "text": "Bye."}]
+    panel = build_panel(shown(transcript(segments=talk)), CREDENTIALS, state(f"open={OPENED}&u=6"))
+    assert panel.problem is None and panel.can_work
+    assert panel.preview is not None and panel.preview.summary == "Removes 1 utterance: 01:00-01:01."
+
+
+def test_a_cut_record_opens_with_its_cuts_checked_so_work_keeps_them() -> None:
+    # Claude cut utterance 2 and, by a typed range, 0:50 to 0:55; nothing is in the URL.
+    cuts = [Cut(start=12_000, end=30_400, unit="ms"), Cut(start=50_000, end=55_000, unit="ms")]
+    record = shown(transcript(), "classified", state="ready", classified_by="claude", cuts=cuts)
+    panel = build_panel(record, CREDENTIALS, state(f"open={OPENED}"))
+    assert panel.utterances is not None
+    assert [u.n for u in panel.utterances if u.checked] == [2]
+    assert panel.typed == "0:50-0:55"
+    assert panel.work_label == "Work, with 2 cuts"
+    assert panel.preview is not None and panel.preview.summary.startswith("Removes 3 utterances")
+    # The checks and the typed range make exactly the stored cuts.
+    reading = read_record(record.entry.staged.record, CREDENTIALS)
+    assert chosen_cuts(reading, state(f"open={OPENED}&u=2&cut=0:50-0:55")) == cuts
+    # Unchecked on purpose and previewed: the empty selection is the user's.
+    bare = build_panel(record, CREDENTIALS, state(f"open={OPENED}&picked=1"))
+    assert bare.utterances is not None and not any(u.checked for u in bare.utterances)
+    assert bare.work_label == "Work, whole"
+
+
+def test_a_cut_that_covers_part_of_an_utterance_keeps_the_rest_typed_exactly() -> None:
+    cut = Cut(start=10_000, end=35_000, unit="ms")
+    reading = read_record(transcript(), CREDENTIALS)
+    u, line, typed = stored(reading, [cut])
+    assert (u, line, typed) == (((2, 2),), (), ("0:10-0:12", "0:30.400-0:35"))
+    selection = StagingState(open=OPENED, u=u, cut=typed)
+    assert chosen_cuts(reading, selection) == [cut]
+    # Lines a character cut covers are checked, with the break between them; a part of a line is typed.
+    text = read_record(mail(), CREDENTIALS)
+    lines = MAIL.split("\n")
+    start = len(lines[0]) + 1 + len(lines[1]) + 1
+    whole = Cut(start=start, end=start + len(lines[2]) + 1 + len(lines[3]))
+    assert stored(text, [whole]) == ((), ((3, 4),), ())
+    part = Cut(start=start, end=start + 5)
+    assert stored(text, [part]) == ((), (), (f"{start}-{start + 5}",))
+
+
+def test_a_version_staged_before_its_release_shows_what_the_release_cuts() -> None:
+    release = (Cut(start=12_000, end=30_400, unit="ms"),)
+    record = Shown(entry(transcript()), None, "released", release)
+    panel = build_panel(record, CREDENTIALS, state(f"open={OPENED}"))
+    assert panel.utterances is not None
+    assert [u.n for u in panel.utterances if u.released] == [2, 3]
+    assert all(u.going for u in panel.utterances if u.released)
+    assert any("release cuts 2 utterances" in n for n in panel.notes)
+    # A preview cuts by the release too, as classification and promotion do.
+    previewed = build_panel(record, CREDENTIALS, state(f"open={OPENED}&u=5"))
+    assert previewed.preview is not None and previewed.preview.summary == "Removes 1 utterance: 00:46-01:00."
+    assert [u.n for u in previewed.utterances or [] if u.going] == [2, 3, 5]
+
+
 def test_a_record_on_hold_shows_neither_its_title_nor_its_text() -> None:
     panel = build_panel(shown(transcript(), "on-hold"), CREDENTIALS, state(f"open={OPENED}"))
     assert (panel.title, panel.text, panel.utterances, panel.lines, panel.facts) == ("", "", None, None, [])
@@ -215,7 +290,8 @@ def test_a_record_on_hold_shows_neither_its_title_nor_its_text() -> None:
 
 
 def test_the_list_counts_titles_and_reasons() -> None:
-    long_title = "A very long title " * 8 + PHONE
+    # The phone sits across the 80th character: cut before it is redacted, a part of it would show.
+    long_title = "x" * 72 + " " + PHONE
     records = [transcript(), mail(title=long_title), memo(), transcript("rec-9", title="Held back call")]
     entries = [entry(records[0]), entry(records[1]), entry(records[2], state="ready"), entry(records[3])]
     why: dict[str, Why] = dict(zip([e.key for e in entries], ["mixed", "by-hand", "work", "on-hold"], strict=True))
@@ -224,7 +300,10 @@ def test_the_list_counts_titles_and_reasons() -> None:
         "4 records wait at the gate: 2 for you to classify, 1 ready to promote, 1 on hold; 2 recordings held"
     )
     rows = {r.rid: r for g in view.groups for r in g.rows}
-    assert rows["calls:mail-1"].title.endswith("\N{HORIZONTAL ELLIPSIS}") and len(rows["calls:mail-1"].title) <= 80
+    title = rows["calls:mail-1"].title
+    assert title.endswith("\N{HORIZONTAL ELLIPSIS}") and len(title) <= 80
+    assert title.startswith("x" * 72 + " [redac")
+    assert not any(part in title for part in ("+1", "555", "0142"))
     assert PHONE not in str(view)
     assert rows["calls:rec-9/transcript"].title == "" and rows["calls:rec-9/transcript"].on_hold
     assert rows["calls:mail-1"].line == "an earlier version was decided by hand: work or private?"
@@ -293,6 +372,40 @@ def test_a_value_a_shell_would_act_on_stays_a_placeholder_listed_beside() -> Non
     assert out.ids[0].commands[0].text == 'docket hold show calls "rec-1" --from "<folder>" --vault "<vault>"'
     assert out.unfilled == [("folder", "/home/ada/$HOME/calls"), ("folder", "/srv/two"), ("vault", "/srv/100%")]
     assert build_held(held, Releases(), state("source=memo"), folders={}, root="/v", on_hold={}) == []
+
+
+# Each kind of character a copied command can't carry as it is: the double quote, $, the backquote, % and ! that
+# shells expand, a control character, two backslashes, a trailing backslash, and the curly quotes PowerShell reads as
+# a quote, after which a held id would run as code.
+NOT_CARRIED = ['"', "$", "`", "%", "!", "\x07", "\\\\", "\u201c", "\u201d", "\u201e", ";", "'", "&", "|", "(", "#"]
+
+
+@pytest.mark.parametrize("bad", NOT_CARRIED)
+@pytest.mark.parametrize("where", ["id", "folder", "vault"])
+def test_each_character_a_shell_reads_leaves_its_value_a_placeholder(bad: str, where: str) -> None:
+    value = {"id": f"x{bad}y", "folder": f"/srv/ex{bad}ports", "vault": f"/v/wo{bad}rk"}[where]
+    native = value if where == "id" else "rec-1"
+    folder = value if where == "folder" else "/srv/exports"
+    root = value if where == "vault" else "/v/work"
+    held = Holds({"calls": frozenset({native})})
+    (out,) = build_held(held, Releases(), StagingState(), folders={"calls": [folder]}, root=root, on_hold={})
+    command = out.ids[0].commands[1].text
+    assert value not in command and f'"<{where}>"' in command
+    assert out.unfilled == [(where, value)]
+
+
+def test_a_trailing_backslash_leaves_its_value_a_placeholder() -> None:
+    held = Holds({"calls": frozenset({"rec-1"})})
+    (out,) = build_held(held, Releases(), StagingState(), folders={"calls": ["C:\\exports\\"]}, root="/v", on_hold={})
+    assert '--from "<folder>"' in out.ids[0].commands[0].text
+
+
+def test_letters_of_any_script_are_carried_as_they_are() -> None:
+    folder = "C:\\Users\\ada\\\u00c1rv\u00edzt\u0171r\u0151 t\u00fck\u00f6r"
+    held = Holds({"calls": frozenset({"felv\u00e9tel-1"})})
+    (out,) = build_held(held, Releases(), StagingState(), folders={"calls": [folder]}, root="/v/w", on_hold={})
+    assert out.ids[0].commands[0].text == f'docket hold show calls "felv\u00e9tel-1" --from "{folder}" --vault "/v/w"'
+    assert out.unfilled == []
 
 
 def test_reading_a_state_from_a_form_mapping() -> None:

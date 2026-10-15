@@ -386,6 +386,11 @@ Departures from the plan above, each small; the decisions' entries say the same.
 | the chips say "All sources" and "Pending and ready" | "All" twice | two rows of chips each began with "All" |
 | the keys test runs for every page in `pages.PAGE_KEYS` | Search's keys only | each page lists its own |
 | a reading entry for `web/staging.py` as a contract | none | its two writes and its lack of a release are what a later change must keep |
+| the code review's fixes: the hold commands fill a value only from an allow-list (letters and digits in any script, and ` ._-:/\@+,~`) | the deny-list | PowerShell reads the curly quotes as a quote, which the deny-list let through |
+| a record opened with nothing chosen starts from its stored cuts, and `picked=1` marks an empty selection as the user's (the coordinator's call) | the panel starting empty | Work from it made a cut record ready with none |
+| a typed time takes milliseconds, `0:30.400`, in `cuts.parse`, and `cuts.spec` writes a cut back exactly | stored cuts rounded to seconds in the typed field | a rounded cut takes the neighbouring utterance |
+| utterances a release cuts show their times only, as gone, and can't be checked | showing their text as going | the owner cut them out at the console; the page has no need to show them again |
+| a typed cut that doesn't read is the panel's problem, the record and checks kept | the page's error with an empty state | one slip in the field lost every check |
 
 The `Origin: null` the plan named was seen, not assumed: the browser flow run once with the pages' policy left at
 `no-referrer` got a 403 on its first post, and passes with `same-origin`.

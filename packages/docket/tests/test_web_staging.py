@@ -65,6 +65,15 @@ def form(html: str, cls: str = "cut-form") -> dict[str, Any]:
     return {i.attrs["name"]: i.attrs["value"] for i in found.find_all("input") if i.attrs.get("type") == "hidden"}
 
 
+def as_shown(html: str) -> dict[str, Any]:
+    """The panel's form as the browser posts it untouched: its hidden fields, what is checked, and the typed cuts."""
+    found = parse(html).find("form", class_="cut-form")
+    fields = form(html)
+    fields["u"] = [i.attrs["value"] for i in found.find_all("input", name="u") if "checked" in i.attrs]
+    fields["cut"] = found.find("input", name="cut").attrs["value"]
+    return fields
+
+
 def staged(vault: Vault) -> dict[str, dict[str, Any]]:
     root = vault.root / "staging"
     return {
@@ -462,6 +471,62 @@ def test_an_unexpected_failure_is_the_error_page_and_names_nothing_of_it(
     panel = client.get("/staging/panel")
     assert panel.status_code == 500 and "Something failed in Docket" in panel.text
     assert "Kovács" not in panel.text
+
+
+def test_a_classification_of_a_record_on_hold_writes_nothing(client: TestClient, vault: Vault) -> None:
+    key = key_of(vault, TRANSCRIPT)
+    holds.add(vault, "calls", ["rec-1"])
+    before = staged(vault)
+    shown = {"shown_state": "pending", "shown_by": "", "shown_cuts": ""}
+    for label in ("work", "private"):
+        answer = client.post("/staging/classify", data={"open": key, "label": label} | shown, headers=SAME)
+        assert answer.status_code == 400, label
+        assert "is on hold" in answer.text
+    assert staged(vault) == before
+    assert not (vault.root / "staging" / "_decided.jsonl").exists()
+
+
+def test_work_on_a_cut_record_keeps_its_cuts_unless_they_are_unchecked(client: TestClient, vault: Vault) -> None:
+    cuts = [Cut(start=12_000, end=30_400, unit="ms"), Cut(start=50_000, end=55_000, unit="ms")]
+    Gate(vault).classify(key_of(vault, TRANSCRIPT), "work", cuts, by="claude")
+    html = page(client, opened(vault, TRANSCRIPT))
+    assert "Work, with 2 cuts" in html
+    answer = client.post("/staging/classify", data=as_shown(html) | {"label": "work"}, headers=SAME)
+    assert answer.status_code == 303, answer.text
+    file = staged(vault)[TRANSCRIPT]
+    assert (file["classified_by"], [(c["start"], c["end"]) for c in file["cuts"]]) == (
+        "user",
+        [(12_000, 30_400), (50_000, 55_000)],
+    )
+
+
+def test_a_version_staged_before_its_release_shows_the_released_stretch_as_gone(
+    client: TestClient, vault: Vault
+) -> None:
+    line = Release.model_validate(
+        {"id": "rec-1", "cuts": [LoggedCut(start=12_000, end=30_400)], "keep": [], "at": "2026-10-14T09:00:00Z",
+         "machine": "laptop-1"}
+    )  # fmt: skip
+    releaselog.add(vault, "calls", line)
+    html = page(client, opened(vault, TRANSCRIPT))
+    assert "released with its cuts" in html
+    assert "First the weekend plans." not in html and "The cabin by the lake" not in html
+    assert text_of(html, "was-cut") == ["00:12-00:31 cut by its release", "00:30-00:46 cut by its release"]
+    assert parse(html).find_all("input", name="u", value="2") == []
+
+
+def test_a_badly_typed_cut_keeps_the_record_open_and_its_checks(client: TestClient, vault: Vault) -> None:
+    before = staged(vault)
+    fields = form(page(client, opened(vault, TRANSCRIPT))) | {"u": "2", "cut": "12:30", "label": "work"}
+    answer = client.post("/staging/classify", data=fields, headers=SAME)
+    assert answer.status_code == 400
+    panel = parse(answer.text).find("section", class_="staged-record")
+    assert "cut 12:30: a cut is <start>-<end>" in panel.text()
+    assert [i.attrs["value"] for i in panel.find_all("input", name="u") if "checked" in i.attrs] == ["2"]
+    assert staged(vault) == before
+    html = page(client, opened(vault, TRANSCRIPT, "&u=2&cut=12.30-14.05"))
+    assert "cut 12.30-14.05: a cut" in text_of(html, "notice")[0]
+    assert parse(html).find("input", name="cut").attrs["value"] == "12.30-14.05"
 
 
 def test_a_post_without_a_session_is_refused(client: TestClient, vault: Vault) -> None:

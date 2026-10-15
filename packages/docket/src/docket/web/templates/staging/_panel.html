@@ -48,9 +48,11 @@
       <legend>Check the utterances to cut</legend>
       <ol class="utterances">
         {% for u in panel.utterances %}
-        <li class="utterance{% if u.going %} going{% endif %}{% if u.was_cut %} was-cut{% endif %}">
+        <li class="utterance{% if u.going %} going{% endif %}{% if u.was_cut or u.released %} was-cut{% endif %}">
           {% if u.was_cut %}
           <span class="time">{{ u.span }}</span><span class="text">[cut]</span>
+          {% elif u.released %}
+          <span class="time">{{ u.span }}</span><span class="text">cut by its release</span>
           {% else %}
           <label><input type="checkbox" name="u" value="{{ u.n }}"{% if u.checked %} checked{% endif %}><span class="time">{{ u.span }}</span><span class="speaker" dir="auto">{{ u.speaker }}</span><span class="text" dir="auto">{{ u.text }}</span>{% if u.going %}<span class="visually-hidden"> (goes with these cuts)</span>{% endif %}</label>
           {% endif %}
