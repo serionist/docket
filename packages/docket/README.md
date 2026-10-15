@@ -30,6 +30,10 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 A command finds its vault from `--vault`, `DOCKET_VAULT`, the working folder upward, a `vault/` folder in it, or the
 default the wizard recorded. A `<ref>` is a record's rid, or at least 6 characters of the key `staging list` shows.
 
+Docket's commits skip your repo's hooks, in a folder of your repo and in a repo of its own, and so do `docket
+sync`'s fetch and rebase: a formatter or a commit-msg rule can't rewrite what Docket writes once. Your own commits
+and every push still run them, so git-lfs's pre-push uploads the media.
+
 ## In a folder of your repo
 
 By default the vault is a folder of the repo you work in (`storage: folder` in `vault.yaml`). Docket commits there

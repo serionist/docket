@@ -2,7 +2,8 @@
 blocks a commit.
 
 In a folder of the user's repo (the host), git runs from the vault's folder: pathspecs are relative to it, but some
-names git prints are relative to the host's top, and the index, its lock and the hooks are the host's.
+names git prints are relative to the host's top, and the index and its lock are the host's. In both modes Docket's
+commits, and sync's fetch and rebase, run no hooks; a push runs them (DR-0260, DR-0261).
 """
 
 from __future__ import annotations
@@ -25,6 +26,10 @@ INDEX_LOCK_WAIT_SECONDS = 3.0
 _INDEX_LOCK_PAUSE = 0.1
 _PATHSPEC = ("--pathspec-from-file=-", "--pathspec-file-nul")
 NO_SIGNING = ("-c", "commit.gpgsign=false")
+HOOKS_OFF_TEXT = (
+    "Docket points core.hooksPath at this file for its own commits and sync's rebase, so no hook runs for them. It is\n"
+    "a file, not a folder, because git-lfs writes its hooks into any folder there.\n"
+)
 
 
 @dataclass(frozen=True)
@@ -54,10 +59,15 @@ class Git:
         env: dict[str, str] | None = None,
         identity: bool = False,
         stdin: str | None = None,
+        hooks: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         # Docket's commits are machine commits, so they never sign, and neither does sync's rebase, which writes
         # commits again: a service with no terminal would hang on a pinentry prompt or fail on a key it can't unlock.
         config: list[str] = list(NO_SIGNING)
+        # Hooks are off only where a call says so: a push that skipped git-lfs's pre-push would leave media off the
+        # remote, and a later push of the same branch wouldn't send it.
+        if not hooks and self.home is not None:
+            config += ["-c", f"core.hooksPath={_hooks_off(self.home).as_posix()}"]
         if identity and self.fallback is not None and not self.has_identity():
             config += ["-c", f"user.name={self.fallback.name}", "-c", f"user.email={self.fallback.email}"]
         extra = dict(env or {})
@@ -128,22 +138,20 @@ class Git:
         # On stdin, not the command line: a backlog of run files would pass Windows' 32,767-character limit.
         spec = "\0".join(paths)
         folder = self.home is not None and self.home.folder
-        hooks: list[str] = []
-        if folder and self.home is not None:
-            # The host's hooks are written for the user's commits: a formatter would rewrite a raw file written once,
-            # a commit-msg rule would refuse or rewrite a Doc: line. On the add too: git-lfs's filter writes its own
-            # hooks into the hooks path when it runs, which for a host like husky's is the user's tree.
-            hooks = ["-c", f"core.hooksPath={self.home.no_hooks.as_posix()}"]
+        # The repo's hooks are written for the user's commits: a formatter would rewrite a raw file written once, a
+        # commit-msg rule would refuse or rewrite a Doc: line, and git-lfs's post-commit is most of a commit's time on
+        # Windows. On the add too: git-lfs's filter writes its own hooks into the hooks path when it runs, which for a
+        # host like husky's is the user's tree.
         try:
-            self.run(*hooks, "add", *_PATHSPEC, stdin=spec)
+            self.run("add", *_PATHSPEC, stdin=spec, hooks=False)
             # `-- .` and the prefix, not --relative: that crashes git 2.47.0.windows.2 while a stash pop conflicts.
             staged = {p for p in self.out("diff", "--cached", "--name-only", "-z", "--", ".").split("\0") if p}
             if not staged & {self.prefix + Path(p).as_posix() for p in paths}:
                 return None
-            self.run(*hooks, "commit", "-q", "--only", *_PATHSPEC, "-m", message, identity=True, stdin=spec)
+            self.run("commit", "-q", "--only", *_PATHSPEC, "-m", message, identity=True, stdin=spec, hooks=False)
         except BaseException:
             if folder:
-                self.run(*hooks, "reset", "-q", *_PATHSPEC, check=False, stdin=spec)
+                self.run("reset", "-q", *_PATHSPEC, check=False, stdin=spec, hooks=False)
             raise
         return self.out("rev-parse", "HEAD").strip()
 
@@ -189,7 +197,9 @@ class Git:
         if not self.has_remote():
             return SyncResult(False, False, "no remote")
         env = {"GIT_TERMINAL_PROMPT": "0"}
-        if self.run("fetch", "-q", "origin", check=False, env=env).returncode != 0:
+        # Sync's fetch and rebase run no hooks either: the rebase runs pre-rebase, post-checkout, post-commit for every
+        # commit it picks and post-rewrite, so a user's refusing pre-rebase would stop every sync (DR-0261).
+        if self.run("fetch", "-q", "origin", check=False, env=env, hooks=False).returncode != 0:
             return SyncResult(False, False, "couldn't reach the remote; the commits stay local")
         upstream = f"origin/{self.branch()}"
         if self.run("rev-parse", "--verify", "--quiet", upstream, check=False).returncode != 0:
@@ -206,9 +216,9 @@ class Git:
         marker.write_text(upstream, encoding="utf-8")
         # The marker is removed only once the rebase is over. Interrupted (Ctrl+C, a kill), it stays, so the next
         # write knows the rebase left behind is Docket's and undoes it.
-        proc = self.run("rebase", "--autostash", "-q", upstream, check=False, identity=True)
+        proc = self.run("rebase", "--autostash", "-q", upstream, check=False, identity=True, hooks=False)
         if proc.returncode != 0:
-            self.run("rebase", "--abort", check=False)
+            self.run("rebase", "--abort", check=False, hooks=False)
             marker.unlink(missing_ok=True)
             return SyncResult(True, False, f"the rebase onto {upstream} conflicted and was undone; resolve it by hand")
         marker.unlink(missing_ok=True)
@@ -217,6 +227,18 @@ class Git:
 
 def sync_marker(root: Path) -> Path:
     return root / ".git" / "docket" / "sync-rebase"
+
+
+def _hooks_off(home: Home) -> Path:
+    """The file Docket points the hooks path at, written when it is missing: a missing path is no better than a folder,
+    since git-lfs's filter creates it and writes its hooks there."""
+    path = home.hooks_off
+    # Never into a git dir that went missing: the folders made on the way would pass for the vault's own .git, and git
+    # refuses to run there anyway (DR-0140).
+    if not path.is_file() and home.git_dir.is_dir():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(HOOKS_OFF_TEXT, encoding="utf-8")
+    return path
 
 
 def toplevel(path: Path) -> Path | None:

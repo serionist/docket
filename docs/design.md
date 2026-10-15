@@ -218,6 +218,9 @@ flowchart TB
   jobs run on the machine marked primary in `vault.yaml`.
 - A commit is local and never touches the network. In a repo of its own, `docket sync` fetches, rebases with
   autostash and pushes; on a conflict it aborts and keeps the local commits.
+- Docket's commits, and sync's fetch and rebase, run none of the repo's hooks, in both modes: a hook can't rewrite or
+  refuse what Docket writes once, and git-lfs's post-commit doesn't cost every write half a second on Windows. Every
+  push runs them, so git-lfs's pre-push uploads the media (DR-0260, DR-0261).
 - In a folder of the user's repo, Docket only makes local commits of the vault's paths. It never fetches, rebases,
   pushes or rewrites that repo: the user's own git flow moves it, and `docket sync` says so and does nothing else.
 
@@ -267,8 +270,8 @@ vault/
 - Setup checks the host repo before it offers a folder: it refuses a remote anyone can read (an SSH remote is asked
   over https), warns when the repo looks shared (other committers), refuses a host ignore rule that would hide the
   vault, and offers a repo of its own instead.
-- In a folder, Docket's commits hold only the vault's paths, skip the host's hooks, and land on whichever branch is
-  checked out; `docket vault status` warns when that isn't the remote's default.
+- In a folder, Docket's commits hold only the vault's paths, skip the host's hooks as in a repo of its own, and land
+  on whichever branch is checked out; `docket vault status` warns when that isn't the remote's default.
 - Raw text is in plain git, so grep, diffs and partial clones keep working. Only `media/` is in LFS, in both modes,
   so a clone with `lfs.fetchexclude=<vault path>/media/**` can rebuild everything except playback.
 - The vault's own `.gitattributes` holds every attribute it needs, in both modes: its first line stops the host's

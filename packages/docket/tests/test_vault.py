@@ -381,15 +381,12 @@ def test_a_failed_write_leaves_its_records_free_to_write(
     assert len(vault.rawlog.read(make_record(1).rid)) == 1
 
 
-def test_an_init_whose_real_commit_fails_leaves_nothing(tmp_path: Path, config: VaultConfig) -> None:
-    # A pre-commit hook that refuses: Docket's commits never sign, so a failing signer no longer stops one.
-    hooks = tmp_path / "hooks"
-    hooks.mkdir()
-    refuse = hooks / "pre-commit"
-    refuse.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8", newline="\n")
-    refuse.chmod(0o755)
-    gitconfig = Path(os.environ["GIT_CONFIG_GLOBAL"])
-    gitconfig.write_text(f"[core]\n\thooksPath = {hooks.as_posix()}\n", encoding="utf-8")
+def test_an_init_whose_real_commit_fails_leaves_nothing(
+    tmp_path: Path, config: VaultConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # git itself refuses the commit after the add: Docket's commits never sign and run no hooks, so neither a failing
+    # signer nor a refusing hook stops one any more.
+    monkeypatch.setenv("GIT_AUTHOR_DATE", "not a date")
     with pytest.raises(DocketError, match="git commit"):
         Vault.init(tmp_path / "vault", config, "test-box")
     assert not (tmp_path / "vault").exists()
@@ -397,7 +394,7 @@ def test_an_init_whose_real_commit_fails_leaves_nothing(tmp_path: Path, config: 
     with pytest.raises(DocketError):
         Vault.init(tmp_path / "empty", config, "test-box")
     assert list((tmp_path / "empty").iterdir()) == []
-    gitconfig.write_text("", encoding="utf-8")
+    monkeypatch.delenv("GIT_AUTHOR_DATE")
     assert Vault.init(tmp_path / "vault", config, "test-box").root == (tmp_path / "vault").resolve()
 
 

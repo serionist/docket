@@ -505,11 +505,12 @@ decisions:
       - "The host's root .gitattributes: a line there goes stale when the folder moves, and it is a host path Docket would have to commit."
   - id: DR-0143
     title: In a host, Docket's commits skip the host's hooks and leave its locks alone
-    status: proposed
+    status: superseded
     at: "2026-10-15"
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#34"]
+    superseded_by: [DR-0260]
     description: "A folder vault's commits run with core.hooksPath pointed at an empty folder in Docket's private folder. The host's index.lock is the user's: a fresh one is waited for a few seconds, a stale one is reported with its age, and Docket never deletes it. A commit that fails after its add unstages Docket's paths, and a run file a crash left staged counts as uncommitted and goes in with the next commit."
     binds:
       - An operation in progress in the host (merge, rebase, cherry-pick, revert, a detached HEAD) blocks Docket's writes, and Docket never aborts it.
@@ -1097,3 +1098,37 @@ decisions:
       - "core.checkStat=minimal: it also keeps copies clean on Linux and macOS, but on a git that compares sub-second times it could hide a same-size rewrite within the second of a commit."
       - "core.hooksPath at an empty folder: git lfs install writes its hooks into whatever hooks path is set, so it saved nothing, and a test about hooks would pass without its hook."
       - "Tests without git-lfs by default: three times faster on every vault operation, but users and every CI runner have git-lfs, and the tests would stop running against its filter and hooks."
+  - id: DR-0260
+    title: Docket's commits skip the repo's hooks in both modes, and in a host leave its locks alone
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#55"]
+    supersedes: [DR-0143]
+    description: "Restates DR-0143 for both modes, with a file in place of its empty folder. Docket's own commits, in a repo of its own and in a folder of the user's repo, run with core.hooksPath pointed at hooks-off, a file in Docket's private folder, written whenever it is missing: git finds no hook under a file, and git-lfs's filter, which writes its hooks into whatever folder the hooks path names (a missing one included), can't write there. DR-0143's empty folder got git-lfs's four hooks on init's first add, so folder vaults ran git-lfs's post-commit on every commit. Media still goes to LFS through the filter. A hook can't rewrite or refuse what Docket writes once, and a commit takes about 65 ms on Windows instead of about 500 ms, the difference being git-lfs's post-commit, which only makes lockable files read-only; the vault has none. In a host, the host's index.lock is the user's: a fresh one is waited for a few seconds, a stale one is reported with its age, and Docket never deletes it. A commit that fails after its add unstages Docket's paths, and a run file a crash left staged counts as uncommitted and goes in with the next commit."
+    binds:
+      - The hooks path is a file, never a folder; an older Docket's no-hooks folder is left where it is, and nothing reads it.
+      - The user's own commits and every push still run the repo's hooks.
+      - An operation in progress in the host (merge, rebase, cherry-pick, revert, a detached HEAD) blocks Docket's writes, and Docket never aborts it.
+      - "A conflict in the user's own files doesn't block Docket: git's partial commit leaves it as it is."
+      - "The file is never written when the git dir itself is missing: the folders made on the way would pass for the vault's own .git."
+    not_chosen:
+      - "Running the repo's hooks: a formatter would rewrite raw files written once, a commit-msg rule would refuse or rewrite Doc: lines, and git-lfs's post-commit is most of a commit's time on Windows."
+      - "An empty folder as the hooks path: git-lfs's filter writes its hooks into it on the first media add."
+      - "git commit --no-verify: it skips pre-commit and commit-msg only, and post-commit and git-lfs's hooks still run."
+      - "core.hooksPath in the repo's own config: the user's own commits would lose their hooks too."
+  - id: DR-0261
+    title: docket sync fetches and rebases without hooks, and every push keeps them
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#55"]
+    description: "In a repo of its own, docket sync's fetch and rebase, and a rebase --abort (sync's own, or the recovery check's after a killed sync), run with the hooks path DR-0260 sets. The rebase writes Docket's commits again, and git runs pre-rebase, post-checkout, post-commit for every commit it picks, and post-rewrite: a user's pre-rebase that refuses would stop every sync, and git-lfs's post-commit costs about 0.4 s a picked commit on Windows. Media the rebase checks out still arrives through git-lfs's smudge filter, which no hook drives. Sync rebases and never merges, so post-merge doesn't come up. A push keeps the hooks: git-lfs's pre-push is what uploads media, and a push that skipped it leaves the objects off the remote, where a later push of the same ref doesn't send them. Sync doesn't push yet (#58); its push, like every push Docket makes, keeps the hooks. Git.run keeps hooks unless a call passes hooks=False."
+    binds:
+      - Every push Docket makes runs the repo's hooks, sync's own push (#58) included.
+      - A git call skips hooks only when it says so (hooks=False); none is off by default.
+    not_chosen:
+      - "Hooks off by default in Git.run and on for a push: a push written later without the flag would leave media off the remote."
+      - "Hooks on for sync's rebase: a user's pre-rebase could refuse every sync, and git-lfs's post-commit runs once per picked commit."
