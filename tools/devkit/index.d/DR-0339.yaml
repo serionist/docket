@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0339
+    title: The gate stays model-free; a required models job in CI runs the question set with the embedder on a CPU against floors of its own
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#67"]
+    description: "The gate's lanes run the question set keyword-only against eval-floors.json (DR-0295), and test the worker, the vector stage and the fusion with a stdlib-only fake worker that gives deterministic vectors. The worker's ONNX Runtime backend is checked like any module under src: strict pyright and its coverage floor, against a stubbed session, with the CPU builds of onnxruntime, tokenizers and numpy in the dev group. A models job on Linux restores the worker's environment and model files from the Actions cache, keyed by the requirements and the catalogue, installs them on a miss (0.5 GB), runs the set with DOCKET_TEST_MODELS=1, and holds each kind against tools/devkit/eval-floors-models.json through a lane of its own, gate models; on Windows and macOS the job installs and starts the worker without floors. The job is required for merge. A kind below its floor fails; a kind above its floor fails, printing the floor to write, only once three runs on CI have given identical numbers, which the PR shows, and until then it is printed. A cache miss downloads the pinned revision, so a Hugging Face outage blocks merges until it ends. On the maintainer's desktop three CPU runs gave identical numbers, and the CPU matched the GPU row for row."
+    not_chosen:
+      - "A tiny model in the gate: its numbers say nothing about the model users run."
+      - "Floors from the maintainer's GPU: not reproducible in CI."
+      - "The gate's eval with vectors whenever a model is cached: one commit would pass on one machine and fail on another."
+      - "The backend left out of the type and coverage checks: a check loosened."

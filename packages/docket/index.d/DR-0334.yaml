@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0334
+    title: The embedder is multilingual-e5-small on every device
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#67"]
+    description: "intfloat/multilingual-e5-small: MIT, a 470 MB ONNX file, 384 dims, 512 tokens, with query and passage prefixes. Fused with keyword search on the invented question set (DR-0338) it lifts recall at 10 and MRR over all kinds from 0.77 and 0.60 to 0.86 and 0.65, paraphrase from 0.33 and 0.13 to 0.44 and 0.22, and typo from 0.75 and 0.46 to 1.00 and 0.62, and no kind's MRR falls by more than 0.01. Under a reranker the embedder moves one or two questions, and e5-small runs on any machine: 69 chunks a second on 16 CPU threads against e5-base's 25 and bge-m3's 5, and its 384 dims keep the vector scan at 67 ms over 100,000 chunks."
+    not_chosen:
+      - "multilingual-e5-base or bge-m3: about 3x and 14x slower on a CPU, with 768 and 1024 dims, for one or two paraphrase questions under a reranker."
+      - "paraphrase-multilingual-MiniLM-L12-v2: 128 tokens, and exact names fell to 0.93 and 0.67."
+      - "Qwen3-Embedding-0.6B: weaker on the set (paraphrase 0.39 and 0.24), and a decoder, slow on a CPU."
+      - "jina-embeddings-v3: CC BY-NC 4.0."
+      - "gte-multilingual-base: it loads the model repo's own Python."
