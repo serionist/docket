@@ -5,7 +5,8 @@
 3. FTS candidates, top 200 by BM25, filters applied inside the query: all words required, however common (DR-0230); if
    fewer than k, any of them; if still fewer, word prefixes. In each, the best chunk of each group whose title's lead
    holds most of the query's terms goes first (DR-0231); in the any-word stage the rest go by how many terms their text
-   holds (DR-0232), then by BM25.
+   holds (DR-0232), then by BM25. The any-word and prefix stages leave out words in half the chunks or more, which
+   BM25 gives no weight; they still count in the order.
 4. Entity candidates, top 200: chunks mentioning the query's or the boosts' entities.
 5. Fuse the two lists by reciprocal rank, so a boost lifts a chunk and never drops one.
 6. Collapse hits on the same stretch, group them by recording or thread, attach each group's summary.
@@ -15,6 +16,7 @@ The parameters follow the design's MCP `search` tool, which the service (#8) map
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 import sqlite3
@@ -31,7 +33,7 @@ from docket.index import matching
 from docket.index.build import languages_of, open_index
 from docket.index.languages import Languages
 from docket.index.terms import Checker, Word, phrase_of, tokens
-from docket.index.text import WORD, Analyzer, any_of, dedupe, fold, phrase, prefix, words
+from docket.index.text import WORD, Analyzer, any_of, dedupe, fold, in_columns, phrase, prefix, words
 from docket.index.timewords import Range, read_time
 from docket.vault.vault import Vault
 
@@ -202,6 +204,17 @@ class _Search:
         self.tz = ZoneInfo(vault.config.owner.time_zone)
         self.terms: set[str] = set()
         self.lookup, self.longest = self._lookups()
+        # Per query word, the most chunks any of its forms is in.
+        self.reach: dict[str, int] = {}
+
+    @functools.cached_property
+    def total(self) -> int:
+        """How many chunks there are, read once, and only for a query that has an any-word stage."""
+        return int(self.conn.execute("SELECT count(*) FROM chunks").fetchone()[0])
+
+    def weighs(self, word: str) -> bool:
+        """Whether BM25 still weighs a word: FTS5 gives a term in half the chunks or more no weight at all."""
+        return self.reach[word] * 2 < self.total
 
     # -- reading the query --------------------------------------------------------------------------------------
 
@@ -289,17 +302,26 @@ class _Search:
 
     def word_groups(self, tokens: list[str]) -> tuple[list[tuple[str, str]], list[Word], list[str]]:
         """(word, expression) per word, with every form however common (DR-0230); each word with its forms, for the
-        word check; and the words no chunk holds in any form."""
+        word check, which also reads titles no chunk holds; and the words no chunk holds in any form.
+
+        The expression leaves out a form its column doesn't hold, which matches nothing, and puts a term several
+        columns hold in one phrase: a common word's every phrase costs BM25 a pass over its rows."""
         groups: list[tuple[str, str]] = []
         kept: list[Word] = []
         absent: list[str] = []
         for word in dedupe(tokens):
             forms = self.word_forms(word)
             self.terms |= {term for _, term in forms}
-            groups.append((word, any_of(phrase(col, [term]) for col, term in forms)))
             kept.append(Word(word, frozenset(forms)))
-            if not any(self._docs(col, term) for col, term in forms):
+            counts = [self._docs(col, term) for col, term in forms]
+            held = [form for form, n in zip(forms, counts, strict=True) if n]
+            self.reach[word] = max(counts)
+            if not held:
                 absent.append(word)
+            columns: dict[str, list[str]] = {}
+            for col, term in held or forms[:1]:
+                columns.setdefault(term, []).append(col)
+            groups.append((word, any_of(in_columns(cols, term) for term, cols in columns.items())))
         return groups, kept, absent
 
     def phrase_group(self, text: str) -> str:
@@ -636,9 +658,16 @@ def _run(
         *(g for _, g in word_groups),
         *(s.phrase_group(w) for w in dedupe(e.words for e in found)),
     ]
+    # The any-word and prefix stages leave out the words BM25 gives no weight, which match half the chunks or more and
+    # would cost scoring them all; the word check still counts them in the order (DR-0232). When nothing else would
+    # find a chunk, the least common of them stays.
+    some = [(w, g) for w, g in word_groups if s.weighs(w)]
+    if not phrase_groups and not entity_groups and not any(s.reach[w] for w, _ in some):
+        some += sorted((wg for wg in word_groups if not s.weighs(wg[0])), key=lambda wg: s.reach[wg[0]])[:1]
+    any_groups = [*phrase_groups, *(g for _, g in some), *entity_groups]
     widened = [
         *phrase_groups,
-        *(any_of([g, prefix("folded", fold(w))]) if len(w) >= PREFIX_MIN else g for w, g in word_groups),
+        *(any_of([g, prefix("folded", fold(w))]) if len(w) >= PREFIX_MIN else g for w, g in some),
         *entity_groups,
     ]
     all_entities = sorted(set(query_entities) | set(reading.boosts))
@@ -658,8 +687,8 @@ def _run(
             take(s.order(s.fts(" AND ".join(literal), filters, CANDIDATES), q, by_text=False), "all")
         take(s.order(s.fts(" AND ".join(groups), filters, CANDIDATES), q, by_text=False), "all")
         if len(order) < k and len(groups) > 1:
-            take(s.order(s.fts(" OR ".join(groups), filters, CANDIDATES), q, by_text=True), "any")
-        if len(order) < k and widened != groups:
+            take(s.order(s.fts(" OR ".join(any_groups), filters, CANDIDATES), q, by_text=True), "any")
+        if len(order) < k and widened != any_groups:
             take(s.order(s.fts(" OR ".join(widened), filters, CANDIDATES), q, by_text=False), "prefix")
     elif not all_entities:
         take(s.newest(filters), "time")

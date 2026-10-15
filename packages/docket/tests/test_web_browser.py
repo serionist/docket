@@ -91,10 +91,15 @@ def test_the_search_page_in_a_browser(service: tuple[int, str], tmp_path: Path) 
         # Escape leaves the box with the query kept; j moves through the hits; Enter opens one beside the results.
         page.keyboard.press("Escape")
         assert page.input_value("#query") == "Nortwin"
+        # Titles that name Northwind lead (DR-0231), so the call isn't the first group: j walks on to it, a new hit each
+        # time.
         page.keyboard.press("j")
-        page.keyboard.press("j")
-        hit = page.evaluate("document.activeElement.dataset.locator")
-        assert hit.startswith("r:calls:")
+        seen = [page.evaluate("document.activeElement.dataset.locator")]
+        while not seen[-1].startswith("r:calls:") and len(seen) < 8:
+            page.keyboard.press("j")
+            seen.append(page.evaluate("document.activeElement.dataset.locator"))
+        hit = seen[-1]
+        assert hit.startswith("r:calls:") and len(seen) > 1 and len(set(seen)) == len(seen)
         page.keyboard.press("Enter")
         page.wait_for_selector("#panel .raw-column .segment")
         expect(page.locator("#panel .summary-column")).to_be_visible()

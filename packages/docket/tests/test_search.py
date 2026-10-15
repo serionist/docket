@@ -399,6 +399,18 @@ def test_the_any_word_stage_ranks_more_of_the_words_first(names: Vault) -> None:
     assert first(result, "chat:C0NAMES/1791500002.000100") < first(result, "chat:C0NAMES/1791500001.000100")
 
 
+def test_a_word_in_half_the_chunks_leaves_the_any_word_match_and_counts_in_its_order(names: Vault) -> None:
+    # Acme is in most chunks, so BM25 gives it no weight: the any-word stage doesn't match it, and a weekly mail holding
+    # only Acme isn't a candidate, while Acme still counts in the order above.
+    hits = ranked(find(names, "acme budget approval", k=50))
+    assert hits and not any((h.rid or "").startswith("mail:<weekly-") for h in hits)
+    # When the other words are in no chunk, the least common of the weightless ones stays: Orbex, in fewer chunks.
+    fallback = find(names, "acme orbex zebracorn")
+    assert fallback.query.absent == ["zebracorn"]
+    assert {h.found_by for h in ranked(fallback)} == {"any"}
+    assert all("orbex" in h.snippet.lower() for h in ranked(fallback))
+
+
 def test_a_title_never_lifts_a_hit_into_an_earlier_stage(names: Vault) -> None:
     hits = ranked(find(names, "crane audit approval"))
     every = [h.rank for h in hits if h.found_by == "all"]
