@@ -30,7 +30,7 @@ Only through the writer verbs, never by hand:
 | `docs set <key> --set f=v --add f=v --unset f` | changes one where it is; `--in <folder>` when a reading path is in several folders (`.` is the root) |
 | `docs supersede <old> --by <new>` | marks a decision superseded and prints the citations to fix |
 | `docs remove <key> --why "..."` | soft-deletes |
-| `docs move <key>... [--from <rev>]` | moves a branch's own decisions or conventions out of an `index.yaml` into files of their own; `--from` takes them as they stood at a revision |
+| `docs move <key>... [--from <rev>]` | moves a branch's own decisions or conventions out of an `index.yaml` into files of their own; `--from` takes them as they stood at a revision, and marks each older decision they supersede superseded again |
 
 Parallel branches would each take the same next id. So a plan takes a block of ten for its decisions, the next free
 one above main and every open branch, and adds each with `--set id=DR-nnnn`.
@@ -57,6 +57,9 @@ and GitHub's own merge of a PR both apply them.
 - A branch that appended to an `index.yaml` before this layout moves its entries at its next rebase: `docs move
   <ids>`. If the rebase stopped on that `index.yaml` and was settled by taking main's side (`git checkout --ours`),
   `docs move <ids> --from ORIG_HEAD` brings them back from the branch as it was.
+- An entry that supersedes an older one comes back with the same command: it marks the older decision superseded
+  again, as it was at `ORIG_HEAD`, and leaves main's other changes to it. If the older one was the branch's own and
+  is gone too, name both: `docs move <new> <old> --from ORIG_HEAD`.
 
 ## The canonical form
 

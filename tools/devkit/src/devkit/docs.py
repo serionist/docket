@@ -207,6 +207,11 @@ def _apply(kind: Kind, entry: dict[str, Any], args: argparse.Namespace) -> None:
         current: list[str] = list(entry.get(name) or [])
         current.append(value)
         entry[name] = current
+    _in_order(kind, entry)
+
+
+def _in_order(kind: Kind, entry: dict[str, Any]) -> None:
+    # Fields outside the schema stay, so the render refuses the file instead of dropping their text.
     ordered = {k: entry[k] for k in kind.fields if k in entry}
     ordered.update({k: v for k, v in entry.items() if k not in ordered})
     entry.clear()
@@ -331,11 +336,7 @@ def cmd_supersede(args: argparse.Namespace) -> int:
         old.entry["status"] = "superseded"
         new.entry["supersedes"] = [*(new.entry.get("supersedes") or []), old.key]
         for loc in (old, new):
-            # Fields outside the schema stay, so the render refuses the file instead of dropping their text.
-            ordered = {k: loc.entry[k] for k in loc.kind.fields if k in loc.entry}
-            ordered.update({k: v for k, v in loc.entry.items() if k not in ordered})
-            loc.entry.clear()
-            loc.entry.update(ordered)
+            _in_order(loc.kind, loc.entry)
         return {old.file.rel, new.file.rel}
 
     _report(_mutate(store, change))
@@ -378,6 +379,34 @@ def _entry_at(store: Store, rev: str, key: str) -> tuple[Kind, str, dict[str, An
     raise KitError(f"no decision or convention {key} at {rev}")
 
 
+def _restore_superseded(work: Store, rev: str, key: str, entry: dict[str, Any]) -> set[str]:
+    """Each older decision a moved entry supersedes, marked superseded by it again as it was at `rev`.
+
+    A rebase settled by taking main's side drops the branch's edit to the older decision along with its new entry, and
+    neither `move` nor `set` can then go first. Only the link comes back: the rest of the older decision stays as main
+    has it. An older decision gone from the tree too is named in the same move; a link the revision lacks is left for
+    the check to refuse.
+    """
+    touched: set[str] = set()
+    supersedes: list[str] = list(entry.get("supersedes") or [])
+    for other in supersedes:
+        if not any(loc.key == other for loc in work.entries("decisions")):
+            continue
+        old = work.find(other, kind="decisions")
+        try:
+            then = _entry_at(work, rev, other)[2]
+        except KitError:
+            continue
+        if key in (old.entry.get("superseded_by") or []) or key not in (then.get("superseded_by") or []):
+            continue
+        old.entry["superseded_by"] = [*(old.entry.get("superseded_by") or []), key]
+        old.entry["status"] = "superseded"
+        _in_order(old.kind, old.entry)
+        touched.add(old.file.rel)
+        print(f"restored {other} superseded by {key}, as at {rev}")
+    return touched
+
+
 def cmd_move(args: argparse.Namespace) -> int:
     store = _load()
     if not store.regime.entry_dir:
@@ -391,6 +420,7 @@ def cmd_move(args: argparse.Namespace) -> int:
                     raise KitError(f"{key} is in the tree already; move it without --from")
                 kind, folder, entry = _entry_at(work, args.rev, key)
                 folder = _folder_value(work, kind, folder or ".")
+                touched |= _restore_superseded(work, args.rev, key, entry)
             else:
                 loc = work.find(key)
                 kind, folder, entry = loc.kind, loc.file.folder or "", loc.entry
@@ -505,7 +535,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("move", help="move decisions or conventions out of an index.yaml into files of their own")
     s.add_argument("keys", nargs="+", metavar="key")
-    s.add_argument("--from", dest="rev", help="take each entry as it stood at this revision, e.g. ORIG_HEAD")
+    s.add_argument(
+        "--from",
+        dest="rev",
+        help="take each entry as it stood at this revision, e.g. ORIG_HEAD, and relink what it supersedes",
+    )
     s.set_defaults(func=cmd_move)
 
     sub.add_parser("check", help="check every entry file against the regime").set_defaults(func=cmd_check)
