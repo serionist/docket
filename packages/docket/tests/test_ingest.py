@@ -310,9 +310,9 @@ def test_a_folder_that_isn_t_one_is_refused(vault: Vault, tmp_path: Path) -> Non
 
 def release_memo(vault: Vault, memo_id: str) -> None:
     """The owner releases a memo, keeping it as the mapper makes it: a memo has no segments to cut."""
-    record = RawRecord(
-        rid=f"memo:{memo_id}", source="memo", kind="memo", container=f"memo:{memo_id}", ts=TS,
-        title=PRIVATE_TITLE, text=f"memo {memo_id}", fetched=TS, via="memo-file",
+    record = RawRecord.model_validate(
+        {"rid": f"memo:{memo_id}", "source": "memo", "kind": "memo", "container": f"memo:{memo_id}", "ts": TS,
+         "title": PRIVATE_TITLE, "text": f"memo {memo_id}", "fetched": TS, "via": "memo-file"}
     )  # fmt: skip
     view = Gate(vault).intake_view(record)
     assert isinstance(view, RawRecord)
@@ -378,3 +378,17 @@ def test_a_staged_record_under_a_hold_brought_back_names_the_release_not_deletin
     # m2 was never released: its staged file still has to go.
     assert "1 record(s) on hold wait in staging; delete these files" in err
     assert PRIVATE_TITLE not in err
+
+
+def test_only_released_records_waiting_under_a_hold_brought_back_ask_for_no_deletion(
+    vault: Vault, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    folder = folder_with(tmp_path, {"a.json": memo("m1")})
+    release_memo(vault, "m1")
+    assert ingest(vault, folder) == 0
+    hold_back(vault, "m1")
+    capsys.readouterr()
+    assert ingest(vault, folder) == 2
+    err = capsys.readouterr().err
+    assert "docket hold release memo m1" in err
+    assert "delete" not in err
