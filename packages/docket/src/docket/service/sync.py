@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -20,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from docket import index
 from docket.errors import DocketError
+from docket.service import history
 from docket.service.runs import BUDGET, Run
 from docket.service.state import Service
 from docket.sources import ingest as ingesting
@@ -238,6 +241,39 @@ def _stored(vault: Vault, source: str) -> Callable[[Iterable[str]], set[str]]:
     return stored
 
 
+@dataclass(frozen=True)
+class Ready:
+    """A source that passed `run_open`'s checks before any work, with what those checks read."""
+
+    tools: list[str]
+    skill: Path
+    own: cursors.Cursor | None
+    others: dict[str, cursors.Cursor]
+    # Another machine's cursor file left out, for the run's notes.
+    notes: list[str]
+    held: frozenset[str]
+
+
+def preflight(vault: Vault, source: str) -> Ready:
+    """`run_open`'s checks before any work, which the Sync page runs too (DR-0304): the source in `vault.yaml`, its
+    skill with the marker line, this machine's cursor file, no held record waiting in staging."""
+    tools = _checked_source(vault, source)
+    skill = _skill(vault, source)
+    own = cursors.read(vault.root, vault.machine).get(source)
+    everyone, notes = cursors.read_others(vault.root, vault.machine)
+    others = {m: c[source] for m, c in everyone.items() if source in c}
+    held = holds.read(vault.root, source)
+    released = frozenset(releaselog.read(vault.root, source))
+    ingesting.check_staging(vault, source, held, held & released)
+    return Ready(tools=tools, skill=skill, own=own, others=others, notes=notes, held=held)
+
+
+def owed(vault: Vault, source: str, ready: Ready, now: datetime, *, final: bool) -> cursors.Handover:
+    """The retry and waiting ids a run opened now would be handed; with `final`, what a final run would get, so the
+    Sync page says one is due exactly when `run_open(final=true)` would open."""
+    return cursors.handover(ready.own, ready.others, now, ready.held, _stored(vault, source), final=final)
+
+
 def new_run_id(now: datetime) -> str:
     return f"run-{now:%Y%m%dT%H%M%S}-{secrets.token_hex(8)}"
 
@@ -263,16 +299,11 @@ async def run_open(
 
     def build() -> RunOpened:
         vault = service.vault()
-        tools = _checked_source(vault, source)
-        skill = _skill(vault, source)
-        own = cursors.read(vault.root, vault.machine).get(source)
-        everyone, notes = cursors.read_others(vault.root, vault.machine)
+        ready = preflight(vault, source)
+        tools, skill, own, others, held = ready.tools, ready.skill, ready.own, ready.others, ready.held
+        notes = list(ready.notes)
         if building is not None:
             notes.append(building)
-        others = {m: c[source] for m, c in everyone.items() if source in c}
-        held = holds.read(vault.root, source)
-        released = frozenset(releaselog.read(vault.root, source))
-        ingesting.check_staging(vault, source, held, held & released)
         # Whole seconds: the mark is written to the second, and the window must start where the mark says.
         now = service.runs.clock().replace(microsecond=0)
         window: cursors.Window | None = None
@@ -281,7 +312,7 @@ async def run_open(
             window = cursors.window(own, others, now, _since(since, ZoneInfo(vault.config.owner.time_zone), now))
             notes.extend(window.notes)
             kept = _kept(vault, source, window, notes)
-        handed = cursors.handover(own, others, now, held, _stored(vault, source), final=final)
+        handed = owed(vault, source, ready, now, final=final)
         if final and not handed.waiting and not handed.retry:
             raise DocketError(f"nothing of {source} has waited a week; no final run is needed")
         shown, whole = ([], False) if since is not None else _fit(sorted(kept), str, KEPT_CHARS)
@@ -315,6 +346,7 @@ async def run_open(
             held=held,
             session=session,
             agent=agent,
+            backfill=since is not None,
         )
         service.runs.open(run)
         return RunOpened(
@@ -400,6 +432,7 @@ async def ingest(
     if captures < 0:
         raise DocketError("captures is 0 or more")
     run = runs.begin_close(run_id)
+    run.skips = dict(Counter(s.reason for s in skips))
     # From here a closing run never outlives the call: it goes back to open, is dropped, or reaches _finish, which
     # records its outcome whatever happens.
     try:
@@ -416,11 +449,14 @@ async def ingest(
     except _ReopenError as e:
         runs.reopen(run_id)
         raise DocketError(str(e)) from None
+    except _DropError as e:
+        runs.drop(run_id, str(e), e.kind)
+        raise
     except DocketError as e:
-        runs.drop(run_id, str(e))
+        runs.drop(run_id, str(e), history.REFUSED)
         raise
     except Exception:
-        runs.drop(run_id, "the close failed")
+        runs.drop(run_id, "the close failed", history.FAILED)
         raise
     # Shielded: a client that gives up doesn't stop a close halfway, and its outcome is kept for the next ingest.
     closed = await asyncio.shield(asyncio.ensure_future(_finish(service, run, manifest, folder_path)))
@@ -436,24 +472,49 @@ async def _finish(service: Service, run: Run, manifest: Manifest, folder: Path |
         runs.reopen(run.id)
         raise DocketError(f"{e}; the run stays open: call ingest again in a moment") from None
     except (MapperFailedError, MapperRefusedError) as e:
-        runs.drop(run.id, f"the mapper failed: {e}")
+        runs.drop(run.id, f"the mapper failed: {e}", history.MAPPER)
         raise DocketError(
             f"{e}; the run is dropped and nothing is staged; the mark stays. The mapper's own errors aren't shown, "
             "since they can quote a payload: run its tests"
         ) from None
     except DocketError as e:
-        runs.drop(run.id, str(e))
+        runs.drop(run.id, str(e), history.REFUSED)
         raise DocketError(f"{e}; the run is dropped and the mark stays") from None
     except Exception:
-        runs.drop(run.id, "the close failed")
+        runs.drop(run.id, "the close failed", history.FAILED)
         raise
-    runs.finish(run.id, closed)
+    runs.finish(run.id, closed, _closing(closed))
     service.updater.poke()
     return closed
 
 
+def _closing(closed: RunClosed) -> history.Closing:
+    """What a whole close adds to its run's line in the history: ids and counts."""
+    return history.Closing(
+        staged=history.Staged(
+            pending=closed.pending, ready=closed.ready, skipped=closed.skipped, on_hold=closed.on_hold
+        ),
+        dropped=dict(closed.dropped),
+        set_aside=[history.SetAside(id=e.id, reason=e.reason, tool=e.tool, key=e.key) for e in closed.set_aside],
+        waiting=[w.id for w in closed.waiting],
+        mark=history.Mark(before=closed.mark_before, after=closed.mark_after, moved=closed.moved),
+        cursor_problem=closed.cursor_problem,
+        owed=history.Counts(retry=closed.retry_count, waiting=closed.waiting_count),
+        expired=list(closed.expired),
+        held_in_raw=list(closed.held_in_raw),
+    )
+
+
 class _ReopenError(DocketError):
     """A close refused before anything was written, for a reason the caller can fix: the run stays open."""
+
+
+class _DropError(DocketError):
+    """A close refused for a reason that drops the run, named by its kind (DR-0302)."""
+
+    def __init__(self, kind: str, message: str) -> None:
+        super().__init__(message)
+        self.kind = kind
 
 
 def _check_close(service: Service, run: Run, captures: int, final: bool, folder: str | None) -> Path | None:
@@ -465,13 +526,18 @@ def _check_close(service: Service, run: Run, captures: int, final: bool, folder:
     except DocketError as e:
         raise _ReopenError(str(e)) from None
     if run.session is None:
-        raise DocketError("the capture hook never tied the run to a session; is the docket plugin on here?")
+        raise _DropError(
+            history.UNBOUND, "the capture hook never tied the run to a session; is the docket plugin on here?"
+        )
     if run.short is not None:
-        raise DocketError(f"the run came up short: {run.short}; nothing is staged, the next run fetches it again")
+        raise _DropError(
+            history.SHORT, f"the run came up short: {run.short}; nothing is staged, the next run fetches it again"
+        )
     if captures != len(run.captures):
-        raise DocketError(
+        raise _DropError(
+            history.COUNT,
             f"the manifest counts {captures} capture(s) and {len(run.captures)} arrived; nothing is staged, the next "
-            "run fetches them again"
+            "run fetches them again",
         )
     return folder_path
 

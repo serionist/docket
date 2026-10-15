@@ -11,8 +11,6 @@ other exception is logged as its type and frames, never its message, and answere
 from __future__ import annotations
 
 import asyncio
-import logging
-from collections.abc import Awaitable, Callable
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -28,8 +26,6 @@ from docket.web import panel, templating, views
 from docket.web.shell import shell
 from docket.web.state import SearchState
 
-log = logging.getLogger("docket.service.web")
-
 RETRY = "X-Docket-Retry"
 FAILED = (
     "Something failed in Docket. The service log says what, and never holds your words; docket service status names it."
@@ -37,12 +33,14 @@ FAILED = (
 WAIT_SECONDS = 5
 
 
+def _canonical(url: str) -> str | None:
+    state = SearchState.from_url(url)
+    return state.url() if state is not None else None
+
+
 def _history(request: Request, state: SearchState, *, replace: bool = False) -> dict[str, str]:
     """The header that puts this state's canonical URL in the address bar: a new entry only when it changed."""
-    canonical = state.url()
-    current = SearchState.from_url(request.headers.get("hx-current-url", ""))
-    same = current is not None and current.url() == canonical
-    return {"HX-Replace-Url" if replace or same else "HX-Push-Url": canonical}
+    return templating.history(request, state.url(), _canonical, replace=replace)
 
 
 async def _workspace(service: Service, state: SearchState) -> tuple[dict[str, Any], int]:
@@ -78,18 +76,6 @@ async def _workspace(service: Service, state: SearchState) -> tuple[dict[str, An
 
 def _zone(service: Service) -> ZoneInfo:
     return ZoneInfo(service.vault().config.owner.time_zone)
-
-
-async def _safely(
-    request: Request, route: str, answer: Callable[[], Awaitable[Response]], failed: Callable[[], Response]
-) -> Response:
-    """The route's answer; on an unexpected error, the log gets the type and frames only, since a message can quote a
-    record, and the answer is the page's or the fragment's own error, so a fragment never swaps in a whole page."""
-    try:
-        return await answer()
-    except Exception as e:
-        log.error("%s %s failed", request.method, route, exc_info=e)
-        return failed()
 
 
 def _dates(request: Request) -> dict[str, str]:
@@ -129,7 +115,7 @@ def router(service: Service) -> APIRouter:
         def failed() -> Response:
             return templating.page("error.html", shell(None, request, "Something failed"), status=500)
 
-        return await _safely(request, "/search", answer, failed)
+        return await templating.safely(request, "/search", answer, failed)
 
     @web.get("/search/results", include_in_schema=False)
     async def search_results(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
@@ -147,7 +133,7 @@ def router(service: Service) -> APIRouter:
             context = shell(None, request, "Search") | _unread(request, FAILED)
             return templating.page("search/_workspace.html", context, status=500)
 
-        return await _safely(request, "/search/results", answer, failed)
+        return await templating.safely(request, "/search/results", answer, failed)
 
     @web.get("/search/panel", include_in_schema=False)
     async def search_panel(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
@@ -161,7 +147,7 @@ def router(service: Service) -> APIRouter:
             headers = _history(request, state)
             return templating.page("search/_panel.html", {"panel": built}, status=status, headers=headers)
 
-        return await _safely(request, "/search/panel", answer, lambda: _panel_error(FAILED, 500))
+        return await templating.safely(request, "/search/panel", answer, lambda: _panel_error(FAILED, 500))
 
     return web
 

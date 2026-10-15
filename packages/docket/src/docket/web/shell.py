@@ -13,6 +13,7 @@ from starlette.requests import Request
 
 from docket.errors import DocketError
 from docket.service.state import Service
+from docket.web import pages
 
 THEME_COOKIE = "docket_theme"
 KEYS_COOKIE = "docket_keys"
@@ -34,8 +35,9 @@ def _index_line(service: Service) -> str:
     return f"{chunks:,} chunks from {records:,} records and {docs:,} docs, updated {last.at.astimezone():%H:%M}"
 
 
-def shell(service: Service | None, request: Request, title: str) -> dict[str, Any]:
-    context: dict[str, Any] = {"title": title, "current": "search", "vault_name": "", "machine": "", "index_line": ""}
+def shell(service: Service | None, request: Request, title: str, current: str = "search") -> dict[str, Any]:
+    context: dict[str, Any] = {"title": title, "current": current, "vault_name": "", "machine": "", "index_line": ""}
+    context |= {"page_keys": pages.PAGE_KEYS[current], "hints": pages.HINTS[current]}
     context |= prefs(request)
     if service is None:
         return context

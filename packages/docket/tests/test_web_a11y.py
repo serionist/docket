@@ -22,11 +22,17 @@ PAGES = [
     f"/search?query=Nortwin&hit={quote('r:calls:rec-0100@01:50-03:20')}&verify=1",
     "/search?query=fleet&hit=recording-note:2026-10-13-fleet-review&lines=12",
     "/search?hit=r:calls:rec-9999",
+    "/sync",
+    "/sync?source=calls&k=40",
+    "/sync?run=run-20261015T000000-ffffffffffffffff",
+    "/sync?k=0",
 ]
 FRAGMENTS = [
     "/search/results?query=pallet+labels",
     f"/search/panel?hit={quote('r:mail:<offer-1@northwind.example>#1-4')}",
     "/search/panel?hit=legacy-note:old-northwind-notes",
+    "/sync/runs",
+    "/sync/runs?k=0",
 ]
 
 

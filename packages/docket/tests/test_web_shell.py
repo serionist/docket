@@ -65,9 +65,13 @@ def test_the_navigation_has_a_slot_for_every_page_and_links_the_built_ones(clien
     page = parse(client.get("/search").text)
     nav = page.find("nav", class_="nav")
     links = nav.find_all("a")
-    assert [(a.attrs["href"], a.attrs.get("aria-current")) for a in links] == [("/search", "page")]
+    built = [p for p in pages.PAGES if p.built]
+    assert [(a.attrs["href"], a.attrs.get("aria-current")) for a in links] == [
+        (p.path, "page" if p.key == "search" else None) for p in built
+    ]
     slots = nav.find_all("span", class_="nav-slot")
-    assert len(slots) == len(pages.PAGES) - 1 == 11
+    assert len(slots) == len(pages.PAGES) - len(built)
+    assert len(pages.PAGES) == 12
     assert [s.attrs["title"].split(":")[0] for s in slots[:5]] == ["Today", "Queue", "Ledger", "Meetings", "Outbox"]
     # No number beside a slot, which would read as a count: one muted "later" per group, the phase in the tooltip and
     # the screen-reader text.
@@ -81,7 +85,9 @@ def test_the_navigation_has_a_slot_for_every_page_and_links_the_built_ones(clien
     assert [c.text() for c in finding.find_all("li")][:2] == ["Search", "later"]
 
 
-@pytest.mark.parametrize("path", ["/search", "/search?query=fleet", "/search/results?query=fleet", "/search/panel"])
+@pytest.mark.parametrize(
+    "path", ["/search", "/search?query=fleet", "/search/results?query=fleet", "/search/panel", "/sync", "/sync/runs"]
+)
 def test_every_page_and_fragment_carries_the_page_csp_and_no_store(client: TestClient, path: str) -> None:
     answer = client.get(path)
     assert answer.status_code == 200

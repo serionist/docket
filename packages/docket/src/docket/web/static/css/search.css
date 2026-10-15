@@ -127,10 +127,6 @@
   .also summary { cursor: pointer; }
   .more { margin-top: var(--space-3); }
 
-  .empty { padding: var(--space-5); color: var(--ink); background: var(--surface); border: 1px dashed var(--line-strong); border-radius: var(--radius-lg); }
-  .empty h3 { margin-bottom: var(--space-2); }
-  .empty ul { list-style: disc; padding-left: 1.4em; display: grid; gap: 2px; }
-  .empty .chips { list-style: none; padding: 0; }
   .start { max-width: 980px; }
   .start .muted { margin-top: var(--space-3); font-size: var(--text-sm); }
 

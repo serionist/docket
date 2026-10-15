@@ -224,7 +224,8 @@ flowchart TB
   keychain; the MCP endpoint also uses the MCP SDK's DNS-rebinding protection. The service runs the consuming repo's
   mappers, never code from the vault, a downloads folder or a drop folder.
 - Sync runs live in the service's memory from `run_open` to `ingest`, and nothing of a capture is written to disk or
-  to a log (DR-0240). The run routes under `/api/runs` take the bearer token only, never the browser's session, and a
+  to a log (DR-0240). Each run that ends, whole or dropped with its kind (DR-0302), leaves a line of ids and counts in
+  the vault's private folder, `sync/runs.jsonl`, which only the Sync page reads (DR-0301). The run routes under `/api/runs` take the bearer token only, never the browser's session, and a
   capture only from the session its run is bound to, within caps (DR-0243). A close maps on a thread of its own for at
   most 90 seconds, under the plugin's 120-second tool timeout, and writes through the writer (DR-0244).
 - Any number of machines; git is the source of truth. Each machine's index is a cache, rebuilt from the repo. Raw
@@ -593,6 +594,10 @@ How it is built (DR-0170 to DR-0176):
   raw.
 - The user's words stay out of the browser's storage: pages aren't cached, and the browser keeps only the theme and
   the keys switch.
+- The Sync page only reads (DR-0300): what needs a Claude session or the user first, by `run_open`'s own checks and
+  final-run rule (DR-0304); the failures still current, each with what to do (DR-0305); the runs open and ended; each
+  machine's cursors. Its URL holds `source`, `run` and `k` (DR-0303), and its runs part refreshes while a run is open
+  (DR-0306).
 
 ## 11. Claude first
 

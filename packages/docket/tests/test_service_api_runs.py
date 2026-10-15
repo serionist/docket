@@ -31,6 +31,7 @@ from sync_kit import (
 )
 
 from docket.cli import main
+from docket.errors import DocketError
 from docket.service import api, logs, state, sync
 from docket.service.runs import Run
 from docket.service.sessions import COOKIE
@@ -77,6 +78,14 @@ def own_cursor(vault: Vault) -> cursors.Cursor | None:
 
 def staged(vault: Vault) -> set[str]:
     return {e.staged.record.rid for e in Gate(vault).list(source="memo").entries}
+
+
+def history_file(vault: Vault) -> Path:
+    return vault.home.private / "sync" / "runs.jsonl"
+
+
+def last_kind(vault: Vault) -> str:
+    return json.loads(history_file(vault).read_text(encoding="utf-8").splitlines()[-1])["kind"]
 
 
 def log(vault: Vault) -> list[str]:
@@ -270,6 +279,7 @@ def test_a_held_record_waiting_in_staging_drops_the_run(client: TestClient, vaul
     assert answer.status_code == 400
     assert "on hold wait in staging" in answer.json()["error"]
     assert "the run is dropped and the mark stays" in answer.json()["error"]
+    assert last_kind(vault) == "refused"
 
 
 def test_a_second_close_while_one_maps_is_refused_and_its_run_stays_open(client: TestClient) -> None:
@@ -712,7 +722,7 @@ def test_a_cursor_that_cant_be_saved_leaves_the_run_closed_and_the_mark_where_it
     assert own_cursor(vault) is None
 
 
-def test_an_unexpected_failure_drops_the_run(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_unexpected_failure_drops_the_run(client: TestClient, vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
     from docket.sources import ingest
 
     def broken(*_args: object) -> None:
@@ -724,6 +734,7 @@ def test_an_unexpected_failure_drops_the_run(client: TestClient, monkeypatch: py
     run.fetch(memo("u1"))
     assert run.close().status_code == 500
     assert "was dropped: the close failed" in run.close().json()["error"]
+    assert last_kind(vault) == "failed"
 
 
 def test_the_close_text_names_ids_and_counts() -> None:
@@ -968,3 +979,117 @@ def test_the_window_line_is_in_utc_whatever_zone_since_came_in(client: TestClien
     opened = Session(client).open(since="2026-01-02T09:00")
     text = sync.opened_text(sync.RunOpened.model_validate(opened))
     assert "window   2026-01-02T08:00:00Z to " in text
+
+
+# -- the run history (DR-0301, DR-0302) --------------------------------------------------------------------------------
+
+
+def test_each_ended_run_leaves_a_line_of_ids_and_counts_that_outlives_the_service(
+    client: TestClient, vault: Vault
+) -> None:
+    whole = Session(client, session="session-5c1d")
+    whole.open()
+    a, b = memo("h1"), memo("h2")
+    whole.listing(a, b)
+    whole.fetch(a)
+    assert whole.close(skipped=[{"id": "h2", "reason": "rate-limited"}]).status_code == 200
+    counted = Session(client, session="session-5c1d")
+    counted.open()
+    counted.listing(memo("h3"))
+    assert counted.close(5).status_code == 400
+    crashed = Session(client, session="session-5c1d")
+    crashed.open()
+    crashed.fetch(memo("h4", crash=TITLE))
+    assert crashed.close().status_code == 400
+    unbound = client.post("/api/runs", json={"source": "memo"}, headers=BEARER).json()["run"]
+    assert client.post(f"/api/runs/{unbound}/close", json={"captures": 0}, headers=BEARER).status_code == 400
+    short = Session(client, session="session-5c1d")
+    short.open()
+    short.capture("delete_memo", as_structured(memo("h5")))
+    assert short.close(0).status_code == 400
+
+    lines = [json.loads(t) for t in history_file(vault).read_text(encoding="utf-8").splitlines()]
+    assert [(line["run"], line["kind"]) for line in lines] == [
+        (whole.run, "closed"),
+        (counted.run, "count"),
+        (crashed.run, "mapper"),
+        (unbound, "unbound"),
+        (short.run, "short"),
+    ]
+    first = lines[0]
+    assert (first["outcome"], first["captures"], first["skipped"]) == ("closed", 2, {"rate-limited": 1})
+    assert (first["staged"]["pending"], first["mark"]["moved"], first["owed"]) == (1, True, {"retry": 1, "waiting": 0})
+    assert "counts 5 capture(s)" in lines[1]["why"]
+    assert lines[2]["why"].startswith("the mapper failed")
+    text = history_file(vault).read_text(encoding="utf-8")
+    for never in (TITLE, "session-5c1d", "Ada Example"):
+        assert never not in text
+    # A new service on the same vault reads them back, newest first.
+    with service_client(vault) as again:
+        recent = app_of(again).service.history.recent()
+        assert [line.run for line in recent] == [short.run, unbound, crashed.run, counted.run, whole.run]
+
+
+# -- run_open's checks and its final rule, which the Sync page shares (DR-0304) ---------------------------------------
+
+
+def _old_skill(vault: Vault) -> None:
+    (vault.root.parent / ".claude" / "skills" / "sources" / "memo" / "SKILL.md").write_text("# old\n", encoding="utf-8")
+
+
+def _bad_cursor(vault: Vault) -> None:
+    path = cursors.file_path(vault.root, "test-box")
+    path.parent.mkdir(exist_ok=True)
+    path.write_text("schema_version: 1\nsurprise: 1\n", encoding="utf-8")
+
+
+def _held_in_staging(vault: Vault) -> None:
+    Gate(vault).stage([make_record(rid="memo:h9", source="memo", container=None, thread=None)])
+    holds.add(vault, "memo", ["h9"])
+
+
+@pytest.mark.parametrize(
+    "breaks",
+    [
+        _old_skill,
+        _bad_cursor,
+        _held_in_staging,
+        lambda v: set_config(v, lambda c: setattr(c.sources["memo"], "enabled", False)),
+        lambda v: set_config(v, lambda c: setattr(c.sources["memo"], "mapper", None)),
+    ],
+)
+def test_preflight_refuses_with_run_opens_own_words(client: TestClient, vault: Vault, breaks: Any) -> None:
+    breaks(vault)
+    with pytest.raises(DocketError) as refused:
+        sync.preflight(Vault.open(vault.root), "memo")
+    assert client.post("/api/runs", json={"source": "memo"}, headers=BEARER).json()["error"] == str(refused.value)
+
+
+def test_a_final_run_is_owed_exactly_when_run_open_would_open_one(client: TestClient, vault: Vault) -> None:
+    now = datetime.now(UTC)
+    write_cursor(vault, cursors.Cursor(mark=now, waiting={"w1": cursors.Waiting("w1", "summary", TODAY)}))
+    ready = sync.preflight(vault, "memo")
+    assert sync.owed(vault, "memo", ready, now, final=True) == cursors.Handover()
+    assert set(sync.owed(vault, "memo", ready, now, final=False).waiting) == {"w1"}
+    refused = client.post("/api/runs", json={"source": "memo", "final": True}, headers=BEARER)
+    assert "no final run is needed" in refused.json()["error"]
+    old = TODAY - timedelta(days=8)
+    write_cursor(vault, cursors.Cursor(mark=now, waiting={"w1": cursors.Waiting("w1", "summary", old)}))
+    ready = sync.preflight(vault, "memo")
+    assert set(sync.owed(vault, "memo", ready, now, final=True).waiting) == {"w1"}
+    assert [w["id"] for w in Session(client).open(final=True)["waiting"]] == ["w1"]
+
+
+def test_another_refusal_before_the_mapper_drops_the_run_as_refused(
+    client: TestClient, vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuses(*_args: object) -> None:
+        raise DocketError("a check of its own refused the close")
+
+    monkeypatch.setattr(sync, "_check_close", refuses)
+    run = Session(client)
+    run.open()
+    answer = run.close(0)
+    assert answer.status_code == 400
+    assert answer.json()["error"] == "a check of its own refused the close"
+    assert last_kind(vault) == "refused"

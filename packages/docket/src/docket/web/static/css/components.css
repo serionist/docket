@@ -277,6 +277,12 @@
   .pair.has-problem .pair-line { border-left: 3px solid var(--error); padding-left: var(--space-2); }
   .problem { display: flex; gap: 6px; margin-top: 4px; color: var(--error); font-size: var(--text-sm); }
 
+  /* -- the empty state any page shows -------------------------------------------------------------------------- */
+  .empty { padding: var(--space-5); color: var(--ink); background: var(--surface); border: 1px dashed var(--line-strong); border-radius: var(--radius-lg); }
+  .empty h3 { margin-bottom: var(--space-2); }
+  .empty ul { list-style: disc; padding-left: 1.4em; display: grid; gap: 2px; }
+  .empty .chips { list-style: none; padding: 0; }
+
   .bare-main { display: grid; place-items: start center; padding: 10vh var(--space-4) var(--space-5); }
   .bare-card { max-width: 560px; display: grid; gap: var(--space-2); }
 }

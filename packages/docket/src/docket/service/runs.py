@@ -9,20 +9,25 @@ one small file and nothing else.
 A run is dropped, its captures freed and the mark kept, when it comes up short, fails its close, sees no capture for 30
 minutes, stays open 6 hours, is never bound, or is replaced by a newer run of its source or of its session. A closing
 run is never dropped or replaced. Each finished run's outcome stays an hour, so a repeated `ingest` gets the truth.
+
+Every end names its kind (DR-0302), and its line, ids and counts only, goes to the run history (DR-0301).
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from docket.errors import DocketError
+from docket.service import history
+from docket.service.history import Closing, Counts, RunLine
 from docket.sources.contract import Capture
 from docket.vault import cursors
 from docket.vault.staging import retry
@@ -36,6 +41,7 @@ CAPTURE_CAP = 32 * 1024 * 1024
 TOTAL_CAP = 256 * 1024 * 1024
 # What a run may capture before it fetches no new item: about a tenth of Claude's context, so a sync never fills it.
 BUDGET = 400 * 1024
+RUN_ID = re.compile(r"^run-(\d{8}T\d{6})-[0-9a-f]{16}$")
 
 
 class RunError(DocketError):
@@ -64,12 +70,17 @@ class Run:
     held: frozenset[str]
     session: str | None = None
     agent: str | None = None
+    # Opened with `since`, for a backfill's listing.
+    backfill: bool = False
     captures: list[Capture] = field(default_factory=list[Capture])
     tool_uses: dict[str, int] = field(default_factory=dict[str, int])
     size: int = 0
     short: str | None = None
     closing: bool = False
     last: datetime | None = None
+    last_capture: datetime | None = None
+    # What the close's manifest skipped, by reason, once a close has begun.
+    skips: dict[str, int] = field(default_factory=dict[str, int])
 
 
 @dataclass(frozen=True)
@@ -77,6 +88,32 @@ class Outcome:
     at: datetime
     closed: Any = None
     dropped: str | None = None
+    kind: str = history.CLOSED
+
+
+@dataclass(frozen=True)
+class OpenRun:
+    """An open run as a status page shows it: ids, counts and times, never content, no session or agent."""
+
+    id: str
+    source: str
+    final: bool
+    backfill: bool
+    bound: bool
+    closing: bool
+    captures: int
+    bytes: int
+    budget: int
+    opened: datetime
+    last: datetime | None
+    # When it drops with nothing more: the bind's minute, 30 minutes idle or 6 hours open; None while it closes.
+    drops_at: datetime | None
+    short: str | None
+    since: datetime | None
+    until: datetime | None
+    told_to_skip: int
+    held: int
+    handed: Counts
 
 
 @dataclass(frozen=True)
@@ -86,16 +123,59 @@ class Kept:
     budget: int
 
 
+def _opened_by_id(run_id: str) -> datetime | None:
+    match = RUN_ID.match(run_id)
+    return datetime.strptime(match[1], "%Y%m%dT%H%M%S").replace(tzinfo=UTC) if match else None
+
+
+def _left(marker: Path) -> list[tuple[str, str]]:
+    """The runs a marker names, as (run, source): ids only, and nothing at all from one that doesn't read."""
+    try:
+        data: Any = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    runs: Any = cast(dict[str, Any], data).get("runs") if isinstance(data, dict) else None
+    if not isinstance(runs, list):
+        return []
+    left: list[tuple[str, str]] = []
+    for entry in cast(list[Any], runs):
+        if not isinstance(entry, dict):
+            continue
+        run, source = cast(dict[str, Any], entry).get("run"), cast(dict[str, Any], entry).get("source")
+        if isinstance(run, str) and isinstance(source, str):
+            left.append((run, source))
+    return left
+
+
 class Runs:
-    def __init__(self, state: Path | None, clock: Callable[[], datetime] = now_utc) -> None:
+    def __init__(
+        self,
+        state: Path | None,
+        clock: Callable[[], datetime] = now_utc,
+        ended: Callable[[RunLine], None] | None = None,
+    ) -> None:
         self.clock = clock
         self.marker = state / MARKER if state is not None else None
+        self._ended = ended
         self._lock = threading.RLock()
         self._runs: dict[str, Run] = {}
         self._outcomes: dict[str, Outcome] = {}
         self._mapping: str | None = None
-        # A marker a stopped or crashed service left names runs nobody holds.
+        # A marker a stopped or crashed service left names runs nobody holds: each is recorded as stopped, then it goes.
         if self.marker is not None:
+            now = self.clock()
+            for run_id, source in _left(self.marker):
+                self._record(
+                    RunLine(
+                        run=run_id,
+                        source=source,
+                        opened=_opened_by_id(run_id) or now,
+                        ended=now,
+                        outcome="dropped",
+                        kind=history.STOPPED,
+                        why="the service stopped before the run closed; found at the next start",
+                    )
+                )
             retry(lambda: self.marker.unlink(missing_ok=True) if self.marker else None)
 
     # -- opening and binding -----------------------------------------------------------------------------------------
@@ -113,7 +193,7 @@ class Runs:
             if any(r.closing for r in same):
                 raise RunError(f"a run of {run.source} is closing; open the new one in a minute")
             for old in same:
-                self._drop(old.id, f"replaced by a newer run, {run.id}")
+                self._drop(old.id, f"replaced by a newer run, {run.id}", history.REPLACED)
             self._runs[run.id] = run
             self._write_marker()
 
@@ -128,7 +208,7 @@ class Runs:
             for other in [r for r in self._runs.values() if (r.session, r.agent) == (session, agent)]:
                 if other.closing:
                     raise RunError("this session's last run is still closing; open the new one in a minute")
-                self._drop(other.id, f"replaced by a newer run of its session, {run_id}")
+                self._drop(other.id, f"replaced by a newer run of its session, {run_id}", history.REPLACED)
             run.session, run.agent = session, agent
             self._write_marker()
             return run
@@ -172,7 +252,7 @@ class Runs:
             )
             run.tool_uses[tool_use_id] = len(run.captures)
             run.size += size
-            run.last = self.clock()
+            run.last = run.last_capture = self.clock()
             return Kept(len(run.captures), run.size, BUDGET)
 
     def mark_short(self, run_id: str, why: str) -> None:
@@ -221,24 +301,62 @@ class Runs:
             if self._mapping == run_id:
                 self._mapping = None
 
-    def finish(self, run_id: str, closed: Any) -> None:
+    def finish(self, run_id: str, closed: Any, closing: Closing | None = None) -> None:
         with self._lock:
-            self._runs.pop(run_id, None)
-            self._outcomes[run_id] = Outcome(at=self.clock(), closed=closed)
+            run = self._runs.pop(run_id, None)
+            now = self.clock()
+            self._outcomes[run_id] = Outcome(at=now, closed=closed)
             if self._mapping == run_id:
                 self._mapping = None
+            if run is not None:
+                self._record(self._line(run, now, history.CLOSED, None, closing))
             self._write_marker()
 
-    def drop(self, run_id: str, why: str) -> None:
+    def drop(self, run_id: str, why: str, kind: str) -> None:
         with self._lock:
-            self._drop(run_id, why)
+            self._drop(run_id, why, kind)
             self._write_marker()
 
     def close_all(self, why: str = "the service stopped") -> None:
         with self._lock:
             for run_id in list(self._runs):
-                self._drop(run_id, why)
+                self._drop(run_id, why, history.STOPPED)
             self._write_marker()
+
+    def snapshot(self) -> list[OpenRun]:
+        """Open runs for the Sync page, oldest first."""
+        with self._lock:
+            self._sweep()
+            return [self._open_run(r) for r in sorted(self._runs.values(), key=lambda r: (r.opened, r.id))]
+
+    @staticmethod
+    def _open_run(run: Run) -> OpenRun:
+        if run.closing:
+            drops_at = None
+        elif run.session is None:
+            drops_at = run.opened + BIND_WITHIN
+        else:
+            drops_at = min(run.opened + MAX_OPEN, (run.last or run.opened) + IDLE)
+        return OpenRun(
+            id=run.id,
+            source=run.source,
+            final=run.final,
+            backfill=run.backfill,
+            bound=run.session is not None,
+            closing=run.closing,
+            captures=len(run.captures),
+            bytes=run.size,
+            budget=BUDGET,
+            opened=run.opened,
+            last=run.last_capture,
+            drops_at=drops_at,
+            short=run.short,
+            since=run.window.since if run.window else None,
+            until=run.window.until if run.window else None,
+            told_to_skip=len(run.kept),
+            held=len(run.held),
+            handed=Counts(retry=len(run.handed.retry), waiting=len(run.handed.waiting)),
+        )
 
     def listing(self) -> list[dict[str, Any]]:
         """Open runs for a status page: ids, counts and times, never content."""
@@ -271,13 +389,59 @@ class Runs:
             f"no open run {run_id}: the service restarted or the run was dropped; nothing staged, the mark stays"
         )
 
-    def _drop(self, run_id: str, why: str) -> None:
+    def _drop(self, run_id: str, why: str, kind: str, ended: datetime | None = None) -> None:
         run = self._runs.pop(run_id, None)
         if run is None:
             return
-        self._outcomes[run_id] = Outcome(at=self.clock(), dropped=why)
+        now = self.clock()
+        self._outcomes[run_id] = Outcome(at=now, dropped=why, kind=kind)
         if self._mapping == run_id:
             self._mapping = None
+        self._record(self._line(run, ended or now, kind, why, None))
+
+    @staticmethod
+    def _line(run: Run, ended: datetime, kind: str, why: str | None, closing: Closing | None) -> RunLine:
+        """A run's line for the history: ids, counts and times, never a capture, a session or an agent."""
+        fields: dict[str, Any] = {
+            "run": run.id,
+            "source": run.source,
+            "final": run.final,
+            "backfill": run.backfill,
+            "opened": run.opened,
+            "ended": ended,
+            "since": run.window.since if run.window else None,
+            "until": run.window.until if run.window else None,
+            "outcome": "closed" if kind == history.CLOSED else "dropped",
+            "kind": kind,
+            "why": history.capped_why(why),
+            "captures": len(run.captures),
+            "bytes": run.size,
+            "told_to_skip": len(run.kept),
+            "held": len(run.held),
+            "handed": Counts(retry=len(run.handed.retry), waiting=len(run.handed.waiting)),
+            "skipped": dict(run.skips),
+        }
+        if closing is not None:
+            fields |= {
+                "staged": closing.staged,
+                "dropped": dict(closing.dropped),
+                "set_aside": closing.set_aside[: history.IDS],
+                "set_aside_count": len(closing.set_aside),
+                "waiting": history.first_ids(closing.waiting),
+                "waiting_count": len(closing.waiting),
+                "mark": closing.mark,
+                "cursor_problem": history.capped_why(closing.cursor_problem),
+                "owed": closing.owed,
+                "expired": history.first_ids(closing.expired),
+                "expired_count": len(closing.expired),
+                "held_in_raw": history.first_ids(closing.held_in_raw),
+                "held_in_raw_count": len(closing.held_in_raw),
+            }
+        return RunLine(**fields)
+
+    def _record(self, line: RunLine) -> None:
+        if self._ended is not None:
+            self._ended(line)
 
     def _sweep(self) -> None:
         now = self.clock()
@@ -285,16 +449,18 @@ class Runs:
         for run in list(self._runs.values()):
             if run.closing:
                 continue
-            why = None
+            # A run dropped by a limit ended when the limit passed, not when this sweep saw it.
             if run.session is None and now - run.opened > BIND_WITHIN:
                 why = "the capture hook never tied it to a session; is the docket plugin on in this session?"
+                kind, ended = history.UNBOUND, run.opened + BIND_WITHIN
             elif now - run.opened > MAX_OPEN:
-                why = "it stayed open 6 hours"
+                why, kind, ended = "it stayed open 6 hours", history.TOO_LONG, run.opened + MAX_OPEN
             elif run.last is not None and now - run.last > IDLE:
-                why = "30 minutes passed with no capture"
-            if why is not None:
-                self._drop(run.id, why)
-                changed = True
+                why, kind, ended = "30 minutes passed with no capture", history.IDLE, run.last + IDLE
+            else:
+                continue
+            self._drop(run.id, why, kind, ended)
+            changed = True
         for run_id in [i for i, o in self._outcomes.items() if now - o.at > KEEP_OUTCOME]:
             del self._outcomes[run_id]
         if changed:

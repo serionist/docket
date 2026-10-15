@@ -97,6 +97,9 @@ terms:
   - term: retry set
     definition: The ids a sync run skipped with a reason (later, too-large, gone, rate-limited), fetched by id on later runs. An id held back for the budget waits as long as it takes; any other leaves after 30 days.
     see: [packages/docket/src/docket/vault/cursors.py]
+  - term: run history
+    definition: "One line of ids, counts and times per sync run that ended, whole or dropped, in sync/runs.jsonl in the vault's private folder: per machine, never committed, read only by the Sync page, and safe to delete."
+    see: [packages/docket/src/docket/service/history.py]
   - term: run manifest
     definition: "What a source skill sends when its run ends: the run's id, how many captures it made, its window and what it skipped. A run closes only when Docket holds every capture it counts."
     see: [packages/docket/src/docket/sources/contract.py]

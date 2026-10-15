@@ -1,0 +1,30 @@
+{% from "macros.html" import notice %}
+{% from "sync/macros.html" import card with context %}
+{# The runs part: the whole page includes it, and /sync/runs answers it alone while a run is open. #}
+<header class="part-head">
+  <h2 id="runs-title">Runs</h2>
+  {% if view %}<p class="as-of">as of <time datetime="{{ view.as_of.isoformat() }}">{{ view.as_of|at(tz) }}</time>{% if view.live %}; refreshes while a run is open{% endif %} <a href="{{ state.url() }}">Reload</a></p>{% endif %}
+</header>
+{% if problem and fragment %}
+{{ notice('error', problem) }}
+{% elif view %}
+{% if view.live %}
+<div class="poll" aria-hidden="true" hx-get="{{ view.refresh }}" hx-trigger="load delay:5s" hx-target="#runs"></div>
+{% elif fragment %}
+{{ notice('info', 'No run is open now. Reload the page for the cursors and what is due.') }}
+{% endif %}
+{% if view.focus %}
+<ol class="runs focus" aria-label="The run asked for">
+  {{ card(view.focus) }}
+</ol>
+{% endif %}
+{% if view.open_runs or view.recent %}
+<ol class="runs" aria-label="Open runs, then recent ones">
+  {% for r in view.open_runs %}{{ card(r) }}{% endfor %}
+  {% for r in view.recent %}{{ card(r) }}{% endfor %}
+</ol>
+{% if view.more %}<p class="more"><a class="button" href="{{ view.more }}">Show more</a></p>{% endif %}
+{% elif not view.focus %}
+<p class="empty-line">No run yet on this machine. Runs show here when Claude syncs a source.</p>
+{% endif %}
+{% endif %}

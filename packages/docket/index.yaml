@@ -19,6 +19,7 @@ reading:
   - { path: packages/docket/src/docket/vault/cursors.py, role: contract, note: "each machine's cursor file, a one-way door: its keys, how it reads and fails closed, the window, the retry and waiting sets" }
   - { path: packages/docket/src/docket/service/runs.py, role: contract, note: "open sync runs in memory: bind, captures, close, drop, the caps, the marker the capture hook reads" }
   - { path: packages/docket/src/docket/questions.py, role: contract, note: "the question file docket eval reads, a one-way door (DR-0290), and what answers a wanted locator (DR-0291)" }
+  - { path: packages/docket/src/docket/service/history.py, role: contract, note: "the run history: one line of ids and counts per ended run, in the vault's private folder; disposable, not a door" }
 decisions:
   - id: DR-0019
     title: The vault's layout and run-file names are fixed
@@ -1519,3 +1520,90 @@ decisions:
     not_chosen:
       - "DR-0131's steps as SQL: a second copy of the rules to keep in step."
       - "The old_paths table alone: read would still parse every doc for superseded_by and the citing lines."
+  - id: DR-0300
+    title: The Sync page is read-only and shows what needs doing, what failed, the runs and the cursors
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#72"]
+    description: "/sync shows, in this order: what needs a Claude session or the user first, the failures still current with what to do about each, the open and recent runs, and each machine's cursor of each source. Its sources are those whose vault.yaml entry lists tools, and any other a cursor file or the run history names. It reads the open runs in the service's memory, the run history (DR-0301) and the cursor files, and runs run_open's own checks, in the service's process and never through /api. It adds no write route: nothing on it opens, closes or drops a run or edits a cursor, and the run routes keep the bearer token only (DR-0243)."
+    binds:
+      - "Nothing from a capture's arguments or result, and no session or agent id, reaches the page: ids, counts, times and Docket's own messages only."
+      - "The page and its fragment answer GET only, as Search's do: no write route."
+    not_chosen:
+      - "A button that drops an open run: a write from the browser for what the run's limits already do, and the run routes take no session."
+      - "The page through GET /api/runs: the API takes the token and the page the session; the page reads the service's memory, as Search calls the tools' functions."
+      - "The issue's order, runs first: what to do would sit at the bottom."
+  - id: DR-0301
+    title: Each ended run's summary is a line in the vault's private folder, sync/runs.jsonl, and is disposable
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#72"]
+    description: "When a run closes or drops, the service appends one JSON line to <private>/sync/runs.jsonl, beside folders.json (DR-0248): v (1), run, source, final, backfill, opened, ended, since and until, outcome and kind (DR-0302), why (Docket's own reason, at most 500 characters), captures and bytes, the counts of ids told to skip, held and handed over, skips by reason, the staged counts and intake drops by reason, the set-aside, waiting, expired and held-in-raw ids (20 each at most, with their full counts), the mark before and after and whether it moved, the cursor problem, and the retry and waiting counts after. Per machine, never committed. The service alone writes it, each line whole, under the history's own lock, off the writer thread and outside the vault lock: no other Docket writes it, and it holds nothing the vault keeps. It goes through make_private, so a missing git dir is refused (DR-0270). At start the newest 500 lines are read into memory, which the page reads; a line that doesn't read is skipped; past 1,000 lines the file is rewritten with the newest 500 through a temp file and a rename. A write that fails keeps the line in memory, logs the error's type, and the page says runs aren't kept across a restart."
+    binds:
+      - No capture, title, session or agent id goes into the file.
+      - "Nothing decides from the history: windows, marks, the sets and run_open read the cursor files and the vault. Deleting it loses only the page's list, and a later format starts a new file, so it is no door."
+    not_chosen:
+      - "Docket's state folder beside runs.json: one file for every vault the service ever served."
+      - "Committed in the vault: a commit per run, for one machine's log."
+      - "Memory only, as the outcomes kept for an hour: a restart empties the page."
+      - "The cursor commits as the history: no counts, and no dropped runs."
+      - "Through the writer thread: drops happen in sweeps on any thread, and nothing else writes the file."
+  - id: DR-0302
+    title: A dropped run names its kind, and runs a crash left open are recorded at the next start
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#72"]
+    description: "Every drop names a kind: unbound (no bind within 60 seconds, or a close of a run never bound), idle (30 minutes with no capture), too-long (6 hours open), replaced (a newer run of its source, or a second run bound to its session and agent), stopped (the service stopping), short (a close of a run a refused capture marked short), count (a count that doesn't match), mapper (the mapper failed or its output was refused), refused (another DocketError at close) or failed (any other exception). A whole close is closed, with its cursor problem when it has one. A run dropped by a limit ends when the limit passed, not when a later call's sweep saw it. At start, before deleting a stale runs.json, the service records each run it names as stopped, with no counts. The kinds drive the Sync page's advice (DR-0305); RunClosed, RunOpened and the ingest errors' texts don't change."
+    not_chosen: ["Matching the drop messages: rewording one would break the page's advice."]
+  - id: DR-0303
+    title: The Sync page's URL holds source, run and k
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#72"]
+    description: "/sync takes source (one source's name: every part narrows to it), run (a run's id: its card opens at the top of the runs, open or in the history) and k (how many recent runs: 20 by default, Show more adds 20, up to 500). One canonical form: that order, defaults left out. A malformed value is the page's own error with status 400; a well-formed source or run the page doesn't know says so with 200; unknown parameters are ignored. /sync is always a whole page and /sync/runs always the runs part, for the refresh (DR-0306), naming the page's canonical URL by DR-0170's rule. The page's own links are plain links."
+    binds:
+      - Parameters only gain optional ones whose default keeps today's meaning, so a bookmark or a link to a run keeps opening.
+    not_chosen:
+      - "htmx swaps for the source and Show more: every part changes with the source, and the page is light."
+  - id: DR-0304
+    title: A source is due when no machine synced it in a day; a final run is due by run_open's own rule
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#72"]
+    description: "On the Sync page a source with tools is due a sync when no machine's mark of it is under a day old, or none has one, and no run of it is open; the line names the newest mark, its machine and its age. A final run is due when cursors.handover with final hands over any id, with the inputs run_open(final=true) gives it, so the page says due exactly when that call would open. A source run_open would refuse before any work (no SKILL.md or one without the marker line, no mapper, this machine's cursor file unreadable, a held record waiting in staging) needs the user first, with run_open's own message: preflight in service/sync.py holds those checks, and run_open calls it. A source turned off or private needs nothing, and a retry or waiting entry is badged due a final run only when that final run would be handed it. Each need carries the words to paste into Claude Code, naming run_open, since the sync skill comes in phase 3 (DR-0251)."
+    not_chosen:
+      - "The source's lookback as the line, 7 days: a week of silence before the page says anything."
+      - "A cadence per source in vault.yaml: a source's keys are a door (DR-0124), and Settings owns them."
+      - "The page's own copy of run_open's checks: the two would drift apart."
+  - id: DR-0305
+    title: The Sync page shows current failures, each with what to do
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#72"]
+    description: "Failures are worked out at each render, not stored: a dropped run, and a close whose cursor didn't move or commit, until a later whole close of its source; retry entries skipped for a reason other than later (rate-limited, too-large, gone or another), while run_open would hand them to a run by DR-0247 (not expired, not held, not from a machine whose mark is 30 days old), with the date each leaves; ids a close expired, and held ids already in raw, for 7 days after that close; this machine's cursor file that doesn't read, and another machine's left out. Each kind has one line of what to do, from one table in web/sync_view.py that a test holds to every kind. An older failure stays in the runs list."
+    not_chosen:
+      - "Every failure in the history: a mapper fixed last week would sit beside today's."
+      - "An acknowledge button: a write from the browser, and the next whole close clears it anyway."
+  - id: DR-0306
+    title: The Sync page's runs part refreshes every 5 seconds while a run is open
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#72"]
+    description: While a run is open, the runs part asks /sync/runs again after 5 seconds (hx-trigger load delay:5s, as the Search page's waiting state) and swaps only itself, so a list opened elsewhere on the page stays open. With no run open the answer carries no trigger, and says to reload for the cursors and what is due. The refresh reads the service's memory only. Without JavaScript the page shows the same at load, with a reload link.
+    not_chosen:
+      - "Every part refreshed: the cursor files, staging and the index read every 5 seconds, and every open list closed."
+      - "Server-sent events: a held connection and another CSP rule, for a page open a few minutes."
