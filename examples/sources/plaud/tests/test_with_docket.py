@@ -4,6 +4,7 @@ this folder copied into a temp project the way a user copies it."""
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -23,10 +24,12 @@ from plaud_payloads import (
     Run,
     live_call,
     meta,
+    segment,
     structured,
 )
 
 from docket.cli import main
+from docket.sources import release as releasing
 from docket.sources.contract import check_output
 from docket.vault.config import Owner, SourceConfig, VaultConfig
 from docket.vault.gate import Gate
@@ -176,3 +179,66 @@ def test_docket_ingest_imports_a_backfill_through_the_example(
     assert {e.staged.state for e in entries} == {"pending"}
     assert main(args) == 0
     assert "staged     plaud: 0 pending, 0 ready, 5 already staged or in raw" in capsys.readouterr().out
+
+
+def test_a_held_recording_goes_in_only_with_the_cuts_its_owner_confirms(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = project_with_the_example(tmp_path)
+    stretch = [
+        segment(0, 10_000, "Ben Sample", "Morning, Ada."),
+        segment(10_000, 20_000, "Ada Example", "First, my weekend plans."),
+        segment(18_000, 30_000, "Ben Sample", "The cabin by the lake?"),
+        segment(30_000, 40_000, "Ada Example", "Yes, from Saturday."),
+        segment(40_000, 50_000, "Ben Sample", "Now the offer: ten million."),
+    ]
+    listing = {
+        "tool": "list_files",
+        "arguments": {"page": 1},
+        "result": structured({"files": [meta(i, n) for i, n in [(CALL, "Supplier call"), (SHORT, "Quick sync"),
+                                                                 ("rec-cut-01", "Supplier sync"),
+                                                                 ("rec-cut-03", PRIVATE_TITLE)]]}),
+        "captured": "2026-10-14T10:00:00Z",
+    }  # fmt: skip
+
+    def backfill(file_id: str, segments: list[Any], block: str | None = "transaction_polish") -> dict[str, Any]:
+        return {"file_id": file_id, "block": block, "segments": segments, "summary": BACKFILL_SUMMARY}
+
+    folder = tmp_path / "backfill"
+    write_folder(
+        folder,
+        {
+            "0-listing.json": listing,
+            f"{CALL}.json": backfill(CALL, [*CALL_PAGE_1, *CALL_PAGE_2]),
+            f"{SHORT}.json": backfill(SHORT, [], block=None),
+            "rec-cut-01.json": backfill("rec-cut-01", stretch),
+            "rec-cut-03.json": backfill("rec-cut-03", [], block=None),
+            "hold.txt": "rec-cut-01\nrec-cut-03\n",
+        },
+    )
+    root = str(vault.root)
+    assert main(["ingest", "plaud", str(folder), "--vault", root]) == 0
+    assert "on hold    2" in capsys.readouterr().out
+    assert not any("rec-cut" in e.staged.record.rid for e in Gate(vault).list().entries)
+
+    # The owner at the console, typing back the code each question shows.
+    monkeypatch.setattr(releasing, "_console_problem", lambda: None)
+    monkeypatch.setattr(releasing, "_ask", lambda prompt: re.findall(r"Type ([A-Z]{4}) to", prompt)[0])
+    release = ["hold", "release", "plaud", "--from", str(folder), "--vault", root]
+    assert main([*release, "rec-cut-01", "--cut", "0:12-0:35", "--keep", "plaud:rec-cut-01"]) == 0
+    assert main([*release, "rec-cut-03", "--cut", "0:01-0:02"]) == 0
+    out = capsys.readouterr().out
+    assert "released   rec-cut-01" in out
+    assert "held       rec-cut-03  no transcript to cut by time" in out
+
+    gate = Gate(vault)
+    gate.promote()
+    stored = {r.rid: r for _, _, r in vault.rawlog.iter_records()}
+    transcript = stored["plaud:rec-cut-01/transaction_polish"]
+    inside = [s.text for s in transcript.segments or [] if s.start_ms < 40_000 and s.end_ms > 10_000]
+    assert inside == ["[cut]"]
+    assert not any(word in transcript.model_dump_json() for word in ("weekend", "cabin", "Saturday"))
+    assert stored["plaud:rec-cut-01"].title == "Supplier sync"
+    assert "plaud:rec-cut-01/summary" not in stored
+    assert main(["hold", "list", "plaud", "--vault", root]) == 0
+    assert capsys.readouterr().out == "plaud  rec-cut-03\n"
