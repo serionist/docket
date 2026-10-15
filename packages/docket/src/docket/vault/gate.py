@@ -6,6 +6,10 @@ decided by hand before. Classification (by the user or Claude) makes a pending r
 Promotion cuts, redacts again with the current rules and writes one run per source. Every call first sweeps staging
 against the current vault.yaml and reads the hold lists: a record on hold is never staged, classified or promoted.
 
+It reads the release logs with them (DR-0201): a record under a released id goes in only with the release's cuts, at
+intake and again at promotion, and one without segments only when the release keeps it; the rest is left out and only
+counted. A hold beats a release.
+
 Nothing here names a dropped record: not a log line, not an error, not a file. Only counts leave the gate.
 """
 
@@ -22,7 +26,7 @@ from typing import Any, Literal
 
 from docket.errors import DocketError
 from docket.vault import cuts as cutting
-from docket.vault import holds, neverstore
+from docket.vault import holds, neverstore, releaselog
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.cuts import CUT_MARKER, Cut
 from docket.vault.records import RawRecord, version
@@ -93,6 +97,7 @@ class Gate:
         self._cut_rids: set[str] = set()
         self._read_runs: set[Path] = set()
         self._holds = holds.Holds()
+        self._releases = releaselog.Releases()
 
     def stage(self, records: Iterable[RawRecord]) -> StageResult:
         """Take records from a connector: drop, skip or stage each one."""
@@ -126,13 +131,25 @@ class Gate:
                 if self._holds.covers(record):
                     result.on_hold += 1
                     continue
-                redacted, counts = redactor.record(record)
+                release = self._releases.covering(record)
+                taken = record
+                if release is not None and record.segments:
+                    try:
+                        taken = cutting.apply(record, release.cuts)
+                    except DocketError:
+                        # A version the release's times don't fit (it ends before a cut starts): never half cut.
+                        result.dropped["left-out"] += 1
+                        continue
+                redacted, counts = redactor.record(taken)
                 redacted = redacted.model_copy(update={"v": version(redacted), "run": ""})
+                if release is not None and not redacted.segments and not release.keeps(redacted):
+                    result.dropped["left-out"] += 1
+                    continue
                 key = key_of(redacted.rid, redacted.v)
                 if key in staged_keys or key in decided.keys or self.vault.rawlog.contains(redacted):
                     result.skipped += 1
                     continue
-                pending = sensitivity == "mixed" or self._by_hand(redacted.rid, decided, cut_in_staging)
+                pending = sensitivity == "mixed" or self._by_hand(redacted, decided, cut_in_staging)
                 self.staging.write(Staged(state="pending" if pending else "ready", staged_at=now, record=redacted))
                 staged_keys.add(key)
                 result.pending += pending
@@ -188,7 +205,8 @@ class Gate:
                 return None
             merged = cutting.merge(cuts)
             # A dry run, in promotion's order, so a cut that can't be made fails now and not at promotion.
-            Redactor.from_config(config.redaction).record(cutting.apply(entry.staged.record, merged))
+            final = cutting.apply(entry.staged.record, [*merged, *self._release_cuts(entry.staged.record)])
+            Redactor.from_config(config.redaction).record(final)
             staged = entry.staged.model_copy(
                 update={"state": "ready", "classified_by": by, "cuts": merged, "problem": None}
             )
@@ -216,7 +234,9 @@ class Gate:
                 try:
                     if name not in config.sources:
                         raise DocketError(f"source {name!r} isn't in vault.yaml any more")
-                    final, _ = redactor.record(cutting.apply(staged.record, staged.cuts))
+                    final, _ = redactor.record(
+                        cutting.apply(staged.record, [*staged.cuts, *self._release_cuts(staged.record)])
+                    )
                 except DocketError as e:
                     result.held.append(self._hold(entry, str(e)))
                     continue
@@ -277,6 +297,7 @@ class Gate:
         send back to pending what nobody classified and can no longer go through on its source's word. The hold lists
         are read here too, on every call: a list that doesn't read stops the gate rather than let a held record by."""
         self._holds = holds.read_all(self.vault.root)
+        self._releases = releaselog.read_all(self.vault.root)
         self.staging.clear_temp()
         self._refresh_cuts()
         scan = self.staging.scan()
@@ -295,12 +316,16 @@ class Gate:
             elif entry.key in decided.keys:
                 # Classified private, or promoted with cuts, before a crash let its file be deleted.
                 self.staging.delete(entry.path)
+            elif not self._holds.covers(staged.record) and self._left_out(staged.record):
+                # Staged before its release arrived (on another clone, under its hold), and the release leaves it out.
+                self.staging.delete(entry.path)
+                dropped["left-out"] += 1
             elif (
                 staged.state == "ready"
                 and staged.classified_by is None
                 and (
                     (source is not None and source.sensitivity == "mixed")
-                    or self._by_hand(staged.record.rid, decided, cut_in_staging)
+                    or self._by_hand(staged.record, decided, cut_in_staging)
                 )
             ):
                 self.staging.write(staged.model_copy(update={"state": "pending"}))
@@ -308,10 +333,52 @@ class Gate:
             log.info("gate: swept %d record(s) out of staging", dropped.total())
         return dropped
 
-    def _by_hand(self, rid: str, decided: Decided, cut_in_staging: set[str]) -> bool:
+    def _by_hand(self, record: RawRecord, decided: Decided, cut_in_staging: set[str]) -> bool:
         """Whether a record was decided by hand: here (classified private, or cut), on any machine (a cut version in
-        raw), or in another staged version holding cuts. A new version of it then waits for the user."""
-        return rid_hash(rid) in decided.rids or rid in self._cut_rids or rid in cut_in_staging
+        raw, or a release of it), or in another staged version holding cuts. A new version of it then waits for the
+        user."""
+        rid = record.rid
+        return (
+            rid_hash(rid) in decided.rids
+            or rid in self._cut_rids
+            or rid in cut_in_staging
+            or self._releases.covering(record) is not None
+        )
+
+    def _release_cuts(self, record: RawRecord) -> list[Cut]:
+        """The cuts a release adds to a record with segments, every time it is cut; none for any other record."""
+        release = self._releases.covering(record)
+        return list(release.cuts) if release is not None and record.segments else []
+
+    def _left_out(self, record: RawRecord) -> bool:
+        """Whether a release leaves a staged record out: one without segments it doesn't keep at this version, or one
+        with segments its times can't be made on."""
+        release = self._releases.covering(record)
+        if release is None:
+            return False
+        if not record.segments:
+            return not release.keeps(record)
+        try:
+            cutting.apply(record, release.cuts)
+        except DocketError:
+            return True
+        return False
+
+    def intake_view(self, record: RawRecord) -> RawRecord | str:
+        """What intake would make of one record, without staging it: why it would drop it ("private source",
+        "never-store"), or the record redacted and versioned as it would be staged. `docket hold show` and a release's
+        screen read held records through this, so what the owner reads and keeps is what the gate would write."""
+        config = self._config()
+        source = config.sources.get(record.source)
+        if source is None:
+            raise DocketError(f"source {record.source!r} isn't in vault.yaml")
+        if source.sensitivity == "private":
+            return "private source"
+        if neverstore.match(record, config.never_store):
+            return "never-store"
+        # Redaction follows the vault's own settings; #24 makes each rule optional there.
+        redacted, _ = Redactor.from_config(config.redaction).record(record)
+        return redacted.model_copy(update={"v": version(redacted), "run": ""})
 
     def _refresh_cuts(self) -> None:
         """The rids whose raw text holds a cut marker, from the run files this gate hasn't read yet."""
