@@ -144,6 +144,7 @@ ONE_CUSTOMER = {
     "customer/acme.yaml": "id: acme\ntype: customer\nname: {en: Acme}\n",
     "person/mark.yaml": "id: mark\ntype: person\nname: {en: Mark}\n",
     "person/sam.yaml": "id: sam\ntype: person\nname: {en: Sam}\n",
+    "person/tony.yaml": "id: tony\ntype: person\nname: {en: Tony}\n",
 }
 INFLECTED = [
     "Az Acménél voltunk", "Az Acménak elküldtem", "Az Acmét felhívtam", "Az Acmével egyeztettünk",
@@ -176,6 +177,9 @@ def one_customer_message(n: int) -> tuple[str, set[str]]:
     if n % 10 == 6 or n % 20 == 8:
         parts.append("Sammal beszéltem." if n % 20 == 16 else "Sam is on site.")
         named.add("sam")
+    if n % 10 in (0, 3, 9):
+        parts.append({0: "Tony hívott.", 3: "Tonyval beszéltem.", 9: "Tonynak írtam."}[n % 10])
+        named.add("tony")
     return " ".join(parts), named
 
 
@@ -222,6 +226,13 @@ def test_a_common_word_sharing_a_name_s_stem_is_still_dropped(one_customer: Vaul
     named = {e: {n for n in range(400) if e in one_customer_message(n)[1]} for e in ("mark", "sam")}
     assert mentions_of(one_customer, "mark") == {n for n in named["mark"] if n % 8 == 1}
     assert mentions_of(one_customer, "sam") == {n for n in named["sam"] if n % 20 != 16}
+
+
+def test_a_name_ending_in_y_keeps_its_inflected_mentions(one_customer: Vault) -> None:
+    # Tony is in 120 chunks, a third of them Tonyval: a y read as a vowel takes -val, not a doubled consonant.
+    assert mentions_of(one_customer, "tony") == {n for n in range(400) if n % 10 in (0, 3, 9)}
+    forms = query(one_customer, "SELECT term, how FROM alias_terms WHERE entity = 'tony' AND col = 'stem_hu'")
+    assert ("tony", "stem") in forms
 
 
 def test_asr_aliases_match_within_one_or_two_edits_from_five_letters(vault: Vault) -> None:

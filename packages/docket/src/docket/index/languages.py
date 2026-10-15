@@ -123,12 +123,16 @@ _ENDINGS = {
 }
 # A two-letter consonant doubles its first letter (Kovács gives Kováccsal); dzs comes before zs, which it ends with.
 _DIGRAPHS = ("dzs", "cs", "dz", "gy", "ly", "ny", "sz", "ty", "zs")
+# Old spellings and foreign letters keep their letters, and the doubling writes the sound after them: Babitscsal,
+# Ráczcal, Madáchcsal, Kossuthtal, Maxszal.
+_OLD_SOUNDS = {"ts": "cs", "cz": "c", "ch": "cs", "th": "t", "x": "sz"}
 
 
 def hungarian_cases(word: str) -> list[str]:
     """A name's case forms: a final vowel lengthened as for the dative, then each case ending. Back endings for a word
     with a back vowel, front for one with a front vowel or none, and both for one with both, since foreign names go
-    either way (Acménak, Acmének)."""
+    either way (Acménak, Acmének). A final y takes the endings after a vowel as well, as foreign names and old spellings
+    read it (Tonyval, Szalayval), and those after a consonant, as ny, ly, gy and ty do (Báránnyal)."""
     if not word[-1:].isalpha():
         return []
     back = any(ch in _BACK for ch in word)
@@ -139,10 +143,16 @@ def hungarian_cases(word: str) -> list[str]:
         if word[-1] in _BACK | _FRONT:
             base = word[:-1] + _LENGTHENED.get(word[-1], word[-1])
             out += [base + e for e in (*every, *after_vowel)]
+            continue
+        if word[-1] == "y":
+            out += [word + e for e in (*every, *after_vowel)]
+        old = next((spelling for spelling in _OLD_SOUNDS if word.endswith(spelling)), None)
+        if old is not None:
+            doubled = word + _OLD_SOUNDS[old]
         else:
             last = next((d for d in _DIGRAPHS if word.endswith(d)), word[-1])
             doubled = word if word.endswith(last[0] + last) else word[: -len(last)] + last[0] + last
-            out += [word + e for e in (*every, *after_consonant)] + [doubled + e for e in doubling]
+        out += [word + e for e in (*every, *after_consonant)] + [doubled + e for e in doubling]
     return list(dict.fromkeys(out))
 
 

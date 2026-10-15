@@ -155,6 +155,22 @@ def test_hungarian_case_forms_follow_harmony_and_assimilation() -> None:
     assert language("en").cases is None
 
 
+def test_hungarian_case_forms_read_a_final_y_and_old_spellings() -> None:
+    assert {"tonyval", "tonyn", "tonyvá", "tonyt", "tonynak"} <= set(hungarian_cases("tony"))
+    assert {"szalayval", "szalayt", "szalayn"} <= set(hungarian_cases("szalay"))
+    assert {"kellyvel", "kellyn"} <= set(hungarian_cases("kelly"))
+    assert "kölcseyvel" in hungarian_cases("kölcsey")
+    # A Hungarian ny still doubles: Bárány gives Báránnyal.
+    assert {"báránnyal", "bárányt"} <= set(hungarian_cases("bárány"))
+    assert {"babitscsal", "babitscsá"} <= set(hungarian_cases("babits"))
+    assert "ráczcal" in hungarian_cases("rácz")
+    assert "madáchcsal" in hungarian_cases("madách")
+    assert "kossuthtal" in hungarian_cases("kossuth")
+    assert {"maxszal", "maxot"} <= set(hungarian_cases("max"))
+    old = {*hungarian_cases("babits"), *hungarian_cases("kossuth"), *hungarian_cases("max")}
+    assert not {"babitssal", "kossuthhal", "maxxal"} & old
+
+
 def test_the_seeds_are_the_dative_stem_and_the_word() -> None:
     analyzer = Analyzer(resolve(["hu"]))
     assert analyzer.seeds("nortwin", language("hu")) == ["nortwin"]
