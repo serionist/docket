@@ -95,7 +95,7 @@ While you build:
 ## One-way doors
 
 Users and their stored data depend on these. Change one only in a PR that names it in its title, after the maintainer
-agrees in the issue:
+agrees in the issue or, under an autonomy grant, with its decision recorded as proposed for his review (DR-0012):
 
 - the names: the `docket` package and command, the plugin's and the marketplace's name `docket`;
 - the vault's format: its layout, run-file names and where Docket's own files live (DR-0141), the raw record's
@@ -117,6 +117,6 @@ Each lands with its decision in `index.yaml`, marked `cost: one-way`.
 - Push to `main`, or merge with a failing gate.
 - Commit secrets, or a real person's data.
 - Put a name from the deny list anywhere: the repo, an issue, a PR, a commit message.
-- Change a one-way door without the maintainer's agreement.
+- Change a one-way door without the maintainer's agreement or, under an autonomy grant, its proposed decision.
 - Check out, build or run code from outside the maintainers on your machine: read it, and let CI run it.
 - Weaken a test, a check or a review step to make a change pass.

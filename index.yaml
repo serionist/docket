@@ -135,7 +135,7 @@ decisions:
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#1"]
-    description: The review rules asked for the maintainer's yes before any fix on a sensitive area. Under an autonomy grant that would stop the loop on fixes that only tighten a check or protect data, so those are made and recorded in the PR's Decided without asking. A fix that loosens a check, changes a one-way door or changes what happens to stored data still waits for the maintainer.
+    description: "The review rules asked for the maintainer's yes before any fix on a sensitive area. Under an autonomy grant that would stop the loop on fixes that only tighten a check or protect data, so those are made and recorded in the PR's Decided without asking. A one-way door may change under the grant too: its PR title names it and its decision is recorded as proposed, and the maintainer approves or changes it when he reviews the decisions (his choice, 15 Oct). A fix that loosens a check still waits for the maintainer."
     not_chosen: ["Every sensitive fix waits for the maintainer, even under an autonomy grant."]
   - id: DR-0013
     title: Every user's data lives in their own private git vault; git is the source of truth
