@@ -69,10 +69,16 @@ def test_the_navigation_has_a_slot_for_every_page_and_links_the_built_ones(clien
     slots = nav.find_all("span", class_="nav-slot")
     assert len(slots) == len(pages.PAGES) - 1 == 11
     assert [s.attrs["title"].split(":")[0] for s in slots[:5]] == ["Today", "Queue", "Ledger", "Meetings", "Outbox"]
-    assert [s.find("span", class_="phase").text() for s in slots] == ["3"] * 5 + ["2"] * 2 + ["1"] * 4
+    # No number beside a slot, which would read as a count: one muted "later" per group, the phase in the tooltip and
+    # the screen-reader text.
+    assert [li.text() for li in nav.find_all("li", class_="nav-later")] == ["later"] * 3
+    assert all(li.attrs["aria-hidden"] == "true" for li in nav.find_all("li", class_="nav-later"))
+    assert not any(ch.isdigit() for s in slots for ch in "".join(c for c in s.children if isinstance(c, str)))
     staging = next(s for s in slots if s.text().startswith("Staging"))
     assert "arrives in phase 1" in staging.text()
-    assert "records waiting for the gate" in staging.attrs["title"]
+    assert staging.attrs["title"] == "Staging: records waiting for the gate: classify, cut, drop; arrives in phase 1"
+    finding = nav.find_all("ul", class_="nav-group")[1]
+    assert [c.text() for c in finding.find_all("li")][:2] == ["Search", "later"]
 
 
 @pytest.mark.parametrize("path", ["/search", "/search?query=fleet", "/search/results?query=fleet", "/search/panel"])
@@ -106,13 +112,24 @@ def test_a_failure_answers_the_error_page_and_the_log_keeps_no_words(
             raise RuntimeError("Kovács Ödön") from e
 
     monkeypatch.setattr(calls, "search", broken)
-    for path in ("/search?query=fleet", "/search/results?query=fleet"):
-        answer = client.get(path)
-        assert answer.status_code == 500
-        assert "Something failed in Docket" in answer.text
-        assert "Ödön" not in answer.text
+    page = client.get("/search?query=fleet")
+    assert page.status_code == 500
+    assert page.text.startswith("<!doctype html>")
+    assert "Something failed in Docket" in page.text
+    # A fragment answers with a fragment: its own notice, never a whole page swapped into the results.
+    fragment = client.get("/search/results?query=fleet&sources=chat&since=2026-10-01")
+    assert fragment.status_code == 500
+    assert "<html" not in fragment.text
+    assert "Something failed in Docket" in parse(fragment.text).find("div", class_="error").text()
+    carried = {(i.attrs["name"], i.attrs["value"]) for i in parse(fragment.text).find_all("input", form="search-form")}
+    assert {("sources", "chat"), ("since", "2026-10-01")} <= carried
     monkeypatch.setattr(panel, "build", broken)
-    assert client.get("/search/panel?hit=r:calls:rec-0100").status_code == 500
+    in_panel = client.get("/search/panel?hit=r:calls:rec-0100")
+    assert in_panel.status_code == 500
+    assert "<html" not in in_panel.text
+    assert "Something failed in Docket" in parse(in_panel.text).find("section", class_="panel").text()
+    for answer in (page, fragment, in_panel):
+        assert "Ödön" not in answer.text
     logged = log_file.read_text(encoding="utf-8")
     assert "builtins.RuntimeError" in logged
     assert "builtins.KeyError" in logged

@@ -20,6 +20,7 @@ ones whose default keeps today's meaning.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from urllib.parse import urlencode, urlsplit
 
@@ -84,6 +85,29 @@ def _lines(params: QueryParams) -> tuple[str, ...]:
     return tuple(str(a) if a == b else f"{a}-{b}" for a, b in spans)
 
 
+def _verify(params: QueryParams) -> bool:
+    given = (params.get("verify") or "").strip()
+    if given not in ("", "0", "1"):
+        raise StateError(f"verify is 1 or left out, not {given!r}")
+    return given == "1"
+
+
+# Each field and how it is read from the query string, in the URL's order.
+_READERS: tuple[tuple[str, Callable[[QueryParams], object]], ...] = (
+    ("query", lambda p: " ".join((p.get("query") or "").split())),
+    ("sources", lambda p: _many(p, "sources")),
+    ("people", lambda p: _many(p, "people")),
+    ("entities", lambda p: _many(p, "entities")),
+    ("since", lambda p: _when(p, "since")),
+    ("until", lambda p: _when(p, "until")),
+    ("k", lambda p: _number(p, "k", DEFAULT_K, 1, MAX_K)),
+    ("hit", lambda p: (p.get("hit") or "").strip() or None),
+    ("lines", _lines),
+    ("around", lambda p: _number(p, "around", DEFAULT_AROUND, 0, MAX_AROUND)),
+    ("verify", _verify),
+)
+
+
 def is_locator(text: str) -> bool:
     """Whether a query is one locator to open rather than words to search: `r:...`, `[r:...]`, or a doc id."""
     value = text.strip()
@@ -115,23 +139,23 @@ class SearchState:
     @classmethod
     def read(cls, params: QueryParams) -> SearchState:
         """The state a URL's query string holds; a value that can't be read raises `StateError` naming it."""
-        verify = (params.get("verify") or "").strip()
-        if verify not in ("", "0", "1"):
-            raise StateError(f"verify is 1 or left out, not {verify!r}")
-        hit = (params.get("hit") or "").strip()
-        return cls(
-            query=" ".join((params.get("query") or "").split()),
-            sources=_many(params, "sources"),
-            people=_many(params, "people"),
-            entities=_many(params, "entities"),
-            since=_when(params, "since"),
-            until=_when(params, "until"),
-            k=_number(params, "k", DEFAULT_K, 1, MAX_K),
-            hit=hit or None,
-            lines=_lines(params),
-            around=_number(params, "around", DEFAULT_AROUND, 0, MAX_AROUND),
-            verify=verify == "1",
-        )
+        state, problems = cls.read_what_reads(params)
+        if problems:
+            raise StateError(problems[0])
+        return state
+
+    @classmethod
+    def read_what_reads(cls, params: QueryParams) -> tuple[SearchState, list[str]]:
+        """Every value that reads, and a message for each that doesn't, which keeps its default: a page with one bad
+        value still shows the query and the filters that were fine."""
+        values: dict[str, object] = {}
+        problems: list[str] = []
+        for name, reader in _READERS:
+            try:
+                values[name] = reader(params)
+            except StateError as e:
+                problems.append(str(e))
+        return cls(**values), problems  # pyright: ignore[reportArgumentType]
 
     @classmethod
     def from_url(cls, url: str) -> SearchState | None:

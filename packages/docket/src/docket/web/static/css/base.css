@@ -13,6 +13,8 @@
     min-height: 100dvh;
     display: grid;
     grid-template-rows: auto 1fr auto;
+    /* One column that may shrink below its content's width, so a narrow window wraps and never scrolls sideways. */
+    grid-template-columns: minmax(0, 1fr);
     background: var(--bg);
     color: var(--ink);
     font: 400 var(--text) / 1.45 var(--font-sans);

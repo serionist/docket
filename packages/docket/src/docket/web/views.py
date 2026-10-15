@@ -160,13 +160,42 @@ def reading_line(reading: QueryReading, names: dict[str, EntityLabel], tz: ZoneI
     return out
 
 
-def chips(state: SearchState, names: dict[str, EntityLabel]) -> list[Chip]:
+def resolved(
+    values: tuple[str, ...], reading: QueryReading | None, names: dict[str, EntityLabel], *, person: bool
+) -> dict[str, str]:
+    """Each chosen person or entity, as the URL holds it (an id, a name or an alias), to the id search resolved it
+    to, so `people=Ben Sample` and the facet's `ben-sample` are one entry. A value search didn't resolve stays as it
+    is."""
+    boosts = list(reading.boosts) if reading is not None else []
+    pool = [b for b in boosts if not person or (b in names and names[b].type == "person")]
+    out: dict[str, str] = {}
+    for value in values:
+        if value in names:
+            out[value] = value
+            continue
+        same = [b for b in pool if b in names and names[b].name.casefold() == value.casefold()]
+        out[value] = same[0] if same else value
+    # A value given by an alias matches no name: when one such value and one unexplained boost are left, they are one.
+    unknown = set(reading.unknown) if reading is not None else set[str]()
+    left = [v for v, found in out.items() if found == v and v not in names and v not in unknown]
+    spare = [b for b in pool if b not in out.values()]
+    if len(left) == 1 and len(spare) == 1:
+        out[left[0]] = spare[0]
+    return out
+
+
+def chips(state: SearchState, names: dict[str, EntityLabel], reading: QueryReading | None = None) -> list[Chip]:
     """The chosen filters and boosts, each a link to the same search without it."""
     base = state.search_only()
+    people = resolved(base.people, reading, names, person=True)
+    entities = resolved(base.entities, reading, names, person=False)
     out = [Chip(f"source: {s}", link(base.but(sources=_toggle(base.sources, s)))) for s in base.sources]
-    out += [Chip(f"favour {_name(p, names)}", link(base.but(people=_toggle(base.people, p)))) for p in base.people]
     out += [
-        Chip(f"favour {_name(e, names)}", link(base.but(entities=_toggle(base.entities, e)))) for e in base.entities
+        Chip(f"favour {_name(people[p], names)}", link(base.but(people=_toggle(base.people, p)))) for p in base.people
+    ]
+    out += [
+        Chip(f"favour {_name(entities[e], names)}", link(base.but(entities=_toggle(base.entities, e))))
+        for e in base.entities
     ]
     month = _month_of(state)
     if month is not None:
@@ -194,12 +223,14 @@ def facets(result: SearchResult, state: SearchState, names: dict[str, EntityLabe
     for chosen in base.sources:
         sources.setdefault(chosen, 0)
     entity_counts = dict(found.get("entities", {}))
+    # Each entity id chosen, to the value the URL holds for it, which its link takes away again.
+    chosen_people = {i: v for v, i in resolved(base.people, result.query, names, person=True).items()}
+    chosen_entities = {i: v for v, i in resolved(base.entities, result.query, names, person=False).items()}
     people = {e: n for e, n in entity_counts.items() if (names.get(e) and names[e].type == "person")}
-    for chosen in base.people:
-        if chosen not in people:
-            people[chosen] = 0
+    for chosen in chosen_people:
+        people.setdefault(chosen, 0)
     others = {e: n for e, n in entity_counts.items() if e not in people}
-    for chosen in base.entities:
+    for chosen in chosen_entities:
         others.setdefault(chosen, 0)
     month = _month_of(state)
     out = [
@@ -217,7 +248,12 @@ def facets(result: SearchResult, state: SearchState, names: dict[str, EntityLabe
             "People",
             favours=True,
             items=[
-                FacetItem(_name(p, names), n, p in base.people, link(base.but(people=_toggle(base.people, p))))
+                FacetItem(
+                    _name(p, names),
+                    n,
+                    p in chosen_people,
+                    link(base.but(people=_toggle(base.people, chosen_people.get(p, p)))),
+                )
                 for p, n in sorted(people.items(), key=lambda kv: (-kv[1], _name(kv[0], names)))
             ],
         ),
@@ -229,8 +265,8 @@ def facets(result: SearchResult, state: SearchState, names: dict[str, EntityLabe
                 FacetItem(
                     _name(e, names),
                     n,
-                    e in base.entities,
-                    link(base.but(entities=_toggle(base.entities, e))),
+                    e in chosen_entities,
+                    link(base.but(entities=_toggle(base.entities, chosen_entities.get(e, e)))),
                     note=names[e].type if e in names else "",
                 )
                 for e, n in sorted(others.items(), key=lambda kv: (-kv[1], _name(kv[0], names)))
@@ -244,7 +280,7 @@ def facets(result: SearchResult, state: SearchState, names: dict[str, EntityLabe
         target = base.but(since=None, until=None) if chosen else base.but(since=since, until=until)
         months.append(FacetItem(month_label(m), n, chosen, link(target)))
     out.append(Facet("time", "Time", favours=False, items=months))
-    return [f for f in out if f.items or f.key == "time"]
+    return [f for f in out if f.items]
 
 
 def _stretch(hit: Hit) -> str:
@@ -303,7 +339,7 @@ def build(result: SearchResult, state: SearchState, names: dict[str, EntityLabel
     marks = terms(result.query)
     view = SearchView(
         reading=reading_line(result.query, names, tz),
-        chips=chips(state, names),
+        chips=chips(state, names, result.query),
         facets=facets(result, state, names),
         candidates=result.candidates,
     )
@@ -327,7 +363,7 @@ def build(result: SearchResult, state: SearchState, names: dict[str, EntityLabel
     if view.hits >= state.k and state.k < 100:
         view.more = link(state.search_only().but(k=min(100, state.k + MORE)))
     if not view.groups:
-        view.drops = chips(state, names)
+        view.drops = chips(state, names, result.query)
     return view
 
 
@@ -335,5 +371,5 @@ def label_ids(result: SearchResult, state: SearchState) -> list[str]:
     """Every entity id the page may name: in the facets, the hits, the reading and the chosen boosts."""
     ids = set(result.facets.get("entities", {}))
     ids |= {e for group in result.groups for hit in group.hits for e in hit.entities}
-    ids |= {found.id for found in result.query.entities}
+    ids |= {found.id for found in result.query.entities} | set(result.query.boosts)
     return sorted(ids | set(state.people) | set(state.entities))

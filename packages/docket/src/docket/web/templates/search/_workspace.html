@@ -10,30 +10,31 @@
 {% if view.reading %}<p class="reading" aria-label="How search read the query">{% for fact in view.reading %}<span>{{ fact }}</span>{% endfor %}</p>{% endif %}
 {% if view.chips %}<ul class="chips" aria-label="Filters and boosts">{% for c in view.chips %}<li>{{ chip(c) }}</li>{% endfor %}</ul>{% endif %}
 {% endif %}
-<div class="layout{% if view %} with-facets{% endif %}">
-  {% if view %}
+<div class="layout{% if view or problem %} with-facets{% endif %}">
+  {% if view or problem %}
   <details class="facets" open>
     <summary>Narrow or favour</summary>
-    <p class="facet-note">Counts are within the top {{ view.candidates }} search ranked.</p>
+    {% if view %}
+    <p class="facet-note">Counts are over the {{ view.candidates }} best match{{ "es" if view.candidates != 1 else "" }}, not the whole vault.</p>
     {% for facet in view.facets %}
     <section class="facet" aria-labelledby="facet-{{ facet.key }}">
       <h2 id="facet-{{ facet.key }}">{{ facet.title }}{% if facet.favours %} <span class="badge">favour</span>{% endif %}</h2>
-      {% if facet.items %}
       <ul>
         {% for item in facet.items %}
         <li><a class="facet-item{% if item.on %} on{% endif %}" {{ swap(item.link, '#workspace') }}{% if item.on %} aria-current="true"{% endif %}><span class="label" dir="auto">{{ item.label }}</span>{% if item.note %}<span class="note">{{ item.note }}</span>{% endif %}<span class="count">{{ item.count }}</span></a></li>
         {% endfor %}
       </ul>
-      {% endif %}
-      {% if facet.key == "time" %}
-      <div class="dates">
-        <label>Since <input type="text" name="since" value="{{ state.since or '' }}" form="search-form" placeholder="2026-10-01" spellcheck="false"></label>
-        <label>Until <input type="text" name="until" value="{{ state.until or '' }}" form="search-form" placeholder="2026-10-31" spellcheck="false"></label>
-        <button type="submit" class="button" form="search-form">Apply</button>
-      </div>
-      {% endif %}
     </section>
     {% endfor %}
+    {% endif %}
+    <section class="facet" aria-labelledby="facet-dates">
+      <h2 id="facet-dates">Dates</h2>
+      <div class="dates">
+        <label>Since <input type="text" name="since" value="{{ dates.since }}" form="search-form" placeholder="2026-10-01" spellcheck="false"></label>
+        <label>Until <input type="text" name="until" value="{{ dates.until }}" form="search-form" placeholder="2026-10-31" spellcheck="false"></label>
+        <button type="submit" class="button" form="search-form">Apply</button>
+      </div>
+    </section>
   </details>
   {% endif %}
   <section class="results" aria-labelledby="results-title" data-announce="{{ view.announce if view else (problem or '') }}">

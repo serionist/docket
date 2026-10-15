@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -111,8 +112,9 @@ def test_the_facets_narrow_by_source_and_time_and_favour_people_and_entities(cli
     html = client.get("/search?query=Nortwin").text
     tree = parse(html)
     titles = [h.text() for h in tree.find_all("h2") if h.attrs.get("id", "").startswith("facet-")]
-    assert titles == ["Sources", "People favour", "Entities favour", "Time"]
-    assert "Counts are within the top" in html
+    assert titles == ["Sources", "People favour", "Entities favour", "Time", "Dates"]
+    candidates = parse(html).find("details", class_="facets").find("p", class_="facet-note").text()
+    assert re.fullmatch(r"Counts are over the \d+ best matches, not the whole vault\.", candidates)
     url, fragment = link_to(html, "calls")
     assert url == "/search?query=Nortwin&sources=calls"
     assert fragment == "/search/results?query=Nortwin&sources=calls"
@@ -194,6 +196,41 @@ def test_the_start_runs_no_search_and_says_what_a_query_can_hold(client: TestCli
     assert "Find anything you kept" in html
     assert 'class="facets"' not in html
     assert parse(html).find("input", id="query").attrs["value"] == ""
+
+
+def test_a_bad_date_keeps_the_query_and_the_filters_that_read(client: TestClient) -> None:
+    page = client.get("/search?query=day+rate&sources=chat&people=ben-sample&since=soon&until=2026-10-31")
+    assert page.status_code == 400
+    tree = parse(page.text)
+    assert tree.find("input", id="query").attrs["value"] == "day rate"
+    assert tree.find("input", name="since").attrs["value"] == "soon"
+    assert tree.find("input", name="until").attrs["value"] == "2026-10-31"
+    carried = {(i.attrs["name"], i.attrs["value"]) for i in tree.find_all("input", type="hidden")}
+    assert {("sources", "chat"), ("people", "ben-sample")} <= carried
+    assert "since is a date or a time" in tree.find("div", class_="error").text()
+    assert tree.find("details", class_="facets")
+    both = client.get("/search/results?query=x&since=soon&until=later").text
+    assert "since is a date or a time" in both
+    assert "until is a date or a time" in both
+    assert parse(both).find("input", name="until").attrs["value"] == "later"
+
+
+def test_a_person_given_by_name_is_one_entry_with_its_id(client: TestClient) -> None:
+    html = client.get("/search?query=Nortwin&people=Ben+Sample").text
+    people = parse(html).find("section", aria_labelledby="facet-people")
+    labels = [a.find("span", class_="label").text() for a in people.find_all("a")]
+    assert labels.count("Ben Sample") == 1
+    ben = next(a for a in people.find_all("a") if a.find("span", class_="label").text() == "Ben Sample")
+    assert "on" in ben.attrs["class"].split()
+    assert ben.attrs["href"] == "/search?query=Nortwin"
+    assert [c.text() for c in parse(html).find_all("a", class_="chip")] == ["favour Ben Sample : remove"]
+    by_alias = parse(client.get("/search?query=Nortwin&people=Ben").text).find(
+        "section", aria_labelledby="facet-people"
+    )
+    assert [a.find("span", class_="label").text() for a in by_alias.find_all("a")].count("Ben Sample") == 1
+    entity = client.get("/search?query=fleet&entities=Northwind").text
+    found = parse(entity).find("section", aria_labelledby="facet-entities")
+    assert [a.find("span", class_="label").text() for a in found.find_all("a")].count("Northwind") == 1
 
 
 def test_a_bad_value_is_the_page_s_own_error(client: TestClient) -> None:

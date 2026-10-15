@@ -25,6 +25,7 @@
     border-bottom: 1px solid var(--line);
   }
   .brand {
+    white-space: nowrap;
     font-weight: 700;
     font-size: var(--text-lg);
     letter-spacing: -0.01em;
@@ -41,6 +42,10 @@
     vertical-align: 1px;
   }
   .nav {
+    /* Positioned, so the slots' screen-reader text, which is absolutely placed, stays inside it; it takes the room
+       left and scrolls within it rather than widening the bar. */
+    position: relative;
+    flex: 1 1 0;
     display: flex;
     gap: var(--space-3);
     min-width: 0;
@@ -65,8 +70,16 @@
   .nav-link { color: var(--ink); font-weight: 560; }
   .nav-link:hover { background: var(--hover); text-decoration: none; }
   .nav-link[aria-current="page"] { background: var(--accent-soft); color: var(--accent); }
-  .nav-slot { color: var(--muted); cursor: default; }
-  .nav-slot .phase { font-size: 10px; font-family: var(--font-mono); }
+  .nav-slot { position: relative; color: var(--muted); cursor: default; }
+  .nav-later {
+    align-self: center;
+    padding: 0 2px 0 6px;
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .nav-group:first-child .nav-later { padding-left: 0; }
   .tools { display: flex; align-items: center; gap: var(--space-1); margin-left: auto; }
 
   .statusbar {

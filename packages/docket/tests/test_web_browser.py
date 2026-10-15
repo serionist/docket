@@ -14,6 +14,7 @@ import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from urllib.parse import quote
 
 import pytest
 import uvicorn
@@ -117,6 +118,23 @@ def test_the_search_page_in_a_browser(service: tuple[int, str], tmp_path: Path) 
         page.reload()
         assert page.evaluate("document.documentElement.dataset.theme") == "dark"
         page.screenshot(path=str(shots / "search-dark.png"))
+
+        # A narrow window wraps and never scrolls sideways: the close button and the switches stay in view.
+        for width, height in ((800, 900), (390, 844)):
+            page.set_viewport_size({"width": width, "height": height})
+            page.goto(f"{base}/search?query=Nortwin&hit={quote(hit)}")
+            page.wait_for_selector("#panel .panel")
+            wide = page.evaluate("[document.documentElement.scrollWidth, document.documentElement.clientWidth]")
+            assert wide[0] == wide[1], (width, wide)
+            for control in ("#panel .close", '[data-action="theme"]', '[data-action="keys"]'):
+                box = page.locator(control).bounding_box()
+                assert box is not None
+                assert box["x"] >= 0 and box["x"] + box["width"] <= wide[1], (width, control, box)
+            if width == 800:
+                page.screenshot(path=str(shots / "search-800.png"))
+        page.set_viewport_size({"width": 1440, "height": 900})
+        page.goto(f"{base}/search?query=Nortwin")
+        page.wait_for_selector(".groups")
         assert not errors, errors
 
         # With the single keys switched off, j moves nothing.

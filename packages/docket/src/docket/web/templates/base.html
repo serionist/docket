@@ -21,12 +21,17 @@
   <nav class="nav" aria-label="Pages">
     {% for group in nav %}
     <ul class="nav-group" aria-label="{{ group.title }}">
+      {% set seen = namespace(later=false) %}
       {% for page in group.pages %}
+      {% if not page.built and not seen.later %}
+      {% set seen.later = true %}
+      <li class="nav-later" aria-hidden="true">later</li>
+      {% endif %}
       <li>
         {% if page.built %}
         <a class="nav-link" href="{{ page.path }}"{% if page.key == current %} aria-current="page"{% endif %}>{{ page.title }}</a>
         {% else %}
-        <span class="nav-slot" title="{{ page.title }}: {{ page.what }}">{{ page.title }}<span class="phase" aria-hidden="true">{{ page.phase }}</span><span class="visually-hidden">, arrives in phase {{ page.phase }}: {{ page.what }}</span></span>
+        <span class="nav-slot" title="{{ page.title }}: {{ page.what }}; arrives in phase {{ page.phase }}">{{ page.title }}<span class="visually-hidden">, arrives in phase {{ page.phase }}: {{ page.what }}</span></span>
         {% endif %}
       </li>
       {% endfor %}
