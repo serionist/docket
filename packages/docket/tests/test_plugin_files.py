@@ -60,3 +60,34 @@ def test_the_plugin_is_past_its_placeholder_version() -> None:
     manifest = read_json(".claude-plugin/plugin.json")
     assert manifest["name"] == "docket"
     assert tuple(int(n) for n in manifest["version"].split(".")) >= (0, 1, 0)
+
+
+def frontmatter(skill: str) -> dict[str, str]:
+    text = (PLUGIN / "skills" / skill / "SKILL.md").read_text(encoding="utf-8")
+    head = text.split("---\n", 2)[1]
+    return {k.strip(): v.strip() for k, _, v in (line.partition(":") for line in head.splitlines())}
+
+
+def test_recall_pre_approves_only_docket_s_read_only_tools() -> None:
+    golden = json.loads((REPO / "packages/docket/tests/fixtures/mcp-tools.json").read_text(encoding="utf-8"))
+    read_only = {t["name"] for t in golden if t["annotations"]["read_only_hint"]}
+    allowed = frontmatter("recall")["allowed-tools"].split()
+    # The plugin's name, then the server's key in .mcp.json: the names Claude Code gives a plugin's tools.
+    prefix = "mcp__plugin_docket_docket__"
+    assert all(name.startswith(prefix) for name in allowed)
+    assert {name.removeprefix(prefix) for name in allowed} == read_only == {"search", "read", "verify"}
+    assert list(read_json(".mcp.json")["mcpServers"]) == ["docket"]
+
+
+def test_recall_names_command_line_options_docket_has(capsys: pytest.CaptureFixture[str]) -> None:
+    text = (PLUGIN / "skills" / "recall" / "SKILL.md").read_text(encoding="utf-8")
+    for command, options in (
+        (["search"], ["--person", "--entity", "--since", "--until", "-k", "--vault"]),
+        (["doc", "read"], ["--view", "--around", "--vault"]),
+        (["doc", "verify"], ["--line", "--vault"]),
+    ):
+        assert f"docket {' '.join(command)}" in text
+        assert main([*command, "--help"]) == 0
+        shown = capsys.readouterr().out
+        for option in options:
+            assert option in shown, (command, option)
