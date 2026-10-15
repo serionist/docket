@@ -215,8 +215,9 @@ def test_the_word_check_agrees_with_stemming_every_word_on_a_sample(vault: Vault
     analyzer = Analyzer(build.languages_of(vault))
     rng = random.Random(57)  # noqa: S311 - seeded test words, not secrets
     phrases = [phrase_of(analyzer, " ".join(text.split()[i : i + 2])) for text in rng.sample(texts, 10) for i in (0, 7)]
-    for joined in (False, True):
-        words = query_words(analyzer, texts, [], seed=57, sample=100, compounds=joined)
+    # With compounds every word brings its splits, which the slow way scans each text for: fewer words keep it quick.
+    for joined, sample in ((False, 100), (True, 30)):
+        words = query_words(analyzer, texts, [], seed=57, sample=sample, compounds=joined)
         checker = Checker(analyzer, words, phrases)
         assert checker.firsts is not None
         for text in texts:
