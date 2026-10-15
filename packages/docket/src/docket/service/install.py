@@ -113,6 +113,10 @@ def install(
         raise DocketError(f"no vault at or above {target}; create one with `docket init`")
     chosen = port or settings.port or client.DEFAULT_PORT
     userconfig.set_service(vault=root, port=chosen)
+    if installer.installed() is not None:
+        # Stopped while the old token is still the one in the store: under the Run key, stopping confirms the
+        # running service's pid with it, and ensure() may choose a new store and a new token.
+        installer.stop()
     token = tokens.ensure()
     path = env_file()
     path.parent.mkdir(parents=True, exist_ok=True)

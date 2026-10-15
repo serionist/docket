@@ -702,11 +702,15 @@ def service_token(
     """Print the service's token, for a client on this machine."""
     tokens = _tokens()
     if rotate:
+        installer = _installer(tokens)
+        registered = installer.installed() is not None
+        if registered:
+            # Stopped before the rotation: under the Run key, stopping confirms the service's pid with the old token.
+            installer.stop()
         made = tokens.rotate()
         if made.moved_from is not None:
             say(f"the {made.moved_from} store was gone; the token now lives in {tokens.where()}")
-        installer = _installer(tokens)
-        if installer.installed() is not None:
+        if registered:
             from docket.service import install  # noqa: PLC0415
 
             installer.install(install.launch_for())

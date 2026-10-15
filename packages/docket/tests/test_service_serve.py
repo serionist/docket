@@ -76,6 +76,10 @@ def test_port_zero_is_bound_by_serve_and_recorded(prepared: Prepared, vault: Pat
 def test_a_second_service_is_refused_naming_the_first(prepared: Prepared, vault: Path) -> None:
     with pytest.raises(DocketError, match=f"already runs \\(pid {os.getpid()}, port {prepared.port}\\)"):
         prepare(vault, 0)
+    # Under pythonw there is no console: the refusal is in the log.
+    prepared.handler.flush()
+    written = (userconfig.log_dir() / "service.log").read_text(encoding="utf-8")
+    assert f"the service didn't start: the service already runs (pid {os.getpid()}" in written
 
 
 def test_closing_removes_the_record_and_frees_the_lock(vault: Path, token: str) -> None:
@@ -96,6 +100,8 @@ def test_a_record_another_process_wrote_is_left_alone(vault: Path, token: str) -
 def test_no_token_stops_serve_with_the_way_out_and_frees_the_lock(vault: Path) -> None:
     with pytest.raises(DocketError, match=ROTATE):
         prepare(vault, 0)
+    written = (userconfig.log_dir() / "service.log").read_text(encoding="utf-8")
+    assert "the service didn't start: there is no service token yet" in written
     Tokens().ensure()
     prepare(vault, 0).close()
 
@@ -107,12 +113,25 @@ def test_a_port_in_use_is_named(vault: Path, token: str) -> None:
         taken = holder.getsockname()[1]
         with pytest.raises(DocketError, match=f"port {taken} on 127.0.0.1 is in use"):
             prepare(vault, taken)
+    # As the task starts it, under pythonw, the reason has no console: it is in the log.
+    written = (userconfig.log_dir() / "service.log").read_text(encoding="utf-8")
+    assert f"the service didn't start: port {taken} on 127.0.0.1 is in use" in written
     prepare(vault, 0).close()
 
 
-def test_another_bind_failure_is_raised_as_it_is() -> None:
+def test_another_bind_failure_is_raised_as_it_is(vault: Path, token: str) -> None:
     with pytest.raises(OSError):
         bind(free_port(), options=[(socket.SOL_SOCKET, 0x7FFF, 1)])
+
+    def refused(port: int, options: object = None) -> socket.socket:
+        raise OSError(22, "an option the system doesn't take")
+
+    # A context of its own: undoing the test's monkeypatch would also undo conftest's temp folders.
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(server, "bind", refused)
+        with pytest.raises(OSError):
+            prepare(vault, 0)
+    prepare(vault, 0).close()
 
 
 def test_the_socket_options_per_system() -> None:

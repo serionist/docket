@@ -145,7 +145,7 @@ def test_status_names_the_vault_its_index_and_the_token_store(client: TestClient
 
 
 def test_errors_over_rest_and_mcp_leave_no_name_in_the_log(
-    client: TestClient, log_file: Path, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, log_file: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     # A refused doc over MCP: the SDK logs a tool error's text at INFO.
     refused = NOTE.replace("calls:rec-0101", f"calls:{NAME.replace(' ', '-')}").replace("@00:40", f"@00:40 {NAME}")
@@ -161,6 +161,15 @@ def test_errors_over_rest_and_mcp_leave_no_name_in_the_log(
     assert answer.json()["result"]["isError"]
     # A DocketError over REST: its message goes to the caller only.
     assert client.get("/api/read", params={"locator": f"minutes:{NAME}"}, headers=BEARER).status_code == 400
+
+    # A broken doc the core skips with a warning that names its path and quotes its frontmatter.
+    broken_doc = tmp_path / "vault" / "processed" / "recording-note" / "2026" / "10" / "2026-10-15-Ödön.md"
+    broken_doc.parent.mkdir(parents=True, exist_ok=True)
+    broken_doc.write_text(
+        f"---\nid: recording-note:2026-10-15-odon\ntype: recording-note\ncovers: [{NAME}]\n---\n\n- {NAME}\n",
+        encoding="utf-8",
+    )
+    assert client.get("/api/read", params={"locator": "r:calls:rec-0101"}, headers=BEARER).status_code == 200
 
     # A 500 over REST, from an exception whose message, and whose cause's, hold the name.
     async def broken(*_args: object, **_kwargs: object) -> object:
@@ -182,6 +191,8 @@ def test_errors_over_rest_and_mcp_leave_no_name_in_the_log(
     assert "in broken" in written
     assert "GET /api/read 500" in written
     assert "POST /mcp 200" in written
+    # The core's warning is there, as its template alone.
+    assert "docket.vault.docstore: skipping %s: %s" in written
 
 
 def test_the_libraries_log_at_warning(log_file: Path) -> None:

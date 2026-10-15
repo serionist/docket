@@ -1,8 +1,9 @@
 """The service's log: one line per request, and no content.
 
 The user's words never reach the log: no query string, body, tool argument or result, and no exception's message,
-since an error can quote a record. Library loggers stay at WARNING (the MCP SDK logs a tool error's text at INFO), and
-an exception is written as its type and frames, for it and every cause and context in its chain.
+since an error can quote a record. Library loggers stay at WARNING (the MCP SDK logs a tool error's text at INFO); a
+line from any logger but the service's own is written as its template alone, without its arguments; and an exception
+is written as its type and frames, for it and every cause and context in its chain.
 """
 
 from __future__ import annotations
@@ -17,7 +18,8 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from docket.service.security import HEADERS
 
-log = logging.getLogger("docket.service")
+SERVICE_LOGGER = "docket.service"
+log = logging.getLogger(SERVICE_LOGGER)
 
 LIBRARIES = ("mcp", "uvicorn", "uvicorn.error", "uvicorn.access", "starlette", "fastapi", "httpx2", "sse_starlette")
 LOG_BYTES = 5 * 1024 * 1024
@@ -51,7 +53,11 @@ class NoMessages(logging.Formatter):
         super().__init__("%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     def format(self, record: logging.LogRecord) -> str:
-        record.message = record.getMessage()
+        # The service's own lines are written whole: methods, route templates, ports, counts and types. Any other
+        # logger's (the core's, a library's) gets its template alone, since its arguments can be a broken doc's path or
+        # the values in its frontmatter.
+        own = record.name == SERVICE_LOGGER or record.name.startswith(f"{SERVICE_LOGGER}.")
+        record.message = record.getMessage() if own else str(record.msg)
         record.asctime = self.formatTime(record)
         line = self.formatMessage(record)
         error = record.exc_info[1] if record.exc_info else None

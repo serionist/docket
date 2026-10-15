@@ -29,7 +29,7 @@ from docket.service.platforms import (
     unit_quote,
     user_unit,
 )
-from docket.service.token import Tokens
+from docket.service.token import Token, Tokens
 from docket.vault.config import VaultConfig
 from docket.vault.vault import Vault
 
@@ -567,3 +567,31 @@ def test_status_not_running_or_answered_by_another_program(monkeypatch: pytest.M
 def test_a_service_status_line_is_one_line() -> None:
     st = ServiceStatus(None, False, 1, {}, "x", None, {}, None)
     assert "\n" not in st.line
+
+
+def test_install_stops_a_registered_service_before_it_may_choose_a_new_token(
+    tmp_path: Path, config: VaultConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = a_vault(tmp_path, config)
+    order: list[str] = []
+
+    class Registered(Recorder):
+        def installed(self) -> str | None:
+            return "a test registration"
+
+        def stop(self) -> None:
+            order.append("stop")
+
+        def install(self, launch: Launch) -> str:
+            order.append("install")
+            return super().install(launch)
+
+    class Watched(Tokens):
+        def ensure(self) -> Token:
+            order.append("ensure")
+            return super().ensure()
+
+    answering(monkeypatch, lambda: {"started": (datetime.now(UTC) + timedelta(seconds=2)).isoformat()})
+    install.install(root, None, installer=Registered(), tokens=Watched(), environ={}, system="Linux")
+    # Under the Run key, stop confirms the running service's pid with the token it holds: the old one.
+    assert order == ["stop", "ensure", "install"]

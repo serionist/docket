@@ -51,8 +51,7 @@ class Prepared:
             client.service_file().unlink(missing_ok=True)
         self.sock.close()
         self.lock.release()
-        logging.getLogger().removeHandler(self.handler)
-        self.handler.close()
+        _drop(self.handler)
 
 
 def socket_options(system: str = SYSTEM) -> list[tuple[int, int, int]]:
@@ -94,24 +93,34 @@ def prepare(vault: Path | None = None, port: int | None = None, *, tokens: Token
     wanted = port if port is not None else (settings.port or client.DEFAULT_PORT)
     state = userconfig.state_dir()
     state.mkdir(parents=True, exist_ok=True)
+    # The log first: under pythonw on Windows a refusal has no console to go to, and the log is where status sends
+    # the user. A refusal names only a port, a pid or the token's store, never content.
+    handler = logs.configure(userconfig.log_dir() / LOG_FILE)
     lock = FileLock(str(state / LOCK_FILE), timeout=0)
     try:
-        lock.acquire()
-    except Timeout:
-        running = client.recorded() or {}
-        raise DocketError(
-            f"the service already runs (pid {running.get('pid', '?')}, port {running.get('port', '?')}); "
-            "`docket service status` says more"
-        ) from None
-    try:
-        store = tokens or Tokens()
-        token = store.read()
-        sock = bind(wanted)
+        try:
+            lock.acquire()
+        except Timeout:
+            running = client.recorded() or {}
+            raise DocketError(
+                f"the service already runs (pid {running.get('pid', '?')}, port {running.get('port', '?')}); "
+                "`docket service status` says more"
+            ) from None
+        try:
+            store = tokens or Tokens()
+            token = store.read()
+            sock = bind(wanted)
+        except BaseException:
+            lock.release()
+            raise
+    except DocketError as e:
+        log.error("the service didn't start: %s", e)
+        _drop(handler)
+        raise
     except BaseException:
-        lock.release()
+        _drop(handler)
         raise
     actual: int = sock.getsockname()[1]
-    handler = logs.configure(userconfig.log_dir() / LOG_FILE)
     started = datetime.now(UTC)
     app = create_app(Settings(port=actual, vault=vault, token=lambda: token, store=store.where(), started=started))
     record = {
@@ -127,6 +136,11 @@ def prepare(vault: Path | None = None, port: int | None = None, *, tokens: Token
     tmp.replace(target)
     log.info("serving on %s:%d", HOST, actual)
     return Prepared(app=app, sock=sock, port=actual, lock=lock, handler=handler)
+
+
+def _drop(handler: logging.Handler) -> None:
+    logging.getLogger().removeHandler(handler)
+    handler.close()
 
 
 def serve(

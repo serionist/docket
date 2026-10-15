@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -11,8 +13,10 @@ from docket import userconfig
 from docket.cli import main
 from docket.service import client, install, server
 from docket.service.install import Installed, ServiceStatus
-from docket.service.platforms import Launch
+from docket.service.platforms import Launch, Windows
 from docket.service.token import Token, Tokens
+
+WHOAMI = '"EXAMPLE\\ada","S-1-5-21-1111111111-2222222222-3333333333-1001"\n'
 
 
 def run(capsys: pytest.CaptureFixture[str], *args: str) -> tuple[int, str, str]:
@@ -214,7 +218,7 @@ def test_rotate_restarts_an_installed_service_or_says_to(
     registration.registered = "a test registration"
     code, out, _ = run(capsys, "service", "token", "--rotate")
     assert out == "a new token; the service restarted with it\n"
-    assert registration.done == ["install -X"]
+    assert registration.done == ["stop", "install -X"]
 
 
 def test_rotate_says_when_the_store_moved(
@@ -279,3 +283,50 @@ def test_open_without_a_service_says_so(capsys: pytest.CaptureFixture[str], monk
     code, _, err = run(capsys, "open")
     assert code == 2
     assert "the service isn't answering" in err
+
+
+def test_rotate_under_the_run_key_stops_the_service_that_answers_only_to_the_old_token(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old = Tokens().ensure().value
+    client.service_file().parent.mkdir(parents=True, exist_ok=True)
+    client.service_file().write_text(json.dumps({"pid": 4242, "port": 9001}), encoding="utf-8")
+
+    def status(method: str, path: str, *, token: str | None = None, at: int | None = None) -> client.Answer:
+        # The running service still holds the old token, and answers nothing else.
+        return client.Answer(200, {"pid": 4242}) if token == old else client.Answer(401, {})
+
+    monkeypatch.setattr(client, "call", status)
+    killed: list[int] = []
+    monkeypatch.setattr(os, "kill", lambda pid, _sig: killed.append(pid))
+
+    def runner(args: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        # No task, and Task Scheduler refuses one: the Run key it is.
+        code = 1 if args[0] == "schtasks" and args[1] in ("/Query", "/Create") else 0
+        return subprocess.CompletedProcess(list(args), code, WHOAMI if args[0] == "whoami" else "", "")
+
+    values: dict[str, str] = {"Docket": "the old service"}
+
+    class Values:
+        def get(self, name: str) -> str | None:
+            return values.get(name)
+
+        def set(self, name: str, value: str) -> None:
+            values[name] = value
+
+        def delete(self, name: str) -> None:
+            values.pop(name, None)
+
+    started: list[list[str]] = []
+
+    def installer_for(system: str | None = None, *, stop_pid: Callable[[], None] | None = None) -> Windows:
+        return Windows(runner=runner, registry=Values, start=started.append, stop_pid=stop_pid, work=tmp_path)
+
+    monkeypatch.setattr(install, "installer_for", installer_for)
+    code, out, _ = run(capsys, "service", "token", "--rotate")
+    assert code == 0
+    assert out == "a new token; the service restarted with it\n"
+    assert killed == [4242]
+    assert Tokens().read() != old
+    assert values["Docket"].endswith("--env-file " + str(install.env_file()))
+    assert started

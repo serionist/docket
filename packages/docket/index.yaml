@@ -642,6 +642,8 @@ decisions:
     cost: medium
     sources: ["#8"]
     description: "Windows: a Task Scheduler task Docket at the user's own logon, the user named by SID, InteractiveToken and LeastPrivilege, on battery too, restarted after a failure and started again within 5 minutes by a repeating time trigger, IgnoreNew; the per-user Run key value Docket when Task Scheduler refuses. macOS: a LaunchAgent io.github.serionist.docket, RunAtLoad, KeepAlive {SuccessfulExit: false}, booted out fully before it is loaded again. Linux: a systemd user unit docket.service, Restart=on-failure, RestartSec=5. Each runs this Docket's interpreter (pythonw.exe on Windows) with -X utf8 -m docket serve --env-file <file>, the file holding the installing shell's PATH, SSH_AUTH_SOCK except on macOS, and DOCKET_CONFIG_DIR and DOCKET_STATE_DIR when set. Install run again replaces the registration and restarts; an upgrade is stop, upgrade, install. stop disables the Windows task, and under the Run key ends the pid on record once /api/status answers with it."
+    binds:
+      - install and token --rotate stop a registered service before the token may change, so under the Run key its pid is confirmed with the token it still holds.
     not_chosen:
       - "A system service: no audio devices, keychain or git credentials of the user."
       - "The environment in each registration: a Task Scheduler task has none, so one file serves all three."
@@ -653,7 +655,7 @@ decisions:
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#8"]
-    description: "service.log, in the user's log folder, rotated at 5 MB with three kept, holds a line per request (method, route template, status, milliseconds) and never a query string, a body, a tool's arguments or result, or an exception's message: an exception is written as its type and frames, for each cause and context in its chain. Docket logs at INFO; mcp, uvicorn and starlette at WARNING, since the SDK logs a tool error's text at INFO. The outermost layer answers any exception with a 500 and never raises it again, so no server logs it with its message."
+    description: "service.log, in the user's log folder, rotated at 5 MB with three kept, holds a line per request (method, route template, status, milliseconds) and never a query string, a body, a tool's arguments or result, or an exception's message: an exception is written as its type and frames, for each cause and context in its chain. The service's own lines (the docket.service logger) are written whole; any other logger's, the core's or a library's, as its format template alone, since its arguments can be a broken doc's path or its frontmatter's values. Docket logs at INFO; mcp, uvicorn and starlette at WARNING, since the SDK logs a tool error's text at INFO. The log is set up before anything else at start, so a refusal to start (a port in use, a service already running, a token store that can't be read) is written there, naming only a port, a pid or the store. The outermost layer answers any exception with a 500 and never raises it again, so no server logs it with its message."
   - id: DR-0156
     title: Docket's git never signs
     status: proposed
