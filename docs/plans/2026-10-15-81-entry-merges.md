@@ -144,7 +144,8 @@ the root's `index.yaml` with this plan, the way today's tool writes; step 4 move
 ## Tests
 
 In `tools/devkit/tests/test_docs.py`, on the `repo` fixture's throwaway repo with this repo's regime; the merge test
-makes its branches with git there. No test is deleted or weakened; the devkit coverage floor stays at 80 or rises.
+makes its branches with git there. No test is deleted or weakened; the devkit coverage floor stays at 80 or rises
+(it rose to 82).
 
 ## Docs
 
