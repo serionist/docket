@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from devkit import commits, content, coverage
+from devkit import commits, content, coverage, evalfloors
 from devkit.regime import Regime
 from devkit.repo import KitError, default_base, listed_files, repo_root, utf8_stdio
 from devkit.store import Store
@@ -267,11 +267,16 @@ def step_tests(ctx: Ctx) -> Outcome:
     report = ctx.root / ".local" / "coverage.json"
     report.parent.mkdir(exist_ok=True)
     report.unlink(missing_ok=True)
+    numbers = ctx.root / evalfloors.REPORT
+    numbers.unlink(missing_ok=True)
     # One worker per core: most of the time goes to git subprocesses that would otherwise wait on each other.
     cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-n", "auto", f"--durations={SLOWEST}"]
+    env: dict[str, str] = {}
     if ctx.lane == "full":
         cmd += ["--cov", f"--cov-report=json:{report.as_posix()}", "--cov-report=term:skip-covered"]
-    code, lines = _run(ctx, cmd)
+        # The question set's test writes its numbers there, for the eval floors (DR-0295).
+        env[evalfloors.REPORT_ENV] = str(numbers)
+    code, lines = _run(ctx, cmd, env=env)
     if code != 0:
         return Outcome.fail(*lines[-80:])
     summary = next((ln for ln in reversed(lines) if " passed" in ln or " failed" in ln), "")
@@ -279,10 +284,12 @@ def step_tests(ctx: Ctx) -> Outcome:
         return Outcome.ok(summary.strip("= "), *slowest(lines))
     measures = coverage.measure(json.loads(report.read_text(encoding="utf-8")))
     failures, rise = coverage.judge(measures, coverage.load_floors(ctx.root))
+    eval_failures, eval_line = evalfloors.check(ctx.root, ctx.base)
+    failures += eval_failures
     if failures:
         return Outcome.fail(*failures, *rise)
     per = ", ".join(f"{m.module} {m.percent:.1f}%" for m in measures.values())
-    return Outcome.ok(summary.strip("= "), per, *rise, *slowest(lines))
+    return Outcome.ok(summary.strip("= "), per, eval_line, *rise, *slowest(lines))
 
 
 STEPS = [
