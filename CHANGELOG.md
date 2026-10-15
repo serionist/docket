@@ -93,7 +93,8 @@ Unreleased in the same PR.
   comes after the hits holding as many of your words as written. The index rebuilds once, at the first search or
   service start after the update.
 - A customer or person named in most of your notes is found in its Hungarian inflected forms too (`Acménél`,
-  `Acmét`), and `acménél` in a query reads as that entity. A word that only stems like a name no longer counts as
+  `Acmét`), and `acménél` in a query reads as that entity. A foreign name is found as Hungarian says it by its sound
+  (`Sammel`, `Ryannel`, `Nimishsel`). A word that only stems like a name no longer counts as
   the name, in your notes or in a query: not `már` for Mark, and not the English `same` for Sam or `marked` and
   `market` for Mark. A name written only in a Hungarian possessive (`Markéhoz`) no longer counts on its own. The same
   one rebuild covers it.
