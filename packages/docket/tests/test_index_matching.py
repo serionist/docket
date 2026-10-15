@@ -499,7 +499,7 @@ def test_a_case_form_far_commoner_than_a_rare_name_counts_as_a_word(common_words
 
 # A team where people are named often: each name bare in 40 of 400 chunks and inflected in 20 more, and a word that is
 # one of its case forms in 100, over twice the name as written yet under ten times. Anna, in 100 chunks, folds like
-# Ann's Anná. Péter is written inflected in 80 of his 100 chunks, 20 per case form.
+# Ann's Anná.
 COLLEAGUES = {
     "person/ann.yaml": "id: ann\ntype: person\nname: {en: Ann}\n",
     "person/anna.yaml": "id: anna\ntype: person\nname: {hu: Anna}\n",
@@ -511,12 +511,10 @@ COLLEAGUES = {
     "person/bea.yaml": "id: bea\ntype: person\nname: {hu: Bea}\n",
     "person/ben.yaml": "id: ben\ntype: person\nname: {en: Ben}\n",
     "person/don.yaml": "id: don\ntype: person\nname: {en: Don}\n",
-    "person/peter.yaml": "id: peter\ntype: person\nname: {hu: Péter}\n",
 }
 COLLEAGUE_LINES: list[Line] = [
     (4, 0, "Annál jobb, ha holnap jön.", None),
     (4, 0, "Egy évet vártunk rá.", None),
-    (4, 0, "Anna küldte a listát.", "anna"),
     (4, 1, "Please edit the doc.", None),
     (4, 1, "Even so, it works.", None),
     (4, 1, "Az adat hiányzik.", None),
@@ -525,6 +523,7 @@ COLLEAGUE_LINES: list[Line] = [
     (4, 2, "Beat the deadline.", None),
     (4, 3, "Bent vagyok az irodában.", None),
     (4, 3, "Holnap dönt a bizottság.", None),
+    (4, 3, "Anna küldte a listát.", "anna"),
     (10, 0, "Ann szerint jó.", "ann"),
     (10, 1, "Eve szerint jó.", "eve"),
     (10, 2, "Edi szerint jó.", "edi"),
@@ -543,11 +542,6 @@ COLLEAGUE_LINES: list[Line] = [
     (20, 17, "Beával beszéltem.", "bea"),
     (20, 18, "Bennel beszéltem.", "ben"),
     (20, 19, "Donnal beszéltem.", "don"),
-    (20, 9, "Péter szerint jó.", "peter"),
-    (20, 1, "Péternek írtam.", "peter"),
-    (20, 3, "Péterrel beszéltem.", "peter"),
-    (20, 5, "Pétert hívtam.", "peter"),
-    (20, 7, "Péterhez megyek.", "peter"),
 ]
 
 
@@ -567,21 +561,24 @@ def colleague_chunks(entity: str) -> set[int]:
     return {n for n in range(400) if entity in lines_message(COLLEAGUE_LINES, n)[1]}
 
 
-def test_a_case_form_in_over_twice_the_name_s_chunks_counts_as_a_word(colleagues: Vault) -> None:
+def chunks_saying(text: str) -> set[int]:
+    return {n for n in range(400) if text in lines_message(COLLEAGUE_LINES, n)[0]}
+
+
+def test_a_case_form_no_kept_stem_form_checks_counts_as_a_word_past_twice_the_name(colleagues: Vault) -> None:
+    # Each of these is cut only to a stem form under three letters (an, ev, ed, ad, be), so nothing but its count tells
+    # it from the name.
     dropped = set(query(colleagues, "SELECT entity, term FROM alias_terms WHERE col = 'folded' AND how = 'common'"))
     assert {
-        ("ann", "annal"), ("eve", "evet"), ("eve", "even"), ("edi", "edit"), ("ada", "adat"), ("bela", "belat"),
-        ("eva", "evan"), ("bea", "beat"), ("ben", "bent"), ("don", "dont"),
+        ("ann", "annal"), ("eve", "evet"), ("eve", "even"), ("edi", "edit"), ("ada", "adat"), ("eva", "evan"),
+        ("bea", "beat"),
     } <= dropped  # fmt: skip
-    # Ben's and Don's stem forms stay: bent and dönt are under ten times their names, so the case forms go alone.
-    stems = set(query(colleagues, "SELECT entity, term, how FROM alias_terms WHERE col = 'stem_hu'"))
-    assert {("ben", "ben", "stem"), ("don", "don", "stem")} <= stems
-    for entity in {e.split("/")[1].removesuffix(".yaml") for e in COLLEAGUES}:
-        # Annhoz, Evével, Edivel, Adával, Bélával, Évával, Beával, Bennel and Donnal in; no chunk saying only annál,
-        # évet, even, edit, adat, belát, Evan, beat, bent or dönt.
+    for entity in ("eve", "edi", "ada", "eva", "bea"):
+        # Evével, Edivel, Adával, Évával and Beával in; no chunk saying only évet, even, edit, adat, Evan or beat.
         assert mentions_of(colleagues, entity) == colleague_chunks(entity), entity
+    assert not (mentions_of(colleagues, "ann") - colleague_chunks("ann")) & chunks_saying("Annál")
     now = datetime(2026, 10, 15, tzinfo=UTC)
-    for word in ("annál", "évet", "edit", "even", "adat", "belát", "evan", "beat", "bent", "dönt"):
+    for word in ("annál", "évet", "edit", "even", "adat", "evan", "beat"):
         reading = search(colleagues, word, now=now).query
         assert reading.entities == [], word
         assert reading.words == [word], word
@@ -593,20 +590,67 @@ def test_a_case_form_in_over_twice_the_name_s_chunks_counts_as_a_word(colleagues
         assert [e.id for e in search(colleagues, word, now=now).query.entities] == [entity], word
 
 
-def test_a_name_that_folds_like_another_name_s_case_form_counts_as_itself(colleagues: Vault) -> None:
-    # Ann's Anná folds to anna and stems to ann without its accent; Anna is in over twice Ann's chunks.
-    assert ("ann", "anna") in set(query(colleagues, "SELECT entity, term FROM alias_terms WHERE how = 'common'"))
-    assert mentions_of(colleagues, "ann") == colleague_chunks("ann")
+def test_a_case_form_a_kept_stem_form_checks_is_judged_as_main_judges_it(colleagues: Vault) -> None:
+    # bent, dönt, belát and Anna (Ann's Anná without its accent) are cut to Ben's ben, Don's don, Béla's bel and Ann's
+    # ann, all kept, so they are judged at ten times the name, as a stem form is. Under that, they count as the name,
+    # as on main: a word and a name used about as often can't be told apart by counts.
+    dropped = set(query(colleagues, "SELECT entity, term FROM alias_terms WHERE col = 'folded' AND how = 'common'"))
+    assert not {("ben", "bent"), ("don", "dont"), ("bela", "belat"), ("ann", "anna")} & dropped
+    collisions = {"ben": "Bent", "don": "dönt", "bela": "belát", "ann": "Anna"}
+    for entity, word in collisions.items():
+        assert mentions_of(colleagues, entity) == colleague_chunks(entity) | chunks_saying(word), entity
     assert mentions_of(colleagues, "anna") == colleague_chunks("anna")
-    reading = search(colleagues, "anna", now=datetime(2026, 10, 15, tzinfo=UTC)).query
-    assert [e.id for e in reading.entities] == ["anna"]
+    now = datetime(2026, 10, 15, tzinfo=UTC)
+    for word, entities in [("bent", ["ben"]), ("dönt", ["don"]), ("belát", ["bela"]), ("anna", ["ann", "anna"])]:
+        assert [e.id for e in search(colleagues, word, now=now).query.entities] == entities, word
 
 
-def test_a_name_written_mostly_inflected_keeps_its_mentions(colleagues: Vault) -> None:
-    # Péter is bare in 20 chunks and inflected in 80, 20 per case form: none is past twice the name as written.
-    assert not query(colleagues, "SELECT term FROM alias_terms WHERE entity = 'peter' AND how = 'common'")
-    assert len(colleague_chunks("peter")) == 100
-    assert mentions_of(colleagues, "peter") == colleague_chunks("peter")
+# Names written mostly inflected or never bare, as to-dos and places are: Laci bare in 5 chunks and Lacinak in 16,
+# Tamás bare in 10 and Tamásnak in 25, and Péternek, Bálintnak and the place Győrben, never bare, in 40, 20 and 31. Each
+# case form is past twice the name as written, and a kept stem form checks it.
+REGULARS = {
+    "person/laci.yaml": "id: laci\ntype: person\nname: {hu: Laci}\n",
+    "person/tamas.yaml": "id: tamas\ntype: person\nname: {hu: Tamás}\n",
+    "person/peter.yaml": "id: peter\ntype: person\nname: {hu: Péter}\n",
+    "person/balint.yaml": "id: balint\ntype: person\nname: {hu: Bálint}\n",
+    "place/gyor.yaml": "id: gyor\ntype: place\nname: {hu: Győr}\n",
+}
+REGULAR_LINES: list[Line] = [
+    (80, 0, "Laci szerint jó.", "laci"),
+    (25, 1, "Lacinak szóltam.", "laci"),
+    (40, 4, "Tamás szerint jó.", "tamas"),
+    (16, 5, "Tamásnak megírni a választ.", "tamas"),
+    (27, 6, "Tamással egyeztetni.", "tamas"),
+    (10, 2, "Péternek írtam.", "peter"),
+    (20, 3, "Bálintnak írtam.", "balint"),
+    (13, 7, "Győrben voltunk.", "gyor"),
+    (40, 8, "Győrbe megyünk.", "gyor"),
+]
+
+
+def make_regulars_vault(root: Path) -> Vault:
+    return people_vault(root, REGULARS, REGULAR_LINES)
+
+
+@pytest.fixture(scope="module")
+def regulars(tmp_path_factory: pytest.TempPathFactory) -> Vault:
+    template = template_with(tmp_path_factory, make_regulars_vault)
+    v = copy_vault(template, tmp_path_factory.mktemp("regulars"))
+    rebuild(v)
+    return v
+
+
+def test_a_name_mostly_inflected_or_never_bare_keeps_its_mentions(regulars: Vault) -> None:
+    assert not query(regulars, "SELECT entity, term FROM alias_terms WHERE how = 'common'")
+    for entity in ("laci", "tamas", "peter", "balint", "gyor"):
+        expected = {n for n in range(400) if entity in lines_message(REGULAR_LINES, n)[1]}
+        assert mentions_of(regulars, entity) == expected, entity
+    now = datetime(2026, 10, 15, tzinfo=UTC)
+    named = [
+        ("lacinak", "laci"), ("tamásnak", "tamas"), ("péternek", "peter"), ("bálintnak", "balint"), ("győrben", "gyor"),
+    ]  # fmt: skip
+    for word, entity in named:
+        assert [e.id for e in search(regulars, word, now=now).query.entities] == [entity], word
 
 
 def test_a_name_ending_in_y_keeps_its_inflected_mentions(one_customer: Vault) -> None:

@@ -448,8 +448,10 @@ role: the customer's site lead
   (`Nimishsel`) counts on its own. A stem form under three letters, or one that floods the index (`Rob` stems to
   `rob`, which `robot` gives too), is dropped and listed for curation; the case forms count while any stem form of the
   name is kept, so `Markkal`, cut to `mar`, counts while `már` floods it, and with every one dropped they don't. A
-  case form in over twice as many chunks as the name as written is a common word and is dropped too: `annál` isn't
-  Ann then, though a colleague named more than half as often as the word still collides with it (DR-0350).
+  case form that floods the index is a common word and is dropped too: past ten times the name as written, as a stem
+  form, or past twice where no kept stem form checks it, since every stem form it is cut to is short or common
+  (`annál`, cut to `an`, isn't Ann then; a colleague named more than half as often as the word still collides with
+  it) (DR-0350).
 - Aliases marked `asr` also match vocabulary words within one edit of a word of 5 to 7 letters, two of 8 or more.
 - Aliases with `needs` count only when one of the named entities is in the same chunk.
 - A diarized speaker, or an author whose id an entity lists, counts as a mention of that person.
