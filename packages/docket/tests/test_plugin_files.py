@@ -124,3 +124,21 @@ def test_setup_runs_commands_with_flags_docket_has() -> None:
     for flag in ("--allow-shared", "--remote-is-private", "--allow-dirty-parent"):
         assert f"`{flag}`" in text
         assert flag in options("init")
+
+
+def test_cuts_pre_approves_only_reading_holds_and_hands_the_release_to_the_owner() -> None:
+    allowed = re.findall(r"Bash\(([^)]*)\)", frontmatter("cuts")["allowed-tools"])
+    assert allowed == ["docket hold list", "docket hold list *", "docket hold show *"]
+    for skill in sorted(p.name for p in (PLUGIN / "skills").iterdir()):
+        assert "hold release" not in frontmatter(skill).get("allowed-tools", ""), skill
+    text = (PLUGIN / "skills" / "cuts" / "SKILL.md").read_text(encoding="utf-8")
+    for command in (["hold", "list"], ["hold", "show"], ["hold", "release"], ["staging", "promote"]):
+        used = re.findall(rf"docket {' '.join(command)}[^`\n]*", text)
+        assert used, command
+        flags = {flag for line in used for flag in re.findall(r"--[a-z][a-z-]*", line)}
+        assert flags <= options(*command), command
+    # Where hold show's output stays, said before the first one; and the release the skill never runs.
+    for words in ("session log", "tool-results/*.txt", "bridged", "cleanupPeriodDays", "delete this session"):
+        assert words in text, words
+    assert "Never run it yourself" in text
+    assert "CLAUDECODE" in text
