@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -9,13 +10,19 @@ import pytest
 import yaml
 from docket_testkit import (
     CALL,
+    COMPOUND_FOLLOW,
+    COMPOUND_KICK,
     CRANE,
+    EDITORS,
     FLEET,
     INDEX_FIXTURE,
     INDEX_NOW,
     OFFER,
     PARENT,
+    compound_chat,
+    compound_template,
     copy_vault,
+    fts_and_check,
     index_config,
     index_template,
     make_record,
@@ -35,7 +42,7 @@ from docket.index.terms import Checker, phrase_of
 from docket.index.text import Analyzer
 from docket.vault.records import RawRecord
 from docket.vault.vault import Vault
-from docket.web import views
+from docket.web import templating, views
 
 QUESTIONS: list[dict[str, Any]] = yaml.safe_load((INDEX_FIXTURE / "questions.yaml").read_text(encoding="utf-8"))
 LATER = datetime(2026, 10, 14, 9, 0, tzinfo=UTC)
@@ -422,31 +429,35 @@ def test_a_title_never_lifts_a_hit_into_an_earlier_stage(names: Vault) -> None:
     assert some[0].rid == CRANE
 
 
-def test_the_word_check_agrees_with_stemming_every_word(vault: Vault, names: Vault) -> None:
+def test_the_word_check_agrees_with_stemming_every_word(vault: Vault, names: Vault, compounds: Vault) -> None:
     # Stems that change a word's early letters (`cries` to `cri`, `dying` to `die`, `skies` to `sky`), and a capital
-    # that lowercases to two characters (`İ`): a screen on more than the first letter would miss them.
+    # that lowercases to two characters (`İ`): a screen on more than the first letter would miss them. With compounds
+    # (#59), joined words and splits, whose halves' first letters the screen must take too.
     texts = [
         "Acménál volt szó a határidőről, és az Acme határidő csúszik.",
         "The dying light under grey skies; the baby cries, the kick-off is dry. ÁRVÍZTŰRŐ tükörfúrógép, İSTANBUL.",
     ]
-    for v in (vault, names):
+    for v in (vault, names, compounds):
         conn = open_index(v)
         try:
             texts += [r[0] for r in conn.execute("SELECT text FROM chunks ORDER BY id")]
         finally:
             conn.close()
-    for languages in (["en", "hu"], ["en", "de"]):
+    for languages, joined in ((["en", "hu"], False), (["en", "de"], False), (["en", "hu"], True), (["en", "de"], True)):
         analyzer = Analyzer(resolve(languages))
         picked = ["acme", "határidő", "die", "sky", "cry", "dry", "istanbul", "dana", "budget", "forint", "árvíztűrő"]
-        words = query_words(analyzer, texts, picked, seed=57)
+        if joined:
+            picked += ["kickoff", "kickoffs", "followup", "email", "emailben", "online", "editor", "visitor", "setup"]
+        words = query_words(analyzer, texts, picked, seed=57, compounds=joined)
         phrases = [phrase_of(analyzer, p) for p in ("budget review", "crane audit", "acme kick", "grey skies")]
         checker = Checker(analyzer, words, phrases)
         assert (checker.firsts is not None) == (languages == ["en", "hu"])
         for text in texts:
-            want_words, want_phrases = stem_every_word(analyzer, words, phrases, text)
+            want_words, want_phrases, want_split = stem_every_word(analyzer, words, phrases, text)
             held = checker.held(text)
-            assert (set(held.words), set(held.phrases)) == (want_words, want_phrases), text
-            assert checker.count(text) == len(want_words) + len(want_phrases), text
+            got = (set(held.words), set(held.phrases), set(held.split_only))
+            assert got == (want_words, want_phrases, want_split), text
+            assert checker.examine(text) == (len(want_words) + len(want_phrases) + len(want_split), bool(want_split))
 
 
 @pytest.mark.parametrize(
@@ -495,3 +506,139 @@ def test_the_any_word_stage_adds_a_weightless_word_when_the_stages_leave_fewer_t
     # Two weightless words and a source where no chunk holds both: the least common, Orbex, finds the chat.
     chat = find(names, "acme orbex", sources=["chat"])
     assert [h.rid for h in ranked(chat)] == ["chat:C0NAMES/1791500001.000100"]
+
+
+# -- the compound vault: hyphenated, joined and spaced spellings (#59) -----------------------------------------------
+
+MAIL_KICK = "mail:<kick-1@orbex.example>"
+MAIL_FOLLOW = "mail:<follow-1@orbex.example>"
+MAIL_EDIT = "mail:<edit-1@orbex.example>"
+AGREEMENT = [
+    "orbex kickoff", "orbex kick-off", "orbex kick off", "crane followup", "crane follow-up", "crane follow up",
+    "email", "e-mail", "emailben", "online", "on-line", "well", "setup", "set up", "editor", "visitor",
+    # A stemmed compound, and queries where no other word screens in the split's second half ("off").
+    "kickoffs", "kickoff", "crane kickoff",
+]  # fmt: skip
+
+
+@pytest.fixture(scope="module")
+def compounds(tmp_path_factory: pytest.TempPathFactory) -> Vault:
+    v = copy_vault(compound_template(tmp_path_factory), tmp_path_factory.mktemp("compounds"))
+    rebuild(v)
+    return v
+
+
+def rids(result: SearchResult) -> set[str | None]:
+    return {h.rid for h in ranked(result)}
+
+
+def test_the_compound_vault_holds_each_spelling(compounds: Vault) -> None:
+    conn = open_index(compounds)
+    try:
+        total = conn.execute("SELECT count(*) FROM chunks").fetchone()[0]
+
+        def docs(col: str, term: str) -> int:
+            row = conn.execute("SELECT doc FROM vocab WHERE col = ? AND term = ?", (col, term)).fetchone()
+            return 0 if row is None else row[0]
+
+        # The joined words: kick-off, follow-up, e-mailt, e-mail-címedet, on-line, and kick-offs through its stem.
+        for term in ("kickoff", "followup", "emailt", "emailcimedet", "online"):
+            assert docs("folded", term), term
+        assert docs("stem_hu", "email") and docs("stem_en", "kickoff")
+        # The chunk keeps the text as written: only its FTS5 row holds the joined word.
+        text = conn.execute("SELECT text FROM chunks WHERE rid = ?", (MAIL_KICK,)).fetchone()[0]
+        assert "kick-off" in text and "kickoff" not in text
+        assert docs("folded", "set") * 2 >= total and docs("folded", "up") * 2 >= total
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize(
+    ("query", "want"),
+    [
+        *((q, [MAIL_KICK, compound_chat("kickoff"), COMPOUND_KICK]) for q in ("orbex kickoff", "orbex kick-off",
+                                                                              "orbex kick off")),
+        *((q, [MAIL_FOLLOW, compound_chat("followup"), COMPOUND_FOLLOW]) for q in ("crane followup", "crane follow-up",
+                                                                                   "crane follow up")),
+    ],
+)  # fmt: skip
+def test_every_spelling_finds_all_three(compounds: Vault, query: str, want: list[str]) -> None:
+    by = {h.rid: h.found_by for h in ranked(find(compounds, query))}
+    assert [by.get(rid) for rid in want] == ["all", "all", "all"], query
+
+
+def test_email_finds_its_hungarian_spellings(compounds: Vault) -> None:
+    for query in ("email", "e-mail", "emailben"):
+        assert {compound_chat(k) for k in ("emailben", "emailt", "email", "emailcim")} <= rids(find(compounds, query))
+
+
+def test_online_and_on_line_find_each_other(compounds: Vault) -> None:
+    for query in ("online", "on-line"):
+        assert {compound_chat("online-hu"), compound_chat("online")} <= rids(find(compounds, query)), query
+
+
+def test_a_split_s_first_half_has_three_letters(compounds: Vault) -> None:
+    found = rids(find(compounds, "well"))
+    assert compound_chat("well") in found and compound_chat("well-short") not in found
+
+
+def test_a_split_needs_a_letter_in_each_half(compounds: Vault) -> None:
+    # "round 10" is said, and both halves are words the index holds, but a number never splits.
+    result = find(compounds, "round10")
+    assert result.query.absent == ["round10"] and not result.groups
+
+
+def test_a_split_of_two_words_in_most_chunks_is_left_out(compounds: Vault) -> None:
+    found = rids(find(compounds, "setup"))
+    assert compound_chat("setup") in found and compound_chat("set-up") not in found
+    assert {compound_chat("setup"), compound_chat("set-up")} <= rids(find(compounds, "set up", k=100))
+
+
+def test_a_split_ranks_after_the_word_itself(compounds: Vault) -> None:
+    editor = ranked(find(compounds, "editor"))
+    editors = [h.rank for h in editor if h.rid in {compound_chat(f"editor-{n}") for n in range(EDITORS)}]
+    edit_or = [h.rank for h in editor if h.rid in {compound_chat("edit-or-0"), compound_chat("edit-or-1"), MAIL_EDIT}]
+    # The mail titled "Edit or delete the crane list" holds `editor` only through a split: its lead doesn't lift it.
+    assert len(editors) == EDITORS and len(edit_or) == 3 and max(editors) < min(edit_or)
+    visitor = find(compounds, "visitor")
+    assert first(visitor, compound_chat("visitor")) < first(visitor, compound_chat("visit-or"))
+
+
+def test_a_split_ranks_by_the_terms_held_in_the_any_word_stage(compounds: Vault) -> None:
+    # No chunk holds all three. The transcript holds followup only as "follow up", and crane: two terms, after the
+    # chunks holding two through their forms, above those holding crane alone.
+    result = ranked(find(compounds, "followup crane permit"))
+    rank = {h.rid: h.rank for h in result}
+    two = [rank[r] for r in (MAIL_FOLLOW, compound_chat("followup"), compound_chat("online"))]
+    one = [rank[r] for r in (compound_chat(f"editor-{n}") for n in range(EDITORS)) if r in rank]
+    assert all(h.found_by == "any" for h in result) and one
+    assert max(two) < rank[COMPOUND_FOLLOW] < min(one)
+
+
+def test_a_word_whose_splits_no_chunk_says_is_in_no_chunk(compounds: Vault) -> None:
+    # "list" and "crane" are both words of the vault, never in that order; "crane quote" is said.
+    assert find(compounds, "listcrane").query.absent == ["listcrane"]
+    quote = find(compounds, "cranequote")
+    assert quote.query.absent == [] and MAIL_FOLLOW in rids(quote)
+
+
+def test_a_title_with_a_compound_leads(compounds: Vault) -> None:
+    # Its lead holds both words only when the check reads kick-off as kickoff; the checklist says kickoff twice.
+    result = find(compounds, "orbex kickoff")
+    assert ranked(result)[0].rid == MAIL_KICK
+    assert first(result, MAIL_KICK) < first(result, compound_chat("checklist"))
+
+
+@pytest.mark.parametrize("query", AGREEMENT)
+def test_the_word_check_agrees_with_fts5_on_compounds(compounds: Vault, query: str) -> None:
+    found, held = fts_and_check(compounds, query)
+    assert found and found == held, query
+
+
+def test_a_compound_s_snippet_shows_it_as_written(compounds: Vault) -> None:
+    snippets = {h.rid: h.snippet for h in ranked(find(compounds, "kickoff"))}
+    assert "kick off" in snippets[COMPOUND_KICK] and "kick-off" in snippets[MAIL_KICK]
+    # "We'll" opens the message, "well" ends it 60 words on: the snippet starts at the word, not at the contraction.
+    assert "went well" in {h.rid: h.snippet for h in ranked(find(compounds, "well"))}[compound_chat("well-long")]
+    marks = templating.marked("we kick off, the kick-off, a kickoff; we'll see", ["kickoff", "well"])
+    assert re.findall(r"<mark>(.*?)</mark>", str(marks)) == ["kick", "off", "kick", "off", "kickoff"]

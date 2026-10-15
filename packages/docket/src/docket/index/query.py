@@ -1,13 +1,15 @@
 """Search: one query over the index, keyword-only, answered in well under a second.
 
 1. Read the query: quoted phrases, words, time words (a range), and names or aliases found in it (its entities).
-2. Each word becomes an OR of its forms across the columns; each entity an OR of its aliases' forms.
+2. Each word becomes an OR of its forms across the columns, its joined words' forms (two query words in a row, the
+   stretches of a hyphenated one) and its splits, two words in a row the index holds (DR-0281); each entity an OR of its
+   aliases' forms.
 3. FTS candidates, top 200 by BM25, filters applied inside the query: all words required, however common (DR-0230); if
    fewer than k, any of them; if still fewer, word prefixes. In each, the best chunk of each group whose title's lead
    holds most of the query's terms goes first (DR-0231); in the any-word stage the rest go by how many terms their text
-   holds (DR-0232), then by BM25. The any-word and prefix stages leave out words in half the chunks or more, which
-   BM25 gives no weight; they still count in the order, and the least common joins one more any-word query when the
-   stages leave fewer than k.
+   holds (DR-0232), then by BM25; a chunk holding a word only through a split goes after the rest (DR-0282). The
+   any-word and prefix stages leave out words in half the chunks or more, which BM25 gives no weight; they still count
+   in the order, and the least common joins one more any-word query when the stages leave fewer than k.
 4. Entity candidates, top 200: chunks mentioning the query's or the boosts' entities.
 5. Fuse the two lists by reciprocal rank, so a boost lifts a chunk and never drops one.
 6. Collapse hits on the same stretch, group them by recording or thread, attach each group's summary.
@@ -34,7 +36,21 @@ from docket.index import matching
 from docket.index.build import languages_of, open_index
 from docket.index.languages import Languages
 from docket.index.terms import Checker, Word, phrase_of, tokens
-from docket.index.text import WORD, Analyzer, any_of, dedupe, fold, in_columns, phrase, prefix, words
+from docket.index.text import (
+    HYPHENS,
+    WORD,
+    Analyzer,
+    Joined,
+    any_of,
+    dedupe,
+    fold,
+    has_letter,
+    in_columns,
+    phrase,
+    prefix,
+    words,
+    words_and_compounds,
+)
 from docket.index.timewords import Range, read_time
 from docket.vault.vault import Vault
 
@@ -52,6 +68,10 @@ LEAD_END = ": "
 LEAD_MIN = 3
 LEAD_WORDS = 12
 SUMMARY_TYPES = ("minutes", "recording-note", "thread-summary")
+# A split's halves (DR-0281): a first half of two letters is a contraction's or a function word's (`we're`, `in to`),
+# while `up`, `in` and `on` end compounds (`follow up`, `log in`).
+SPLIT_FIRST = 3
+SPLIT_SECOND = 2
 QUOTED = re.compile(r'"([^"]*)"')
 # The open ends of a range given only one side: far enough, and still printable in any time zone.
 FAR_PAST = datetime(1900, 1, 1, tzinfo=UTC)
@@ -208,6 +228,9 @@ class _Search:
         self.lookup, self.longest = self._lookups()
         # Per query word, the most chunks any of its forms is in.
         self.reach: dict[str, int] = {}
+        # How many chunks hold a split's half, and the admitted splits' column terms, where a snippet may start.
+        self.halves: dict[str, int] = {}
+        self.split_terms: set[tuple[str, str, str]] = set()
 
     @functools.cached_property
     def total(self) -> int:
@@ -256,16 +279,16 @@ class _Search:
                 i += 1
         return spans
 
-    def find_entities(self, tokens: list[str]) -> tuple[list[EntityFound], list[str]]:
-        """Names and aliases in the query, longest first; the words left over."""
+    def find_entities(self, tokens: list[str]) -> tuple[list[EntityFound], list[int]]:
+        """Names and aliases in the query, longest first; the places of the words left over."""
         found: list[EntityFound] = []
-        rest: list[str] = []
+        rest: list[int] = []
         at = 0
         for start, end, hits in self.entity_spans(tokens):
-            rest += tokens[at:start]
+            rest += range(at, start)
             found += [EntityFound(id=e, words=" ".join(tokens[start:end])) for e in sorted(hits)]
             at = end
-        return found, rest + tokens[at:]
+        return found, [*rest, *range(at, len(tokens))]
 
     def resolve(self, names: Sequence[str], person: bool) -> tuple[list[str], list[str]]:
         """Boosts by id, name or alias; what resolves to nothing comes back as unknown."""
@@ -302,9 +325,43 @@ class _Search:
                     forms.append((lang.column, twice[1]))
         return forms
 
-    def word_groups(self, tokens: list[str]) -> tuple[list[tuple[str, str]], list[Word], list[str]]:
-        """(word, expression) per word, with every form however common (DR-0230); each word with its forms, for the
-        word check, which also reads titles no chunk holds; and the words no chunk holds in any form.
+    def _half(self, half: str) -> int:
+        """How many chunks hold a split's half, as written or through a stem: the most in any column."""
+        known = self.halves.get(half)
+        if known is None:
+            counts = [self._docs("folded", fold(half))]
+            counts += [self._docs(lang.column, self.analyzer.stem(half, lang)) for lang in self.langs.languages]
+            known = self.halves[half] = max(counts)
+        return known
+
+    def splits(self, word: str) -> list[tuple[str, str, int]]:
+        """The two words in a row a query word also matches as (DR-0281), with the fewer chunks its halves are in: the
+        first half of three letters or more and the second of two, each holding a letter, both words the index holds,
+        and not both in half the chunks or more, where the phrase would cost a pass over most chunks."""
+        out: list[tuple[str, str, int]] = []
+        for at in range(SPLIT_FIRST, len(word) - SPLIT_SECOND + 1):
+            first, second = word[:at], word[at:]
+            if not (has_letter(first) and has_letter(second)):
+                continue
+            a = self._half(first)
+            b = self._half(second) if a else 0
+            if a and b and not (a * 2 >= self.total and b * 2 >= self.total):
+                out.append((first, second, min(a, b)))
+        return out
+
+    def said(self, first: str, second: str) -> bool:
+        """Whether some chunk says a split's halves in a row: both halves being words doesn't make the phrase one."""
+        row = self.conn.execute(
+            "SELECT 1 FROM chunks_fts WHERE chunks_fts MATCH ? LIMIT 1", (self._phrase([first, second]),)
+        ).fetchone()
+        return row is not None
+
+    def word_groups(
+        self, tokens: list[str], joins: dict[str, list[str]]
+    ) -> tuple[list[tuple[str, str]], list[Word], list[str]]:
+        """(word, expression) per word, with every form however common (DR-0230), its joined words' forms and its
+        splits (DR-0281); each word with its forms and splits, for the word check, which also reads titles no chunk
+        holds; and the words no chunk holds in any form or split.
 
         The expression leaves out a form its column doesn't hold, which matches nothing, and puts a term several
         columns hold in one phrase: a common word's every phrase costs BM25 a pass over its rows."""
@@ -313,25 +370,37 @@ class _Search:
         absent: list[str] = []
         for word in dedupe(tokens):
             forms = self.word_forms(word)
+            for joined in dedupe(joins.get(word, [])):
+                forms += self.word_forms(joined)
+            forms = list(dict.fromkeys(forms))
             self.terms |= {term for _, term in forms}
-            kept.append(Word(word, frozenset(forms)))
             counts = [self._docs(col, term) for col, term in forms]
             held = [form for form, n in zip(forms, counts, strict=True) if n]
-            self.reach[word] = max(counts)
-            if not held:
+            found = self.splits(word)
+            splits = tuple(phrase_of(self.analyzer, f"{first} {second}") for first, second, _ in found)
+            self.split_terms |= {(col, terms[0], terms[1]) for split in splits for col, terms in split.columns}
+            kept.append(Word(word, frozenset(forms), splits))
+            self.reach[word] = max([*counts, *(n for *_, n in found)])
+            # Checked only for a word no form of which the index holds: one lookup per split, at most a few.
+            if not held and not any(self.said(first, second) for first, second, _ in found):
                 absent.append(word)
             columns: dict[str, list[str]] = {}
-            for col, term in held or forms[:1]:
+            for col, term in held or ([] if found else forms[:1]):
                 columns.setdefault(term, []).append(col)
-            groups.append((word, any_of(in_columns(cols, term) for term, cols in columns.items())))
+            parts = [in_columns(cols, term) for term, cols in columns.items()]
+            parts += [self._phrase([first, second]) for first, second, _ in found]
+            groups.append((word, any_of(parts)))
         return groups, kept, absent
+
+    def _phrase(self, ws: list[str]) -> str:
+        parts = [phrase("folded", [fold(w) for w in ws])]
+        parts += [phrase(lang.column, [self.analyzer.stem(w, lang) for w in ws]) for lang in self.langs.languages]
+        return any_of(parts)
 
     def phrase_group(self, text: str) -> str:
         ws = words(text)
         self.terms |= {fold(w) for w in ws}
-        parts = [phrase("folded", [fold(w) for w in ws])]
-        parts += [phrase(lang.column, [self.analyzer.stem(w, lang) for w in ws]) for lang in self.langs.languages]
-        return any_of(parts)
+        return self._phrase(ws)
 
     def entity_group(self, entity: str) -> str | None:
         exprs = list(matching.expressions(self.conn, [entity], needs=False).values())
@@ -408,24 +477,28 @@ class _Search:
         q.leads[text] = known
         return known
 
-    def text_terms(self, ids: list[int], q: _Terms) -> dict[int, int]:
-        """How many of the query's terms each chunk's text holds: words and phrases by the word check, names by the
-        chunk's mentions."""
+    def text_terms(self, ids: list[int], q: _Terms) -> dict[int, tuple[int, bool]]:
+        """How many of the query's terms each chunk's text holds, words and phrases by the word check and names by the
+        chunk's mentions; and whether it holds a word only through a split."""
+        if not ids:
+            return {}
         marks = ", ".join("?" * len(ids))
         texts = dict(self.conn.execute(f"SELECT id, text FROM chunks WHERE id IN ({marks})", ids).fetchall())  # noqa: S608 - placeholders only
         named: dict[int, set[str]] = {}
         for chunk, entity in self.conn.execute(f"SELECT chunk, entity FROM mentions WHERE chunk IN ({marks})", ids):  # noqa: S608 - placeholders only
             named.setdefault(chunk, set()).add(entity)
-        return {
-            chunk: q.checker.count(texts[chunk])
-            + sum(1 for wanted in q.entities.values() if wanted & named.get(chunk, set()))
-            for chunk in ids
-        }
+        out: dict[int, tuple[int, bool]] = {}
+        for chunk in ids:
+            held, by_split = q.checker.examine(texts[chunk])
+            out[chunk] = (held + sum(1 for wanted in q.entities.values() if wanted & named.get(chunk, set())), by_split)
+        return out
 
     def order(self, ids: list[int], q: _Terms, *, by_text: bool) -> list[int]:
         """A stage's candidates, BM25 order given: first the best chunk of each group whose title's lead holds more
         than half the query's terms, by the terms its lead holds, then the share of its words they are, then BM25
-        (DR-0231); then the rest, in the any-word stage by how many terms their text holds, then BM25 (DR-0232)."""
+        (DR-0231); then the rest, in the any-word stage by how many terms their text holds, then BM25 (DR-0232). A
+        chunk holding a word only through a split goes there after the chunks holding as many terms, and above those
+        holding fewer; in the all-words and prefix stages, after all the others, each part in its order (DR-0282)."""
         info = self.titles(ids)
         lifted: list[tuple[int, float, int, int]] = []
         groups: set[str] = set()
@@ -440,10 +513,14 @@ class _Search:
         first = [chunk for *_, chunk in sorted(lifted)]
         moved = set(first)
         rest = [chunk for chunk in ids if chunk not in moved]
+        if not by_text and not q.checker.splits:
+            return first + rest
+        held_by = self.text_terms(rest if by_text else ids, q)
         if by_text:
-            held_by = self.text_terms(rest, q)
-            rest.sort(key=lambda chunk: -held_by[chunk])
-        return first + rest
+            rest.sort(key=lambda chunk: (-held_by[chunk][0], held_by[chunk][1]))
+            return first + rest
+        ordered = first + rest
+        return [c for c in ordered if not held_by[c][1]] + [c for c in ordered if held_by[c][1]]
 
     # -- hits ---------------------------------------------------------------------------------------------------
 
@@ -468,11 +545,29 @@ class _Search:
             return True
         return any(self.analyzer.stem(word.lower(), lang) in self.terms for lang in self.langs.languages)
 
+    def _starts(self, text: str, found: list[re.Match[str]], i: int) -> bool:
+        """Whether a snippet may start at a text's word i: a query word, or the first of two words in a row that are a
+        hyphenated pair joining into one or one of its admitted splits (DR-0282)."""
+        if self._matches(found[i].group(0)):
+            return True
+        if i + 1 == len(found):
+            return False
+        a, b = found[i].group(0), found[i + 1].group(0)
+        if text[found[i].end() : found[i + 1].start()] in HYPHENS and self._matches(a + b):
+            return True
+        if not self.split_terms:
+            return False
+        a, b = a.lower(), b.lower()
+        stem = self.analyzer.stem
+        pairs = [("folded", fold(a), fold(b))]
+        pairs += [(lang.column, stem(a, lang), stem(b, lang)) for lang in self.langs.languages]
+        return any(pair in self.split_terms for pair in pairs)
+
     def snippet(self, text: str) -> str:
         found = list(WORD.finditer(text))
         if not found:
             return " ".join(text.split())
-        at = next((i for i, m in enumerate(found) if self._matches(m.group(0))), 0)
+        at = next((i for i in range(len(found)) if self._starts(text, found, i)), 0)
         lo = max(0, at - SNIPPET_BEFORE)
         hi = min(len(found), lo + SNIPPET_WORDS)
         body = " ".join(text[found[lo].start() : found[hi - 1].end()].split())
@@ -589,6 +684,23 @@ def lead(title: str) -> str:
     return title[: found[LEAD_WORDS - 1].end()] if len(found) > LEAD_WORDS else title
 
 
+def _joins(tokens: list[str], compounds: list[Joined], kept: list[int]) -> dict[str, list[str]]:
+    """Each query word's joined words (DR-0281): two words in a row join, and a hyphenated word's parts join as the
+    index joins them (DR-0280); never across a name, which left the words."""
+    keep = set(kept)
+    joins: dict[str, list[str]] = {}
+    for i in kept:
+        if i + 1 in keep:
+            pair = tokens[i] + tokens[i + 1]
+            joins.setdefault(tokens[i], []).append(pair)
+            joins.setdefault(tokens[i + 1], []).append(pair)
+    for compound in compounds:
+        if all(i in keep for i in range(compound.start, compound.end)):
+            for i in range(compound.start, compound.end):
+                joins.setdefault(tokens[i], []).append(compound.word)
+    return joins
+
+
 def _iso(value: datetime) -> str:
     at = value.astimezone(UTC)
     return f"{at:%Y-%m-%dT%H:%M:%S}.{at.microsecond // 1000:03d}Z"
@@ -633,7 +745,9 @@ def _run(
     reading.phrases = [p.strip() for p in QUOTED.findall(query) if words(p)]
     time = read_time(QUOTED.sub(" ", query).replace('"', " "), s.langs.languages, now or datetime.now(UTC), s.tz)
     reading.time_words = time.words
-    found, rest = s.find_entities(words(time.rest))
+    tokens_read, compounds = words_and_compounds(time.rest)
+    found, kept_at = s.find_entities(tokens_read)
+    rest = [tokens_read[i] for i in kept_at]
     reading.entities = found
     boosted, unknown_people = s.resolve(people, person=True)
     boosted_too, unknown = s.resolve(entities, person=False)
@@ -649,7 +763,7 @@ def _run(
         reading.until = None if span.until == FAR_FUTURE else span.until
     filters = s.filters(span, sources)
     phrase_groups = [s.phrase_group(p) for p in reading.phrases]
-    word_groups, word_terms, reading.absent = s.word_groups(rest)
+    word_groups, word_terms, reading.absent = s.word_groups(rest, _joins(tokens_read, compounds, kept_at))
     reading.words = [w for w, _ in word_groups]
     named: dict[str, set[str]] = {}
     for entity in found:

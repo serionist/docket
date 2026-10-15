@@ -199,6 +199,10 @@ whose title leads with most of your words comes before one that only mentions th
 the first `: ` after at least three words (so `RE: ` or `Fwd: ` doesn't end it), else its first 12 words. `in no
 chunk: <word>` names a word nothing in the vault holds, so no hit can hold every word.
 
+A compound is found however it is written: `kickoff`, `kick-off` and `kick off` find each other, and so do
+`e-mail`, `email` and `e-mailben`. A hit holding a word only split in two ("edit or" for `editor`) comes after the
+hits holding as many of your words as written. A quoted phrase matches its words as written.
+
 The index lives in `index/` in the vault, on each machine, never committed. `docket search` keeps it up to date, and
 `docket index rebuild` makes it again from scratch.
 

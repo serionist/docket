@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import sqlite3
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -157,6 +157,39 @@ def test_a_shortened_run_file_or_new_languages_or_another_version_rebuild(vault:
     conn.commit()
     conn.close()
     assert "snowballstemmer" in str(update(vault).reason)
+
+
+def test_hyphenated_compounds_come_and_go_as_in_a_rebuild(vault: Vault) -> None:
+    # A reply says kick-off and e-mail-cím, then a new version of it drops them: its chunk and its thread's windows are
+    # indexed with the joined words and deleted with them again, so the FTS5 rows end as a rebuild's (DR-0280).
+    same_as_rebuild(
+        vault, lambda: vault.write_run("chat", [reply(15, "The kick-off moved; the e-mail-cím list is out.")], LATER)
+    )
+    terms = folded_terms(vault)
+    assert {"kickoff", "emailcim", "email"} <= terms
+    same_as_rebuild(
+        vault, lambda: vault.write_run("chat", [reply(15, "The kickoff moved.")], LATER + timedelta(hours=1))
+    )
+    terms = folded_terms(vault)
+    assert "kickoff" in terms and "emailcim" not in terms
+
+
+def folded_terms(vault: Vault) -> set[str]:
+    conn = sqlite3.connect(build.db_path(vault))
+    try:
+        return {r[0] for r in conn.execute("SELECT term FROM vocab WHERE col = 'folded'")}
+    finally:
+        conn.close()
+
+
+def test_an_index_of_the_schema_before_compounds_rebuilds(vault: Vault) -> None:
+    conn = sqlite3.connect(build.db_path(vault))
+    conn.execute("PRAGMA user_version = 1")
+    conn.commit()
+    conn.close()
+    report = update(vault)
+    assert report.rebuilt and report.reason == "it has schema 1, and this Docket writes 2"
+    assert status(vault).stale is None
 
 
 def test_a_run_file_written_again_at_the_same_length_rebuilds(vault: Vault) -> None:

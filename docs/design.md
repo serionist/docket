@@ -434,6 +434,10 @@ role: the customer's site lead
   word's dative, and for a query word the stem of its stem when the index holds that stem as a word, more often than
   the second cut (`robotot` to `robot` to `rob`, what a bare `robot` holds; not `form` to `for`).
 - A compound is one word (`tízmillió`), so `millió` doesn't find it; amounts come with the typed extractors.
+- A hyphenated compound is also indexed joined, after the chunk's own words: `kick-off` adds `kickoff`, and
+  `e-mailben` holds `email` in the Hungarian column (DR-0280). A spaced one is found at query time: a word also
+  matches two words in a row the index holds (`kickoff`, "kick off"), and two query words their joined word
+  (DR-0281).
 - Aliases match as written, and through those forms in the columns of languages that inflect names (Hungarian, not
   English: `Mark` would match `marking`). Each stem form is judged: one under three letters, or one that floods the
   index (`Mark` stems to `mar`, which `már` gives too), is dropped and listed for curation.
@@ -472,7 +476,8 @@ The dashboard shows review minutes per week, a number to keep down.
 2. Candidates, filters applied inside each: FTS5 (BM25 over the columns; all words however common, then any, then
    prefixes) top 200, the vector index top 200, chunks that mention the query's entities. In each FTS stage, a title
    whose lead holds most of the query's words goes first; the any-word stage matches the words BM25 still weighs and
-   ranks chunks holding more of the words first.
+   ranks chunks holding more of the words first. A word also matches its compound's other spellings, and a chunk
+   holding a word only through a split goes after the rest (DR-0282).
 3. Fuse by reciprocal rank; rerank the top 50 with a small cross-encoder; keep the top k.
 4. Group by container (a recording, a thread, a mail conversation), attach its summary, return locators.
 

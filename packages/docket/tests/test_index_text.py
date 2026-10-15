@@ -9,7 +9,7 @@ import pytest
 
 from docket.index import text
 from docket.index.languages import code_of, hungarian_dative, language, resolve
-from docket.index.text import Analyzer, Stemmer, any_of, fold, phrase, prefix, quote, words
+from docket.index.text import Analyzer, Stemmer, any_of, fold, phrase, prefix, quote, words, words_and_compounds
 
 
 def fts_words(value: str) -> list[str]:
@@ -32,6 +32,39 @@ def test_words_split_and_fold_as_fts5_stores_them(sample: str) -> None:
 def test_words_keep_accents_and_lowercase_for_the_stemmers() -> None:
     assert words("Határidőről, KÉT nap!") == ["határidőről", "két", "nap"]
     assert fold("Határidő") == "hatarido"
+
+
+HYPHEN, NON_BREAKING, EN_DASH = chr(0x2010), chr(0x2011), chr(0x2013)
+
+
+@pytest.mark.parametrize(
+    ("text", "joined"),
+    [
+        ("Orbex kick-off with Dana", ["kickoff"]),
+        ("Írd meg az e-mail-címedet", ["email", "emailcímedet", "mailcímedet"]),
+        ("state-of-the-art", ["stateoftheart"]),
+        ("a1-b2-c3-d4-e5", ["a1b2c3d4e5"]),
+        ("covid-19", ["covid19"]),
+        ("2026-10-12 and +36-30-123", []),
+        (f"kick{HYPHEN}off, kick{NON_BREAKING}off", ["kickoff", "kickoff"]),
+        (f"kick - off, kick{EN_DASH}off, kick--off", []),
+        ("-lead and tail-", []),
+    ],
+)
+def test_a_hyphenated_compound_is_joined(text: str, joined: list[str]) -> None:
+    ws, found = words_and_compounds(text)
+    assert ws == words(text)
+    assert [j.word for j in found] == joined
+
+
+def test_the_joined_words_follow_the_chunk_s_own_in_every_column() -> None:
+    text = "Megkaptam az e-mailt, the kick-offs"
+    folded, en, hu = Analyzer(resolve(["en", "hu"])).index_values(text)
+    assert folded == f"{text} emailt kickoffs"
+    # The text's own words keep their places, so phrases match as before; the joined words are stemmed like any.
+    assert fts_words(folded)[: len(words(text))] == [fold(w) for w in words(text)]
+    assert en.split()[-1] == "kickoff" and hu.split()[-2] == "email"
+    assert Analyzer(resolve(["en"])).index_values("no compound here") == ["no compound here", "no compound here"]
 
 
 @pytest.mark.parametrize(
