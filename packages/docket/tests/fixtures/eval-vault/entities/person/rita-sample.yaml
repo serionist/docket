@@ -1,0 +1,7 @@
+id: rita-sample
+type: person
+name: {en: Rita Sample, hu: Sample Rita}
+aliases:
+  - {text: Rita}
+ids: {email: rita@translate.example}
+role: translator

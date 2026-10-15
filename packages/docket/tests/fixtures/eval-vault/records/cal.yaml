@@ -1,0 +1,14 @@
+# Invented calendar events of the invented publisher Kestrel Books.
+
+- {rid: "cal:evt-0301", ts: "2026-09-15T07:00:00Z", title: Print run planning, text: "Organiser: Ada Example\nAttendees: Ben Sample\nResponse: accepted"}
+- {rid: "cal:evt-0302", ts: "2026-09-22T08:00:00Z", title: Fordítói egyeztetés, text: "Organiser: Ada Example\nAttendees: Rita Sample, Dóra Minta\nResponse: accepted"}
+- {rid: "cal:evt-0303", ts: "2026-10-01T09:00:00Z", title: Book fair planning, text: "Organiser: Ada Example\nAttendees: Cleo Test, Ben Sample\nResponse: accepted"}
+- {rid: "cal:evt-0304", ts: "2026-10-06T08:00:00Z", title: Borító és szerződések, text: "Organiser: Ada Example\nAttendees: Dóra Minta\nResponse: accepted"}
+- {rid: "cal:evt-0305", ts: "2026-10-08T12:00:00Z", title: Audiobook, text: "Organiser: Ben Sample\nAttendees: Ada Example, Dóra Minta\nResponse: accepted"}
+- {rid: "cal:evt-0306", ts: "2026-10-13T07:30:00Z", title: Weekly production, text: "Organiser: Ada Example\nAttendees: Ben Sample, Cleo Test\nResponse: accepted"}
+- {rid: "cal:evt-0307", ts: "2026-10-16T08:00:00Z", title: Végleges borító határidő, text: "Organiser: Dóra Minta\nResponse: accepted"}
+- {rid: "cal:evt-0308", ts: "2026-11-05T08:00:00Z", title: Fair set-up, text: "Organiser: Ben Sample\nAttendees: Ada Example\nLocation: stand B14\nResponse: accepted"}
+- {rid: "cal:evt-0309", ts: "2026-11-06T08:00:00Z", title: Harbour Book Fair, text: "Organiser: Ada Example\nAttendees: Ben Sample, Cleo Test\nResponse: accepted"}
+- {rid: "cal:evt-0310", ts: "2026-11-27T17:00:00Z", title: Könyvbemutató, text: "Organiser: Dóra Minta\nAttendees: Ada Example\nLocation: Hársfa utcai könyvesbolt\nResponse: accepted"}
+- {rid: "cal:evt-0311", ts: "2026-12-07T08:00:00Z", title: Audiobook studio, text: "Organiser: Ben Sample\nAttendees: Dóra Minta\nResponse: tentative"}
+- {rid: "cal:evt-0312", ts: "2026-10-20T08:00:00Z", title: Weekly production, text: "Organiser: Ada Example\nAttendees: Ben Sample, Cleo Test\nResponse: accepted"}

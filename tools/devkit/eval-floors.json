@@ -1,0 +1,8 @@
+{
+  "$comment": "Recall at 10 and MRR per kind on the invented question set, as main measures them, rounded down to two decimals (DR-0295). Raise one in the change that earns it; a lowered one carries a new lowered note saying why (tools/devkit/src/devkit/evalfloors.py).",
+  "exact-name": {"recall": 1.0, "mrr": 0.88},
+  "paraphrase": {"recall": 0.33, "mrr": 0.13},
+  "inflection": {"recall": 0.92, "mrr": 0.84},
+  "typo": {"recall": 0.75, "mrr": 0.46},
+  "time-bound": {"recall": 0.96, "mrr": 0.78}
+}

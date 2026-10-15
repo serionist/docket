@@ -210,6 +210,39 @@ Your languages are `owner.languages` in `vault.yaml`, as codes such as `en` and 
 Norwegian as `"no"` in quotes, or YAML reads it as false. Adding or removing a language rebuilds the index the next
 time you search.
 
+## Measuring search
+
+`docket eval questions.yaml` runs your own questions against your vault and prints recall at 10 and MRR per kind of
+question and per language, then the questions it missed. Write the questions you really ask, with the locators a good
+answer cites, and run it again after changing aliases, models or settings: a change that helps paraphrases and hurts
+names shows in the table.
+
+```yaml
+schema_version: 1
+asked: "2026-10-14T10:00:00+02:00"   # when you asked: time words like last week count from here
+questions:
+  - q: money up front for the translator        # the words search gets
+    want: ["r:mail:<advance-1@example.invalid>#2"]
+    kind: paraphrase                            # exact-name, paraphrase, inflection, typo or time-bound
+    lang: en
+    note: the mail says advance                 # optional
+```
+
+| Wanted | Written | A hit answers it when it is |
+|---|---|---|
+| a record | `r:<rid>` | on that record |
+| a moment or a stretch | `r:<rid>@12:08`, `r:<rid>@12:08-12:40` | that record whole, or a window of it overlapping the stretch |
+| paragraphs | `r:<rid>#2-4` | that record whole, or a part of it overlapping them |
+| a doc, or its lines | `minutes:<slug>`, `minutes:<slug>#L7-9` | a section of it, whose lines overlap them when given |
+| a thread or a recording | `thread:<rid>` | anything grouped under it |
+
+- Copy locators from `docket search`'s output. A thread window answers the messages it holds, and a doc's section the
+  raw its anchors point into.
+- `-k 20` scores the top 20 instead of 10; `--json` prints the numbers and each question's ranks, to compare two runs.
+- It reads the index as it is and writes nothing; when the index is behind the vault it says so, and `docket index
+  update` brings it up to date.
+- Keep the file in your own repo, never in Docket's: it holds your questions.
+
 ## Entities
 
 An entity is one YAML file, `entities/<type>/<id>.yaml`, that tells search who or what a name means:

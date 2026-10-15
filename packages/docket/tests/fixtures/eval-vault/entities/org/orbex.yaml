@@ -1,0 +1,7 @@
+id: orbex
+type: org
+name: {en: Orbex Distribution}
+aliases:
+  - {text: Orbex}
+ids: {email_domain: orbex.example}
+role: distributor

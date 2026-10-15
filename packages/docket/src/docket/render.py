@@ -12,6 +12,7 @@ from collections.abc import Iterable
 from zoneinfo import ZoneInfo
 
 from docket.index import SearchResult
+from docket.questions import EvalReport, Score
 from docket.recall import ReadResult, VerifyResult
 from docket.vault.anchors import format_time
 from docket.vault.docstore import PutResult, RedactReport
@@ -154,4 +155,31 @@ def search(result: SearchResult, tz: ZoneInfo) -> list[str]:
             lines += [f"       -> {anchor}" for anchor in hit.anchors]
             if hit.also:
                 lines.append(f"       also {', '.join(hit.also)}")
+    return lines
+
+
+def _score_row(name: str, s: Score) -> str:
+    return f"{name:<14}{s.questions:>4}{s.recall:>12.2f}{s.mrr:>7.2f}"
+
+
+def eval_report(report: EvalReport) -> list[str]:
+    """`docket eval`'s table: a row per kind, per language and for all, then each question missed at k."""
+    lines = [f"eval      {report.file}: {report.all.questions} questions, k {report.k}"]
+    if report.behind:
+        lines.append(report.behind)
+    lines.append(f"{'kind':<14}{'n':>4}{f'recall@{report.k}':>12}{'MRR':>7}")
+    lines += [_score_row(kind, s) for kind, s in report.kinds.items()]
+    lines.append("")
+    lines += [_score_row(lang, s) for lang, s in report.langs.items()]
+    lines.append(_score_row("all", report.all))
+    missed = [r for r in report.questions if r.recall < 1]
+    if missed:
+        lines += ["", f"missed at {report.k}"]
+    for r in missed:
+        wanted = ", ".join(w for w, rank in zip(r.want, r.ranks, strict=True) if rank is None)
+        why = f"  (search refused: {r.refused})" if r.refused else ""
+        lines.append(f"  {r.n:>3}. {r.kind}  {r.lang}  {r.q}  ->  {wanted}{why}")
+    if report.unknown:
+        lines += ["", "wanted, but naming no record, doc or thread in the index:"]
+        lines += [f"  {text}" for text in report.unknown]
     return lines

@@ -1,0 +1,130 @@
+# Invented recordings of an invented small publisher, Kestrel Books, which publishes English and Hungarian
+# translations. A segment is "mm:ss | speaker | text"; it lasts until the next one starts, the last for 30 seconds.
+# The weekly production call is the recorder's own transcript, which mishears names: Selma Lom for Szélmalom, Orbix
+# for Orbex, Clio for Cleo, Hamberg for Hamburg.
+
+- rid: calls:rec-0301
+  kind: recording
+  ts: "2026-09-15T07:00:00Z"
+  title: Print run planning
+  segments:
+    - "00:00 | Ada Example | Morning, Ben. Let us go through the print run for The Salt Road, then the binding and the paper, and I need to leave by half past nine."
+    - "00:30 | Ben Sample | Morning. So, the first run. I would go with three thousand copies in hardback. The paperback can wait until we see how the hardback sells over the winter."
+    - "01:00 | Ada Example | Three thousand feels right. We sold about that many of the last novel in its first year, and this one has more press behind it."
+    - "01:30 | Ben Sample | Szélmalom came back with their quote yesterday: two point one million forints for the three thousand, with the jacket and the delivery included."
+    - "02:00 | Ada Example | That is less than I feared. Did they say anything about the schedule, or only the money?"
+    - "02:30 | Ben Sample | They suggest a ninety gram cream stock for the inside pages. It is softer on the eye than white and it keeps the spine thin enough for the jacket design."
+    - "03:00 | Ada Example | Cream is fine. The designer will want to see a sample sheet before we sign, so ask them to post one."
+    - "03:30 | Ben Sample | I will. On timing, they can start as soon as the files are final, and they need about three weeks on the press and in the bindery."
+    - "04:00 | Ada Example | Then the boxes should be in our storeroom by the twentieth of October, if the files go over at the end of September."
+    - "04:30 | Ben Sample | Yes, the twentieth, as long as nothing slips on our side."
+    - "05:00 | Ben Sample | One thing worries me: a sewn binding instead of glued costs fifteen percent more. It lasts longer, and reviewers notice it, but it eats into the margin."
+    - "05:30 | Ada Example | Let us pay for the sewing. A hardback that falls apart on the second read is not what we want this book to be known for."
+    - "06:00 | Ben Sample | Fine by me. I will tell them we go with the sewn version and ask for the revised figure."
+    - "06:30 | Ada Example | And add five hundred more for the book fair in November, we always run short at the stand."
+    - "07:00 | Ben Sample | Five hundred extra, so three and a half thousand in total. I will ask for a single delivery so we do not pay the van twice."
+    - "07:30 | Ada Example | Good. When do we see the cover proof?"
+    - "08:00 | Ben Sample | Next Tuesday. They print it on the real stock so we can judge the colours properly."
+    - "08:30 | Ada Example | And no shrink-wrap this time, the bookshops told us they open every copy anyway and the plastic just goes in the bin."
+    - "09:00 | Ben Sample | Noted, no plastic. I think that is all for the printer. I will send a summary to the team this afternoon."
+
+- rid: calls:rec-0302
+  kind: recording
+  ts: "2026-09-22T08:00:00Z"
+  title: Fordítói egyeztetés Ritával
+  segments:
+    - "00:00 | Ada Example | Szia Rita, szia Dóra. Ma a fordításról beszéljünk, utána a pénzügyekről, és a végén a helynevekről."
+    - "00:30 | Rita Sample | Sziasztok. Jól haladok, a regény hetven százaléka kész. Az első tizennégy fejezetet már átnéztem még egyszer, azok mehetnek a szerkesztőhöz."
+    - "01:10 | Dóra Minta | Remek. Akkor októberben elkezdem a korrektúrát az első felén, hogy ne torlódjon minden a végére."
+    - "01:40 | Ada Example | És a hátralévő fejezetek? Mikorra tudod leadni őket?"
+    - "02:00 | Rita Sample | November tizedikére. Őszintén szólva a kilencedik fejezet miatt kérnék egy kis haladékot, mert tele van tájszólással, és azt nagyon nehéz angolul visszaadni."
+    - "02:40 | Ada Example | Rendben, a tizedike jó lesz, a nyomdai munka úgyis csak decemberben kezdődik a második kiadásnál."
+    - "03:10 | Dóra Minta | A tájszólásos részeknél szerintem érdemes egy rövid jegyzetet írni a végére, hogy az olvasó tudja, miért szól másképp az öreg sókereskedő."
+    - "03:40 | Rita Sample | Jó ötlet, megírom. A címről is szeretnék még szólni: én a Salt Way-t javasoltam, de értem, ha maradunk a The Salt Road-nál."
+    - "04:10 | Ada Example | Maradjunk a The Salt Road-nál, azzal ment ki a katalógus, és a terjesztő is azt ismeri már."
+    - "04:40 | Ada Example | A pénzről: a szerződés szerint az előleg négyszáz euró, amit az aláíráskor fizetünk, a többit a kézirat leadásakor."
+    - "05:10 | Rita Sample | Ez így rendben van. Az aláírt példányt a héten visszaküldöm postán."
+    - "05:40 | Dóra Minta | A helynevekről: kellene egy jegyzék, hogy a térképen és a szövegben ugyanúgy szerepeljenek."
+    - "06:10 | Rita Sample | Elkészítem a helynévjegyzéket, nagyjából nyolcvan-kilencven név lesz benne, a falvak és a bányák nevei."
+    - "06:40 | Ada Example | Köszönöm. Akkor a jegyzéket Dórának küldd, ő egyezteti a grafikussal a térkép miatt."
+    - "07:10 | Dóra Minta | És még valami: a hetedik fejezetben két oldal hiányzik a fájlból, azt kérem újra."
+    - "07:40 | Rita Sample | Megnézem, valószínűleg rossz verziót töltöttem fel. Ma este átküldöm a jót."
+
+- rid: calls:rec-0303
+  kind: recording
+  ts: "2026-10-01T09:00:00Z"
+  title: Book fair planning
+  segments:
+    - "00:00 | Ada Example | Thanks for joining, Cleo, Ben. The Harbour Book Fair is five weeks away, so let us settle the stand, the meetings and the stock."
+    - "00:30 | Cleo Test | Happy to. The fair runs from the sixth to the eighth of November, and we have stand B14 in the translation hall, near the café."
+    - "01:00 | Ben Sample | The stand costs eight hundred and fifty euros for the three days. Orbex Distribution offered to share it with us and take half."
+    - "01:30 | Ada Example | Sharing with Orbex makes sense, they carry most of our backlist anyway. Ben, can you confirm with them this week?"
+    - "02:00 | Ben Sample | Yes, I will write to them today."
+    - "02:30 | Cleo Test | On the rights side I have two meetings so far: a German house from Hamburg and a Polish one from Kraków. Both asked about The Salt Road after the catalogue went out."
+    - "03:10 | Ada Example | Good. What do they need from us before the fair?"
+    - "03:40 | Cleo Test | A short pitch in English, the reader's report, and if possible a sample of the translation. I will put a folder together."
+    - "04:10 | Ada Example | And the reading. The author agreed to read on the Saturday, at three in the afternoon, in the small hall."
+    - "04:40 | Cleo Test | I will put it on the fair's programme. They close the programme on the twentieth."
+    - "05:10 | Ben Sample | For the stand we need posters. Szélmalom can print twenty A2 posters with the new cover on the same stock as the jacket."
+    - "05:40 | Ada Example | Twenty is plenty. And how many copies do we take to the fair?"
+    - "06:10 | Ben Sample | Two hundred copies of The Salt Road, fifty of the backlist titles, and the catalogues. I will book the van for the fifth."
+    - "06:40 | Cleo Test | Please bring the rights guide too, printed, the Germans like paper."
+    - "07:10 | Ada Example | Fine. Let us meet again after the cover is final."
+
+- rid: calls:rec-0304
+  kind: recording
+  ts: "2026-10-06T08:00:00Z"
+  title: Borító és szerződések
+  segments:
+    - "00:00 | Ada Example | Dóra, nézzük a borítót, aztán a szerződéseket. Megjöttek a grafikus vázlatai?"
+    - "00:30 | Dóra Minta | Igen, kettő. Az egyik egy kék borító egy régi sóbánya fényképével, a másik egy rajzos változat, egy szekér az úton, ahogy a regény elején."
+    - "01:10 | Ada Example | Nekem a fénykép kicsit hideg. Te melyiket választanád?"
+    - "01:40 | Dóra Minta | A rajzosat. Jobban illik a regényhez, és a könyvesboltban is kiemelkedik a polcon."
+    - "02:10 | Ada Example | Legyen az illusztrált borító. Mikorra kell a végleges változat a nyomdának?"
+    - "02:40 | Dóra Minta | Október tizenhatodikáig, különben csúszik a nyomtatás. A grafikus azt mondta, addig meglesz."
+    - "03:10 | Ada Example | Jó. A nyomdával egyeztettem tegnap: a papír ára tizenkét százalékkal emelkedett, november elsejétől."
+    - "03:50 | Dóra Minta | Ez a mi rendelésünket is érinti?"
+    - "04:10 | Ada Example | Ha kilencedikéig visszaigazoljuk, akkor még a régi áron számolnak. Ma megírom nekik."
+    - "04:40 | Dóra Minta | Az ISBN-számokat is kértük már a könyvtártól, a keménytáblás kiadáshoz és az e-könyvhöz külön."
+    - "05:10 | Ada Example | A terjesztői szerződésről: az Orbex harmincöt százalékos kedvezményt kér a bolti ár után, hatvan napos fizetéssel."
+    - "05:50 | Dóra Minta | Ez a szokásos, nem? A tavalyi könyvnél is ennyi volt."
+    - "06:10 | Ada Example | Igen, ennyi volt. Aláírom. És a bemutató: a Hársfa utcai könyvesbolt november huszonhetedikét ajánlotta, este hatkor."
+    - "06:50 | Dóra Minta | Az jó nap, csütörtök. Megkérdezem, a szerző tud-e jönni."
+    - "07:20 | Ada Example | Köszönöm. Ennyi mára."
+
+- rid: calls:rec-0305
+  kind: recording
+  ts: "2026-10-08T12:00:00Z"
+  title: Audiobook and Téli kert
+  segments:
+    - "00:00 | Ada Example | Let us do the audiobook first, then the Hungarian edition of Winter Orchard."
+    - "00:30 | Ben Sample | The studio in Budapest has five days free in December, from the seventh to the eleventh. The narrator we liked is free then as well."
+    - "01:00 | Ada Example | Five days is enough for a book of that length?"
+    - "01:30 | Ben Sample | They say yes, with a day to spare for retakes. The whole thing comes to one point two million forints, studio and narrator together."
+    - "02:00 | Dóra Minta | A narrátornak küldenünk kell egy kiejtési listát, mert az angol nevek és a helynevek sokszor rosszul szólnak magyarul."
+    - "02:40 | Ada Example | Igen, Dóra, kérlek, állítsd össze, a felvétel előtt két héttel menjen ki."
+    - "03:10 | Ben Sample | The audiobook goes out on two platforms, the big one and the library service, both on the same day as the print edition."
+    - "03:40 | Ada Example | And the Hungarian print edition itself, Téli kert?"
+    - "04:10 | Dóra Minta | A Téli kert januárban megy nyomdába. A fordítás kész, most a második korrektúránál tartunk."
+    - "04:40 | Ben Sample | Then I book the press for the second week of January, same printer, same stock as The Salt Road."
+    - "05:10 | Ada Example | Good. That is it for today, thank you both."
+
+- rid: calls:rec-0306
+  kind: recording
+  ts: "2026-10-13T07:30:00Z"
+  title: Weekly production call
+  engine: recorder
+  segments:
+    - "00:00 | Speaker 1 | OK, let us start. Ben, where are we with the printer."
+    - "00:20 | Speaker 2 | Selma Lom moved the delivery to the twenty third of October. The lorry with the paper was stuck at the border for three days, so the press started late."
+    - "01:00 | Speaker 1 | Twenty third is still fine for the fair. Does it change anything for the bookshops."
+    - "01:30 | Speaker 2 | No, the bookshops get theirs in November anyway. Orbix will pick up their share straight from our storeroom."
+    - "02:00 | Speaker 3 | Can I go next. The German publisher, the one from Hamberg, wants a sample translation of fifty pages before they make an offer."
+    - "02:40 | Speaker 1 | Clio, can Rita do fifty pages in time, or do we send the first chapters as they are."
+    - "03:10 | Speaker 3 | The first chapters are fine, they are already edited. I will send them the PDF this week."
+    - "03:40 | Speaker 2 | On the e book, the file is converted and the EPUB passed the validator without errors, so it can go to the shops."
+    - "04:10 | Speaker 1 | What price did we set for it."
+    - "04:30 | Speaker 2 | Four ninety nine in euros, and the forint price follows the usual rate."
+    - "05:00 | Speaker 3 | And for the rights deals my fee stays ten percent of the advance, as in our agreement."
+    - "05:30 | Speaker 1 | Fine. The stand design is due to the fair organisers on Friday, Ben."
+    - "06:00 | Speaker 2 | I know, the printer has the file already. That is all from me."

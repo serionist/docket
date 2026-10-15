@@ -27,3 +27,17 @@ decisions:
     binds: [A slow test moves or speeds up; it is never skipped on a system to save time.]
     not_chosen:
       - "Only the modules that differ by system on Windows and macOS: little saved, and what those jobs are for lost."
+  - id: DR-0295
+    title: Each kind's recall at 10 and MRR on the invented question set has a floor in tools/devkit/eval-floors.json at today's number
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#66"]
+    description: tools/devkit/eval-floors.json holds, per kind of question, the recall at 10 and MRR that main measures on the invented set, rounded down to two decimals. The set's test fails on every system when a kind falls below its floor. In the full lane the test writes its numbers to the file DOCKET_EVAL_REPORT names, and the gate prints them; it fails a number above its floor, printing the floor to write, so the change that earns a gain raises the floor in its own diff and no later change gives it back unseen. A floor below the base branch's fails unless its kind's entry carries a lowered note (the issue, and what was traded) that the base's didn't, so a lowered kind is said in the diff and read under REVIEW.md's harness rule. A kind with no floor, or a floor with no kind, fails.
+    binds: [A floor is never set above what main measures.]
+    not_chosen:
+      - "One floor for the whole set: a change that helps paraphrases and hurts names would pass."
+      - "A margin under today's numbers: a question lost in a kind of 14 would hide in it."
+      - "Printing a gain without failing, as coverage does: a floor left behind lets a later change give the gain back unseen."
+      - "Floors beside the test fixtures: tools/devkit is the harness, where a loosened check needs its reason."

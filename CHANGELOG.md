@@ -8,6 +8,9 @@ Unreleased in the same PR.
 
 ### Added
 
+- `docket eval <file>` measures search with your own questions: each with the locators a good answer cites, its
+  kind and its language. It prints recall at 10 and MRR per kind and per language, and the questions it missed, or
+  JSON with `--json`, and writes nothing. The question file's format is described in the README.
 - Live syncs through the service: ask Claude to sync a source, and it opens a run with the MCP tool `run_open`,
   follows the source's skill and closes the run with `ingest`. The plugin's capture hook hands Docket what the
   source's tools returned, so nothing is retyped, and a run that comes up short is dropped and fetched again. Update
