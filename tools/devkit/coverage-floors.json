@@ -1,5 +1,5 @@
 {
   "$comment": "Line coverage floors per module, in whole percent. Raise one in the change that earns it; never lower one (tools/devkit/src/devkit/coverage.py).",
   "docket": 100,
-  "devkit": 83
+  "devkit": 84
 }
