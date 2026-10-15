@@ -215,8 +215,9 @@ flowchart TB
   otherwise (DR-0151). The plugin registers it with Claude Code.
 - It runs its writes one at a time. Every Claude session and the app go through it; the CLI writes directly, under
   the same vault lock the service takes, whether the service runs or not (DR-0153).
-- Models run in worker processes, each in its own environment: the embedder and reranker stay loaded; Whisper
-  starts per job and ends, freeing its VRAM, and its CUDA libraries never share a process with PyTorch's.
+- Models run in worker processes, each in its own environment: the embedder and reranker stay loaded (DR-0330,
+  DR-0332), and a command that only asks queries starts one for itself; Whisper starts per job and ends, freeing its
+  VRAM, and its CUDA libraries never share a process with another worker's.
 - Security on localhost (DR-0152): bound to 127.0.0.1; every request's Host checked; the browser gets a session
   cookie (SameSite=Strict) from a one-time link `docket open` opens, and only the web app's static files go without
   it (DR-0177); every write checks Origin and Sec-Fetch-Site;
@@ -246,14 +247,15 @@ flowchart TB
 | Feature | NVIDIA GPU | Apple silicon | CPU only | No models |
 |---|---|---|---|---|
 | Speech | faster-whisper large-v3, float16, about 10x real time | whisper.cpp or mlx-whisper | the source's own transcript; turbo int8 overnight as an optional extra | the source's own transcript |
-| Embeddings | local model | local model on MPS | small model or an API | keyword search only |
-| Reranker | local cross-encoder, 0.6B or smaller | the same on MPS | small model or an API | rank fusion only |
+| Embeddings | multilingual-e5-small on ONNX Runtime's CUDA provider (DR-0331, DR-0334) | the same on the CPU, until MPS or CoreML is measured | the same on the CPU | keyword search only |
+| Reranker | bge-reranker-v2-m3 (#88) | the CPU's, within a time budget (#88) | a small cross-encoder within a time budget (#88) | rank fusion only |
 
 `docket doctor` says what a machine can do and why not.
 
 **Stack:** Python 3.12 and uv; SQLite with FTS5 (and sqlite-vec for vectors); JSONL for the raw log; age for media
 encryption; Pydantic for schemas; the MCP Python SDK; FastAPI with server-rendered HTML and HTMX (no front-end build);
-faster-whisper; sentence-transformers. MCP servers it launches are pinned to a version.
+faster-whisper; ONNX Runtime with tokenizers for the embedder, in an environment `docket models install` builds
+(DR-0331, DR-0332). MCP servers it launches are pinned to a version.
 
 ## 5. The data layer
 
@@ -265,7 +267,7 @@ Inside, the layout is the same either way:
 
 ```
 vault/
-  vault.yaml                     the owner, time zone, languages, sources, primary machine, models, redaction, never-store
+  vault.yaml                     the owner, time zone, languages, sources, primary machine, redaction, never-store
   staging/                       new records waiting for the gate                          -> never committed
   raw/<source>/<yyyy>/<mm>/<yyyy-mm-dd>T<hhmm>-<machine>.jsonl
                                  one file per sync run, written once                       -> plain git
@@ -366,7 +368,7 @@ the earlier ones (DR-0112).
 | `meta`, `run_files`, `problems` | what the index was built with (schema, languages, stemmer), the run files it read, what didn't load |
 | `records`, `record_versions`, `crosswalk` | every raw record's current version with its file and line in the raw log, and every version; old and new ids of one thing |
 | `segments` | transcript utterances: rid, engine, start and end ms, speaker, person, text |
-| `chunks`, `chunks_fts`, `chunk_vec_<model>` | the searchable units; FTS5 over the text as written and a stemmed column per language (DR-0114); vectors per model |
+| `chunks`, `chunks_fts`, `chunk_vec_<model>` | the searchable units; FTS5 over the text as written and a stemmed column per language (DR-0114); a vector table per model, keyed by the hash of each chunk's input and kept in step with the chunks by every update and rebuild (DR-0336) |
 | `docs`, `doc_covers`, `doc_anchors`, `old_paths`, `derived_from` | processed docs, the records each covers, each line's anchors, legacy notes' old paths, and what each item and brief line was built from |
 | `entities`, `aliases`, `alias_terms`, `entity_links`, `external_ids` | the keyword layer loaded from YAML, with each alias's forms and misspellings |
 | `mentions`, `extracts` | which chunk mentions which entity; typed values (ticket, amount, date, URL) |
@@ -487,14 +489,17 @@ The dashboard shows review minutes per week, a number to keep down.
 1. Read the query: entities expand to their aliases in both languages and their ASR forms; time words ("last week",
    "múlt héten") become a filter; people and entities become boosts.
 2. Candidates, filters applied inside each: FTS5 (BM25 over the columns; all words however common, then any, then
-   prefixes) top 200, the vector index top 200, chunks that mention the query's entities. In each FTS stage, a title
+   prefixes) top 200, the vector stage's top 200 (the query's words embedded, the model's table scanned under the same
+   filters beside the FTS stages, DR-0337), chunks that mention the query's entities. In each FTS stage, a title
    whose lead holds most of the query's words goes first; the any-word stage matches the words BM25 still weighs and
    ranks chunks holding more of the words first. A word also matches its compound's other spellings, and a chunk
    holding a word only through a split goes after the rest (DR-0282).
-3. Fuse by reciprocal rank; rerank the top 50 with a small cross-encoder; keep the top k.
+3. Fuse by reciprocal rank, the vector list at half weight (DR-0338); rerank the top 50 with a small cross-encoder
+   (#88); keep the top k.
 4. Group by container (a recording, a thread, a mail conversation), attach its summary, return locators.
 
-Without models, steps 2 and 3 are FTS5 and the mentions, fused by rank (DR-0117). The target is under 1.5 s for k = 20
+Without models, or when the worker can't answer, steps 2 and 3 are FTS5 and the mentions, fused by rank (DR-0117), and
+the result says why. The target is under 1.5 s for k = 20
 on a desktop GPU with the models kept loaded; keyword search alone answers in under 0.2 s over 100,000 chunks.
 
 ## 8. Speech

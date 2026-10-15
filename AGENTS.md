@@ -75,6 +75,9 @@ You need uv (it brings Python 3.12), git, gitleaks, and Claude Code for the full
 - Eval floors, recall at 10 and MRR per kind of question on the invented set, are in
   `tools/devkit/eval-floors.json`: the full lane fails a kind above or below its floor, and a lowered one needs a new
   `lowered` note saying why.
+- The same set with the embedder has floors of its own in `tools/devkit/eval-floors-models.json`, held by `uv run gate
+  models` with `DOCKET_TEST_MODELS` naming a folder `docket models install --device cpu` filled; the models CI job
+  runs it and is required for merge.
 - The repo is public and Docket is built from its maintainer's life, so the gate checks a private deny list kept
   outside the repo (`~/.config/docket-dev/denylist.txt`; CI has its own). Tests and examples use invented people.
 

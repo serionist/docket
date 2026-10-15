@@ -242,6 +242,40 @@ questions:
 - It reads the index as it is and writes nothing; when the index is behind the vault it says so, and `docket index
   update` brings it up to date.
 - Keep the file in your own repo, never in Docket's: it holds your questions.
+- With models on, it says what the vectors covered and how many questions ran without them; `--no-models` measures
+  keyword search alone, so two runs show what the models add.
+
+## Models
+
+Models are optional: with them, search also finds what a question means, not only the words it shares, in English and
+Hungarian alike. Keyword search works the same without them. The embedder is multilingual-e5-small (MIT), run on ONNX
+Runtime in a worker process of its own, on the CPU or an NVIDIA GPU.
+
+| Command | Does |
+|---|---|
+| `docket models install [--device auto\|cpu\|cuda]` | builds the models' environment with uv, fetches the embedder's pinned files, checks the worker runs and turns models on for this machine |
+| `docket models status [--check]` | the choice, the environment, the files; `--check` starts the worker once and says what it runs on |
+| `docket models remove` | deletes the environment, the files and the choice; search goes on with keywords |
+
+- Downloads, once: 0.49 GB of model files, and about 50 MB of packages for the CPU or 1.3 GB for CUDA (NVIDIA's CUDA
+  13 and cuDNN wheels, under NVIDIA's licences, in that environment only). `auto` takes CUDA when `nvidia-smi` lists a
+  GPU; CUDA 13 needs a driver of R580 or later, and the install says when ONNX Runtime fell back to the CPU.
+- The choice is this machine's, in your config's `models:` block, never in `vault.yaml`: each machine embeds with what
+  it has. A block Docket can't read turns models off and says why.
+- Nothing leaves the machine. The files live under your user cache and data folders, never in the vault or a repo,
+  and after the install nothing touches the network.
+
+Who embeds what:
+
+| Where | Embeds |
+|---|---|
+| the service | what each index update added, in the background, a few seconds for a sync run's chunks on a CPU |
+| `docket index update`, `docket index rebuild` | what has no vector, with a progress line; when the service runs for the vault it leaves that to the service |
+| `docket search`, `docket eval` | only the query, on a worker they start for themselves (a second or two); `--no-models` skips it |
+
+A first pass over a year of chunks takes a minute or two on a GPU and half an hour or more on a CPU; search uses what is
+there meanwhile, and a rebuild keeps every vector it had. When the worker is down or slow, search answers with keywords
+alone and says `no vectors in this search:` and why.
 
 ## Entities
 

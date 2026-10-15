@@ -1,0 +1,6 @@
+conventions:
+  - id: CV-0014
+    rule: Each kind of question with the embedder keeps its recall at 10 and MRR at its floor in tools/devkit/eval-floors-models.json; a floor moves with its number once three CI runs agree, and a lowered one carries a new lowered note saying why
+    area: tests
+    enforced_by: "gate: models (the models CI job)"
+    decision: DR-0339

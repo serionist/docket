@@ -8,6 +8,11 @@ Unreleased in the same PR.
 
 ### Added
 
+- Models, optional: `docket models install` sets up a multilingual embedder (multilingual-e5-small, on the CPU or an
+  NVIDIA GPU) in a worker of its own, and search then also finds what a question means, not only its words. The
+  service keeps the worker loaded and embeds what each sync adds; `docket models status` and `docket models remove`
+  manage it, and `--no-models` on `docket search`, `docket eval` and `docket index update` keeps keyword search alone.
+  Nothing leaves the machine.
 - `docket eval <file>` measures search with your own questions: each with the locators a good answer cites, its
   kind and its language. It prints recall at 10 and MRR per kind and per language, and the questions it missed, or
   JSON with `--json`, and writes nothing. The question file's format is described in the README.
