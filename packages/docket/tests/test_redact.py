@@ -31,7 +31,7 @@ NARROW_NBSP = chr(0x202F)
 
 @pytest.fixture
 def redactor() -> Redactor:
-    return Redactor.from_config(Redaction())
+    return Redactor.from_config(Redaction(phone=True))
 
 
 def redacted(redactor: Redactor, text: str) -> tuple[str, Counter[str]]:
@@ -252,8 +252,8 @@ def test_a_user_pattern_replaces_its_match_or_only_its_secret_group() -> None:
     assert slug("!!") == "pattern"
 
 
-def test_built_ins_off_leaves_only_the_user_s_patterns() -> None:
-    redactor = Redactor.from_config(Redaction(builtin=False, patterns=[RedactionPattern(name="x", pattern="zzz")]))
+def test_credentials_off_leaves_only_the_user_s_patterns() -> None:
+    redactor = Redactor.from_config(Redaction(credentials=False, patterns=[RedactionPattern(name="x", pattern="zzz")]))
     out, _ = redacted(redactor, f"password: {HIDDEN} zzz")
     assert out == f"password: {HIDDEN} [redacted:x]"
     record, _ = redactor.record(make_record(native={"password": HIDDEN}))

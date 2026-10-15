@@ -263,6 +263,20 @@ def test_a_source_registered_as_it_stands_needs_no_commit(tmp_path: Path, capsys
     assert head(top) == before
 
 
+def test_a_vault_yaml_written_before_the_redaction_switches_is_still_docket_s_own(tmp_path: Path) -> None:
+    top = host_repo(tmp_path)
+    vault = folder_vault_in(top)
+    path = vault.root / "vault.yaml"
+    old = path.read_text(encoding="utf-8").replace("  credentials: true\n  phone: false\n", "  builtin: true\n")
+    path.write_text(old, encoding="utf-8", newline="\n")
+    git(top, "commit", "-qam", "an old vault.yaml")
+    assert main(["source", "new", "zebra-notes", "--vault", str(vault.root)]) == 0
+    text = path.read_text(encoding="utf-8")
+    assert "builtin" not in text
+    assert "  credentials: true\n  phone: false\n" in text
+    assert VaultConfig.load(path).sources["zebra-notes"].mapper == ".claude/skills/sources/zebra-notes/mapper.py"
+
+
 def test_a_write_that_fails_half_way_leaves_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     top = host_repo(tmp_path)
     vault = folder_vault_in(top)

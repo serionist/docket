@@ -149,12 +149,12 @@ def _write_folder(folder: Path, files: dict[str, bytes]) -> None:
 
 def _register(vault: Vault, name: str, entry: SourceConfig) -> tuple[bool, str | None, str | None]:
     """`sources.<name>` in vault.yaml, rewritten and committed only when the file is exactly what Docket would write
-    for it; otherwise the entry, to paste."""
+    for it, now or in the form before the redaction switches were split; otherwise the entry, to paste."""
     path = vault.root / CONFIG_FILE
     with vault.writing():
         text = path.read_bytes().decode("utf-8")
         config = VaultConfig.load(path)
-        if text != config.dump():
+        if not config.written_by_docket(text):
             return False, block(name, entry), None
         updated = config.model_copy(update={"sources": {**config.sources, name: entry}}).dump()
         if updated == text:
