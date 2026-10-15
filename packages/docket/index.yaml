@@ -1393,3 +1393,68 @@ decisions:
       - "Scanning every candidate for every split: 556 ms on 200 candidates for six splits."
       - "A snippet or mark at any two words joining into a query word: a snippet for were starts at we're."
       - "Every chunk holding a word only through a split after every other in the any-word stage: a chunk holding two of three words fell below every chunk holding one."
+  - id: DR-0290
+    title: "Questions for docket eval are a YAML file of schema 1: each question's words, the locators a good answer cites, its kind and its language"
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#66"]
+    description: "A question file holds schema_version (1), asked (when the questions were asked: a date, or a time with its offset; search's now, so time words read the same on every run) and questions, each with q (the words search gets, as typed), want (one or more locators a good answer cites), kind (exact-name, paraphrase, inflection, typo or time-bound), lang (the question's language code, such as en or hu), and optionally its own asked and a note. A wanted locator is r:<rid> with an optional time, stretch or paragraphs in the anchor grammar (DR-0198); a doc id with an optional #L<line> or #L<first>-<last>; or thread:<rid> for a thread or a recording with everything grouped under it. The file is read with YAML's base loader, so every value is text; an unknown key, a missing field, another schema or a locator that doesn't parse is refused, naming the question's number. Users keep their own files outside the Docket repo and run them with docket eval, so the format is a one-way door."
+    binds:
+      - A later schema reads every earlier version.
+      - The invented question set in the repo is written in this format.
+    not_chosen:
+      - "JSON: users write these files by hand, and want comments."
+      - "Unknown keys ignored: a mistyped want would score its question zero, unseen."
+      - "Bare rids, as read takes them: a record, a doc and a thread would read alike."
+      - "Any kind name: a mistyped kind would make a row of its own."
+      - "The run's time when asked is missing: last week would move every week."
+  - id: DR-0291
+    title: A hit answers a wanted locator when it is on the same record, doc or thread with positions that overlap, or holds or cites it
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#66"]
+    description: A hit's locators are its own and those collapsed under it, all at its rank; rids compare exactly, so rec-0100 never answers for rec-0100-second. A hit answers r:<rid> when it is on that record; a time, a stretch or paragraphs of it when it is the whole record or its window or part overlaps them, ends included, a moment being a stretch of no length; a doc when it is one of its sections, and the doc's lines when the section's lines overlap them; thread:<rid> when its group is that one. A thread window also answers each message it holds, read from the index's chunks, and a doc's section each raw stretch its lines' anchors point into, since verify takes the reader from that line to the raw.
+    binds: ["A change to what answers moves every user's numbers, so the changelog says so."]
+    not_chosen:
+      - "Containment only: windows share one utterance, so a cited stretch that crosses a window's end would match no window."
+      - "Hits on the record itself only: a question would miss whenever its minutes outrank its raw, though verify reaches the raw from the minutes' line."
+      - "A prefix match on locators: rec-0100 would answer for rec-0100-second."
+  - id: DR-0292
+    title: docket eval scores recall at k as the share of a question's wanted locators found, and MRR from the first hit that answers any
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#66"]
+    description: Each question runs through search with k (10 by default, 1 to 100) and its asked as now. Its recall at k is the share of its wanted locators a hit answers; its reciprocal rank is one over the rank of the first hit that answers any of them, else 0. A kind's, a language's and the whole set's numbers are the means over their questions, each weighing the same. A question whose search is refused scores 0 and is listed with the reason; a wanted locator naming no record, doc or thread in the index counts as missed and is listed.
+    not_chosen:
+      - "A question found when any wanted locator is: an answer of two facts that finds one would score as whole."
+      - "Means over wanted locators: a question with five would weigh five times one with one."
+  - id: DR-0293
+    title: docket eval reads the index as it is, writes nothing, and prints a table per kind and per language, the misses, or JSON
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#66"]
+    description: "docket eval <file> [-k N] [--json] [--vault PATH] reads the question file wherever it is and opens the vault's index read-only. Unlike docket search it never brings the index up to date, so two runs compare the same index and nothing in the vault or its index is written; when the index is behind the vault it says so first, naming docket index update. It prints a row per kind, per language and for all (questions, recall at k, MRR), then a line per question missed at k: its kind, language, words and the wanted locators no hit answered. --json prints the same numbers and each question's rank per wanted locator."
+    not_chosen:
+      - "Updating the index first, as docket search does: a measure that changes what it measures, and a write the person running it didn't ask for."
+      - "A results file next to the questions: --json into a file the user names is enough."
+      - "An MCP tool or a web page: eval is for the person tuning search, at a console."
+  - id: DR-0294
+    title: The invented question set is 72 questions over an invented two-language publisher's vault, built from fixture files and seeded filler
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#66"]
+    description: "packages/docket/tests/fixtures/eval-vault holds the records (calls, mail, chat, cal), the docs, the entities and questions.yaml of an invented small publisher of English and Hungarian translations; tests/eval_vault.py writes them into a vault with about 150 seeded routine messages and mails in both languages that share the questions' words and hold none of their answers, once per test session: about 400 chunks. The set has 72 questions, 14 exact-name, 18 paraphrase, 14 inflection (all Hungarian), 12 typo and 14 time-bound, 31 in English and 41 in Hungarian, asked on Wednesday 14 October 2026. A paraphrase uses none of its answer's words, so keyword search finds few: that is the number embeddings (#67) must raise. The index fixture's nine questions stay a search test of their own."
+    not_chosen:
+      - "All of it generated in code: nobody could check a question against its answer."
+      - "The perf vault: its words are seeded syllables, so no question means anything there."
+      - "Growing the index fixture or the name vault: other tests count their chunks and hits."
