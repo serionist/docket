@@ -440,7 +440,9 @@ role: the customer's site lead
   (DR-0281).
 - Aliases match as written, and through those forms in the columns of languages that inflect names (Hungarian, not
   English: `Mark` would match `marking`). Each stem form is judged: one under three letters, or one that floods the
-  index (`Mark` stems to `mar`, which `már` gives too), is dropped and listed for curation.
+  index (`Mark` stems to `mar`, which `már` gives too), is dropped and listed for curation. A form common because the
+  name is everywhere stays when nine in ten of its chunks hold the name or one of its case forms, so a customer in
+  most chunks keeps `Acménél` and `Acmét` (DR-0310).
 - Aliases marked `asr` also match vocabulary words within one edit of a word of 5 to 7 letters, two of 8 or more.
 - Aliases with `needs` count only when one of the named entities is in the same chunk.
 - A diarized speaker, or an author whose id an entity lists, counts as a mention of that person.

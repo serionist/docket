@@ -2,9 +2,11 @@
 
 An alias matches as written in `folded`, and through its stem forms in the stemmed columns of languages that inflect
 names (Hungarian). Each stem form is judged on its own: one under three letters, or one the index holds in over ten
-times as many chunks as the alias as written (counting that as at least five), or in over a fifth of all chunks and
-over 100, is dropped and kept in `alias_terms` as dropped. An `asr` alias also matches through vocabulary words within
-one edit of a word of 5 to 7 letters, two of 8 or more, found per word by a bounded Levenshtein walk (DR-0116).
+times as many chunks as the alias as written (counting that as at least five), is dropped and kept in `alias_terms` as
+dropped. So is one in over a fifth of all chunks and over 100, unless nine in ten of its chunks hold the alias as
+written or in one of its case forms: a name in most chunks keeps its inflected mentions, and an ordinary word that
+stems like it still drops it. An `asr` alias also matches through vocabulary words within one edit of a word of 5 to 7
+letters, two of 8 or more, found per word by a bounded Levenshtein walk (DR-0310).
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from docket.index.languages import Language
-from docket.index.text import Analyzer, any_of, fold, phrase, words
+from docket.index.text import Analyzer, any_of, dedupe, fold, phrase, words
 from docket.vault.entities import Entities, Entity
 
 SHORT = 3
@@ -26,6 +28,8 @@ COMMON_TIMES = 10
 COMMON_FLOOR = 5
 COMMON_SHARE = 5
 COMMON_MIN = 100
+# A form past the share stays when at most one chunk in this many holds none of the alias's written or case forms.
+UNEXPLAINED_ONE_IN = 10
 TERMS_SQL = (
     "INSERT OR IGNORE INTO alias_terms (entity, ordinal, col, word, term, how, distance) VALUES (?, ?, ?, ?, ?, ?, ?)"
 )
@@ -187,6 +191,13 @@ def alias_langs(analyzer: Analyzer) -> list[Language]:
     return [lang for lang in analyzer.languages if lang.alias_stems]
 
 
+def explained(ws: list[str], lang: Language) -> str:
+    """An alias as written or in one of its case forms in a language, in `folded`: only its last word inflects."""
+    head = [fold(w) for w in ws[:-1]]
+    lasts = dedupe(fold(w) for w in [ws[-1], *(lang.cases(ws[-1]) if lang.cases is not None else [])])
+    return any_of(phrase("folded", [*head, last]) for last in lasts)
+
+
 def judge_forms(conn: sqlite3.Connection, analyzer: Analyzer, aliases: list[AliasRow]) -> None:
     """Every alias's forms as written and its stem forms, kept or dropped, in alias_terms (word -1)."""
     conn.execute("DELETE FROM alias_terms WHERE word = -1")
@@ -200,11 +211,16 @@ def judge_forms(conn: sqlite3.Connection, analyzer: Analyzer, aliases: list[Alia
         floor = max(_count(conn, phrase("folded", written), cache), COMMON_FLOOR)
         for lang in alias_langs(analyzer):
             for form in _stem_forms(analyzer, ws, lang):
-                count = _count(conn, phrase(lang.column, form), cache)
+                expr = phrase(lang.column, form)
+                count = _count(conn, expr, cache)
                 if len(form[-1]) < SHORT:
                     how = "short"
-                elif count > COMMON_TIMES * floor or (count * COMMON_SHARE > total and count > COMMON_MIN):
+                elif count > COMMON_TIMES * floor:
                     how = "common"
+                elif count * COMMON_SHARE > total and count > COMMON_MIN:
+                    # Only a form this common pays a second count: its chunks the name doesn't explain.
+                    unexplained = _count(conn, f"{expr} NOT {explained(ws, lang)}", cache)
+                    how = "common" if unexplained * UNEXPLAINED_ONE_IN > count else "stem"
                 else:
                     how = "stem"
                 rows.add((alias.entity, alias.ordinal, lang.column, -1, " ".join(form), how, 0))

@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from docket_testkit import copy_vault, index_config, make_record, template_with
 
-from docket.index import build, matching, rebuild
+from docket.index import build, matching, rebuild, search
 from docket.index.languages import resolve
 from docket.index.schema import create
 from docket.vault.vault import Vault
@@ -136,6 +136,92 @@ def test_short_and_flooded_stem_forms_are_dropped_and_listed(vault: Vault) -> No
     assert ("dora-minta", "do", "short") in dropped
     assert ("mark", "mar", "common") in dropped
     assert ("rob", "rob", "common") in dropped
+
+
+# A vault about one customer: Acme in 270 of 400 messages, 110 of them only inflected. Mark and Sam are named often
+# enough that the ratio rule lets their stem forms through, while már and the English same stem like them.
+ONE_CUSTOMER = {
+    "customer/acme.yaml": "id: acme\ntype: customer\nname: {en: Acme}\n",
+    "person/mark.yaml": "id: mark\ntype: person\nname: {en: Mark}\n",
+    "person/sam.yaml": "id: sam\ntype: person\nname: {en: Sam}\n",
+}
+INFLECTED = [
+    "Az Acménél voltunk", "Az Acménak elküldtem", "Az Acmét felhívtam", "Az Acmével egyeztettünk",
+    "Az Acméhoz megyünk", "Az Acméról beszéltünk", "Az Acmében dolgoznak", "Az Acmének írtam",
+]  # fmt: skip
+
+
+def one_customer_message(n: int) -> tuple[str, set[str]]:
+    """Message n's text and the entities it names."""
+    named: set[str] = set()
+    if n < 100:
+        parts = [f"Az Acme kérte a darulistát, {n}."]
+    elif n < 210:
+        parts = [f"{INFLECTED[n % len(INFLECTED)]} a darulista miatt, {n}."]
+    elif n < 230:
+        parts = [f"Az Acme-nak elküldtem a listát, {n}."]
+    elif n < 270:
+        parts = [f"Acme's crane list is done, {n}."]
+    else:
+        parts = [f"A raktárban rendben van minden, {n}."]
+    if n < 270:
+        named.add("acme")
+    if n % 8 in (0, 3, 5):
+        parts.append("Már kész a terv.")
+    if n % 8 == 1 or n % 40 == 2:
+        parts.append("Mark szerint jó." if n % 8 == 1 else "Marknak szóltam, Markkal megbeszéltük.")
+        named.add("mark")
+    if n % 40 in (4, 7, 9, 13, 17, 19, 23):
+        parts.append("The same crane again.")
+    if n % 10 == 6 or n % 20 == 8:
+        parts.append("Sammal beszéltem." if n % 20 == 16 else "Sam is on site.")
+        named.add("sam")
+    return " ".join(parts), named
+
+
+def make_one_customer_vault(root: Path) -> Vault:
+    vault = Vault.init(root / "vault", index_config(), "test-box")
+    records = [make_record(n, text=one_customer_message(n)[0]) for n in range(400)]
+    vault.write_run("chat", records, datetime(2026, 10, 14, 7, tzinfo=UTC))
+    for rel, text in ONE_CUSTOMER.items():
+        path = vault.root / "entities" / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return vault
+
+
+@pytest.fixture(scope="module")
+def one_customer(tmp_path_factory: pytest.TempPathFactory) -> Vault:
+    template = template_with(tmp_path_factory, make_one_customer_vault)
+    v = copy_vault(template, tmp_path_factory.mktemp("one-customer"))
+    rebuild(v)
+    return v
+
+
+def mentions_of(vault: Vault, entity: str) -> set[int]:
+    rids = {
+        r[0]
+        for r in query(vault, "SELECT c.rid FROM mentions m JOIN chunks c ON c.id = m.chunk WHERE entity = ?", entity)
+    }
+    return {n for n in range(400) if make_record(n).rid in rids}
+
+
+def test_a_name_in_most_chunks_keeps_its_inflected_mentions(one_customer: Vault) -> None:
+    assert mentions_of(one_customer, "acme") == set(range(270))
+    forms = query(one_customer, "SELECT term, how FROM alias_terms WHERE entity = 'acme' AND col = 'stem_hu'")
+    assert ("acm", "stem") in forms
+    result = search(one_customer, "acménél", now=datetime(2026, 10, 15, tzinfo=UTC))
+    assert [e.id for e in result.query.entities] == ["acme"]
+
+
+def test_a_common_word_sharing_a_name_s_stem_is_still_dropped(one_customer: Vault) -> None:
+    forms = query(one_customer, "SELECT entity, term, how FROM alias_terms WHERE col = 'stem_hu' AND how = 'common'")
+    assert ("mark", "mar", "common") in forms
+    assert ("sam", "sam", "common") in forms
+    # Each is named as written in at least a tenth as many chunks as its stem form, so only the share judges them.
+    named = {e: {n for n in range(400) if e in one_customer_message(n)[1]} for e in ("mark", "sam")}
+    assert mentions_of(one_customer, "mark") == {n for n in named["mark"] if n % 8 == 1}
+    assert mentions_of(one_customer, "sam") == {n for n in named["sam"] if n % 20 != 16}
 
 
 def test_asr_aliases_match_within_one_or_two_edits_from_five_letters(vault: Vault) -> None:

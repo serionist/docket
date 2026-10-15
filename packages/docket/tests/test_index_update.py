@@ -11,6 +11,7 @@ from docket_testkit import PARENT, copy_vault, index_template, logical_dump, mak
 
 from docket import recall
 from docket.index import build, matching, rebuild, status, update
+from docket.index.schema import SCHEMA_VERSION
 from docket.vault.records import RawRecord
 from docket.vault.vault import Vault
 
@@ -182,13 +183,16 @@ def folded_terms(vault: Vault) -> set[str]:
         conn.close()
 
 
-def test_an_index_of_the_schema_before_compounds_rebuilds(vault: Vault) -> None:
+def test_an_index_of_the_schema_before_rebuilds(vault: Vault) -> None:
     conn = sqlite3.connect(build.db_path(vault))
-    conn.execute("PRAGMA user_version = 1")
+    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION - 1}")
     conn.commit()
     conn.close()
     report = update(vault)
-    assert report.rebuilt and report.reason == "it has schema 1, and this Docket writes 2"
+    assert (
+        report.rebuilt
+        and report.reason == f"it has schema {SCHEMA_VERSION - 1}, and this Docket writes {SCHEMA_VERSION}"
+    )
     assert status(vault).stale is None
 
 

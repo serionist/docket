@@ -1,5 +1,5 @@
 """The languages the index stems: each one's Snowball stemmer, the extra word forms it needs, whether aliases match on
-its stems, and its time words.
+its stems and the case forms of a name, and its time words.
 
 English is always one; the others come from `vault.yaml`'s `owner.languages`, which is free text, so a code is matched
 in any case and Snowball's own names are taken too. A language Docket can't place gets no column and is a problem: its
@@ -52,6 +52,9 @@ class Language:
     # Only the first: English changes the third (`dry` to `dri`) and its exceptions the second (`dying` to `die`). Some
     # Snowball stemmers cut prefixes (Indonesian, Irish), so a language says so only once someone has checked it.
     keeps_start: bool = False
+    # A name's case forms (lowercased, as written): they tell a common stem form's inflected mentions of the name from
+    # an ordinary word that stems the same (DR-0310).
+    cases: Callable[[str], list[str]] | None = None
 
     @property
     def column(self) -> str:
@@ -101,6 +104,48 @@ def hungarian_dative(word: str) -> list[str]:
     return [base + ("nak" if any(ch in _BACK for ch in base) else "nek")]
 
 
+_FRONT = frozenset("eéiíöőüű")
+# Per side of vowel harmony, the case endings every word takes, those after a vowel, those after a consonant, and
+# those that double a final consonant in place of their v (Markkal, Markká).
+_ENDINGS = {
+    "back": (
+        ("nak", "nál", "hoz", "ban", "ba", "ból", "ra", "ról", "tól", "ig", "ért", "ként", "ul"),
+        ("t", "n", "val", "vá"),
+        ("t", "ot", "at", "on"),
+        ("al", "á"),
+    ),
+    "front": (
+        ("nek", "nél", "hez", "höz", "ben", "be", "ből", "re", "ről", "től", "ig", "ért", "ként", "ül"),
+        ("t", "n", "vel", "vé"),
+        ("t", "et", "öt", "en", "ön"),
+        ("el", "é"),
+    ),
+}
+# A two-letter consonant doubles its first letter (Kovács gives Kováccsal); dzs comes before zs, which it ends with.
+_DIGRAPHS = ("dzs", "cs", "dz", "gy", "ly", "ny", "sz", "ty", "zs")
+
+
+def hungarian_cases(word: str) -> list[str]:
+    """A name's case forms: a final vowel lengthened as for the dative, then each case ending. Back endings for a word
+    with a back vowel, front for one with a front vowel or none, and both for one with both, since foreign names go
+    either way (Acménak, Acmének)."""
+    if not word[-1:].isalpha():
+        return []
+    back = any(ch in _BACK for ch in word)
+    front = not back or any(ch in _FRONT for ch in word)
+    out: list[str] = []
+    for side in [side for side, takes in (("back", back), ("front", front)) if takes]:
+        every, after_vowel, after_consonant, doubling = _ENDINGS[side]
+        if word[-1] in _BACK | _FRONT:
+            base = word[:-1] + _LENGTHENED.get(word[-1], word[-1])
+            out += [base + e for e in (*every, *after_vowel)]
+        else:
+            last = next((d for d in _DIGRAPHS if word.endswith(d)), word[-1])
+            doubled = word if word.endswith(last[0] + last) else word[: -len(last)] + last[0] + last
+            out += [word + e for e in (*every, *after_consonant)] + [doubled + e for e in doubling]
+    return list(dict.fromkeys(out))
+
+
 KNOWN: dict[str, Language] = {
     "en": Language("en", "english", time_words=ENGLISH_TIME, keeps_start=True),
     "hu": Language(
@@ -111,6 +156,7 @@ KNOWN: dict[str, Language] = {
         restem=True,
         time_words=HUNGARIAN_TIME,
         keeps_start=True,
+        cases=hungarian_cases,
     ),
 }
 
