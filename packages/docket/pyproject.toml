@@ -17,6 +17,8 @@ dependencies = [
   "pydantic>=2.13.5",
   "PyYAML>=6.0.3",
   "snowballstemmer>=3.1.1",
+  # The vector stage's distance (DR-0337), only where it ships wheels: none for Windows on Arm or musl, and no sdist.
+  "sqlite-vec>=0.1.9; (sys_platform == 'win32' and platform_machine == 'AMD64') or sys_platform == 'darwin' or (sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64'))",
   "typer>=0.27.2",
   "tzdata>=2026.4",
   "tzlocal>=5.4.4",
