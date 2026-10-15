@@ -62,6 +62,23 @@ def consuming_repo(vault_root: Path) -> Path:
     return repo
 
 
+def skill_folder(repo: Path, vault_root: Path, source: str) -> Path:
+    """A source's folder in the consuming repo, links followed: refused unless it stays in the repo and outside the
+    vault. The runner takes a mapper only from under it, and `docket source new` writes only into it, so a linked
+    `.claude`, `skills` or `sources` folder can't lead either of them elsewhere."""
+    problem = source_name_problem(source)
+    if problem is not None:
+        raise DocketError(problem)
+    inside = vault_root.resolve()
+    folder = repo.joinpath(*SKILLS, source).resolve()
+    if not folder.is_relative_to(repo) or folder.is_relative_to(inside):
+        raise DocketError(
+            f"{source}'s folder .claude/skills/sources/{source}/ must stay in {repo} and outside the vault after links "
+            f"are followed; it leads to {folder}"
+        )
+    return folder
+
+
 def find_mapper(vault: Vault, source: str) -> Path:
     """A source's mapper, its real path checked against the folder built from the checked name."""
     problem = source_name_problem(source)
@@ -77,15 +94,9 @@ def find_mapper(vault: Vault, source: str) -> Path:
         )
     repo = consuming_repo(vault.root)
     inside = vault.root.resolve()
-    folder = repo.joinpath(*SKILLS, source).resolve()
+    folder = skill_folder(repo, inside, source)
     path = (repo / config.mapper).resolve()
-    if (
-        not folder.is_relative_to(repo)
-        or folder.is_relative_to(inside)
-        or not path.is_relative_to(folder)
-        or path == folder
-        or path.is_relative_to(inside)
-    ):
+    if not path.is_relative_to(folder) or path == folder or path.is_relative_to(inside):
         raise DocketError(
             f"{source}'s mapper must be a file under .claude/skills/sources/{source}/ in {repo}, outside the vault, "
             f"after links are followed; {config.mapper} isn't"
