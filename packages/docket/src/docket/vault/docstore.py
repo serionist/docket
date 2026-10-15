@@ -64,6 +64,34 @@ class PutResult(BaseModel):
     redacted_lines: list[int] = Field(default_factory=list[int])
 
 
+class Redacting(BaseModel):
+    """A doc the pass redacted (or would, in a dry run): its id, the rev it went in as, the markers per rule, and
+    whether it went in through the take-in of a hand edit."""
+
+    id: str
+    rev: int
+    redactions: dict[str, int]
+    by_hand: bool = False
+
+
+class RedactReport(BaseModel):
+    """What `docket doc redact` did: the docs it redacted, the files it left with why (paths and line numbers, never
+    a value), and the commit."""
+
+    dry_run: bool
+    docs: list[Redacting] = Field(default_factory=list[Redacting])
+    left: list[str] = Field(default_factory=list[str])
+    commit: str | None = None
+
+    @property
+    def counts(self) -> dict[str, int]:
+        total: dict[str, int] = {}
+        for doc in self.docs:
+            for rule, n in doc.redactions.items():
+                total[rule] = total.get(rule, 0) + n
+        return dict(sorted(total.items()))
+
+
 class DocStore:
     def __init__(self, vault: Vault) -> None:
         self.vault = vault
@@ -376,6 +404,54 @@ class DocStore:
             self._replace(path, original)
             raise
         return rev, text
+
+    # -- the pass ------------------------------------------------------------------------------------------------------
+
+    def redact_all(self, dry_run: bool = False) -> RedactReport:
+        """Redact the docs already stored with the settings as they are now (DR-0200): each doc redaction would change
+        is written as its next rev, all in one commit, its body redacted in the file's own text and only its rev line
+        set, so a doc from a newer Docket keeps what this one doesn't know. A hand edit goes in first through the
+        take-in. A doc the never-store lists forbid, one whose frontmatter as written holds a keyword or what
+        redaction would hide, and a file that doesn't parse or sits where its id doesn't say are left and named."""
+        report = RedactReport(dry_run=dry_run)
+        folder = self.root / "processed"
+        writes: list[tuple[str, str]] = []
+        lines: list[str] = []
+        with self.vault.writing():
+            for path in sorted(folder.rglob("*.md")) if folder.is_dir() else []:
+                rel = path.relative_to(self.root).as_posix()
+                try:
+                    text = self.read_file(path)
+                    doc = parse_doc(text, lenient=True)
+                except DocketError:
+                    report.left.append(f"{rel}: it doesn't parse as a doc; fix it")
+                    continue
+                meta = doc.meta
+                if doc_path(meta.id).as_posix() != rel:
+                    report.left.append(f"{rel}: its id {meta.id} belongs at {doc_path(meta.id)}")
+                    continue
+                history = self.history(meta.id)
+                last = normalize_newlines(self._blob(history[0][1], meta.id)) if history else None
+                stored = max((n for n, _ in history), default=0)
+                edit = derived.hand_edit(meta.type, text, last, self.redactor, self.lists)
+                if edit.stops:
+                    report.left += [f"{rel}: line {n} {what}" for n, what in edit.stops]
+                    continue
+                if not edit.redacted.lines:
+                    continue
+                counts = dict(sorted(edit.redacted.counts.items()))
+                if normalize_newlines(text) != last:
+                    rev = max(stored, meta.rev) + 1
+                    if not dry_run:
+                        rev, _ = self._take_in(meta.id, path, text, stored, last)
+                    report.docs.append(Redacting(id=meta.id, rev=rev, redactions=counts, by_hand=True))
+                    continue
+                report.docs.append(Redacting(id=meta.id, rev=stored + 1, redactions=counts))
+                writes.append((rel, _with_rev(edit.text, stored + 1)))
+                lines.append(f"Doc: {meta.id} rev {stored + 1}")
+            if writes and not dry_run:
+                report.commit = self._write_all_and_commit(writes, f"Redact docs: {len(writes)}\n\n" + "\n".join(lines))
+        return report
 
     def _write_all_and_commit(self, files: list[tuple[str, str]], message: str) -> str | None:
         """Write each (path, text) and commit them together. If a write or the commit fails, every file written goes

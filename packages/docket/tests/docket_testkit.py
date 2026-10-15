@@ -197,10 +197,14 @@ def git(cwd: Path, *args: str) -> str:
     return sh(cwd, "git", "-c", "user.name=Ada Example", "-c", "user.email=ada@example.invalid", *args)
 
 
-def configure(root: Path, *, phone: bool | None = None, keywords: list[str] | None = None) -> None:
+def configure(
+    root: Path, *, credentials: bool | None = None, phone: bool | None = None, keywords: list[str] | None = None
+) -> None:
     """A vault's redaction and never-store settings changed in its vault.yaml and committed, as the user would."""
     path = root / "vault.yaml"
     config = VaultConfig.load(path)
+    if credentials is not None:
+        config.redaction.credentials = credentials
     if phone is not None:
         config.redaction.phone = phone
     if keywords is not None:

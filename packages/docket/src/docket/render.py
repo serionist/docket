@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 from docket.index import SearchResult
 from docket.recall import ReadResult, VerifyResult
 from docket.vault.anchors import format_time
-from docket.vault.docstore import PutResult
+from docket.vault.docstore import PutResult, RedactReport
 from docket.vault.processed import DocProblem
 from docket.vault.spans import Span
 
@@ -58,6 +58,34 @@ def put(result: PutResult) -> list[str]:
         where = ", ".join(str(n) for n in result.redacted_lines)
         counts = ", ".join(f"{n} {rule}" for rule, n in result.redactions.items())
         lines.append(f"redacted on line{'s' if len(result.redacted_lines) > 1 else ''} {where}: {counts}")
+    return lines
+
+
+def redacted(report: RedactReport, storage: str) -> list[str]:
+    """What `docket doc redact` did or would do: the docs and their markers, what it left and why, and where the old
+    text still is. Paths, ids, line numbers and rule names only, never a value."""
+    would = "would redact" if report.dry_run else "redacted"
+    if not report.docs:
+        lines = [f"{would:<9} nothing: every doc is as the settings would have it"]
+    else:
+        counts = ", ".join(f"{n} {rule}" for rule, n in report.counts.items())
+        lines = [f"{would:<9} {len(report.docs)} doc{'s' if len(report.docs) > 1 else ''}: {counts}"]
+        lines += [
+            f"          {doc.id} rev {doc.rev}{', a hand edit taken in' if doc.by_hand else ''}" for doc in report.docs
+        ]
+    if report.left:
+        lines.append(f"left      {len(report.left)} problem(s); each file is left as it is:")
+        lines += [f"          {why}" for why in report.left]
+        lines.append("          edit or delete each, then run docket doc redact again")
+    if report.docs and not report.dry_run:
+        where = (
+            "the history of the repo the vault is a folder of, which Docket never rewrites"
+            if storage == "folder"
+            else "this vault's git history"
+        )
+        lines.append(f"history   earlier revs still hold what was redacted, in {where}")
+    if report.dry_run:
+        lines.append("dry run: nothing written")
     return lines
 
 

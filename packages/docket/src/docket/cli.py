@@ -17,6 +17,7 @@ import typer
 from docket import __version__, index, recall, render, userconfig
 from docket.errors import DocketError
 from docket.imports import notes
+from docket.index.build import db_path
 from docket.render import printable
 from docket.service.platforms import Installer
 from docket.service.token import Tokens
@@ -25,6 +26,7 @@ from docket.sources.contract import Manifest
 from docket.sources.ingest import IngestReport, ingest_run
 from docket.sources.runner import MapperFailedError
 from docket.vault import convert, cuts, holds, redaction, releaselog
+from docket.vault.docstore import DocStore
 from docket.vault.gate import Gate, Label
 from docket.vault.processed import DocRefusedError
 from docket.vault.records import RawRecord, source_name_problem
@@ -648,6 +650,24 @@ def doc_verify(
 ) -> None:
     """Each line of a doc next to the raw its anchors point at."""
     say_all(render.verify(recall.verify(find_vault(vault), doc, lines=line or None, window=window)))
+
+
+@doc_app.command("redact")
+def doc_redact(
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Say what would change, and write nothing.")] = False,
+    vault: VaultOption = None,
+) -> None:
+    """Redact the docs already stored, with vault.yaml's settings as they are now: once after upgrading, and again
+    after turning a rule on or adding a pattern or a never-store keyword."""
+    found = find_vault(vault)
+    report = DocStore(found).redact_all(dry_run=dry_run)
+    say_all(render.redacted(report, found.config.storage))
+    if report.docs and not dry_run and db_path(found).exists():
+        # A new file, so the old text isn't left in free pages or the full-text index's deleted entries.
+        index.rebuild(found, "docs were redacted")
+        say("index    rebuilt here; on another machine, run docket index rebuild after it pulls")
+    if report.left:
+        raise typer.Exit(1)
 
 
 def _report(report: index.BuildReport) -> None:
