@@ -367,11 +367,15 @@ class Gate:
     def intake_view(self, record: RawRecord) -> RawRecord | str:
         """What intake would make of one record, without staging it: why it would drop it ("private source",
         "never-store"), or the record redacted and versioned as it would be staged. `docket hold show` and a release's
-        screen read held records through this, so what the owner reads and keeps is what the gate would write."""
+        screen read held records through this, so what the owner reads and keeps is what the gate would write. It
+        refuses what `stage` refuses, a source missing from vault.yaml or disabled there, so a release stops before
+        its question, not after its commits."""
         config = self._config()
         source = config.sources.get(record.source)
         if source is None:
             raise DocketError(f"source {record.source!r} isn't in vault.yaml")
+        if not source.enabled:
+            raise DocketError(f"source {record.source!r} is disabled in vault.yaml")
         if source.sensitivity == "private":
             return "private source"
         if neverstore.match(record, config.never_store):

@@ -164,7 +164,8 @@ def _held_in_staging(vault: Vault, source: str, waiting: list[Entry], held: froz
     for native in sorted(released):
         parts.append(
             f"{native} is held again after its release (a merge brought the hold back) and its records wait in "
-            f"staging; take the hold off with docket hold release {source} {native}, then run the ingest again"
+            f"staging; take the hold off with docket hold release {source} {native} --from <folder> (any import "
+            f"folder of {source}), then run the ingest again"
         )
     return "; ".join(parts)
 

@@ -32,6 +32,7 @@ CUT = (10_000, 20_000)
 def vault(tmp_path: Path, config: VaultConfig) -> Vault:
     config.sources["talks"] = SourceConfig(sensitivity="work")
     config.sources["hush"] = SourceConfig(sensitivity="private")
+    config.sources["paused"] = SourceConfig(enabled=False)
     config.never_store = NeverStore(keywords=["zebrafinch"])
     return Vault.init(tmp_path / "vault", config, "test-box")
 
@@ -193,3 +194,8 @@ def test_intake_view_says_what_intake_drops_and_redacts_the_rest(vault: Vault) -
     assert view.v.startswith("sha256:")
     with pytest.raises(DocketError, match=r"isn't in vault\.yaml"):
         gate.intake_view(rec(source="other", rid="other:rec-1", container=None))
+    # What stage refuses, intake_view refuses: a release stops before its question, not after its commits.
+    with pytest.raises(DocketError, match=r"'paused' is disabled in vault\.yaml"):
+        gate.intake_view(rec(source="paused", rid="paused:rec-1", container=None))
+    with pytest.raises(DocketError, match=r"'paused' is disabled in vault\.yaml"):
+        gate.stage([rec(source="paused", rid="paused:rec-1", container=None)])

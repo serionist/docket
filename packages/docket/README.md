@@ -128,11 +128,15 @@ A held recording goes in only with the cuts you confirm (DR-0200 to DR-0206).
 - A recording needs a transcript and at least one time cut that removes an utterance; a record without segments, such
   as the vendor's notes, is left out unless you keep it. Anything else stays held, with the reason.
 - The release line goes to `state/releases/<source>.jsonl` and is committed before the hold comes off; then the
-  recording is staged already cut, ready, and `docket staging promote` takes it to raw.
+  versions you were shown are staged already cut, ready, and `docket staging promote` takes them to raw. Any other
+  version under the id waits as pending for you to classify.
+- A hold never comes off in git before its release line: a line whose commit failed is committed first, and a log
+  or hold list an ignore rule hides stops the release with git's own error.
 - The gate cuts a released recording by the same times wherever it is staged again, on any machine. Update Docket on
   every machine before your first release.
-- A merge can bring a hold back: `hold list` and every ingest say so, and the next import with a hold file, or the
-  release run again, takes it off.
+- A merge can bring a hold back: `hold list` and every ingest say so, and the next import with a hold file, or
+  `docket hold release <source> <id> --from <folder>` (one code, no cuts asked), takes it off; what that stages waits
+  as pending. `hold show` refuses such an id: its cuts are on record.
 
 ## Processed docs
 

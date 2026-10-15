@@ -30,6 +30,7 @@ from docket.render import printable
 from docket.sources import runner
 from docket.sources.contract import Manifest
 from docket.sources.ingest import map_folder
+from docket.vault import cuts as cutting
 from docket.vault import holds, releaselog
 from docket.vault.config import UniqueKeyLoader
 from docket.vault.cuts import Cut, merge, parse, removes, widen
@@ -183,10 +184,16 @@ def records_under(
 
 
 def show(vault: Vault, source: str, native: str, folder: Path) -> list[Viewed]:
-    """A held recording's records, each with what intake makes of it. Nothing is written."""
+    """A held recording's records, each with what intake makes of it. Nothing is written. An id released already and
+    held again is refused: its cuts are on record, and showing it would print the stretch the release took out."""
     held = holds.read(vault.root, source)
     if native not in held:
         raise DocketError(f"{native} isn't held in {holds.HOLDS}/{source}.txt; docket hold list names what is")
+    if native in releaselog.read(vault.root, source):
+        raise DocketError(
+            f"{native} was released already and is held again (a merge brought the hold back); its cuts are on "
+            f"record, so take the hold off with docket hold release {source} {native} --from <folder>"
+        )
     records = records_under(vault, source, folder, {native}, held)[native]
     if not records:
         raise DocketError(f"{native} isn't in {folder}")
@@ -408,15 +415,36 @@ def _release_one(vault: Vault, source: str, checked: _Checked, place: str, repor
         at=datetime.now(UTC),
         machine=vault.machine,
     )
+    shown = _shown(Gate(vault), checked)
     with vault.writing():
         if native not in holds.read(vault.root, source) or native in releaselog.read(vault.root, source):
             report.held.append((native, "its hold or release changed since the screen; run the release again"))
             return True
         releaselog.add(vault, source, line)
         holds.remove(vault, source, [native])
-    _stage(vault, source, native, checked.records)
+    _stage(vault, source, native, checked.records, shown)
     report.released.append(native)
     return True
+
+
+def _shown(gate: Gate, checked: _Checked) -> frozenset[tuple[str, str]]:
+    """The versions the screen showed, as the gate will stage them: each transcript cut by the release, each record
+    kept as it reads. Only these are classified work by the owner."""
+    out: set[tuple[str, str]] = set()
+    for record in checked.records:
+        if record.segments:
+            try:
+                view = gate.intake_view(cutting.apply(record, checked.spans))
+            except DocketError:
+                # A transcript the times don't fit; the gate leaves it out.
+                continue
+        elif record.rid in checked.proposal.keep:
+            view = checked.views[record.rid]
+        else:
+            continue
+        if isinstance(view, RawRecord):
+            out.add((view.rid, view.v))
+    return frozenset(out)
 
 
 def _take_off_again(vault: Vault, source: str, granted: releaselog.Granted, place: str, report: ReleaseReport) -> bool:
@@ -437,17 +465,21 @@ def _take_off_again(vault: Vault, source: str, granted: releaselog.Granted, plac
     return True
 
 
-def _stage(vault: Vault, source: str, native: str, records: list[RawRecord]) -> None:
-    """Stage a released recording: the gate cuts it by its release and leaves out what the release doesn't keep;
-    what waits under the id is then classified work by the user, who confirmed the release."""
+def _stage(
+    vault: Vault, source: str, native: str, records: list[RawRecord], shown: frozenset[tuple[str, str]] = frozenset()
+) -> None:
+    """Stage a released recording: the gate cuts it by its release and leaves out what the release doesn't keep.
+    Only the versions this run showed the owner are classified work by them; anything else under the id (a version
+    staged elsewhere or earlier, or one staged again after a crash or a merge) waits as pending for a classification."""
     if native in holds.read(vault.root, source):
         return
     gate = Gate(vault)
     gate.stage(records)
-    ids = frozenset({native})
+    if not shown:
+        return
     for entry in gate.list(source=source, state="pending").entries:
         record = entry.staged.record
-        if any(holds.holder(ref, source, ids) for ref in (record.rid, record.thread, record.container)):
+        if (record.rid, record.v) in shown:
             gate.classify(entry.key, "work", by="user")
 
 

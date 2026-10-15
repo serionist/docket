@@ -23,6 +23,7 @@ from docket.errors import DocketError
 from docket.sources import release as releasing
 from docket.sources.release import Proposal, load_proposals, show, show_lines
 from docket.vault import holds, releaselog
+from docket.vault.config import VaultConfig
 from docket.vault.cuts import CUT_MARKER
 from docket.vault.gate import Gate
 from docket.vault.holds import HOLDS
@@ -50,6 +51,9 @@ def map_run(run):
         if item.get("segments"):
             out["records"].append({**base, "rid": "rec:" + native + "/transcript", "kind": "transcript",
                                    "segments": item["segments"]})
+        if item.get("second"):
+            out["records"].append({**base, "rid": "rec:" + native + "/second", "kind": "transcript",
+                                   "segments": item["second"]})
         if item.get("summary"):
             out["records"].append({**base, "rid": "rec:" + native + "/summary", "kind": "vendor-summary",
                                    "text": item["summary"]})
@@ -327,7 +331,8 @@ def test_a_hold_or_log_that_changes_while_the_owner_reads_stops_that_id(
     ingest(vault, folder)
 
     def meanwhile() -> str:
-        holds.remove(vault, "rec", ["rec-cut-01"])
+        # Another machine's change arrives while the owner reads: the hold is gone from the list.
+        (vault.root / HOLDS / "rec.txt").write_text("rec-cut-02\nrec-cut-03\n", encoding="utf-8")
         return "code"
 
     owner(meanwhile)
@@ -352,7 +357,7 @@ def test_a_line_left_uncommitted_is_committed_and_a_rerun_only_takes_the_hold_of
     assert person.prompts[0].endswith("to take the hold off rec-cut-01, n to keep it held, q to stop: ")
     assert subjects(vault)[:2] == ["Holds: rec, 1 released on test-box", "Releases: rec, the log committed on test-box"]
     assert len(releaselog.read(vault.root, "rec")["rec-cut-01"].lines) == 1
-    assert staged(vault)["rec:rec-cut-01/transcript"][:2] == ("ready", "user")
+    assert staged(vault)["rec:rec-cut-01/transcript"][:2] == ("pending", None)
 
 
 def test_a_hold_brought_back_gets_one_question_and_no_new_line(
@@ -385,7 +390,7 @@ def test_released_and_off_the_hold_with_nothing_staged_is_staged_without_a_quest
     report = releasing.release(vault, "rec", folder, [cut_01(), Proposal("rec-cut-09", ("0:12-0:35",))])
     assert report.restaged == ["rec-cut-01"]
     assert person.prompts == []
-    assert staged(vault)["rec:rec-cut-01/transcript"][:2] == ("ready", "user")
+    assert staged(vault)["rec:rec-cut-01/transcript"][:2] == ("pending", None)
     empty = folder.parent / "empty"
     empty.mkdir()
     report = releasing.release(vault, "rec", empty, [cut_01()])
@@ -415,6 +420,90 @@ def test_with_a_console_on_both_sides_and_outside_claude_code_the_question_is_as
 ) -> None:
     monkeypatch.setattr(releasing, "_is_console", lambda stream: True)
     assert releasing._console_problem() is None  # pyright: ignore[reportPrivateUsage]
+
+
+def test_a_disabled_source_stops_before_the_question(vault: Vault, folder: Path, owner: Callable[..., Owner]) -> None:
+    ingest(vault, folder)
+    path = vault.root / "vault.yaml"
+    config = VaultConfig.load(path)
+    config.sources["rec"] = config.sources["rec"].model_copy(update={"enabled": False})
+    path.write_text(config.dump(), encoding="utf-8")
+    before = snapshot(vault)
+    person = owner("code")
+    with pytest.raises(DocketError, match=r"'rec' is disabled in vault\.yaml"):
+        releasing.release(vault, "rec", folder, [cut_01()])
+    assert person.prompts == []
+    assert snapshot(vault) == before
+
+
+def test_show_refuses_an_id_released_already_and_held_again(
+    vault: Vault, folder: Path, owner: Callable[..., Owner]
+) -> None:
+    ingest(vault, folder)
+    owner("code")
+    releasing.release(vault, "rec", folder, [cut_01()])
+    (vault.root / HOLDS / "rec.txt").write_text("rec-cut-01\nrec-cut-02\n", encoding="utf-8")
+    with pytest.raises(DocketError, match="rec-cut-01 was released already and is held again") as e:
+        show(vault, "rec", "rec-cut-01", folder)
+    assert "docket hold release rec rec-cut-01 --from <folder>" in str(e.value)
+
+
+def test_only_the_versions_the_owner_was_shown_are_classified_by_them(
+    vault: Vault, folder: Path, owner: Callable[..., Owner]
+) -> None:
+    # A version of the transcript staged before its hold arrived, as on another machine: never on this screen.
+    variant = RawRecord.model_validate(
+        {
+            "rid": "rec:rec-cut-01/transcript",
+            "source": "rec",
+            "kind": "transcript",
+            "container": "rec:rec-cut-01",
+            "ts": "2026-10-14T09:30:00Z",
+            "segments": [*TALK[:-1], said(60, 70, "Ada Example", "Send it by Monday.")],
+            "fetched": datetime.now(UTC),
+            "via": "rec-file",
+        }
+    )
+    Gate(vault).stage([variant])
+    holds.add(vault, "rec", ["rec-cut-01"])
+    owner("code")
+    assert releasing.release(vault, "rec", folder, [cut_01()]).released == ["rec-cut-01"]
+    versions = sorted(
+        (e.staged.state, e.staged.classified_by)
+        for e in Gate(vault).list().entries
+        if e.staged.record.rid == "rec:rec-cut-01/transcript"
+    )
+    assert versions == [("pending", None), ("ready", "user")]
+
+
+@pytest.mark.parametrize(
+    ("second", "keyword"),
+    [
+        # A second transcript that ends before the cut starts: the gate leaves it out, never half cut.
+        ([said(0, 5, "Ben Sample", "Morning.")], None),
+        # One never-store drops at intake: shown as dropped, and never staged.
+        ([said(0, 10, "Ben Sample", "Morning, zebrafinch."), said(10, 70, "Ada Example", "The rest.")], "zebrafinch"),
+    ],
+)
+def test_a_transcript_the_gate_won_t_stage_is_not_classified_and_the_release_goes_on(
+    vault: Vault, tmp_path: Path, owner: Callable[..., Owner], second: list[dict[str, Any]], keyword: str | None
+) -> None:
+    folder = tmp_path / "two"
+    folder.mkdir()
+    (folder / "rec-two-06.json").write_text(json.dumps(recording("rec-two-06", second=second)), encoding="utf-8")
+    (folder / "hold.txt").write_text("rec-two-06\n", encoding="utf-8")
+    if keyword:
+        path = vault.root / "vault.yaml"
+        config = VaultConfig.load(path)
+        config.never_store.keywords.append(keyword)
+        path.write_text(config.dump(), encoding="utf-8")
+    ingest(vault, folder)
+    owner("code")
+    proposal = Proposal("rec-two-06", ("0:12-0:35",), ("rec:rec-two-06",))
+    assert releasing.release(vault, "rec", folder, [proposal]).released == ["rec-two-06"]
+    got = staged(vault)
+    assert "rec:rec-two-06/second" not in got
+    assert got["rec:rec-two-06/transcript"][:2] == ("ready", "user")
 
 
 def test_show_needs_a_folder(vault: Vault, folder: Path) -> None:

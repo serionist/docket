@@ -359,7 +359,10 @@ def test_a_hold_a_merge_brought_back_is_named_and_its_cut_version_in_raw_isn_t_w
     capsys.readouterr()
     assert ingest(vault, folder) == 0
     out = capsys.readouterr().out
-    assert "holds      m1 is held again after its release; the next import or docket hold release takes it off" in out
+    assert (
+        "holds      m1 is held again after its release; the next import with a hold file, or docket hold release memo "
+        "m1 --from <folder>, takes it off"
+    ) in out
     assert "waits for docket forget" not in out
 
 
@@ -374,7 +377,7 @@ def test_a_staged_record_under_a_hold_brought_back_names_the_release_not_deletin
     assert ingest(vault, folder) == 2
     err = capsys.readouterr().err
     assert "m1 is held again after its release (a merge brought the hold back)" in err
-    assert "docket hold release memo m1" in err
+    assert "docket hold release memo m1 --from <folder> (any import folder of memo)" in err
     # m2 was never released: its staged file still has to go.
     assert "1 record(s) on hold wait in staging; delete these files" in err
     assert PRIVATE_TITLE not in err
@@ -390,5 +393,5 @@ def test_only_released_records_waiting_under_a_hold_brought_back_ask_for_no_dele
     capsys.readouterr()
     assert ingest(vault, folder) == 2
     err = capsys.readouterr().err
-    assert "docket hold release memo m1" in err
+    assert "docket hold release memo m1 --from <folder> (any import folder of memo)" in err
     assert "delete" not in err

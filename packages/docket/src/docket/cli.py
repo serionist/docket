@@ -363,13 +363,15 @@ def hold_release(
         items = [release.Proposal(native, tuple(cut or []), tuple(keep or []))]
     report = release.release(found, source, from_, items)
     rows = [f"released   {i}" for i in report.released]
-    rows += [f"taken off  {i}  held again after its release" for i in report.taken_off]
-    rows += [f"staged     {i}  released already" for i in report.restaged]
+    rows += [f"taken off  {i}  held again after its release; its records wait as pending" for i in report.taken_off]
+    rows += [f"staged     {i}  released already; its records wait as pending" for i in report.restaged]
     rows += [f"held       {i}  {why}" for i, why in report.held]
     rows += [f"refused    {i}  {why}" for i, why in report.refused]
     if report.stopped:
         rows.append("stopped    the rest stay held")
-    if report.released or report.taken_off or report.restaged:
+    if report.taken_off or report.restaged:
+        rows.append("next       docket staging list --state pending, and classify what waits, already cut")
+    if report.released:
         rows.append("next       docket staging promote")
     say_all(rows or ["nothing to release"])
 
@@ -383,7 +385,10 @@ def _ingest_report(report: IngestReport) -> None:
     for released in report.holds_released:
         say(f"holds      {released} was released with its cuts; not held again")
     for again in report.held_again:
-        say(f"holds      {again} is held again after its release; the next import or docket hold release takes it off")
+        say(
+            f"holds      {again} is held again after its release; the next import with a hold file, or docket hold "
+            f"release {report.source} {again} --from <folder>, takes it off"
+        )
     staged = report.staged
     say(
         f"staged     {report.source}: {staged.pending} pending, {staged.ready} ready, "

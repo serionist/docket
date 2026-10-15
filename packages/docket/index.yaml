@@ -870,6 +870,8 @@ decisions:
     binds:
       - The log line is committed before the hold's removal, so a machine that has the removal has the line.
       - Changing a line's shape needs a new schema_version and a reader for every earlier one.
+      - "An id comes off a hold list only after its release line is committed: holds.add and holds.remove commit the log first, and holds.remove refuses an id with no line."
+      - A release log or hold list an ignore rule hides fails its commit loudly instead of staying out of git.
     not_chosen:
       - "Removing the hold with no log: a machine that pulls the removal stages a later pull of the recording uncut, and the times are lost for the audio (#42)."
       - "A cuts or release field in staging's files: staging's format is a one-way door (DR-0024), and a record staged already cut needs none."
@@ -907,7 +909,7 @@ decisions:
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#31"]
-    description: "docket hold release maps the import folder once, with the holds of the ids it releases lifted in memory (the mapper's holds input less those ids, so contract 1 doesn't change), and keeps only the records under them. An id needs at least one transcript and one time cut; each cut starts before the transcripts end, removes at least one utterance and is widened to a fixed point before the screen; each keep names a record under the id without segments; and, for an id never released, nothing under it is in raw. Anything else stays held, and the rest of a batch goes on. On the code: under the vault lock the hold list and the log are read again; the log line is committed, then the id taken off the hold list and committed as Holds: <source>, 1 released on <machine>; then the records are staged through the gate and classified work by the user. An id held and released only asks to take the hold off again, and one released and off the hold is staged without a question."
+    description: "docket hold release maps the import folder once, with the holds of the ids it releases lifted in memory (the mapper's holds input less those ids, so contract 1 doesn't change), and keeps only the records under them. An id needs at least one transcript and one time cut; each cut starts before the transcripts end, removes at least one utterance and is widened to a fixed point before the screen; each keep names a record under the id without segments; and, for an id never released, nothing under it is in raw. Anything else stays held, and the rest of a batch goes on. On the code: under the vault lock the hold list and the log are read again; the log line is committed, then the id taken off the hold list and committed as Holds: <source>, 1 released on <machine>; then the records are staged through the gate, and only the versions the screen showed are classified work by the user. An id held and released only asks to take the hold off again, and one released and off the hold is staged without a question; what those two stage, and any other version under the id, waits as pending for a classification."
     binds:
       - Each record kept uncut is printed whole, title and text, redacted and escaped, before the question.
     not_chosen:
@@ -920,7 +922,7 @@ decisions:
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#31"]
-    description: "docket hold show <source> <id> --from <folder> maps the folder with that one hold lifted in memory, runs each record under the id through the gate's intake checks (a private source, never-store, then redaction by the vault's settings), and prints it with control characters escaped: rid, kind, title, text, and a transcript as [mm:ss-mm:ss] speaker: text, the start rounded down and the end up. A record intake would drop is named as dropped, not printed. It writes nothing and logs nothing. Refines DR-0121's bind that nothing reporting a hold names a title, for these two views; every other report about holds stays ids and counts."
+    description: "docket hold show <source> <id> --from <folder> maps the folder with that one hold lifted in memory, runs each record under the id through the gate's intake checks (a source missing or disabled in vault.yaml refused as stage refuses it, then a private source, never-store, and redaction by the vault's settings), and prints it with control characters escaped: rid, kind, title, text, and a transcript as [mm:ss-mm:ss] speaker: text, the start rounded down and the end up. A record intake would drop is named as dropped, not printed. An id released already and held again is refused, since its cuts are on record and showing it would print what the release took out. It writes nothing and logs nothing. Refines DR-0121's bind that nothing reporting a hold names a title, for these two views; every other report about holds stays ids and counts."
   - id: DR-0205
     title: A hold list's add leaves released ids out
     status: proposed
@@ -928,7 +930,7 @@ decisions:
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#31"]
-    description: "holds.add never adds an id the release log holds, and drops such ids from the list it writes, rewriting it for that even when nothing new is added: an import's hold.txt doesn't hold a released recording again, and the next import with a hold file clears a hold a merge brought back. Until then docket hold list and every ingest name the id as held again after its release, and HeldInStagingError for it names docket hold release instead of telling the user to delete the staged, cut files. holds.remove takes ids off, for a release only. Refines DR-0121's \"Docket only adds ids\"."
+    description: "holds.add never adds an id the release log holds, and drops such ids from the list it writes, rewriting it for that even when nothing new is added: an import's hold.txt doesn't hold a released recording again, and the next import with a hold file clears a hold a merge brought back. Until then docket hold list and every ingest name the id as held again after its release, and HeldInStagingError for it names docket hold release <source> <id> --from <folder> instead of telling the user to delete the staged, cut files. holds.remove takes ids off, for a release only. Refines DR-0121's \"Docket only adds ids\"."
   - id: DR-0206
     title: The proposals file
     status: proposed

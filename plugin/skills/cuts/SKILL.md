@@ -13,6 +13,8 @@ ranges. It never releases anything.
 ## Before anything
 
 - `docket hold list --vault <vault>`: the held ids. No vault: `/docket:setup` first.
+- Skip an id marked `held again after its release`: its cuts are on record already, so it needs no words, no
+  `hold show` and no proposal, only the release run again (below).
 - Tell the owner where `docket hold show`'s output will stay, and go on only on their word:
   - Claude Code's session log for this project, on this machine, and `tool-results/*.txt` beside it for a long output;
   - a claude.ai session bridged to this one, which keeps its own copy until it is deleted there;
@@ -27,6 +29,7 @@ ranges. It never releases anything.
 | The transcript | `docket hold show <source> <id> --from <folder> --vault <vault>`: each record, a transcript one utterance a line as `[m:ss-m:ss] speaker: text` |
 | Each stretch | from the first utterance on the described topic to the last: the start as shown, the end rounded up. Unsure of an edge: take one more utterance, and say so in the note |
 | No range | words that match nothing, or a stretch that runs through the whole recording: no cuts, `held` with the reason |
+| Every stretch | every stretch the owner named gets a range, or the recording stays held with `held`: never a release that cuts some of what they named |
 | The other records | the vendor's summary: left out unless it plainly doesn't touch the stretch. The recording's own record and its title: kept unless the title names the stretch. Keep by rid |
 
 ## The proposals file
@@ -66,7 +69,8 @@ docket hold release <source> --from <folder> --proposals <file> --vault <vault>
 
 - `docket hold list --vault <vault>`: what is still held; the command's own output says why.
 - After the next sync on each other machine, again: an id marked `held again after its release` came back with a
-  merge, and the next import, or the release run again (one code, no cuts asked), takes it off.
+  merge. The next import with a hold file takes it off, or the owner runs `docket hold release <source> <id> --from
+  <folder> --vault <vault>` (one code, no cuts asked); its records then wait as pending for a classification.
 - Then `docket staging promote --vault <vault>`, as for any record.
 - When the backfill is done, remind the owner to delete this session: their words and the transcripts are in it.
 
