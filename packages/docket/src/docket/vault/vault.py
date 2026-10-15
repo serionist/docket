@@ -261,7 +261,7 @@ class Vault:
             marker = self.home.sync_marker
             if state is not None and marker.exists() and _started_with(state, marker):
                 log.warning("undoing a rebase a stopped sync left in %s", self.root)
-                self.git.run("rebase", "--abort")
+                self.git.run("rebase", "--abort", hooks=False)
                 rebasing = False
             marker.unlink(missing_ok=True)
         if rebasing:

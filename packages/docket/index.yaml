@@ -1112,6 +1112,7 @@ decisions:
       - The user's own commits and every push still run the repo's hooks.
       - An operation in progress in the host (merge, rebase, cherry-pick, revert, a detached HEAD) blocks Docket's writes, and Docket never aborts it.
       - "A conflict in the user's own files doesn't block Docket: git's partial commit leaves it as it is."
+      - "The file is never written when the git dir itself is missing: the folders made on the way would pass for the vault's own .git."
     not_chosen:
       - "Running the repo's hooks: a formatter would rewrite raw files written once, a commit-msg rule would refuse or rewrite Doc: lines, and git-lfs's post-commit is most of a commit's time on Windows."
       - "An empty folder as the hooks path: git-lfs's filter writes its hooks into it on the first media add."

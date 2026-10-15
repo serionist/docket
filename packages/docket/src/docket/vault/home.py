@@ -45,8 +45,11 @@ class Home:
         return self.private / "sync-rebase"
 
     @property
-    def no_hooks(self) -> Path:
-        return self.private / "no-hooks"
+    def hooks_off(self) -> Path:
+        """A file, not a folder, as git's hooks path for Docket's own calls: git finds no hook under a file, and
+        git-lfs's filter, which writes its hooks into whatever folder the hooks path names, a missing one included,
+        can't write there (DR-0260)."""
+        return self.private / "hooks-off"
 
     @property
     def ceiling(self) -> Path | None:

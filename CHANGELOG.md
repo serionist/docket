@@ -79,6 +79,11 @@ Unreleased in the same PR.
   lines; a doc that says something on the never-store keywords list is refused, naming only the lines. The notes
   import redacts the same way and says how much.
 - A redaction marker before a line's anchors is text, not a bad anchor.
+- Docket's commits in a vault that is a repo of its own skip the repo's hooks, as a folder vault's do, and so do
+  `docket sync`'s fetch and rebase: a write takes about 0.4 s less on Windows. Your own commits and every push still
+  run them.
+- Folder vaults stop running git-lfs's post-commit hook on Docket's commits. They were meant to skip the host's
+  hooks, but git-lfs wrote its hooks into the empty folder Docket used for that.
 - Update every machine first: an older Docket keeps redacting phone numbers while `vault.yaml` is in its old form,
   can't load it once Docket writes the new keys, writes docs unredacted, and refuses to put back a doc holding a
   marker.
