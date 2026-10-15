@@ -5,9 +5,9 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 
 | Command | What it does |
 |---|---|
-| `docket init` | set up a vault: asks where, who you are, this machine's name, the sources, and inside a git repo whether the vault is a folder of it (the default) or a repo of its own (`--storage folder\|repo`); every answer is also a flag, and `--yes` takes the defaults |
+| `docket init` | set up a vault: asks where, who you are, this machine's name, the sources, and inside a git repo whether the vault is a folder of it (the default) or a repo of its own (`--storage folder\|repo`); every answer is also a flag, and `--yes` takes the defaults; `--no-sources` starts with none, for `docket source new` to add; the summary names each check a flag overrode (`--allow-shared`, `--remote-is-private`, `--allow-dirty-parent`) |
 | `docket sync` | a repo of its own: fetch and rebase onto its remote; a folder: says your own git moves it, and does nothing else |
-| `docket vault status` | where the vault lives and on which branch, records per source, runs, run files not committed yet, the last commit |
+| `docket vault status` | which vault it found and how (`--vault`, `DOCKET_VAULT`, this folder or above, `./vault`, the default vault), where it lives and on which branch, records per source, runs, run files not committed yet, the last commit |
 | `docket vault check` | whether the vault is intact: every raw file parses, nothing written once was changed, no ignore rule hides a vault path, the vault's own attributes apply, no doc rev is claimed by two commits |
 | `docket vault convert` | make a vault that is a repo of its own a folder of the repo around it, history included: a dry run first, then your yes; `--abort` undoes one that stopped before its commit |
 | `docket staging list` | what waits for the gate, oldest first: `pending` waits for you or Claude, `ready` goes to raw at the next promotion |
@@ -15,6 +15,7 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 | `docket staging classify <ref> work\|private` | work makes it ready, `--cut 120-340` (characters) or `--cut 12:30-14:05` (a time) cuts a stretch; private drops it |
 | `docket staging promote` | writes every ready record to the raw log, cut and redacted, one run per source, and commits; a record on hold stays in staging |
 | `docket ingest <source> <folder>` | imports payloads fetched earlier through the source's mapper: the folder's `hold.txt` first, then its JSON files; every record goes to staging, nothing on hold; `--hold <file>` adds more ids to hold, `--final` tells the mapper not to wait for more, `--mapper-errors` prints the mapper's own errors |
+| `docket source new <name>` | writes a source's skill, mapper and tests into `.claude/skills/sources/<name>/` of the repo that holds the vault, from Docket's blank template, or `--example` for a reference source (Plaud), and adds the source to `vault.yaml` with `--sensitivity` and its `--tool`s; never over a folder that exists |
 | `docket doc put <file or ->` | store a processed doc as its next rev; refused, with every problem and its line, when the frontmatter is wrong, an anchor doesn't resolve, or the doc changed since the rev it carries |
 | `docket doc read <locator>` | a doc, or a record and the doc lines that point at it; `--view raw` or `both` for the raw, `--around` for minutes, paragraphs or messages either side, `--rev` for an earlier revision |
 | `docket doc verify <doc>` | each line of a doc next to the raw its anchors point at; `--line` for chosen lines |
@@ -71,9 +72,23 @@ Every record reaches the raw log through the gate. It reads `vault.yaml` on ever
 ## Sources and their mappers
 
 A source's skill and mapper live in your project, under `.claude/skills/sources/<source>/`; Docket runs the mapper and
-checks what it returns (DR-0108, DR-0119). [examples/sources/plaud](../../examples/sources/plaud) is the reference to
-copy: its `SKILL.md` says how to set it up.
+checks what it returns (DR-0108, DR-0119). `docket source new <name> --vault <vault>` writes that folder and adds the
+source to `vault.yaml` (DR-0166); the plugin's `/docket:setup` runs it for each source you choose.
 
+- Without `--example` it writes Docket's blank template: a `SKILL.md` to fill, a mapper that sets every capture aside
+  as `not-mapped-yet` until you write the mapping, and its tests. With `--example` it copies a reference source whole:
+  in this version Plaud, [examples/sources/plaud](../../examples/sources/plaud) (DR-0167).
+- It writes only into that folder of the repo around the vault, never through a link out of it or into the vault, and
+  never over a folder that exists. It changes `vault.yaml` only when the file is as Docket wrote it, and commits it;
+  otherwise it prints the lines to add under `sources:`. The folder is yours to commit.
+- Without `--vault` it takes only a vault found from the project that holds it. One found through the default vault
+  or `DOCKET_VAULT` can be another project's, so it is refused, with the `--vault` to pass.
+- Claude Code doesn't load a `SKILL.md` from `.claude/skills/sources/` as a skill: whatever runs the source reads it
+  by its path (DR-0168).
+- Run a source's tests where it lives: `python -m pytest .claude/skills/sources/<name>/tests`, one source folder at a
+  time, or with `--import-mode=importlib`, since every source has a `tests/test_mapper.py`. The tests that go through
+  Docket's own checks run only where `docket` can be imported (a Python environment Docket is installed in);
+  elsewhere they are left out and the mapper's own tests still run.
 - The mapper is `map_run(run)` in `mapper.py`: a run's captures and its manifest in, records out, as plain JSON.
 - Docket runs it in its own process, for at most 300 seconds and 256 MiB of output. A failure stages nothing, and the
   run's captures are fetched again.
@@ -175,6 +190,10 @@ Claude Code connects through the Docket plugin, or by hand:
 ```json
 {"type": "http", "url": "http://127.0.0.1:8741/mcp", "headersHelper": "docket service token --header", "timeout": 120000}
 ```
+
+The plugin's session-start hook runs `docket hook session-start`, which prints the service's state, the vault's and
+the port check as the JSON Claude Code reads (DR-0163). It is hidden from `docket --help`: it is for the plugin, not
+for people.
 
 What the service refuses, and what it doesn't:
 

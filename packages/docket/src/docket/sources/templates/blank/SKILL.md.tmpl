@@ -1,0 +1,54 @@
+---
+name: {{source}}
+description: Harvest {{source}} into Docket with the user's own tools. Use when a sync runs the {{source}} source, or the user asks to fetch, catch up on or import from {{source}}.
+---
+
+# {{source}}, a Docket source
+
+Reads {{source}} with the user's own tools and hands what they returned to Docket untouched; `mapper.py` next to
+this file turns a run's captures into records. `docket source new` wrote this folder from Docket's blank template:
+fill in each section below, then the mapping in `mapper.py`. Docket's Plaud reference shows a whole source:
+https://github.com/serionist/docket/tree/main/examples/sources/plaud
+
+Claude Code doesn't load this file as a skill from `.claude/skills/sources/{{source}}/`: whatever runs the source
+reads it by its path.
+
+## What it reads
+
+Which tools read {{source}} (an MCP server, a plugin, the browser), and which of them return its content. The ones the
+capture hook posts are listed in `vault.yaml` under `sources.{{source}}.tools`, by their own names, without the
+host's `mcp__` prefix.
+
+## A run
+
+The capture hook posts each tool's result as it came; Claude never retypes a payload. The run's manifest counts the
+captures, and Docket maps them when the manifest closes the run.
+
+| Step | What |
+|---|---|
+| Sign in | what "not signed in" looks like, and the way back in |
+| Skip | the held ids, and what raw and staging already hold, read through the service; skip those, to save calls |
+| List | newest first, without date filters, until a page's oldest item is before the window's start |
+| Each item | the calls that fetch it whole |
+| Rate limits | what a limit looks like; pause and retry with growing pauses; still limited, end the run, and the kept window resumes it |
+| Waiting | what the mapper reports as waiting, and when it is asked for again |
+
+Recordings and mail fetched before Docket go in with `docket ingest {{source}} <folder> --vault <vault>`, through the
+same mapper.
+
+## What it makes
+
+| Record | rid | When |
+|---|---|---|
+| each item | `{{source}}:<its own id>` | what makes it complete |
+
+A held item is skipped before anything of it is parsed, and nothing the mapper reports carries a title.
+
+## Changing the mapper
+
+Every record the lookback reads again gets a new version when the mapper's output changes, and the gate asks about it
+again.
+
+- Keep the output stable: change it only for a real change in what {{source}} says.
+- Pin golden versions in the tests, as the Plaud reference does, so a change shows before it runs.
+- Pull the project on every machine before its next sync, so two machines never map one item two ways.

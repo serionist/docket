@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import webbrowser
@@ -19,6 +20,7 @@ from docket.imports import notes
 from docket.render import printable
 from docket.service.platforms import Installer
 from docket.service.token import Tokens
+from docket.sources import scaffold
 from docket.sources.contract import Manifest
 from docket.sources.ingest import IngestReport, ingest_run
 from docket.sources.runner import MapperFailedError
@@ -54,6 +56,15 @@ app.add_typer(service_app, name="service")
 
 import_app = typer.Typer(help="Bring what already exists into the vault: a notes folder first.", no_args_is_help=True)
 app.add_typer(import_app, name="import")
+source_app = typer.Typer(
+    help="A source's skill, mapper and tests in the project that holds the vault, and its entry in vault.yaml.",
+    no_args_is_help=True,
+)
+app.add_typer(source_app, name="source")
+SENSITIVITIES = ("work", "mixed", "private")
+# The Claude Code plugin's hooks run these; they print what Claude Code reads, not what a person does.
+hook_app = typer.Typer(help="What the Claude Code plugin's hooks run.", no_args_is_help=True)
+app.add_typer(hook_app, name="hook", hidden=True)
 
 VaultOption = Annotated[Path | None, typer.Option("--vault", help="The vault; default: DOCKET_VAULT, here, ./vault")]
 
@@ -72,14 +83,24 @@ class TyperPrompter:
 def find_vault(explicit: Path | None) -> Vault:
     """The vault a command works on: --vault, DOCKET_VAULT, the working folder upward, a vault/ child of it, or the
     default vault the wizard recorded."""
+    return locate_vault(explicit)[0]
+
+
+def locate_vault(explicit: Path | None) -> tuple[Vault, str]:
+    """The vault a command works on, and how it was found: a vault found in another project's config must be
+    recognisable as such before anything writes to it."""
     env = os.environ.get("DOCKET_VAULT")
-    for candidate in (explicit, Path(env) if env else None):
+    for candidate, how in ((explicit, "--vault"), (Path(env) if env else None, "DOCKET_VAULT")):
         if candidate is not None:
-            return Vault.open(candidate)
+            return Vault.open(candidate), how
     here = Path.cwd()
-    for candidate in (here, here / "vault", userconfig.default_vault()):
+    for candidate, how in (
+        (here, "this folder or one above it"),
+        (here / "vault", "./vault"),
+        (userconfig.default_vault(), f"the default vault in {userconfig.config_path()}"),
+    ):
         if candidate is not None and Vault.find(candidate) is not None:
-            return Vault.open(candidate)
+            return Vault.open(candidate), how
     raise DocketError("no vault here; pass --vault, set DOCKET_VAULT, or create one with `docket init`")
 
 
@@ -131,6 +152,9 @@ def init(
     source: Annotated[
         list[str] | None, typer.Option(help="A source to enable: name, or name=work|mixed|private (repeat).")
     ] = None,
+    no_sources: Annotated[
+        bool, typer.Option("--no-sources", help="Start with no sources; add each with `docket source new`.")
+    ] = False,
     storage: Annotated[
         str | None, typer.Option(help="folder (a folder of the repo around it) or repo (a repo of its own).")
     ] = None,
@@ -149,6 +173,7 @@ def init(
         time_zone=time_zone,
         machine=machine,
         sources=source or [],
+        no_sources=no_sources,
         storage=storage,
         remote=remote,
         remote_is_private=remote_is_private,
@@ -171,8 +196,10 @@ def sync(vault: VaultOption = None) -> None:
 @vault_app.command("status")
 def vault_status(vault: VaultOption = None) -> None:
     """Records per source, runs, and what isn't committed yet."""
-    s = find_vault(vault).status()
+    found, how = locate_vault(vault)
+    s = found.status()
     typer.echo(f"vault    {s.root}")
+    typer.echo(f"found    by {how}")
     typer.echo(f"storage  {f'a folder of {s.host}' if s.host else 'a repo of its own'}, on {s.branch}")
     if s.branch_warning:
         typer.echo(f"warning  {s.branch_warning}")
@@ -230,6 +257,46 @@ def ingest(
             typer.echo(e.stderr, err=True)
         raise
     _ingest_report(report)
+
+
+@source_app.command("new")
+def source_new(
+    name: Annotated[str, typer.Argument(help="The source's name: lowercase letters, digits, dots, _ and -.")],
+    *,
+    example: Annotated[
+        bool, typer.Option("--example", help="Copy Docket's reference source of this name, such as plaud.")
+    ] = False,
+    sensitivity: Annotated[
+        str | None, typer.Option(help="work, mixed or private; default: as vault.yaml has it, else the reference's.")
+    ] = None,
+    tool: Annotated[
+        list[str] | None, typer.Option("--tool", help="A tool whose results it captures, by its own name (repeat).")
+    ] = None,
+    vault: VaultOption = None,
+) -> None:
+    """Write a source's skill, mapper and tests into the project that holds the vault, and add it to vault.yaml."""
+    if sensitivity is not None and sensitivity not in SENSITIVITIES:
+        raise DocketError(f"--sensitivity is work, mixed or private, not {sensitivity!r}")
+    found, how = locate_vault(vault)
+    # A vault found through the environment or the config can be another project's: the folder would land in its
+    # repo, and the entry be committed there. Only one named, or found from here, is taken.
+    if how == "DOCKET_VAULT" or how.startswith("the default vault"):
+        raise DocketError(f"found {found.root} by {how}; pass --vault {found.root} to add a source there")
+    made = scaffold.new_source(found, name, example=example, sensitivity=sensitivity, tools=tool or [])
+    say(f"wrote    {made.folder}" + (", Docket's reference" if made.example else ", from the blank template"))
+    for rel in made.files:
+        say(f"         {rel}")
+    entry = made.entry
+    tools = ", ".join(entry.tools) or "none yet"
+    if made.registered:
+        commit = f", committed {made.commit[:12]}" if made.commit else ""
+        say(f"source   {name} in vault.yaml: {entry.sensitivity}, mapper {entry.mapper}, tools {tools}{commit}")
+    else:
+        say("source   vault.yaml has comments or a layout of your own, so it is left as it is; add under sources:")
+        for line in (made.block or "").splitlines():
+            say(line)
+    say(f"tests    python -m pytest {made.folder / 'tests'}")
+    say("next     the folder is yours to commit; Docket commits only the vault")
 
 
 def _ingest_report(report: IngestReport) -> None:
@@ -719,6 +786,21 @@ def service_token(
             say("a new token; restart `docket serve` to use it")
         return
     typer.echo(tokens.header() if header else tokens.read())
+
+
+@hook_app.command("session-start")
+def hook_session_start() -> None:
+    """What state Docket is in, as JSON for Claude Code's SessionStart hook. It reads nothing from stdin and always
+    exits 0: a failure is a line in the JSON, never a failed session."""
+    from docket import hooks  # noqa: PLC0415
+    from docket.service import install  # noqa: PLC0415
+
+    def status() -> install.ServiceStatus:
+        tokens = _tokens()
+        return install.status(_installer(tokens), tokens)
+
+    # ASCII on the wire, whatever the console's code page: JSON escapes every other character.
+    typer.echo(json.dumps(hooks.session_start(status, os.environ)))
 
 
 @app.command("open")

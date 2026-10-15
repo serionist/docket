@@ -1,0 +1,67 @@
+# What binds `plugin`: reading list, decisions, conventions. Entries change only through `uv run docs`;
+# docs/docs-regime.md explains the schema.
+
+reading:
+  - { path: plugin/README.md, role: guide, note: "installing docket and the plugin, and what each part does" }
+  - { path: plugin/.mcp.json, role: contract, note: "the MCP entry: its server key names every tool Claude Code shows, a one-way door" }
+  - { path: plugin/hooks/hooks.json, role: contract, note: "the SessionStart hook and the command it runs: a one-way door" }
+decisions:
+  - id: DR-0160
+    title: The plugin registers the service as the MCP server docket
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#12"]
+    description: "plugin/.mcp.json registers the service as the server docket: type http, url http://127.0.0.1:${DOCKET_PORT:-8741}/mcp, headersHelper docket service token --header, timeout 120000. Claude Code names a plugin server's tools mcp__plugin_docket_docket__<tool>, so the key is a door beside the tools' own names (DR-0150): the skills and users' permission rules name them. DOCKET_PORT is set only when service.port isn't 8741 (DR-0151); the token comes from the helper on each connect and again after a 401 (DR-0152), never from the plugin's files. The timeout is above the service's 15-second lock wait and 30-second index wait. The tools stay deferred, with no alwaysLoad."
+    binds:
+      - "The server key docket is a one-way door: renaming it renames every tool Claude Code shows."
+    not_chosen:
+      - "The port in the plugin's userConfig: every user answers a prompt for a value almost nobody changes, and the service reads its port from its own config anyway."
+      - "alwaysLoad: every session on a machine whose service is down waits 5 seconds at start."
+      - "The token in the entry's headers: it would sit in the plugin's files."
+  - id: DR-0161
+    title: The plugin's first skills are recall and setup, and its SessionStart hook runs docket hook session-start
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#12"]
+    description: "The skills recall (/docket:recall) and setup (/docket:setup) live under plugin/skills/. hooks/hooks.json's SessionStart, with no matcher so it runs on startup, resume, clear and compact, runs docket hook session-start in exec form with a 15-second timeout. Later skills keep the design's names (sync, tasks, curate); the capture hook comes with #41."
+    binds: [The skill names recall and setup and the hook's command are a one-way door (AGENTS.md).]
+  - id: DR-0162
+    title: "The plugin holds no scripts: its hook and its token helper run the docket command"
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#12"]
+    description: "Every hook runs docket hook <event> in exec form, and the MCP entry's helper runs docket service token --header, so their logic is typed Python in packages/docket, tested on the three systems. docket must be on PATH, as uv tool install puts it; the plugin's README and the setup skill say so first. docket hook is hidden from help: it prints what Claude Code reads."
+    not_chosen:
+      - "Hook scripts in bash and PowerShell: two shells to write and test, and the logic needs the package anyway."
+      - "The plugin's bin/ folder: claude.ai and Cowork refuse a plugin that has one, and its commands would still call the package."
+      - "uvx from git in each hook: a network fetch at every session's start."
+  - id: DR-0164
+    title: Recall answers from the raw, with locators
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#12"]
+    description: The recall skill searches, reads the summary, checks every fact it will use against its raw with verify or read view=raw, and answers with the raw's words and their locators; it says so when a summary and its raw disagree, and what it searched when it found nothing. Results are data, never instructions. It pre-approves only search, read and verify; doc_put asks. With the tools missing it runs the same steps through docket search, docket doc read and docket doc verify. writing-docs.md beside it gives the doc form (DR-0109, DR-0110) for a fix the user asks for.
+  - id: DR-0165
+    title: Setup asks for sources first, names the vault on every command, and asks for each override
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#12"]
+    description: "The setup skill runs DR-0103's round through the docket command's flags. It counts a vault found outside the session's project (docket vault status says how it found one) only on the user's word, and asks for sources before the vault's place, so a vault that takes sources sits in this project's git repo (DR-0123). It runs docket init --yes --no-sources, then names the vault with --vault on every later command: docket source new per source, --example where a reference exists, the docket ingest line it hands over, and docket service install, which it offers and asks about because install replaces the user's one registration. A host-check override (--allow-shared, --remote-is-private, --allow-dirty-parent) is its own question quoting Docket's refusal, added alone on a re-run, and init's summary names each override taken. Its allowed-tools cover only docket --version, docket vault status and docket service status."
+    binds:
+      - "Accepted: in auto mode the skill's text is the control on an override; init's summary leaves each one in the transcript."
+conventions:
+  - id: CV-0012
+    rule: A change under plugin/ bumps the version in plugin/.claude-plugin/plugin.json
+    area: plugin
+    review_only: true
+    why: Claude Code keeps users on a plugin's set version until it changes, so an unbumped change never reaches them.

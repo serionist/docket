@@ -10,6 +10,10 @@ file turns a run's captures into records. This folder is an example to copy, not
 
 ## Set it up
 
+`docket source new plaud --example --vault <vault>` copies this folder to `.claude/skills/sources/plaud/` in the repo
+that holds the vault and adds the source to `vault.yaml`; Docket's `/docket:setup` runs it for you. By hand, the same
+two steps:
+
 1. Copy this folder to `.claude/skills/sources/plaud/` in the repo that holds the vault.
 2. In `vault.yaml`, add the source:
 
@@ -21,10 +25,12 @@ sources:
     tools: [list_files, get_file, get_transcript, get_note]
 ```
 
-3. Run its tests where you copied it: `pytest .claude/skills/sources/plaud/tests`.
+Then run its tests where it was copied: `pytest .claude/skills/sources/plaud/tests`. The tests that go through
+Docket's own checks run only where `docket` can be imported, and are left out elsewhere.
 
-A live run needs Docket's service and capture hook; until then, recordings already fetched go in with
-`docket ingest plaud <folder>`.
+Claude Code doesn't load this file as a skill from `.claude/skills/sources/plaud/`: whatever runs the source reads it
+by its path. A live run needs Docket's service and capture hook; until then, recordings already fetched go in with
+`docket ingest plaud <folder> --vault <vault>`.
 
 ## A run
 

@@ -1,0 +1,18 @@
+"""{{source}}'s mapper through Docket's own checks: what the core accepts, as a real run would hand it. Collected only
+where docket can be imported (see conftest.py). Once the mapper makes records, pin a golden version per kind here, as
+Docket's Plaud reference does, so a change to the output shows before it runs."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from types import ModuleType
+from typing import Any
+
+from docket.sources.contract import check_output
+
+
+def test_the_core_accepts_what_the_mapper_returns(mapper: ModuleType, make_run: Callable[..., dict[str, Any]]) -> None:
+    captures = [{"tool": "list_items", "result": {"structuredContent": {"items": []}}}, {"tool": None, "result": "x"}]
+    mapped = check_output("{{source}}", mapper.map_run(make_run(*captures)))
+    assert mapped.records == []
+    assert [entry.reason for entry in mapped.set_aside] == ["not-mapped-yet", "no-json"]

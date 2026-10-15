@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from docket_testkit import make_record, sh
+from docket_testkit import host_repo, make_config, make_record, sh
 
 from docket import __version__, userconfig
 from docket.cli import main
@@ -124,13 +124,55 @@ def test_the_vault_is_found_from_here_a_child_env_and_the_default(
     path = tmp_path / "vault"
     main(["init", "--yes", "--path", str(path), "--remote", "none", *FLAGS])
     assert userconfig.default_vault() == path.resolve()
-    for where in (tmp_path, path / "raw", tmp_path / "elsewhere"):
+    capsys.readouterr()
+    # vault status says how it found the vault, so a setup can tell another project's default vault from its own.
+    for where, how in (
+        (tmp_path, "./vault"),
+        (path / "raw", "this folder or one above it"),
+        (tmp_path / "elsewhere", f"the default vault in {userconfig.config_path()}"),
+    ):
         where.mkdir(exist_ok=True)
         monkeypatch.chdir(where)
         assert main(["vault", "status"]) == 0
+        assert f"found    by {how}\n" in capsys.readouterr().out
+    assert main(["vault", "status", "--vault", str(path)]) == 0
+    assert "found    by --vault\n" in capsys.readouterr().out
     monkeypatch.setenv("DOCKET_VAULT", str(path))
     assert main(["vault", "status"]) == 0
-    assert str(path.resolve()) in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert str(path.resolve()) in out
+    assert "found    by DOCKET_VAULT\n" in out
+
+
+def test_source_new_takes_a_vault_found_in_the_config_or_the_environment_only_when_named(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Project A's folder vault is the default; the user works in project B.
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    a = host_repo(tmp_path / "a")
+    vault = Vault.init(a / "vault", make_config("folder"), "test-box")
+    userconfig.set_default_vault(vault.root)
+    b = host_repo(tmp_path / "b")
+    monkeypatch.chdir(b)
+    before = sh(a, "git", "rev-parse", "HEAD")
+    capsys.readouterr()
+    assert main(["source", "new", "zebra-notes"]) == 2
+    default = f"the default vault in {userconfig.config_path()}"
+    refused = f"found {vault.root} by {default}; pass --vault {vault.root} to add a source there"
+    assert refused in capsys.readouterr().err
+    monkeypatch.setenv("DOCKET_VAULT", str(vault.root))
+    assert main(["source", "new", "zebra-notes"]) == 2
+    assert f"found {vault.root} by DOCKET_VAULT; pass --vault {vault.root}" in capsys.readouterr().err
+    assert not (a / ".claude").exists()
+    assert not (b / ".claude").exists()
+    assert sh(a, "git", "rev-parse", "HEAD") == before
+    # Named, or found from the project that holds it, it is taken.
+    monkeypatch.delenv("DOCKET_VAULT")
+    monkeypatch.chdir(a)
+    assert main(["source", "new", "zebra-notes"]) == 0
+    assert main(["source", "new", "calls", "--vault", str(vault.root)]) == 0
+    assert sorted(p.name for p in (a / ".claude" / "skills" / "sources").iterdir()) == ["calls", "zebra-notes"]
 
 
 def test_with_no_vault_anywhere_the_command_says_how_to_make_one(
@@ -184,8 +226,10 @@ def test_a_dirty_parent_is_refused(tmp_path: Path) -> None:
     with pytest.raises(DocketError, match="uncommitted changes"):
         Wizard(Script(), given(parent / "vault", yes=True, storage="repo")).run()
     assert not (parent / "vault").exists()
-    Wizard(Script(), given(parent / "vault", yes=True, storage="repo", allow_dirty_parent=True)).run()
+    script = Script()
+    Wizard(script, given(parent / "vault", yes=True, storage="repo", allow_dirty_parent=True)).run()
     assert (parent / "vault" / "vault.yaml").is_file()
+    assert f"override: --allow-dirty-parent: {parent} has uncommitted changes" in script.said[0].splitlines()
 
 
 def test_a_folder_the_parent_tracks_is_refused(tmp_path: Path) -> None:
@@ -213,7 +257,9 @@ def test_a_remote_docket_cant_check_needs_the_user_s_word(tmp_path: Path) -> Non
     asked = Wizard(Script(confirms=[True, True]), given(tmp_path / "b", remote=url), unknown).run()  # type: ignore[arg-type]
     assert asked.git.has_remote()
     flagged = given(tmp_path / "c", yes=True, remote=url, remote_is_private=True)
-    assert Wizard(Script(), flagged, unknown).run().git.has_remote()  # type: ignore[arg-type]
+    script = Script()
+    assert Wizard(script, flagged, unknown).run().git.has_remote()  # type: ignore[arg-type]
+    assert f"override: --remote-is-private: Docket can't check {url} itself" in script.said[0].splitlines()
 
 
 def test_a_local_remote_is_fine(tmp_path: Path) -> None:

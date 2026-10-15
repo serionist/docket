@@ -1,0 +1,32 @@
+"""{{source}}'s mapper on its own: plain JSON in, plain JSON out, no Docket needed. Add a test per payload shape the
+source returns, written from a saved payload with invented people and text."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from types import ModuleType
+from typing import Any
+
+Run = Callable[..., dict[str, Any]]
+
+
+def test_the_output_has_the_contract_s_shape(mapper: ModuleType, make_run: Run) -> None:
+    out = mapper.map_run(make_run({"tool": "list_items", "result": {"structuredContent": {"items": []}}}))
+    assert out["contract"] == 1
+    assert sorted(out) == ["contract", "held", "records", "set_aside", "waiting"]
+
+
+def test_an_empty_run_gives_no_records(mapper: ModuleType, make_run: Run) -> None:
+    assert mapper.map_run(make_run())["records"] == []
+
+
+def test_results_are_read_from_structured_content_or_the_first_json_in_their_text(mapper: ModuleType) -> None:
+    payload = {"items": [1]}
+    assert mapper.unwrap({"structuredContent": payload}) == payload
+    texts = [{"type": "text", "text": 'The tool says: {"items": [1]} and that is all.'}]
+    assert mapper.unwrap({"content": texts}) == payload
+    assert mapper.unwrap(texts) == payload
+    assert mapper.unwrap("preamble [1, 2] trailing") == [1, 2]
+    assert mapper.unwrap("no json here { at all") is None
+    assert mapper.unwrap(payload) == payload
+    assert mapper.unwrap(None) is None

@@ -8,6 +8,13 @@ Unreleased in the same PR.
 
 ### Added
 
+- The Claude Code plugin's first version: it registers the service as the MCP server `docket`, tells each session at
+  its start whether Docket runs and what waits in staging, and brings `/docket:recall`, which answers from the raw with
+  locators, and `/docket:setup`, which asks which sources to set up, creates the vault and writes each source's folder.
+- `docket source new`: a source's skill, mapper and tests in your project, from Docket's blank template or, with
+  `--example`, the Plaud reference, and the source added to `vault.yaml`.
+- `docket init --no-sources`; init's summary names each check a flag overrode; `docket vault status` says which vault
+  it found and how.
 - The service: `docket serve`, and `docket service install` to start it at your logon on Windows, macOS and Linux.
   It serves Claude the MCP tools `search`, `read`, `verify` and `doc_put` on 127.0.0.1, behind a token from your
   keychain, and the same four under a REST API.

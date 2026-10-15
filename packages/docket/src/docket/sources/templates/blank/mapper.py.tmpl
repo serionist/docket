@@ -1,0 +1,70 @@
+"""{{source}}'s mapper for Docket (contract 1): a run's captures of the source's tools, and files of an import folder,
+turned into records in the core's shape.
+
+`docket source new` wrote this file from Docket's blank template. Until `_map_capture` is written, every capture is
+set aside as not-mapped-yet and a run stages nothing. Docket's Plaud reference shows a whole mapper:
+https://github.com/serionist/docket/tree/main/examples/sources/plaud
+
+Standard library only: Docket runs this file in its own process and reads the JSON it returns. Docket checks every
+rid and computes every version; this file never does either.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+CONTRACT = 1
+SOURCE = "{{source}}"
+
+
+def map_run(run: dict[str, Any]) -> dict[str, Any]:
+    held = set(run.get("holds") or [])
+    out: dict[str, Any] = {"contract": CONTRACT, "records": [], "set_aside": [], "waiting": [], "held": []}
+    for capture in sorted(run["captures"], key=lambda c: c["seq"]):
+        _map_capture(capture, held, out)
+    return out
+
+
+def _map_capture(capture: dict[str, Any], held: set[str], out: dict[str, Any]) -> None:
+    """One capture: a tool's result (`tool`, `arguments`, `result`), or a file of an import folder (`file`, `result`).
+
+    To write: find the item's own id first, and when it is in `held` add it to out["held"] and read nothing more of
+    it; then append its records to out["records"] in the core's shape: rid `{{source}}:<its own id>`, kind, ts,
+    source, container, thread, title, text (or segments for a transcript), native, fetched, via and fidelity. An item
+    that can't be read goes to out["set_aside"] as {id, reason, tool, key}, short tokens only, never a title.
+    """
+    payload = unwrap(capture.get("result"))
+    reason = "no-json" if payload is None else "not-mapped-yet"
+    out["set_aside"].append({"id": None, "reason": reason, "tool": capture.get("tool"), "key": None})
+
+
+def unwrap(result: Any) -> Any:
+    """A tool's payload: its structuredContent, else the first JSON value in its text, past any preamble or note."""
+    if isinstance(result, dict):
+        if result.get("structuredContent") is not None:
+            return result["structuredContent"]
+        content = result.get("content")
+        if isinstance(content, list):
+            return first_json(_texts(content))
+        return result
+    if isinstance(result, list) and result and all(isinstance(i, dict) and i.get("type") == "text" for i in result):
+        return first_json(_texts(result))
+    if isinstance(result, str):
+        return first_json(result)
+    return result
+
+
+def _texts(items: list[Any]) -> str:
+    return "\n".join(i.get("text", "") for i in items if isinstance(i, dict) and isinstance(i.get("text"), str))
+
+
+def first_json(text: str) -> Any:
+    decoder = json.JSONDecoder()
+    for start, ch in enumerate(text):
+        if ch in "{[":
+            try:
+                return decoder.raw_decode(text, start)[0]
+            except ValueError:
+                continue
+    return None
