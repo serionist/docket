@@ -9,6 +9,7 @@ stay out of the browser's cache.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable, Mapping
 from datetime import datetime
 from importlib.resources import files
@@ -18,7 +19,8 @@ from jinja2 import Environment, PackageLoader, StrictUndefined
 from markupsafe import Markup, escape
 from starlette.responses import HTMLResponse
 
-from docket.index.text import WORD, fold
+from docket.index.query import SPLIT_FIRST, SPLIT_SECOND
+from docket.index.text import HYPHENS, WORD, fold, has_letter
 from docket.vault.anchors import format_time
 from docket.web import assets, pages
 
@@ -58,16 +60,34 @@ def clock(seconds: int | None) -> str:
     return "" if seconds is None else format_time(seconds)
 
 
+def _pair(text: str, a: re.Match[str], b: re.Match[str], wanted: set[str]) -> bool:
+    """Two words in a row joining into a query word (DR-0282): a hyphenated pair always; a spaced one only with the
+    halves a split has, since the page can't see which splits the index admitted (DR-0281)."""
+    if fold(a.group(0)) + fold(b.group(0)) not in wanted:
+        return False
+    if text[a.end() : b.start()] in HYPHENS:
+        return True
+    first, second = a.group(0), b.group(0)
+    return len(first) >= SPLIT_FIRST and len(second) >= SPLIT_SECOND and has_letter(first) and has_letter(second)
+
+
 def marked(text: str, terms: Iterable[str]) -> Markup:
     """A snippet with the query's words marked, built from escaped pieces so a record's markup stays text."""
     wanted = {fold(t) for t in terms if t}
-    out: list[str] = []
-    last = 0
-    for m in WORD.finditer(text):
+    found = list(WORD.finditer(text))
+    marks: set[int] = set()
+    for i, m in enumerate(found):
         word = fold(m.group(0))
         if word in wanted or any(len(t) >= MARK_PREFIX and word.startswith(t) for t in wanted):
-            out += [str(escape(text[last : m.start()])), f"<mark>{escape(m.group(0))}</mark>"]
-            last = m.end()
+            marks.add(i)
+        if i + 1 < len(found) and _pair(text, m, found[i + 1], wanted):
+            marks |= {i, i + 1}
+    out: list[str] = []
+    last = 0
+    for i in sorted(marks):
+        m = found[i]
+        out += [str(escape(text[last : m.start()])), f"<mark>{escape(m.group(0))}</mark>"]
+        last = m.end()
     out.append(str(escape(text[last:])))
     return Markup("".join(out))  # noqa: S704 - every piece is escaped above
 

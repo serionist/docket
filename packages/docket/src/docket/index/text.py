@@ -1,8 +1,9 @@
 """Words, folding, stems and FTS5 strings: how text becomes the index's columns and a query's terms.
 
 A word is a run of Unicode letters and digits in NFC text, close to how FTS5's `unicode61` tokenizer splits. A chunk
-goes into the index as written (the tokenizer folds case and accents) and once per language as its words' stems. A
-query word's forms in a stemmed column are its stem, the word as written, and what the language's hook adds.
+goes into the index as written (the tokenizer folds case and accents) and once per language as its words' stems, each
+followed by its hyphenated compounds joined (DR-0280). A query word's forms in a stemmed column are its stem, the word
+as written, and what the language's hook adds.
 """
 
 from __future__ import annotations
@@ -13,11 +14,26 @@ import threading
 import unicodedata
 from collections.abc import Iterable, Sequence
 from importlib import metadata
-from typing import Any
+from typing import Any, NamedTuple
 
 from docket.index.languages import Language, Languages
 
 WORD = re.compile(r"[^\W_]+")
+# The words and, between them, what separates them: re.split keeps the captured words at the odd places.
+PIECES = re.compile(r"([^\W_]+)")
+# A hyphen, the Unicode hyphen and the non-breaking one join two words; a dash or two hyphens don't.
+HYPHENS = frozenset("-\u2010\u2011")
+# A run of up to this many words joins every stretch of two or more (`e-mail-cím` gives `email`); a longer run, an id
+# or `state-of-the-art`, joins only whole.
+STRETCHES_UP_TO = 3
+
+
+class Joined(NamedTuple):
+    """A hyphenated compound joined (`kickoff` for `kick-off`), and the words it joins: `words[start:end]`."""
+
+    word: str
+    start: int
+    end: int
 
 
 def nfc(text: str) -> str:
@@ -27,6 +43,35 @@ def nfc(text: str) -> str:
 def words(text: str) -> list[str]:
     """The words of a text, lowercased, accents kept: the stemmers need them."""
     return [w.lower() for w in WORD.findall(nfc(text))]
+
+
+def has_letter(run: Iterable[str]) -> bool:
+    return any(ch.isalpha() for word in run for ch in word)
+
+
+def _joins(ws: list[str], start: int, end: int) -> list[Joined]:
+    if end - start < 2 or not has_letter(ws[start:end]):
+        return []
+    if end - start > STRETCHES_UP_TO:
+        return [Joined("".join(ws[start:end]), start, end)]
+    return [Joined("".join(ws[i:j]), i, j) for i in range(start, end) for j in range(i + 2, end + 1)]
+
+
+def words_and_compounds(text: str) -> tuple[list[str], list[Joined]]:
+    """A text's words, as `words()` gives them, and its hyphenated compounds joined: a run of words with one hyphen
+    between each two and no space, one of them holding a letter (DR-0280). One pass, since a regex for compounds costs
+    five times the words' own."""
+    pieces = PIECES.split(nfc(text))
+    ws = [w.lower() for w in pieces[1::2]]
+    joined: list[Joined] = []
+    start = 0
+    for k in range(1, len(ws) + 1):
+        # pieces[2k] is what lies between word k-1 and word k.
+        if k < len(ws) and pieces[2 * k] in HYPHENS:
+            continue
+        joined += _joins(ws, start, k)
+        start = k
+    return ws, joined
 
 
 def fold(word: str) -> str:
@@ -88,9 +133,14 @@ class Analyzer:
         self.columns = langs.columns
 
     def index_values(self, text: str) -> list[str]:
-        """A chunk's column values: the text as written, then each language's stems."""
-        ws = words(text)
-        return [text, *(" ".join(stemmer(lang).stem(w) for w in ws) for lang in self.languages)]
+        """A chunk's column values: the text as written, then each language's stems, each followed by the text's
+        hyphenated compounds joined. After the words, not between them, so every word keeps its position and phrases
+        match as before; the chunk's own text never holds them (DR-0280)."""
+        ws, joined = words_and_compounds(text)
+        extra = [j.word for j in joined]
+        every = ws + extra
+        folded = f"{text} {' '.join(extra)}" if extra else text
+        return [folded, *(" ".join(stemmer(lang).stem(w) for w in every) for lang in self.languages)]
 
     def stem(self, word: str, lang: Language) -> str:
         return fold(stemmer(lang).stem(word))

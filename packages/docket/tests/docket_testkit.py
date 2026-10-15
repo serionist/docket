@@ -640,47 +640,177 @@ def name_template(factory: pytest.TempPathFactory) -> Path:
     return template_with(factory, build_name_vault)
 
 
-def query_words(analyzer: Any, texts: list[str], picked: list[str], *, seed: int, sample: int = 60) -> list[Any]:
+# The compound vault (#59): each spelling of a few compounds, in English and Hungarian, and the shapes a split
+# mistakes: two words that are in most chunks, a contraction, a word that splits into two others. Not `were` or
+# `format`: their Hungarian stems are `we` and `for`, so they meet "we're" and "form at" without a split.
+COMPOUND_KICK = "calls:rec-0300"
+COMPOUND_FOLLOW = "calls:rec-0301"
+COMPOUND_FILLERS = 40
+EDITORS = 6
+WE_LL_LONG = (
+    "We'll be on site at seven with the second crew, and the pallets come off the first truck before the yard gets "
+    "busy; the gate log, the badges and the safety walk take the first hour, the crane checks the second, and the "
+    "cones go out along the north fence before lunch, as the plan from last week said, and it went well"
+)
+# Long, so plain BM25 ranks it below a short message saying kickoff twice: only its title's lead lifts it.
+KICK_MAIL = (
+    "The agenda for the first week on site: who brings the drawings, where the cabins stand, when the fence goes up, "
+    "how the gate log works, which crew takes the night shift, who signs the permits, where the cones are kept, and "
+    "what the yard needs before the first truck comes in on Monday morning."
+)
+COMPOUND_MESSAGES = {
+    "kickoff": "The Orbex kickoff moves to Thursday.",
+    "checklist": "Orbex kickoff checklist: the kickoff starts at nine.",
+    "kickoffs": "The kick-offs went well.",
+    "kicked": "We kicked off the crane work.",
+    "followup": "followup: the crane quote is still open.",
+    "emailben": "Küldd el e-mailben a darulistát.",
+    "emailt": "Megkaptam az e-mailt.",
+    "email": "The email with the crane list came.",
+    "emailcim": "Írd meg az e-mail-címedet.",
+    "online-hu": "Az on-line egyeztetés kedden lesz.",
+    "online": "The online form for the crane permit.",
+    "setup": "The setup took an hour.",
+    "set-up": "We set up the crane by noon.",
+    "well-short": "We'll be on site at seven.",
+    "well": "It went well.",
+    "well-long": WE_LL_LONG,
+    **{f"editor-{n}": f"The editor of the crane list checked row {n}." for n in range(EDITORS)},
+    **{f"edit-or-{n}": f"Edit or delete row {n} of the crane list." for n in range(2)},
+    "visitor": "The visitor signed the crane log.",
+    "visit-or": "Visit or call the yard before noon.",
+    **{f"filler-{n}": f"We set the pallets up today, round {n}." for n in range(COMPOUND_FILLERS)},
+}
+
+
+def compound_records() -> dict[str, list[RawRecord]]:
+    """The compound vault's records by source."""
+    fetched = {"fetched": "2026-10-14T07:00:00Z", "via": "fixture"}
+    mails = [
+        ("kick-1", "Orbex kick-off with Dana", KICK_MAIL),
+        ("follow-1", "Follow-up on the crane quote", "Two lines on the price and the delivery date."),
+        ("edit-1", "Edit or delete the crane list", "Edit or delete the rows that are wrong."),
+    ]
+    mail = [
+        {"rid": f"mail:<{key}@orbex.example>", "source": "mail", "kind": "mail", "container": "mail:orbex",
+         "ts": f"2026-10-12T{8 + n:02d}:00:00Z", "title": title, "text": text}
+        for n, (key, title, text) in enumerate(mails)
+    ]  # fmt: skip
+    chat = [
+        {"rid": f"chat:C0COMPOUND/{1791600000 + n}.000100", "source": "chat", "kind": "message",
+         "container": "chat:C0COMPOUND", "ts": f"2026-10-13T{8 + n // 60:02d}:{n % 60:02d}:00Z", "author": "U0BEN",
+         "text": text}
+        for n, text in enumerate(COMPOUND_MESSAGES.values())
+    ]  # fmt: skip
+    calls = [
+        {"rid": COMPOUND_KICK, "source": "calls", "kind": "recording", "ts": "2026-10-12T14:00:00Z",
+         "title": "Weekly site call", "segments": _segments(
+             ["Good morning everyone.", "Then we kick off the Orbex work on Monday.", "Thanks, see you then."])},
+        {"rid": COMPOUND_FOLLOW, "source": "calls", "kind": "recording", "ts": "2026-10-13T14:00:00Z",
+         "title": "Quote review", "segments": _segments(
+             ["The quote came in high.", "I will follow up on the crane quote tomorrow.", "Good, thanks."])},
+    ]  # fmt: skip
+    by_source = {"mail": mail, "chat": chat, "calls": calls}
+    return {s: [RawRecord.model_validate({**r, **fetched}) for r in rs] for s, rs in by_source.items()}
+
+
+def compound_chat(key: str) -> str:
+    """The rid of one of the compound vault's messages."""
+    return f"chat:C0COMPOUND/{1791600000 + list(COMPOUND_MESSAGES).index(key)}.000100"
+
+
+def build_compound_vault(root: Path) -> Vault:
+    vault = Vault.init(root / "vault", index_config(), "test-box")
+    for source, records in sorted(compound_records().items()):
+        vault.write_run(source, records, datetime(2026, 10, 14, 7, 0, tzinfo=UTC))
+    return vault
+
+
+def compound_template(factory: pytest.TempPathFactory) -> Path:
+    """The compound vault, built once per session; tests copy it."""
+    return template_with(factory, build_compound_vault)
+
+
+def fts_and_check(vault: Vault, query: str, where: str = "") -> tuple[set[int], set[int]]:
+    """The chunks the all-words stage finds for a query's words, and those the word check says hold every word, over
+    the chunks `where` (SQL on `c`) keeps: the two must agree (DR-0282)."""
+    from docket.index import query as search_module
+    from docket.index.build import languages_of, open_index
+    from docket.index.terms import Checker
+    from docket.index.text import words_and_compounds
+
+    conn = open_index(vault)
+    try:
+        s = search_module._Search(conn, vault, languages_of(vault))  # pyright: ignore[reportPrivateUsage]
+        tokens, compounds = words_and_compounds(query)
+        _, kept = s.find_entities(tokens)
+        joins = search_module._joins(tokens, compounds, kept)  # pyright: ignore[reportPrivateUsage]
+        groups, words, _ = s.word_groups([tokens[i] for i in kept], joins)
+        found = set(s.fts(" AND ".join(g for _, g in groups), (where, []), 1_000_000))
+        checker = Checker(s.analyzer, words, [])
+        rows = conn.execute(f"SELECT c.id, c.text FROM chunks c WHERE 1 = 1{where}")  # noqa: S608 - the test's own SQL
+        held = {chunk for chunk, text in rows if checker.count(text) == len(words)}
+        return found, held
+    finally:
+        conn.close()
+
+
+def query_words(
+    analyzer: Any, texts: list[str], picked: list[str], *, seed: int, sample: int = 60, compounds: bool = False
+) -> list[Any]:
     """Query words for the word check: those picked, and a seeded sample of the texts' own words, each with the forms
-    search gives it (as written, then each language's forms)."""
+    search gives it (as written, then each language's forms). With compounds, the pool takes the texts' hyphenated
+    compounds joined, and each word its next word's join and a split at every place a split may be."""
     import random
 
-    from docket.index.terms import Word, tokens
-    from docket.index.text import fold
+    from docket.index.terms import Word, phrase_of, tokens
+    from docket.index.text import fold, words_and_compounds
 
-    pool = sorted({w for text in texts for w in tokens(text)})
-    chosen = list(dict.fromkeys([*picked, *random.Random(seed).sample(pool, min(sample, len(pool)))]))  # noqa: S311 - seeded test words
-    return [
-        Word(
-            w,
-            frozenset(
-                [
-                    ("folded", fold(w)),
-                    *((lang.column, f) for lang in analyzer.languages for f in analyzer.forms(w, lang)),
-                ]
-            ),
+    def forms(w: str) -> list[tuple[str, str]]:
+        stemmed = [(lang.column, f) for lang in analyzer.languages for f in analyzer.forms(w, lang)]
+        return [("folded", fold(w)), *stemmed]
+
+    pool = {w for text in texts for w in tokens(text)}
+    if compounds:
+        pool |= {j.word for text in texts for j in words_and_compounds(text)[1]}
+    chosen = list(dict.fromkeys([*picked, *random.Random(seed).sample(sorted(pool), min(sample, len(pool)))]))  # noqa: S311 - seeded test words
+    out: list[Any] = []
+    for i, w in enumerate(chosen):
+        every = forms(w)
+        splits: tuple[Any, ...] = ()
+        if compounds:
+            if i + 1 < len(chosen):
+                every += forms(w + chosen[i + 1])
+            splits = tuple(phrase_of(analyzer, f"{w[:at]} {w[at:]}") for at in range(3, len(w) - 1))
+        out.append(Word(w, frozenset(every), splits))
+    return out
+
+
+def stem_every_word(
+    analyzer: Any, words: list[Any], phrases: list[Any], text: str
+) -> tuple[set[int], set[int], set[int]]:
+    """Which words and phrases a text holds, and which words only through a split, found the slow way: every word of
+    the text and every compound it joins folded and stemmed, and every split looked for."""
+    from docket.index.text import fold, words_and_compounds
+
+    def terms_of(w: str) -> set[tuple[str, str]]:
+        return {("folded", fold(w)), *((lang.column, analyzer.stem(w, lang)) for lang in analyzer.languages)}
+
+    ws, joined = words_and_compounds(text)
+    terms = [terms_of(w) for w in ws]
+    every: set[tuple[str, str]] = set().union(*terms, *(terms_of(j.word) for j in joined))
+
+    def found(phrase: Any) -> bool:
+        return any(
+            all((col, seq[k]) in terms[start + k] for k in range(len(seq)))
+            for col, seq in phrase.columns
+            for start in range(len(ws) - len(seq) + 1)
         )
-        for w in chosen
-    ]
 
-
-def stem_every_word(analyzer: Any, words: list[Any], phrases: list[Any], text: str) -> tuple[set[int], set[int]]:
-    """Which words and phrases a text holds, found the slow way: every word of the text folded and stemmed."""
-    from docket.index.terms import tokens
-    from docket.index.text import fold
-
-    ws = tokens(text)
-    terms = [{("folded", fold(w)), *((lang.column, analyzer.stem(w, lang)) for lang in analyzer.languages)} for w in ws]
-    every: set[tuple[str, str]] = set().union(*terms)
     held_words = {i for i, word in enumerate(words) if word.forms & every}
-    held_phrases = {
-        i
-        for i, phrase in enumerate(phrases)
-        for col, seq in phrase.columns
-        for start in range(len(ws) - len(seq) + 1)
-        if (col, seq[0]) in terms[start] and all((col, seq[k]) in terms[start + k] for k in range(1, len(seq)))
-    }
-    return held_words, held_phrases
+    held_phrases = {i for i, phrase in enumerate(phrases) if found(phrase)}
+    split_only = {i for i, word in enumerate(words) if i not in held_words and any(found(s) for s in word.splits)}
+    return held_words, held_phrases, split_only
 
 
 # An invented notes folder, as an existing setup would have it: notes per source, a clash of stems, a note naming two
