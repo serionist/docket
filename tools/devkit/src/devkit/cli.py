@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Sequence
+from datetime import date, timedelta
 from pathlib import Path
 
 from devkit import commits, content
@@ -119,6 +120,38 @@ def cmd_board(args: argparse.Namespace) -> int:
     return 0
 
 
+# The models' worker environments' requirements (DR-0332), compiled with hashes from versions Dependabot's cooldown
+# would take: at least a week old (DR-0157).
+MODELS = "packages/docket/src/docket/models"
+COOLDOWN_DAYS = 7
+
+
+def _today() -> date:
+    return date.today()
+
+
+def cmd_models_lock(_: argparse.Namespace) -> int:
+    """Compile each requirements-<device>.in beside the models' worker into its .txt, with hashes, for every system."""
+    root = repo_root()
+    cutoff = (_today() - timedelta(days=COOLDOWN_DAYS)).isoformat()
+    sources = sorted((root / MODELS).glob("requirements-*.in"))
+    if not sources:
+        raise KitError(f"no requirements-*.in in {MODELS}")
+    for source in sources:
+        target = source.with_suffix(".txt")
+        proc = subprocess.run(
+            [
+                "uv", "pip", "compile", str(source), "--universal", "--generate-hashes", "--python-version", "3.12",
+                "--exclude-newer", cutoff, "--no-header", "--no-annotate", "-o", str(target),
+            ],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+        )  # fmt: skip
+        if proc.returncode != 0:
+            raise KitError(f"uv pip compile {source.name}: {proc.stderr.strip() or proc.stdout.strip()}")
+        print(f"{target.relative_to(root).as_posix()}: from versions published before {cutoff}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     utf8_stdio()
     p = argparse.ArgumentParser(prog="devkit")
@@ -135,6 +168,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     s.add_argument("--phase", choices=[str(n) for n in range(6)])
     s.add_argument("--size", choices=["S", "M", "L"])
     s.set_defaults(func=cmd_board)
+    sub.add_parser(
+        "models-lock", help="compile the models' worker requirements with hashes, from versions a week old"
+    ).set_defaults(func=cmd_models_lock)
     args = p.parse_args(argv)
     try:
         return int(args.func(args))

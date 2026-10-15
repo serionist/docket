@@ -28,6 +28,8 @@ def isolated(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.Monke
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("DOCKET_CONFIG_DIR", str(home / "docket"))
     monkeypatch.setenv("DOCKET_STATE_DIR", str(home / "docket-state"))
+    # The models' environments and files, never the developer's own.
+    monkeypatch.setenv("DOCKET_MODELS_DIR", str(home / "docket-models"))
     # No test may reach the developer's real keychain: keyring's failing backend, here and in any subprocess.
     monkeypatch.setenv("PYTHON_KEYRING_BACKEND", "keyring.backends.fail.Keyring")
     keyring.set_keyring(FailKeyring())

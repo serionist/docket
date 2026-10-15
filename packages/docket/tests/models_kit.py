@@ -16,6 +16,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from docket.models import config
 from docket.models.catalogue import Embedder, ModelFile
 from docket.models.client import Worker
 from docket.models.provider import Models
@@ -117,3 +118,15 @@ class InProcess:
 def fake_models(budget: int = 8192) -> tuple[Models, InProcess]:
     worker = InProcess()
     return Models(FAKE, worker, budget), worker
+
+
+def make_env(device: config.Device, **marker: Any) -> None:
+    env = config.env_dir(device)
+    python = config.env_python(env)
+    python.parent.mkdir(parents=True, exist_ok=True)
+    python.write_bytes(b"")
+    found = {
+        "device": device, "budget": 8192, "requirements": config.requirements_hash(device),
+        "python": config.python_version(), **marker,
+    }  # fmt: skip
+    (env / config.MARKER).write_text(json.dumps(found), encoding="utf-8")

@@ -77,6 +77,11 @@ SENSITIVITIES = ("work", "mixed", "private")
 # The Claude Code plugin's hooks run these; they print what Claude Code reads, not what a person does.
 hook_app = typer.Typer(help="What the Claude Code plugin's hooks run.", no_args_is_help=True)
 app.add_typer(hook_app, name="hook", hidden=True)
+models_app = typer.Typer(
+    help="The models on this machine: an embedder that lets search find what a question means. Optional.",
+    no_args_is_help=True,
+)
+app.add_typer(models_app, name="models")
 
 VaultOption = Annotated[Path | None, typer.Option("--vault", help="The vault; default: DOCKET_VAULT, here, ./vault")]
 
@@ -963,6 +968,62 @@ def service_token(
             say("a new token; restart `docket serve` to use it")
         return
     typer.echo(tokens.header() if header else tokens.read())
+
+
+@models_app.command("install")
+def models_install(
+    device: Annotated[str, typer.Option("--device", help="auto, cpu or cuda (an NVIDIA GPU).")] = "auto",
+) -> None:
+    """Build the models' environment, fetch the embedder's files, check it runs, and turn models on here."""
+    from docket.models import install  # noqa: PLC0415
+
+    install.install(device, say=say)
+
+
+@models_app.command("status")
+def models_status(
+    check: Annotated[bool, typer.Option("--check", help="Start the worker once and say what it runs on.")] = False,
+) -> None:
+    """What this machine's models are: the choice, the environments, the files."""
+    from docket.models import config  # noqa: PLC0415
+    from docket.models.provider import Off  # noqa: PLC0415
+    from docket.models.runtime import worker_for  # noqa: PLC0415
+
+    choice = config.read()
+    if isinstance(choice, Off):
+        say(f"models     off{f': {choice.why}' if choice.why else ' (docket models install turns them on)'}")
+    else:
+        say(f"models     {choice.embedder.name} on {choice.device}")
+    for device in config.DEVICES:
+        if config.env_dir(device).exists():
+            found = config.installed(device)
+            line = found if isinstance(found, str) else f"ready, batches of {found.budget:,} characters"
+            say(f"env {device:<6} {line} ({config.env_dir(device)})")
+    if not isinstance(choice, Off):
+        missing = config.missing_files(choice.embedder)
+        say(f"files      {'missing: ' + ', '.join(f.path for f in missing) if missing else 'all here'}")
+    if check:
+        found = choice if isinstance(choice, Off) else config.installed(choice.device)
+        if isinstance(choice, Off) or isinstance(found, (Off, str)):
+            say(f"! {found if isinstance(found, str) else 'models are off'}")
+            raise typer.Exit(1)
+        worker = worker_for(choice, choice.device)
+        try:
+            if not worker.ensure() or worker.hello is None:
+                say(f"! {worker.why}")
+                say_all(worker.stderr().strip().splitlines()[-10:])
+                raise typer.Exit(1)
+            say(f"worker     up: {worker.hello.provider}, {worker.hello.dims} dims")
+        finally:
+            worker.stop()
+
+
+@models_app.command("remove")
+def models_remove() -> None:
+    """Delete the models' environments, files and choice; keyword search goes on."""
+    from docket.models import install  # noqa: PLC0415
+
+    install.remove(say=say)
 
 
 @hook_app.command("session-start")

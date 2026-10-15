@@ -52,6 +52,16 @@ def _save(data: dict[str, Any]) -> None:
     target.write_text(yaml.safe_dump(data, sort_keys=True, allow_unicode=True), encoding="utf-8")
 
 
+def set_section(name: str, value: dict[str, Any] | None) -> None:
+    """Write one top-level section, or take it out with None, and keep the rest of the file as it is."""
+    data = load()
+    if value is None:
+        data.pop(name, None)
+    else:
+        data[name] = value
+    _save(data)
+
+
 def default_vault() -> Path | None:
     value = load().get("default_vault")
     return Path(value) if isinstance(value, str) and value else None

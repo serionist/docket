@@ -1,0 +1,4 @@
+# The models' worker on the CPU (DR-0331, DR-0332). Compiled with hashes by `uv run devkit models-lock`, never by hand.
+onnxruntime==1.30.0
+tokenizers==0.23.2
+numpy==2.5.3
