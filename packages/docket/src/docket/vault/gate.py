@@ -93,7 +93,7 @@ class Shown:
 class Gate:
     def __init__(self, vault: Vault) -> None:
         self.vault = vault
-        self.staging = Staging(vault.root, vault.home.tmp_dir)
+        self.staging = Staging(vault.root, vault.home)
         self._cut_rids: set[str] = set()
         self._read_runs: set[Path] = set()
         self._holds = holds.Holds()

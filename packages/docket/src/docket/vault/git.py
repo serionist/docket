@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from docket.errors import DocketError
-from docket.vault.home import Home
+from docket.vault.home import Home, make_private
 
 # A processed doc's rev is the commit whose message has this line, in its subject or its body (DR-0112).
 DOC_LINE = re.compile(r"^Doc: (\S+) rev ([1-9]\d*)(?: \(edited by hand\))?$")
@@ -212,7 +212,7 @@ class Git:
             return SyncResult(True, False, f"this machine and {upstream} both wrote {named}; resolve it by hand")
         # The marker says this rebase is Docket's own: one a killed sync leaves behind may be undone, a user's never.
         marker = sync_marker(self.root)
-        marker.parent.mkdir(parents=True, exist_ok=True)
+        make_private(self.root / ".git", marker.parent)
         marker.write_text(upstream, encoding="utf-8")
         # The marker is removed only once the rebase is over. Interrupted (Ctrl+C, a kill), it stays, so the next
         # write knows the rebase left behind is Docket's and undoes it.
@@ -233,10 +233,10 @@ def _hooks_off(home: Home) -> Path:
     """The file Docket points the hooks path at, written when it is missing: a missing path is no better than a folder,
     since git-lfs's filter creates it and writes its hooks there."""
     path = home.hooks_off
-    # Never into a git dir that went missing: the folders made on the way would pass for the vault's own .git, and git
-    # refuses to run there anyway (DR-0140).
-    if not path.is_file() and home.git_dir.is_dir():
-        path.parent.mkdir(parents=True, exist_ok=True)
+    # Refused, not skipped, when the git dir went missing: in a folder vault git would go on to the repo above the
+    # host and run Docket's add there (DR-0270).
+    make_private(home.git_dir, path.parent)
+    if not path.is_file():
         path.write_text(HOOKS_OFF_TEXT, encoding="utf-8")
     return path
 

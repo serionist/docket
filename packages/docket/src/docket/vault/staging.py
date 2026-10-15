@@ -25,6 +25,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from docket.vault.cuts import Cut
+from docket.vault.home import Home, make_private
 from docket.vault.records import RawRecord
 
 STAGING = "staging"
@@ -111,11 +112,10 @@ def retry(op: Callable[[], object]) -> None:
             time.sleep(_RETRY_PAUSE)
 
 
-def write_replacing(tmp_dir: Path, path: Path, text: str, tmp_name: str) -> None:
+def write_replacing(home: Home, path: Path, text: str, tmp_name: str) -> None:
     """Write a vault file through a temp file in Docket's private folder and a rename, so a crash leaves the old file
     or the new, and a link planted at the path is replaced, never written through."""
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-    tmp = tmp_dir / f"{tmp_name}.{os.getpid()}.tmp"
+    tmp = make_private(home.git_dir, home.tmp_dir) / f"{tmp_name}.{os.getpid()}.tmp"
     try:
         with tmp.open("w", encoding="utf-8", newline="\n") as out:
             out.write(text)
@@ -127,9 +127,10 @@ def write_replacing(tmp_dir: Path, path: Path, text: str, tmp_name: str) -> None
 
 
 class Staging:
-    def __init__(self, root: Path, tmp_dir: Path | None = None) -> None:
+    def __init__(self, root: Path, home: Home) -> None:
         self.dir = root / STAGING
-        self.tmp_dir = tmp_dir or root / ".git" / "docket" / "tmp"
+        self.home = home
+        self.tmp_dir = home.tmp_dir
         self.decided_file = self.dir / DECIDED
 
     def path(self, staged: Staged) -> Path:
@@ -139,8 +140,7 @@ class Staging:
         """Write a staged version through a temp file and a rename; the temp file lives in .git, outside staging."""
         target = self.path(staged)
         target.parent.mkdir(parents=True, exist_ok=True)
-        self.tmp_dir.mkdir(parents=True, exist_ok=True)
-        tmp = self.tmp_dir / f"staging-{staged.key}.{os.getpid()}.tmp"
+        tmp = make_private(self.home.git_dir, self.tmp_dir) / f"staging-{staged.key}.{os.getpid()}.tmp"
         try:
             with tmp.open("w", encoding="utf-8", newline="\n") as out:
                 out.write(staged.model_dump_json(indent=2) + "\n")

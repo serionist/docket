@@ -8,6 +8,7 @@ import socket
 from pathlib import Path
 
 from docket.errors import DocketError
+from docket.vault.home import Home, make_private
 
 NAME = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$")
 _ENDS_IN_NUMBER = re.compile(r"-[0-9]+$")
@@ -48,7 +49,6 @@ def resolve(private: Path | None = None) -> str:
     return from_host(socket.gethostname())
 
 
-def remember(private: Path, name: str) -> None:
-    path = machine_file(private)
-    path.parent.mkdir(parents=True, exist_ok=True)
+def remember(home: Home, name: str) -> None:
+    path = machine_file(make_private(home.git_dir, home.private))
     path.write_text(validate(name) + "\n", encoding="utf-8")

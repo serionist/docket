@@ -206,7 +206,7 @@ def add(vault: Vault, source: str, release: Release) -> None:
         if text and not text.endswith("\n"):
             text += "\n"
         path.parent.mkdir(parents=True, exist_ok=True)
-        write_replacing(vault.home.tmp_dir, path, f"{text}{release.line()}\n", f"releases-{source}")
+        write_replacing(vault.home, path, f"{text}{release.line()}\n", f"releases-{source}")
         commit_pending(vault, source, f"Releases: {source}, 1 added on {vault.machine}")
 
 

@@ -17,6 +17,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from docket.errors import DocketError
+from docket.vault.home import Home, make_private
 from docket.vault.machine import validate as validate_machine
 from docket.vault.records import source_name_problem
 from docket.vault.staging import retry
@@ -223,11 +224,10 @@ def _dump(data: dict[str, Any]) -> str:
     return header + yaml.safe_dump(data, sort_keys=False, allow_unicode=True, default_flow_style=False, width=100)
 
 
-def write_config(tmp_dir: Path, path: Path, text: str) -> None:
+def write_config(home: Home, path: Path, text: str) -> None:
     """Write vault.yaml through a temp file in Docket's private folder under the git dir and a rename, so a crash
     leaves the old file or the new one."""
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-    tmp = tmp_dir / f"vault-yaml.{os.getpid()}.tmp"
+    tmp = make_private(home.git_dir, home.tmp_dir) / f"vault-yaml.{os.getpid()}.tmp"
     try:
         with tmp.open("w", encoding="utf-8", newline="\n") as out:
             out.write(text)

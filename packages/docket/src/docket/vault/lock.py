@@ -10,6 +10,7 @@ from types import TracebackType
 from filelock import FileLock, Timeout
 
 from docket.errors import DocketError
+from docket.vault.home import make_private
 
 log = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ class VaultLock:
         self._lock = FileLock(str(self.path), timeout=timeout)
 
     def __enter__(self) -> VaultLock:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        make_private(self.git_dir, self.path.parent)
         try:
             self._lock.acquire()
         except Timeout as e:

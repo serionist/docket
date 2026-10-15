@@ -158,11 +158,11 @@ def _register(vault: Vault, name: str, entry: SourceConfig) -> tuple[bool, str |
         updated = config.model_copy(update={"sources": {**config.sources, name: entry}}).dump()
         if updated == text:
             return True, None, None
-        write_config(vault.home.tmp_dir, path, updated)
+        write_config(vault.home, path, updated)
         try:
             commit = vault.commit([CONFIG_FILE], f"Config: source {name}")
         except BaseException:
-            write_config(vault.home.tmp_dir, path, text)
+            write_config(vault.home, path, text)
             raise
         return True, None, commit
 

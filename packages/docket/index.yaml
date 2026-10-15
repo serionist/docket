@@ -1175,3 +1175,35 @@ decisions:
       - "A screen on the first three letters: English stems dry to dri and dying to die, so it misses them."
       - "FTS5 per word restricted to the candidates' row ids: 390 ms."
       - "Every word in the any-word match: an OR with a word in most chunks scores every chunk it is in."
+  - id: DR-0270
+    title: Docket never makes a vault's git dir, and a .git counts only when git would use it
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#62"]
+    description: "Docket never makes a vault's git dir. Every writer of its own files (the lock, the temp files of the raw log, staging, vault.yaml, the hold and release lists and the docs, the machine file, sync's marker, the hooks-off file, convert's state) makes its folder through one helper that refuses when the git dir fails git's own test for one: a HEAD file, objects/ and refs/. Before, a write through a repo vault whose .git went missing made .git/ and .git/docket/tmp, and Open then took them for the vault's own .git and stopped saying its history was gone; in a folder vault the same write made the host's .git/docket/<vault path>/ and ran its add in whatever repo git found above the host. Open, find and the stopped-convert check count a .git only when it passes the same test, as git itself does: git skips a .git without HEAD and looks further up."
+    binds:
+      - A writer refuses with an error naming the git dir and saying to restore it; it never makes the git dir or a folder above Docket's own.
+      - "Open refuses storage: repo when .git fails the test, as when there is none; a .git file, a submodule's or a linked worktree's link, fails it too."
+      - A folder vault still refuses any .git of its own, whether or not git would use it.
+    not_chosen:
+      - "Testing that the git dir is a folder, as the hooks-off file did: the folder the lock makes passes it."
+      - "Asking git (rev-parse --git-dir) on every write and open: a process for what three stats answer."
+      - "Calling a .git missing when it holds only Docket's names: any other leftover would pass."
+      - "Guarding the lock alone, since every write takes it: init's machine file and convert's state are written outside it."
+  - id: DR-0271
+    title: Open refuses a folder vault whose vault.yaml the repo it found doesn't track
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#62"]
+    description: "Vault.open of a folder vault checks that its vault.yaml is tracked in the repo git found around it (git ls-files --error-unmatch), and refuses otherwise, naming the vault and that repo. A folder vault has no ceiling: when its host's .git goes missing, git finds whatever repo holds the host, Open takes the vault for a folder of that one, and Docket commits the vault's files there (measured: run files landed in the outer repo's HEAD). Every folder vault Docket makes has its vault.yaml in its first commit, init's or convert's, so a healthy one passes. A tracked answer is kept per process by (git dir, vault path), so the service, which opens the vault on every call, pays one git call; an untracked one is never kept, so restoring the .git works without a restart. Init and convert never go through Vault.open before their first commit, so neither is exempted by a flag."
+    binds:
+      - The message names the vault and the repo found, and says to restore the lost .git, or for a vault moved there on purpose, to commit its vault.yaml first.
+      - Only Vault.open checks; a Home resolved directly, as init does, doesn't.
+    not_chosen:
+      - "A ceiling for folder vaults: the host's top isn't known once its .git is gone."
+      - "Recording the host's path in the vault: it would sit in the git dir that went missing, or in the user's tree."
+      - "Checking on every open without keeping the answer: a git call on every service request."
