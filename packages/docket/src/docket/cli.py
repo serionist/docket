@@ -392,6 +392,8 @@ def hold_release(
     if report.released:
         rows.append("next       docket staging promote")
     say_all(rows or ["nothing to release"])
+
+
 @redaction_app.callback(invoke_without_command=True)
 def redaction_show(ctx: typer.Context, vault: VaultOption = None) -> None:
     """Which redaction rules run: credentials, phone numbers, your own patterns. Names are never redacted."""
