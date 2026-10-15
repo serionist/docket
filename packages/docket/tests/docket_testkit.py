@@ -305,6 +305,37 @@ def copy_vault(template: Path, tmp_path: Path) -> Vault:
     return Vault.open(target)
 
 
+READ_ROUTES = ["parse", "index"]
+
+
+def read_route(route: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every `recall.read` in a test through one route (DR-0321): `parse`, with no index, parses every doc; `index`
+    brings the index up to date before each read, and parsing every doc fails the test, so the index answers all that
+    read asks. A test run both ways shows the two give the same result."""
+    from docket import index, recall
+    from docket.index.build import db_path
+    from docket.vault.docstore import DocStore
+
+    real = recall.read
+
+    def parsing(vault: Vault, *args: Any, **kwargs: Any) -> Any:
+        assert not db_path(vault).exists()
+        return real(vault, *args, **kwargs)
+
+    def through_index(vault: Vault, *args: Any, **kwargs: Any) -> Any:
+        index.update(vault)
+        return real(vault, *args, **kwargs)
+
+    def every_doc(self: DocStore) -> list[Any]:
+        raise AssertionError(f"read parsed every doc in {self.root}, though the index is current")
+
+    if route == "parse":
+        monkeypatch.setattr(recall, "read", parsing)
+    else:
+        monkeypatch.setattr(recall, "read", through_index)
+        monkeypatch.setattr(DocStore, "all", every_doc)
+
+
 def template_project(factory: pytest.TempPathFactory, mappers: dict[str, str]) -> Path:
     """A consuming project with its vault, built once per session for these mappers; each test copies it with
     copy_project."""
@@ -458,7 +489,7 @@ def build_index_vault(root: Path) -> Vault:
 
 LOGICAL_TABLES = (
     "meta", "run_files", "records", "record_versions", "segments", "docs", "doc_files", "doc_covers", "doc_anchors",
-    "entities", "entity_files", "aliases", "alias_terms", "entity_links", "external_ids", "problems",
+    "old_paths", "entities", "entity_files", "aliases", "alias_terms", "entity_links", "external_ids", "problems",
 )  # fmt: skip
 
 

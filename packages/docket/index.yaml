@@ -1480,3 +1480,42 @@ decisions:
       - "Any word starting with the alias as the explanation: same starts with sam, market and marked with mark."
       - "The fifth counted over the chunks the case forms don't explain: már in 15% of the chunks gave Mark 110 wrong mentions."
       - "A capital letter as the sign of a name: chat is often written in lower case."
+  - id: DR-0320
+    title: The index keeps every legacy note's old paths in a table of their own
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#46"]
+    description: "The index keeps a table old_paths (doc, path, folded, name): one row for each old path of each legacy note it reads, as the doc keeps it, with its casefold and the casefold of its last part, folded in Python so SQLite only compares with = and IN. Rows come and go with their doc's file, so update and rebuild keep the same table. It is a cache of DR-0130's field; schema 4 brings it in."
+    binds: ["Folding is Python's casefold, never SQLite's case rules."]
+    not_chosen:
+      - "The design's crosswalk table: it links record ids to record ids, while this maps a path to a doc and needs its own lookup columns."
+      - "Every old path into Python on each read: linear in the notes."
+  - id: DR-0321
+    title: read asks the index only when it is current for processed/, and never writes it
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#46"]
+    description: "read asks the index about other docs only when it is current for processed/: in one read transaction, every *.md under processed/ has the sha256 doc_files holds, and no file is missing or extra. Otherwise (no index, another schema or languages, a file that won't open, no FTS5, any doc changed) read parses every doc once for the call. A read never updates, rebuilds or waits for the index; search, the service and docket index update keep it current."
+    binds:
+      - "Only processed/ decides: raw runs and entity files don't send a read to the parse route."
+    not_chosen:
+      - "Update before reading, as docket search does: a read would write, and wait minutes behind a rebuild."
+      - "Trust the index and check only the doc it names: a note imported since could match better, and the answer would differ from a parse."
+      - "Size and modification time instead of the hash: an edit that keeps both would read a stale answer."
+  - id: DR-0322
+    title: The index narrows the docs a read parses, and today's code decides
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#46"]
+    description: "With a current index, read takes candidates from it and runs today's code on them: an old path's candidates are the old_paths rows whose folded path is the locator's folded path or a suffix of it after a / or :, or whose name is its file name, and legacy.find chooses among them as among all; the docs superseding a doc come from the docs rows with a supersedes list; the docs covering a record come from doc_covers, parsed and sorted by path as DocStore.all sorts, through the same citing-lines and legacy-note code. A current index gives the same result as a parse."
+    binds:
+      - An old path's candidate keys live beside legacy.find, so DR-0131's steps change in one place.
+    not_chosen:
+      - "DR-0131's steps as SQL: a second copy of the rules to keep in step."
+      - "The old_paths table alone: read would still parse every doc for superseded_by and the citing lines."

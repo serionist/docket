@@ -44,6 +44,7 @@ from docket.index.chunks import (
 from docket.index.languages import Languages, resolve
 from docket.index.schema import check_sqlite, create, stale
 from docket.index.text import Analyzer, fold, words
+from docket.vault import legacy
 from docket.vault.entities import entity_files, load_entities
 from docket.vault.processed import doc_path, parse_doc
 from docket.vault.rawlog import RunFile, parse_run_file
@@ -308,7 +309,7 @@ class Indexer:
         if row is not None and row[0] is not None:
             doc = row[0]
             self.drop_owner(f"d {doc}")
-            for table in ("doc_covers", "doc_anchors"):
+            for table in ("doc_covers", "doc_anchors", "old_paths"):
                 self.conn.execute(f"DELETE FROM {table} WHERE doc = ?", (doc,))  # noqa: S608 - fixed table names
             self.conn.execute("DELETE FROM docs WHERE id = ?", (doc,))
         self.conn.execute("DELETE FROM doc_files WHERE path = ?", (rel,))
@@ -339,6 +340,10 @@ class Indexer:
             )  # fmt: skip
             self.conn.executemany(
                 "INSERT INTO doc_covers (doc, rid) VALUES (?, ?)", [(meta.id, rid) for rid in sorted(meta.covers)]
+            )
+            self.conn.executemany(
+                "INSERT INTO old_paths (doc, path, folded, name) VALUES (?, ?, ?, ?)",
+                [legacy.index_row(e) for e in legacy.old_paths([doc])],
             )
             self.conn.executemany(
                 "INSERT INTO doc_anchors (doc, line, ordinal, rid, kind, start, end) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -389,6 +394,25 @@ class Indexer:
             return False
         matching.write_entities(self.conn, load_entities(self.root), hashes)
         return True
+
+
+def doc_hashes(root: Path) -> dict[str, str]:
+    """Every doc file under processed/, by its path from the vault's root, with the sha256 of its bytes."""
+    folder = root / "processed"
+    if not folder.is_dir():
+        return {}
+    # Every read checks these, and Path.relative_to costs as much as the hashing. rglob gives each path as the
+    # folder's text and the rest, so the text after the root and its separator is the path from the root.
+    cut = len(str(root / "_")) - 1
+    return {str(p)[cut:].replace(os.sep, "/"): _sha(p.read_bytes()) for p in folder.rglob("*.md")}
+
+
+def changed_docs(conn: sqlite3.Connection, root: Path) -> int:
+    """How many doc files came, went or changed since the index read processed/: none means its doc rows say what the
+    files say."""
+    current = doc_hashes(root)
+    stored = dict(conn.execute("SELECT path, sha256 FROM doc_files").fetchall())
+    return sum(1 for p in set(current) | set(stored) if current.get(p) != stored.get(p))
 
 
 def _counts(conn: sqlite3.Connection) -> dict[str, int]:
@@ -538,22 +562,23 @@ def update(vault: Vault) -> BuildReport:
     return report
 
 
-def _reader(db: Path) -> sqlite3.Connection:
+def _reader(db: Path, timeout: float = BUSY_SECONDS) -> sqlite3.Connection:
     """The index opened to read: by its plain path, since a URI can't name a file on a network share, and writable
     underneath, so SQLite rolls back a hot journal an interrupted update left; `query_only` keeps every statement a
-    read."""
-    conn = sqlite3.connect(db, timeout=BUSY_SECONDS)
+    read. `timeout` is how long a statement waits for an update's lock."""
+    conn = sqlite3.connect(db, timeout=timeout)
     conn.execute("PRAGMA query_only = ON")
     return conn
 
 
-def open_index(vault: Vault) -> sqlite3.Connection:
-    """The index to read, refused when there is none or it was built for another Docket or other languages."""
+def open_index(vault: Vault, timeout: float = BUSY_SECONDS) -> sqlite3.Connection:
+    """The index to read, refused when there is none or it was built for another Docket or other languages. Its
+    statements wait up to `timeout` seconds for an update's lock."""
     check_sqlite()
     db = db_path(vault)
     if not db.exists():
         raise DocketError("there is no index yet; run docket index rebuild")
-    conn = _reader(db)
+    conn = _reader(db, timeout)
     why = stale(conn, languages_of(vault))
     if why is not None:
         conn.close()
@@ -578,10 +603,7 @@ def status(vault: Vault) -> IndexStatus:
         base.problems = _problems(conn)
         new, base.changed_runs = _changed_runs(conn, vault)
         base.new_runs = len(new)
-        folder = vault.root / "processed"
-        current = {_rel(vault.root, p): _sha(p.read_bytes()) for p in folder.rglob("*.md")} if folder.is_dir() else {}
-        stored = dict(conn.execute("SELECT path, sha256 FROM doc_files").fetchall())
-        base.changed_docs = sum(1 for p in set(current) | set(stored) if current.get(p) != stored.get(p))
+        base.changed_docs = changed_docs(conn, vault.root)
         hashes = {_rel(vault.root, p): _sha(p.read_bytes()) for p in entity_files(vault.root)}
         base.entities_changed = hashes != dict(conn.execute("SELECT path, sha256 FROM entity_files").fetchall())
     finally:

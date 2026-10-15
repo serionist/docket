@@ -7,6 +7,10 @@ here acts on what it says.
 
 `read` also takes the path other files cite a legacy note by (its old path), with an optional time: the note, and the
 raw at that time in the recording it covered. A rid in the raw log stays a rid, and `r:` is always raw.
+
+What a read asks about docs other than the one it shows (an old path's note, the docs superseding it, the docs covering
+a record) comes from the index when it is current for processed/, else from one parse of every doc for the whole call;
+either way the same code decides (DR-0321, DR-0322). A read loads each source's raw once.
 """
 
 from __future__ import annotations
@@ -18,6 +22,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from docket.errors import DocketError
+from docket.index import lookup
+from docket.index.lookup import DocIndex
 from docket.vault import legacy
 from docket.vault.anchors import Anchor, AnchorError, format_anchor, parse_locator, split_path_locator, trailing_anchors
 from docket.vault.docstore import DocStore, PutResult
@@ -114,58 +120,121 @@ def read(vault: Vault, locator: str, view: str = "summary", around: int = 0, rev
     if around < 0:
         raise DocketError("around counts minutes, paragraphs or messages either side; it can't be negative")
     the_view: View = "summary" if view == "summary" else "raw" if view == "raw" else "both"
-    store = DocStore(vault)
+    call = _Call(vault)
+    try:
+        return _read(call, locator, the_view, around, rev)
+    finally:
+        call.close()
+
+
+class _Call:
+    """What one read shares: the store, one `RawLookup`, so each source's raw loads once, and the answers about docs
+    other than the one it shows. Those come from the index when it is current for processed/, opened at the first
+    question (DR-0321), else from one parse of every doc; the index only narrows, and the same code decides
+    (DR-0322)."""
+
+    def __init__(self, vault: Vault) -> None:
+        self.store = DocStore(vault)
+        self.raw = RawLookup(vault.root)
+        self._opened = False
+        self._index: DocIndex | None = None
+        self._every: list[ProcessedDoc] | None = None
+        self._supersedes: list[tuple[str, list[str]]] | None = None
+
+    def _ask(self) -> DocIndex | None:
+        if not self._opened:
+            self._opened = True
+            self._index = lookup.open_current(self.store.vault)
+        return self._index
+
+    def _all(self) -> list[ProcessedDoc]:
+        if self._every is None:
+            self._every = self.store.all()
+        return self._every
+
+    def old_path(self, path: str) -> str:
+        """The legacy note an old path names; nothing or several is a `DocketError` naming the candidates."""
+        index = self._ask()
+        return legacy.find(index.old_paths(path) if index is not None else legacy.old_paths(self._all()), path)
+
+    def supersedes(self) -> list[tuple[str, list[str]]]:
+        """Each doc that supersedes others, with the ids it names, in the order `DocStore.all` reads them."""
+        if self._supersedes is None:
+            index = self._ask()
+            self._supersedes = (
+                index.supersedes()
+                if index is not None
+                else [(d.meta.id, d.meta.supersedes) for d in self._all() if d.meta.supersedes]
+            )
+        return self._supersedes
+
+    def superseded_by(self, doc_id: str) -> list[str]:
+        return [doc for doc, listed in self.supersedes() if doc_id in listed]
+
+    def superseded(self) -> set[str]:
+        return {target for _, listed in self.supersedes() for target in listed}
+
+    def covering(self, rid: str) -> list[ProcessedDoc]:
+        """The docs that cover a record, in the order `DocStore.all` reads them."""
+        index = self._ask()
+        if index is not None:
+            return self.store.at_paths(index.covering(rid))
+        return [d for d in self._all() if rid in d.meta.covers]
+
+    def close(self) -> None:
+        if self._index is not None:
+            self._index.close()
+
+
+def _read(call: _Call, locator: str, view: View, around: int, rev: int | None) -> ReadResult:
     value = locator.strip()
     try:
         path = None if value.startswith(("[", "r:")) else split_path_locator(value)
-        if path is not None and not (RID.match(value) and RawLookup(vault.root).versions(value)):
-            return _read_path(store, locator, found=path, view=the_view, around=around, rev=rev)
+        if path is not None and not (RID.match(value) and call.raw.versions(value)):
+            return _read_path(call, locator, found=path, view=view, around=around, rev=rev)
         loc = parse_locator(locator, DOC_TYPES)
     except AnchorError as e:
         raise DocketError(str(e)) from None
     if loc.kind != "record":
-        return _read_doc(store, _load(store, loc.kind, loc.value, rev), locator, the_view)
+        return _read_doc(call, _load(call.store, loc.kind, loc.value, rev), locator, view)
     if rev is not None:
         raise DocketError("rev is a doc's revision; for a record, the raw view says how many versions it has")
-    lookup = RawLookup(vault.root)
-    versions = lookup.versions(loc.value)
+    versions = call.raw.versions(loc.value)
     if not versions:
         hint = " (for a position, write r:<rid>@mm:ss)" if "@" in loc.value or "#" in loc.value else ""
         raise DocketError(f"no record {loc.value} in the raw log{hint}")
     record = versions[-1]
     anchor = loc.anchor or Anchor(record.rid, "record")
-    result = ReadResult(locator=locator, view=the_view)
-    if the_view != "summary":
-        result.spans = _raw_spans(lookup, record, anchor, len(versions), around)
-    if the_view != "raw":
-        docs = store.all()
-        result.lines = _citing(docs, record.rid, anchor, around)
+    result = ReadResult(locator=locator, view=view)
+    if view != "summary":
+        result.spans = _raw_spans(call.raw, record, anchor, len(versions), around)
+    if view != "raw":
+        docs = call.covering(record.rid)
+        result.lines = _citing(docs, call.superseded(), record.rid, anchor, around)
         result.legacy = [
-            LegacyRef(id=d.meta.id, old_paths=d.meta.old_paths)
-            for d in docs
-            if d.meta.type == "legacy-note" and record.rid in d.meta.covers
+            LegacyRef(id=d.meta.id, old_paths=d.meta.old_paths) for d in docs if d.meta.type == "legacy-note"
         ]
     return result
 
 
 def _read_path(
-    store: DocStore, locator: str, *, found: tuple[str, Anchor | None], view: View, around: int, rev: int | None
+    call: _Call, locator: str, *, found: tuple[str, Anchor | None], view: View, around: int, rev: int | None
 ) -> ReadResult:
     """A doc by a path: one in the vault's processed/ folder, else a legacy note by its old path; with a time, the
     raw at that time in the one recording it covers."""
     path, at = found
+    store = call.store
     processed = (store.root / "processed").resolve()
     given = Path(os.path.normpath(store.root / path.replace("\\", "/")))
     if given.is_relative_to(processed) and given.is_file():
         doc = _load(store, "path", str(given), rev)
     else:
-        doc_id = legacy.find(legacy.old_paths(store.all()), path)
-        doc = _load(store, "doc", doc_id, rev)
-    result = _read_doc(store, doc, locator, view)
+        doc = _load(store, "doc", call.old_path(path), rev)
+    result = _read_doc(call, doc, locator, view)
     result.resolved = doc.meta.id
     if at is None:
         return result
-    lookup = RawLookup(store.root)
+    lookup = call.raw
     timed = [rid for rid in doc.meta.covers if any(segments(r) for r in lookup.versions(rid)[-1:])]
     if len(timed) != 1:
         if timed:
@@ -182,7 +251,7 @@ def _read_path(
     result.resolved = anchor.token[1:-1]
     versions = lookup.versions(rid)
     if view != "raw":
-        result.lines = _citing(store.all(), rid, anchor, around)
+        result.lines = _citing(call.covering(rid), call.superseded(), rid, anchor, around)
     found_span = span(anchor, versions[-1], len(versions), around=around)
     if found_span.problem is not None:
         result.problems.append(found_span.problem)
@@ -266,11 +335,12 @@ def _load(store: DocStore, kind: str, value: str, rev: int | None) -> ProcessedD
     return found
 
 
-def _read_doc(store: DocStore, doc: ProcessedDoc, locator: str, view: View) -> ReadResult:
+def _read_doc(call: _Call, doc: ProcessedDoc, locator: str, view: View) -> ReadResult:
     meta = doc.meta
+    store = call.store
     result = ReadResult(locator=locator, view=view)
     if view != "raw":
-        superseded_by = [d.meta.id for d in store.all() if meta.id in d.meta.supersedes]
+        superseded_by = call.superseded_by(meta.id)
         result.doc = DocView(
             id=meta.id,
             type=meta.type,
@@ -289,9 +359,8 @@ def _read_doc(store: DocStore, doc: ProcessedDoc, locator: str, view: View) -> R
             ],
         )
     if view != "summary":
-        lookup = RawLookup(store.root)
         for rid in meta.covers:
-            versions = lookup.versions(rid)
+            versions = call.raw.versions(rid)
             if versions:
                 result.spans.append(span(Anchor(rid, "record"), versions[-1], len(versions)))
             else:
@@ -310,9 +379,8 @@ def _raw_spans(lookup: RawLookup, record: RawRecord, anchor: Anchor, versions: i
     return [found]
 
 
-def _citing(docs: list[ProcessedDoc], rid: str, at: Anchor, around: int) -> list[CitingLine]:
+def _citing(docs: list[ProcessedDoc], superseded: set[str], rid: str, at: Anchor, around: int) -> list[CitingLine]:
     """The lines of current docs (none supersedes them) whose anchors point at the record, near the position."""
-    superseded = {s for d in docs for s in d.meta.supersedes}
     out: list[CitingLine] = []
     for doc in docs:
         meta = doc.meta

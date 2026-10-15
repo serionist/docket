@@ -54,6 +54,14 @@ def test_a_rebuild_fills_every_table(vault: Vault) -> None:
     assert rows(vault, "SELECT superseded_by FROM docs WHERE id = 'minutes:2026-10-13-fleet-review'") == [
         ("recording-note:2026-10-13-fleet-review",)
     ]
+    assert rows(vault, "SELECT * FROM old_paths") == [
+        (
+            "legacy-note:old-northwind-notes",
+            "notes/Northwind/Site Lead.md",
+            "notes/northwind/site lead.md",
+            "site lead.md",
+        )
+    ]
     assert not list((vault.root / "index").glob("*.tmp"))
     assert locate(vault, CALL) is not None and locate(vault, "calls:gone") is None
 

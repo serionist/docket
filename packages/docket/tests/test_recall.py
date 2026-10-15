@@ -3,7 +3,18 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from docket_testkit import MAIL, REC, THREAD, at, copy_vault, make_record, note, template_vault
+from docket_testkit import (
+    MAIL,
+    READ_ROUTES,
+    REC,
+    THREAD,
+    at,
+    copy_vault,
+    make_record,
+    note,
+    read_route,
+    template_vault,
+)
 
 from docket import recall
 from docket.errors import DocketError
@@ -22,10 +33,11 @@ def template(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return template_vault(tmp_path_factory)
 
 
-@pytest.fixture
-def vault(template: Path, tmp_path: Path) -> Vault:
+@pytest.fixture(params=READ_ROUTES)
+def vault(template: Path, tmp_path: Path, request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> Vault:
     v = copy_vault(template, tmp_path)
     recall.doc_put(v, note(lines=LINES))
+    read_route(request.param, monkeypatch)
     return v
 
 

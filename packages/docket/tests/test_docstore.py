@@ -381,6 +381,9 @@ def test_reading_docs_skips_what_doesn_t_parse_or_sits_in_the_wrong_place(
     with pytest.raises(DocketError, match="isn't UTF-8"):
         store.get("brief:latin")
     assert store.get("brief:nobody") is None
+    caplog.clear()
+    assert store.at_paths([vault.root / "processed" / "brief" / "gone.md", vault.root / NOTE_PATH]) == store.all()
+    assert "skipping processed/brief/gone.md:" in caplog.text
 
 
 def test_a_vault_with_no_processed_folder_has_no_docs(vault: Vault) -> None:

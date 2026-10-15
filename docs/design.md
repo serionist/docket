@@ -332,7 +332,8 @@ vault/
   rids are `plaud:<file id>` for the recording, `plaud:<file id>/<block>` for its transcript and
   `plaud:<file id>/summary` for its notes.
 - `rid` is also the ledger's locator, so every ledger source resolves to a record. Older locators (a legacy note's
-  path) resolve through the note's `old_paths`, which the index loads into its crosswalk.
+  path) resolve through the note's `old_paths`, which the index loads into its `old_paths` table (DR-0320); `read`
+  asks the index when it is current and parses the docs otherwise (DR-0321).
 
 ### 5.3 Processed docs
 
@@ -365,7 +366,7 @@ the earlier ones (DR-0112).
 | `records`, `record_versions`, `crosswalk` | every raw record's current version with its file and line in the raw log, and every version; old and new ids of one thing |
 | `segments` | transcript utterances: rid, engine, start and end ms, speaker, person, text |
 | `chunks`, `chunks_fts`, `chunk_vec_<model>` | the searchable units; FTS5 over the text as written and a stemmed column per language (DR-0114); vectors per model |
-| `docs`, `doc_covers`, `doc_anchors`, `derived_from` | processed docs, the records each covers, each line's anchors, and what each item and brief line was built from |
+| `docs`, `doc_covers`, `doc_anchors`, `old_paths`, `derived_from` | processed docs, the records each covers, each line's anchors, legacy notes' old paths, and what each item and brief line was built from |
 | `entities`, `aliases`, `alias_terms`, `entity_links`, `external_ids` | the keyword layer loaded from YAML, with each alias's forms and misspellings |
 | `mentions`, `extracts` | which chunk mentions which entity; typed values (ticket, amount, date, URL) |
 | `items`, `item_log`, `meetings`, `points`, `streams` | the ledger, folded from the op log |
