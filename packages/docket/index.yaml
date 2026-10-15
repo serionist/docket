@@ -1463,12 +1463,13 @@ decisions:
       - "Growing the index fixture or the name vault: other tests count their chunks and hits."
   - id: DR-0310
     title: Chunks are cut per kind, and aliases match as written and through the stems of languages that inflect names, a common stem form kept when the name's own case forms explain it
-    status: proposed
+    status: superseded
     at: "2026-10-15"
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#60"]
     supersedes: [DR-0116]
+    superseded_by: [DR-0350]
     description: "Transcripts are cut into windows that grow to 60 s and stop before 90 s or 350 words, sharing one utterance; a message is a chunk alone and its thread gets windows of the parent and up to 10 replies, sharing one; other records carry their title on top and split above 500 words between paragraphs; processed docs split per section, their anchors cut from the text and kept. An alias matches its words as written, or its stem forms (its stem, its dative's stem, itself) in the stemmed columns of languages that allow it: Hungarian, not English. A stem form under three letters, or in over ten times as many chunks as the alias as written (counting that as at least five), is dropped. One in over a fifth of all chunks and over 100 is dropped too, unless nine in ten of its chunks hold the alias as written or in one of its case forms: its last word followed by each of Hungarian's case endings, back or front by the word's vowels and both for a word holding both, matched folded (Acménél, Acmét, Markkal); a final y takes the endings after a vowel as well (Tonyval), and an old spelling keeps its letters before the doubled sound (Babitscsal, Kossuthtal, Maxszal). So a customer named in most chunks keeps its inflected mentions, while the Hungarian már still drops Mark's mar and the English same drops Sam's sam. On 1,000 invented chunks with Acme in 600, Acme was found in all 600 against 380 before; judging the forms of 100,000 chunks took 78 ms against 62. An asr alias also matches vocabulary words within one edit of a word of 5 to 7 letters, two of 8 or more; an alias with needs counts only beside an unconditional mention. Speakers, authors (by ids) and a doc's entities are mentions too. The index's schema version went up with it, so an existing index rebuilds at its next update (DR-0115)."
     binds:
       - No entity name enters chunk text, so editing an entity never re-chunks.

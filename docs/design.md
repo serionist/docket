@@ -440,11 +440,12 @@ role: the customer's site lead
   `e-mailben` holds `email` in the Hungarian column (DR-0280). A spaced one is found at query time: a word also
   matches two words in a row the index holds (`kickoff`, "kick off"), and two query words their joined word
   (DR-0281).
-- Aliases match as written, and through those forms in the columns of languages that inflect names (Hungarian, not
-  English: `Mark` would match `marking`). Each stem form is judged: one under three letters, or one that floods the
-  index (`Mark` stems to `mar`, which `már` gives too), is dropped and listed for curation. A form common because the
-  name is everywhere stays when nine in ten of its chunks hold the name or one of its case forms, so a customer in
-  most chunks keeps `Acménél` and `Acmét` (DR-0310).
+- Aliases match as written, and in their case forms in languages that give them (Hungarian, not English: `Mark`
+  would match `marking`): `Acménél`, `Sammal`, and `Sammel` as Hungarian says a foreign name by its sound. A case
+  form counts beside one of the name's kept stem forms, in a chunk or a query: a stem form alone meets "the same",
+  which the Hungarian stemmer cuts to Sam's `sam`, and a case form alone `benne`, which folds like Ben's `benné`. One
+  the stemmer leaves whole (`Nimishsel`) counts on its own. A stem form under three letters, or one that floods the
+  index (`Rob` stems to `rob`, which `robot` gives too), is dropped and listed for curation (DR-0350).
 - Aliases marked `asr` also match vocabulary words within one edit of a word of 5 to 7 letters, two of 8 or more.
 - Aliases with `needs` count only when one of the named entities is in the same chunk.
 - A diarized speaker, or an author whose id an entity lists, counts as a mention of that person.

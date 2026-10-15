@@ -12,6 +12,7 @@ from __future__ import annotations
 import functools
 import itertools
 import random
+import shutil
 import sqlite3
 import sys
 import time
@@ -37,6 +38,9 @@ VOCAB = 40_000
 ENTITIES = 300
 ASR = 100
 SECONDS = 1.0
+# Every update judges the stem forms and finds every mention again: on these chunks and aliases, about half a second on
+# a laptop (DR-0350).
+MENTION_SECONDS = 2.0
 COMPOUNDS = 2_000
 COMPOUND_SHARE = 0.01
 # The word check's load, as DR-0232 measured it: 200 candidates of 350 words, here six query words each with a split.
@@ -181,6 +185,30 @@ def test_queries_answer_in_well_under_a_second(vault: Vault) -> None:
     since, until = result.query.since, result.query.until
     assert since is not None and until is not None
     assert all(h.ts is not None and since <= h.ts < until for g in result.groups for h in g.hits)
+
+
+def test_the_mention_pass_stays_under_two_seconds(vault: Vault, tmp_path: Path) -> None:
+    # On a copy: the template is shared, and never written.
+    db = tmp_path / "docket.sqlite"
+    shutil.copyfile(build.db_path(vault), db)
+    analyzer = Analyzer(build.languages_of(vault))
+    conn = sqlite3.connect(db, isolation_level=None)
+    try:
+        before = conn.execute("SELECT count(*) FROM mentions").fetchone()[0]
+        aliases = matching.load_aliases(conn)
+        conn.execute("BEGIN")
+        started = time.monotonic()
+        matching.judge_forms(conn, analyzer, aliases)
+        matching.mentions(conn, analyzer, aliases)
+        seconds = time.monotonic() - started
+        conn.execute("COMMIT")
+        after = conn.execute("SELECT count(*) FROM mentions").fetchone()[0]
+    finally:
+        conn.close()
+    print(f"\nmention pass: {len(aliases)} aliases, {CHUNKS} chunks, {seconds * 1000:.0f} ms, {after} mentions")
+    assert after == before > 0
+    if not traced():
+        assert seconds < MENTION_SECONDS
 
 
 @functools.cache

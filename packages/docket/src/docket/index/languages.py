@@ -1,5 +1,5 @@
-"""The languages the index stems: each one's Snowball stemmer, the extra word forms it needs, whether aliases match on
-its stems and the case forms of a name, and its time words.
+"""The languages the index stems: each one's Snowball stemmer, the extra word forms it needs, the case forms of a name
+(which aliases match in), and its time words.
 
 English is always one; the others come from `vault.yaml`'s `owner.languages`, which is free text, so a code is matched
 in any case and Snowball's own names are taken too. A language Docket can't place gets no column and is a problem: its
@@ -39,8 +39,6 @@ class TimeWord:
 class Language:
     code: str
     snowball: str
-    # Aliases match on this language's stems only where it inflects names and someone has tuned it.
-    alias_stems: bool = False
     # More words to stem for a word (lowercased, as written), because the stemmer cuts a bare word shorter than an
     # inflected one.
     more: Callable[[str], list[str]] | None = None
@@ -52,8 +50,9 @@ class Language:
     # Only the first: English changes the third (`dry` to `dri`) and its exceptions the second (`dying` to `die`). Some
     # Snowball stemmers cut prefixes (Indonesian, Irish), so a language says so only once someone has checked it.
     keeps_start: bool = False
-    # A name's case forms (lowercased, as written): they tell a common stem form's inflected mentions of the name from
-    # an ordinary word that stems the same (DR-0310).
+    # A name's case forms (lowercased, as written). Aliases match in them beside a kept stem form in this language,
+    # and never through a stem form alone: an ordinary word that stems like a name (`same` for Sam) is none of its
+    # case forms (DR-0350).
     cases: Callable[[str], list[str]] | None = None
 
     @property
@@ -124,15 +123,29 @@ _ENDINGS = {
 # A two-letter consonant doubles its first letter (Kovács gives Kováccsal); dzs comes before zs, which it ends with.
 _DIGRAPHS = ("dzs", "cs", "dz", "gy", "ly", "ny", "sz", "ty", "zs")
 # Old spellings and foreign letters keep their letters, and the doubling writes the sound after them: Babitscsal,
-# Ráczcal, Madáchcsal, Kossuthtal, Maxszal.
-_OLD_SOUNDS = {"ts": "cs", "cz": "c", "ch": "cs", "th": "t", "x": "sz"}
+# Ráczcal, Madáchcsal, Kossuthtal, Maxszal, Nimishsel, Josephfel.
+_OLD_SOUNDS = {"ts": "cs", "cz": "c", "ch": "cs", "th": "t", "x": "sz", "sh": "s", "ph": "f"}
+# A foreign name with back vowels only may sound front (Sammel, Ryannel, Jasonnek): after a consonant it takes these
+# front endings too, and -el on the doubled consonant. Not -et, -en, -öt or -ön: Mark with -et is the English market.
+_SOUNDED_FRONT = ("nek", "nél", "hez", "ben", "be", "ből", "re", "ről", "től", "ként")
+
+
+def _doubled(word: str) -> str:
+    """A word ending in a consonant with that consonant doubled, as -val, -vá and their front pairs write it."""
+    old = next((spelling for spelling in _OLD_SOUNDS if word.endswith(spelling)), None)
+    if old is not None:
+        return word + _OLD_SOUNDS[old]
+    last = next((d for d in _DIGRAPHS if word.endswith(d)), word[-1])
+    return word if word.endswith(last[0] + last) else word[: -len(last)] + last[0] + last
 
 
 def hungarian_cases(word: str) -> list[str]:
     """A name's case forms: a final vowel lengthened as for the dative, then each case ending. Back endings for a word
     with a back vowel, front for one with a front vowel or none, and both for one with both, since foreign names go
     either way (Acménak, Acmének). A final y takes the endings after a vowel as well, as foreign names and old spellings
-    read it (Tonyval, Szalayval), and those after a consonant, as ny, ly, gy and ty do (Báránnyal)."""
+    read it (Tonyval, Szalayval), and those after a consonant, as ny, ly, gy and ty do (Báránnyal). A word with back
+    vowels only that ends in a consonant also takes the front endings that start with one, as a foreign name read by
+    its sound does (Sammel, Samnek)."""
     if not word[-1:].isalpha():
         return []
     back = any(ch in _BACK for ch in word)
@@ -146,13 +159,12 @@ def hungarian_cases(word: str) -> list[str]:
             continue
         if word[-1] == "y":
             out += [word + e for e in (*every, *after_vowel)]
-        old = next((spelling for spelling in _OLD_SOUNDS if word.endswith(spelling)), None)
-        if old is not None:
-            doubled = word + _OLD_SOUNDS[old]
-        else:
-            last = next((d for d in _DIGRAPHS if word.endswith(d)), word[-1])
-            doubled = word if word.endswith(last[0] + last) else word[: -len(last)] + last[0] + last
-        out += [word + e for e in (*every, *after_consonant)] + [doubled + e for e in doubling]
+        out += [word + e for e in (*every, *after_consonant)] + [_doubled(word) + e for e in doubling]
+    if not front and word[-1] not in _BACK:
+        out += [word + e for e in _SOUNDED_FRONT] + [_doubled(word) + "el"]
+        if word[-1] == "y":
+            # Read as a vowel, as the back endings read Tonyval: Andyvel.
+            out += [word + "vel", word + "vé"]
     return list(dict.fromkeys(out))
 
 
@@ -161,7 +173,6 @@ KNOWN: dict[str, Language] = {
     "hu": Language(
         "hu",
         "hungarian",
-        alias_stems=True,
         more=hungarian_dative,
         restem=True,
         time_words=HUNGARIAN_TIME,

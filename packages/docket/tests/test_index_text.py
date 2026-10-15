@@ -7,7 +7,7 @@ import types
 
 import pytest
 
-from docket.index import text
+from docket.index import matching, text
 from docket.index.languages import code_of, hungarian_cases, hungarian_dative, language, resolve
 from docket.index.text import Analyzer, Stemmer, any_of, fold, phrase, prefix, quote, words, words_and_compounds
 
@@ -140,8 +140,9 @@ def test_hungarian_case_forms_follow_harmony_and_assimilation() -> None:
     assert "acmet" not in acme
     mark = hungarian_cases("mark")
     assert {"marknak", "markkal", "markká", "markot", "markon", "marknál", "markról"} <= set(mark)
-    # Back vowels only, so the English market and marked are no case form of Mark.
-    assert not {"market", "marked", "marknek", "markkel"} & set(mark)
+    # Back vowels only: front endings only where they start with a consonant, so the English market and marked are no
+    # case form of Mark.
+    assert not {"market", "marked", "marken", "marköt"} & set(mark)
     assert {"kováccsal", "kovácsot"} <= set(hungarian_cases("kovács"))
     assert {"bellel", "bellnek"} <= set(hungarian_cases("bell"))
     peter = hungarian_cases("péter")
@@ -169,6 +170,40 @@ def test_hungarian_case_forms_read_a_final_y_and_old_spellings() -> None:
     assert {"maxszal", "maxot"} <= set(hungarian_cases("max"))
     old = {*hungarian_cases("babits"), *hungarian_cases("kossuth"), *hungarian_cases("max")}
     assert not {"babitssal", "kossuthhal", "maxxal"} & old
+    # sh and ph are one sound, which the doubling writes: Nimishsel, Joshsal, Josephfel.
+    assert {"nimishsel", "nimishnek"} <= set(hungarian_cases("nimish"))
+    assert {"joshsal", "joshsel"} <= set(hungarian_cases("josh"))
+    assert "josephfel" in hungarian_cases("joseph")
+    assert not {"nimishhel", "joshhal", "josephhel"} & {*hungarian_cases("nimish"), *hungarian_cases("josh")}
+
+
+def test_hungarian_case_forms_let_a_foreign_name_sound_front() -> None:
+    # Hungarian inflects a foreign name by its sound: Sammel, Ryannel, Jasonnek, Frankkel, beside Sammal and Ryannak.
+    for name, forms in {
+        "sam": {"sammel", "samnek", "samhez", "sammal", "samnak"},
+        "ryan": {"ryannel", "ryannek", "ryanről", "ryannal"},
+        "jason": {"jasonnel", "jasonnek", "jasonben"},
+        "frank": {"frankkel", "franknek"},
+        # A final y read as a vowel, as Tonyval reads it: Andyvel, Garyvel.
+        "andy": {"andyvel", "andyvé", "andynek", "andyval"},
+        "gary": {"garyvel", "garynek"},
+    }.items():
+        assert forms <= set(hungarian_cases(name)), name
+    # Only the endings that start with a consonant: Sam with -et would be samet, Jack's jacket.
+    assert not {"samet", "samen", "jacket", "jacken"} & {*hungarian_cases("sam"), *hungarian_cases("jack")}
+    # A word ending in a back vowel keeps back endings only.
+    assert not any(form.endswith(("nek", "vel")) for form in hungarian_cases("dóra"))
+
+
+def test_only_languages_with_case_forms_match_aliases_on_stems() -> None:
+    # Without case forms an alias matches as written only (DR-0350).
+    assert [lang.code for lang in matching.alias_langs(Analyzer(resolve(["en", "hu", "de"])))] == ["hu"]
+    # Only the last word inflects.
+    analyzer = Analyzer(resolve(["en", "hu"]))
+    cases = matching.cases_of(analyzer, ["northwind", "traders"], language("hu"))
+    assert cases.reached[0] == ("northwind", "tradersnak")
+    assert all(form[0] == "northwind" for form in (*cases.reached, *cases.alone))
+    assert matching.cases_of(analyzer, ["mark"], language("en")) == matching.Cases((), ())
 
 
 def test_the_seeds_are_the_dative_stem_and_the_word() -> None:
