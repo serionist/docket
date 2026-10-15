@@ -68,6 +68,9 @@ You need uv (it brings Python 3.12), git, gitleaks, and Claude Code for the full
 - `uv run gate full` adds the tests with their coverage floors, the whole history's secrets and the plugin validated
   by Claude Code. It is the merge rule; CI runs it on Linux and the types and tests on Windows and macOS.
 - Coverage floors are in `tools/devkit/coverage-floors.json`. Raise one in the change that earns it, never lower one.
+- Eval floors, recall at 10 and MRR per kind of question on the invented set, are in
+  `tools/devkit/eval-floors.json`: the full lane fails a kind above or below its floor, and a lowered one needs a new
+  `lowered` note saying why.
 - The repo is public and Docket is built from its maintainer's life, so the gate checks a private deny list kept
   outside the repo (`~/.config/docket-dev/denylist.txt`; CI has its own). Tests and examples use invented people.
 
@@ -106,6 +109,7 @@ agrees in the issue or, under an autonomy grant, with its decision recorded as p
   (DR-0121), release logs (DR-0200), a cut record's fidelity (DR-0126), a legacy note's old paths and import hash
   (DR-0130), old paths as locators (DR-0131), each machine's cursor file (DR-0245);
 - a source's mapper interface (DR-0119), and the names and keys of a source in `vault.yaml` (DR-0124, DR-0125);
+- the question file `docket eval` reads, which users keep outside the repo (DR-0290);
 - the MCP tools' names and parameters: `search`, `read`, `verify` and `doc_put` (DR-0150), `run_open` and `ingest`
   (DR-0241), and the plugin's server key `docket` that prefixes them (DR-0160);
 - the plugin's skill and hook names: `recall`, `setup`, `cuts` (DR-0207), the SessionStart hook running `docket

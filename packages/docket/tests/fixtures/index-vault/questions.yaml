@@ -1,6 +1,6 @@
 # Invented questions over the index fixture, each with where its answer is: a locator among the top five hits (a hit's
 # own or one collapsed under it), matched exactly, or a record's locator that the hit's extends with @ or #. The group
-# it sits in is named when that matters. They seed the question set `docket eval` runs (phase 1).
+# it sits in is named when that matters. A search test; the question set docket eval measures is fixtures/eval-vault.
 # The second transcript writes "tíz millió"; the first writes "tízmillió", one word that "millió" never finds.
 - q: millió forint
   expect: "r:calls:rec-0100-second@00:30-01:51"

@@ -430,3 +430,8 @@ conventions:
     area: docs
     review_only: true
     why: The maintainer reads every doc; dense paragraphs and AI phrasing get skipped.
+  - id: CV-0013
+    rule: Each kind of question in the invented set keeps its recall at 10 and MRR at its floor in tools/devkit/eval-floors.json; a floor moves with its number, and a lowered one carries a new lowered note saying why
+    area: tests
+    enforced_by: "gate: tests (full lane)"
+    decision: DR-0295

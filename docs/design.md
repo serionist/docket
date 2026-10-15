@@ -654,8 +654,9 @@ No big-bang switch: each piece of an existing setup is replaced only after its r
 
 ## 13. How we know it works
 
-- Recall: a set of real questions with the right locators; recall@10 and MRR, run by `docket eval` after every change
-  to chunking, models or aliases.
+- Recall: questions with the locators a good answer cites, of five kinds in two languages; recall@10 and MRR per
+  kind. An invented set runs in the gate against a floor per kind, and `docket eval <file>` runs a user's own set
+  against their vault after a change to chunking, models or aliases.
 - Speech: hand-corrected stretches; word error rate and name error rate.
 - Software: a synthetic fixture vault; a test that two rebuilds give the same database; recorded replays per
   connector; property tests that merging two machines' ledger ops gives one result in any order; structured logs per

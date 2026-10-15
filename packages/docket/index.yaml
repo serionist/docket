@@ -18,6 +18,7 @@ reading:
   - { path: packages/docket/src/docket/vault/releaselog.py, role: contract, note: "the release log, a one-way door: the file, its lines, how several fold into one and how it fails closed" }
   - { path: packages/docket/src/docket/vault/cursors.py, role: contract, note: "each machine's cursor file, a one-way door: its keys, how it reads and fails closed, the window, the retry and waiting sets" }
   - { path: packages/docket/src/docket/service/runs.py, role: contract, note: "open sync runs in memory: bind, captures, close, drop, the caps, the marker the capture hook reads" }
+  - { path: packages/docket/src/docket/questions.py, role: contract, note: "the question file docket eval reads, a one-way door (DR-0290), and what answers a wanted locator (DR-0291)" }
 decisions:
   - id: DR-0019
     title: The vault's layout and run-file names are fixed
@@ -1453,7 +1454,7 @@ decisions:
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#66"]
-    description: "packages/docket/tests/fixtures/eval-vault holds the records (calls, mail, chat, cal), the docs, the entities and questions.yaml of an invented small publisher of English and Hungarian translations; tests/eval_vault.py writes them into a vault with about 150 seeded routine messages and mails in both languages that share the questions' words and hold none of their answers, once per test session: about 400 chunks. The set has 72 questions, 14 exact-name, 18 paraphrase, 14 inflection (all Hungarian), 12 typo and 14 time-bound, 31 in English and 41 in Hungarian, asked on Wednesday 14 October 2026. A paraphrase uses none of its answer's words, so keyword search finds few: that is the number embeddings (#67) must raise. The index fixture's nine questions stay a search test of their own."
+    description: "packages/docket/tests/fixtures/eval-vault holds the records (calls, mail, chat, cal), the docs, the entities and questions.yaml of an invented small publisher of English and Hungarian translations; tests/eval_vault.py writes them into a vault with 150 seeded routine messages and mails in both languages that share the questions' words and hold none of their answers, once per test session: about 300 chunks. The set has 72 questions, 14 exact-name, 18 paraphrase, 14 inflection (all Hungarian), 12 typo and 14 time-bound, 31 in English and 41 in Hungarian, asked on Wednesday 14 October 2026. A paraphrase uses none of its answer's key words, so keyword search finds few: that is the number embeddings (#67) must raise. The index fixture's nine questions stay a search test of their own."
     not_chosen:
       - "All of it generated in code: nobody could check a question against its answer."
       - "The perf vault: its words are seeded syllables, so no question means anything there."
