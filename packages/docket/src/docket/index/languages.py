@@ -48,6 +48,10 @@ class Language:
     # (`robot` to `rob`, `robotot` to `robot`): the second cut meets the bare word.
     restem: bool = False
     time_words: tuple[TimeWord, ...] = ()
+    # The stemmer keeps a word's first letter once folded, so the word check need not stem a word no form starts like.
+    # Only the first: English changes the third (`dry` to `dri`) and its exceptions the second (`dying` to `die`). Some
+    # Snowball stemmers cut prefixes (Indonesian, Irish), so a language says so only once someone has checked it.
+    keeps_start: bool = False
 
     @property
     def column(self) -> str:
@@ -98,8 +102,16 @@ def hungarian_dative(word: str) -> list[str]:
 
 
 KNOWN: dict[str, Language] = {
-    "en": Language("en", "english", time_words=ENGLISH_TIME),
-    "hu": Language("hu", "hungarian", alias_stems=True, more=hungarian_dative, restem=True, time_words=HUNGARIAN_TIME),
+    "en": Language("en", "english", time_words=ENGLISH_TIME, keeps_start=True),
+    "hu": Language(
+        "hu",
+        "hungarian",
+        alias_stems=True,
+        more=hungarian_dative,
+        restem=True,
+        time_words=HUNGARIAN_TIME,
+        keeps_start=True,
+    ),
 }
 
 

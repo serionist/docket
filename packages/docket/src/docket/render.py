@@ -136,8 +136,8 @@ def search(result: SearchResult, tz: ZoneInfo) -> list[str]:
     lines += [f"{found.words!r} is {found.id}" for found in reading.entities]
     if reading.unknown:
         lines.append(f"not found as a person or entity: {', '.join(reading.unknown)}")
-    if reading.left_out:
-        lines.append(f"too common to search for: {', '.join(reading.left_out)}")
+    if reading.absent:
+        lines.append(f"in no chunk: {', '.join(reading.absent)}")
     if not result.groups:
         lines.append("nothing found")
     for group in result.groups:

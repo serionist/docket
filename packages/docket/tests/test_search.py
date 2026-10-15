@@ -3,11 +3,13 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 import yaml
 from docket_testkit import (
     CALL,
+    CRANE,
     FLEET,
     INDEX_FIXTURE,
     INDEX_NOW,
@@ -17,15 +19,23 @@ from docket_testkit import (
     index_config,
     index_template,
     make_record,
+    name_template,
+    query_words,
+    stem_every_word,
 )
 
+from docket import render
 from docket.errors import DocketError
 from docket.index import labels, rebuild, search, summary_for
 from docket.index import query as search_module
 from docket.index.build import languages_of, open_index
-from docket.index.query import SearchResult
+from docket.index.languages import resolve
+from docket.index.query import Hit, SearchResult
+from docket.index.terms import Checker, phrase_of
+from docket.index.text import Analyzer
 from docket.vault.records import RawRecord
 from docket.vault.vault import Vault
+from docket.web import views
 
 QUESTIONS: list[dict[str, Any]] = yaml.safe_load((INDEX_FIXTURE / "questions.yaml").read_text(encoding="utf-8"))
 LATER = datetime(2026, 10, 14, 9, 0, tzinfo=UTC)
@@ -107,13 +117,10 @@ def test_all_then_any_then_prefixes(vault: Vault) -> None:
     assert find(vault, "zebracorn qwertyuiop").groups == []
 
 
-def test_common_forms_leave_the_query_only_past_the_floor(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
-    assert find(vault, "the pallet").query.left_out == []
-    monkeypatch.setattr(search_module, "COMMON_MIN", 0)
-    reading = find(vault, "the pallet").query
-    assert reading.left_out == ["the"] and reading.words == ["pallet"]
-    alone = find(vault, "the").query
-    assert alone.left_out == [] and alone.words == ["the"]
+def test_every_word_stays_however_common(vault: Vault) -> None:
+    result = find(vault, "the pallet the")
+    assert result.query.words == ["the", "pallet"] and result.query.left_out == [] and result.query.absent == []
+    assert {h.found_by for g in result.groups for h in g.hits} >= {"all"}
 
 
 def test_filters_apply_before_the_cut(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -284,3 +291,144 @@ def test_summary_for_gives_what_search_attaches_to_the_record_s_group(vault: Vau
     assert summary_for(vault, "calls:rec-0100-second") == by_search[CALL]
     assert summary_for(vault, "chat:C0SIDE/1791500000.000100") is None
     assert summary_for(vault, "chat:nowhere/1") is None
+
+
+# -- the name vault: a name in most chunks, and titles ---------------------------------------------------------------
+
+NOTE = "recording-note:2026-10-12-acme-kick-off"
+
+
+@pytest.fixture(scope="module")
+def names(tmp_path_factory: pytest.TempPathFactory) -> Vault:
+    v = copy_vault(name_template(tmp_path_factory), tmp_path_factory.mktemp("names"))
+    rebuild(v)
+    return v
+
+
+def ranked(result: SearchResult) -> list[Hit]:
+    return sorted((h for g in result.groups for h in g.hits), key=lambda h: h.rank)
+
+
+def first(result: SearchResult, found: str) -> int:
+    """The best rank of a hit in a record or a doc."""
+    return min(h.rank for h in ranked(result) if found in (h.rid, h.doc))
+
+
+def test_the_name_vault_holds_its_names_in_most_chunks(names: Vault) -> None:
+    conn = open_index(names)
+    try:
+        total = conn.execute("SELECT count(*) FROM chunks").fetchone()[0]
+        for name in ("acme", "orbex"):
+            n = conn.execute("SELECT doc FROM vocab WHERE col = 'folded' AND term = ?", (name,)).fetchone()[0]
+            assert n * 5 > total and n > 100, name
+    finally:
+        conn.close()
+
+
+def test_a_name_in_most_chunks_stays_in_the_query(names: Vault) -> None:
+    # Orbex's forms are all the word itself, so it was dropped and reported; Acme's stem differs, so its form as
+    # written was in no stemmed column and the all-words stage found nothing.
+    for query in ("orbex budget", "acme budget"):
+        result = find(names, query)
+        assert result.query.words == query.split() and result.query.left_out == [] and result.query.absent == []
+        top = ranked(result)[0]
+        assert top.found_by == "all" and all(w in top.snippet.lower() for w in query.split()), query
+
+
+def test_a_word_in_no_chunk_is_said(names: Vault) -> None:
+    result = find(names, "acme zebracorn")
+    assert result.query.absent == ["zebracorn"]
+    tz = ZoneInfo("Europe/Budapest")
+    assert "in no chunk: zebracorn" in render.search(result, tz)
+    assert views.reading_line(result.query, {}, tz) == ["in no chunk: zebracorn"]
+
+
+def test_a_title_holding_the_words_ranks_first(names: Vault) -> None:
+    budget = find(names, "acme budget")
+    assert ranked(budget)[0].doc == "legacy-note:acme-budget-review"
+    assert first(budget, "legacy-note:acme-budget-review") < first(budget, "legacy-note:notes-from-the-week")
+    kick = find(names, "kick-off acme dana")
+    assert ranked(kick)[0].doc == NOTE
+    assert first(kick, NOTE) < first(kick, "legacy-note:weekly-notes")
+
+
+def test_a_long_heading_lifts_only_by_its_lead(names: Vault) -> None:
+    result = find(names, "acme kick-off dana")
+    order = [first(result, d) for d in (NOTE, "legacy-note:acme-kick-off-second-half", "legacy-note:weekly-notes")]
+    assert order == sorted(order)
+    # The sweep names every word after its lead: it keeps its BM25 place, below a short note saying them in its body.
+    assert first(result, "legacy-note:weekly-notes") < first(result, "legacy-note:mail-sweep")
+
+
+def test_a_recording_s_name_lifts_its_group(names: Vault) -> None:
+    result = find(names, "borealis crane audit")
+    assert result.groups[0].key == CRANE and ranked(result)[0].rid == CRANE
+    assert first(result, CRANE) < first(result, "chat:C0NAMES/1791500004.000100")
+
+
+def test_a_quoted_phrase_in_a_title_counts(names: Vault) -> None:
+    result = find(names, '"budget review" acme')
+    order = [
+        first(result, f"legacy-note:{slug}")
+        for slug in ("acme-budget-review", "notes-from-the-week", "acme-review-of-the-budget")
+    ]
+    assert order == sorted(order)
+
+
+def test_a_name_in_a_title_counts_through_its_alias(names: Vault) -> None:
+    result = find(names, "rita budget")
+    assert [(e.id, e.words) for e in result.query.entities] == [("rita-sample", "rita")]
+    assert ranked(result)[0].rid == "mail:<rita-1@acme.example>"
+
+
+def test_a_hungarian_title_is_held_through_its_stems(names: Vault) -> None:
+    result = find(names, "acme határidő")
+    assert ranked(result)[0].doc == "legacy-note:acme-dontes"
+    assert first(result, "legacy-note:acme-dontes") < first(result, "legacy-note:heti-jegyzet")
+
+
+def test_a_title_lifts_one_hit_per_group(names: Vault) -> None:
+    hits = ranked(find(names, "kick-off acme dana"))
+    assert [h.doc for h in hits[:2]] == [NOTE, "legacy-note:acme-kick-off-second-half"]
+    assert len([h for h in hits if h.doc == NOTE]) == 3
+
+
+def test_the_any_word_stage_ranks_more_of_the_words_first(names: Vault) -> None:
+    result = find(names, "acme budget approval")
+    assert {h.found_by for h in ranked(result)} == {"any"}
+    assert first(result, "chat:C0NAMES/1791500002.000100") < first(result, "chat:C0NAMES/1791500001.000100")
+
+
+def test_a_title_never_lifts_a_hit_into_an_earlier_stage(names: Vault) -> None:
+    hits = ranked(find(names, "crane audit approval"))
+    every = [h.rank for h in hits if h.found_by == "all"]
+    some = [h for h in hits if h.found_by == "any"]
+    assert every and some and max(every) < min(h.rank for h in some)
+    assert some[0].rid == CRANE
+
+
+def test_the_word_check_agrees_with_stemming_every_word(vault: Vault, names: Vault) -> None:
+    # Stems that change a word's early letters (`cries` to `cri`, `dying` to `die`, `skies` to `sky`), and a capital
+    # that lowercases to two characters (`İ`): a screen on more than the first letter would miss them.
+    texts = [
+        "Acménál volt szó a határidőről, és az Acme határidő csúszik.",
+        "The dying light under grey skies; the baby cries, the kick-off is dry. ÁRVÍZTŰRŐ tükörfúrógép, İSTANBUL.",
+    ]
+    for v in (vault, names):
+        conn = open_index(v)
+        try:
+            texts += [r[0] for r in conn.execute("SELECT text FROM chunks ORDER BY id")]
+        finally:
+            conn.close()
+    for languages in (["en", "hu"], ["en", "de"]):
+        analyzer = Analyzer(resolve(languages))
+        picked = ["acme", "határidő", "die", "sky", "cry", "dry", "istanbul", "dana", "budget", "forint", "árvíztűrő"]
+        words = query_words(analyzer, texts, picked, seed=57)
+        phrases = [phrase_of(analyzer, p) for p in ("budget review", "crane audit", "acme kick", "grey skies")]
+        checker = Checker(analyzer, words, phrases)
+        assert (checker.firsts is not None) == (languages == ["en", "hu"])
+        for text in texts:
+            want_words, want_phrases = stem_every_word(analyzer, words, phrases, text)
+            held = checker.held(text)
+            assert (set(held.words), set(held.phrases)) == (want_words, want_phrases), text
+            assert checker.count(text) == len(want_words) + len(want_phrases), text

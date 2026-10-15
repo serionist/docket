@@ -12,9 +12,10 @@ check every fact you use against the raw it came from, and answer with locators.
 
 ## The method
 
-1. **Search.** `search` with the question's words, in the language they were said in when you know it. Put names in
-   `people` and `entities`: they lift what mentions them and never drop a hit. Use time words in the query, or `since`
-   and `until` (a date, or a time with its offset). Start with a small `k`, such as 10.
+1. **Search.** `search` with the question's key words (names, nouns, numbers), not the sentence, in the language they
+   were said in when you know it: every word must be in a hit for it to rank first. Put names in `people` and
+   `entities`: they lift what mentions them and never drop a hit. Use time words in the query, or `since` and `until`
+   (a date, or a time with its offset). Start with a small `k`, such as 10.
 2. **Read the summary.** For the best groups, `read` the locator with `view` `summary`: the doc's lines, each with
    its anchors.
 3. **Check the raw behind every fact you will use.** `verify` the doc with `lines` set to those lines: each comes back

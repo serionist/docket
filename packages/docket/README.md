@@ -168,6 +168,12 @@ ben-sample`. Words match as written, accents or not, and through their stems in 
 their aliases; time words ("last week", "múlt héten", "yesterday", "2026-10") become a filter; `--person` and
 `--entity` lift what mentions them and never hide the rest. In Python it is `docket.index.search`.
 
+Search with key words (names, nouns, numbers), not the sentence: every word counts, however common, and a hit holding
+every word ranks first, so a customer named in most of your notes still narrows the search. A doc, mail or recording
+whose title leads with most of your words comes before one that only mentions them; a title's lead is its text up to
+the first `: `, else its first 12 words. `in no chunk: <word>` names a word nothing in the vault holds, so no hit can
+hold every word.
+
 The index lives in `index/` in the vault, on each machine, never committed. `docket search` keeps it up to date, and
 `docket index rebuild` makes it again from scratch.
 

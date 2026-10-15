@@ -155,8 +155,8 @@ def reading_line(reading: QueryReading, names: dict[str, EntityLabel], tz: ZoneI
     out += [f'"{found.words}" is {_name(found.id, names)}' for found in reading.entities]
     if reading.unknown:
         out.append(f"not found as a person or entity: {', '.join(reading.unknown)}")
-    if reading.left_out:
-        out.append(f"too common to search for: {', '.join(reading.left_out)}")
+    if reading.absent:
+        out.append(f"in no chunk: {', '.join(reading.absent)}")
     return out
 
 

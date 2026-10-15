@@ -488,6 +488,191 @@ def index_template(factory: pytest.TempPathFactory) -> Path:
     return template_with(factory, build_index_vault)
 
 
+# The name vault: a vault about one customer, where two invented names are in most chunks. Acme's stems differ from it
+# (`acm`), Orbex's forms are all the word itself; both stay plain words, never entities. Rita Sample is the one entity.
+WEEKLY = 160
+KICK_OFF = "calls:rec-0200"
+CRANE = "calls:rec-0201"
+FILLER = (
+    "The team walked through the schedule, the site plan and the open items, then agreed on the next steps for the "
+    "week and who follows up with whom."
+)
+NAME_MESSAGES = {
+    # Other customers' news, short and saying the query's words often: plain BM25 puts them first.
+    "kick": "Borealis kick-off with Dana: kick-off agenda, kick-off notes, Dana runs the kick-off.",
+    "orbex": "Orbex budget: budget budget budget.",
+    "acme": "Acme budget, among the many other things we went through at length today, gets a second look later.",
+    "approval": "Borealis budget approval: budget approved.",
+    "crane": "Borealis crane audit: crane audit done, crane audit report sent, crane audit closed.",
+    "both": "Crane audit approval granted.",
+    "rita": "Rita: budget, budget, budget.",
+}
+NAME_DOCS = {
+    "weekly-notes": ("Weekly notes", "The acme kick-off with dana went well."),
+    "acme-budget-review": ("Acme budget review", f"{FILLER} {FILLER}"),
+    "notes-from-the-week": ("Notes from the week", "Acme budget review went fine; acme budget numbers came in."),
+    "mail-sweep": (
+        "2026-10-12 - Mail sweep, received 11 Oct 23:44 to 12 Oct 22:50: the Acme kick-off ran, Dana sent the notes",
+        " ".join([FILLER] * 6),
+    ),
+    "acme-kick-off-second-half": (
+        "2026-10-12 - Acme kick-off with Dana (second half): no site in the plan yet",
+        " ".join([FILLER] * 3),
+    ),
+    "acme-review-of-the-budget": ("Acme review of the budget", f"{' '.join([FILLER] * 4)} The budget review is due."),
+    "acme-dontes": (
+        "Acme döntés a határidőről",
+        "A csapat megbeszélte a következő lépéseket, és pénteken újra összeül.",
+    ),
+    "heti-jegyzet": ("Heti jegyzet", "Az acme határidő kérdése nyitott, az acme határidő csúszik."),
+}
+
+
+def _segments(texts: list[str]) -> list[dict[str, Any]]:
+    speakers = ("Ada Example", "Ben Sample")
+    return [
+        {"start_ms": n * 30_000, "end_ms": (n + 1) * 30_000, "speaker": speakers[n % 2], "text": text}
+        for n, text in enumerate(texts)
+    ]
+
+
+def name_records() -> dict[str, list[RawRecord]]:
+    """The name vault's records by source."""
+    fetched = {"fetched": "2026-10-14T07:00:00Z", "via": "fixture"}
+    mail = [
+        {
+            "rid": f"mail:<weekly-{n}@acme.example>", "source": "mail", "kind": "mail", "container": "mail:weekly",
+            "ts": f"2026-{5 + n // 30:02d}-{1 + n % 28:02d}T09:00:00Z", "title": f"Weekly status {n}",
+            "text": f"Acme and Orbex: routine status for week {n}. Deliveries arrived on time and the line ran well.",
+        }
+        for n in range(WEEKLY)
+    ]  # fmt: skip
+    mail.append(
+        {
+            "rid": "mail:<rita-1@acme.example>", "source": "mail", "kind": "mail", "container": "mail:rita",
+            "ts": "2026-10-12T15:00:00Z", "title": "Budget call with Rita",
+            "text": "A short call about the numbers for next quarter, nothing settled yet, more to follow next week.",
+        }
+    )  # fmt: skip
+    chat = [
+        {
+            "rid": f"chat:C0NAMES/{1791500000 + n}.000100", "source": "chat", "kind": "message",
+            "container": "chat:C0NAMES", "ts": f"2026-10-13T08:{n:02d}:00Z", "author": "U0BEN", "text": text,
+        }
+        for n, text in enumerate(NAME_MESSAGES.values())
+    ]  # fmt: skip
+    kick_off = [
+        "Let us start with the site plan and the schedule for the first month.",
+        "The cranes arrive in the second week, after the foundations are poured.",
+        "Who owns the safety briefing for the night shift?",
+        "I will draft it and send it round by Friday.",
+        "Then the next call is in two weeks, same time.",
+        "Thanks everyone, that is all for today.",
+    ]
+    crane = [
+        "Good morning, this is the borealis crane audit for the north yard, starting with the hoist, the rails, the "
+        "brakes and the load charts, then the logbooks and the operator cards.",
+        "The hoist passed, the rails need new clamps on the east side.",
+        "The brakes passed; the load charts are out of date and get reprinted.",
+        "The logbooks are complete, two operator cards expire next month.",
+    ]
+    calls = [
+        {"rid": KICK_OFF, "source": "calls", "kind": "recording", "ts": "2026-10-12T09:00:00Z",
+         "title": "Acme kick-off with Dana", "segments": _segments(kick_off)},
+        {"rid": CRANE, "source": "calls", "kind": "recording", "ts": "2026-10-13T10:00:00Z",
+         "title": "Borealis crane audit", "segments": _segments(crane)},
+    ]  # fmt: skip
+    by_source = {"mail": mail, "chat": chat, "calls": calls}
+    return {s: [RawRecord.model_validate({**r, **fetched}) for r in rs] for s, rs in by_source.items()}
+
+
+def name_docs() -> list[str]:
+    """The name vault's docs: a recording note of three sections under its recording's name, and legacy notes."""
+    sections = [
+        ("Site plan", ["- The site plan and the schedule come first. @00:00-00:30", f"- {FILLER} @00:30-01:00"]),
+        ("Cranes", ["- The cranes arrive in the second week. @00:30-01:00", f"- {FILLER} @01:00-01:30"]),
+        ("Safety", ["- Ada drafts the safety briefing by Friday. @01:30-02:00", f"- {FILLER} @02:00-02:30"]),
+    ]
+    body = "\n\n".join(f"## {heading}\n\n" + "\n".join(lines) for heading, lines in sections)
+    note = (
+        f"---\nid: recording-note:2026-10-12-acme-kick-off\ntype: recording-note\ncovers:\n  - {KICK_OFF}\n"
+        f"by: claude-test, sync 2026-10-12T12:00\n---\n\n# Acme kick-off with Dana\n\n{body}\n"
+    )
+    legacy = [
+        f"---\nid: legacy-note:{slug}\ntype: legacy-note\nby: import\n---\n\n# {title}\n\n{text}\n"
+        for slug, (title, text) in NAME_DOCS.items()
+    ]
+    return [note, *legacy]
+
+
+def build_name_vault(root: Path) -> Vault:
+    """The name vault: about 160 weekly mails naming Acme and Orbex, short messages about other customers, two
+    recordings (one with a recording note under its name, one without), docs titled with the queries' words and docs
+    that say them only in their bodies, and Rita Sample with her alias. The docs go in one commit."""
+    from docket.vault.docstore import DocStore, PutResult
+
+    vault = Vault.init(root / "vault", index_config(), "test-box")
+    for source, records in sorted(name_records().items()):
+        vault.write_run(source, records, datetime(2026, 10, 14, 7, 0, tzinfo=UTC))
+    person = vault.root / "entities" / "person"
+    person.mkdir(parents=True, exist_ok=True)
+    (person / "rita-sample.yaml").write_text(
+        "id: rita-sample\ntype: person\nname: {en: Rita Sample}\naliases:\n  - {text: Rita}\n", encoding="utf-8"
+    )
+    vault.commit(["entities"], "Entities")
+    stored = DocStore(vault).put_many(name_docs(), "Name vault docs")
+    assert all(isinstance(r, PutResult) for r in stored), stored
+    return vault
+
+
+def name_template(factory: pytest.TempPathFactory) -> Path:
+    """The name vault, built once per session; tests copy it."""
+    return template_with(factory, build_name_vault)
+
+
+def query_words(analyzer: Any, texts: list[str], picked: list[str], *, seed: int, sample: int = 60) -> list[Any]:
+    """Query words for the word check: those picked, and a seeded sample of the texts' own words, each with the forms
+    search gives it (as written, then each language's forms)."""
+    import random
+
+    from docket.index.terms import Word, tokens
+    from docket.index.text import fold
+
+    pool = sorted({w for text in texts for w in tokens(text)})
+    chosen = list(dict.fromkeys([*picked, *random.Random(seed).sample(pool, min(sample, len(pool)))]))  # noqa: S311 - seeded test words
+    return [
+        Word(
+            w,
+            frozenset(
+                [
+                    ("folded", fold(w)),
+                    *((lang.column, f) for lang in analyzer.languages for f in analyzer.forms(w, lang)),
+                ]
+            ),
+        )
+        for w in chosen
+    ]
+
+
+def stem_every_word(analyzer: Any, words: list[Any], phrases: list[Any], text: str) -> tuple[set[int], set[int]]:
+    """Which words and phrases a text holds, found the slow way: every word of the text folded and stemmed."""
+    from docket.index.terms import tokens
+    from docket.index.text import fold
+
+    ws = tokens(text)
+    terms = [{("folded", fold(w)), *((lang.column, analyzer.stem(w, lang)) for lang in analyzer.languages)} for w in ws]
+    every: set[tuple[str, str]] = set().union(*terms)
+    held_words = {i for i, word in enumerate(words) if word.forms & every}
+    held_phrases = {
+        i
+        for i, phrase in enumerate(phrases)
+        for col, seq in phrase.columns
+        for start in range(len(ws) - len(seq) + 1)
+        if (col, seq[0]) in terms[start] and all((col, seq[k]) in terms[start + k] for k in range(1, len(seq)))
+    }
+    return held_words, held_phrases
+
+
 # An invented notes folder, as an existing setup would have it: notes per source, a clash of stems, a note naming two
 # recordings, one naming a recording not in the raw log yet, one with its own frontmatter, CRLF with a BOM, a
 # credential, Latin-1, files that aren't notes, a folder git ignores, and two the never-store keywords catch: one by

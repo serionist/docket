@@ -89,16 +89,13 @@ def test_search_names_a_language_problem_after_a_rebuild(vault: Vault, capsys: p
     assert code == 0 and "! vault.yaml: vault.yaml's language 'klingon' has no stemmer" in out
 
 
-def test_search_refuses_a_bad_date_and_common_words_are_said(
-    vault: Vault, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+def test_search_refuses_a_bad_date_and_names_a_word_in_no_chunk(
+    vault: Vault, capsys: pytest.CaptureFixture[str]
 ) -> None:
     code = main(["search", "pallet", "--since", "last tuesday", "--vault", str(vault.root)])
     assert code == 2 and "--since is a date or a time" in capsys.readouterr().err
-    from docket.index import query
-
-    monkeypatch.setattr(query, "COMMON_MIN", 0)
-    code, out = run(vault, capsys, "search", "the", "pallet")
-    assert "too common to search for: the" in out
+    code, out = run(vault, capsys, "search", "the", "pallet", "zebracorn")
+    assert "in no chunk: zebracorn" in out and "too common" not in out
 
 
 def test_raw_text_is_printed_with_control_characters_escaped(vault: Vault, capsys: pytest.CaptureFixture[str]) -> None:

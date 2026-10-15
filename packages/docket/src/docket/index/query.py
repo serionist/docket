@@ -2,8 +2,10 @@
 
 1. Read the query: quoted phrases, words, time words (a range), and names or aliases found in it (its entities).
 2. Each word becomes an OR of its forms across the columns; each entity an OR of its aliases' forms.
-3. FTS candidates, top 200 by BM25, filters applied inside the query: all words required; if fewer than k, any of them;
-   if still fewer, word prefixes. Forms found in over a fifth of all chunks, and over 100, are left out.
+3. FTS candidates, top 200 by BM25, filters applied inside the query: all words required, however common (DR-0230); if
+   fewer than k, any of them; if still fewer, word prefixes. In each, the best chunk of each group whose title's lead
+   holds most of the query's terms goes first (DR-0231); in the any-word stage the rest go by how many terms their text
+   holds (DR-0232), then by BM25.
 4. Entity candidates, top 200: chunks mentioning the query's or the boosts' entities.
 5. Fuse the two lists by reciprocal rank, so a boost lifts a chunk and never drops one.
 6. Collapse hits on the same stretch, group them by recording or thread, attach each group's summary.
@@ -28,6 +30,7 @@ from docket.errors import DocketError
 from docket.index import matching
 from docket.index.build import languages_of, open_index
 from docket.index.languages import Languages
+from docket.index.terms import Checker, Word, phrase_of, tokens
 from docket.index.text import WORD, Analyzer, any_of, dedupe, fold, phrase, prefix, words
 from docket.index.timewords import Range, read_time
 from docket.vault.vault import Vault
@@ -37,12 +40,13 @@ ENTITY_ROWS = 2000
 RRF = 60
 MAX_K = 100
 STEMMED_WEIGHT = 0.6
-COMMON_SHARE = 5
-COMMON_MIN = 100
 PREFIX_MIN = 3
 SNIPPET_BEFORE = 15
 SNIPPET_WORDS = 40
 TITLE_WORDS = 8
+# A title's lead: its text up to the first `: `, else its first 12 words (DR-0231).
+LEAD_END = ": "
+LEAD_WORDS = 12
 SUMMARY_TYPES = ("minutes", "recording-note", "thread-summary")
 QUOTED = re.compile(r'"([^"]*)"')
 # The open ends of a range given only one side: far enough, and still printable in any time zone.
@@ -64,7 +68,10 @@ class QueryReading(BaseModel):
     entities: list[EntityFound] = []
     boosts: list[str] = []
     unknown: list[str] = []
+    # Always empty: no word leaves a query any more (DR-0230), and DR-0150 keeps every field a result has.
     left_out: list[str] = []
+    # The words no chunk holds in any form, so no hit can hold every word.
+    absent: list[str] = []
     since: datetime | None = None
     until: datetime | None = None
     time_words: list[str] = []
@@ -193,7 +200,6 @@ class _Search:
         self.langs = langs
         self.analyzer = Analyzer(langs)
         self.tz = ZoneInfo(vault.config.owner.time_zone)
-        self.total = conn.execute("SELECT count(*) FROM chunks").fetchone()[0]
         self.terms: set[str] = set()
         self.lookup, self.longest = self._lookups()
 
@@ -220,23 +226,31 @@ class _Search:
             out += [(lang.column, (*head, form)) for form in self.analyzer.forms(tokens[-1], lang)]
         return out
 
+    def entity_spans(self, tokens: list[str]) -> list[tuple[int, int, set[str]]]:
+        """The runs of words that are a name or an alias, longest first, with the entities each names."""
+        spans: list[tuple[int, int, set[str]]] = []
+        i = 0
+        while i < len(tokens):
+            for size in range(min(self.longest, len(tokens) - i), 0, -1):
+                hits = set[str]().union(*(self.lookup.get(c, set()) for c in self._candidates_at(tokens[i : i + size])))
+                if hits:
+                    spans.append((i, i + size, hits))
+                    i += size
+                    break
+            else:
+                i += 1
+        return spans
+
     def find_entities(self, tokens: list[str]) -> tuple[list[EntityFound], list[str]]:
         """Names and aliases in the query, longest first; the words left over."""
         found: list[EntityFound] = []
         rest: list[str] = []
-        i = 0
-        while i < len(tokens):
-            for size in range(min(self.longest, len(tokens) - i), 0, -1):
-                span = tokens[i : i + size]
-                hits = set[str]().union(*(self.lookup.get(c, set()) for c in self._candidates_at(span)))
-                if hits:
-                    found += [EntityFound(id=e, words=" ".join(span)) for e in sorted(hits)]
-                    i += size
-                    break
-            else:
-                rest.append(tokens[i])
-                i += 1
-        return found, rest
+        at = 0
+        for start, end, hits in self.entity_spans(tokens):
+            rest += tokens[at:start]
+            found += [EntityFound(id=e, words=" ".join(tokens[start:end])) for e in sorted(hits)]
+            at = end
+        return found, rest + tokens[at:]
 
     def resolve(self, names: Sequence[str], person: bool) -> tuple[list[str], list[str]]:
         """Boosts by id, name or alias; what resolves to nothing comes back as unknown."""
@@ -259,10 +273,6 @@ class _Search:
         row = self.conn.execute("SELECT doc FROM vocab WHERE col = ? AND term = ?", (col, term)).fetchone()
         return 0 if row is None else row[0]
 
-    def _common(self, col: str, term: str) -> bool:
-        n = self._docs(col, term)
-        return n * COMMON_SHARE > self.total and n > COMMON_MIN
-
     def word_forms(self, word: str) -> list[tuple[str, str]]:
         forms = [("folded", fold(word))]
         for lang in self.langs.languages:
@@ -277,21 +287,20 @@ class _Search:
                     forms.append((lang.column, twice[1]))
         return forms
 
-    def word_groups(self, tokens: list[str]) -> tuple[list[tuple[str, str]], list[str]]:
-        """(word, expression) per word, common forms left out; words with every form common leave, unless all do."""
-        kept: list[tuple[str, str]] = []
-        left: list[str] = []
-        everything: list[tuple[str, str]] = []
-        for word in tokens:
+    def word_groups(self, tokens: list[str]) -> tuple[list[tuple[str, str]], list[Word], list[str]]:
+        """(word, expression) per word, with every form however common (DR-0230); each word with its forms, for the
+        word check; and the words no chunk holds in any form."""
+        groups: list[tuple[str, str]] = []
+        kept: list[Word] = []
+        absent: list[str] = []
+        for word in dedupe(tokens):
             forms = self.word_forms(word)
             self.terms |= {term for _, term in forms}
-            everything.append((word, any_of(phrase(col, [term]) for col, term in forms)))
-            rare = [(col, term) for col, term in forms if not self._common(col, term)]
-            if rare:
-                kept.append((word, any_of(phrase(col, [term]) for col, term in rare)))
-            else:
-                left.append(word)
-        return (kept, left) if kept else (everything, [])
+            groups.append((word, any_of(phrase(col, [term]) for col, term in forms)))
+            kept.append(Word(word, frozenset(forms)))
+            if not any(self._docs(col, term) for col, term in forms):
+                absent.append(word)
+        return groups, kept, absent
 
     def phrase_group(self, text: str) -> str:
         ws = words(text)
@@ -343,6 +352,74 @@ class _Search:
     def newest(self, filters: tuple[str, list[object]]) -> list[int]:
         sql = f"SELECT c.id FROM chunks c WHERE 1 = 1{filters[0]} ORDER BY c.ts DESC, c.id LIMIT ?"  # noqa: S608 - placeholders only
         return [r[0] for r in self.conn.execute(sql, [*filters[1], CANDIDATES])]
+
+    # -- the order inside a stage -------------------------------------------------------------------------------
+
+    def titles(self, ids: list[int]) -> dict[int, tuple[str, str | None]]:
+        """Each chunk's group and title: its doc's title, else its own (a record's), else the title of the record its
+        group is named after (a transcript's recording, a thread window's parent)."""
+        rows = self.conn.execute(
+            "SELECT c.id, c.grp, CASE WHEN c.doc IS NULL THEN coalesce(c.title, g.title) ELSE d.title END "  # noqa: S608 - placeholders only
+            "FROM chunks c LEFT JOIN docs d ON d.id = c.doc LEFT JOIN records g ON g.rid = c.grp "
+            f"WHERE c.id IN ({', '.join('?' * len(ids))})",
+            ids,
+        )
+        return {r[0]: (r[1], r[2]) for r in rows}
+
+    def lead_held(self, text: str, q: _Terms) -> tuple[int, float]:
+        """How many of the query's terms a title's lead holds, and the share of its words that are query terms."""
+        known = q.leads.get(text)
+        if known is not None:
+            return known
+        ws = tokens(text)
+        held = q.checker.held(text)
+        positions = set(held.positions)
+        named: set[str] = set()
+        for start, end, ids in self.entity_spans(ws):
+            for said, wanted in q.entities.items():
+                if ids & wanted:
+                    named.add(said)
+                    positions.update(range(start, end))
+        known = (len(held.words) + len(held.phrases) + len(named), len(positions) / max(len(ws), 1))
+        q.leads[text] = known
+        return known
+
+    def text_terms(self, ids: list[int], q: _Terms) -> dict[int, int]:
+        """How many of the query's terms each chunk's text holds: words and phrases by the word check, names by the
+        chunk's mentions."""
+        marks = ", ".join("?" * len(ids))
+        texts = dict(self.conn.execute(f"SELECT id, text FROM chunks WHERE id IN ({marks})", ids).fetchall())  # noqa: S608 - placeholders only
+        named: dict[int, set[str]] = {}
+        for chunk, entity in self.conn.execute(f"SELECT chunk, entity FROM mentions WHERE chunk IN ({marks})", ids):  # noqa: S608 - placeholders only
+            named.setdefault(chunk, set()).add(entity)
+        return {
+            chunk: q.checker.count(texts[chunk])
+            + sum(1 for wanted in q.entities.values() if wanted & named.get(chunk, set()))
+            for chunk in ids
+        }
+
+    def order(self, ids: list[int], q: _Terms, *, by_text: bool) -> list[int]:
+        """A stage's candidates, BM25 order given: first the best chunk of each group whose title's lead holds more
+        than half the query's terms, by the terms its lead holds, then the share of its words they are, then BM25
+        (DR-0231); then the rest, in the any-word stage by how many terms their text holds, then BM25 (DR-0232)."""
+        info = self.titles(ids)
+        lifted: list[tuple[int, float, int, int]] = []
+        groups: set[str] = set()
+        for at, chunk in enumerate(ids):
+            grp, title = info[chunk]
+            if title is None or grp in groups:
+                continue
+            held, share = self.lead_held(lead(title), q)
+            if held * 2 > q.total:
+                lifted.append((-held, -share, at, chunk))
+                groups.add(grp)
+        first = [chunk for *_, chunk in sorted(lifted)]
+        moved = set(first)
+        rest = [chunk for chunk in ids if chunk not in moved]
+        if by_text:
+            held_by = self.text_terms(rest, q)
+            rest.sort(key=lambda chunk: -held_by[chunk])
+        return first + rest
 
     # -- hits ---------------------------------------------------------------------------------------------------
 
@@ -460,6 +537,30 @@ def labels(vault: Vault, ids: Sequence[str]) -> dict[str, EntityLabel]:
     return out
 
 
+@dataclass
+class _Terms:
+    """The query's terms that titles and texts are checked for: its words and phrases, and the names found in it, one
+    term per run of words that named them."""
+
+    checker: Checker
+    entities: dict[str, set[str]]
+    leads: dict[str, tuple[int, float]] = field(default_factory=dict[str, tuple[int, float]])
+
+    @property
+    def total(self) -> int:
+        return len(self.checker.words) + len(self.checker.phrases) + len(self.entities)
+
+
+def lead(title: str) -> str:
+    """A title's lead (DR-0231): its text up to the first `: `, so a time such as 23:44 doesn't cut it, else its first
+    12 words. A long heading that lists everything lifts nothing with the words after its lead."""
+    head, sep, _ = title.partition(LEAD_END)
+    if sep:
+        return head
+    found = list(WORD.finditer(title))
+    return title[: found[LEAD_WORDS - 1].end()] if len(found) > LEAD_WORDS else title
+
+
 def _iso(value: datetime) -> str:
     at = value.astimezone(UTC)
     return f"{at:%Y-%m-%dT%H:%M:%S}.{at.microsecond // 1000:03d}Z"
@@ -520,8 +621,12 @@ def _run(
         reading.until = None if span.until == FAR_FUTURE else span.until
     filters = s.filters(span, sources)
     phrase_groups = [s.phrase_group(p) for p in reading.phrases]
-    word_groups, reading.left_out = s.word_groups(rest)
+    word_groups, word_terms, reading.absent = s.word_groups(rest)
     reading.words = [w for w, _ in word_groups]
+    named: dict[str, set[str]] = {}
+    for entity in found:
+        named.setdefault(entity.words, set()).add(entity.id)
+    q = _Terms(Checker(s.analyzer, word_terms, [phrase_of(s.analyzer, p) for p in reading.phrases]), named)
     query_entities = sorted({e.id for e in found})
     entity_groups = [g for g in (s.entity_group(e) for e in query_entities) if g]
     groups = [*phrase_groups, *(g for _, g in word_groups), *entity_groups]
@@ -550,12 +655,12 @@ def _run(
 
     if groups:
         if entity_groups:
-            take(s.fts(" AND ".join(literal), filters, CANDIDATES), "all")
-        take(s.fts(" AND ".join(groups), filters, CANDIDATES), "all")
+            take(s.order(s.fts(" AND ".join(literal), filters, CANDIDATES), q, by_text=False), "all")
+        take(s.order(s.fts(" AND ".join(groups), filters, CANDIDATES), q, by_text=False), "all")
         if len(order) < k and len(groups) > 1:
-            take(s.fts(" OR ".join(groups), filters, CANDIDATES), "any")
+            take(s.order(s.fts(" OR ".join(groups), filters, CANDIDATES), q, by_text=True), "any")
         if len(order) < k and widened != groups:
-            take(s.fts(" OR ".join(widened), filters, CANDIDATES), "prefix")
+            take(s.order(s.fts(" OR ".join(widened), filters, CANDIDATES), q, by_text=False), "prefix")
     elif not all_entities:
         take(s.newest(filters), "time")
     rank = {chunk: n for n, chunk in enumerate(order, start=1)}

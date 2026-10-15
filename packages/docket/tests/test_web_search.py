@@ -291,9 +291,9 @@ def test_a_locator_as_the_query_opens_it_instead_of_searching(client: TestClient
 
 def test_the_reading_line_and_the_group_times_read_plainly() -> None:
     tz = ZoneInfo("Europe/Budapest")
-    reading = QueryReading(text="the offer", words=["offer"], left_out=["the"], phrases=["day rate"])
-    assert views.reading_line(reading, {}, tz) == ["too common to search for: the"]
-    assert views.terms(reading) == ["offer", "day", "rate"]
+    reading = QueryReading(text="the offer", words=["the", "offer"], absent=["the"], phrases=["day rate"])
+    assert views.reading_line(reading, {}, tz) == ["in no chunk: the"]
+    assert views.terms(reading) == ["the", "offer", "day", "rate"]
     first = datetime(2026, 10, 7, 8, 0, tzinfo=UTC)
     group = Group(key="chat:C0X", kind="thread", title="t", first=first, last=first + timedelta(days=2))
     assert views._when(group, tz) == "7 Oct 2026 10:00 to 9 Oct 2026 10:00"  # pyright: ignore[reportPrivateUsage]

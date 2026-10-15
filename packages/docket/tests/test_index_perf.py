@@ -1,6 +1,7 @@
 """A year's worth of chunks: queries answer well under a second without models.
 
-The chunks are synthetic (a seeded vocabulary with Zipf frequencies, in English- and Hungarian-looking words), written
+The chunks are synthetic (a seeded vocabulary with Zipf frequencies, in English- and Hungarian-looking words), each
+with a title of five words so the title order runs on every candidate (DR-0231), written
 through the build's own insert path. Wall times are asserted only when no tracer runs: under coverage they are printed,
 and the fuzzy walk's work is counted instead.
 """
@@ -16,17 +17,19 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from docket_testkit import index_config, template_with
+from docket_testkit import index_config, query_words, stem_every_word, template_with
 
 from docket.index import build, matching, search
 from docket.index.chunks import Chunk, iso
 from docket.index.schema import create
+from docket.index.terms import Checker, phrase_of
 from docket.index.text import Analyzer
 from docket.vault.entities import Alias, Entities, Entity
 from docket.vault.vault import Vault
 
 CHUNKS = 100_000
 WORDS_PER_CHUNK = 60
+TITLE_WORDS = 5
 VOCAB = 40_000
 ENTITIES = 300
 ASR = 100
@@ -72,12 +75,13 @@ def make_perf_vault(root: Path) -> Vault:
     chunks = []
     for n in range(CHUNKS):
         text = " ".join(rng.choices(vocab, cum_weights=cumulative, k=WORDS_PER_CHUNK))
+        title = " ".join(rng.choices(vocab, cum_weights=cumulative, k=TITLE_WORDS))
         source = ("calls", "chat", "mail")[n % 3]
         rid = f"{source}:perf-{n}"
         chunks.append(
             Chunk(
                 owner=f"r {rid}", ordinal=0, kind="record", grp=rid, text=text, locator=f"r:{rid}", source=source,
-                ts=iso(start + timedelta(minutes=n * 5)), rid=rid, rids=[rid],
+                ts=iso(start + timedelta(minutes=n * 5)), rid=rid, rids=[rid], title=title,
             )
         )  # fmt: skip
     indexer.add_chunks(chunks)
@@ -130,6 +134,10 @@ def test_queries_answer_in_well_under_a_second(vault: Vault) -> None:
         "a source": (common, {"sources": ["mail"]}),
         "a time word": ("last week", {}),
         "a time filter": (f"{common} múlt héten", {}),
+        # Every word stays however common (DR-0230): BM25 counts each common form's chunks once per query.
+        "common and rare": (f"{common} {rare}", {}),
+        "3 common, 1 rare": (f"{by_doc[0][0]} {by_doc[5][0]} {by_doc[12][0]} {rare}", {}),
+        "5 common, 1 none": (f"{' '.join(t for t, _ in by_doc[:5])} zzqqxx", {}),
     }
     for name, (query, kwargs) in shapes.items():
         seconds, found = timed(vault, query, **kwargs)
@@ -141,6 +149,25 @@ def test_queries_answer_in_well_under_a_second(vault: Vault) -> None:
     since, until = result.query.since, result.query.until
     assert since is not None and until is not None
     assert all(h.ts is not None and since <= h.ts < until for g in result.groups for h in g.hits)
+
+
+def test_the_word_check_agrees_with_stemming_every_word_on_a_sample(vault: Vault) -> None:
+    conn = sqlite3.connect(build.db_path(vault))
+    try:
+        texts = [r[0] for r in conn.execute("SELECT text FROM chunks WHERE id % 400 = 0 ORDER BY id")]
+    finally:
+        conn.close()
+    analyzer = Analyzer(build.languages_of(vault))
+    words = query_words(analyzer, texts, [], seed=57, sample=100)
+    rng = random.Random(57)  # noqa: S311 - seeded test words, not secrets
+    phrases = [phrase_of(analyzer, " ".join(text.split()[i : i + 2])) for text in rng.sample(texts, 10) for i in (0, 7)]
+    checker = Checker(analyzer, words, phrases)
+    assert checker.firsts is not None
+    for text in texts:
+        want_words, want_phrases = stem_every_word(analyzer, words, phrases, text)
+        held = checker.held(text)
+        assert (set(held.words), set(held.phrases)) == (want_words, want_phrases), text
+        assert checker.count(text) == len(want_words) + len(want_phrases), text
 
 
 def test_the_fuzzy_walk_over_a_large_vocabulary() -> None:
