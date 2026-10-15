@@ -95,6 +95,10 @@ jobs:
           - { os: ubuntu-latest, name: Linux, floors: true }
           - { os: windows-latest, name: Windows, floors: false }
           - { os: macos-latest, name: macOS, floors: false }
+    # uv's own Python, whose SQLite loads extensions on every system: some runners' own Pythons can't, and search goes
+    # without vectors there (DR-0337). The install refuses such a Python, so this job checks the README's advice.
+    env:
+      UV_PYTHON_PREFERENCE: only-managed
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -127,6 +131,13 @@ jobs:
           DOCKET_MODELS_DIR: ${{ runner.temp }}/docket-models
           DOCKET_CONFIG_DIR: ${{ runner.temp }}/docket-config
         run: uv run docket models status --check
+      # The vector stage and the index's vectors with the fake embedder, never skipped here.
+      - name: Vectors in search
+        env:
+          DOCKET_TEST_VECTORS: "1"
+        run: >-
+          uv run pytest -q -p no:cacheprovider packages/docket/tests/test_search_vectors.py
+          packages/docket/tests/test_index_vectors.py packages/docket/tests/test_service_models.py
 
   # The service registered for real on each system, killed, back again, stopped and uninstalled, under a name of its
   # own and on a temp vault. A runner whose user session can't hold the registration skips it, and the PR says which ran.

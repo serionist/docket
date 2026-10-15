@@ -22,7 +22,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from docket_testkit import fts_and_check, index_config, query_words, stem_every_word, template_with
+from docket_testkit import copy_vault, fts_and_check, index_config, query_words, stem_every_word, template_with
 from models_kit import FAKE
 
 from docket.index import build, matching, search, vectors
@@ -129,7 +129,6 @@ def make_perf_vault(root: Path) -> Vault:
     matching.refresh(conn, Analyzer(langs), full=True)
     conn.execute("COMMIT")
     conn.execute("INSERT INTO chunks_fts (chunks_fts) VALUES ('optimize')")
-    write_vectors(conn)
     conn.close()
     return vault
 
@@ -177,13 +176,27 @@ def vault(tmp_path_factory: pytest.TempPathFactory) -> Vault:
     return Vault.open(root)
 
 
+@pytest.fixture(scope="module")
+def vectors_vault(vault: Vault, tmp_path_factory: pytest.TempPathFactory) -> Vault:
+    """A copy of the perf vault with a vector per chunk: the keyword timings keep the index main measures."""
+    v = copy_vault(vault.root, tmp_path_factory.mktemp("perf-vectors"))
+    conn = sqlite3.connect(build.db_path(v), isolation_level=None)
+    try:
+        write_vectors(conn)
+    finally:
+        conn.close()
+    # The first search of a file opens it cold (and a virus scanner may read it whole): that is no search's time.
+    search(v, "warm", now=NOW, models=PerfModels())
+    return v
+
+
 def timed(vault: Vault, query: str, **kwargs: object) -> tuple[float, int]:
     started = time.monotonic()
     result = search(vault, query, now=NOW, **kwargs)  # type: ignore[arg-type]
     return time.monotonic() - started, sum(len(g.hits) for g in result.groups)
 
 
-def test_queries_answer_in_well_under_a_second(vault: Vault) -> None:
+def test_queries_answer_in_well_under_a_second(vault: Vault, vectors_vault: Vault) -> None:
     conn = sqlite3.connect(build.db_path(vault))
     by_doc = conn.execute("SELECT term, doc FROM vocab WHERE col = 'folded' ORDER BY doc DESC").fetchall()
     names = [r[0] for r in conn.execute("SELECT text FROM aliases WHERE kind = 'name' LIMIT 2")]
@@ -222,7 +235,7 @@ def test_queries_answer_in_well_under_a_second(vault: Vault) -> None:
     for name, (query, kwargs) in shapes.items():
         seconds, found = timed(vault, query, **kwargs)
         # The same with the vector stage on, its scan over 100,000 vectors running beside the FTS stages.
-        with_vectors, found_too = timed(vault, query, models=PerfModels(), **kwargs)
+        with_vectors, found_too = timed(vectors_vault, query, models=PerfModels(), **kwargs)
         print(f"{name:16} {seconds * 1000:7.1f} ms, {with_vectors * 1000:7.1f} with vectors  {found} hits  {query!a}")
         assert found and found_too, name
         if not traced():

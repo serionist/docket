@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import sqlite3
 import struct
 import sys
 import time
@@ -16,12 +18,32 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+import pytest
+
+from docket.index.vectors import load_extension
 from docket.models import config
 from docket.models.catalogue import Embedder, ModelFile
 from docket.models.client import Worker
 from docket.models.provider import Models
 
 FAKE_WORKER = Path(__file__).with_name("fake_worker.py")
+
+
+def _cant_search() -> str | None:
+    probe = sqlite3.connect(":memory:")
+    try:
+        return load_extension(probe)
+    finally:
+        probe.close()
+
+
+# A Python whose SQLite can't load extensions searches without vectors, and says so (DR-0337); a test that scans
+# vectors runs where it can, and always where DOCKET_TEST_VECTORS asks, as the models CI job does.
+CANT_SEARCH = _cant_search()
+needs_vectors = pytest.mark.skipif(
+    CANT_SEARCH is not None and not os.environ.get("DOCKET_TEST_VECTORS"),
+    reason=f"this Python can't search vectors: {CANT_SEARCH}",
+)
 DIMS = 64
 
 FAKE = Embedder(

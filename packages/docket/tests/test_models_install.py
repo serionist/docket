@@ -25,6 +25,8 @@ from docket.models.config import Choice
 from docket.models.provider import Off
 
 ONE = b"the model's bytes " * 50
+# The real check, kept before the fixture below stands in for it in every other test.
+VECTORS_PROBLEM = install.vectors_problem
 TWO = b'{"tokenizer": true}'
 
 
@@ -74,6 +76,12 @@ class Hub(http.server.BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: Any) -> None:
         pass
+
+
+@pytest.fixture(autouse=True)
+def vectors_here(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The install's own steps, on any Python: whether this one's SQLite loads extensions has a test of its own."""
+    monkeypatch.setattr(install, "vectors_problem", lambda: None)
 
 
 @pytest.fixture
@@ -233,10 +241,22 @@ def test_install_refuses_without_sqlite_vec_without_uv_or_for_an_unknown_embedde
         install.install("cpu", embedder_name="large", say=lambda _: None)
     with pytest.raises(DocketError, match="built with uv, which isn't on PATH"):
         install.install("cpu", say=lambda _: None, which=lambda _: None)
-    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
-    with pytest.raises(DocketError, match="vectors need sqlite-vec, which has no build for this system"):
+    monkeypatch.setattr(install, "vectors_problem", lambda: "vectors need sqlite-vec")
+    with pytest.raises(DocketError, match="vectors need sqlite-vec"):
         install.install("cpu", say=lambda _: None)
-    assert install.vectors_problem() is not None
+
+
+def test_vectors_need_sqlite_vec_and_a_python_whose_sqlite_loads_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(install, "load_extension", lambda conn: None)
+    assert VECTORS_PROBLEM() is None
+    monkeypatch.setattr(install, "load_extension", lambda conn: "no")
+    assert VECTORS_PROBLEM() == (
+        "the Python Docket runs on can't load SQLite extensions, so search can't use vectors; uv's own Pythons "
+        "can: uv tool install --python-preference only-managed docket"
+    )
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
+    problem = VECTORS_PROBLEM()
+    assert problem is not None and problem.startswith("vectors need sqlite-vec, which has no build for this system")
 
 
 @pytest.mark.parametrize(

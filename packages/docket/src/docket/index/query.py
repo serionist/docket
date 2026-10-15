@@ -774,11 +774,11 @@ class _VectorStage:
         self._thread.start()
 
     def _run(self, models: vectors.QueryVectors, db: Path, text: str, filters: tuple[str, list[object]]) -> None:
-        vector = models.query_vector(text)
-        if isinstance(vector, str):
-            self.why = vector
-            return
-        found = vectors.scan(db, self.table, vector, filters)
+        try:
+            vector = models.query_vector(text)
+            found = vector if isinstance(vector, str) else vectors.scan(db, self.table, vector, filters)
+        except Exception as e:  # the stage only ever skips: keyword search answers whatever happens here
+            found = f"the vector stage failed: {type(e).__name__}"
         if isinstance(found, str):
             self.why = found
         else:

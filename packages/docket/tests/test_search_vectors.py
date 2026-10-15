@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from docket_testkit import copy_vault, index_template, make_record
-from models_kit import FAKE, fake_models, trigram_vector
+from models_kit import FAKE, fake_models, needs_vectors, trigram_vector
 from test_index_vectors import choose
 
 from docket import questions, recall, render
@@ -57,6 +57,7 @@ def hits(result: query.SearchResult) -> list[query.Hit]:
     return sorted((h for g in result.groups for h in g.hits), key=lambda h: h.rank)
 
 
+@needs_vectors
 def test_a_chunk_only_the_vectors_find_comes_back(vault: Vault) -> None:
     models, worker = fake_models()
     keyword = search(vault, "zebbra migrashun", now=NOW)
@@ -69,6 +70,7 @@ def test_a_chunk_only_the_vectors_find_comes_back(vault: Vault) -> None:
     assert not any("no vectors" in line for line in render.search(result, NOW.tzinfo))  # type: ignore[arg-type]
 
 
+@needs_vectors
 def test_the_searchs_filters_apply_to_the_vector_list(vault: Vault) -> None:
     models, _ = fake_models()
     later = search(vault, "zebbra migrashun", since=date(2026, 10, 10), now=NOW, models=models)
@@ -82,6 +84,7 @@ def test_the_searchs_filters_apply_to_the_vector_list(vault: Vault) -> None:
     assert {sources[h.locator] for h in hits(other)} == {"mail"}
 
 
+@needs_vectors
 def test_ids_the_search_cant_hold_are_dropped(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
     conn = sqlite3.connect(build.db_path(vault))
     zebra = conn.execute("SELECT id FROM chunks WHERE rid = ?", (ZEBRA,)).fetchone()[0]
@@ -99,6 +102,7 @@ def test_ids_the_search_cant_hold_are_dropped(vault: Vault, monkeypatch: pytest.
     assert all(h.rid != ZEBRA for h in hits(result))
 
 
+@needs_vectors
 def test_facets_count_a_vector_only_chunk_only_when_it_made_the_top(vault: Vault) -> None:
     models, _ = fake_models()
     narrow = search(vault, "zebbra migrashun", k=1, now=NOW, models=models)
@@ -107,6 +111,7 @@ def test_facets_count_a_vector_only_chunk_only_when_it_made_the_top(vault: Vault
     assert sum(wide.facets["sources"].values()) > 1
 
 
+@needs_vectors
 def test_a_search_right_after_a_re_put_finds_only_vectors_of_chunks_it_holds(vault: Vault) -> None:
     doc = recall.read(vault, "recording-note:2026-10-07-supplier-call").doc
     assert doc is not None
@@ -165,6 +170,7 @@ def test_a_query_of_time_words_only_has_nothing_to_embed(vault: Vault) -> None:
     assert result.models.why == "nothing to embed: the query is only time words or filters"
 
 
+@needs_vectors
 def test_no_table_no_sqlite_vec_or_a_scan_that_fails_skip_the_stage(
     vault: Vault, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -193,6 +199,7 @@ def test_no_table_no_sqlite_vec_or_a_scan_that_fails_skip_the_stage(
     assert FAKE.dims == 64
 
 
+@needs_vectors
 def test_eval_says_what_the_vectors_covered_and_how_many_questions_went_without(vault: Vault, tmp_path: Path) -> None:
     file = tmp_path / "questions.yaml"
     file.write_text(
@@ -215,3 +222,15 @@ def test_eval_says_what_the_vectors_covered_and_how_many_questions_went_without(
     assert "          2 question(s) ran without them: the models' worker stopped (exit 5)" in render.eval_report(report)
     assert questions.run(vault, asked).vectors is None
     assert questions.run(vault, asked, models=Off("off")).vectors is None
+
+
+def test_a_stage_that_raises_is_skipped_with_its_type(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
+    models, _ = fake_models()
+
+    def broken(words: str) -> bytes | str:
+        raise RuntimeError(words)
+
+    monkeypatch.setattr(models, "query_vector", broken)
+    plain = search(vault, "supplier budget", now=NOW)
+    result = search(vault, "supplier budget", now=NOW, models=models)
+    assert result.groups == plain.groups and result.models.why == "the vector stage failed: RuntimeError"

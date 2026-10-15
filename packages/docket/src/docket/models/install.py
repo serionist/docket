@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import shutil
+import sqlite3
 import subprocess
 import sys
 import time
@@ -22,6 +23,7 @@ from pathlib import Path
 from typing import IO, Protocol
 
 from docket.errors import DocketError
+from docket.index.vectors import load_extension
 from docket.models import config
 from docket.models.catalogue import DEFAULT_EMBEDDER, EMBEDDERS, Embedder, ModelFile
 from docket.models.client import Worker, WorkerError
@@ -56,11 +58,22 @@ def _open(request: urllib.request.Request, *, timeout: float) -> AbstractContext
 
 
 def vectors_problem() -> str | None:
-    """Why vectors can't be searched on this system: sqlite-vec ships no build for it."""
+    """Why vectors can't be searched with this Docket: sqlite-vec ships no build for the system, or this Python's
+    SQLite can't load it."""
     if importlib.util.find_spec("sqlite_vec") is None:
         return (
             "vectors need sqlite-vec, which has no build for this system (it ships them for Windows on x86-64, macOS, "
             "and Linux on x86-64 and arm64); keyword search works without it"
+        )
+    probe = sqlite3.connect(":memory:")
+    try:
+        why = load_extension(probe)
+    finally:
+        probe.close()
+    if why is not None:
+        return (
+            "the Python Docket runs on can't load SQLite extensions, so search can't use vectors; uv's own Pythons "
+            "can: uv tool install --python-preference only-managed docket"
         )
     return None
 

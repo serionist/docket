@@ -1071,6 +1071,7 @@ def models_status(
 ) -> None:
     """What this machine's models are: the choice, the environments, the files."""
     from docket.models import config  # noqa: PLC0415
+    from docket.models.install import vectors_problem  # noqa: PLC0415
     from docket.models.provider import Off  # noqa: PLC0415
     from docket.models.runtime import worker_for  # noqa: PLC0415
 
@@ -1087,6 +1088,8 @@ def models_status(
     if not isinstance(choice, Off):
         missing = config.missing_files(choice.embedder)
         say(f"files      {'missing: ' + ', '.join(f.path for f in missing) if missing else 'all here'}")
+        problem = vectors_problem()
+        say(f"search     {'! ' + problem if problem else 'uses the vectors'}")
     if check:
         found = choice if isinstance(choice, Off) else config.installed(choice.device)
         if isinstance(choice, Off) or isinstance(found, (Off, str)):

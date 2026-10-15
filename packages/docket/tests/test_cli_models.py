@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 import yaml
 from docket_testkit import copy_vault, index_template, make_record
-from models_kit import FAKE, fake_command, make_env
+from models_kit import FAKE, fake_command, make_env, needs_vectors
 
 from docket import cli, userconfig
 from docket.cli import main
@@ -122,6 +122,7 @@ def at(vault: Vault, capsys: pytest.CaptureFixture[str], *args: str) -> tuple[in
     return code, capsys.readouterr().out
 
 
+@needs_vectors
 def test_index_update_embeds_and_search_and_eval_use_the_vectors(
     vault: Vault, capsys: pytest.CaptureFixture[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

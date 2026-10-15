@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 from docket_testkit import index_template, make_record
-from models_kit import fake_models
+from models_kit import fake_models, needs_vectors
 from starlette.testclient import TestClient
 from test_index_vectors import choose
 
@@ -127,6 +127,7 @@ def client(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[Test
         yield found, worker
 
 
+@needs_vectors
 def test_the_service_searches_with_vectors_once_its_pass_has_run(client: tuple[TestClient, Any]) -> None:
     http, worker = client
     service = http.app.service  # type: ignore[attr-defined]
