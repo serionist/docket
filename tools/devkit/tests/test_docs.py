@@ -549,3 +549,76 @@ def test_move_from_a_revision_brings_back_what_a_rebase_dropped(repo: Path, git:
     assert s.check() == []
     assert call("move", DR7, "--from", "ORIG_HEAD") == 2  # in the tree already
     assert call("move", "DR-" + "0099", "--from", "ORIG_HEAD") == 2  # not there either
+
+
+def superseding_branch_rebased(repo: Path, git: Callable[..., str]) -> Path:
+    """Branch b appends DR7 superseding the older DR1; main appends DR3 and edits DR1; b's rebase keeps main's file."""
+    branches(repo, git)
+    index = write_index(repo, "pkg", (DR1, "Old"))
+    commit(repo, git, "base")
+    git(repo, "switch", "-q", "-c", "b")
+    write_index(repo, "pkg", (DR1, "Old"), (DR7, "Mine"))
+    assert call("supersede", DR1, "--by", DR7) == 0
+    (repo / "pkg" / "code.py").write_text("x = 2\n", encoding="utf-8")
+    commit(repo, git, "b supersedes an old decision")
+    git(repo, "switch", "-q", "main")
+    write_index(repo, "pkg", (DR1, "Old"), (DR3, "Theirs"))
+    assert call("set", DR1, "--set", "description=Why Old, said again on main.") == 0
+    commit(repo, git, "main appends a decision and edits the old one")
+    git(repo, "switch", "-q", "b")
+    assert rebase(repo, "main").returncode != 0
+    git(repo, "checkout", "--ours", "--", "pkg/index.yaml")
+    git(repo, "add", "pkg/index.yaml")
+    git(repo, "rebase", "--continue")
+    return index
+
+
+def test_move_from_restores_the_other_side_of_a_supersede(repo: Path, git: Callable[..., str]) -> None:
+    index = superseding_branch_rebased(repo, git)
+    assert "superseded" not in index.read_text(encoding="utf-8")
+    assert call("set", DR1, "--set", "status=superseded", "--add", f"superseded_by={DR7}") == 2  # DR7 is gone
+    assert call("move", DR7, "--from", "ORIG_HEAD") == 0
+    s = store(repo)
+    assert s.find(DR7).file.rel == f"pkg/index.d/{DR7}.yaml"
+    assert s.find(DR7).entry["supersedes"] == [DR1]
+    old = s.find(DR1)
+    assert old.file.rel == "pkg/index.yaml"
+    assert old.entry["status"] == "superseded"
+    assert old.entry["superseded_by"] == [DR7]
+    assert old.entry["description"] == "Why Old, said again on main."  # only the link comes back, main's edit stays
+    assert s.find(DR3).file.rel == "pkg/index.yaml"
+    assert s.check() == []
+
+
+def test_move_from_takes_both_sides_when_the_rebase_dropped_both(repo: Path, git: Callable[..., str]) -> None:
+    branches(repo, git)
+    write_index(repo, "pkg", (DR1, "Old"))
+    commit(repo, git, "base")
+    git(repo, "switch", "-q", "-c", "b")
+    write_index(repo, "pkg", (DR1, "Old"), (DR2, "Mine"), (DR7, "Mine again"))
+    assert call("supersede", DR2, "--by", DR7) == 0
+    (repo / "pkg" / "code.py").write_text("x = 2\n", encoding="utf-8")
+    commit(repo, git, "b adds a decision and supersedes it")
+    git(repo, "switch", "-q", "main")
+    write_index(repo, "pkg", (DR1, "Old"), (DR3, "Theirs"))
+    commit(repo, git, "main appends a decision")
+    git(repo, "switch", "-q", "b")
+    assert rebase(repo, "main").returncode != 0
+    git(repo, "checkout", "--ours", "--", "pkg/index.yaml")
+    git(repo, "add", "pkg/index.yaml")
+    git(repo, "rebase", "--continue")
+    assert call("move", DR7, "--from", "ORIG_HEAD") == 2  # what it supersedes is gone too
+    assert call("move", DR7, DR2, "--from", "ORIG_HEAD") == 0
+    s = store(repo)
+    assert s.find(DR2).entry["superseded_by"] == [DR7]
+    assert s.find(DR7).entry["supersedes"] == [DR2]
+    assert s.check() == []
+
+
+def test_move_from_writes_nothing_when_any_part_refuses(repo: Path, git: Callable[..., str]) -> None:
+    index = superseding_branch_rebased(repo, git)
+    before = index.read_text(encoding="utf-8")
+    assert call("move", DR7, "DR-" + "0099", "--from", "ORIG_HEAD") == 2  # the second isn't at the revision
+    assert index.read_text(encoding="utf-8") == before
+    assert not own(repo, DR7, "pkg").exists()
+    assert store(repo).check() == []
