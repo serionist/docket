@@ -114,6 +114,7 @@ def test_what_isn_t_a_labelled_secret_stays(redactor: Redactor, text: str) -> No
     assert redacted(redactor, text) == (text, Counter())
 
 
+@pytest.mark.perf
 def test_long_runs_of_filler_are_read_in_linear_time(redactor: Redactor) -> None:
     n = 50_000
     inputs = [

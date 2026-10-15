@@ -336,6 +336,7 @@ def test_sync_rebases_without_signing_when_the_user_signs_commits(tmp_path: Path
     assert sh(vault.root, "git", "log", "--format=%s").split("\n")[:2] == ["Raw: chat, 1 record(s) from test-box", "x"]
 
 
+@pytest.mark.perf
 def test_a_write_waits_only_as_long_as_its_vault_was_opened_with(tmp_path: Path, config: VaultConfig) -> None:
     root = new_vault(tmp_path, config).root
     impatient = Vault.open(root, lock_timeout=0.2)
