@@ -54,19 +54,19 @@
 <footer class="statusbar">
   <span class="where">{{ vault_name }}{% if machine %} on {{ machine }}{% endif %}</span>
   <span class="index">{{ index_line }}</span>
-  <span class="hints"><kbd>/</kbd> search <kbd>j</kbd><kbd>k</kbd> move <kbd>Enter</kbd> open <kbd>?</kbd> keys</span>
+  <span class="hints">{% for names, word in hints %}{% for key in names %}<kbd>{{ key }}</kbd>{% endfor %} {{ word }}{{ ' ' if not loop.last }}{% endfor %}</span>
 </footer>
 <p id="announce" class="visually-hidden" role="status" aria-live="polite"></p>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <dialog id="keys-dialog" class="dialog" aria-labelledby="keys-title">
   <h2 id="keys-title">Keys</h2>
   <dl class="keys">
-    {% for names, what in keys %}
+    {% for names, what in page_keys %}
     <div><dt>{% for key in names %}<kbd data-key="{{ key }}">{{ 'Esc' if key == 'Escape' else key }}</kbd>{% endfor %}</dt><dd>{{ what }}</dd></div>
     {% endfor %}
   </dl>
   <label class="switch"><input type="checkbox" data-action="keys-switch"{% if not keys_off %} checked{% endif %}> Single-key shortcuts</label>
-  <p class="hint">Turn them off when they get in the way of your screen reader's keys; <kbd>Esc</kbd> still closes the panel.</p>
+  <p class="hint">Turn them off when they get in the way of your screen reader's keys{% if current == 'search' %}; <kbd>Esc</kbd> still closes the panel{% endif %}.</p>
   <div class="dialog-actions"><button type="button" class="button" data-action="close-dialog">Close</button></div>
 </dialog>
 </body>

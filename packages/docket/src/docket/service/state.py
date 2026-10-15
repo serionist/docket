@@ -14,9 +14,11 @@ from pydantic import BaseModel
 from docket import __version__, index, userconfig
 from docket.errors import DocketError
 from docket.index import IndexStatus
+from docket.service.history import RunHistory
 from docket.service.runs import Runs
 from docket.service.sessions import Sessions
 from docket.service.writer import IndexUpdater, Writer
+from docket.vault.home import Home
 from docket.vault.vault import Vault
 
 # How long a write of the service waits for another Docket process to let go of the vault: less than a client's
@@ -61,8 +63,11 @@ class Service:
         self.settings = settings
         self.sessions = sessions or Sessions()
         self.writer = Writer()
+        # Each ended run's line, in the vault's private folder (DR-0301), read before Runs records what a crash left.
+        self.history = RunHistory(self._home if settings.vault is not None else None)
+        self.history.load()
         # Open sync runs, in memory only; the hook's marker goes in the state folder (DR-0240).
-        self.runs = Runs(userconfig.state_dir())
+        self.runs = Runs(userconfig.state_dir(), ended=self.history.add)
         self.updater = IndexUpdater(self._update)
         # Kept for the web app's footer: index.status() hashes every doc and entity file, too much for each page.
         self.last_update: LastUpdate | None = None
@@ -70,6 +75,9 @@ class Service:
     def _update(self) -> None:
         report = index.update(self.vault())
         self.last_update = LastUpdate(datetime.now(UTC), dict(report.counts))
+
+    def _home(self) -> Home:
+        return self.vault().home
 
     def vault(self) -> Vault:
         """The vault, opened for this call, so an edit to vault.yaml applies at once."""

@@ -28,6 +28,9 @@ Unreleased in the same PR.
   grouped by recording or thread, and a panel that puts a hit's summary next to its raw and checks each line
   against it. Opened with `docket open`; light and dark, by keyboard, and offline.
 - `docket open [PATH]` lands on the page you asked for.
+- The Sync page: what to ask Claude to sync, with the words to paste; failed runs and skipped ids, each with what to do;
+  the runs open and ended; each machine's cursor. Recent runs survive a restart, as ids and counts in the vault's
+  private folder.
 - The Claude Code plugin's first version: it registers the service as the MCP server `docket`, tells each session at
   its start whether Docket runs and what waits in staging, and brings `/docket:recall`, which answers from the raw with
   locators, and `/docket:setup`, which asks which sources to set up, creates the vault and writes each source's folder.

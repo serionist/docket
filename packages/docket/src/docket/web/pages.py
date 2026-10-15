@@ -1,5 +1,5 @@
-"""The navigation and the keys: every page of the design, by use, with the phase it arrives in, and the keys the
-Search page answers to. The shell, the keys dialog and the footer read these, and `docket.js` handles the same keys.
+"""The navigation and the keys: every page of the design, by use, with the phase it arrives in, and the keys each
+built page answers to. The shell, the keys dialog and the footer read these, and `docket.js` handles the same keys.
 
 Only built pages are links; the others are slots that say when they come (DR-0176).
 """
@@ -56,7 +56,14 @@ NAV: tuple[Group, ...] = (
         (
             Page("staging", "Staging", "/staging", 1, "records waiting for the gate: classify, cut, drop"),
             Page("curate", "Curate", "/curate", 1, "the weekly batch of proposals"),
-            Page("sync", "Sync", "/sync", 1, "runs, failures, cursors, rate limits"),
+            Page(
+                "sync",
+                "Sync",
+                "/sync",
+                1,
+                "runs, failures, cursors, rate limits, what needs a Claude session",
+                built=True,
+            ),
             Page("settings", "Settings", "/settings", 1, "sources, never-store lists, models, redaction rules"),
         ),
     ),
@@ -64,8 +71,10 @@ NAV: tuple[Group, ...] = (
 
 PAGES: tuple[Page, ...] = tuple(page for group in NAV for page in group.pages)
 
+Keys = tuple[tuple[tuple[str, ...], str], ...]
+
 # (keys, what they do), in the order the dialog lists them. Each key is one `KeyboardEvent.key` value.
-KEYS: tuple[tuple[tuple[str, ...], str], ...] = (
+KEYS: Keys = (
     (("/",), "to the query box"),
     (("j", "k"), "next, previous hit"),
     (("Enter", "o"), "open the hit beside the results"),
@@ -75,3 +84,11 @@ KEYS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("Escape",), "close the panel, or leave the box"),
     (("?",), "these keys"),
 )
+SYNC_KEYS: Keys = ((("?",), "these keys"),)
+
+# The keys each page answers, which its dialog lists, and the few its footer names, as (keys, a word).
+PAGE_KEYS: dict[str, Keys] = {"search": KEYS, "sync": SYNC_KEYS}
+HINTS: dict[str, Keys] = {
+    "search": ((("/",), "search"), (("j", "k"), "move"), (("Enter",), "open"), (("?",), "keys")),
+    "sync": ((("?",), "keys"),),
+}

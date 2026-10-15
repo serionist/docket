@@ -322,8 +322,8 @@ What the service refuses, and what it doesn't:
 
 ## The web app
 
-`docket open` signs your browser in to the service's own pages. In this version that is Search; the navigation shows
-the pages still to come, with the phase each arrives in.
+`docket open` signs your browser in to the service's own pages. In this version that is Search and Sync; the
+navigation shows the pages still to come, with the phase each arrives in.
 
 - Search runs the search Claude runs: the same words, names, time words and dates. Sources and a month narrow it;
   people and entities favour the hits that mention them, as Claude's boosts do. Facet counts are within the top 200.
@@ -338,6 +338,24 @@ the pages still to come, with the phase each arrives in.
   browser from mid-2024 on.
 - A session lasts 12 hours, and ends when the service restarts; the sign-in page then names the `docket open` command
   that brings you back to the page you were on.
+
+### The Sync page
+
+`/sync` shows how syncs went without a log, what to do first (DR-0300 to DR-0306). It only reads: nothing on it opens,
+drops or closes a run.
+
+| Part | Shows |
+|---|---|
+| Needs | a source `run_open` would refuse, in its words; a source no machine synced in a day, or never; ids due a final run; each with the words to paste into Claude Code |
+| Failures | dropped runs until a later whole run of their source, ids skipped for a reason other than `later` while a cursor file holds them, ids a close expired in the last week, cursor files that don't read; each with what to do |
+| Runs | open runs, refreshed every 5 seconds while one is open, then recent ones: captures, what was staged, the mark, what is owed, or why the run dropped |
+| Cursors | each machine's mark, lookback, retry and waiting ids with their ages, and whether another machine's are still handed over |
+
+- Its URL holds `source` (one source), `run` (a run's card at the top) and `k` (how many recent runs, up to 500).
+- Recent runs survive a restart: each ended run leaves one line in the vault's private folder, `sync/runs.jsonl`
+  under `.git/docket/` (or the host's git dir for a folder vault). Ids and counts only, per machine, never committed;
+  deleting it loses only the page's list.
+- The page shows ids, counts, times and Docket's own messages, never a title or anything a source's tool returned.
 
 The pages' browser test runs on CI. To run it here, against your own Chrome or Edge:
 `DOCKET_TEST_BROWSER=chrome uv run pytest packages/docket/tests/test_web_browser.py` (or `msedge`).

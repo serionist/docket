@@ -9,20 +9,24 @@ stay out of the browser's cache.
 from __future__ import annotations
 
 import json
+import logging
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from datetime import datetime
 from importlib.resources import files
 from zoneinfo import ZoneInfo
 
 from jinja2 import Environment, PackageLoader, StrictUndefined
 from markupsafe import Markup, escape
-from starlette.responses import HTMLResponse
+from starlette.requests import Request
+from starlette.responses import HTMLResponse, Response
 
 from docket.index.query import SPLIT_FIRST, SPLIT_SECOND
 from docket.index.text import HYPHENS, WORD, fold, has_letter
 from docket.vault.anchors import format_time
 from docket.web import assets, pages
+
+log = logging.getLogger("docket.service.web")
 
 PAGE_CSP = (
     "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; "
@@ -31,7 +35,7 @@ PAGE_CSP = (
 # htmx's settings: its own indicator CSS off (ours has it), and a 401 not swapped in, since the page reloads into the
 # sign-in page instead. Read once by htmx from a meta tag, so no script sets them.
 HTMX_CONFIG = json.dumps({"includeIndicatorCSS": False, "noSwap": [204, 304, 401]})
-STYLESHEETS = ("css/tokens.css", "css/base.css", "css/components.css", "css/search.css")
+STYLESHEETS = ("css/tokens.css", "css/base.css", "css/components.css", "css/search.css", "css/sync.css")
 SCRIPTS = (assets.HTMX, "js/docket.js")
 # A word of a snippet is marked when it is a query word, or starts with one this long (an inflected form).
 MARK_PREFIX = 4
@@ -110,7 +114,6 @@ def _environment() -> Environment:
         "stylesheets": STYLESHEETS,
         "scripts": SCRIPTS,
         "nav": pages.NAV,
-        "keys": pages.KEYS,
     }
     filters: dict[str, object] = {"at": at, "clock": clock, "marked": marked}
     for name, value in names.items():
@@ -129,6 +132,27 @@ ENV = _environment()
 
 def render(template: str, context: Mapping[str, object]) -> str:
     return ENV.get_template(template).render(context)
+
+
+def history(
+    request: Request, canonical: str, canonical_of: Callable[[str], str | None], *, replace: bool = False
+) -> dict[str, str]:
+    """The header a fragment answers with, putting its page's canonical URL in the address bar: a new history entry
+    only when the URL changed (DR-0170). `canonical_of` reads the page the request came from into the same form."""
+    same = canonical_of(request.headers.get("hx-current-url", "")) == canonical
+    return {"HX-Replace-Url" if replace or same else "HX-Push-Url": canonical}
+
+
+async def safely(
+    request: Request, route: str, answer: Callable[[], Awaitable[Response]], failed: Callable[[], Response]
+) -> Response:
+    """A route's answer; on an unexpected error, the log gets the type and frames only, since a message can quote a
+    record, and the answer is the page's or the fragment's own error, so a fragment never swaps in a whole page."""
+    try:
+        return await answer()
+    except Exception as e:
+        log.error("%s %s failed", request.method, route, exc_info=e)
+        return failed()
 
 
 def page(
