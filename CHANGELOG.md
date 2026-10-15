@@ -77,6 +77,10 @@ Unreleased in the same PR.
 
 ### Changed
 
+- Reading an old note path, a doc or a record no longer parses every doc in the vault when the search index is current,
+  and loads a source's raw once: `docket doc read notes/x.md@12:08` on a vault of 200 legacy notes went from 0.8 to
+  0.5 s, and from 1.3 to 0.5 s with 800 docs. The index rebuilds once, at the first search or service start after
+  the update; until then, and after a change to a doc the index hasn't seen yet, a read parses every doc once.
 - Search keeps every word of a query, however common, so a customer named in most of your notes still narrows it; a
   doc, mail or recording whose title leads with most of your words comes first. `too common to search for` is gone,
   and `in no chunk: <word>` names a word nothing in the vault holds. Search with key words, not the sentence.

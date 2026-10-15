@@ -399,7 +399,12 @@ class Indexer:
 def doc_hashes(root: Path) -> dict[str, str]:
     """Every doc file under processed/, by its path from the vault's root, with the sha256 of its bytes."""
     folder = root / "processed"
-    return {_rel(root, p): _sha(p.read_bytes()) for p in folder.rglob("*.md")} if folder.is_dir() else {}
+    if not folder.is_dir():
+        return {}
+    # Every read checks these, and Path.relative_to costs as much as the hashing. rglob gives each path as the
+    # folder's text and the rest, so the text after the root and its separator is the path from the root.
+    cut = len(str(root / "_")) - 1
+    return {str(p)[cut:].replace(os.sep, "/"): _sha(p.read_bytes()) for p in folder.rglob("*.md")}
 
 
 def changed_docs(conn: sqlite3.Connection, root: Path) -> int:
