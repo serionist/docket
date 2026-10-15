@@ -9,7 +9,7 @@ import pytest
 from devkit import docs
 from devkit.regime import Regime
 from devkit.repo import KitError
-from devkit.store import Store
+from devkit.store import EntryFile, Store
 from devkit.yamlio import Comments, emit_file
 
 # The ids the tests create in their own throwaway repo, built so this file cites no decision of the real one.
@@ -317,8 +317,8 @@ def test_door_counts_both_places_and_names_a_folder_with_entry_files_only(
         (f"index.d/{DR1}.yaml", "two", "holds 2 entries; a file in index.d/ holds one"),
         (f"index.d/{DR7}.yaml", "one", f"holds {DR1}, so its name is {DR1}.yaml"),
         ("index.d/README.yaml", "reading", "top-level key 'reading' isn't one of decisions, conventions"),
-        ("index.d/notes.md", "text", "only <id>.yaml files belong in index.d/"),
-        (f"index.d/old/{DR1}.yaml", "one", "only <id>.yaml files belong in index.d/"),
+        ("index.d/notes.md", "text", "only <id>.yaml files belong in index.d/, right inside it"),
+        (f"index.d/old/{DR1}.yaml", "one", "only <id>.yaml files belong in index.d/, right inside it"),
         (f"pkg/index.d/{DR1}.yaml", "empty", "holds 0 entries; a file in index.d/ holds one"),
     ],
 )
@@ -340,6 +340,53 @@ def test_a_file_in_index_d_holds_one_entry_named_by_its_key(repo: Path, rel: str
     path.write_text(body, encoding="utf-8", newline="\n")
     (repo / "index.d" / ".DS_Store").write_bytes(b"\0\1")
     assert [str(p) for p in store(repo).check(citations=False)] == [f"{rel}: {problem}"]
+
+
+@pytest.mark.parametrize(
+    ("kind", "folder", "fields"),
+    [
+        ("decisions", "index.d", ["title=T", "cost=cheap", "description=x"]),
+        ("conventions", "pkg/index.d", ["rule=Be kind", "area=all", "review_only=true"]),
+        ("reading", "index.d", ["path=README.md", "role=guide"]),
+    ],
+)
+def test_add_refuses_a_folder_inside_index_d(
+    repo: Path, capsys: pytest.CaptureFixture[str], kind: str, folder: str, fields: list[str]
+) -> None:
+    add_decision("First")
+    (repo / "pkg" / "index.d").mkdir(parents=True)
+    before = sorted(p.relative_to(repo).as_posix() for p in repo.rglob("*") if ".git" not in p.parts)
+    args = ["add", kind, "--in", folder]
+    for f in fields:
+        args += ["--set", f]
+    assert call(*args) == 2
+    assert "is inside an index.d/ folder" in capsys.readouterr().err
+    assert sorted(p.relative_to(repo).as_posix() for p in repo.rglob("*") if ".git" not in p.parts) == before
+    assert store(repo).check() == []
+
+
+def test_a_file_made_in_memory_inside_index_d_fails_the_check(repo: Path) -> None:
+    add_decision("First")
+    s = store(repo)
+    entry = dict(s.find(DR1).entry, id=DR2)
+    for rel, single in ((f"index.d/index.d/{DR2}.yaml", True), ("index.d/index.yaml", False)):
+        f = EntryFile(rel=rel, folder="", raw="", created=True, dirty=True, single=single)
+        f.sections["decisions"] = [entry]
+        s.files[rel] = f
+        assert f"{rel}: only <id>.yaml files belong in index.d/, right inside it" in [str(p) for p in s.check()]
+        del s.files[rel]
+
+
+def test_move_from_refuses_an_entry_that_sat_inside_index_d(repo: Path, git: Callable[..., str]) -> None:
+    branches(repo, git)
+    add_decision("First")
+    write_index(repo, "index.d", (DR7, "Misplaced"))
+    commit(repo, git, "an index.yaml where it doesn't belong")
+    git(repo, "rm", "-q", "index.d/index.yaml")
+    commit(repo, git, "gone")
+    assert call("move", DR7, "--from", "HEAD~1") == 2
+    assert not (repo / "index.d" / "index.d").exists()
+    assert store(repo).check() == []
 
 
 def test_one_id_in_an_index_yaml_and_in_a_file_of_its_own_is_reported(repo: Path) -> None:

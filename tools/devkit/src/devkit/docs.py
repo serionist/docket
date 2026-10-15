@@ -240,6 +240,9 @@ def _folder_value(store: Store, kind: Kind, folder: str | None) -> str:
     if folder is None:
         raise KitError(f"{kind.name} bind a folder: give --in <folder> ('.' for the root)")
     value = "" if folder in (".", "") else Path(folder).as_posix().strip("/")
+    entry_dir = store.regime.entry_dir
+    if entry_dir and entry_dir in value.split("/"):
+        raise KitError(f"{folder} is inside an {entry_dir}/ folder; give the folder the entry binds")
     if not (store.root / value).is_dir():
         raise KitError(f"{folder} isn't a folder")
     return value
@@ -387,8 +390,7 @@ def cmd_move(args: argparse.Namespace) -> int:
                 if any(loc.key == key for loc in work.entries()):
                     raise KitError(f"{key} is in the tree already; move it without --from")
                 kind, folder, entry = _entry_at(work, args.rev, key)
-                if not (work.root / folder).is_dir():
-                    raise KitError(f"{key} bound {folder}, which isn't a folder here")
+                folder = _folder_value(work, kind, folder or ".")
             else:
                 loc = work.find(key)
                 kind, folder, entry = loc.kind, loc.file.folder or "", loc.entry
@@ -479,7 +481,7 @@ def build_parser() -> argparse.ArgumentParser:
         w.add_argument("--set", action="append", metavar="FIELD=VALUE", help="VALUE, @file, - for stdin")
         w.add_argument("--add", action="append", metavar="FIELD=VALUE", help="append to a list field")
         w.add_argument("--unset", action="append", metavar="FIELD")
-        w.add_argument("--in", dest="folder", help="the folder whose index.yaml holds it ('.' for the root)")
+        w.add_argument("--in", dest="folder", help="the folder the entry binds ('.' for the root)")
         return w
 
     s = writer("add", "add an entry")

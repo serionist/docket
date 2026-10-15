@@ -170,6 +170,9 @@ class Store:
     def _check_file(self, f: EntryFile) -> list[Problem]:
         if f.error:
             return [Problem(f.rel, f.error)]
+        misplaced = _misplaced(self.regime, f.rel, single=f.single)
+        if misplaced:
+            return [Problem(f.rel, misplaced)]
         out: list[Problem] = []
         if f.single:
             out.extend(Problem(f.rel, m) for m in self._check_single(f))
@@ -402,16 +405,26 @@ def _discover(regime: Regime) -> list[str]:
     return sorted(found)
 
 
+def _misplaced(regime: Regime, rel: str, *, single: bool) -> str | None:
+    """Why a file under an index.d/ folder doesn't belong there: only one entry's <id>.yaml sits right inside it."""
+    parts = rel.split("/")
+    if not regime.entry_dir or regime.entry_dir not in parts[:-1]:
+        return None
+    at = parts.index(regime.entry_dir)
+    if single and at == len(parts) - 2 and parts[-1].endswith(".yaml"):
+        return None
+    return f"only <id>.yaml files belong in {regime.entry_dir}/, right inside it"
+
+
 def _read(regime: Regime, rel: str) -> EntryFile:
     table_kind = regime.table_files.get(rel)
     parts = rel.split("/")
     single = bool(regime.entry_dir) and regime.entry_dir in parts[:-1]
     folder: str | None
     if single:
-        at = parts.index(str(regime.entry_dir))
-        folder = "/".join(parts[:at])
-        if at != len(parts) - 2 or not parts[-1].endswith(".yaml"):
-            error = f"only <id>.yaml files belong in {regime.entry_dir}/"
+        folder = "/".join(parts[: parts.index(str(regime.entry_dir))])
+        error = _misplaced(regime, rel, single=True)
+        if error:
             return EntryFile(rel=rel, folder=folder, raw="", single=True, error=error)
     else:
         folder = None if table_kind else rel.rpartition("/")[0]
