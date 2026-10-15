@@ -29,6 +29,9 @@ Only through the writer verbs, never by hand:
 | `docs supersede <old> --by <new>` | marks a decision superseded and prints the citations to fix |
 | `docs remove <key> --why "..."` | soft-deletes |
 
+Parallel branches would each take the same next id. So a plan takes a block of ten for its decisions, the next free
+one above main and every open branch, and adds each with `--set id=DR-nnnn`.
+
 A value is text; `@file` reads it from a UTF-8 file, `-` from stdin, and `@@` writes a literal `@`. Each verb checks
 the edit in memory, refuses one that adds a problem or a file that changed on disk, checks every file before writing
 any, and writes through a temp file and a rename.
