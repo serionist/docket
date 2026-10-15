@@ -160,12 +160,22 @@ def test_a_git_dir_holding_only_docket_s_folders_is_no_git_dir(tmp_path: Path) -
     (vault.root / ".git" / "docket" / "tmp").mkdir(parents=True)
     (vault.root / ".git" / "docket.lock").write_text("", encoding="utf-8")
     assert Vault.find(vault.root) == vault.root
-    with pytest.raises(DocketError, match=r"no \.git in .*holds no repository"):
+    with pytest.raises(DocketError, match=r"no \.git in .*holds no repository.*; restore it") as refused:
         Vault.open(vault.root)
+    assert "link to a repository elsewhere" not in str(refused.value)
     other = tmp_path / "k8s"
     (other / ".git" / "docket").mkdir(parents=True)
     (other / CONFIG_FILE).write_text("server:\n  dev: true\n", encoding="utf-8")
     assert Vault.find(other) is None
+
+
+def test_a_repo_vault_reached_through_a_git_file_says_to_use_its_own_checkout(tmp_path: Path) -> None:
+    vault = Vault.init(tmp_path / "own", make_config(), "test-box")
+    git(vault.root, "worktree", "add", "-q", str(tmp_path / "wt"))
+    assert (tmp_path / "wt" / ".git").is_file()
+    with pytest.raises(DocketError, match=r"link to a repository elsewhere.*vault's own checkout") as refused:
+        Vault.open(tmp_path / "wt")
+    assert "restore it" not in str(refused.value)
 
 
 def _write_config(vault: Vault) -> None:

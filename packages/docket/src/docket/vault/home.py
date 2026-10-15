@@ -97,6 +97,11 @@ def rev_parse(cwd: Path, *flags: str) -> list[str] | None:
 
 
 def _own_repo(root: Path) -> Home:
+    if (root / ".git").is_file():
+        raise DocketError(
+            f"{root}/.git is a link to a repository elsewhere (a submodule or a linked worktree); Docket works only in "
+            "the vault's own checkout, with its .git folder"
+        )
     if not is_git_dir(root / ".git"):
         found = " (the .git there holds no repository, only what was left in it)" if (root / ".git").exists() else ""
         raise DocketError(
