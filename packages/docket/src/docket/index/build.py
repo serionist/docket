@@ -562,22 +562,23 @@ def update(vault: Vault) -> BuildReport:
     return report
 
 
-def _reader(db: Path) -> sqlite3.Connection:
+def _reader(db: Path, timeout: float = BUSY_SECONDS) -> sqlite3.Connection:
     """The index opened to read: by its plain path, since a URI can't name a file on a network share, and writable
     underneath, so SQLite rolls back a hot journal an interrupted update left; `query_only` keeps every statement a
-    read."""
-    conn = sqlite3.connect(db, timeout=BUSY_SECONDS)
+    read. `timeout` is how long a statement waits for an update's lock."""
+    conn = sqlite3.connect(db, timeout=timeout)
     conn.execute("PRAGMA query_only = ON")
     return conn
 
 
-def open_index(vault: Vault) -> sqlite3.Connection:
-    """The index to read, refused when there is none or it was built for another Docket or other languages."""
+def open_index(vault: Vault, timeout: float = BUSY_SECONDS) -> sqlite3.Connection:
+    """The index to read, refused when there is none or it was built for another Docket or other languages. Its
+    statements wait up to `timeout` seconds for an update's lock."""
     check_sqlite()
     db = db_path(vault)
     if not db.exists():
         raise DocketError("there is no index yet; run docket index rebuild")
-    conn = _reader(db)
+    conn = _reader(db, timeout)
     why = stale(conn, languages_of(vault))
     if why is not None:
         conn.close()

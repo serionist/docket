@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -125,3 +126,20 @@ def test_an_update_can_t_commit_while_a_read_asks(vault: Vault) -> None:
     finally:
         writer.close()
         index.close()
+
+
+def test_an_update_holding_the_index_sends_a_read_to_the_parse_route_at_once(vault: Vault) -> None:
+    from docket import recall
+
+    writer = sqlite3.connect(build.db_path(vault), isolation_level=None)
+    try:
+        writer.execute("BEGIN EXCLUSIVE")
+        started = time.monotonic()
+        assert open_current(vault) is None
+        assert time.monotonic() - started < 0.5
+        found = recall.read(vault, "notes/northwind/site lead.md")
+        assert found.resolved == NORTHWIND
+        assert time.monotonic() - started < 1.0
+        writer.execute("ROLLBACK")
+    finally:
+        writer.close()

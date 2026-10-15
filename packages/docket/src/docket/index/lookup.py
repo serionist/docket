@@ -4,8 +4,9 @@ The index is current when every doc file under processed/ has the sha256 it was 
 `old_paths`, `docs` and `doc_covers` rows then say what the files say, since each comes from its doc's file alone.
 `open_current` checks that inside a read transaction that stays open while the caller asks, so an update can't commit
 between the check and the questions. Anything else (no index, another schema or languages, a file that isn't an index,
-no FTS5, a doc changed) gives None, and `read` parses every doc instead. The index only narrows: `read` runs the same
-code on what it gets back as on every doc. Nothing here writes the index.
+no FTS5, a doc changed, an update holding the index) gives None, and `read` parses every doc instead, never waiting
+for the index. The index only narrows: `read` runs the same code on what it gets back as on every doc. Nothing here
+writes the index.
 """
 
 from __future__ import annotations
@@ -22,6 +23,8 @@ from docket.vault.vault import Vault
 
 # SQLite before 3.32 takes at most 999 parameters in one statement.
 BATCH = 500
+# How long a read waits for an update holding the index: parsing the docs is the fallback, so hardly at all.
+LOCK_WAIT_SECONDS = 0.05
 
 
 class DocIndex:
@@ -64,7 +67,7 @@ def open_current(vault: Vault) -> DocIndex | None:
     if not build.db_path(vault).exists():
         return None
     try:
-        conn = build.open_index(vault)
+        conn = build.open_index(vault, timeout=LOCK_WAIT_SECONDS)
     except (DocketError, sqlite3.Error):
         return None
     try:
