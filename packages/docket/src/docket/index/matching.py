@@ -8,9 +8,10 @@ is judged on its own: one under three letters, or one the index holds in over te
 written (counting that as at least five), is dropped and kept in `alias_terms` as dropped. The case forms count while
 one stem form is kept, whichever they are cut to (Mark's `Markkal` is cut to `mar`, which `már` crowds out, while his
 `mark` is kept); with every one dropped they don't (Rob's `rob` while `robot`, Rob with -ot, is everywhere). A case
-form is judged by the ratio rule too, folded, so one that is also a common word doesn't count (`annál` for Ann's
-`Annál`, `évet` for Eve's `Evét`). An `asr` alias also matches through vocabulary words within one edit of a word of 5
-to 7 letters, two of 8 or more, found per word by a bounded Levenshtein walk (DR-0350).
+form the index holds, folded, in over twice as many chunks as the alias as written (at least five) is a common word and
+doesn't count (`annál` for Ann's `Annál`, `évet` for Eve's `Evét`). An `asr` alias also matches through vocabulary
+words within one edit of a word of 5 to 7 letters, two of 8 or more, found per word by a bounded Levenshtein walk
+(DR-0350).
 """
 
 from __future__ import annotations
@@ -30,6 +31,8 @@ from docket.vault.entities import Entities, Entity
 
 SHORT = 3
 COMMON_TIMES = 10
+# A stem form covers every inflection of a name, while one case form is a fraction of the name's uses.
+CASE_COMMON_TIMES = 2
 COMMON_FLOOR = 5
 TERMS_SQL = (
     "INSERT OR IGNORE INTO alias_terms (entity, ordinal, col, word, term, how, distance) VALUES (?, ?, ?, ?, ?, ?, ?)"
@@ -230,8 +233,9 @@ def cases_of(analyzer: Analyzer, ws: list[str], lang: Language) -> Cases:
 
 def judge_forms(conn: sqlite3.Connection, analyzer: Analyzer, aliases: list[AliasRow]) -> None:
     """Every alias's forms as written and its stem forms, kept or dropped, in alias_terms (word -1), and its case forms
-    the ratio rule drops, folded: a case form that is also a common word (`annál` for Ann's `Annál`) would count as the
-    name in every chunk holding the word, since the word stems as the case form does."""
+    in over twice as many chunks as the alias as written, folded: a case form that is also a common word (`annál` for
+    Ann's `Annál`) would count as the name in every chunk holding the word, since the word stems as the case form
+    does."""
     conn.execute("DELETE FROM alias_terms WHERE word = -1")
     cache: dict[str, int] = {}
     rows: set[tuple[str, int, str, int, str, str, int]] = set()
@@ -252,7 +256,7 @@ def judge_forms(conn: sqlite3.Connection, analyzer: Analyzer, aliases: list[Alia
                     how = "stem"
                 rows.add((alias.entity, alias.ordinal, lang.column, -1, " ".join(form), how, 0))
             for form in cases_of(analyzer, ws, lang).forms():
-                if _count(conn, phrase("folded", form), cache) > COMMON_TIMES * floor:
+                if _count(conn, phrase("folded", form), cache) > CASE_COMMON_TIMES * floor:
                     rows.add((alias.entity, alias.ordinal, "folded", -1, " ".join(form), "common", 0))
     conn.executemany(
         TERMS_SQL,
