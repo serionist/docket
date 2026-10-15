@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import webbrowser
@@ -61,6 +62,9 @@ source_app = typer.Typer(
 )
 app.add_typer(source_app, name="source")
 SENSITIVITIES = ("work", "mixed", "private")
+# The Claude Code plugin's hooks run these; they print what Claude Code reads, not what a person does.
+hook_app = typer.Typer(help="What the Claude Code plugin's hooks run.", no_args_is_help=True)
+app.add_typer(hook_app, name="hook", hidden=True)
 
 VaultOption = Annotated[Path | None, typer.Option("--vault", help="The vault; default: DOCKET_VAULT, here, ./vault")]
 
@@ -777,6 +781,21 @@ def service_token(
             say("a new token; restart `docket serve` to use it")
         return
     typer.echo(tokens.header() if header else tokens.read())
+
+
+@hook_app.command("session-start")
+def hook_session_start() -> None:
+    """What state Docket is in, as JSON for Claude Code's SessionStart hook. It reads nothing from stdin and always
+    exits 0: a failure is a line in the JSON, never a failed session."""
+    from docket import hooks  # noqa: PLC0415
+    from docket.service import install  # noqa: PLC0415
+
+    def status() -> install.ServiceStatus:
+        tokens = _tokens()
+        return install.status(_installer(tokens), tokens)
+
+    # ASCII on the wire, whatever the console's code page: JSON escapes every other character.
+    typer.echo(json.dumps(hooks.session_start(status, os.environ)))
 
 
 @app.command("open")
