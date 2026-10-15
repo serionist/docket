@@ -1,5 +1,5 @@
-"""The languages the index stems: each one's Snowball stemmer, the extra word forms it needs, whether aliases match on
-its stems and the case forms of a name, and its time words.
+"""The languages the index stems: each one's Snowball stemmer, the extra word forms it needs, the case forms of a name
+(which make aliases match on its stems), and its time words.
 
 English is always one; the others come from `vault.yaml`'s `owner.languages`, which is free text, so a code is matched
 in any case and Snowball's own names are taken too. A language Docket can't place gets no column and is a problem: its
@@ -39,8 +39,6 @@ class TimeWord:
 class Language:
     code: str
     snowball: str
-    # Aliases match on this language's stems only where it inflects names and someone has tuned it.
-    alias_stems: bool = False
     # More words to stem for a word (lowercased, as written), because the stemmer cuts a bare word shorter than an
     # inflected one.
     more: Callable[[str], list[str]] | None = None
@@ -52,8 +50,9 @@ class Language:
     # Only the first: English changes the third (`dry` to `dri`) and its exceptions the second (`dying` to `die`). Some
     # Snowball stemmers cut prefixes (Indonesian, Irish), so a language says so only once someone has checked it.
     keeps_start: bool = False
-    # A name's case forms (lowercased, as written): they tell a common stem form's inflected mentions of the name from
-    # an ordinary word that stems the same (DR-0310).
+    # A name's case forms (lowercased, as written). Aliases match on this language's stems only where it gives them,
+    # since a stem form counts only beside the alias as written or in one of them: an ordinary word that stems like a
+    # name (`same` for Sam) is none of its case forms (DR-0350).
     cases: Callable[[str], list[str]] | None = None
 
     @property
@@ -161,7 +160,6 @@ KNOWN: dict[str, Language] = {
     "hu": Language(
         "hu",
         "hungarian",
-        alias_stems=True,
         more=hungarian_dative,
         restem=True,
         time_words=HUNGARIAN_TIME,

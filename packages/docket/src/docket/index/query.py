@@ -403,7 +403,7 @@ class _Search:
         return self._phrase(ws)
 
     def entity_group(self, entity: str) -> str | None:
-        exprs = list(matching.expressions(self.conn, [entity], needs=False).values())
+        exprs = list(matching.expressions(self.conn, self.analyzer, [entity], needs=False).values())
         for (term,) in self.conn.execute(
             "SELECT term FROM alias_terms WHERE entity = ? AND how IN ('written', 'stem', 'asr')", (entity,)
         ):

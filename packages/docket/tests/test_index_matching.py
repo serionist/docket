@@ -12,6 +12,7 @@ from docket_testkit import copy_vault, index_config, make_record, template_with
 from docket.index import build, matching, rebuild, search
 from docket.index.languages import resolve
 from docket.index.schema import create
+from docket.index.text import Analyzer
 from docket.vault.vault import Vault
 
 ENTITIES = {
@@ -218,14 +219,72 @@ def test_a_name_in_most_chunks_keeps_its_inflected_mentions(one_customer: Vault)
     assert [e.id for e in result.query.entities] == ["acme"]
 
 
-def test_a_common_word_sharing_a_name_s_stem_is_still_dropped(one_customer: Vault) -> None:
-    forms = query(one_customer, "SELECT entity, term, how FROM alias_terms WHERE col = 'stem_hu' AND how = 'common'")
-    assert ("mark", "mar", "common") in forms
-    assert ("sam", "sam", "common") in forms
-    # Each is named as written in at least a tenth as many chunks as its stem form, so only the share judges them.
-    named = {e: {n for n in range(400) if e in one_customer_message(n)[1]} for e in ("mark", "sam")}
-    assert mentions_of(one_customer, "mark") == {n for n in named["mark"] if n % 8 == 1}
-    assert mentions_of(one_customer, "sam") == {n for n in named["sam"] if n % 20 != 16}
+def test_a_common_word_sharing_a_name_s_stem_never_counts_as_the_name(one_customer: Vault) -> None:
+    # már and the English same are in over a fifth of the chunks, and each name as written in over a tenth as many as
+    # its stem form: the forms stay, and count only beside the name as written or in a case form (DR-0350).
+    forms = query(one_customer, "SELECT entity, term, how FROM alias_terms WHERE col = 'stem_hu'")
+    assert {("mark", "mar", "stem"), ("sam", "sam", "stem")} <= set(forms)
+    for entity in ("mark", "sam"):
+        # Marknak, Markkal and Sammal included; no chunk saying only "Már kész" or "the same".
+        assert mentions_of(one_customer, entity) == {n for n in range(400) if entity in one_customer_message(n)[1]}
+
+
+# A team vault where no stem form is in a fifth of the chunks, so only the check per chunk tells Sam from the English
+# same, and Mark from marked and market. Bálint is named only inflected.
+TEAM = {
+    "person/mark.yaml": "id: mark\ntype: person\nname: {en: Mark}\n",
+    "person/sam.yaml": "id: sam\ntype: person\nname: {en: Sam}\n",
+    "person/balint.yaml": "id: balint\ntype: person\nname: {en: Bálint}\n",
+}
+TEAM_LINES = [
+    # The messages it is in (n % mod == rest), the line, and the person it names.
+    (25, 3, "Sam is on site.", "sam"),
+    (25, 11, "Sammal beszéltem.", "sam"),
+    (50, 19, "Sam's truck is here.", "sam"),
+    (13, 5, "The same crane again.", None),
+    (25, 7, "Mark szerint jó.", "mark"),
+    (50, 21, "Marknak szóltam, Markkal megbeszéltük.", "mark"),
+    (100, 33, "Markot hívtam.", "mark"),
+    (20, 4, "The boxes are marked.", None),
+    (20, 9, "The market is slow.", None),
+    (40, 17, "Bálintnak elküldtem.", "balint"),
+    (40, 37, "Bálinttal beszéltem.", "balint"),
+]
+
+
+def team_message(n: int) -> tuple[str, set[str]]:
+    """Message n's text and the people it names."""
+    lines = [(line, who) for mod, rest, line, who in TEAM_LINES if n % mod == rest]
+    return " ".join([f"A raktárban minden rendben, {n}.", *(line for line, _ in lines)]), {w for _, w in lines if w}
+
+
+def make_team_vault(root: Path) -> Vault:
+    vault = Vault.init(root / "vault", index_config(), "test-box")
+    vault.write_run(
+        "chat", [make_record(n, text=team_message(n)[0]) for n in range(400)], datetime(2026, 10, 14, 7, tzinfo=UTC)
+    )
+    for rel, text in TEAM.items():
+        path = vault.root / "entities" / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return vault
+
+
+@pytest.fixture(scope="module")
+def team(tmp_path_factory: pytest.TempPathFactory) -> Vault:
+    template = template_with(tmp_path_factory, make_team_vault)
+    v = copy_vault(template, tmp_path_factory.mktemp("team"))
+    rebuild(v)
+    return v
+
+
+def test_an_english_word_stemming_like_a_name_is_no_mention(team: Vault) -> None:
+    # The forms are kept: under a fifth of the chunks, and each name as written in over a tenth as many.
+    forms = query(team, "SELECT entity, term, how FROM alias_terms WHERE col = 'stem_hu'")
+    assert {("sam", "sam", "stem"), ("mark", "mar", "stem")} <= set(forms)
+    for entity in ("sam", "mark", "balint"):
+        # Sammal, Sam's, Marknak, Markot and every Bálint in; no chunk saying only the same, marked or market.
+        assert mentions_of(team, entity) == {n for n in range(400) if entity in team_message(n)[1]}
 
 
 def test_a_name_ending_in_y_keeps_its_inflected_mentions(one_customer: Vault) -> None:
@@ -326,10 +385,10 @@ def test_a_multi_word_asr_alias_makes_at_most_twenty_phrases() -> None:
     rows = [("e", 0, "folded", -1, "alpha beta", "written", 0)]
     rows += [("e", 0, "folded", w, f"{'ab'[w]}variant{n}", "asr", 1) for w in (0, 1) for n in range(8)]
     conn.executemany("INSERT INTO alias_terms VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
-    expr = matching.expressions(conn)[("e", 0)]
+    expr = matching.expressions(conn, Analyzer(resolve(["en"])))[("e", 0)]
     assert expr.count(" OR ") + 1 == 1 + matching.MAX_PHRASES
     assert 'folded : "alpha beta"' in expr
-    assert matching.expressions(conn, ["other"]) == {}
+    assert matching.expressions(conn, Analyzer(resolve(["en"])), ["other"]) == {}
 
 
 def test_an_entity_with_only_needs_aliases_has_no_query_expression() -> None:
@@ -337,5 +396,28 @@ def test_an_entity_with_only_needs_aliases_has_no_query_expression() -> None:
     create(conn, resolve(["en"]))
     conn.execute("INSERT INTO aliases VALUES ('e', 0, 'cond', 'plain', NULL, '[\"x\"]', 'cond')")
     conn.execute("INSERT INTO alias_terms VALUES ('e', 0, 'folded', -1, 'cond', 'written', 0)")
-    assert matching.expressions(conn, ["e"], needs=False) == {}
-    assert matching.expressions(conn, ["e"]) == {("e", 0): 'folded : "cond"'}
+    assert matching.expressions(conn, Analyzer(resolve(["en"])), ["e"], needs=False) == {}
+    assert matching.expressions(conn, Analyzer(resolve(["en"])), ["e"]) == {("e", 0): 'folded : "cond"'}
+
+
+def test_a_stem_form_counts_only_beside_a_case_form() -> None:
+    conn = sqlite3.connect(":memory:")
+    create(conn, resolve(["en", "hu"]))
+    conn.executemany(
+        "INSERT INTO aliases VALUES (?, 0, ?, 'name', NULL, '[]', ?)",
+        [("sam", "Sam", "sam"), ("rel", "Release 2026", "release 2026")],
+    )
+    conn.executemany(
+        "INSERT INTO alias_terms VALUES (?, 0, ?, -1, ?, ?, 0)",
+        [
+            ("sam", "folded", "sam", "written"),
+            ("sam", "stem_hu", "sam", "stem"),
+            ("rel", "folded", "release 2026", "written"),
+            ("rel", "stem_hu", "releas 2026", "stem"),
+        ],
+    )
+    exprs = matching.expressions(conn, Analyzer(resolve(["en", "hu"])))
+    assert exprs[("sam", 0)].startswith('(folded : "sam" OR (stem_hu : "sam" AND (folded : "samnak" OR ')
+    assert 'folded : "sammal"' in exprs[("sam", 0)]
+    # A number has no case forms, so its stem form could count only beside the alias as written, which counts already.
+    assert exprs[("rel", 0)] == 'folded : "release 2026"'

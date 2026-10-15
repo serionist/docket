@@ -7,7 +7,7 @@ import types
 
 import pytest
 
-from docket.index import text
+from docket.index import matching, text
 from docket.index.languages import code_of, hungarian_cases, hungarian_dative, language, resolve
 from docket.index.text import Analyzer, Stemmer, any_of, fold, phrase, prefix, quote, words, words_and_compounds
 
@@ -169,6 +169,16 @@ def test_hungarian_case_forms_read_a_final_y_and_old_spellings() -> None:
     assert {"maxszal", "maxot"} <= set(hungarian_cases("max"))
     old = {*hungarian_cases("babits"), *hungarian_cases("kossuth"), *hungarian_cases("max")}
     assert not {"babitssal", "kossuthhal", "maxxal"} & old
+
+
+def test_only_languages_with_case_forms_match_aliases_on_stems() -> None:
+    # Without case forms nothing but the alias as written could explain a stem form's chunk (DR-0350).
+    assert [lang.code for lang in matching.alias_langs(Analyzer(resolve(["en", "hu", "de"])))] == ["hu"]
+    # Only the last word inflects.
+    forms = matching.explaining(["northwind", "traders"], language("hu"))
+    assert forms[:2] == [("northwind", "traders"), ("northwind", "tradersnak")]
+    assert all(form[0] == "northwind" for form in forms)
+    assert matching.explaining(["mark"], language("en")) == [("mark",)]
 
 
 def test_the_seeds_are_the_dative_stem_and_the_word() -> None:
