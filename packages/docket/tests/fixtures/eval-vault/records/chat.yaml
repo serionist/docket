@@ -1,0 +1,37 @@
+# Invented chat of the invented publisher Kestrel Books: a production channel and a rights channel. A message is
+# "<id> | <ts> | <author> | text", its rid chat:<channel>/<id>; a thread is its parent's id and its replies.
+
+C0PROD:
+  messages:
+    - "1790000100.000100 | 2026-09-14T08:05:00Z | U0BEN | Morning all, the printer meeting is moved to tomorrow at nine."
+    - "1790100100.000100 | 2026-09-16T12:10:00Z | U0DORA | A grafikus kéri a végleges fülszöveget péntekig."
+    - "1790200100.000100 | 2026-09-21T09:00:00Z | U0ADA | Who has the spare key to the storeroom? The cleaner needs it on Thursday."
+    - "1790300100.000100 | 2026-09-24T14:30:00Z | U0BEN | Jacket text approved, sent to the designer."
+    - "1790500100.000100 | 2026-10-02T07:50:00Z | U0DORA | Az ISBN-kérelmet holnap küldöm, kell még a pontos oldalszám."
+    - "1790500200.000100 | 2026-10-02T08:10:00Z | U0BEN | Page count is 384 with the map and the notes."
+    - "1790700100.000100 | 2026-10-05T10:00:00Z | U0ADA | Reminder: the office is closed on Friday afternoon."
+    - "1791000100.000100 | 2026-10-09T13:00:00Z | U0BEN | The studio wants the audiobook script as one file, not per chapter."
+    - "1791100100.000100 | 2026-10-12T09:20:00Z | U0DORA | Megjött a végleges fülszöveg angolul is, feltöltöttem a közös mappába."
+    - "1791300100.000100 | 2026-10-14T07:10:00Z | U0BEN | Fair programme: the reading is listed for Saturday 15:00, small hall."
+  threads:
+    - - "1790400100.000100 | 2026-09-30T08:00:00Z | U0DORA | Elírás van a borítón: a szerző nevében hiányzik egy ékezet."
+      - "1790400200.000100 | 2026-09-30T08:12:00Z | U0ADA | Jó, hogy észrevetted. Szólj a grafikusnak, a nyomdának még nem ment ki."
+      - "1790400300.000100 | 2026-09-30T09:40:00Z | U0DORA | Javította, az új fájl a mappában van."
+    - - "1790900100.000100 | 2026-10-08T09:00:00Z | U0BEN | The cover proof came in. The colours are too dark, the cart almost disappears into the background."
+      - "1790900200.000100 | 2026-10-08T09:15:00Z | U0ADA | Agreed, the blue is too heavy. Can they lighten it before the run?"
+      - "1790900300.000100 | 2026-10-08T10:30:00Z | U0BEN | Szélmalom says yes, they adjust the curve and send a new proof on Thursday."
+      - "1790900400.000100 | 2026-10-08T10:45:00Z | U0DORA | A szekér színét a grafikus is világosítja, a kettő együtt elég lesz."
+    - - "1791200100.000100 | 2026-10-13T11:00:00Z | U0DORA | Hova tesszük a könyveket, ha megjönnek? A raktárban kevés a hely a tavalyi maradék miatt."
+      - "1791200200.000100 | 2026-10-13T11:20:00Z | U0BEN | A tavalyi maradékot az Orbex elviszi a jövő héten, akkor felszabadul két polcsor."
+      - "1791200300.000100 | 2026-10-13T11:35:00Z | U0ADA | Rendben, a vásárra szánt ötszáz példány maradjon dobozban az ajtó mellett."
+
+C0RIGHTS:
+  messages:
+    - "1790050100.000100 | 2026-09-15T15:00:00Z | U0CLEO | Pitch folder for the fair is started, I will add the reader's report when it arrives."
+    - "1790350100.000100 | 2026-09-28T10:00:00Z | U0CLEO | Two meetings booked for the fair so far. More to come."
+    - "1790750100.000100 | 2026-10-06T16:00:00Z | U0CLEO | Rights guide draft is in the shared folder, comments by Monday please."
+    - "1791350100.000100 | 2026-10-14T06:30:00Z | U0CLEO | Rights guide is final and at the printer with the posters."
+  threads:
+    - - "1791050100.000100 | 2026-10-10T08:00:00Z | U0CLEO | Both houses want a sample. Do we send the first chapters as they are, or wait for the edit?"
+      - "1791050200.000100 | 2026-10-10T08:20:00Z | U0ADA | As they are. Chapters one to three are edited, that is about fifty pages."
+      - "1791050300.000100 | 2026-10-10T08:40:00Z | U0CLEO | Sent as a PDF, with the map."

@@ -1,0 +1,8 @@
+id: szelmalom-nyomda
+type: org
+name: {en: Szélmalom Nyomda, hu: Szélmalom Nyomda}
+aliases:
+  - {text: Szélmalom}
+  - {text: Selma Lom, kind: asr}
+ids: {email_domain: szelmalom.example}
+role: printer

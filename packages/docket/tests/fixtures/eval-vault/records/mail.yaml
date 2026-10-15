@@ -1,0 +1,343 @@
+# Invented mail of the invented publisher Kestrel Books. Paragraphs are separated by a blank line; a reply's subject
+# starts with RE:.
+
+- rid: mail:<quote-1@szelmalom.example>
+  container: mail:szelmalom-quote
+  ts: "2026-09-10T09:15:00Z"
+  author: Szélmalom Nyomda <ajanlat@szelmalom.example>
+  title: "Árajánlat: A sóút, 3000 példány"
+  text: |-
+    Kedves Ada!
+
+    Köszönjük a megkeresést. A sóút keménytáblás kiadására, 3000 példányra az ajánlatunk 2 100 000 Ft, amely tartalmazza a védőborítót és a kiszállítást a raktárukba.
+
+    Belívnek 90 grammos, krémszínű ofszetpapírt javaslunk. A cérnafűzött kötés a ragasztotthoz képest 15 százalékkal drágább, de jóval tartósabb.
+
+    A gyártási idő a végleges fájlok beérkezésétől számítva nagyjából három hét.
+
+    Üdvözlettel:
+    Szélmalom Nyomda, ajánlati osztály
+
+- rid: mail:<quote-2@kestrel.example>
+  container: mail:szelmalom-quote
+  ts: "2026-09-16T08:40:00Z"
+  author: Ada Example <ada@kestrel.example>
+  title: "RE: Árajánlat: A sóút, 3000 példány"
+  text: |-
+    Kedves Nyomda!
+
+    Köszönjük az ajánlatot, elfogadjuk. A cérnafűzött kötést kérjük, és a 3000 mellé további 500 példányt a novemberi vásárra, egyetlen szállítással.
+
+    Kérjük, küldjenek mintalapot a krémszínű papírból a grafikusunknak.
+
+    Üdvözlettel:
+    Ada
+
+- rid: mail:<advance-1@kestrel.example>
+  container: mail:rita-contract
+  ts: "2026-09-23T13:00:00Z"
+  author: Ada Example <ada@kestrel.example>
+  to: [Cleo Test <cleo@rights.example>]
+  title: Rita's contract for The Salt Road
+  text: |-
+    Hi Cleo,
+
+    We agreed the terms with Rita yesterday. She gets an advance of four hundred euros on signing, and the rest when she hands in the manuscript in November.
+
+    Could you draw up the contract on those terms and send it to her for signature? She will post the signed copy back.
+
+    Thanks,
+    Ada
+
+- rid: mail:<fair-1@harbourfair.example>
+  container: mail:fair-booking
+  ts: "2026-09-25T10:30:00Z"
+  author: Harbour Book Fair <stands@harbourfair.example>
+  title: "Stand booking confirmed: B14"
+  text: |-
+    Dear exhibitor,
+
+    Your booking for stand B14 in the translation hall is confirmed for the Harbour Book Fair, 6 to 8 November.
+
+    Set-up is on 5 November from 14:00. Each stand gets two tables, four chairs, a power socket and a shelf unit; extra furniture is ordered through the portal.
+
+    The stand fee of 850 euros is due by 20 October.
+
+    Kind regards,
+    The exhibitor team
+
+- rid: mail:<orbex-1@orbex.example>
+  container: mail:orbex-terms
+  ts: "2026-10-02T11:00:00Z"
+  author: Orbex Distribution <trade@orbex.example>
+  title: Distribution terms for the autumn titles
+  text: |-
+    Dear Ada,
+
+    Following our talk, here are our terms for the autumn titles. We take a discount of 35 percent of the cover price, and pay sixty days after the end of the month of sale.
+
+    Unsold copies can come back to you for six months after publication. We collect your share from your storeroom the week the stock arrives.
+
+    We are glad to split the fair stand with you, half each.
+
+    Best regards,
+    Trade team, Orbex Distribution
+
+- rid: mail:<paper-1@szelmalom.example>
+  container: mail:paper-price
+  ts: "2026-10-05T07:45:00Z"
+  author: Szélmalom Nyomda <ajanlat@szelmalom.example>
+  title: Papírár-emelés november 1-től
+  text: |-
+    Tisztelt Partnerünk!
+
+    Tájékoztatjuk, hogy beszállítónk áremelése miatt november 1-től a papír ára 12 százalékkal emelkedik.
+
+    A már leadott rendeléseket a régi áron teljesítjük, ha azokat október 9-ig írásban visszaigazolják.
+
+    Üdvözlettel:
+    Szélmalom Nyomda
+
+- rid: mail:<paper-2@kestrel.example>
+  container: mail:paper-price
+  ts: "2026-10-07T09:10:00Z"
+  author: Ada Example <ada@kestrel.example>
+  title: "RE: Papírár-emelés november 1-től"
+  text: |-
+    Kedves Nyomda!
+
+    Ezúton visszaigazoljuk A sóút 3500 példányos rendelését a szeptemberi feltételekkel.
+
+    Üdvözlettel:
+    Ada
+
+- rid: mail:<german-1@rights.example>
+  container: mail:german-interest
+  ts: "2026-10-09T15:20:00Z"
+  author: Cleo Test <cleo@rights.example>
+  to: [Ada Example <ada@kestrel.example>]
+  title: Hamburg interest in The Salt Road
+  text: |-
+    Hi Ada,
+
+    The house from Hamburg read the pitch and the reader's report and liked both. Before they make an offer they want to see fifty pages of the English text.
+
+    I expect an offer after the fair, most likely in the range of the advance we discussed. The Kraków publisher is slower, they will decide in December.
+
+    Best,
+    Cleo
+
+- rid: mail:<isbn-1@kestrel.example>
+  container: mail:isbn
+  ts: "2026-10-07T12:00:00Z"
+  author: Dóra Minta <dora@kestrel.example>
+  title: ISBN-kérelem
+  text: |-
+    Kedves Ada!
+
+    Elküldtem a kérelmet a nemzeti könyvtárnak: két ISBN-számot kértünk, egyet a keménytáblás kiadásnak és egyet az e-könyvnek.
+
+    A számokat egy héten belül megkapjuk, akkor beírom őket a copyright oldalra.
+
+    Dóra
+
+- rid: mail:<studio-1@studio.example>
+  container: mail:studio
+  ts: "2026-10-09T08:30:00Z"
+  author: Sound Studio <booking@studio.example>
+  title: Studio booking, 7 to 11 December
+  text: |-
+    Dear Ben,
+
+    We have reserved the large booth for five days, 7 to 11 December, with the narrator you chose.
+
+    The total for studio time, engineer and narrator is 1 200 000 forints, half on booking and half on delivery of the master files.
+
+    Please confirm by Friday.
+
+    Regards,
+    Booking desk
+
+- rid: mail:<delay-1@szelmalom.example>
+  container: mail:szelmalom-delivery
+  ts: "2026-10-12T06:50:00Z"
+  author: Szélmalom Nyomda <gyartas@szelmalom.example>
+  title: Szállítás csúszik
+  text: |-
+    Kedves Ada!
+
+    Sajnos a szállítás október 23-ra csúszik: a papírt hozó kamion három napig a határon állt, így a nyomtatást csak később tudtuk elkezdeni.
+
+    A cérnafűzés és a védőborító a tervek szerint halad, a minőséget ez nem érinti.
+
+    Elnézést kérünk a kellemetlenségért.
+    Szélmalom Nyomda, gyártás
+
+- rid: mail:<launch-1@kestrel.example>
+  container: mail:launch
+  ts: "2026-10-12T14:00:00Z"
+  author: Dóra Minta <dora@kestrel.example>
+  title: Könyvbemutató november 27.
+  text: |-
+    Kedves Mindenki!
+
+    A Hársfa utcai könyvesbolt visszaigazolta a könyvbemutatót: november 27., csütörtök, este 6 óra. A termet lefoglaltuk, hatvan szék fér el benne.
+
+    A szerző eljön, a beszélgetést én vezetem. Bort és pogácsát a bolt intéz.
+
+    Dóra
+
+- rid: mail:<poster-1@szelmalom.example>
+  container: mail:posters
+  ts: "2026-10-02T13:30:00Z"
+  author: Szélmalom Nyomda <ajanlat@szelmalom.example>
+  title: Plakátok a vásárra
+  text: |-
+    Kedves Ben!
+
+    Húsz darab A2-es plakátot nyomtatunk az új borítóval, a védőborítóval azonos papírra. Az ára 48 000 Ft.
+
+    A plakátokat a könyvekkel együtt szállítjuk.
+
+    Üdvözlettel:
+    Szélmalom Nyomda
+
+- rid: mail:<ebook-1@kestrel.example>
+  container: mail:ebook
+  ts: "2026-10-10T10:00:00Z"
+  author: Ben Sample <ben@kestrel.example>
+  title: E-book for The Salt Road
+  text: |-
+    Hi all,
+
+    The conversion is done and the EPUB passed the validator with no errors. I uploaded it to the two shops; it goes live on publication day.
+
+    We set the price at 4.99 euros.
+
+    Ben
+
+- rid: mail:<proof-1@kestrel.example>
+  container: mail:proofs
+  ts: "2026-10-09T16:00:00Z"
+  author: Dóra Minta <dora@kestrel.example>
+  title: Korrektúra, első hét fejezet
+  text: |-
+    Kedves Rita!
+
+    Átnéztem az első hét fejezetet. Összesen 140 helyen módosítottam, többnyire vesszők és két elírt helynév; a listát csatolom.
+
+    A hetedik fejezetben a hiányzó két oldalt megkaptam, köszönöm.
+
+    Dóra
+
+- rid: mail:<glossary-1@translate.example>
+  container: mail:glossary
+  ts: "2026-10-03T18:20:00Z"
+  author: Rita Sample <rita@translate.example>
+  title: Helynévjegyzék
+  text: |-
+    Kedves Dóra!
+
+    Csatolom a helynévjegyzéket: 86 név, a falvak, a bányák és a két folyó, mindegyik a magyar és az angol alakjával.
+
+    A térképen a régi neveket használnám, ahogy a regény is.
+
+    Rita
+
+- rid: mail:<insurance-1@kestrel.example>
+  container: mail:insurance
+  ts: "2026-09-29T09:00:00Z"
+  author: Ben Sample <ben@kestrel.example>
+  title: Insurance for the fair
+  text: |-
+    Hi Ada,
+
+    The insurer covers the stock at the fair under our usual policy, up to the value of the books, as long as the van is locked overnight.
+
+    Ben
+
+- rid: mail:<catalogue-1@kestrel.example>
+  container: mail:catalogue
+  ts: "2026-09-18T11:00:00Z"
+  author: Ada Example <ada@kestrel.example>
+  title: Autumn catalogue
+  text: |-
+    Hi all,
+
+    The autumn catalogue went out to the bookshops and the foreign publishers this morning. The Salt Road is on the cover, Winter Orchard on page four.
+
+    Ada
+
+- rid: mail:<reader-1@rights.example>
+  container: mail:reader-report
+  ts: "2026-09-20T10:00:00Z"
+  author: Cleo Test <cleo@rights.example>
+  title: Reader's report
+  text: |-
+    Hi Ada,
+
+    Attached is the reader's report for the pitch folder. The reader calls the book a quiet road novel about salt traders, and singles out the dialogue of the old trader.
+
+    Cleo
+
+- rid: mail:<narrator-1@kestrel.example>
+  container: mail:pronunciation
+  ts: "2026-10-13T12:30:00Z"
+  author: Dóra Minta <dora@kestrel.example>
+  title: Kiejtési lista a felolvasónak
+  text: |-
+    Kedves Ben!
+
+    Összeállítottam a kiejtési listát: 42 angol név és helynév, mindegyik mellett a kiejtés magyar betűkkel. Kérlek, küldd tovább a stúdiónak.
+
+    A stúdió levelét is csatolom, abban van a felvétel napi beosztása.
+
+    Dóra
+
+- rid: mail:<cover-1@kestrel.example>
+  container: mail:cover
+  ts: "2026-10-07T07:30:00Z"
+  author: Dóra Minta <dora@kestrel.example>
+  title: A borító döntés
+  text: |-
+    Kedves Ada!
+
+    A grafikus örült, hogy az illusztrált változat maradt. A szekér színét egy árnyalattal világosabbra veszi, és október 16-ig küldi a végleges fájlt.
+
+    Dóra
+
+- rid: mail:<payment-1@kestrel.example>
+  container: mail:payments
+  ts: "2026-10-02T08:00:00Z"
+  author: Ada Example <ada@kestrel.example>
+  title: Átutalás Ritának
+  text: |-
+    Kedves Rita!
+
+    Ma elutaltuk a szerződés szerinti első részletet. Ha kérdésed van a számlával kapcsolatban, írj nyugodtan.
+
+    Ada
+
+- rid: mail:<van-1@kestrel.example>
+  container: mail:van
+  ts: "2026-10-06T15:00:00Z"
+  author: Ben Sample <ben@kestrel.example>
+  title: Van for the fair
+  text: |-
+    Hi Ada,
+
+    The van is booked for 5 November, picking up at our storeroom at nine. It holds the books, the posters, the shelf for the rights guides and the coffee machine.
+
+    Ben
+
+- rid: mail:<polish-1@rights.example>
+  container: mail:polish-interest
+  ts: "2026-10-11T09:00:00Z"
+  author: Cleo Test <cleo@rights.example>
+  title: Kraków
+  text: |-
+    Hi Ada,
+
+    The publisher from Kraków asked for the English sample as a PDF and a word count. I sent both; they will take it to their December board.
+
+    Cleo

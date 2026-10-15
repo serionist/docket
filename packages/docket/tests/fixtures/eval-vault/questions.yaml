@@ -1,0 +1,326 @@
+# The invented question set: 72 questions over the invented eval vault (eval_vault.py), in the format docket eval
+# reads (DR-0290). The gate runs it at k 10 against a floor per kind in tools/devkit/eval-floors.json (DR-0295).
+#
+# Kinds: exact-name (the name as the text writes it), paraphrase (none of the answer's words; four ask in the other
+# language than the answer's), inflection (the question's form of a word differs from the text's), typo (a word an
+# edit or two off: eight in the question, four in the recorder's transcript of the weekly call), time-bound (the
+# answer depends on a time word). A note says why a question is hard, or which change is meant to close its gap.
+schema_version: 1
+asked: "2026-10-14T10:00:00+02:00"
+questions:
+  # -- exact-name ------------------------------------------------------------------------------------------------
+  - q: Harbour Book Fair stand B14
+    want: ["r:mail:<fair-1@harbourfair.example>"]
+    kind: exact-name
+    lang: en
+  - q: Orbex Distribution terms
+    want: ["r:mail:<orbex-1@orbex.example>"]
+    kind: exact-name
+    lang: en
+  - q: Winter Orchard audiobook studio
+    want: ["r:calls:rec-0305@00:30"]
+    kind: exact-name
+    lang: en
+  - q: Szélmalom quote
+    want: ["r:calls:rec-0301@01:30"]
+    kind: exact-name
+    lang: en
+  - q: Hamburg sample
+    want: ["r:mail:<german-1@rights.example>"]
+    kind: exact-name
+    lang: en
+  - q: Ben Sample sewn binding
+    want: ["r:calls:rec-0301@05:00"]
+    kind: exact-name
+    lang: en
+  - q: Cleo Test Kraków
+    want: ["r:mail:<polish-1@rights.example>"]
+    kind: exact-name
+    lang: en
+  - q: Szélmalom Nyomda árajánlat
+    want: ["r:mail:<quote-1@szelmalom.example>"]
+    kind: exact-name
+    lang: hu
+  - q: Minta Dóra korrektúra
+    want: ["r:mail:<proof-1@kestrel.example>"]
+    kind: exact-name
+    lang: hu
+  - q: Téli kert nyomdába
+    want: ["r:calls:rec-0305@04:10"]
+    kind: exact-name
+    lang: hu
+  - q: Hársfa utcai könyvesbolt
+    want: ["r:mail:<launch-1@kestrel.example>", "r:calls:rec-0304@06:10"]
+    kind: exact-name
+    lang: hu
+  - q: Orbex kedvezmény
+    want: ["r:calls:rec-0304@05:10"]
+    kind: exact-name
+    lang: hu
+  - q: Rita helynévjegyzék
+    want: ["r:mail:<glossary-1@translate.example>"]
+    kind: exact-name
+    lang: hu
+  - q: Salt Way cím
+    want: ["r:calls:rec-0302@03:40"]
+    kind: exact-name
+    lang: hu
+
+  # -- paraphrase ------------------------------------------------------------------------------------------------
+  - q: money up front for the translator
+    want: ["r:mail:<advance-1@kestrel.example>#2"]
+    kind: paraphrase
+    lang: en
+    note: the mail says an advance on signing, and names Rita, not the translator
+  - q: how many books in the first printing
+    want: ["r:calls:rec-0301@00:30"]
+    kind: paraphrase
+    lang: en
+  - q: how long does the voice actor need
+    want: ["r:mail:<studio-1@studio.example>#2"]
+    kind: paraphrase
+    lang: en
+  - q: what cut does the wholesaler take
+    want: ["r:mail:<orbex-1@orbex.example>#2"]
+    kind: paraphrase
+    lang: en
+  - q: where is our booth
+    want: ["r:mail:<fair-1@harbourfair.example>#2"]
+    kind: paraphrase
+    lang: en
+    note: the fair calls it a stand; the studio's booth is another thing
+  - q: reason the shipment slipped
+    want: ["r:calls:rec-0306@00:20"]
+    kind: paraphrase
+    lang: en
+  - q: price of recording the spoken book
+    want: ["r:calls:rec-0305@01:30"]
+    kind: paraphrase
+    lang: en
+  - q: is the digital edition ready for sale
+    want: ["r:mail:<ebook-1@kestrel.example>#2"]
+    kind: paraphrase
+    lang: en
+  - q: which artwork goes on the jacket
+    want: ["r:calls:rec-0304@02:10"]
+    kind: paraphrase
+    lang: en
+    note: asked in English, decided in Hungarian
+  - q: when do the finished copies reach our storeroom
+    want: ["r:mail:<delay-1@szelmalom.example>#2"]
+    kind: paraphrase
+    lang: en
+    note: asked in English, answered in Hungarian; the print run call gives the date before the delay
+  - q: mennyibe kerül a nyomtatás
+    want: ["r:mail:<quote-1@szelmalom.example>#2"]
+    kind: paraphrase
+    lang: hu
+  - q: drágul az alapanyag
+    want: ["r:mail:<paper-1@szelmalom.example>#2"]
+    kind: paraphrase
+    lang: hu
+  - q: mekkora rész készült el a szövegből
+    want: ["r:calls:rec-0302@00:30"]
+    kind: paraphrase
+    lang: hu
+  - q: mikor ünnepeljük a megjelenést
+    want: ["r:mail:<launch-1@kestrel.example>#2"]
+    kind: paraphrase
+    lang: hu
+  - q: melyik külföldi kiadó akar részletet olvasni
+    want: ["r:mail:<german-1@rights.example>#2"]
+    kind: paraphrase
+    lang: hu
+    note: asked in Hungarian, answered in English
+  - q: mennyi hibát talált a lektor
+    want: ["r:mail:<proof-1@kestrel.example>#2"]
+    kind: paraphrase
+    lang: hu
+  - q: kell-e fóliázni a könyveket
+    want: ["r:calls:rec-0301@08:30"]
+    kind: paraphrase
+    lang: hu
+    note: asked in Hungarian, answered in English
+  - q: meddig kell elkészülni a címlappal
+    want: ["r:calls:rec-0304@02:40"]
+    kind: paraphrase
+    lang: hu
+
+  # -- inflection ------------------------------------------------------------------------------------------------
+  - q: papírárak emelése
+    want: ["r:mail:<paper-1@szelmalom.example>"]
+    kind: inflection
+    lang: hu
+  - q: terjesztői szerződést
+    want: ["r:calls:rec-0304@05:10"]
+    kind: inflection
+    lang: hu
+  - q: borítóról döntöttünk
+    want: ["r:mail:<cover-1@kestrel.example>"]
+    kind: inflection
+    lang: hu
+  - q: terem székek
+    want: ["r:mail:<launch-1@kestrel.example>#2"]
+    kind: inflection
+    lang: hu
+    note: the mail says termet, which drops the vowel of terem; Snowball keeps them apart, and székek finds it
+  - q: stúdió levél
+    want: ["r:mail:<narrator-1@kestrel.example>#3"]
+    kind: inflection
+    lang: hu
+    note: the mail says levelét, which shortens the é of levél
+  - q: tájszólásról
+    want: ["r:calls:rec-0302@02:00"]
+    kind: inflection
+    lang: hu
+  - q: kiejtésről
+    want: ["r:mail:<narrator-1@kestrel.example>"]
+    kind: inflection
+    lang: hu
+    note: the text says kiejtési, an adjective made from the noun
+  - q: helynévjegyzékről
+    want: ["r:mail:<glossary-1@translate.example>", "r:calls:rec-0302@06:10"]
+    kind: inflection
+    lang: hu
+  - q: korrektúráját októberben
+    want: ["r:calls:rec-0302@01:10"]
+    kind: inflection
+    lang: hu
+  - q: előleget Ritának
+    want: ["r:calls:rec-0302@04:40"]
+    kind: inflection
+    lang: hu
+  - q: ISBN-számokról
+    want: ["r:mail:<isbn-1@kestrel.example>"]
+    kind: inflection
+    lang: hu
+  - q: kedvezménnyel terjesztő
+    want: ["r:calls:rec-0304@05:10"]
+    kind: inflection
+    lang: hu
+    note: kedvezménnyel doubles the consonant of the ending; the text says kedvezményt and terjesztői
+  - q: könyv bemutató
+    want: ["r:mail:<launch-1@kestrel.example>"]
+    kind: inflection
+    lang: hu
+    note: a compound written apart, as könyvbemutató is in the text; #59 finds the joined form
+  - q: fül szöveget péntekig
+    want: ["r:chat:C0PROD/1790100100.000100"]
+    kind: inflection
+    lang: hu
+    note: a compound written apart, as fülszöveget is in the text; #59 finds the joined form
+
+  # -- typo ------------------------------------------------------------------------------------------------------
+  - q: Szélmalom border
+    want: ["r:calls:rec-0306@00:20"]
+    kind: typo
+    lang: en
+    note: the recorder heard Selma Lom, which is an ASR alias of the printer
+  - q: Orbex storeroom pickup
+    want: ["r:calls:rec-0306@01:30"]
+    kind: typo
+    lang: en
+    note: the recorder heard Orbix, which no alias knows, and the call says pick up apart
+  - q: Cleo Rita fifty pages
+    want: ["r:calls:rec-0306@02:40"]
+    kind: typo
+    lang: en
+    note: the recorder heard Clio, which is an ASR alias of Cleo
+  - q: Hamburg publisher offer
+    want: ["r:mail:<german-1@rights.example>", "r:calls:rec-0306@02:00"]
+    kind: typo
+    lang: en
+    note: the recorder heard Hamberg; the mail spells it right
+  - q: transaltor advance
+    want: ["r:mail:<advance-1@kestrel.example>"]
+    kind: typo
+    lang: en
+  - q: Harbur Book Fair
+    want: ["r:mail:<fair-1@harbourfair.example>"]
+    kind: typo
+    lang: en
+  - q: nyomdda árajánlat
+    want: ["r:mail:<quote-1@szelmalom.example>"]
+    kind: typo
+    lang: hu
+  - q: korektúra
+    want: ["r:mail:<proof-1@kestrel.example>"]
+    kind: typo
+    lang: hu
+  - q: helynévjegyzk
+    want: ["r:mail:<glossary-1@translate.example>"]
+    kind: typo
+    lang: hu
+  - q: kiejtési lsita
+    want: ["r:mail:<narrator-1@kestrel.example>"]
+    kind: typo
+    lang: hu
+  - q: Szélmalmo szállítás
+    want: ["r:mail:<delay-1@szelmalom.example>"]
+    kind: typo
+    lang: hu
+  - q: tájszólás haldék
+    want: ["r:calls:rec-0302@02:00"]
+    kind: typo
+    lang: hu
+
+  # -- time-bound ------------------------------------------------------------------------------------------------
+  - q: last week paper price
+    want: ["r:mail:<paper-1@szelmalom.example>#2"]
+    kind: time-bound
+    lang: en
+    note: the printer wrote in Hungarian; the week's digest says it in English
+  - q: yesterday call
+    want: ["thread:calls:rec-0306"]
+    kind: time-bound
+    lang: en
+  - q: Cleo last week
+    want: ["r:mail:<german-1@rights.example>", "r:mail:<polish-1@rights.example>"]
+    kind: time-bound
+    lang: en
+  - q: last month print run
+    want: ["thread:calls:rec-0301"]
+    kind: time-bound
+    lang: en
+  - q: this week delivery
+    want: ["r:mail:<delay-1@szelmalom.example>", "thread:calls:rec-0306"]
+    kind: time-bound
+    lang: en
+  - q: last week studio booking dates
+    want: ["r:mail:<studio-1@studio.example>"]
+    kind: time-bound
+    lang: en
+  - q: two weeks ago fair stand
+    want: ["r:calls:rec-0303@01:00"]
+    kind: time-bound
+    lang: en
+    note: two weeks ago is in no time table, so its words stay in the query; fair and stand still find the call
+  - q: last 7 days cover proof
+    want: ["thread:chat:C0PROD/1790900100.000100"]
+    kind: time-bound
+    lang: en
+  - q: múlt héten papír ára
+    want: ["r:calls:rec-0304@03:10", "r:mail:<paper-1@szelmalom.example>"]
+    kind: time-bound
+    lang: hu
+  - q: tegnap raktár
+    want: ["thread:chat:C0PROD/1791200100.000100"]
+    kind: time-bound
+    lang: hu
+  - q: ezen a héten szállítás
+    want: ["r:mail:<delay-1@szelmalom.example>"]
+    kind: time-bound
+    lang: hu
+  - q: múlt hónapban fordító
+    want: ["thread:calls:rec-0302"]
+    kind: time-bound
+    lang: hu
+  - q: ebben a hónapban ISBN
+    want: ["r:mail:<isbn-1@kestrel.example>"]
+    kind: time-bound
+    lang: hu
+  - q: szeptemberben árajánlat
+    want: ["r:mail:<quote-1@szelmalom.example>"]
+    kind: time-bound
+    lang: hu
+    note: the time table has no month names, so szeptemberben stays a word

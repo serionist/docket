@@ -1,0 +1,7 @@
+id: ben-sample
+type: person
+name: {en: Ben Sample}
+aliases:
+  - {text: Ben}
+ids: {chat: U0BEN, email: ben@kestrel.example}
+role: production manager

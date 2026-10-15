@@ -1,0 +1,8 @@
+id: cleo-test
+type: person
+name: {en: Cleo Test}
+aliases:
+  - {text: Cleo}
+  - {text: Clio, kind: asr}
+ids: {chat: U0CLEO, email: cleo@rights.example}
+role: rights agent

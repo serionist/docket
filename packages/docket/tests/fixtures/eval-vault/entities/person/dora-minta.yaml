@@ -1,0 +1,7 @@
+id: dora-minta
+type: person
+name: {en: Dóra Minta, hu: Minta Dóra}
+aliases:
+  - {text: Dóra}
+ids: {chat: U0DORA, email: dora@kestrel.example}
+role: editor
