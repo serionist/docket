@@ -19,6 +19,8 @@ from docket.web import assets, search, templating
 
 # Paths whose 404 stays JSON: the clients of these read JSON, never a page.
 MACHINE_PATHS = ("/api", "/mcp")
+# The icon every page the service answers names, served without a session like the other static files.
+ICON = "/static/icon.svg"
 
 
 def sign_in_page(wanted: str) -> str:

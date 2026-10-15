@@ -233,6 +233,9 @@ def test_a_code_starts_one_session_and_moves_on_with_a_page(app_client: TestClie
     answer = app_client.get(f"/session?code={code}&next=/search")
     assert answer.status_code == 200
     assert '<meta http-equiv="refresh" content="0; url=/search">' in answer.text
+    # It names its icon, so the browser doesn't ask for a /favicon.ico that isn't there.
+    assert '<link rel="icon" href="/static/icon.svg" type="image/svg+xml">' in answer.text
+    assert app_client.get("/static/icon.svg").status_code == 200
     cookie = answer.headers["set-cookie"]
     assert cookie.startswith(f"{COOKIE}=")
     assert "HttpOnly" in cookie

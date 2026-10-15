@@ -70,6 +70,11 @@ def test_the_search_page_in_a_browser(service: tuple[int, str], tmp_path: Path) 
         page = browser.new_page(viewport={"width": 1440, "height": 900})
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: errors.append(str(e)))
+        # A console error names no URL; these do, so a failure says which request it was.
+        page.on("requestfailed", lambda r: errors.append(f"request failed: {r.method} {r.url} ({r.failure})"))
+        page.on(
+            "response", lambda r: errors.append(f"{r.status} {r.request.method} {r.url}") if r.status >= 400 else None
+        )
         base = f"http://127.0.0.1:{port}"
         page.goto(f"{link.body['url']}&next=/search")
         page.wait_for_url(f"{base}/search")

@@ -43,7 +43,7 @@ def create_fastapi(service: Service, lifespan: object = None) -> FastAPI:
             return HTMLResponse(web.used_link_page(safe_next(after)), status_code=401)
         # A page that moves on, not a redirect: coming from a file, a redirect's navigation stays cross-site and the
         # browser would hold back the Strict cookie on it.
-        page = HTMLResponse(moving_on(safe_next(after)))
+        page = HTMLResponse(moving_on(safe_next(after), icon=web.ICON))
         page.set_cookie(COOKIE, started, httponly=True, samesite="strict", path="/")
         return page
 
