@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -16,7 +17,7 @@ from docket_testkit import host_repo, make_config
 
 from docket import hooks, userconfig
 from docket.cli import app, main
-from docket.curate import batch
+from docket.curate import schedule
 from docket.errors import DocketError
 from docket.service import install
 from docket.service.install import ServiceStatus
@@ -166,8 +167,8 @@ def an_entity(vault: Vault) -> None:
 
 def a_round(vault: Vault, days_ago: int) -> None:
     """A round started that many days ago on this machine, with a card decided one minute in and one three in."""
-    begun = batch.now_utc() - timedelta(days=days_ago)
-    round_ = batch.round_id(begun, "test-box")
+    begun = schedule.now_utc() - timedelta(days=days_ago)
+    round_ = schedule.round_id(begun, "test-box")
     for n, minutes in enumerate((1, 3), start=1):
         at = begun + timedelta(minutes=minutes)
         line = Line.model_validate({
@@ -192,7 +193,7 @@ def test_a_round_due_tells_claude_alone_with_the_minutes(tmp_path: Path) -> None
     assert curate_lines(start(status())) == [f"curate: a round is due (none yet){due}"]
     a_round(vault, 10)
     out = start(status())
-    year, week, _ = (batch.now_utc() - timedelta(days=10)).isocalendar()
+    year, week, _ = (schedule.now_utc() - timedelta(days=10)).isocalendar()
     since = f"the last started 10 days ago, 3 min of review in {year}-W{week:02d}"
     assert curate_lines(out) == [f"curate: a round is due ({since}){due}"]
     assert "systemMessage" not in out
@@ -269,6 +270,15 @@ def test_the_command_prints_the_json_and_exits_0(
     monkeypatch.setattr(install, "status", broken)
     assert main(["hook", "session-start"]) == 0
     assert json.loads(capsys.readouterr().out)["systemMessage"] == "docket: the status check failed (OSError)"
+
+
+def test_the_hook_loads_no_index_renderer_or_miner() -> None:
+    # It runs at the start of every session of every project; a fresh interpreter, so no other test's imports count.
+    code = "import sys, docket.hooks; print(' '.join(m for m in sys.modules if m.startswith('docket')))"
+    loaded = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout.split()
+    assert "docket.curate.schedule" in loaded
+    heavy = ("docket.index", "docket.render", "docket.questions", "docket.curate.batch", "docket.vault.entitystore")
+    assert [m for m in loaded if m.startswith(heavy)] == []
 
 
 def test_the_hook_group_is_hidden_from_help() -> None:

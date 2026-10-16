@@ -43,8 +43,9 @@ from docket.index import text as text_module
 from docket.index.chunks import Chunk, iso
 from docket.index.schema import create
 from docket.index.terms import Checker, Word, phrase_of
-from docket.index.text import Analyzer, fold, words_and_compounds
+from docket.index.text import Analyzer, words_and_compounds
 from docket.models.catalogue import Embedder, Reranker, input_hash
+from docket.plaintext import fold
 from docket.vault.entities import Alias, Entities, Entity
 from docket.vault.vault import Vault
 

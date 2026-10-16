@@ -16,9 +16,9 @@ from pathlib import Path
 from typing import Any, cast
 
 from docket import userconfig
-from docket.curate import batch
+from docket.curate import schedule
 from docket.errors import DocketError
-from docket.render import printable
+from docket.plaintext import printable
 from docket.service import client
 from docket.service.install import ServiceStatus
 from docket.vault import curatelog
@@ -124,15 +124,15 @@ def _curate(root: Path) -> list[Line]:
         return [Line(f"curate: {e}", True)]
     if not lines and not any((root / "entities").glob("*/*.yaml")):
         return []
-    last = batch.last_round(lines, None)
-    now = batch.now_utc()
-    if last is not None and now - last < batch.DUE:
+    last = schedule.last_round(lines)
+    now = schedule.now_utc()
+    if last is not None and now - last < schedule.DUE:
         return []
     if last is None:
         since = "none yet"
     else:
         since = f"the last started {(now - last).days} days ago"
-        week = next(iter(batch.minutes(lines).items()), None)
+        week = next(iter(schedule.minutes(lines).items()), None)
         since += f", {week[1]:.0f} min of review in {week[0]}" if week is not None else ""
     return [Line(f"curate: a round is due ({since}); mention it once, and run /docket:curate only when asked", False)]
 

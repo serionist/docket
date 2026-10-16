@@ -22,7 +22,8 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, Response
 
 from docket.index.query import SPLIT_FIRST, SPLIT_SECOND
-from docket.index.text import HYPHENS, WORD, fold, has_letter
+from docket.index.text import HYPHENS, has_letter
+from docket.plaintext import WORD, fold
 from docket.vault.anchors import format_time
 from docket.web import assets, pages
 

@@ -21,7 +21,8 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from docket.index.text import dedupe, nfc, words
+from docket.index.text import dedupe
+from docket.plaintext import nfc, words
 from docket.vault.anchors import Anchor, format_anchor, paragraphs, trailing_anchors
 from docket.vault.processed import DATED, ProcessedDoc
 from docket.vault.records import RawRecord

@@ -17,7 +17,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from docket.index.text import WORD, Analyzer, fold, nfc, words_and_compounds
+from docket.index.text import Analyzer, words_and_compounds
+from docket.plaintext import WORD, fold, nfc
 
 
 @dataclass(frozen=True)

@@ -46,22 +46,20 @@ from docket.index.languages import Language, Languages
 from docket.index.terms import Checker, Word, phrase_of, tokens
 from docket.index.text import (
     HYPHENS,
-    WORD,
     Analyzer,
     Joined,
     any_of,
     dedupe,
-    fold,
     has_letter,
     in_columns,
     phrase,
     prefix,
-    words,
     words_and_compounds,
 )
 from docket.index.timewords import Range, read_time
 from docket.models.catalogue import input_hash, rerank_passage
 from docket.models.provider import RERANK_SECONDS, Off
+from docket.plaintext import WORD, fold, words
 from docket.vault.vault import Vault
 
 CANDIDATES = 200

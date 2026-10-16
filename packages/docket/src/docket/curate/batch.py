@@ -14,8 +14,7 @@ import re
 import sqlite3
 from collections.abc import Sequence
 from contextlib import closing
-from datetime import UTC, datetime, timedelta
-from itertools import pairwise
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -24,6 +23,7 @@ from pydantic import BaseModel, ValidationError
 
 from docket import index, questions, userconfig
 from docket.curate.propose import Card, mine
+from docket.curate.schedule import DUE, last_round, minutes, now_utc, round_id
 from docket.errors import DocketError
 from docket.index.build import open_index
 from docket.vault import curatelog
@@ -35,10 +35,6 @@ from docket.vault.staging import write_replacing
 from docket.vault.vault import Vault
 
 FILE = "curate/batch.json"
-DUE = timedelta(days=7)
-# A pause in a round longer than this counts as this much: the rest was time away (DR-0474).
-GAP = timedelta(minutes=5)
-STAMP = "%Y-%m-%dT%H%M%S"
 SNIPPETS = 3
 ID_LENGTH = 6
 WIDTH = 80
@@ -85,21 +81,6 @@ def save(vault: Vault, batch: Batch) -> None:
     path = batch_path(vault)
     make_private(vault.home.git_dir, path.parent)
     write_replacing(vault.home, path, batch.model_dump_json(indent=1), "curate-batch")
-
-
-def round_id(now: datetime, machine: str) -> str:
-    return f"{now:{STAMP}}-{machine}"
-
-
-def started(round_: str) -> datetime | None:
-    try:
-        return datetime.strptime(round_[:17], STAMP).replace(tzinfo=UTC)
-    except ValueError:
-        return None
-
-
-def now_utc() -> datetime:
-    return datetime.now(UTC).replace(microsecond=0)
 
 
 # -- a round ------------------------------------------------------------------------------------------------------
@@ -351,32 +332,6 @@ def view(vault: Vault, batch: Batch) -> BatchView:
 # -- the measures -------------------------------------------------------------------------------------------------
 
 
-def minutes(lines: Sequence[Line]) -> dict[str, float]:
-    """Review minutes per ISO week, newest first: per round, the gaps from its start through each of its lines, each
-    capped at five minutes (DR-0474)."""
-    rounds: dict[str, list[datetime]] = {}
-    for line in lines:
-        if line.round is not None:
-            rounds.setdefault(line.round, []).append(line.at)
-    out: dict[str, float] = {}
-    for round_, times in rounds.items():
-        begun = started(round_)
-        if begun is None:
-            continue
-        spent = sum((min(b - a, GAP) for a, b in pairwise(sorted([begun, *times]))), timedelta())
-        year, week, _ = begun.isocalendar()
-        key = f"{year}-W{week:02d}"
-        out[key] = out.get(key, 0.0) + spent.total_seconds() / 60
-    return dict(sorted(out.items(), reverse=True))
-
-
-def last_round(lines: Sequence[Line], batch: Batch | None) -> datetime | None:
-    """When the latest round on any machine started: the log's rounds, and this machine's batch."""
-    begun = [started(line.round) for line in lines if line.round is not None]
-    found = [b for b in begun if b is not None] + ([batch.started] if batch is not None else [])
-    return max(found, default=None)
-
-
 class Status(BaseModel):
     round: str | None
     cards: int
@@ -400,7 +355,7 @@ def status(vault: Vault, *, again: bool = False) -> Status:
         batch = batch.model_copy(update={"after": measure(vault)})
         save(vault, batch)
     now = states(vault, batch, lines) if batch is not None else {}
-    last = last_round(lines, batch)
+    last = last_round(lines, batch.started if batch is not None else None)
     path = userconfig.curate_questions()
     return Status(
         round=batch.round if batch is not None else None,

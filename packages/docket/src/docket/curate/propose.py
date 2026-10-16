@@ -47,7 +47,8 @@ from docket.curate.spellings import GENERIC_WORDS, HEARD, TRUSTS, Scan, Seen, sc
 from docket.index.languages import SNOWBALL, Language, code_of, resolve
 from docket.index.matching import SHORT, max_distance, within
 from docket.index.query import NameQuery
-from docket.index.text import fold, phrase
+from docket.index.text import phrase
+from docket.plaintext import fold
 from docket.vault.curatelog import Change, EntityFields, Folded, folded
 from docket.vault.neverstore import listed
 from docket.vault.processed import SLUG_MAX

@@ -14,7 +14,7 @@ from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from docket.index.languages import Language, TimeWord
-from docket.index.text import WORD, fold, nfc
+from docket.plaintext import WORD, fold, nfc
 
 ISO = re.compile(r"(?<![\w-])(\d{4})-(\d{2})(?:-(\d{2}))?(?![\w-])")
 
