@@ -1,9 +1,9 @@
 ---
 title: Ask at the owner's console before the CLI loosens the gate
 issue: "#134"
-status: draft
-approved_by:
-approved_at:
+status: approved
+approved_by: claude, the lead (autonomy grant)
+approved_at: 2026-10-17
 ---
 
 # Ask at the owner's console before the CLI loosens the gate
@@ -52,8 +52,8 @@ field; everything else is HEAD's. Each field was checked against what the gate a
 |---|---|---|
 | a never-store list | the values added; a value the file took off stays | a value only drops records |
 | `credentials`, `phone` | on, if either has it on | a rule only puts markers in; every never-store screen reads the text as written (The doc screen, below) |
-| a pattern of HEAD's | turned on, with nothing else of it changed | as above |
-| a pattern under a name HEAD doesn't have, on or off | run after HEAD's patterns, wherever the file puts it | each rule reads only the text between markers, so one that runs last only adds markers; one run before an existing pattern could split that pattern's match and leave the rest, so the place the file gives it waits for the commit |
+| a pattern of HEAD's | turned on, with nothing else of it changed | as above; one that sits before another can split that one's match today, which #147 fixes in the redactor (Risks) |
+| a pattern under a name HEAD doesn't have, on or off, setting nothing beyond `name`, `pattern` and `enabled` | run after HEAD's patterns, wherever the file puts it | each rule reads only the text between markers, so one that runs last only adds markers; one run before an existing pattern could split that pattern's match and leave the rest, so the place the file gives it waits for the commit. A new pattern with any other key, one a later schema adds, waits whole |
 | a source's `sensitivity` | the stricter of the two | work to mixed to private |
 | a source's `enabled` | off, if either has it off | an off source's records are refused at intake |
 | a source's `exclude` | the entries added; an entry the file dropped stays | `exclude` is fnmatch with no negation, so an entry only leaves paths out, and their files go as gone, as a deleted file does |
@@ -67,7 +67,7 @@ removal: nothing reads it until media_put (phase 2) says what a host drives.
 
 | Part | What |
 |---|---|
-| one rule | `loosens(before, after)` is `effective(before, after) != after`: the per-field rules above are the only list. DR-0506 is amended knowingly, with a binds line added with this plan: `loosens()` no longer calls the four added changes (a pattern added and run last, an exclude entry added, a tool removed, a source removed) loosening. Pages gain no action: they still call only their own writers (`add_listed`, `set_rule` turning on, PR 3's), which the scan's general-entry row and `FOR_PAGES` hold |
+| one rule | `loosens(before, after)` is `effective(before, after) != after`: the per-field rules above are the only list. DR-0506 is amended knowingly, with a binds line added with this plan: `loosens()` no longer calls the four added changes (a pattern added and run last, an exclude entry added, a tool removed, a source removed) loosening. Pages gain no action: they still call only their own writers (`add_listed`, `rule_on`, `stricter`, `turn_off`), which the scan's general-entry row and `FOR_PAGES` hold |
 | when the rest applies | once committed: by the owner's own `git commit`, by a CLI write at the console taking it in, or by a CLI command's own change at the console |
 | the notice | `docket vault status` and the Settings page: "vault.yaml has an edit that isn't in force until you commit it". It names no value, and never says the edit lets more in: what waits can be neutral, such as a time zone |
 | the refusals | the messages that send the owner to `vault.yaml` add the notice when the file isn't in force: sync's "lists no tools" (`service/sync.py`), the runner's missing source and missing mapper (`sources/runner.py`), the gate's "isn't in vault.yaml; add it" (`vault/gate.py`), the scan's missing source (`documents/scan.py`). #141's take-in refusal takes the same words: "vault.yaml has an edit that isn't in force until you commit it; commit it yourself or undo it, then try again" |
@@ -93,7 +93,8 @@ Who reads which:
 ### The doc screen
 
 `doc_put`, `docket doc redact` and a doc's hand-edit take-in screen never-store on the doc as written, as well as on
-the redacted text they screen today (`derived.check`, `derived.hand_edit`).
+the redacted text they screen today (`derived.check`, `derived.hand_edit`). #146 builds it, split out of this plan;
+this PR depends on it and rebases onto it.
 
 - Today they redact first, so a rule turned on can hide a never-store keyword inside its marker and let in a doc the
   lists refuse: a page turning a rule on can do it now, and so could an edit in force. Intake, `docket scan` and
@@ -255,7 +256,7 @@ Taken under the autonomy grant, each proposed for the maintainer's review.
 | the gate obeys HEAD plus every part of an uncommitted edit that only keeps more out, through one loader for every job that decides what gets in | the file as it stands: an edit lets records into raw before anyone confirms it; refusing every write while the file loosens: every sync stops on a stray edit | DR-0521 |
 | one rule for `effective()` and `loosens()`, widened to every change that only keeps more out; DR-0506 amended knowingly | a separate, larger set for `effective()`: two rules drift, and the notice and the take-in would call a new pattern a loosening | DR-0521, DR-0506 |
 | a new pattern runs after HEAD's until committed, wherever the file puts it | the file's order at once: a pattern put first can split an existing pattern's match | DR-0521 |
-| the doc screen reads a doc as written too | patterns left waiting instead: rules turned on keep the hole, and a hand-added pattern lets the codes it names into raw until committed | DR-0521 |
+| the doc screen reads a doc as written too, built by #146 | patterns left waiting instead: rules turned on keep the hole, and a hand-added pattern lets the codes it names into raw until committed | DR-0521 |
 | the committed settings cached by HEAD's commit id, read from files, moved forward by Docket's own commits, a miss read by that id | a git call per read: the service opens the vault on every call; `HEAD:` on a miss: a commit between the reads keys the wrong text | DR-0521 |
 
 ## Doors and data
@@ -288,8 +289,8 @@ the door. Each step leaves the suite green.
 2. `effective()` and the per-field rules in their own module; `loosens()` defined by it. Tests:
    `test_vault_settings.py`: the loosens table changes in four rows only (a pattern added after HEAD's, an exclude
    entry added, a tool removed, a source removed: no longer loosening), and an effective table.
-3. The doc screen reads a doc as written: `derived.check` and `derived.hand_edit`. Tests: `test_derived.py`,
-   `test_doc_redact.py`.
+3. The doc screen reads a doc as written: built by #146, not here. This PR rebases onto it, and onto #147, and isn't
+   marked ready before both are merged.
 4. The settings in force: the loader and its cache, `Vault.open` and `Gate._config()` on it, the carry-forward in
    `Git.commit`, the notice in `docket vault status` and the four refusals, #141's message in its words. The test
    helpers that loosen by writing `vault.yaml` commit it, as the kit's `configure` does: `test_gate.py`'s `rewrite`
@@ -315,8 +316,7 @@ service.
 | File | What it proves |
 |---|---|
 | `test_console.py` | the null device, a pipe and no stream are no console; both ends a console and no `CLAUDECODE` asks; the end of input stops; codes are four fresh letters. Each of the three commands run as `python -m docket` with a `y` piped in: exit 2, the console refusal, `vault.yaml` and HEAD unchanged. On Linux and macOS, `redaction set phone off` in a pseudo-terminal from `pty.openpty`: the code read off the screen and typed back, the change committed |
-| `test_vault_settings.py`, the rule | the loosens table, four rows changed; `effective` per field: each change in the table above taken from the file, each change that waits kept as HEAD's; a list swap keeps both values; a reordered list is the file's; a pattern put before HEAD's runs after them, and `loosens` says so; a source renamed keeps neither name; a later top-level key and one inside a source stay HEAD's |
-| `test_derived.py`, `test_doc_redact.py` | a doc whose never-store keyword sits inside what a rule redacts is refused at put and at take-in, the line as written named and the keyword never; a doc with no keyword is stored as before |
+| `test_vault_settings.py`, the rule | the loosens table, four rows changed; `effective` per field: each change in the table above taken from the file, each change that waits kept as HEAD's; a list swap keeps both values; a reordered list is the file's; a pattern put before HEAD's runs after them, and `loosens` says so; a source renamed keeps neither name; a later top-level key, one inside a source, and a later key inside a new pattern stay HEAD's, the new pattern waiting whole |
 | `test_settings_in_force.py` | Dora Example deleted from `never_store.people`, uncommitted: an ingest naming her is still dropped, and after `git commit` stored. Credentials off, uncommitted: still redacted. A pattern for `CL-\d{4}` added by hand, uncommitted: an ingest's codes are redacted. `exclude: ["private/*"]` added, uncommitted: a scan leaves `private/` out. A tool removed, uncommitted: a capture from it marks the run short. A source removed, uncommitted: its ingest refused. A never-store keyword added or a source made private: applies at once. A source added, a pattern's regex changed, `primary_machine` changed, uncommitted: HEAD's, and the four refusals carry the notice. HEAD without `vault.yaml`, or one that doesn't parse: stops with the message. The cache: no git call over ten gate runs while HEAD stays; a Docket commit moves the key with no call; an owner's commit of another file costs one call; a miss reads by the id from `.git`, so a commit landing between the reads keys nothing wrong; a linked worktree and `packed-refs` read; a cache file that doesn't read is a miss |
 | `test_vault_settings.py`, the change | a CLI change that loosens: refused under `CLAUDECODE=1` and without a console, the file's bytes and HEAD unchanged; a no, a wrong code and the end of input write nothing; the code writes and commits with `confirmed at the console`; a file changed while asked writes nothing; a stricter change asks nothing; a hand-edited file at a console gets its line and no code, and under `CLAUDECODE` the refusal; `rewrite`'s parameters pinned, `warnings` among them |
 | `test_vault_settings.py`, the take-in | an uncommitted edit that loosens, before `redaction set phone on`: under `CLAUDECODE=1` refused, nothing committed; at a console one question, the code gives two commits, the take-in's with `confirmed at the console`, the change's without; a no commits nothing. A never-store swap shows `1 taken off, 1 added`, neither value on the screen. A sensitivity loosened shows `sources.calls.sensitivity: mixed -> work`. The edit and `phone off` both loosening: one code, two commits, each with the line. A commit of `vault.yaml` while asked writes nothing; a commit of another file while asked doesn't stop it. A HEAD with no `vault.yaml`, or one that doesn't parse, refused at a console too. An edit that only keeps more out, a pattern added, taken in unasked |
@@ -349,8 +349,8 @@ service.
 - `packages/docket/README.md`: the `docket redaction set` and `docket source new` rows say a loosening asks at your
   console; the `docket doc redact` row says the settings in force; a short part on hand edits (what applies at once,
   what waits for the commit, the notice) and on scripts.
-- `docs/design.md`: the gate reads the settings in force, and the doc screen reads a doc as written; the Settings
-  bullet says the CLI's loosening asks at the console.
+- `docs/design.md`: the gate reads the settings in force; the Settings bullet says the CLI's loosening asks at the
+  console.
 - `CHANGELOG.md` under Changed.
 - `packages/docket/src/docket/web/templates/settings/page.html`: the notice, and "in your own terminal" for each
   loosening command. `packages/docket/src/docket/web/templates/sync/page.html`: the hint says to commit.
@@ -367,7 +367,9 @@ service.
 | a pattern's regex narrowed or widened by hand waits, though a wider one would keep more out | accepted: a changed regex can match less, and telling wider from narrower is not decidable |
 | a `media_hosts` entry removed waits | accepted: nothing reads it until media_put (phase 2) says what a host drives |
 | a pattern put before HEAD's runs last until committed | accepted: its place applies once committed, with what it may split |
-| a rule turned on hides a never-store keyword from the doc screen | resolved: the screen reads a doc as written too |
+| `effective`'s "pattern turned on" row relies on #147: turning on one of HEAD's patterns that sits before another can split that one's match, on main today | accepted: #147 unions the rules' spans in the redactor, so turning any rule on or adding one only ever redacts more. Once it lands, "a new pattern runs last until committed" could be simplified; that is decided then, not built around now |
+| a new pattern carrying a key a later schema adds | resolved: it waits whole, as any later key does |
+| a rule turned on hides a never-store keyword from the doc screen | resolved by #146, which this PR depends on |
 | a doc whose never-store keyword sits inside a credential, stored today with a marker, is now refused | accepted: a doc that says a never-store keyword is refused, as the lists mean |
 | setup in Claude Code needs the owner at a terminal for each source | accepted: the point of the issue; one command and one code per source, once |
 | Claude edits `vault.yaml` to loosen under auto mode, with no prompt | resolved: the edit applies nothing that loosens, no Docket write commits it unasked, and in Claude's shell the next CLI write is refused |
@@ -398,11 +400,20 @@ Round 1, the coordinator's reviewer at `d82a639`: changes needed, one major and 
 | P6 | minor | the Settings page's loosening commands should say "in your own terminal" | fixed: the page and its template in Docs |
 | P7 | minor | the switch to the `owner` fixture came after the question, leaving the suite red between steps | fixed: in the question's step |
 
-Round 2, the reviewer's re-check of P1 at `540addb`: P1 resolved; one new major and two minors, folded in this
-revision. The reviewer re-checks N1.
+Round 2, the reviewer's re-check of P1 at `540addb`: P1 resolved; one new major and two minors, all folded in
+`e0f37c8`.
 
 | Id | Severity | Finding | Status |
 |---|---|---|---|
-| N1 | major | `effective` took from the file only DR-0506's page list, so a pattern, an exclude, a tool removed or a source removed by hand would wait for a commit, though the gate applies each at once today | fixed: one rule widened to every change that only keeps more out, each checked against the gate and the jobs; a new pattern runs after HEAD's; DR-0506 amended knowingly, pages unchanged. Found while checking it: the doc screen read only redacted text, so a rule turned on could hide a keyword; it now reads the doc as written too |
+| N1 | major | `effective` took from the file only DR-0506's page list, so a pattern, an exclude, a tool removed or a source removed by hand would wait for a commit, though the gate applies each at once today | fixed: one rule widened to every change that only keeps more out, each checked against the gate and the jobs; a new pattern runs after HEAD's; DR-0506 amended knowingly, pages unchanged. Found while checking it: the doc screen read only redacted text, so a rule turned on could hide a keyword; split out as #146 |
 | N2 | minor | messages and docs that send the owner to `vault.yaml` didn't say an edit applies once committed | fixed: the four refusals and #141's carry the notice; the Plaud example, `sources.md`, the Sync page's hint and the README say to commit |
 | N3 | minor | a miss read `HEAD:./vault.yaml`, so a commit between the two reads could key the wrong text | fixed: `git show <id>:./vault.yaml` with the id read from `.git` |
+
+Round 3, the reviewer's re-check of N1 at `e0f37c8`: N1 resolved; two minors and a nit left, with no further round,
+folded in this revision. Approved by the lead under the autonomy grant.
+
+| Id | Severity | Finding | Status |
+|---|---|---|---|
+| M1 | minor | turning on one of HEAD's patterns that sits before another can split that one's match, on main already | moved to #147, which unions the rules' spans in the redactor; Risks notes that `effective`'s "pattern turned on" row relies on it, and that "a new pattern runs last" is revisited once it lands |
+| M2 | minor | a new pattern carrying a later key was taken at once | fixed: a new pattern is taken only when it sets nothing beyond `name`, `pattern` and `enabled`, else it waits whole; tested |
+| nit | - | DR-0506's binds line named `set_rule` among the page writers | fixed: `add_listed`, `rule_on`, `stricter` and `turn_off`, what pages call since #145 |
