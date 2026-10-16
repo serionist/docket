@@ -188,6 +188,10 @@ def test_an_entity_s_case_form_adds_nothing_to_its_card(vault: Vault) -> None:
     entity(vault, "entities/person/ottilia-sample.yaml", text)
     ottilia = [c for c in mined(vault).cards if c.entity == "ottilia-sample"]
     assert [spellings(c) for c in ottilia] == [[("Otilia", "heard", "asr"), ("Ottiliával", "heard", "no")]]
+    # With Otilia rejected as her alias, the case form alone adds nothing, and is no new name either.
+    found = mined(vault, [line("reject", 1, "alias:ottilia-sample:otilia")])
+    assert all(c.entity != "ottilia-sample" for c in found.cards)
+    assert card(found, "Otilia").kind == "new" and "Ottiliával" not in names(found)
 
 
 def test_a_written_name_near_an_entity_s_is_a_name_of_its_own(vault: Vault) -> None:
@@ -199,6 +203,18 @@ def test_a_written_name_near_an_entity_s_is_a_name_of_its_own(vault: Vault) -> N
     found = mined(vault)
     assert spellings(card(found, "Northwood")) == [("Northwood", "docs", "name")]
     assert [(c.entity, c.key) for c in found.cards if c.kind == "alias"] == [("northwind", "alias:northwind:nortwin")]
+
+
+def test_an_alias_card_leaves_out_a_spelling_rejected_for_it_and_offers_the_rest(vault: Vault) -> None:
+    for n in (0, 1):
+        covers, lines = [f"{rid(n)}/transaction"], ["- Cleo Sample checked the proofs. @00:00"]
+        recall.doc_put(vault, note(f"minutes:2026-10-0{5 + n}-cleo-{n}", covers=covers, lines=lines))
+    entity(vault, "entities/person/cleo-sample.yaml", "id: cleo-sample\ntype: person\nname: {en: Cleo Sample}\n")
+    whole = next(c for c in mined(vault).cards if c.entity == "cleo-sample")
+    assert [s.text for s in whole.adds()] == ["Cleo Test", "Cleo"]
+    found = mined(vault, [line("reject", 1, "alias:cleo-sample:cleo test")])
+    rest = next(c for c in found.cards if c.entity == "cleo-sample")
+    assert ([s.text for s in rest.adds()], rest.key) == (["Cleo"], "alias:cleo-sample:cleo")
 
 
 def test_two_misspellings_of_one_entity_make_one_card(vault: Vault) -> None:
