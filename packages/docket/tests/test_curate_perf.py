@@ -3,6 +3,10 @@
 The chunks are synthetic, as the index's perf vault's are, but hold what the miner works on: sentences that start with
 a capital, names among the words (2,000 single ones and 500 of two words, a few misheard by a letter), and every other
 chunk a transcript whose turns carry a speaker's label. Wall time is asserted only when no tracer runs.
+
+Only the timed test carries `perf`. The vault is a shared template the untimed test asks for too, so in a lane
+without coverage the parallel run builds it and the timed run, alone, only times; both read it where it was built, and
+the miner writes nothing (DR-0492).
 """
 
 from __future__ import annotations
@@ -11,11 +15,12 @@ import itertools
 import random
 import sqlite3
 import time
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from docket_testkit import copy_vault, index_config, template_with, traced
+from docket_testkit import index_config, template_with, traced
 
 from docket.curate.propose import mine
 from docket.index import build, matching
@@ -25,8 +30,6 @@ from docket.index.text import Analyzer
 from docket.vault.curatelog import fold
 from docket.vault.entities import Entities
 from docket.vault.vault import Vault
-
-pytestmark = pytest.mark.perf
 
 CHUNKS = 100_000
 WORDS_PER_CHUNK = 60
@@ -97,17 +100,31 @@ def make_named_vault(root: Path) -> Vault:
 
 @pytest.fixture(scope="module")
 def vault(tmp_path_factory: pytest.TempPathFactory) -> Vault:
-    return copy_vault(template_with(tmp_path_factory, make_named_vault), tmp_path_factory.mktemp("named"))
+    """The template, read where it was built, its index file read through once: the parallel run may have built it
+    minutes before, and the memory it took since leaves it cold, which is no mining's time."""
+    v = Vault.open(template_with(tmp_path_factory, make_named_vault))
+    with build.db_path(v).open("rb") as index_file:
+        while index_file.read(1 << 24):
+            pass
+    return v
 
 
+def read_only(vault: Vault) -> sqlite3.Connection:
+    return sqlite3.connect(f"{build.db_path(vault).as_uri()}?mode=ro", uri=True)
+
+
+def test_the_named_vault_holds_its_chunks_and_labels(vault: Vault) -> None:
+    with closing(read_only(vault)) as conn:
+        chunks, labelled = conn.execute("SELECT count(*), sum(speakers != '[]') FROM chunks").fetchone()
+    assert (chunks, labelled) == (CHUNKS, CHUNKS // 2)
+
+
+@pytest.mark.perf
 def test_a_round_s_mining_takes_well_under_thirty_seconds(vault: Vault) -> None:
-    conn = sqlite3.connect(build.db_path(vault))
-    try:
+    with closing(read_only(vault)) as conn:
         began = time.perf_counter()
         found = mine(conn, vault, fold([]))
         elapsed = time.perf_counter() - began
-    finally:
-        conn.close()
     print(f"curate miner: {elapsed:.1f} s on {CHUNKS:,} chunks, {len(found.cards)} cards")
     assert len(found.cards) == 15
     assert found.left_out["common words"] > 0
