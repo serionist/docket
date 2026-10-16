@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0481
+    title: A source with folder in vault.yaml is a folder source, with exclude patterns, no mapper, and never mixed
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#69"]
+    description: "sources.<name>.folder names the folder: relative to the consuming repo, under the home folder as ~/..., or absolute; a machine without it scans nothing and says so. exclude lists fnmatch patterns on the path inside the folder, case-insensitive. A folder source has no mapper, tools or media_hosts, and its sensitivity is work or private: mixed is refused with the fix, since every page would wait on the Staging page one by one. Both keys are optional, so schema_version stays 1, as for DR-0124's keys."
+    binds:
+      - "An older Docket refuses a vault.yaml that uses folder or exclude (DR-0021): every machine upgrades before the keys are written."
+    not_chosen:
+      - "The folder per machine in the vault's private folder, as DR-0248 keeps import folders: the issue asks vault.yaml to name it, and the repo-relative and ~ forms read the same on every machine."
+      - "A top-level documents key: a folder source is a source, with its sensitivity and its hold list."

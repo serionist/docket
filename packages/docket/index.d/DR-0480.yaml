@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0480
+    title: Own documents come in through the core's folder connector, docket scan, not through a mapper
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#69"]
+    description: "A folder source is read by Docket itself: docket scan lists the folder vault.yaml names, extracts each changed file's text in a child process (DR-0485) and stages the records through the core's rid checks, versions, holds and the staging gate. No Claude session, capture or run window is involved: a folder is listed whole each time, and changes are found by stat and hash (DR-0486). The code is docket.documents in the core package, since a mail's attachments need the same readers and limits (DR-0489). Before staging any record of a file, the scan checks the whole file against the never-store lists, so a match on any page keeps the whole file out."
+    binds:
+      - "A folder source's records pass the same gate as every source's: never-store, redaction, holds and sensitivity."
+      - A never-store match anywhere in a file keeps every record of that file out, counted and never named.
+      - "A scan writes nothing in the folder: files are opened for reading only, and a folder in a git repo is listed with GIT_OPTIONAL_LOCKS=0, so git's index isn't refreshed."
+    not_chosen:
+      - "A mapper run: a mapper is plain JSON without libraries (DR-0119), captures are JSON in memory, and there is no session to capture."
+      - "A connector package under packages/: a mail's attachments need the same extraction in the core."

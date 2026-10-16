@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0482
+    title: A folder file's rid is its source and 12 hex of its path's hash, with its pages, slides and sheets as records under it
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#69"]
+    description: "A file's rid is <source>:<id>, the id being the first 12 hex digits of the sha256 of its path: NFC, / separated, from the root of the repo the folder is in, else from the folder. A pdf page is <rid>/page<n>, a slide <rid>/slide<n>, and a sheet <rid>/sheet<n> by its position in the workbook, each with the file's rid as container and thread. A docx, md or txt file is one record. The path is the file record's title. Of two listed paths with one id, the second is refused. A rename or a move gives a new rid, and the old rid gets a gone version (DR-0487)."
+    binds:
+      - "A folder source's rids are stored in raw, anchors and the ledger: their shape never changes."
+      - The page, slide or sheet is in the rid, so the anchor grammar (DR-0198) needs no new position kind.
+    not_chosen:
+      - "The path as the id: a rid holds no whitespace, and % doubles in an anchor."
+      - "An id given at first sight and kept across moves: two machines would give one file two ids."
+      - "A position kind for pages or cells (#p3, !A1:F40): [r:x#p3] parses today as the rid x#p3, so stored anchors would change meaning."

@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0484
+    title: Documents are read with pypdf, openpyxl and our own docx and pptx readers on defusedxml
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#69"]
+    description: "pdf: pypdf (BSD-3-Clause) with its crypto extra, floor 6.19.0, the last release that fixed a published advisory, locked at the newest release a week old (DR-0157); its cryptography is already in the lock. xlsx: openpyxl (MIT, with et-xmlfile, MIT) in read-only mode with saved values; it parses through defusedxml whenever defusedxml is installed. docx and pptx: our own readers on the standard library's zipfile and defusedxml (PSF-2.0), following the package's relationships. All of them are pure Python and use no network."
+    binds: [No AGPL or other copyleft library reads documents.]
+    not_chosen:
+      - "PyMuPDF: AGPL-3.0."
+      - "pdfminer.six: layout analysis search doesn't need, several times slower, and charset-normalizer besides."
+      - "python-docx: its paragraph text skips runs inside w:ins, it misses content controls and text boxes, and it needs lxml."
+      - "python-pptx: lxml, Pillow and XlsxWriter for text alone, and no release since August 2024."

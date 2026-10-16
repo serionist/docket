@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0485
+    title: Document text is extracted in a child process with a time limit, a memory cap and size caps, and a file that fails is a record
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#69"]
+    description: "The scan starts python -I -X utf8 -m docket.documents.child in a temp folder with the mapper runner's stripped environment and hands it one file at a time. The child reads the file once, hashes those bytes, extracts from them and sends a part a line. Limits: 120 s a file, after which the parts sent so far are kept and the record says where it stopped; 2 GiB of memory where the system enforces it (RLIMIT_AS on Linux, a job object on Windows); 64 MiB a file; 1 MiB of text a part and 4 MiB a file; 2,000 pages, 1,000 slides, 100 sheets, and 10,000 rows and 256 columns a sheet; in a zip, 10,000 members, 64 MiB each and 256 MiB together as declared, and 100 to 1 for a member over 1 MiB; every XML part through defusedxml, and no DTD. A file that fails is a record that says why, with an exception's type and never its message; a crash or a stop starts a new child for the next file. A file the system won't let the scan read now is skipped without a record."
+    binds: [No document is parsed in the service's or the CLI's own process.]
+    not_chosen:
+      - "Extraction in the scan's own process with a timer: a thread can't be stopped, and a crash or a memory blow-up takes the service with it."
