@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0430
+    title: A test that asserts an elapsed time carries the perf marker, and a lane without coverage runs it alone after the rest
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#101"]
+    description: "In a lane that runs without coverage (gate os, on Windows and macOS in CI), the gate's tests step runs pytest twice: first every test but the perf-marked ones on xdist's workers, then, once that run and the lane's other steps are done, the perf tests one at a time with nothing beside them. Their limits are meant to measure the code, not four workers sharing four vCPUs: on CI's Windows runner the mention pass failed at 2.03 and 2.05 s against its 2 s, and a search shape at 1.06 to 1.11 s against its 1 s, in code the PRs didn't touch (#101). The second run passes -raP, and the gate prints what the passed timed tests printed, so the log holds every timed shape's time. Under coverage test_index_perf asserts no limit (traced()), so a covered lane (gate full) keeps every test in its one parallel run, with coverage as before: Linux CI never enforced those limits, and a run of their own there doubled gate full on the maintainer's desktop (154 to 313 s) for nothing. The split follows whether the lane collects coverage, not its name. test_index_perf is marked whole: its untimed tests share the timed ones' 100,000-chunk vault, whose build is most of the file's time."
+    binds:
+      - A test that asserts an elapsed time carries the perf marker; a wait for a condition under a deadline does not.
+      - A timed test's limit is what the code needs alone; it is never loosened for a busy runner.
+    not_chosen:
+      - "Looser limits on CI: slower code would pass, and a shape could still fail on a busier runner."
+      - "Fewer xdist workers on Windows: the whole suite slower, and the timed tests still beside other work."
+      - "A CI job of their own: another runner to set up, and a local gate run would still time them beside the workers."
+      - "A run of their own in the full lane too, appending to its coverage: gate full doubled locally, for limits coverage turns off."

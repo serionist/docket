@@ -333,3 +333,118 @@ def test_a_lane_runs_its_tests_beside_its_other_steps(
     assert "types broke" in out
     assert out.index("FAIL types") < out.index("FAIL tests")
     assert "gate os: failed (types, tests)" in out
+
+
+def test_the_timed_tests_wait_for_the_lane_s_other_steps(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    started, done = threading.Event(), list[str]()
+
+    def tests(ctx: gate.Ctx) -> gate.Outcome:
+        started.set()
+        return gate.Outcome.ok(f"alone after {done}" if ctx.alone.wait(10) else "never alone")
+
+    def types(_ctx: gate.Ctx) -> gate.Outcome:
+        started.wait(10)
+        done.append("types")
+        return gate.Outcome.ok()
+
+    steps = [gate.Step("types", ("os",), "", types), gate.Step("tests", ("os",), "", tests)]
+    monkeypatch.setattr(gate, "STEPS", steps)
+    assert gate.run("os") == 0
+    assert "alone after ['types']" in capsys.readouterr().out
+
+
+def test_a_step_that_raises_doesn_t_leave_the_timed_tests_waiting(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def tests(ctx: gate.Ctx) -> gate.Outcome:
+        return gate.Outcome.ok() if ctx.alone.wait(10) else gate.Outcome.fail("never alone")
+
+    def types(_ctx: gate.Ctx) -> gate.Outcome:
+        raise RuntimeError("types fell over")
+
+    steps = [gate.Step("types", ("os",), "", types), gate.Step("tests", ("os",), "", tests)]
+    monkeypatch.setattr(gate, "STEPS", steps)
+    with pytest.raises(RuntimeError, match="fell over"):
+        gate.run("os")
+
+
+PASSED_OUTPUT = [
+    "..                                                                       [100%]",
+    "=================================== PASSES ====================================",
+    "__________________________________ test_queries ___________________________________",
+    "---------------------------- Captured stdout setup ----------------------------",
+    "built 100000 chunks in 40.1 s",
+    "---------------------------- Captured stdout call -----------------------------",
+    "one word            12.1 ms  20 hits  'kaber'",
+    "__________________________________ test_mention ___________________________________",
+    "---------------------------- Captured stdout call -----------------------------",
+    "mention pass: 300 aliases, 100000 chunks, 512 ms, 2210 mentions",
+    "2 passed, 9 deselected in 41.20s",
+]
+
+
+def test_timed_lines_are_read_from_pytest_s_passes_section() -> None:
+    assert gate.timed(PASSED_OUTPUT) == [
+        "timed: built 100000 chunks in 40.1 s",
+        "timed: one word            12.1 ms  20 hits  'kaber'",
+        "timed: mention pass: 300 aliases, 100000 chunks, 512 ms, 2210 mentions",
+    ]
+    # Another section after it ends it, as the stats line does.
+    assert gate.timed([*PASSED_OUTPUT[:5], "=========== tests coverage ===========", "src/a.py 90%"]) == [
+        "timed: built 100000 chunks in 40.1 s"
+    ]
+    assert gate.timed(["1 passed in 0.50s"]) == []
+
+
+def _fake_pytest(monkeypatch: pytest.MonkeyPatch, codes: tuple[int, int] = (0, 0)) -> list[list[str]]:
+    calls: list[list[str]] = []
+
+    def fake_run(_ctx: gate.Ctx, cmd: list[str], *, env: dict[str, str] | None = None) -> tuple[int, list[str]]:
+        calls.append(cmd)
+        if "-n" in cmd:
+            lines = ["....", "12.34s call     t.py::test_slow", "9 passed, 2 deselected in 3.00s", "a test broke"]
+            return codes[0], lines
+        return codes[1], [*PASSED_OUTPUT, "a timed test broke"]
+
+    monkeypatch.setattr(gate, "_run", fake_run)
+    return calls
+
+
+def test_the_tests_step_runs_the_timed_tests_alone_after_the_rest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _fake_pytest(monkeypatch)
+    out = gate.step_tests(gate.Ctx(root=tmp_path, lane="os", ci=False, base=None, pr=None))
+    rest, alone = calls
+    assert rest[rest.index("not perf") - 1] == "-m" and rest[rest.index("-n") + 1] == "auto"
+    assert alone[alone.index("perf") - 1] == "-m" and "-n" not in alone and "-raP" in alone
+    assert not any(a.startswith("--cov") for a in [*rest, *alone])
+    assert out.status == "ok"
+    assert out.detail == [
+        "9 passed, 2 deselected in 3.00s",
+        "timed alone: 2 passed, 9 deselected in 41.20s",
+        "timed: built 100000 chunks in 40.1 s",
+        "timed: one word            12.1 ms  20 hits  'kaber'",
+        "timed: mention pass: 300 aliases, 100000 chunks, 512 ms, 2210 mentions",
+        "slowest: 12.34s call     t.py::test_slow",
+    ]
+
+
+def test_a_failure_in_either_run_shows_its_tail(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for codes, broke in (((1, 1), ["a test broke", "a timed test broke"]), ((0, 1), ["a timed test broke"])):
+        _fake_pytest(monkeypatch, codes=codes)
+        out = gate.step_tests(gate.Ctx(root=tmp_path, lane="os", ci=False, base=None, pr=None))
+        assert out.status == "fail"
+        assert [ln for ln in out.detail if "broke" in ln] == broke
+
+
+def test_under_coverage_the_timed_tests_stay_in_the_one_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _fake_pytest(monkeypatch, codes=(1, 0))
+    ctx = gate.Ctx(root=tmp_path, lane="full", ci=False, base=None, pr=None)
+    # Their limits are off under coverage, so nothing waits for the other steps either.
+    ctx.alone.clear()
+    out = gate.step_tests(ctx)
+    [run] = calls
+    assert "-m" not in run[3:] and run[run.index("-n") + 1] == "auto"
+    assert "--cov" in run and any(a.startswith("--cov-report=json:") for a in run) and "--cov-append" not in run
+    assert out.status == "fail" and "a test broke" in out.detail

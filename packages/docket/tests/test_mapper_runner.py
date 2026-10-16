@@ -110,6 +110,7 @@ def test_a_mapper_past_its_time_limit_is_stopped(tmp_path: Path) -> None:
         runner.run(path, {}, time_limit=1)
 
 
+@pytest.mark.perf
 def test_a_helper_left_holding_the_output_fails_the_run_at_its_limit(tmp_path: Path) -> None:
     # The mapper answers at once, but a helper it started keeps its stdout and stderr open for longer than the limit.
     code = (

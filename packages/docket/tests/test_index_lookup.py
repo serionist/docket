@@ -128,6 +128,7 @@ def test_an_update_can_t_commit_while_a_read_asks(vault: Vault) -> None:
         index.close()
 
 
+@pytest.mark.perf
 def test_an_update_holding_the_index_sends_a_read_to_the_parse_route_at_once(vault: Vault) -> None:
     from docket import recall
 

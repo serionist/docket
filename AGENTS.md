@@ -70,6 +70,8 @@ You need uv (it brings Python 3.12), git, gitleaks, and Claude Code for the full
 - `uv run gate full` adds the tests with their coverage floors, the whole history's secrets and the plugin validated
   by Claude Code. It is the merge rule; CI runs it on Linux and the types and tests on Windows and macOS.
 - Coverage floors are in `tools/devkit/coverage-floors.json`. Raise one in the change that earns it, never lower one.
+- A test that asserts an elapsed time carries the `perf` marker; a lane without coverage (`gate os`) runs those after
+  the rest, alone (DR-0430).
 - Eval floors, recall at 10 and MRR per kind of question on the invented set, are in
   `tools/devkit/eval-floors.json`: the full lane fails a kind above or below its floor, and a lowered one needs a new
   `lowered` note saying why.

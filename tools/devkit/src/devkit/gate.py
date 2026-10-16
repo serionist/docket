@@ -7,7 +7,10 @@ Lanes:
          validated by Claude Code itself. CI runs it on Linux; finish-work runs it before a PR.
   os     types and tests, for the other operating systems CI runs.
 
-In a lane with tests, the tests start first and the other steps run beside them; each run prints its slowest tests.
+In a lane with tests, the tests start first and the other steps run beside them; each run prints its slowest tests. In a
+lane without coverage (os) the timed tests (marked `perf`) run after the rest, alone and one at a time, once the other
+steps are done, and the run prints what they printed: their times. Under coverage the index's time limits are off, so
+the full lane keeps them in its one run.
 
 `gate check-text <file>` checks a text that is about to be posted (an issue or PR body) for private names and tool
 attribution.
@@ -22,6 +25,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -63,6 +67,13 @@ class Ctx:
     ci: bool
     base: str | None
     pr: commits.PullRequest | None
+    # Set once the lane's other steps are done; the timed tests wait for it. Set from the start for a step run alone.
+    alone: threading.Event = field(default_factory=lambda: _set(threading.Event()))
+
+
+def _set(event: threading.Event) -> threading.Event:
+    event.set()
+    return event
 
 
 @dataclass
@@ -263,25 +274,56 @@ def slowest(lines: list[str]) -> list[str]:
     return [f"slowest: {ln.strip()}" for ln in lines if _DURATION.match(ln.strip())]
 
 
+# The marker of a test that asserts an elapsed time (DR-0430).
+PERF = "perf"
+# pytest's rules: "==== PASSES ====" opens a section, "____ test ____" and "---- Captured stdout call ----" its parts.
+_RULE = re.compile(r"^([=_-])\1+ .+ \1+$")
+# The last line under -q, which follows the PASSES section with no rule: "2 passed, 9 deselected in 41.20s (0:00:41)".
+_STATS = re.compile(r"^(\d+ [a-z]+, )*\d+ [a-z]+ in \d+\.\d+s( \(\d+:\d\d:\d\d\))?$")
+
+
+def timed(lines: list[str]) -> list[str]:
+    """What the passed tests printed, from pytest's PASSES section (-rP), so each run's log shows the timed tests'
+    times: pytest shows a passed test's output only there."""
+    out: list[str] = []
+    inside = False
+    for ln in lines:
+        rule = _RULE.match(ln.strip())
+        if (rule and rule.group(1) == "=") or _STATS.match(ln.strip()):
+            inside = ln.strip(" =") == "PASSES"
+        elif inside and not rule:
+            out.append(f"timed: {ln.rstrip()}")
+    return out
+
+
+def _summary(lines: list[str]) -> str:
+    return next((ln for ln in reversed(lines) if " passed" in ln or " failed" in ln), "").strip("= ")
+
+
 def step_tests(ctx: Ctx) -> Outcome:
     report = ctx.root / ".local" / "coverage.json"
     report.parent.mkdir(exist_ok=True)
     report.unlink(missing_ok=True)
     numbers = ctx.root / evalfloors.REPORT
     numbers.unlink(missing_ok=True)
+    pytest = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
     # One worker per core: most of the time goes to git subprocesses that would otherwise wait on each other.
-    cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-n", "auto", f"--durations={SLOWEST}"]
+    cmd = [*pytest, "-n", "auto", f"--durations={SLOWEST}"]
     env: dict[str, str] = {}
-    if ctx.lane == "full":
+    covered = ctx.lane == "full"
+    if covered:
         cmd += ["--cov", f"--cov-report=json:{report.as_posix()}", "--cov-report=term:skip-covered"]
         # The question set's test writes its numbers there, for the eval floors (DR-0295).
         env[evalfloors.REPORT_ENV] = str(numbers)
+    else:
+        # Without coverage the timed tests assert their limits, so they leave the parallel run and run alone after it;
+        # under coverage the index's limits are off and they stay in it (DR-0430).
+        cmd += ["-m", f"not {PERF}"]
     code, lines = _run(ctx, cmd, env=env)
+    if not covered:
+        return _alone_after(ctx, code, lines, [*pytest, "-m", PERF, "-raP"], env)
     if code != 0:
         return Outcome.fail(*lines[-80:])
-    summary = next((ln for ln in reversed(lines) if " passed" in ln or " failed" in ln), "")
-    if ctx.lane != "full":
-        return Outcome.ok(summary.strip("= "), *slowest(lines))
     measures = coverage.measure(json.loads(report.read_text(encoding="utf-8")))
     failures, rise = coverage.judge(measures, coverage.load_floors(ctx.root))
     eval_failures, eval_line = evalfloors.check(ctx.root, ctx.base)
@@ -289,7 +331,18 @@ def step_tests(ctx: Ctx) -> Outcome:
     if failures:
         return Outcome.fail(*failures, *rise)
     per = ", ".join(f"{m.module} {m.percent:.1f}%" for m in measures.values())
-    return Outcome.ok(summary.strip("= "), per, eval_line, *rise, *slowest(lines))
+    return Outcome.ok(_summary(lines), per, eval_line, *rise, *slowest(lines))
+
+
+def _alone_after(ctx: Ctx, code: int, lines: list[str], cmd: list[str], env: dict[str, str]) -> Outcome:
+    """The timed tests after the rest's run, once the lane's other steps are done too, one at a time: no other work
+    shares the CPUs with what they time. -raP adds the passed tests' output, which holds their times, to the summary."""
+    ctx.alone.wait()
+    timed_code, timed_lines = _run(ctx, cmd, env=env)
+    if code != 0 or timed_code != 0:
+        return Outcome.fail(*(lines[-80:] if code else []), *(timed_lines[-80:] if timed_code else []))
+    alone = f"timed alone: {_summary(timed_lines)}"
+    return Outcome.ok(_summary(lines), alone, *timed(timed_lines), *slowest(lines))
 
 
 STEPS = [
@@ -302,7 +355,7 @@ STEPS = [
     Step("content", ("quick", "full"), "no private names (the deny list)", step_content),
     Step("secrets", ("quick", "full"), "gitleaks", step_secrets),
     Step("harness", ("quick", "full"), "AGENTS.md, skills, plugin manifests", step_harness),
-    Step("tests", ("full", "os"), "pytest; coverage floors in the full lane", step_tests),
+    Step("tests", ("full", "os"), "pytest; coverage floors in the full lane, the timed tests alone in os", step_tests),
 ]
 
 
@@ -324,18 +377,29 @@ def run(lane: str, only: Sequence[str] | None = None) -> int:
     # The tests take most of the time and need none of the other steps, so they start first and run beside them; the
     # lines still print in the steps' order.
     tests = next((s for s in steps if s.name == "tests"), None) if len(steps) > 1 else None
+    if tests is not None:
+        ctx.alone.clear()
     with ThreadPoolExecutor(max_workers=1) as pool:
         running = pool.submit(_timed, tests, ctx) if tests is not None else None
-        for step in steps:
-            out, took = running.result() if step is tests and running is not None else _timed(step, ctx)
-            label = {"ok": "ok  ", "fail": "FAIL", "skip": "skip"}[out.status]
-            first = f"  {out.detail[0]}" if out.detail and out.status != "fail" else ""
-            print(f"{label} {step.name:<8} {took:5.1f}s{first}", flush=True)
-            rest = out.detail if out.status == "fail" else out.detail[1:]
-            for line in rest:
-                print(f"       {line}", flush=True)
-            if out.status == "fail":
-                failed.append(step.name)
+        try:
+            for step in steps:
+                if step is tests and running is not None:
+                    # The steps before it are done and those after wait for it: the timed tests can run alone.
+                    ctx.alone.set()
+                    out, took = running.result()
+                else:
+                    out, took = _timed(step, ctx)
+                label = {"ok": "ok  ", "fail": "FAIL", "skip": "skip"}[out.status]
+                first = f"  {out.detail[0]}" if out.detail and out.status != "fail" else ""
+                print(f"{label} {step.name:<8} {took:5.1f}s{first}", flush=True)
+                rest = out.detail if out.status == "fail" else out.detail[1:]
+                for line in rest:
+                    print(f"       {line}", flush=True)
+                if out.status == "fail":
+                    failed.append(step.name)
+        finally:
+            # A step that raised leaves the loop early; the pool's exit waits for the tests, which wait for this.
+            ctx.alone.set()
     if failed:
         print(f"gate {lane}: failed ({', '.join(failed)})")
         return 1

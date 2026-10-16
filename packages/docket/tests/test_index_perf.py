@@ -31,6 +31,9 @@ from docket.index.text import Analyzer, fold, words_and_compounds
 from docket.vault.entities import Alias, Entities, Entity
 from docket.vault.vault import Vault
 
+# The whole file runs alone: its untimed tests share the timed ones' vault, which takes most of its time to build.
+pytestmark = pytest.mark.perf
+
 CHUNKS = 100_000
 WORDS_PER_CHUNK = 60
 TITLE_WORDS = 5

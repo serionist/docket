@@ -69,6 +69,7 @@ testpaths = ["packages", "tools/devkit/tests", "examples"]
 # The app tests' shared builders (docket_testkit) import by name; test folders are not packages.
 pythonpath = ["packages/docket/tests"]
 addopts = ["--import-mode=importlib", "-ra", "--strict-markers"]
+markers = ["perf: asserts an elapsed time; a lane without coverage runs it after the rest, alone (DR-0430)"]
 xfail_strict = true
 filterwarnings = ["error"]
 
