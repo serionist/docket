@@ -36,7 +36,7 @@ from docket.service import api, logs, state, sync
 from docket.service.runs import Run
 from docket.service.sessions import COOKIE
 from docket.vault import cursors, holds
-from docket.vault.config import VaultConfig
+from docket.vault.config import SourceConfig, VaultConfig
 from docket.vault.gate import Gate
 from docket.vault.vault import Vault
 
@@ -465,6 +465,10 @@ def test_run_open_refuses_before_any_work(client: TestClient, body: dict[str, An
         (lambda c: setattr(c.sources["memo"], "sensitivity", "private"), "private in vault.yaml"),
         (lambda c: setattr(c.sources["memo"], "tools", []), "lists no tools"),
         (lambda c: setattr(c.sources["memo"], "mapper", None), "has no mapper"),
+        (
+            lambda c: c.sources.__setitem__("memo", SourceConfig(folder="~/Work")),
+            "is a folder source: Docket reads its folder itself with docket scan memo",
+        ),
     ],
 )
 def test_run_open_refuses_a_source_that_cant_run(client: TestClient, vault: Vault, change: Any, error: str) -> None:

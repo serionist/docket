@@ -5,6 +5,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -32,8 +33,9 @@ from docket_testkit import (
     sh,
     template_vault,
 )
+from documents_scan_kit import junction
 
-from docket import recall
+from docket import folders, recall
 from docket.errors import DocketError
 from docket.imports import notes
 from docket.imports.notes import (
@@ -332,7 +334,7 @@ def test_the_text_screen_is_5s_matcher(text: str, keyword: str, screened: bool) 
 
 def listing(folder: Path, vault_root: Path, prefix: str | None = None) -> tuple[list[str], Counter[str]]:
     skipped: Counter[str] = Counter()
-    repo = notes.repo_root(folder.resolve())
+    repo = folders.repo_root(folder.resolve())
     the_prefix = notes.default_prefix(folder.resolve(), repo) if prefix is None else prefix
     found = list_folder(folder.resolve(), the_prefix, repo, vault_root.resolve(), skipped)
     return [item.old_path for item in found], skipped
@@ -370,14 +372,14 @@ def test_an_uncommitted_delete_is_gone_and_a_rename_is_new(folder: Path, tmp_pat
 
 
 def test_a_conflicted_note_is_listed_once(folder: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    real = notes._git  # pyright: ignore[reportPrivateUsage]
+    real = folders._git  # pyright: ignore[reportPrivateUsage]
 
     def three_stages(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
         if args[0] == "ls-files":
             return subprocess.CompletedProcess(args, 0, f"{CALL}\0{CALL}\0{CALL}\0", "")
         return real(cwd, *args)
 
-    monkeypatch.setattr(notes, "_git", three_stages)
+    monkeypatch.setattr(folders, "_git", three_stages)
     assert listing(folder, tmp_path / "vault")[0] == [CALL]
 
 
@@ -392,10 +394,10 @@ def test_git_that_cant_read_or_list_stops_the_import(
 
         return git
 
-    monkeypatch.setattr(notes, "_git", failing("rev-parse"))
+    monkeypatch.setattr(folders, "_git", failing("rev-parse"))
     with pytest.raises(DocketError, match="ignore rules can't be kept: fatal: detected dubious ownership"):
         listing(folder, tmp_path / "vault")
-    monkeypatch.setattr(notes, "_git", failing("ls-files"))
+    monkeypatch.setattr(folders, "_git", failing("ls-files"))
     with pytest.raises(DocketError, match="git couldn't list"):
         listing(folder, tmp_path / "vault")
 
@@ -421,6 +423,23 @@ def test_a_folder_outside_git_is_walked(tmp_path: Path) -> None:
     assert old_paths == ["notes/a.md", "notes/deep/b.md"]
     assert (skipped["nested repos"], skipped["links"]) == (1, links)
     assert listing(plain, tmp_path / "elsewhere", prefix="")[0] == ["a.md", "deep/b.md", "vault/c.md"]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="junctions are Windows' own")
+def test_a_junction_inside_the_folder_is_left_out_walked_or_listed_by_git(folder: Path, tmp_path: Path) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "outside.md").write_text("# not the folder's\n", encoding="utf-8")
+    plain = tmp_path / "plain" / "notes"
+    plain.mkdir(parents=True)
+    (plain / "a.md").write_text("# a\n", encoding="utf-8")
+    for where in (plain, folder):
+        junction(elsewhere, where / "joined")
+    walked, skipped = listing(plain, tmp_path / "vault")
+    assert (walked, skipped["links"]) == (["notes/a.md"], 1)
+    listed, skipped = listing(folder, tmp_path / "vault")
+    assert not any("outside" in p for p in listed)
+    assert skipped["links"] == 1
 
 
 def test_the_prefix_by_default(folder: Path) -> None:

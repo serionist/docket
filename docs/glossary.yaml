@@ -54,10 +54,16 @@ terms:
     definition: "A list beside the Search page's results that narrows or favours the search by one of its parameters: sources and time narrow, people and entities favour. Its counts are over the candidates search ranked."
     see: [packages/docket/src/docket/web/views.py]
     close_terms: [boost]
+  - term: folder source
+    definition: "A source whose records Docket reads itself from a folder vault.yaml names, read-only: each docx, xlsx, pptx, pdf, md or txt file as text, by page, slide and sheet, staged through the gate by docket scan. It has no mapper or tools, and only the primary machine scans it."
+    see: [packages/docket/src/docket/documents/scan.py]
   - term: gate
     definition: The one set of checks every change passes, `uv run gate`. The quick lane runs in seconds before every push; `gate full` is the merge rule.
     see: [tools/devkit/src/devkit/gate.py]
     close_terms: [staging gate (the vault's)]
+  - term: gone version
+    definition: "The version a folder source's record gets when its file is deleted, moved, excluded or kept out by the never-store lists: its title kept, its text one line saying since when it isn't read, written once. read shows it with the last version that has text, where anchors on the record resolve."
+    see: [packages/docket/src/docket/documents/records.py]
   - term: hold list
     definition: "state/holds/<source>.txt in the vault: ids of records Docket must not stage yet, such as recordings with stretches the owner left out. Every ingest and the gate read it, failing closed."
     see: [packages/docket/src/docket/vault/holds.py]

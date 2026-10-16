@@ -19,9 +19,12 @@ from typing import Literal
 import yaml
 from pydantic import ValidationError
 
+from docket import userconfig
 from docket.errors import DocketError
 from docket.sources.runner import SKILLS, consuming_repo, skill_folder
 from docket.vault.config import CONFIG_FILE, SourceConfig, VaultConfig, write_config
+from docket.vault.git import toplevel
+from docket.vault.records import source_name_problem
 from docket.vault.staging import retry
 from docket.vault.vault import Vault, remove_tree
 from docket.vault.wizard import KNOWN_SOURCES
@@ -104,6 +107,56 @@ def new_source(
         remove_tree(folder)
         raise
     return NewSource(name, folder, sorted(files), example, entry, registered, block, commit)
+
+
+@dataclass(frozen=True)
+class NewFolderSource:
+    name: str
+    entry: SourceConfig
+    registered: bool
+    block: str | None
+    commit: str | None
+
+
+def new_folder_source(vault: Vault, name: str, given: Path) -> NewFolderSource:
+    """A folder source in vault.yaml (DR-0481): the folder as every machine reads it, relative to the repo that holds
+    the vault or under ~/. A folder elsewhere is refused with the fix, a machine's own folder in the user's config."""
+    problem = source_name_problem(name)
+    if problem is not None:
+        raise DocketError(problem)
+    existing = vault.config.sources.get(name)
+    if existing is not None and existing.folder is None and (existing.mapper or existing.tools):
+        raise DocketError(f"source {name} in vault.yaml has a mapper or tools; a folder source is a source of its own")
+    folder = written_folder(vault, given)
+    entry = SourceConfig(
+        enabled=existing.enabled if existing is not None else True,
+        folder=folder,
+        exclude=existing.exclude if existing is not None else [],
+    )
+    registered, block_text, commit = _register(vault, name, entry)
+    return NewFolderSource(name, entry, registered, block_text, commit)
+
+
+def written_folder(vault: Vault, given: Path) -> str:
+    """A folder as vault.yaml holds it: `~` and what is under the home folder as ~/..., else its path from the repo
+    that holds the vault."""
+    text = str(given).replace("\\", "/")
+    if text == "~" or text.startswith("~/"):
+        return text
+    folder = given.expanduser().resolve()
+    home = Path.home().resolve()
+    repo = toplevel(vault.root.parent)
+    if repo is not None and folder.is_relative_to(repo):
+        rel = folder.relative_to(repo).as_posix()
+        return "." if rel == "." else rel
+    if folder.is_relative_to(home):
+        rel = folder.relative_to(home).as_posix()
+        return "~" if rel == "." else f"~/{rel}"
+    raise DocketError(
+        f"{folder} is outside the repo that holds the vault and outside your home folder, so vault.yaml can't name it "
+        "the same way on every machine; add the source with a folder under ~/, then give this machine's own folder "
+        f"in {userconfig.config_path()}, under folders"
+    )
 
 
 def _entry(

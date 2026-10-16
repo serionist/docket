@@ -31,7 +31,7 @@ from documents_kit import (
 )
 from openpyxl import Workbook
 
-from docket.documents import formats, ooxml
+from docket.documents import formats, ooxml, parts
 from docket.documents.formats import extract
 from docket.documents.limits import MIB, Limits, NotReadError
 from docket.documents.ooxml import OLE, UNSAFE_XML, Package
@@ -43,7 +43,7 @@ BILLION_LAUGHS = (
 EXTERNAL = '<?xml version="1.0"?><!DOCTYPE d [<!ENTITY secret SYSTEM "file:///etc/hostname">]>'
 
 
-def refused(data: bytes, fmt: formats.Format, limits: Limits | None = None) -> NotReadError:
+def refused(data: bytes, fmt: parts.Format, limits: Limits | None = None) -> NotReadError:
     with pytest.raises(NotReadError) as caught:
         extract(data, fmt, limits or Limits())
     return caught.value
@@ -59,7 +59,7 @@ def _sheet(book: Workbook) -> None:
 
 
 def test_an_ole_file_is_protected_whatever_its_extension() -> None:
-    fmts: tuple[formats.Format, ...] = ("docx", "xlsx", "pptx")
+    fmts: tuple[parts.Format, ...] = ("docx", "xlsx", "pptx")
     for fmt in fmts:
         error = refused(OLE + bytes(512), fmt)
         assert (error.reason, error.detail) == ("protected", "protected, or in an old binary format")
@@ -406,7 +406,7 @@ def test_a_broken_pdf_is_damaged(data: bytes) -> None:
 
 
 def test_a_reader_s_own_error_is_named_by_its_type_never_its_message(monkeypatch: pytest.MonkeyPatch) -> None:
-    def boom(data: bytes, limits: Limits) -> formats.Extracted:
+    def boom(data: bytes, limits: Limits) -> parts.Extracted:
         raise ValueError("the text of a secret clause")
 
     monkeypatch.setattr(formats, "read_docx", boom)
@@ -416,7 +416,7 @@ def test_a_reader_s_own_error_is_named_by_its_type_never_its_message(monkeypatch
 
 
 def test_running_out_of_memory_isn_t_called_damage(monkeypatch: pytest.MonkeyPatch) -> None:
-    def hungry(data: bytes, limits: Limits) -> formats.Extracted:
+    def hungry(data: bytes, limits: Limits) -> parts.Extracted:
         raise MemoryError
 
     monkeypatch.setattr(formats, "read_pdf", hungry)

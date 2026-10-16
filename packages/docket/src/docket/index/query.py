@@ -39,6 +39,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel
 
+from docket.documents import records as documents
 from docket.errors import DocketError
 from docket.index import matching, rerank, vectors
 from docket.index.build import db_path, languages_of, open_index
@@ -147,6 +148,8 @@ class Hit(BaseModel):
     entities: list[str] = []
     anchors: list[str] = []
     also: list[str] = []
+    # Where a document's hit sits in its file: `page 3`, `slide 4`, `Costs!41:80` (DR-0483).
+    place: str | None = None
 
 
 class Group(BaseModel):
@@ -209,6 +212,8 @@ class _Row:
     locator: str
     anchors: list[str]
     text: str
+    para_from: int | None = None
+    para_to: int | None = None
     also: list[str] = field(default_factory=list[str])
 
 
@@ -607,13 +612,15 @@ class _Search:
             part = ids[start : start + 500]
             for r in self.conn.execute(
                 "SELECT id, kind, grp, source, ts, start_ms, end_ms, line_from, line_to, rid, doc, rids, speakers, "  # noqa: S608 - placeholders only
-                f"authors, title, locator, anchors, text FROM chunks WHERE id IN ({', '.join('?' * len(part))})",
+                "authors, title, locator, anchors, text, para_from, para_to FROM chunks "
+                f"WHERE id IN ({', '.join('?' * len(part))})",
                 part,
             ):
                 out[r[0]] = _Row(
                     id=r[0], kind=r[1], grp=r[2], source=r[3], ts=r[4], start_ms=r[5], end_ms=r[6], line_from=r[7],
                     line_to=r[8], rid=r[9], doc=r[10], rids=json.loads(r[11]), speakers=json.loads(r[12]),
                     authors=json.loads(r[13]), title=r[14], locator=r[15], anchors=json.loads(r[16]), text=r[17],
+                    para_from=r[18], para_to=r[19],
                 )  # fmt: skip
         return out
 
@@ -650,11 +657,21 @@ class _Search:
         body = " ".join(text[found[lo].start() : found[hi - 1].end()].split())
         return ("..." if lo else "") + body + ("..." if hi < len(found) else "")
 
+    def place(self, row: _Row) -> str | None:
+        """Where a document's hit sits in its file: its page, slide, or sheet rows (DR-0483)."""
+        if row.rid is None or row.kind != "record":
+            return None
+        found = self.conn.execute("SELECT kind FROM records WHERE rid = ?", (row.rid,)).fetchone()
+        return documents.place(found[0], row.title, row.para_from, row.para_to) if found else None
+
     def group(self, key: str, hits: list[_Row]) -> Group:
-        record = self.conn.execute("SELECT title, source FROM records WHERE rid = ?", (key,)).fetchone()
+        record = self.conn.execute("SELECT title, source, kind FROM records WHERE rid = ?", (key,)).fetchone()
         doc = self.conn.execute("SELECT title FROM docs WHERE id = ?", (key,)).fetchone()
         if record is not None:
-            if self.conn.execute("SELECT 1 FROM segments WHERE rid = ? LIMIT 1", (key,)).fetchone():
+            if record[2] == documents.FILE_KIND:
+                # A folder source's file: its pages, slides and sheets are under it (DR-0482).
+                kind = "document"
+            elif self.conn.execute("SELECT 1 FROM segments WHERE rid = ? LIMIT 1", (key,)).fetchone():
                 kind = "recording"
             elif self.conn.execute("SELECT count(*) FROM records WHERE thread = ?", (key,)).fetchone()[0] > 1:
                 kind = "thread"
@@ -1135,6 +1152,7 @@ def _run(
                     entities=sorted(mentioned.get(row.id, set()) & set(all_entities)),
                     anchors=row.anchors,
                     also=row.also,
+                    place=s.place(row),
                 )
             )
         result.groups.append(group)

@@ -18,6 +18,7 @@ import typer
 
 from docket import __version__, index, questions, recall, render, userconfig
 from docket.curate import batch as curate
+from docket.documents import scan as documents_scan
 from docket.errors import DocketError
 from docket.imports import notes
 from docket.index.build import db_path
@@ -308,6 +309,77 @@ def ingest(
     _ingest_report(report)
 
 
+@app.command("scan")
+def scan(
+    source: Annotated[
+        str | None, typer.Argument(help="A folder source, as vault.yaml names it; default: every one turned on.")
+    ] = None,
+    *,
+    accept_gone: Annotated[
+        bool,
+        typer.Option(
+            "--accept-gone", help="Take the files missing from the folder as gone, however many of them there are."
+        ),
+    ] = False,
+    vault: VaultOption = None,
+) -> None:
+    """Read a folder source's folder, read-only: each new or changed document's text goes to staging."""
+    found = find_vault(vault)
+    names = [source] if source is not None else documents_scan.folder_sources(found)
+    if not names:
+        raise DocketError("no folder source in vault.yaml; add one with docket source new <name> --folder <folder>")
+    reports = [documents_scan.scan(found, name, accept_gone=accept_gone) for name in names]
+    for report in reports:
+        say_all(scan_lines(report))
+    if any(r.staged.ready for r in reports):
+        say("next     docket staging promote")
+    if any(r.guarded is not None for r in reports):
+        raise typer.Exit(1)
+
+
+def _counts(counts: dict[str, int], order: Sequence[str] = ()) -> str:
+    keys = [k for k in order if counts.get(k)] + sorted(k for k in counts if k not in order and counts[k])
+    return ", ".join(f"{k} {counts[k]:,}" for k in keys)
+
+
+def scan_lines(report: documents_scan.ScanReport) -> list[str]:
+    """A scan's report: counts and rids, never the path of a file it left out."""
+    if report.missing:
+        return [f"scan     {report.source}: no folder at {report.folder} on this machine, so nothing was scanned"]
+    lines = [f"scan     {report.source}: {report.files:,} file(s) in {report.folder}"]
+    if report.guarded is not None:
+        return [
+            *lines,
+            f"stopped  {report.guarded:,} of the {report.known:,} files the vault holds are missing from the folder, "
+            "so nothing was staged; is the folder all there (a share mounted, a sync finished)?",
+            f"         if they were deleted or moved on purpose: docket scan {report.source} --accept-gone",
+        ]
+    outcomes = report.outcomes
+    read = ("same", "touched", "new", "changed", "back", "moved")
+    done = _counts({k: outcomes[k] for k in read}, read)
+    lines.append(f"files    {done or 'none to read'}")
+    if report.gone:
+        lines.append(f"gone     {report.gone:,}")
+    lines += [f"not read {rid}" for rid in report.not_read]
+    if outcomes["kept out"]:
+        lines.append(f"kept out {outcomes['kept out']:,}, by the never-store lists")
+    if outcomes["retry"]:
+        lines.append(f"retry    {outcomes['retry']:,}: the reader stopped or crashed; tried once more at the next scan")
+    waiting = _counts({k: outcomes[k] for k in ("unreadable", "on hold", "placeholders", "lfs pointers")})
+    if waiting:
+        lines.append(f"later    {waiting}: they keep their last version")
+    if report.skipped:
+        lines.append(f"skipped  {_counts(report.skipped)}")
+    staged = report.staged
+    lines.append(
+        f"staged   {report.source}: {staged.pending} pending, {staged.ready} ready, {staged.skipped} already staged or "
+        "in raw"
+    )
+    if staged.dropped:
+        lines.append(f"dropped  {_counts(staged.dropped)}")
+    return lines
+
+
 @source_app.command("new")
 def source_new(
     name: Annotated[str, typer.Argument(help="The source's name: lowercase letters, digits, dots, _ and -.")],
@@ -321,16 +393,35 @@ def source_new(
     tool: Annotated[
         list[str] | None, typer.Option("--tool", help="A tool whose results it captures, by its own name (repeat).")
     ] = None,
+    folder: Annotated[
+        Path | None,
+        typer.Option(
+            "--folder", help="A folder source instead: the folder docket scan reads, in the repo or under your home."
+        ),
+    ] = None,
     vault: VaultOption = None,
 ) -> None:
-    """Write a source's skill, mapper and tests into the project that holds the vault, and add it to vault.yaml."""
+    """Write a source's skill, mapper and tests into the project that holds the vault, and add it to vault.yaml; with
+    --folder, add a folder source that docket scan reads."""
     if sensitivity is not None and sensitivity not in SENSITIVITIES:
         raise DocketError(f"--sensitivity is work, mixed or private, not {sensitivity!r}")
+    if folder is not None and (example or tool or sensitivity not in (None, "work")):
+        raise DocketError("a folder source is work, with no reference, mapper or tools: --folder goes alone")
     found, how = locate_vault(vault)
     # A vault found through the environment or the config can be another project's: the folder would land in its
     # repo, and the entry be committed there. Only one named, or found from here, is taken.
     if how == "DOCKET_VAULT" or how.startswith("the default vault"):
         raise DocketError(f"found {found.root} by {how}; pass --vault {found.root} to add a source there")
+    if folder is not None:
+        added = scaffold.new_folder_source(found, name, folder)
+        if added.registered:
+            commit = f", committed {added.commit[:12]}" if added.commit else ""
+            say(f"source   {name} in vault.yaml: a folder source, folder {added.entry.folder}{commit}")
+        else:
+            say("source   vault.yaml has comments or a layout of your own, so it is left as it is; add under sources:")
+            say_all((added.block or "").splitlines())
+        say(f"next     docket scan {name}")
+        return
     made = scaffold.new_source(found, name, example=example, sensitivity=sensitivity, tools=tool or [])
     say(f"wrote    {made.folder}" + (", Docket's reference" if made.example else ", from the blank template"))
     for rel in made.files:

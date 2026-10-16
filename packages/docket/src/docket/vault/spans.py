@@ -43,6 +43,8 @@ class Span(BaseModel):
     segments: list[Segment] = Field(default_factory=list[Segment])
     text: str = ""
     problem: str | None = None
+    # Set when the span is read from an earlier version than the latest: a folder record that went (DR-0491).
+    note: str | None = None
 
 
 def over(record: RawRecord) -> list[str]:

@@ -27,7 +27,7 @@ from docket.web.templating import at, clock
 RESULTS = "/search/results"
 PANEL = "/search/panel"
 
-KIND_ICON = {"recording": "recording", "thread": "thread", "record": "record", "doc": "doc"}
+KIND_ICON = {"recording": "recording", "thread": "thread", "record": "record", "doc": "doc", "document": "doc"}
 HIT_ICON = {"transcript": "recording", "message": "thread", "thread": "thread", "record": "record", "doc": "doc"}
 FOUND_BY = {
     "any": "some words",
@@ -300,6 +300,9 @@ def facets(result: SearchResult, state: SearchState, names: dict[str, EntityLabe
 
 
 def _stretch(hit: Hit) -> str:
+    if hit.place is not None:
+        # A document's page, slide or sheet rows (DR-0483).
+        return hit.place
     if hit.lines is not None:
         first, last = hit.lines
         return f"lines {first}-{last}" if last != first else f"line {first}"

@@ -23,7 +23,8 @@ from openpyxl import Workbook
 
 from docket.documents import formats
 from docket.documents import text as texts
-from docket.documents.formats import NO_TEXT, NOTES, Part, extract, format_of
+from docket.documents.formats import NO_TEXT, NOTES, extract
+from docket.documents.parts import Part, format_of
 
 # -- text -------------------------------------------------------------------------------------------------------------
 

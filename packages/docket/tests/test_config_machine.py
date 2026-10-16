@@ -6,6 +6,7 @@ import pytest
 from docket_testkit import make_config, sh
 from pydantic import ValidationError
 
+from docket import userconfig
 from docket.cli import main
 from docket.errors import DocketError
 from docket.vault import machine
@@ -154,3 +155,70 @@ def test_the_machine_comes_from_env_then_the_clone_then_the_host(
     assert machine.resolve(home.private) == "work-laptop"
     monkeypatch.setattr("socket.gethostname", lambda: "HOST-A")
     assert machine.resolve(None) == "host-a"
+
+
+# -- a folder source's keys (DR-0481, DR-0490) ----------------------------------------------------------------------
+
+
+def test_a_folder_source_round_trips_and_a_vault_without_one_writes_neither_key(tmp_path: Path) -> None:
+    assert "folder" not in make_config().dump() and "exclude" not in make_config().dump()
+    config = make_config()
+    config.sources["documents"] = SourceConfig(folder="~/Work", exclude=["archive/*", "*.draft.md"])
+    path = tmp_path / "vault.yaml"
+    path.write_text(config.dump(), encoding="utf-8")
+    assert VaultConfig.load(path) == config
+    assert "folder: ~/Work" in config.dump()
+    for value in ("docs", "docs/papers", ".", "~", "~/Work/2026"):
+        assert SourceConfig(folder=value).folder == value
+    # A hand-written `folder: null` is no folder.
+    assert SourceConfig.model_validate({"folder": None}) == SourceConfig()
+
+
+@pytest.mark.parametrize(
+    ("entry", "message"),
+    [
+        ({"folder": "/home/ada/Work"}, "is an absolute path, which names one machine's drive"),
+        ({"folder": "C:/Users/ada/Work"}, "give a machine whose folder is elsewhere its own path"),
+        ({"folder": "D:Work"}, "is an absolute path"),
+        ({"folder": "//server/share/Work"}, "is an absolute path"),
+        ({"folder": r"docs\papers"}, "written with /"),
+        ({"folder": "~ada/Work"}, "another user's isn't taken"),
+        ({"folder": "docs/../../elsewhere"}, r"with no \.\."),
+        ({"folder": " "}, r"with no \.\."),
+        ({"folder": "docs", "sensitivity": "mixed"}, "mixed would hold every page on the Staging page"),
+        ({"folder": "docs", "sensitivity": "private"}, "set enabled: false instead"),
+        ({"folder": "docs", "mapper": ".claude/skills/sources/x/mapper.py"}, "has no mapper, tools or media_hosts"),
+        ({"folder": "docs", "tools": ["list_files"]}, "has no mapper, tools or media_hosts"),
+        ({"exclude": ["archive/*"]}, "exclude goes with folder"),
+        ({"folder": "docs", "exclude": [" "]}, "never empty"),
+    ],
+)
+def test_a_folder_source_s_bad_keys_are_refused_with_their_fix(entry: dict[str, object], message: str) -> None:
+    with pytest.raises(ValidationError, match=message):
+        SourceConfig.model_validate(entry)
+
+
+def test_this_machine_s_folders_come_from_the_user_s_config(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    assert userconfig.folders() == {}
+    userconfig.set_section("folders", {str(vault): {"documents": str(tmp_path / "Work")}})
+    assert userconfig.folders() == {vault.resolve(): {"documents": tmp_path / "Work"}}
+    assert userconfig.folder_for(vault, "documents") == tmp_path / "Work"
+    assert userconfig.folder_for(vault, "other") is None
+    assert userconfig.folder_for(tmp_path, "documents") is None
+
+
+@pytest.mark.parametrize(
+    ("block", "message"),
+    [
+        (["a"], "must be a map from a vault's folder to its sources' folders"),
+        ({"vault": ["a"]}, "must be a vault's folder, with a map of its sources' folders"),
+        ({"vault": {"documents": "Work"}}, "documents must be an absolute folder"),
+        ({"vault": {"documents": 3}}, "documents must be an absolute folder"),
+    ],
+)
+def test_a_folders_block_of_the_wrong_kind_is_refused(block: object, message: str) -> None:
+    userconfig.set_section("folders", block)  # type: ignore[arg-type]
+    with pytest.raises(DocketError, match=message):
+        userconfig.folders()

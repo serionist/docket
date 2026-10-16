@@ -55,7 +55,10 @@ def gather(service: Service) -> Facts:
                 final = running.owed(vault, name, ready, now, final=True)
             except DocketError as e:
                 refused = str(e)
-        sources.append(SourceFacts(name, enabled=enabled, live=live, refused=refused, owed=owed, final=final))
+        folder = config.folder is not None
+        sources.append(
+            SourceFacts(name, enabled=enabled, live=live, refused=refused, owed=owed, final=final, folder=folder)
+        )
     return Facts(
         now=now,
         tz=ZoneInfo(vault.config.owner.time_zone),

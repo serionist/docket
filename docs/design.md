@@ -140,7 +140,8 @@ sequenceDiagram
 
 - `verify` is mechanical because every line carries anchors: `@12:08` within a single-record note, or `[r:<rid>@12:08]`
   when a doc covers several records; `[r:<rid>#2]` points at a paragraph of a mail or message and `[r:<rid>]` at a whole
-  record (DR-0198).
+  record (DR-0198). An anchor on a folder source's record that went resolves against its last version with text, and
+  names where the file moved (DR-0491).
 - People and entity filters are boosts with a fallback, not hard filters: an unlabelled speaker would otherwise drop
   the very chunk that holds the answer.
 - A correction propagates. Every ledger item, decision and brief line records what it was built from
@@ -168,7 +169,7 @@ same result on any day.
 |---|---|---|
 | Briefs | a processed doc per person, project and topic: open items both ways, what changed, the last conversations, the decisions; every line cited; rebuilt after a sync for the entities it touched and before each meeting | 2 |
 | Decision log | candidates from processing, confirmed by the user; contradictions are marked, never resolved by the machine; a later decision supersedes an earlier one, and history stays | 2 |
-| Own documents | the work folder and attachments, read-only, so search covers what was written next to what was said | 1 |
+| Own documents | the work folder and attachments, read-only, so search covers what was written next to what was said: `docket scan` reads a folder source's docx, xlsx, pptx, pdf, md and txt as text, by page, slide and sheet (DR-0480) | 1 |
 | Highlights | a recorder's highlight button and later a hotkey; marked stretches go to the top of the minutes | 1 |
 | Secrets | never in the vault; a keychain-backed `docket secret`, never indexed or sent to a model unless asked for by name | 2 |
 | Outbox | drafts Claude prepared, on one page for the user's click; nothing is sent by the app | 3 |
@@ -336,6 +337,11 @@ vault/
   each, so a page boundary never makes a new version and every source's transcripts read alike (DR-0120). Plaud's
   rids are `plaud:<file id>` for the recording, `plaud:<file id>/<block>` for its transcript and
   `plaud:<file id>/summary` for its notes.
+- A folder source's rids are `<source>:<id>` for a file, the id the first 12 hex digits of the sha256 of its path in
+  the folder, and `<source>:<id>/page3`, `/slide4` or `/sheet2` for its parts, which sit under it as Plaud's records
+  sit under their recording (DR-0482). A sheet's row n is its paragraph n, so `[r:documents:<id>/sheet2#41-80]` is
+  rows 41 to 80. A file that went from the folder gets a gone version of one line, and an anchor on it resolves
+  against its last version with text (DR-0487, DR-0491).
 - `rid` is also the ledger's locator, so every ledger source resolves to a record. Older locators (a legacy note's
   path) resolve through the note's `old_paths`, which the index loads into its `old_paths` table (DR-0320); `read`
   asks the index when it is current and parses the docs otherwise (DR-0321).
@@ -491,7 +497,7 @@ The dashboard shows review minutes per week, a number to keep down.
 | mail | one message without the quoted history and signature, subject on top; split above 500 tokens |
 | chat | one message with its author and channel; plus thread windows (the parent and up to 10 replies) |
 | calendar | one event: subject, organiser, attendees, time, response |
-| document | one section or slide, with its file and page |
+| document | a page, a slide, or up to 500 words of a sheet's rows or a docx's paragraphs, the file's path and the part in the title on top |
 | processed doc | one section, its anchors kept |
 
 ### 7.2 One query
@@ -586,6 +592,10 @@ change lands on whoever uses that vendor, while the core still checks every rid 
   records without segments out unless the owner kept them (DR-0200 to DR-0207). No audio is stored before #42, which
   cuts a released recording's audio by the same times.
 - A Python connector is written only where no skill can harvest: a scheduled run with nobody's Claude session open.
+- A folder source is the core's own connector (DR-0480): `docket scan` lists the folder `vault.yaml` names, read-only,
+  extracts each changed file's text in a child process with limits (DR-0485), and stages the records through the
+  gate. A stat each, a hash when the stat moved, the child only when the bytes did (DR-0486); a file deleted, moved or
+  kept out gets a gone version, once (DR-0487). Only the primary machine scans.
 - Payloads fetched before Docket existed (an export, a backfill folder) are imported with `docket ingest <source>
   <folder>`, through the source's mapper and the same checks as a live run (DR-0128).
 - A skill lists newest first and pages down past its window's start rather than trusting a date filter: a filter in

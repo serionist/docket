@@ -35,9 +35,11 @@ def span(s: Span, indent: str = "") -> list[str]:
         head += f"  {s.kind} {s.ts:%Y-%m-%d %H:%M}Z"
     if s.author:
         head += f" {s.author}"
-    if s.versions > 1:
+    if s.versions > 1 and s.note is None:
         head += f" ({s.versions} versions; this is the latest)"
     lines = [head]
+    if s.note is not None:
+        lines.append(f"{indent}  ({s.note})")
     if s.problem is not None:
         lines.append(f"{indent}  ! {s.problem}")
     elif s.segments:
@@ -52,6 +54,7 @@ def span(s: Span, indent: str = "") -> list[str]:
 def put(result: PutResult) -> list[str]:
     lines = [f"a hand edit went in first, as rev {result.taken_in}"] if result.taken_in else []
     lines.append(f"{'put' if result.changed else 'unchanged'} {result.id} rev {result.rev}  {result.path}")
+    lines += [f"note: {note}" for note in result.notes]
     if result.redactions:
         where = ", ".join(str(n) for n in result.redacted_lines)
         counts = ", ".join(f"{n} {rule}" for rule, n in result.redactions.items())
@@ -151,7 +154,8 @@ def search(result: SearchResult, tz: ZoneInfo) -> list[str]:
             at = f"  {hit.ts.astimezone(tz):%Y-%m-%d %H:%M}" if hit.ts else ""
             who = ", ".join(hit.speakers or hit.authors)
             doc_lines = f"  lines {hit.lines[0]}-{hit.lines[1]}" if hit.lines else ""
-            lines.append(f"  {hit.rank:>3}. {hit.locator}{doc_lines}{at}{f'  {who}' if who else ''}")
+            place = f"  {hit.place}" if hit.place else ""
+            lines.append(f"  {hit.rank:>3}. {hit.locator}{doc_lines}{place}{at}{f'  {who}' if who else ''}")
             lines.append(f"       {hit.snippet}")
             lines += [f"       -> {anchor}" for anchor in hit.anchors]
             if hit.also:

@@ -106,6 +106,34 @@ def service() -> ServiceSettings:
     )
 
 
+def folders() -> dict[Path, dict[str, Path]]:
+    """The `folders` block (DR-0490): each vault's resolved root, by the path the user wrote, with its folder sources'
+    folders on this machine, each absolute. A value of the wrong kind is refused, naming its key: a scan of a folder
+    nobody named must never start."""
+    raw: Any = load().get("folders")
+    if raw is None:
+        return {}
+    where = f"{config_path()}: folders"
+    if not isinstance(raw, dict):
+        raise DocketError(f"{where} must be a map from a vault's folder to its sources' folders")
+    out: dict[Path, dict[str, Path]] = {}
+    for vault, sources in cast(dict[object, Any], raw).items():
+        if not isinstance(vault, str) or not vault or not isinstance(sources, dict):
+            raise DocketError(f"{where}: {vault!s} must be a vault's folder, with a map of its sources' folders")
+        mine: dict[str, Path] = {}
+        for source, folder in cast(dict[object, Any], sources).items():
+            if not isinstance(folder, str) or not Path(folder).is_absolute():
+                raise DocketError(f"{where}: {vault}: {source!s} must be an absolute folder, such as E:/Work")
+            mine[str(source)] = Path(folder)
+        out[Path(vault).expanduser().resolve()] = mine
+    return out
+
+
+def folder_for(vault_root: Path, source: str) -> Path | None:
+    """This machine's folder for a vault's folder source, when the user's config names one."""
+    return folders().get(vault_root.resolve(), {}).get(source)
+
+
 def set_service(
     *, vault: Path | None = None, port: int | None = None, store: TokenStore | None = None
 ) -> ServiceSettings:

@@ -21,6 +21,7 @@ from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel, Field
 
+from docket.documents import records as documents
 from docket.errors import DocketError
 from docket.vault import derived
 from docket.vault.anchors import normalize_newlines, trailing_anchors
@@ -63,6 +64,8 @@ class PutResult(BaseModel):
     taken_in: int | None = None
     redactions: dict[str, int] = Field(default_factory=dict[str, int])
     redacted_lines: list[int] = Field(default_factory=list[int])
+    # What the put met that refused nothing: a covered folder record that went, read from before it did (DR-0491).
+    notes: list[str] = Field(default_factory=list[str])
 
 
 class Redacting(BaseModel):
@@ -204,7 +207,8 @@ class DocStore:
         if problems:
             raise DocRefusedError(problems)
         with self.vault.writing():
-            return self._put_locked(doc, head, redacted)
+            result = self._put_locked(doc, head, redacted)
+        return result.model_copy(update={"notes": _gone_notes(RawLookup(self.root), doc.meta.covers)})
 
     def _against_raw(self, doc: ProcessedDoc, head: list[str]) -> list[DocProblem]:
         """What the raw log decides: every covered rid is in it, and every content line's anchors resolve."""
@@ -213,7 +217,9 @@ class DocStore:
         problems: list[DocProblem] = []
         records: dict[str, RawRecord] = {}
         for rid in meta.covers:
-            record = lookup.latest(rid)
+            versions = lookup.versions(rid)
+            # A folder record that went resolves against its last version with text (DR-0491).
+            record = documents.resolving(versions) if versions else None
             if record is None:
                 line = next((i for i in range(1, doc.head_lines) if rid in head[i]), None)
                 problems.append(DocProblem(None if line is None else line + 1, f"covers: {rid} isn't in the raw log"))
@@ -551,3 +557,13 @@ def _told(redacted: derived.Redacted, text: str) -> tuple[dict[str, int], list[i
     close = normalize_newlines(text).split("\n").index("---", 1)
     # The body starts on the line after the closing ---: index close is line close + 1, so body line i is close + 2 + i.
     return dict(sorted(redacted.counts.items())), [close + 2 + i for i in redacted.lines]
+
+
+def _gone_notes(lookup: RawLookup, covers: list[str]) -> list[str]:
+    """For each covered folder record that went, that the doc's anchors on it were read from before it did."""
+    notes: list[str] = []
+    for rid in covers:
+        versions = lookup.versions(rid)
+        if versions and documents.resolving(versions) is not versions[-1]:
+            notes.append(f"{rid}: {documents.gone_note(versions[-1])}")
+    return notes

@@ -25,6 +25,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from docket.documents import records as documents
 from docket.errors import DocketError
 from docket.index import lookup
 from docket.index.lookup import ReadIndex
@@ -223,9 +224,16 @@ def _read(call: _Call, locator: str, view: View, around: int, rev: int | None) -
             anchor = _placed(timed[0], anchor)
             versions = call.raw.versions(timed[0])
             result.resolved = anchor.token[1:-1]
-    record = versions[-1]
+    record = documents.resolving(versions)
     if view != "summary":
-        result.spans = _raw_spans(call.raw, record, anchor, len(versions), around)
+        if record is not versions[-1]:
+            # A folder record that went: its gone version, then the last one with text, which anchors resolve on.
+            gone = versions[-1]
+            result.spans = [span(Anchor(gone.rid, "record"), gone, len(versions))]
+            earlier = _raw_spans(call.raw, record, anchor, len(versions), around)
+            result.spans += [s.model_copy(update={"note": documents.gone_note(gone)}) for s in earlier]
+        else:
+            result.spans = _raw_spans(call.raw, record, anchor, len(versions), around)
     if view != "raw":
         # A transcript is read as one with its recording: the recording a time was placed from (DR-0370), or the one
         # it is under (DR-0391). A recording read whole is read with the transcripts under it (DR-0440); a paragraph
@@ -336,7 +344,11 @@ def _verify_one(lookup: RawLookup, anchor: Anchor, covers: list[str], window: in
     versions = lookup.versions(rid)
     if not versions:
         return Span(rid=rid, anchor=anchor.token, problem=f"{rid} isn't in the raw log")
-    return span(anchor, versions[-1], len(versions), window=window, lookup=lookup)
+    record = documents.resolving(versions)
+    found = span(anchor, record, len(versions), window=window, lookup=lookup)
+    if record is not versions[-1]:
+        found = found.model_copy(update={"note": documents.gone_note(versions[-1])})
+    return found
 
 
 def _load(store: DocStore, kind: str, value: str, rev: int | None) -> ProcessedDoc:

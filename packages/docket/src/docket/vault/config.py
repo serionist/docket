@@ -14,7 +14,16 @@ from typing import Any, Literal, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    ValidationError,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from docket.errors import DocketError
 from docket.vault.home import Home, make_private
@@ -82,6 +91,11 @@ class SourceConfig(_Model):
     tools: list[str] = Field(default_factory=list[str])
     # The hosts media_put may fetch this source's media from, over https.
     media_hosts: list[str] = Field(default_factory=list[str])
+    # A folder source (DR-0481): the folder docket scan reads, relative to the consuming repo or under ~/, and fnmatch
+    # patterns on the paths inside it to leave out. Written only when set, so a vault.yaml without folder sources
+    # reads as before on an older Docket.
+    folder: str | None = None
+    exclude: list[str] = Field(default_factory=list[str])
 
     @field_validator("mapper")
     @classmethod
@@ -111,6 +125,68 @@ class SourceConfig(_Model):
             if not HOST.match(host):
                 raise ValueError(f"{host!r} isn't a host name: lowercase, with no scheme, port or path")
         return value
+
+    @field_validator("folder")
+    @classmethod
+    def _folder(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        problem = folder_problem(value)
+        if problem is not None:
+            raise ValueError(problem)
+        return value
+
+    @field_validator("exclude")
+    @classmethod
+    def _exclude(cls, value: list[str]) -> list[str]:
+        if any(not pattern.strip() for pattern in value):
+            raise ValueError("an exclude pattern is a path pattern such as archive/* or *.draft.md, never empty")
+        return value
+
+    @model_validator(mode="after")
+    def _folder_source(self) -> SourceConfig:
+        if self.folder is None:
+            if self.exclude:
+                raise ValueError("exclude goes with folder: it leaves paths of a folder source out")
+            return self
+        if self.mapper is not None or self.tools or self.media_hosts:
+            raise ValueError("a folder source has no mapper, tools or media_hosts: docket scan reads its folder")
+        if self.sensitivity == "mixed":
+            raise ValueError(
+                "a folder source is work: mixed would hold every page on the Staging page one by one; keep work, and "
+                "leave out what isn't with exclude"
+            )
+        if self.sensitivity == "private":
+            raise ValueError("a folder source is work: to store nothing from it, set enabled: false instead")
+        return self
+
+    @model_serializer(mode="wrap")
+    def _dump(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """`folder` and `exclude` only when set: an older Docket refuses keys it doesn't know (DR-0021)."""
+        data: dict[str, Any] = handler(self)
+        if self.folder is None:
+            data.pop("folder", None)
+        if not self.exclude:
+            data.pop("exclude", None)
+        return data
+
+
+def folder_problem(value: str) -> str | None:
+    """Why a folder source's folder can't be written in vault.yaml, or None: it is relative to the consuming repo, or
+    under the home folder as ~/..., so it reads the same on every machine (DR-0481)."""
+    if "\\" in value:
+        return f"{value!r}: a folder is written with /, such as docs or ~/Work"
+    if PurePosixPath(value).is_absolute() or PureWindowsPath(value).anchor:
+        return (
+            f"{value!r} is an absolute path, which names one machine's drive: write the folder relative to the repo "
+            "(docs) or under your home folder (~/Work), and give a machine whose folder is elsewhere its own path in "
+            "Docket's config.yaml, under folders"
+        )
+    if value.startswith("~") and value != "~" and not value.startswith("~/"):
+        return f"{value!r}: ~ is your own home folder, written ~/Work; another user's isn't taken"
+    if ".." in PurePosixPath(value).parts or not value.strip():
+        return f"{value!r}: a folder stays inside the repo or under ~/, with no .."
+    return None
 
 
 class NeverStore(_Model):

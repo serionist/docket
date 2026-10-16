@@ -532,6 +532,18 @@ def test_one_source_narrows_every_part_and_an_unknown_one_says_so() -> None:
     assert (view.cursors, view.needs) == ([], [])
 
 
+def test_a_folder_source_is_named_as_one_read_by_docket_scan() -> None:
+    sources = [SourceFacts("memo", enabled=True, live=True), SourceFacts("documents", enabled=True, live=False,
+                                                                         folder=True)]  # fmt: skip
+    view = sync_view.build(facts(sources=sources), SyncState())
+    assert view.notes == ["Folder sources, read by docket scan and never synced here: documents."]
+    view = sync_view.build(facts(sources=sources), SyncState(source="documents"))
+    assert view.notes == [
+        "documents is a folder source: docket scan documents reads its folder, so it never syncs here."
+    ]
+    assert view.needs == []
+
+
 @pytest.mark.parametrize(
     ("sources", "lead"),
     [

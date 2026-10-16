@@ -15,7 +15,8 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 | `docket staging classify <ref> work\|private` | work makes it ready, `--cut 120-340` (characters) or `--cut 12:30-14:05` (a time) cuts a stretch; private drops it |
 | `docket staging promote` | writes every ready record to the raw log, cut and redacted, one run per source, and commits; a record on hold stays in staging |
 | `docket ingest <source> <folder>` | imports payloads fetched earlier through the source's mapper: the folder's `hold.txt` first, then its JSON files; every record goes to staging, nothing on hold; `--hold <file>` adds more ids to hold, `--final` tells the mapper not to wait for more, `--mapper-errors` prints the mapper's own errors |
-| `docket source new <name>` | writes a source's skill, mapper and tests into `.claude/skills/sources/<name>/` of the repo that holds the vault, from Docket's blank template, or `--example` for a reference source (Plaud), and adds the source to `vault.yaml` with `--sensitivity` and its `--tool`s; never over a folder that exists |
+| `docket source new <name>` | writes a source's skill, mapper and tests into `.claude/skills/sources/<name>/` of the repo that holds the vault, from Docket's blank template, or `--example` for a reference source (Plaud), and adds the source to `vault.yaml` with `--sensitivity` and its `--tool`s; never over a folder that exists; `--folder <folder>` adds a folder source instead |
+| `docket scan [source]` | reads a folder source's folder, read-only, and stages each new or changed document's text; every folder source turned on without a name; `--accept-gone` when most files the vault held are missing on purpose |
 | `docket doc put <file or ->` | store a processed doc as its next rev, redacted first, saying on which lines; refused, with every problem and its line, when the frontmatter is wrong, an anchor doesn't resolve, the doc changed since the rev it carries, or it says something on the never-store keywords list (then only the lines are named) |
 | `docket doc redact` | redact the docs already stored with the settings as they are now, as their next revs in one commit; once after upgrading, and again after turning a rule on or adding a pattern or a keyword; `--dry-run` first; a doc it can't redact is named and left, with exit 1 |
 | `docket doc read <locator>` | a doc, or a record and the doc lines that point at it; `--view raw` or `both` for the raw, `--around` for minutes, paragraphs or messages either side, `--rev` for an earlier revision |
@@ -118,6 +119,56 @@ source to `vault.yaml` (DR-0166); the plugin's `/docket:setup` runs it for each 
 - Changing a mapper: keep its output stable, since every record the lookback reads again gets a new version when it
   changes; pin golden versions in its tests, as the example does; pull the project on every machine before its next
   sync.
+
+## Folder sources
+
+A folder source is your own documents: Docket reads the folder itself, read-only, and keeps each file as text through
+the same gate as every source (DR-0480). `docket source new documents --folder ~/Work` adds one; `docket scan`
+reads it, and `docket staging promote` writes what it staged.
+
+```yaml
+sources:
+  documents:
+    sensitivity: work
+    folder: ~/Work                  # or a path relative to the repo that holds the vault
+    exclude: ["archive/*", "*.draft.md"]
+```
+
+- `folder` is under your home folder (`~/Work`) or relative to the repo, so it reads the same on every machine; an
+  absolute path is refused. A machine whose folder is elsewhere names it in Docket's `config.yaml`, by the vault's
+  folder and the source (DR-0490):
+
+  ```yaml
+  folders:
+    D:/vaults/work:
+      documents: E:/Work
+  ```
+
+- `exclude` takes fnmatch patterns on the path inside the folder, any case. Notes you also import with `docket import
+  notes` are best left out here.
+- It is `work`, with no mapper or tools: `mixed` would hold every page on the Staging page, and to store nothing from
+  it, set `enabled: false`. Only the vault's primary machine scans.
+- In a git repo the folder is listed through git's ignore rules, and git's index is never refreshed; elsewhere it is
+  walked, dot folders and nested repos left out. Links and junctions inside it are left out, and so are Office lock
+  files, git-lfs pointers, cloud placeholders whose bytes aren't on disk, and a path holding a never-store keyword.
+
+| Format | Gives | Misses |
+|---|---|---|
+| pdf | a record per page, its text layer | scanned pages (no OCR), reading order across columns, form fields |
+| docx | one record: paragraphs and tables in order, tracked insertions, then headers, footers, notes and comments | list numbers, deleted text, images, charts |
+| pptx | a record per slide: its shapes and tables, then its speaker notes | charts, SmartArt, images |
+| xlsx | a record per sheet: row n is paragraph n, `41: Widget \| 3 \| 4.50`, so `#41-80` is rows 41 to 80 | formulas without a saved value, comments, charts |
+| md, txt | one record, UTF-8, UTF-16 by its BOM, else Windows-1252 | other encodings |
+
+- A file's rid is `documents:<12 hex>`, from its path in the folder, and its parts are `/page3`, `/slide4`, `/sheet2`
+  under it. A search hit names the file's path and the page, slide or `Costs!41:80`.
+- Text is read in a child process: 120 s and 2 GiB a file (no memory cap on macOS), 64 MB, 2,000 pages, 1,000
+  slides, 100 sheets, 10,000 rows and 256 columns, 4 MB of text. A file past a cap, damaged or protected is a record
+  saying why, with no text; one that stops or crashes the reader is tried once more.
+- A second scan reads only what changed: a stat each, a hash when the stat moved, the reader when the bytes did. A
+  file deleted, moved or excluded gets one gone version that says since when; `docket doc read` shows it and the last
+  version with text, and anchors on it still verify. A scan that would find more than half the files gone, and at
+  least 20, stages nothing until `--accept-gone`.
 
 ## Live runs
 

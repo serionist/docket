@@ -182,6 +182,11 @@ def _checked_source(vault: Vault, source: str) -> list[str]:
         raise DocketError(f"source {source} is turned off in vault.yaml")
     if config.sensitivity == "private":
         raise DocketError(f"source {source} is private in vault.yaml: nothing from it is stored, so it runs no sync")
+    if config.folder is not None:
+        raise DocketError(
+            f"source {source} is a folder source: Docket reads its folder itself with docket scan {source}, so it runs "
+            "no sync"
+        )
     if not config.tools:
         raise DocketError(f"source {source} lists no tools in vault.yaml; set sources.{source}.tools")
     runner.find_mapper(vault, source)

@@ -18,6 +18,12 @@ Unreleased in the same PR.
   notes and mail spell, joined with how transcripts misheard them), ranked by what search misses; `show`,
   `accept`, `reject`, `lift` and `status` work through them, every decision in the curate log, and a round
   measures your own question set before and after when `curate.questions` names it.
+- Folder sources, your own documents: `docket source new documents --folder ~/Work` names a folder in `vault.yaml`,
+  and `docket scan` reads its docx, xlsx, pptx, pdf, md and txt files, read-only, through the same gate as every
+  source: a pdf by page, a deck by slide, a workbook by sheet with row n as paragraph n. A search hit names the file's
+  path and its page or rows. A scan reads only what changed; a deleted, moved or excluded file keeps its earlier
+  versions and stops being current. Only the vault's primary machine scans. Update every machine before adding one:
+  an older Docket refuses a `vault.yaml` with `folder` or `exclude`.
 - `docket curate add`, `docket curate log` and `docket curate undo`: entity changes from a file (seed your people
   and terms from what you keep), each logged in `entities/_log/` and committed with the file it changed, and each
   one undoable. Docket never rewrites an entity file that holds a comment or reads with a problem.

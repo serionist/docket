@@ -16,9 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 import re
-import subprocess
 import unicodedata
 from collections import Counter
 from collections.abc import Iterable
@@ -30,12 +28,12 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
 
+from docket import folders
 from docket.errors import DocketError
 from docket.vault import derived
 from docket.vault.anchors import normalize_newlines
 from docket.vault.config import NeverStore
 from docket.vault.docstore import DocStore
-from docket.vault.git import Git
 from docket.vault.legacy import normalize
 from docket.vault.neverstore import fold, matches_text
 from docket.vault.processed import (
@@ -63,8 +61,6 @@ MIN_TOKEN = 6
 MIN_RUN = 12
 CLASH_STEM = SLUG_MAX - 7
 SHORT_HASH = 8
-# A git command run in the notes' repo must not refresh that repo's index file, which plain status-like calls may do.
-GIT_ENV = {"GIT_OPTIONAL_LOCKS": "0"}
 
 _MARKDOWN = (".md", ".markdown")
 _SPLIT = re.compile(r"[\s()\[\]<>{},;\"'`]+")
@@ -163,22 +159,6 @@ class Plan:
 # -- the folder ---------------------------------------------------------------------------------------------------
 
 
-def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return Git(cwd).run(*args, check=False, env=GIT_ENV)
-
-
-def repo_root(folder: Path) -> Path | None:
-    """The git repo the folder is in, or None. A repo git refuses to read stops the import: reading it without its
-    ignore rules could take in what the user kept out of git."""
-    if not any((p / ".git").exists() for p in (folder, *folder.parents)):
-        return None
-    proc = _git(folder, "rev-parse", "--show-toplevel")
-    if proc.returncode != 0:
-        why = (proc.stderr or proc.stdout).strip()
-        raise DocketError(f"git can't read the repo {folder} is in, so its ignore rules can't be kept: {why}")
-    return Path(proc.stdout.strip()).resolve()
-
-
 def default_prefix(folder: Path, repo: Path | None) -> str:
     """The part of an old path before the path inside the folder: the folder from its repo's root, else its name."""
     if repo is None:
@@ -197,43 +177,10 @@ def clean_prefix(given: str) -> str:
 
 
 def list_folder(folder: Path, prefix: str, repo: Path | None, vault_root: Path, skipped: Counter[str]) -> list[Listed]:
-    """Every file in the folder as (old path, path), in old-path order; links and nested repos are counted only."""
-    inner: list[tuple[str, Path]] = []
-    if repo is not None:
-        rel = folder.relative_to(repo).as_posix()
-        proc = _git(repo, "ls-files", "-z", "-co", "--exclude-standard", "--", rel)
-        if proc.returncode != 0:
-            raise DocketError(f"git couldn't list {folder}: {(proc.stderr or proc.stdout).strip()}")
-        base = "" if rel == "." else f"{rel}/"
-        for entry in sorted({e.rstrip("/") for e in proc.stdout.split("\0") if e}):
-            inner.append((entry.removeprefix(base), repo / entry))
-    else:
-        for dirpath, dirnames, filenames in os.walk(folder):
-            here = Path(dirpath)
-            for name in list(dirnames):
-                sub = here / name
-                if sub == vault_root:
-                    dirnames.remove(name)
-                elif name.startswith(".") or sub.is_symlink() or (sub / ".git").exists():
-                    dirnames.remove(name)
-                    if sub.is_symlink():
-                        skipped["links"] += 1
-                    elif not name.startswith("."):
-                        skipped["nested repos"] += 1
-            inner.extend(
-                ((here / n).relative_to(folder).as_posix(), here / n) for n in filenames if not n.startswith(".")
-            )
-    out: list[Listed] = []
-    for rel_inner, path in inner:
-        if path.is_symlink():
-            skipped["links"] += 1
-        elif path == vault_root or vault_root in path.parents:
-            continue
-        elif path.is_dir():
-            skipped["nested repos"] += 1
-        elif path.is_file():
-            old = unicodedata.normalize("NFC", f"{prefix}/{rel_inner}" if prefix else rel_inner)
-            out.append(Listed(old, path))
+    """Every file in the folder as (old path, path), in old-path order: the shared listing (DR-0480), which counts
+    links, junctions and nested repos only."""
+    found = folders.list_folder(folder, repo, vault_root, skipped)
+    out = [Listed(unicodedata.normalize("NFC", f"{prefix}/{f.rel}" if prefix else f.rel), f.path) for f in found]
     return sorted(out, key=lambda item: item.old_path)
 
 
@@ -371,7 +318,7 @@ def import_notes(
     vault_root = vault.root.resolve()
     if folder == vault_root or vault_root in folder.parents:
         raise DocketError(f"{folder} is inside the vault; import a notes folder from outside it")
-    repo = repo_root(folder)
+    repo = folders.repo_root(folder)
     the_prefix = default_prefix(folder, repo) if prefix is None else clean_prefix(prefix)
     report = ImportReport(prefix=the_prefix, dry_run=dry_run)
     skipped: Counter[str] = Counter()

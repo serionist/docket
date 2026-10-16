@@ -13,6 +13,7 @@ import unicodedata
 from collections.abc import Iterable
 
 PARAGRAPH_WORDS = 500
+TEXT_ENGINE = "docket-text 1"
 WINDOWS_1252 = "decoded as Windows-1252"
 
 # C0 and C1 controls and DEL, less the tab and the line feed; vertical tab and form feed are line breaks first.
@@ -96,3 +97,9 @@ def decode(data: bytes) -> tuple[str, str | None]:
         return data.decode("utf-8"), None
     except UnicodeDecodeError:
         return data.decode("cp1252", "replace"), WINDOWS_1252
+
+
+def plain(data: bytes) -> tuple[str, str | None]:
+    """An md or txt file's text as Docket keeps it, and the note `decode` gives."""
+    decoded, note = decode(data)
+    return join(paragraphs(blocks_of(decoded))), note

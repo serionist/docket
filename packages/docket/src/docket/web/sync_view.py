@@ -151,6 +151,8 @@ class SourceFacts:
     # and the sets of a machine whose mark is 30 days old are left out.
     owed: cursors.Handover = field(default_factory=cursors.Handover)
     final: cursors.Handover = field(default_factory=cursors.Handover)
+    # A folder source: Docket reads its folder itself with docket scan, never in a sync (DR-0480).
+    folder: bool = False
 
 
 @dataclass(frozen=True)
@@ -689,8 +691,13 @@ def build(facts: Facts, state: SyncState) -> SyncView:
     wanted = state.source
     shown = [wanted] if wanted is not None else names
     notes: list[str] = []
-    if wanted is not None and wanted not in names:
+    scanned = sorted(s.name for s in facts.sources if s.folder and s.enabled)
+    if wanted is not None and wanted in scanned:
+        notes.append(f"{wanted} is a folder source: docket scan {wanted} reads its folder, so it never syncs here.")
+    elif wanted is not None and wanted not in names:
         notes.append(f"No source {wanted} on this page: vault.yaml lists no tools for it, and nothing synced it here.")
+    elif scanned:
+        notes.append(f"Folder sources, read by docket scan and never synced here: {', '.join(scanned)}.")
     if facts.history_problem is not None:
         notes.append(f"Recent runs aren't kept across a restart: {facts.history_problem}")
     found, paste_all = needs(facts, wanted)

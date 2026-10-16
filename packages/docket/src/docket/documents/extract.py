@@ -35,8 +35,8 @@ from docket.childproc import GROUPS, child_env, stop
 
 # On every system, though only Windows uses it: its own body is Windows' alone.
 from docket.documents import winjob
-from docket.documents.formats import Extracted, Part, format_of
 from docket.documents.limits import MIB
+from docket.documents.parts import Extracted, Part, format_of
 from docket.errors import DocketError
 
 TIME_LIMIT = 120.0

@@ -27,6 +27,8 @@ reading:
   - { path: packages/docket/src/docket/documents/extract.py, role: contract, note: "the documents' reader in a child process: one file at a time, the time limit and memory cap, a fresh child every 100 files, what came of each file (DR-0485)" }
   - { path: packages/docket/src/docket/curate/batch.py, role: contract, note: "a curate round: its batch in the vault's private folder, disposable and not a door; card states from the log; decisions by card id; the measures (DR-0468, DR-0474, DR-0475)" }
   - { path: packages/docket/src/docket/web/curate.py, role: contract, note: "the Curate page's writes: a round, accept, edit, reject, undo and lift as form posts on the writer thread, each decision checked against the round and the entity file it was shown with, logged via page (DR-0473)" }
+  - { path: packages/docket/src/docket/documents/records.py, role: contract, note: "a folder source's records, a one-way door: the rid shape and its parts, titles, native's identity and people, gone versions and what anchors on them resolve against (DR-0482, DR-0483, DR-0487, DR-0491)" }
+  - { path: packages/docket/src/docket/documents/scan.py, role: guide, note: "docket scan: the listing's skips, the cache and change detection, gone and returning versions, the guard, batches into the gate (DR-0486, DR-0487)" }
 decisions:
   - id: DR-0019
     title: The vault's layout and run-file names are fixed
