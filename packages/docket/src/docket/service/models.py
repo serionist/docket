@@ -35,13 +35,18 @@ ERROR_LINES = 10
 
 class ModelsStatus(BaseModel):
     """The service's models for its status: off, or a model and whether its worker is up, with why not and the end of
-    what the worker wrote to stderr."""
+    what the worker wrote to stderr; and its reranker, or why it is off, with the reranks done and past their budget
+    (DR-0454)."""
 
     state: Literal["off", "up", "down"] = "off"
     model: str | None = None
     why: str | None = None
     embedded: int | None = None
     errors: list[str] = []
+    reranker: str | None = None
+    rerank_why: str | None = None
+    reranked: int = 0
+    past_budget: int = 0
 
 
 class ModelsKeeper:
@@ -105,12 +110,21 @@ class ModelsKeeper:
             return ModelsStatus(why=models.why)
         why = models.why
         worker = models.worker
+        reranker = models.reranker
+        hello = worker.hello if isinstance(worker, Worker) else None
+        rerank_why = models.rerank_why
+        if reranker is not None and hello is not None and hello.reranker is not None and hello.reranker.off:
+            rerank_why = hello.reranker.off
         return ModelsStatus(
             state="up" if why is None else "down",
             model=models.embedder.name,
             why=why,
             embedded=self.last.have if self.last is not None else None,
             errors=worker.stderr().strip().splitlines()[-ERROR_LINES:] if isinstance(worker, Worker) else [],
+            reranker=reranker.name if reranker is not None else None,
+            rerank_why=rerank_why,
+            reranked=models.counts.done,
+            past_budget=models.counts.past_budget,
         )
 
     def close(self) -> None:

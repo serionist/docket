@@ -24,6 +24,10 @@ REPORT_ENV = "DOCKET_EVAL_REPORT"
 FLOORS_MODELS = "tools/devkit/eval-floors-models.json"
 REPORT_MODELS = ".local/eval-models.json"
 REPORT_MODELS_ENV = "DOCKET_EVAL_MODELS_REPORT"
+# And with the CPU reranker on its 30 pairs, with no time budget (DR-0458), under the same rules.
+FLOORS_RERANK = "tools/devkit/eval-floors-rerank.json"
+REPORT_RERANK = ".local/eval-rerank.json"
+REPORT_RERANK_ENV = "DOCKET_EVAL_RERANK_REPORT"
 ABOVE = "$above"
 MEASURES = ("recall", "mrr")
 
@@ -101,10 +105,12 @@ def judge(
     return failures, line
 
 
-def check(root: Path, base: str | None, *, models: bool = False) -> tuple[list[str], str]:
+def check(root: Path, base: str | None, *, models: bool = False, rerank: bool = False) -> tuple[list[str], str]:
     """The numbers the question set's test wrote, held against the floors and the base's: (failures, a line). With
-    models, the numbers and floors of the set run with the embedder."""
+    models, the numbers and floors of the set run with the embedder; with rerank, with the CPU reranker too."""
     file, report = (FLOORS_MODELS, REPORT_MODELS) if models else (FLOORS, REPORT)
+    if rerank:
+        file, report = FLOORS_RERANK, REPORT_RERANK
     numbers = root / report
     if not numbers.is_file():
         return [f"eval: the question set's test wrote no numbers to {report}"], "eval: not measured"

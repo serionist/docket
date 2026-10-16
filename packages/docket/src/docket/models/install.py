@@ -1,9 +1,14 @@
-"""`docket models install` and `docket models remove` (DR-0332, DR-0333).
+"""`docket models install` and `docket models remove` (DR-0332, DR-0333, DR-0455, DR-0456).
 
 The install builds the worker's environment with uv from the hashed requirements in the wheel, fetches the model files
 at their pinned revision with their sha256, resuming a broken download, starts the worker once to check it and time a
 batch for the budget, and only then records the environment and the user's choice. On CUDA it checks that ONNX Runtime
 really runs on the GPU: a driver too old for CUDA 13 falls back to the CPU without a word.
+
+The device's reranker comes too, unless `--no-reranker`: a worker with it in its spec, the same session settings a
+search gets, reranks invented pairs of real length, and the median of three after a warm-up goes into the marker with
+the reranker's name and revision. Within RERANK_ON_SECONDS it is on; past it, or when it didn't load or ran on the
+wrong provider, it is off on this machine and the install says why.
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ import importlib.util
 import platform
 import shutil
 import sqlite3
+import statistics
 import subprocess
 import sys
 import time
@@ -27,11 +33,19 @@ from typing import IO, Protocol
 from docket.errors import DocketError
 from docket.index.vectors import load_extension
 from docket.models import config
-from docket.models.catalogue import DEFAULT_EMBEDDER, EMBEDDERS, Embedder, ModelFile
-from docket.models.client import Worker, WorkerError
-from docket.models.config import DEVICES, Choice, Device, Installed
+from docket.models.catalogue import (
+    DEFAULT_EMBEDDER,
+    EMBEDDERS,
+    RERANKER_FOR,
+    RERANKERS,
+    Embedder,
+    ModelFile,
+    Reranker,
+)
+from docket.models.client import Skip, Worker, WorkerError
+from docket.models.config import DEVICES, RERANK_ON_SECONDS, Choice, Device, Installed, RerankTiming
 from docket.models.provider import CHAR_CAP, cost
-from docket.models.runtime import worker_for
+from docket.models.runtime import rerank_spec, worker_for
 from docket.models.worker import CUDA
 from docket.service import client
 from docket.vault.vault import remove_tree
@@ -44,6 +58,10 @@ BUDGET_SECONDS = 0.3
 MIN_BUDGET = CHAR_CAP
 MAX_BUDGET = 1_000_000
 CALIBRATION = ["passage: " + ("The printer sent a new quote for the second print run. " * 30)[:1200]] * 16
+# A reranker is timed on pairs at its token limit: an invented question, and a passage of about 340 words.
+RERANK_QUERY = "who offered to cover the shipping cost for the second print run"
+RERANK_TEXT = "The printer sent a new quote for the second print run and asked about the paper weight. " * 21
+RERANK_RUNS = 3
 PACKAGES = {"cpu": "about 50 MB", "cuda": "about 1.3 GB"}
 # ONNX Runtime 1.30's Mac wheels are for Apple silicon on macOS 14 or later.
 MACOS_MIN = 14
@@ -51,7 +69,8 @@ CUDA_SYSTEMS = ("win32", "linux")
 
 Run = Callable[..., subprocess.CompletedProcess[str]]
 Which = Callable[[str], str | None]
-Starter = Callable[[Choice, Device], Worker]
+# A worker for a choice on a device, with the reranker a spec names (runtime.worker_for, or a test's double).
+Starter = Callable[..., Worker]
 
 
 class Opener(Protocol):
@@ -151,7 +170,7 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def fetch(embedder: Embedder, file: ModelFile, opener: Opener = _open) -> bool:
+def fetch(embedder: Embedder | Reranker, file: ModelFile, opener: Opener = _open) -> bool:
     """Download one file at the pinned revision, resuming a `.part` left before, and keep it only when its sha256 is
     the catalogue's. Returns whether it downloaded anything."""
     target = config.file_path(embedder, file)
@@ -217,15 +236,85 @@ def check_and_time(
     return max(MIN_BUDGET, min(MAX_BUDGET, int(per_second * BUDGET_SECONDS)))
 
 
+def cpu_name(system: str = sys.platform, run: Run = subprocess.run, cpuinfo: Path = Path("/proc/cpuinfo")) -> str:
+    """The machine's CPU as its system names it, for the timing's line: the same pairs take far apart on two CPUs."""
+    try:
+        if system.startswith("linux"):
+            for line in cpuinfo.read_text(encoding="utf-8", errors="replace").splitlines():
+                if line.startswith("model name") and ":" in line:
+                    return line.split(":", 1)[1].strip()
+        elif system == "darwin":
+            found = run(["sysctl", "-n", "machdep.cpu.brand_string"], capture_output=True, text=True, check=False)
+            if found.stdout.strip():
+                return found.stdout.strip()
+    except OSError:
+        pass
+    return platform.processor() or platform.machine() or "an unknown CPU"
+
+
+def time_reranker(worker: Worker, reranker: Reranker, clock: Callable[[], float] = time.monotonic) -> RerankTiming:
+    """Start a worker whose spec names the reranker and time its pairs, the median of RERANK_RUNS after a warm-up; or
+    say why it is off here: it didn't load, ran on another provider than its device's, or the worker failed."""
+
+    def off(why: str) -> RerankTiming:
+        return RerankTiming(reranker.name, reranker.revision, reranker.pairs, None, why)
+
+    texts = [RERANK_TEXT] * reranker.pairs
+    times: list[float] = []
+    try:
+        hello = worker.start()
+        if hello.reranker is None:
+            return off("the worker didn't load it")
+        if hello.reranker.off is not None:
+            return off(hello.reranker.off)
+        for n in range(RERANK_RUNS + 1):
+            began = clock()
+            got = worker.rerank(RERANK_QUERY, texts, None)
+            if isinstance(got, Skip):
+                return off(got.why)
+            if n:
+                times.append(clock() - began)
+    except WorkerError as e:
+        return off(str(e))
+    finally:
+        worker.stop()
+    return RerankTiming(reranker.name, reranker.revision, reranker.pairs, statistics.median(times))
+
+
+def timing_line(timing: RerankTiming, reranker: Reranker, where: str) -> str:
+    """What the install says of the reranker's timing, the CPU or the device named."""
+    head = f"reranker: {reranker.name} ({reranker.licence}, {reranker.trained_on})"
+    if timing.seconds is None:
+        return f"{head} is off on this machine: {timing.why}"
+    took = f"{timing.pairs} pairs in {timing.seconds:.2f} s on {where}"
+    if timing.on:
+        return f"{head}: {took}"
+    return (
+        f"{head} is off on this machine: {took}, past {RERANK_ON_SECONDS:g} s; docket models install --no-reranker "
+        f"frees its {reranker.download / 1e6:,.0f} MB"
+    )
+
+
+def drop_rerankers(say: Callable[[str], None]) -> None:
+    """Remove every reranker's files an earlier install fetched, for --no-reranker."""
+    for reranker in RERANKERS.values():
+        folder = config.files_dir().joinpath(*reranker.repo.split("/"), reranker.revision)
+        if folder.exists():
+            remove_tree(folder)
+            say(f"removed {folder}")
+
+
 def install(
     wanted: str = "auto",
     *,
     embedder_name: str = DEFAULT_EMBEDDER,
+    rerank: bool = True,
     say: Callable[[str], None] = print,
     which: Which = shutil.which,
     run: Run = subprocess.run,
     opener: Opener = _open,
     start: Starter = worker_for,
+    clock: Callable[[], float] = time.monotonic,
 ) -> Installed:
     problem = runtime_problem() or vectors_problem()
     if problem is not None:
@@ -237,9 +326,13 @@ def install(
     uv = which("uv")
     if uv is None:
         raise DocketError("the models' environment is built with uv, which isn't on PATH: https://docs.astral.sh/uv/")
+    named = RERANKER_FOR.get(device) if rerank else None
+    reranker = RERANKERS[named] if named is not None else None
+    size = embedder.download + (reranker.download if reranker is not None else 0)
+    also = f" and {reranker.name} ({reranker.licence})" if reranker is not None else ""
     say(
-        f"models: {embedder.name} ({embedder.licence}) on {device}; downloads {embedder.download / 1e6:,.0f} MB of "
-        f"model files and {PACKAGES[device]} of packages, once"
+        f"models: {embedder.name} ({embedder.licence}){also} on {device}; downloads {size / 1e6:,.0f} MB of model "
+        f"files and {PACKAGES[device]} of packages, once"
     )
     built = isinstance(config.installed(device), str)
     if built:
@@ -247,6 +340,11 @@ def install(
         build_env(device, uv, run)
     for file in embedder.files:
         say(f"{file.path}: {'downloaded' if fetch(embedder, file, opener) else 'already here'}")
+    if reranker is not None:
+        for file in reranker.files:
+            say(f"{reranker.name} {file.path}: {'downloaded' if fetch(reranker, file, opener) else 'already here'}")
+    elif not rerank:
+        drop_rerankers(say)
     choice = Choice(device, embedder)
     try:
         budget = check_and_time(start(choice, device), embedder, device)
@@ -258,9 +356,13 @@ def install(
         say(f"environment: {config.env_dir(device)} didn't pass its check, so it is built again")
         build_env(device, uv, run)
         budget = check_and_time(start(choice, device), embedder, device)
-    found = Installed(device, budget, config.requirements_hash(device), config.python_version())
+    timing = None
+    if reranker is not None:
+        timing = time_reranker(start(choice, device, rerank_spec(reranker, 0.0)), reranker, clock)
+        say(timing_line(timing, reranker, cpu_name() if device == "cpu" else device))
+    found = Installed(device, budget, config.requirements_hash(device), config.python_version(), timing)
     config.mark(found)
-    config.write(device, embedder)
+    config.write(device, embedder, reranker)
     say(f"ready: {embedder.name} on {device}; the service picks it up when it starts again")
     return found
 

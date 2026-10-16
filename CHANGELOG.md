@@ -16,6 +16,10 @@ Unreleased in the same PR.
   service keeps the worker loaded and embeds what each sync adds; `docket models status` and `docket models remove`
   manage it, and `--no-models` on `docket search`, `docket eval` and `docket index update` keeps keyword search alone.
   Nothing leaves the machine.
+- A reranker in the models' worker: bge-reranker-v2-m3 on an NVIDIA GPU, a small multilingual cross-encoder on a CPU
+  fast enough for it, which orders search's top hits by how well each answers the question, hits holding every word
+  first. It has 0.75 s a search, and search says when it went without. `docket models install` fetches and times it;
+  `--no-reranker` leaves it out.
 - `docket eval <file>` measures search with your own questions: each with the locators a good answer cites, its
   kind and its language. It prints recall at 10 and MRR per kind and per language, and the questions it missed, or
   JSON with `--json`, and writes nothing. The question file's format is described in the README.

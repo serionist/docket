@@ -21,23 +21,36 @@ import yaml
 from platformdirs import user_cache_path, user_data_path
 
 from docket import userconfig
-from docket.models.catalogue import DEFAULT_EMBEDDER, EMBEDDERS, Embedder, ModelFile
+from docket.models.catalogue import (
+    DEFAULT_EMBEDDER,
+    EMBEDDERS,
+    RERANK_BATCH,
+    RERANKERS,
+    Embedder,
+    ModelFile,
+    Reranker,
+)
 from docket.models.provider import Off
 
 Device = Literal["cpu", "cuda"]
 DEVICES: tuple[Device, ...] = ("cpu", "cuda")
 PROVIDERS = ("local", "none")
-KEYS = ("provider", "device", "embedder")
+KEYS = ("provider", "device", "embedder", "reranker")
+# The reranker is on only where the install timed its pairs within this (DR-0455), leaving its 0.75 s budget room.
+RERANK_ON_SECONDS = 0.6
 MARKER = "docket-models.json"
 ENV_VAR = "DOCKET_MODELS_DIR"
 
 
 @dataclass(frozen=True)
 class Choice:
-    """Models are on: the local provider, its device and its embedder."""
+    """Models are on: the local provider, its device and its embedder, and its reranker or why there is none (no why
+    when the user chose none)."""
 
     device: Device
     embedder: Embedder
+    reranker: Reranker | None = None
+    reranker_why: str | None = None
 
 
 def read() -> Choice | Off:
@@ -70,11 +83,29 @@ def read() -> Choice | Off:
     embedder = EMBEDDERS.get(str(block.get("embedder", DEFAULT_EMBEDDER)))
     if embedder is None:
         return Off(f"{where} names an embedder this Docket doesn't have ({', '.join(EMBEDDERS)}), so models are off")
-    return Choice(device, embedder)
+    named = block.get("reranker")
+    if named is None:
+        return Choice(device, embedder, None, "no reranker is installed; docket models install adds it")
+    if named == "none":
+        return Choice(device, embedder)
+    reranker = RERANKERS.get(str(named))
+    if reranker is None:
+        # The embedder doesn't depend on the reranker, so only the reranker is off (DR-0335, DR-0451).
+        why = f"{where} names a reranker this Docket doesn't have ({', '.join(RERANKERS)}), so the reranker is off"
+        return Choice(device, embedder, None, why)
+    return Choice(device, embedder, reranker)
 
 
-def write(device: Device, embedder: Embedder) -> None:
-    userconfig.set_section("models", {"provider": "local", "device": device, "embedder": embedder.name})
+def write(device: Device, embedder: Embedder, reranker: Reranker | None = None) -> None:
+    userconfig.set_section(
+        "models",
+        {
+            "provider": "local",
+            "device": device,
+            "embedder": embedder.name,
+            "reranker": reranker.name if reranker is not None else "none",
+        },
+    )
 
 
 def forget() -> None:
@@ -104,8 +135,8 @@ def env_python(env: Path) -> Path:
     return env / "Scripts" / "python.exe" if sys.platform == "win32" else env / "bin" / "python"
 
 
-def file_path(embedder: Embedder, file: ModelFile) -> Path:
-    return files_dir().joinpath(*embedder.repo.split("/"), embedder.revision, *file.path.split("/"))
+def file_path(model: Embedder | Reranker, file: ModelFile) -> Path:
+    return files_dir().joinpath(*model.repo.split("/"), model.revision, *file.path.split("/"))
 
 
 def requirements(device: Device) -> str:
@@ -121,11 +152,35 @@ def requirements_hash(device: Device) -> str:
 
 
 @dataclass(frozen=True)
+class RerankTiming:
+    """The install's timing of a reranker on this machine: its pairs and their seconds, or why it couldn't be timed."""
+
+    name: str
+    revision: str
+    pairs: int
+    seconds: float | None
+    why: str | None = None
+
+    @property
+    def on(self) -> bool:
+        return self.seconds is not None and self.seconds <= RERANK_ON_SECONDS
+
+    @property
+    def batch_seconds(self) -> float:
+        """A batch's share of the time, which the worker judges its first batch by (DR-0451)."""
+        return (self.seconds or 0.0) / max(1, -(-self.pairs // RERANK_BATCH))
+
+    def fits(self, reranker: Reranker) -> bool:
+        return self.name == reranker.name and self.revision == reranker.revision
+
+
+@dataclass(frozen=True)
 class Installed:
     device: Device
     budget: int
     requirements: str
     python: str
+    rerank: RerankTiming | None = None
 
 
 def python_version() -> str:
@@ -134,7 +189,34 @@ def python_version() -> str:
 
 def mark(installed: Installed) -> None:
     path = env_dir(installed.device) / MARKER
-    path.write_text(json.dumps(installed.__dict__, indent=2) + "\n", encoding="utf-8", newline="\n")
+    data: dict[str, object] = {
+        "device": installed.device,
+        "budget": installed.budget,
+        "requirements": installed.requirements,
+        "python": installed.python,
+    }
+    if installed.rerank is not None:
+        data["reranker"] = installed.rerank.__dict__
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8", newline="\n")
+
+
+def _timing(raw: object) -> RerankTiming | None:
+    """A marker's reranker timing. A marker #67 wrote has none, and one that doesn't read leaves the reranker untimed,
+    never the marker unreadable, so the embedder stays on."""
+    if not isinstance(raw, dict):
+        return None
+    data = cast(dict[str, Any], raw)
+    try:
+        seconds, why = data.get("seconds"), data.get("why")
+        return RerankTiming(
+            str(data["name"]),
+            str(data["revision"]),
+            int(data["pairs"]),
+            None if seconds is None else float(seconds),
+            None if why is None else str(why),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def installed(device: Device) -> Installed | str:
@@ -146,7 +228,11 @@ def installed(device: Device) -> Installed | str:
     try:
         data: Any = json.loads(path.read_text(encoding="utf-8"))
         found = Installed(
-            cast(Device, str(data["device"])), int(data["budget"]), str(data["requirements"]), str(data["python"])
+            cast(Device, str(data["device"])),
+            int(data["budget"]),
+            str(data["requirements"]),
+            str(data["python"]),
+            _timing(data.get("reranker")),
         )
     except (ValueError, KeyError, TypeError):
         return "the models' environment can't be read; run docket models install"
@@ -155,6 +241,6 @@ def installed(device: Device) -> Installed | str:
     return found
 
 
-def missing_files(embedder: Embedder) -> list[ModelFile]:
-    """The embedder's files that aren't there at their size: a full check of their hashes is the install's."""
-    return [f for f in embedder.files if not (p := file_path(embedder, f)).is_file() or p.stat().st_size != f.size]
+def missing_files(model: Embedder | Reranker) -> list[ModelFile]:
+    """A model's files that aren't there at their size: a full check of their hashes is the install's."""
+    return [f for f in model.files if not (p := file_path(model, f)).is_file() or p.stat().st_size != f.size]

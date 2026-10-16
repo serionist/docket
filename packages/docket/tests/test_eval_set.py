@@ -20,8 +20,8 @@ from eval_vault import EVAL_QUESTIONS, eval_template
 from docket.index import rebuild
 from docket.index.build import db_path
 from docket.index.embedpass import fill
-from docket.models import config
-from docket.models.catalogue import E5_SMALL
+from docket.models import config, runtime
+from docket.models.catalogue import E5_SMALL, MMARCO_RERANKER
 from docket.models.provider import Models
 from docket.models.runtime import open_models
 from docket.questions import KINDS, EvalReport, Found, QuestionSet, answers, load, run
@@ -35,6 +35,9 @@ REPORT = "DOCKET_EVAL_REPORT"
 MODELS = "DOCKET_TEST_MODELS"
 MODELS_FLOORS = FLOORS.with_name("eval-floors-models.json")
 MODELS_REPORT = "DOCKET_EVAL_MODELS_REPORT"
+# And with the CPU reranker on its 30 pairs and no budget, whatever the machine's own timing decided (DR-0458).
+RERANK_FLOORS = FLOORS.with_name("eval-floors-rerank.json")
+RERANK_REPORT = "DOCKET_EVAL_RERANK_REPORT"
 
 
 @pytest.fixture(scope="module")
@@ -134,3 +137,32 @@ def test_with_the_embedder_no_kind_falls_below_its_floor(
     write_report(report, MODELS_REPORT)
     assert report.vectors is not None and report.vectors.skipped == 0, report.vectors
     below_floors(report, floors(MODELS_FLOORS))
+
+
+@pytest.mark.skipif(not os.environ.get(MODELS), reason="the models: docket models install, then DOCKET_TEST_MODELS")
+def test_with_the_reranker_no_kind_falls_below_its_floor(
+    tmp_path_factory: pytest.TempPathFactory, questions: QuestionSet, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DOCKET_MODELS_DIR", os.environ[MODELS])
+    config.write("cpu", E5_SMALL, MMARCO_RERANKER)
+    choice = config.read()
+    found = config.installed("cpu")
+    assert isinstance(choice, config.Choice) and isinstance(found, config.Installed), found
+    assert config.missing_files(MMARCO_RERANKER) == [], "the install fetches the CPU reranker"
+    # The test's own spec names the reranker, so a runner too slow for it in a search still measures it.
+    worker = runtime.worker_for(choice, "cpu", runtime.rerank_spec(MMARCO_RERANKER, 0.0))
+    models = Models(E5_SMALL, worker, found.budget, reranker=MMARCO_RERANKER, pairs=MMARCO_RERANKER.pairs)
+    try:
+        hello = worker.start()
+        assert hello.reranker is not None and hello.reranker.off is None, hello.reranker
+        v = copy_vault(eval_template(tmp_path_factory), tmp_path_factory.mktemp("eval-rerank"))
+        rebuild(v)
+        embedded = fill(v, models)
+        assert embedded.why is None and embedded.have == embedded.total
+        report = run(v, questions, k=10, models=models)
+    finally:
+        models.close()
+    write_report(report, RERANK_REPORT)
+    assert report.vectors is not None and report.vectors.skipped == 0, report.vectors
+    assert report.rerank is not None and report.rerank.pairs == 30 and report.rerank.skipped == 0, report.rerank
+    below_floors(report, floors(RERANK_FLOORS))

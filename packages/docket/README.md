@@ -248,17 +248,24 @@ questions:
 ## Models
 
 Models are optional: with them, search also finds what a question means, not only the words it shares, in English and
-Hungarian alike. Keyword search works the same without them. The embedder is multilingual-e5-small (MIT), run on ONNX
-Runtime in a worker process of its own, on the CPU or an NVIDIA GPU.
+Hungarian alike, and a reranker orders its top hits by how well each answers the question. Keyword search works the
+same without them. Both run on ONNX Runtime in a worker process of its own, on the CPU or an NVIDIA GPU.
+
+| Model | Where | Licence |
+|---|---|---|
+| multilingual-e5-small, the embedder | every device | MIT |
+| bge-reranker-v2-m3 (onnx-community's fp16 export), the reranker | an NVIDIA GPU: the top 50 | Apache-2.0; trained on data that includes MS MARCO, whose own terms are for non-commercial research |
+| cross-encoder/mmarco-mMiniLMv2-L12-H384-v1, the reranker | the CPU: the top 30 | Apache-2.0; trained on mMARCO, a machine translation of MS MARCO, whose own terms are for non-commercial research |
 
 | Command | Does |
 |---|---|
-| `docket models install [--device auto\|cpu\|cuda]` | builds the models' environment with uv, fetches the embedder's pinned files, checks the worker runs and turns models on for this machine |
-| `docket models status [--check]` | the choice, the environment, the files, each model's vectors in the vault's index, and the running service's worker with the last lines it wrote to stderr; `--check` starts a worker once and says what it runs on |
+| `docket models install [--device auto\|cpu\|cuda] [--no-reranker]` | builds the models' environment with uv, fetches the embedder's and the device's reranker's pinned files, checks the worker runs, times the reranker and turns models on for this machine; `--no-reranker` leaves the reranker out and removes its files |
+| `docket models status [--check]` | the choice, the environment, the files, the reranker's timing or why it is off, each model's vectors in the vault's index, and the running service's worker with its reranks and the last lines it wrote to stderr; `--check` starts a worker once and says what it runs on |
 | `docket models remove` | deletes the environment, the files and the choice; search goes on with keywords. On Windows the service's worker holds its files: models go off at once, and the remove asks you to stop the service and run it again |
 
-- Downloads, once: 0.49 GB of model files, and about 50 MB of packages for the CPU or 1.3 GB for CUDA (NVIDIA's CUDA
-  13 and cuDNN wheels, under NVIDIA's licences, in that environment only). `auto` takes CUDA when `nvidia-smi` lists a
+- Downloads, once: 0.98 GB of model files for the CPU or 1.64 GB for CUDA, the reranker's 0.49 GB or 1.15 GB of them,
+  and about 50 MB of packages for the CPU or 1.3 GB for CUDA (NVIDIA's CUDA 13 and cuDNN wheels, under NVIDIA's
+  licences, in that environment only). `auto` takes CUDA when `nvidia-smi` lists a
   GPU; CUDA 13 needs a driver of R580 or later, and the install says when ONNX Runtime fell back to the CPU.
 - The choice is this machine's, in your config's `models:` block, never in `vault.yaml`: each machine embeds with what
   it has. A block Docket can't read, or a config that isn't YAML, turns models off and says why.
@@ -278,11 +285,25 @@ Who embeds what:
 |---|---|
 | the service | what each index update added, in the background, a few seconds for a sync run's chunks on a CPU |
 | `docket index update`, `docket index rebuild` | what has no vector, with a progress line; when the service runs for the vault with the same model it leaves that to the service |
-| `docket search`, `docket eval` | only the query, on a worker they start for themselves (a second or two); `--no-models` skips it |
+| `docket search`, `docket eval` | only the query, on a worker they start for themselves (a second or two, about 8 s for `docket eval` on a GPU, where its reranker runs); `--no-models` skips it |
 
 A first pass over a year of chunks takes a minute or two on a GPU and half an hour or more on a CPU; search uses what is
 there meanwhile, and a rebuild keeps every vector it had. When the worker is down or slow, search answers with keywords
 alone and says `no vectors in this search:` and why.
+
+The reranker:
+
+- It sees the chunks behind the hits a search would return without it, then the next ones by meaning, up to 50 on a
+  GPU and 30 on a CPU, and orders them: hits holding every word of the question first, and within each part the chunks
+  a `--person` or `--entity` lifted, then the reranker's score.
+- It has 0.75 s a search. Past that, with the worker down, or when it can't run, search keeps the order it gives
+  without a reranker and says `not reranked:` and why; three searches past the budget in a row pause it for five
+  minutes. `docket models status` counts reranks done and past the budget.
+- The install times it on this machine. A GPU, or a CPU of about 8 cores or more, reranks within 0.6 s and the
+  reranker is on; on a slower CPU it stays off, and the install and `docket models status` say the time.
+  `docket models install --no-reranker` frees its files.
+- `docket search` reranks on the CPU only; on a GPU machine the service reranks, and the command's line says so.
+  `docket eval` reranks where the service does, with no time limit, and says how many questions went without it.
 
 ## Entities
 

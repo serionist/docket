@@ -16,9 +16,9 @@ from models_kit import FAKE, make_env
 from docket import userconfig
 from docket.index import build
 from docket.models import config, runtime
-from docket.models.catalogue import E5_SMALL
+from docket.models.catalogue import BGE_RERANKER, E5_SMALL, MMARCO_RERANKER
 from docket.models.client import Worker
-from docket.models.config import Choice, Installed, read
+from docket.models.config import Choice, Installed, RerankTiming, read
 from docket.models.provider import Models, Off
 
 
@@ -67,8 +67,9 @@ def test_provider_none_is_off_quietly_and_a_good_block_is_a_choice() -> None:
     set_block({"provider": "none", "device": "cuda"})
     assert read() == Off()
     set_block({"provider": "local"})
-    assert read() == Choice("cpu", E5_SMALL)
-    set_block({"device": "cuda", "embedder": "e5-small"})
+    # A block #67's install wrote names no reranker: the embedder is on, and the reranker says how to get it.
+    assert read() == Choice("cpu", E5_SMALL, None, "no reranker is installed; docket models install adds it")
+    set_block({"device": "cuda", "embedder": "e5-small", "reranker": "none"})
     assert read() == Choice("cuda", E5_SMALL)
 
 
@@ -76,7 +77,7 @@ def test_write_and_forget_keep_the_rest_of_the_config() -> None:
     set_block(None)
     config.write("cuda", E5_SMALL)
     data = userconfig.load()
-    assert data["models"] == {"provider": "local", "device": "cuda", "embedder": "e5-small"}
+    assert data["models"] == {"provider": "local", "device": "cuda", "embedder": "e5-small", "reranker": "none"}
     assert data["service"] == {"port": 9999}
     config.forget()
     assert "models" not in userconfig.load() and userconfig.load()["service"] == {"port": 9999}
@@ -164,3 +165,122 @@ def test_threads_are_half_the_cores(monkeypatch: pytest.MonkeyPatch) -> None:
     assert runtime.threads() == 8
     monkeypatch.setattr(os, "cpu_count", lambda: None)
     assert runtime.threads() == 1
+
+
+# -- the reranker (#88) ----------------------------------------------------------------------------------------------
+
+TIMED = RerankTiming(MMARCO_RERANKER.name, MMARCO_RERANKER.revision, 30, 0.42)
+
+
+def test_an_unknown_reranker_turns_only_the_reranker_off_and_a_known_one_is_chosen() -> None:
+    set_block({"reranker": "a-big-one"})
+    got = read()
+    assert isinstance(got, Choice) and got.embedder is E5_SMALL and got.reranker is None
+    assert got.reranker_why is not None and "names a reranker this Docket doesn't have" in got.reranker_why
+    assert got.reranker_why.endswith("so the reranker is off")
+    set_block({"reranker": "mmarco-minilm"})
+    assert read() == Choice("cpu", E5_SMALL, MMARCO_RERANKER)
+    config.write("cpu", E5_SMALL, MMARCO_RERANKER)
+    assert userconfig.load()["models"]["reranker"] == "mmarco-minilm"
+
+
+def test_a_timing_is_on_within_its_limit_and_tied_to_its_reranker() -> None:
+    assert TIMED.on and TIMED.batch_seconds == pytest.approx(0.14) and TIMED.fits(MMARCO_RERANKER)
+    assert not RerankTiming("mmarco-minilm", "old", 30, 0.42).fits(MMARCO_RERANKER)
+    assert not RerankTiming("mmarco-minilm", MMARCO_RERANKER.revision, 30, 0.87).on
+    off = RerankTiming("mmarco-minilm", MMARCO_RERANKER.revision, 30, None, "it didn't load")
+    assert not off.on and off.batch_seconds == 0.0
+
+
+def test_the_marker_keeps_the_rerankers_timing_and_a_marker_from_67_still_reads() -> None:
+    make_env("cpu")
+    found = config.installed("cpu")
+    assert isinstance(found, Installed) and found.rerank is None, "a #67 marker: the embedder on, the reranker untimed"
+    config.mark(Installed("cpu", 8192, config.requirements_hash("cpu"), config.python_version(), TIMED))
+    assert config.installed("cpu") == Installed(
+        "cpu", 8192, config.requirements_hash("cpu"), config.python_version(), TIMED
+    )
+    for broken in ({"name": "mmarco-minilm"}, "fast", {"name": "x", "revision": "y", "pairs": "many", "seconds": 1}):
+        make_env("cpu", reranker=broken)
+        found = config.installed("cpu")
+        assert isinstance(found, Installed) and found.rerank is None
+
+
+def models_here(
+    monkeypatch: pytest.MonkeyPatch, timing: RerankTiming | None, device: config.Device = "cpu", **block: Any
+) -> list[str]:
+    set_block({"device": device, "reranker": MMARCO_RERANKER.name, **block})
+    make_env(device)
+    if timing is not None:
+        config.mark(Installed(device, 8192, config.requirements_hash(device), config.python_version(), timing))
+    monkeypatch.setattr(runtime, "missing_files", lambda model: [])
+    started: list[str] = []
+    monkeypatch.setattr(Worker, "ensure", lambda self: started.append(self.command[-1]) or True)
+    return started
+
+
+def test_the_spec_names_the_reranker_only_when_it_is_on_here(monkeypatch: pytest.MonkeyPatch) -> None:
+    started = models_here(monkeypatch, TIMED)
+    models = runtime.open_models()
+    assert isinstance(models, Models) and models.reranker is MMARCO_RERANKER and models.pairs == 30
+    rerank = json.loads(started[-1])["reranker"]
+    assert rerank["name"] == "mmarco-minilm" and rerank["device"] == "cpu" and rerank["max_tokens"] == 256
+    assert rerank["batch_seconds"] == pytest.approx(0.14) and rerank["model"].endswith("model.onnx")
+    for timing, why in [
+        (None, "mmarco-minilm isn't timed on this machine; docket models install times it"),
+        (
+            RerankTiming("mmarco-minilm", MMARCO_RERANKER.revision, 30, 0.87),
+            "mmarco-minilm is off on this machine: 30 pairs took 0.87 s, past 0.6 s; "
+            "docket models install times it again",
+        ),
+        (
+            RerankTiming("mmarco-minilm", MMARCO_RERANKER.revision, 30, None, "the worker didn't load it"),
+            "mmarco-minilm is off on this machine: the worker didn't load it; docket models install times it again",
+        ),
+    ]:
+        started = models_here(monkeypatch, timing)
+        models = runtime.open_models()
+        assert isinstance(models, Models) and models.reranker is None and models.rerank_why == why
+        assert not models.rerank_said and "reranker" not in json.loads(started[-1])
+
+
+def test_a_reranker_whose_files_are_missing_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    models_here(monkeypatch, TIMED)
+    monkeypatch.setattr(runtime, "missing_files", lambda model: [] if model is E5_SMALL else list(model.files))
+    models = runtime.open_models(start=False)
+    assert (
+        isinstance(models, Models)
+        and models.rerank_why == "mmarco-minilm's files are missing; run docket models install"
+    )
+
+
+def test_where_a_command_reranks(monkeypatch: pytest.MonkeyPatch) -> None:
+    gpu = RerankTiming(BGE_RERANKER.name, BGE_RERANKER.revision, 50, 0.13)
+    started = models_here(monkeypatch, gpu, device="cuda", reranker=BGE_RERANKER.name)
+    # docket search runs on the CPU, where the GPU's reranker doesn't: every search says so.
+    search = runtime.open_models(queries_only=True)
+    assert isinstance(search, Models) and search.reranker is None and search.rerank_said
+    assert search.rerank_why == "the reranker runs on the GPU in the service; docket search goes without it"
+    assert json.loads(started[-1])["device"] == "cpu"
+    # docket eval starts where the reranker runs, and the service on the chosen device.
+    for opened in (runtime.open_models(measure=True), runtime.open_models()):
+        assert isinstance(opened, Models) and opened.reranker is BGE_RERANKER and opened.pairs == 50
+        spec = json.loads(started[-1])
+        assert spec["device"] == "cuda" and spec["reranker"]["device"] == "cuda"
+    # A choice of the GPU's reranker for CPU models says so, rather than run it where it is slow.
+    started = models_here(monkeypatch, gpu, device="cpu", reranker=BGE_RERANKER.name)
+    models = runtime.open_models()
+    assert (
+        isinstance(models, Models)
+        and models.rerank_why == "bge-reranker-v2-m3 runs on cuda, and the models on cpu here"
+    )
+    # With no reranker, docket eval runs on the CPU.
+    started = models_here(monkeypatch, None, device="cuda", reranker="none")
+    assert isinstance(runtime.open_models(measure=True), Models) and json.loads(started[-1])["device"] == "cpu"
+
+
+def test_a_command_that_only_embeds_loads_no_reranker(monkeypatch: pytest.MonkeyPatch) -> None:
+    started = models_here(monkeypatch, TIMED)
+    models = runtime.open_models(rerank=False)
+    assert isinstance(models, Models) and models.reranker is None and models.rerank_why is None
+    assert "reranker" not in json.loads(started[-1])

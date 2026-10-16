@@ -82,8 +82,9 @@ jobs:
 
   # The models for real: `docket models install --device cpu` builds the worker's environment and fetches the
   # embedder's pinned files, which come from the cache when they can; a miss downloads them, so an outage of the hub
-  # holds merges until it ends. Linux runs the question set with the embedder against its own floors (`gate models`,
-  # DR-0339); Windows and macOS start the worker and check what it says. Required for merge.
+  # holds merges until it ends. Linux runs the question set with the embedder, and with the CPU reranker, against floors
+  # of their own (`gate models`, DR-0339, DR-0458); Windows and macOS start the worker and check what it says, and the
+  # install's timing is what runs the real reranker there, since those runners time it off. Required for merge.
   models:
     name: Models (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
@@ -128,7 +129,7 @@ jobs:
           DOCKET_MODELS_DIR: ${{ runner.temp }}/docket-models
           DOCKET_CONFIG_DIR: ${{ runner.temp }}/docket-config
         run: uv run docket models install --device cpu
-      - name: The question set with the embedder
+      - name: The question set with the embedder and the reranker
         if: matrix.floors
         env:
           DOCKET_TEST_MODELS: ${{ runner.temp }}/docket-models

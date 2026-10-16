@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from models_kit import DIMS, fake_command, fake_worker, trigram_vector
+from models_kit import DIMS, fake_command, fake_worker, pair_score, trigram_vector
 
 from docket.models import client
 from docket.models.client import NO_WINDOW, Worker, WorkerError, worker_command
@@ -220,3 +220,79 @@ def test_the_command_runs_the_worker_file_isolated(tmp_path: Path) -> None:
     assert command[:4] == [str(tmp_path / "python"), "-I", "-X", "utf8"]
     assert Path(command[4]).name == "worker.py" and Path(command[4]).is_file()
     assert command[5] == '{"dims": 4}'
+
+
+# -- reranks (DR-0451, DR-0454) ------------------------------------------------------------------------------------
+
+RERANKER = {"name": "fake-reranker"}
+
+
+def test_a_worker_with_a_reranker_says_so_and_scores_each_text(stopping: list[Worker]) -> None:
+    w = running(stopping, reranker=RERANKER)
+    assert w.hello is not None and w.hello.reranker == client.RerankerHello(
+        "fake-reranker", "CPUExecutionProvider", None
+    )
+    assert w.hello.versions == {"onnxruntime": "fake"}
+    got = w.rerank("paper price", ["the paper price", "a boat"], time.time() + 30)
+    assert got == pytest.approx([pair_score("paper price", "the paper price"), pair_score("paper price", "a boat")])
+    assert w.rerank("paper price", ["a"], None) == pytest.approx([pair_score("paper price", "a")])
+    assert w.rerank("paper price", [], None) == []
+
+
+@pytest.mark.parametrize(
+    ("spec", "why"),
+    [
+        ({}, "the models' worker runs no reranker"),
+        (
+            {"reranker": RERANKER, "reranker_off": "the reranker didn't load: KeyError"},
+            "the reranker didn't load: KeyError",
+        ),
+        ({"reranker": RERANKER, "rerank_refuse": True}, "the reranker refused a request: ValueError"),
+        ({"reranker": RERANKER, "rerank_wrong_size": True}, "the reranker answered with scores of the wrong size"),
+    ],
+)
+def test_a_rerank_that_cant_answer_says_why_and_the_embedder_goes_on(
+    stopping: list[Worker], spec: dict[str, Any], why: str
+) -> None:
+    w = running(stopping, **spec)
+    assert w.rerank("q", ["a"], None) == client.Skip(why)
+    assert w.query("query: still") == trigram_vector("query: still")
+
+
+def test_a_rerank_past_its_deadline_is_a_budget_skip(stopping: list[Worker]) -> None:
+    w = running(stopping, reranker=RERANKER)
+    # The worker sees a deadline already gone, and says so.
+    assert w.rerank("q", ["a"], time.time() - 1) == client.Skip(client.PAST_BUDGET, budget=True)
+    w = running(stopping, reranker=RERANKER, rerank_delay=1.0)
+    # The client stops waiting at the deadline plus a little, and the worker goes on.
+    assert w.rerank("q", ["a"], time.time() + 0.05) == client.Skip(client.PAST_BUDGET, budget=True)
+    assert w.up
+
+
+def test_a_rerank_skips_without_asking_while_a_slow_query_holds_the_worker(stopping: list[Worker]) -> None:
+    w = running(stopping, reranker=RERANKER, delay=0.6, query_seconds=0.1)
+    assert w.query("query: slow") == "the models' worker didn't answer in 0.1 s" and w.busy
+    sent = w._ids  # pyright: ignore[reportPrivateUsage]
+    before = next(sent)
+    assert w.rerank("q", ["a"], None) == client.Skip("the models' worker is busy: a query passed its time", budget=True)
+    assert next(sent) == before + 1, "no request went to the worker"
+    # The slow query's answer comes, and the worker is free again.
+    deadline = time.monotonic() + 10
+    while w.busy and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert not w.busy and w.rerank("q", ["a"], None) == pytest.approx([pair_score("q", "a")])
+
+
+def test_a_worker_that_dies_mid_rerank_or_isnt_running_says_so(stopping: list[Worker]) -> None:
+    w = running(stopping, reranker=RERANKER, rerank_die=True)
+    got = w.rerank("q", ["a"], None)
+    assert isinstance(got, client.Skip) and not got.budget and "stopped" in got.why
+    assert w.rerank("q", ["a"], None) == client.Skip(got.why)
+    assert Worker(fake_command()).rerank("q", ["a"], None) == client.Skip("the models' worker hasn't started")
+
+
+def test_a_reranker_hello_this_docket_cant_read_stops_the_worker(stopping: list[Worker]) -> None:
+    w = fake_worker(reranker=RERANKER, bad_reranker_hello=True)
+    stopping.append(w)
+    with pytest.raises(WorkerError, match="a form this Docket doesn't read"):
+        w.start()

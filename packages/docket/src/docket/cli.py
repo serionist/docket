@@ -21,6 +21,8 @@ from docket.errors import DocketError
 from docket.imports import notes
 from docket.index.build import db_path
 from docket.index.embedpass import fill
+from docket.models.client import Worker
+from docket.models.config import Choice
 from docket.models.provider import Models, Off
 from docket.models.runtime import open_models
 from docket.render import printable
@@ -757,13 +759,15 @@ def curate_log(
 
 
 @contextlib.contextmanager
-def _query_models(no_models: bool) -> Generator[Models | Off | None]:
-    """The models for a command that only asks queries: a worker on the CPU, started for the command and stopped at
-    its end; None with --no-models."""
+def _query_models(no_models: bool, *, measure: bool = False) -> Generator[Models | Off | None]:
+    """The models for a command that only asks queries, started for the command and stopped at its end: `docket
+    search`'s on the CPU, `docket eval`'s where the reranker runs (DR-0457); None with --no-models."""
     if no_models:
         yield None
         return
-    models = open_models(queries_only=True)
+    models = open_models(queries_only=not measure, measure=measure)
+    if measure and isinstance(models, Models) and models.reranker is not None and models.reranker.device == "cuda":
+        say("(the reranker runs on the GPU, so this worker took a few seconds to start)")
     try:
         yield models
     finally:
@@ -792,7 +796,7 @@ def _embed(vault: Vault, no_models: bool) -> None:
     service when it runs for the vault with the same model."""
     if no_models:
         return
-    models = open_models(start=False)
+    models = open_models(start=False, rerank=False)
     if isinstance(models, Off):
         if models.why:
             say(f"! {models.why}")
@@ -931,7 +935,7 @@ def eval_command(
     """Measure search with your own questions: recall at k and MRR per kind of question. Writes nothing."""
     v = find_vault(vault)
     asked = questions.load(file, ZoneInfo(v.config.owner.time_zone))
-    with _query_models(no_models) as models:
+    with _query_models(no_models, measure=True) as models:
         report = questions.run(v, asked, k=k, models=models)
     if as_json:
         # ASCII only: a question's text can't put a terminal code on the screen.
@@ -1133,11 +1137,15 @@ def service_token(
 @models_app.command("install")
 def models_install(
     device: Annotated[str, typer.Option("--device", help="auto, cpu or cuda (an NVIDIA GPU).")] = "auto",
+    no_reranker: Annotated[
+        bool, typer.Option("--no-reranker", help="Leave the reranker out, and remove its files if they are here.")
+    ] = False,
 ) -> None:
-    """Build the models' environment, fetch the embedder's files, check it runs, and turn models on here."""
+    """Build the models' environment, fetch the embedder's and the reranker's files, check they run, time the
+    reranker, and turn models on here."""
     from docket.models import install  # noqa: PLC0415
 
-    install.install(device, say=say)
+    install.install(device, rerank=not no_reranker, say=say)
 
 
 @models_app.command("status")
@@ -1148,9 +1156,10 @@ def models_status(
     """What this machine's models are: the choice, the environments, the files, the vault's vectors and the service's
     worker."""
     from docket.models import config  # noqa: PLC0415
+    from docket.models.config import RerankTiming  # noqa: PLC0415
     from docket.models.install import vectors_problem  # noqa: PLC0415
     from docket.models.provider import Off  # noqa: PLC0415
-    from docket.models.runtime import worker_for  # noqa: PLC0415
+    from docket.models.runtime import rerank_spec, timed, worker_for  # noqa: PLC0415
 
     choice = config.read()
     if isinstance(choice, Off):
@@ -1167,12 +1176,17 @@ def models_status(
         say(f"files      {'missing: ' + ', '.join(f.path for f in missing) if missing else 'all here'}")
         problem = vectors_problem()
         say(f"search     {'! ' + problem if problem else 'uses the vectors'}")
+        say(f"reranker   {_reranker_line(choice)}")
     _models_vectors(vault, on=not isinstance(choice, Off))
     service = _service_models()
     if service is not None:
         why = service.get("why")
         state = f"{service.get('model')}, {service.get('state')}" if service.get("model") else "off"
         say(f"service    {state}{f': {why}' if why else ''}")
+        if service.get("reranker"):
+            reranks = f"{service.get('reranked', 0)} reranked, {service.get('past_budget', 0)} past the budget"
+            off = service.get("rerank_why")
+            say(f"service    {service.get('reranker')}: {f'off: {off}' if off else reranks}")
         errors = service.get("errors")
         say_all([str(line) for line in cast(list[object], errors)] if isinstance(errors, list) else [])
     if check:
@@ -1180,15 +1194,56 @@ def models_status(
         if isinstance(choice, Off) or isinstance(found, (Off, str)):
             say(f"! {found if isinstance(found, str) else 'models are off'}")
             raise typer.Exit(1)
-        worker = worker_for(choice, choice.device)
+        timing = timed(choice, found)
+        rerank = None
+        if isinstance(timing, RerankTiming) and choice.reranker is not None:
+            rerank = rerank_spec(choice.reranker, timing.batch_seconds)
+        worker = worker_for(choice, choice.device, rerank)
         try:
             if not worker.ensure() or worker.hello is None:
                 say(f"! {worker.why}")
                 say_all(worker.stderr().strip().splitlines()[-10:])
                 raise typer.Exit(1)
             say(f"worker     up: {worker.hello.provider}, {worker.hello.dims} dims")
+            # A reranker the install couldn't run fails the check too; one only too slow here doesn't.
+            ran, chosen = found.rerank, choice.reranker
+            failed = ran is not None and chosen is not None and ran.fits(chosen) and ran.seconds is None
+            if not _check_reranker(worker) or failed:
+                raise typer.Exit(1)
         finally:
             worker.stop()
+
+
+def _reranker_line(choice: Choice) -> str:
+    """The reranker as the install left it: its timing, or why it is off here (DR-0455)."""
+    from docket.models import config  # noqa: PLC0415
+    from docket.models.config import RerankTiming  # noqa: PLC0415
+    from docket.models.runtime import timed  # noqa: PLC0415
+
+    reranker = choice.reranker
+    if reranker is None:
+        return choice.reranker_why or "none (docket models install adds one)"
+    found = config.installed(choice.device)
+    if isinstance(found, str):
+        return found
+    timing = timed(choice, found)
+    if isinstance(timing, RerankTiming):
+        took = f"{timing.pairs} pairs in {timing.seconds or 0:.2f} s"
+        return f"{reranker.name} ({reranker.licence}) on {reranker.device}: {took}"
+    return str(timing)
+
+
+def _check_reranker(worker: Worker) -> bool:
+    """--check's reranker line: one pair scored, or why the worker runs none; False when it should and can't."""
+    hello = worker.hello
+    if hello is None or hello.reranker is None:
+        return True
+    if hello.reranker.off is not None:
+        say(f"reranker   ! off in the worker: {hello.reranker.off}")
+        return False
+    got = worker.rerank("a question", ["a passage"], None)
+    say(f"reranker   up: {hello.reranker.provider}" if isinstance(got, list) else f"reranker   ! {got.why}")
+    return isinstance(got, list)
 
 
 def _models_vectors(vault: Path | None, *, on: bool) -> None:

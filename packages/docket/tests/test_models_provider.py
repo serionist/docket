@@ -3,10 +3,13 @@ inputs."""
 
 from __future__ import annotations
 
-from models_kit import FAKE, fake_models, trigram_vector
+from datetime import datetime
+
+from models_kit import FAKE, fake_models, pair_score, trigram_vector
 
 from docket.models.catalogue import E5_SMALL, EMBEDDERS, input_hash
-from docket.models.provider import CHAR_CAP, Off, batches, cost
+from docket.models.client import PAST_BUDGET, Skip
+from docket.models.provider import CHAR_CAP, PAUSE_AFTER, PAUSE_SECONDS, Off, RerankCounts, batches, cost
 
 
 def test_a_text_costs_its_length_up_to_the_cap() -> None:
@@ -57,3 +60,49 @@ def test_the_catalogue_builds_inputs_and_names_tables() -> None:
     assert E5_SMALL.query("paper price") == "query: paper price"
     assert input_hash("passage: text") != input_hash("passage: text ")
     assert FAKE.dims == 64
+
+
+def test_a_rerank_counts_and_passes_its_deadline_from_its_budget() -> None:
+    models, worker = fake_models(pairs=30, wall=lambda: 1000.0)
+    assert models.rerank("paper", ["the paper", "a boat"], 0.75) == [
+        pair_score("paper", "the paper"), pair_score("paper", "a boat"),
+    ]  # fmt: skip
+    assert worker.reranks[-1][2] == 1000.75
+    assert models.rerank("paper", ["a"], None) == [pair_score("paper", "a")] and worker.reranks[-1][2] is None
+    assert models.counts == RerankCounts(done=2)
+
+
+def test_three_budget_skips_in_a_row_pause_the_reranker_for_five_minutes() -> None:
+    now = [100.0]
+    models, worker = fake_models(pairs=30, clock=lambda: now[0], wall=lambda: 1_800_000_000.0 + now[0])
+    worker.rerank_answer = Skip(PAST_BUDGET, budget=True)
+    for _ in range(PAUSE_AFTER):
+        assert models.rerank("q", ["a"], 0.75) == "the reranker passed its 0.75 s budget"
+    asked = len(worker.reranks)
+    paused = models.rerank("q", ["a"], 0.75)
+    back = datetime.fromtimestamp(1_800_000_000.0 + 100 + PAUSE_SECONDS).astimezone()
+    assert paused == f"the reranker passed its budget 3 times in a row, so search goes without it until {back:%H:%M}"
+    assert len(worker.reranks) == asked, "a paused reranker isn't asked"
+    assert models.counts.past_budget == PAUSE_AFTER and models.counts.in_a_row == 0
+    now[0] += PAUSE_SECONDS
+    worker.rerank_answer = None
+    assert models.rerank("q", ["a"], 0.75) == [pair_score("q", "a")]
+    assert models.counts.done == 1
+
+
+def test_a_skip_that_isnt_the_budgets_is_said_and_not_counted() -> None:
+    models, worker = fake_models(pairs=30)
+    worker.rerank_answer = Skip("the reranker refused a request: ValueError")
+    assert models.rerank("q", ["a"], 0.75) == "the reranker refused a request: ValueError"
+    busy = "the models' worker is busy: a query passed its time"
+    worker.rerank_answer = Skip(busy, budget=True)
+    assert models.rerank("q", ["a"], 0.75) == busy
+    # With no budget, a wait that ran out says the worker's words.
+    worker.rerank_answer = Skip(PAST_BUDGET, budget=True)
+    assert models.rerank("q", ["a"], None) == PAST_BUDGET
+    assert models.counts == RerankCounts(past_budget=2, in_a_row=2)
+
+
+def test_models_without_a_reranker_have_no_pairs() -> None:
+    models, _ = fake_models(pairs=0, rerank_why="none here")
+    assert models.reranker is None and models.pairs == 0 and models.rerank_why == "none here"

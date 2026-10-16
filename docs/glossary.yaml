@@ -100,6 +100,12 @@ terms:
   - term: release log
     definition: "state/releases/<source>.jsonl in the vault: each released id with its cuts in milliseconds and the records kept as they read, merged by union. The gate cuts a released recording by it wherever it is staged."
     see: [packages/docket/src/docket/vault/releaselog.py]
+  - term: rerank budget
+    definition: "The 0.75 s a search gives its rerank from when it asks (DR-0454): past it, the order stays what search gives without a reranker, and the result says why"
+    see: [reranker]
+  - term: reranker
+    definition: The cross-encoder in the worker that orders search's top N by how well each chunk answers the question, the all-words hits first (DR-0452); on a GPU, or a CPU the install timed fast enough
+    see: [worker, rerank budget]
   - term: retry set
     definition: The ids a sync run skipped with a reason (later, too-large, gone, rate-limited), fetched by id on later runs. An id held back for the budget waits as long as it takes; any other leaves after 30 days.
     see: [packages/docket/src/docket/vault/cursors.py]

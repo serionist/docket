@@ -20,9 +20,9 @@ from models_kit import FAKE, fake_command
 
 from docket.errors import DocketError
 from docket.models import catalogue, config, install
-from docket.models.catalogue import Embedder, ModelFile
+from docket.models.catalogue import Embedder, ModelFile, Reranker
 from docket.models.client import Worker
-from docket.models.config import Choice
+from docket.models.config import Choice, RerankTiming
 from docket.models.provider import Off
 from docket.service import client
 from docket.vault.vault import remove_tree
@@ -93,6 +93,13 @@ def vectors_here(monkeypatch: pytest.MonkeyPatch) -> None:
     ONNX Runtime ships for the system, have tests of their own."""
     monkeypatch.setattr(install, "vectors_problem", lambda: None)
     monkeypatch.setattr(install, "runtime_problem", lambda: None)
+
+
+@pytest.fixture(autouse=True)
+def no_reranker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The install's embedder steps alone: the reranker's have tests of their own, which name one."""
+    monkeypatch.setattr(catalogue, "RERANKER_FOR", {})
+    monkeypatch.setattr(install, "RERANKER_FOR", {})
 
 
 @pytest.fixture
@@ -434,3 +441,140 @@ def test_on_windows_a_file_held_open_stops_the_remove_and_models_are_off(
     assert config.read() == Off() and isinstance(config.installed("cpu"), str)
     install.remove(lambda _: None)
     assert not config.env_dir("cpu").exists()
+
+
+# -- the reranker (DR-0455, DR-0456) -------------------------------------------------------------------------------
+
+
+def small_reranker() -> Reranker:
+    # The hub serves by path, so the reranker's files are the embedder's bytes under its own repo.
+    return Reranker(
+        name="fake-reranker",
+        repo="example/fake-reranker",
+        revision="89abcdef0123456789abcdef0123456789abcdef",
+        device="cpu",
+        model_file=ModelFile("onnx/model.onnx", len(ONE), hashlib.sha256(ONE).hexdigest()),
+        tokenizer_file=ModelFile("tokenizer.json", len(TWO), hashlib.sha256(TWO).hexdigest()),
+        max_tokens=256,
+        pairs=30,
+        licence="Apache-2.0",
+        trained_on="trained on invented pairs",
+    )
+
+
+def with_reranker(monkeypatch: pytest.MonkeyPatch) -> Reranker:
+    reranker = small_reranker()
+    monkeypatch.setitem(catalogue.EMBEDDERS, "fake", small())
+    monkeypatch.setattr(install, "RERANKERS", {reranker.name: reranker})
+    monkeypatch.setattr(install, "RERANKER_FOR", {"cpu": reranker.name})
+    monkeypatch.setitem(catalogue.RERANKERS, reranker.name, reranker)
+    monkeypatch.setattr(install, "cpu_name", lambda: "a test CPU")
+    return reranker
+
+
+def starting(**knobs: Any) -> Any:
+    """A starter whose worker runs the fake reranker when the spec names it, with the knobs given."""
+
+    def start(choice: Choice, device: str, rerank: dict[str, Any] | None = None) -> Worker:
+        extra = {"reranker": rerank, **knobs} if rerank is not None else {}
+        return Worker(fake_command(dims=choice.embedder.dims, **extra))
+
+    return start
+
+
+def ticking(step: float) -> Any:
+    now = [0.0]
+
+    def clock() -> float:
+        now[0] += step
+        return now[0]
+
+    return clock
+
+
+def test_install_fetches_and_times_the_devices_reranker_and_turns_it_on(
+    hub: type[Hub], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reranker = with_reranker(monkeypatch)
+    said: list[str] = []
+    found = install.install(
+        "cpu", embedder_name="fake", say=said.append, which=lambda n: n, run=Uv(), start=starting(), clock=ticking(0.1)
+    )
+    assert said[0].startswith("models: fake (MIT) and fake-reranker (Apache-2.0) on cpu; downloads 0 MB")
+    assert "fake-reranker onnx/model.onnx: downloaded" in said and "fake-reranker tokenizer.json: downloaded" in said
+    assert found.rerank is not None and found.rerank.seconds == pytest.approx(0.1)
+    assert found.rerank == RerankTiming("fake-reranker", reranker.revision, 30, found.rerank.seconds)
+    line = "reranker: fake-reranker (Apache-2.0, trained on invented pairs): 30 pairs in 0.10 s on a test CPU"
+    assert line in said
+    assert config.installed("cpu") == found and config.read() == Choice("cpu", small(), reranker)
+    assert config.missing_files(reranker) == []
+
+
+def test_a_reranker_past_its_limit_or_that_cant_run_is_off_on_this_machine(
+    hub: type[Hub], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with_reranker(monkeypatch)
+    said: list[str] = []
+    found = install.install(
+        "cpu", embedder_name="fake", say=said.append, which=lambda n: n, run=Uv(), start=starting(), clock=ticking(0.9)
+    )
+    assert found.rerank is not None and not found.rerank.on
+    assert any(
+        s.endswith("is off on this machine: 30 pairs in 0.90 s on a test CPU, past 0.6 s; docket models install "
+        "--no-reranker frees its 0 MB") for s in said
+    )  # fmt: skip
+    for knobs, why in [
+        ({"reranker_off": "the reranker didn't load: KeyError"}, "the reranker didn't load: KeyError"),
+        ({"rerank_refuse": True}, "the reranker refused a request: ValueError"),
+    ]:
+        said.clear()
+        found = install.install(
+            "cpu", embedder_name="fake", say=said.append, which=lambda n: n, run=Uv(), start=starting(**knobs)
+        )
+        assert found.rerank is not None and found.rerank.seconds is None and found.rerank.why == why
+        assert f"reranker: fake-reranker (Apache-2.0, trained on invented pairs) is off on this machine: {why}" in said
+
+
+def test_a_reranker_whose_worker_fails_or_loads_none_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    reranker = small_reranker()
+    failing = install.time_reranker(Worker(fake_command(exit_at_start=True)), reranker)
+    assert failing.seconds is None and failing.why is not None and "stopped as it started" in failing.why
+    plain = install.time_reranker(Worker(fake_command()), reranker)
+    assert plain.seconds is None and plain.why == "the worker didn't load it"
+
+
+def test_no_reranker_fetches_none_and_removes_one_an_earlier_install_fetched(
+    hub: type[Hub], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reranker = with_reranker(monkeypatch)
+    install.install("cpu", embedder_name="fake", say=lambda _: None, which=lambda n: n, run=Uv(), start=starting())
+    folder = config.files_dir().joinpath("example", "fake-reranker", reranker.revision)
+    assert folder.is_dir()
+    said: list[str] = []
+    found = install.install(
+        "cpu", embedder_name="fake", rerank=False, say=said.append, which=lambda n: n, run=Uv(), start=starting()
+    )
+    assert found.rerank is None and not folder.exists() and f"removed {folder}" in said
+    assert config.read() == Choice("cpu", small()) and said[0].startswith("models: fake (MIT) on cpu")
+
+
+def test_the_cpus_name_comes_from_its_system(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    info = tmp_path / "cpuinfo"
+    info.write_text("processor\t: 0\nmodel name\t: An Invented CPU 9000\n", encoding="utf-8")
+    assert install.cpu_name("linux", cpuinfo=info) == "An Invented CPU 9000"
+    monkeypatch.setattr(platform, "processor", lambda: "")
+    monkeypatch.setattr(platform, "machine", lambda: "x86_64")
+    info.write_text("processor\t: 0\n", encoding="utf-8")
+    assert install.cpu_name("linux", cpuinfo=info) == "x86_64"
+    assert install.cpu_name("linux", cpuinfo=tmp_path / "none") == "x86_64"
+
+    def sysctl(answer: str) -> Any:
+        return lambda args, **_: subprocess.CompletedProcess(args, 0, answer, "")
+
+    assert install.cpu_name("darwin", run=sysctl("Apple M9\n")) == "Apple M9"
+    assert install.cpu_name("darwin", run=sysctl("")) == "x86_64"
+    monkeypatch.setattr(platform, "processor", lambda: "Intel64 Family 6")
+    assert install.cpu_name("win32") == "Intel64 Family 6"
+    monkeypatch.setattr(platform, "processor", lambda: "")
+    monkeypatch.setattr(platform, "machine", lambda: "")
+    assert install.cpu_name("win32") == "an unknown CPU"
