@@ -497,3 +497,90 @@ def test_a_changes_file_that_isn_t_utf_8_is_refused(tmp_path: Path) -> None:
 def test_a_changes_file_s_add_becomes_one_part_each(tmp_path: Path) -> None:
     planned = changes(tmp_path, CREATE_AND_ADD)
     assert [(p.n, p.entity) for p in planned] == [(1, "cleo-test")] + [(2, "northwind")] * 4
+
+
+def killed_before_commit(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
+    """What a kill between a file's rename and the commit leaves: the commit never runs, and nothing is put back."""
+    monkeypatch.setattr(vault, "commit", lambda paths, message: None)
+
+
+def status(vault: Vault) -> str:
+    return sh(vault.root, "git", "status", "--porcelain", "--untracked-files=all", "--", "entities").strip()
+
+
+def test_an_add_killed_after_its_file_write_goes_in_with_its_line(
+    vault: Vault, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with monkeypatch.context() as m:
+        killed_before_commit(vault, m)
+        killed = apply(vault, tmp_path, "changes: [{entity: northwind, add: {aliases: [{text: Nortwin}]}}]")
+    assert status(vault) != ""
+    written = apply(vault, tmp_path, "changes: [{entity: ben-sample, add: {aliases: [{text: Ben}]}}]")
+    assert written.finished == (killed.lines[0].id,)
+    assert "Nortwin" in sh(vault.root, "git", "show", f"HEAD~1:{NORTHWIND}")
+    assert written.taken_in == ()
+    assert status(vault) == ""
+
+
+def test_a_create_killed_after_its_file_write_goes_in_with_its_line(
+    vault: Vault, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with monkeypatch.context() as m:
+        killed_before_commit(vault, m)
+        apply(vault, tmp_path, "changes: [{create: {id: cleo-test, type: person, name: {en: Cleo Test}}}]")
+    apply(vault, tmp_path, "changes: [{entity: ben-sample, add: {aliases: [{text: Ben}]}}]")
+    assert sh(vault.root, "git", "ls-files", "--", CLEO).strip() == CLEO
+    assert status(vault) == ""
+
+
+def test_an_undo_killed_after_its_file_write_goes_in_with_its_line(
+    vault: Vault, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    added = apply(vault, tmp_path, "changes: [{entity: northwind, add: {aliases: [{text: Nortwin}]}}]").lines[0]
+    created = apply(vault, tmp_path, "changes: [{create: {id: cleo-test, type: person, name: {en: Cleo Test}}}]")
+    with monkeypatch.context() as m:
+        killed_before_commit(vault, m)
+        undo(vault, added.id, created.lines[0].id)
+    written = apply(vault, tmp_path, "changes: [{entity: ben-sample, add: {aliases: [{text: Ben}]}}]")
+    assert len(written.finished) == 2
+    assert "Nortwin" not in sh(vault.root, "git", "show", f"HEAD:{NORTHWIND}")
+    assert sh(vault.root, "git", "ls-files", "--", CLEO).strip() == ""
+    assert status(vault) == ""
+
+
+def test_a_name_a_keyword_lists_in_any_order_reaches_neither_the_file_nor_the_log(vault: Vault, tmp_path: Path) -> None:
+    vault.config = vault.config.model_copy(update={"never_store": NeverStore(keywords=["Dóra Minta"])})
+    for name in ("Minta Dóra", "'Minta, Dóra'", "Dóra  Minta"):
+        text = f"changes: [{{create: {{id: m-d, type: person, name: {{hu: {name}}}}}}}]"
+        assert refused(lambda text=text: apply(vault, tmp_path, text)) == [
+            "change 1: a value is on the never-store keywords list; leave it out"
+        ]
+    assert not (vault.root / LOG_DIR).exists()
+    assert not (vault.root / "entities/person/m-d.yaml").exists()
+
+
+def test_ten_ops_in_one_second_undo_in_their_order(vault: Vault, tmp_path: Path) -> None:
+    text = """\
+changes:
+  - {entity: northwind, add: {aliases: [{text: Alpha One}]}}
+  - create: {id: cleo-test, type: person, name: {en: Cleo Test}}
+  - entity: northwind
+    add:
+      aliases: [{text: Bravo}, {text: Charlie}, {text: Delta}, {text: Echo}, {text: Foxtrot}, {text: Golfy},
+        {text: Hotel}]
+  - {entity: cleo-test, add: {aliases: [{text: Cleo}]}}
+"""
+    written = apply(vault, tmp_path, text)
+    ids = [line.id for line in written.lines]
+    assert [line.id for line in read_all(vault.root).lines] == ids
+    assert ids[9].endswith("-10")
+    undo(vault, ids[1], ids[9])
+    assert not (vault.root / CLEO).exists()
+
+
+def test_one_id_in_two_files_is_refused_naming_both(vault: Vault, tmp_path: Path) -> None:
+    seed(vault, "entities/org/northwind.yaml", "id: northwind\ntype: org\nname: {en: Northwind}\n")
+    problems = refused(lambda: apply(vault, tmp_path, "changes: [{entity: northwind, add: {aliases: [{text: x}]}}]"))
+    assert problems == [
+        "change 1: two files have that id, entities/customer/northwind.yaml and entities/org/northwind.yaml; keep one"
+    ]

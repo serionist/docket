@@ -229,10 +229,16 @@ def curate_refused(problems: list[str]) -> list[str]:
     return ["refused; nothing was written", *(f"  {p}" for p in problems)]
 
 
-def curate_log(lines: list[Line], undone_by: dict[str, str], problems: tuple[str, ...]) -> list[str]:
+def curate_log(
+    lines: list[Line], undone_by: dict[str, str], problems: tuple[str, ...], unfinished: set[str] | None = None
+) -> list[str]:
+    def marks(line: Line) -> str:
+        undone = f"  undone by {undone_by[line.id]}" if line.id in undone_by else ""
+        return undone + ("  not finished: the next write commits it" if line.id in (unfinished or set()) else "")
+
     out = [
         f"{line.at:%Y-%m-%d %H:%M}Z  {line.id}  {line.op:<6} {line.entity or '-'}  {_part(line)}  ({line.by}, "
-        f"{line.via}){f'  undone by {undone_by[line.id]}' if line.id in undone_by else ''}"
+        f"{line.via}){marks(line)}"
         for line in lines
     ]
     if not lines:

@@ -9,7 +9,7 @@ from docket_testkit import NORTHWIND_FILE, entity_vault, sh
 from docket import render
 from docket.cli import main
 from docket.vault.curatelog import LOG_DIR, AliasFields, Change, IdFields, Line, NameFields, RelatedFields
-from docket.vault.entitystore import Written
+from docket.vault.entitystore import EntityStore, Written, load_changes
 from docket.vault.vault import Vault
 
 ADD = """\
@@ -104,6 +104,23 @@ def test_log_lists_the_newest_first_with_what_undid_each(
     assert len(capsys.readouterr().out.splitlines()) == 2
     main(["curate", "log", "--json", "--entity", "cleo-test"])
     assert [line["op"] for line in json.loads(capsys.readouterr().out)] == ["undo", "create"]
+
+
+def test_log_marks_a_line_a_stopped_write_left(
+    vault: Vault, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A kill between the file's rename and the commit: the line and the file are written, nothing is committed.
+    with monkeypatch.context() as m:
+        m.setattr(vault, "commit", lambda paths, message: None)
+        EntityStore(vault).apply(load_changes(Path(changes_file(tmp_path, ADD))))
+    assert main(["curate", "log"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert all(x.endswith("(user, cli)  not finished: the next write commits it") for x in out)
+    assert main(["curate", "log", "--json"]) == 0
+    assert [x.get("finished") for x in json.loads(capsys.readouterr().out)] == [False, False]
+    add(tmp_path, "changes: [{entity: ben-sample, add: {aliases: [{text: Ben}]}}]", capsys)
+    assert main(["curate", "log"]) == 0
+    assert "not finished" not in capsys.readouterr().out
 
 
 def line(change: Change | None, op: str = "add", **fields: str) -> Line:

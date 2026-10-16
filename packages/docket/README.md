@@ -325,7 +325,7 @@ changes:
 | Command | Does |
 |---|---|
 | `docket curate add <file>` | creates entities and adds aliases, names, ids and related links; what an entity holds already is counted and skipped |
-| `docket curate log` | every change, newest first, with the op id undo takes; `--entity`, `-n`, `--json` |
+| `docket curate log` | every change, newest first, with the op id undo takes, and a change a stopped write left marked as not finished (the next write commits it); `--entity`, `-n`, `--json` |
 | `docket curate undo <op>...` | takes a change back out: an alias, name, id or link, or a created entity's file while it is as it was created |
 
 - Each change is a line of `entities/_log/<yyyy-mm>-<machine>.jsonl`, committed with the file it changed (DR-0460).

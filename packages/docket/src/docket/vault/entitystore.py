@@ -56,7 +56,16 @@ from docket.vault.curatelog import (
     folded,
     key_of,
 )
-from docket.vault.entities import Alias, Entity, comment_line, entity_files, load_file, load_text, render
+from docket.vault.entities import (
+    Alias,
+    Entity,
+    comment_line,
+    entity_files,
+    entity_rel,
+    load_file,
+    load_text,
+    render,
+)
 from docket.vault.neverstore import listed
 from docket.vault.redact import Redactor
 from docket.vault.staging import write_replacing
@@ -224,14 +233,14 @@ def _values(change: Change) -> list[str]:
 
 
 def screen(vault: Vault, planned: Sequence[Planned]) -> list[str]:
-    """What the never-store lists or the redaction rules refuse, by change; an id is read with its hyphens as spaces
-    too, so ben-sample meets a list's Ben Sample."""
+    """What the never-store lists or the redaction rules refuse, by change. A value is read by its words, so an id's
+    hyphens read as spaces and ben-sample meets a list's Ben Sample."""
     lists = vault.config.never_store
     redactor = Redactor.from_config(vault.config.redaction)
     problems: list[str] = []
     for item in planned:
         for value in _values(item.change):
-            on = listed(value, lists) or listed(value.replace("-", " "), lists)
+            on = listed(value, lists)
             counts: Counter[str] = Counter()
             redactor.text(value, counts)
             if on is not None:
@@ -307,16 +316,27 @@ class _Files:
 
     def __init__(self, root: Path) -> None:
         self.root = root
-        self.paths = {p.stem: p for p in entity_files(root)}
+        self.paths: dict[str, list[Path]] = {}
+        for path in entity_files(root):
+            self.paths.setdefault(path.stem, []).append(path)
         self.now: dict[str, Entity | None] = {}
         self.blame: dict[str, int] = {}
+
+    def file(self, entity_id: str) -> Path | None:
+        """The file that holds an entity, or None. Two files with its id are refused, naming both: the loader reads
+        the first and skips the other, so a write to either would be lost or unseen."""
+        paths = self.paths.get(entity_id, [])
+        if len(paths) > 1:
+            names = " and ".join(p.relative_to(self.root).as_posix() for p in paths)
+            raise _UnwritableError(f"two files have that id, {names}; keep one")
+        return paths[0] if paths else None
 
     def current(self, entity_id: str) -> Entity | None:
         """The entity as this write has it so far, or None when there is none; a file that can't be rewritten whole
         is refused."""
         if entity_id in self.now:
             return self.now[entity_id]
-        path = self.paths.get(entity_id)
+        path = self.file(entity_id)
         if path is None:
             return None
         entity, problems = load_file(self.root, path)
@@ -338,7 +358,7 @@ class _Files:
 
     def rel(self, entity_id: str) -> str:
         entity = self.now[entity_id]
-        return entity.path if entity is not None else self.paths[entity_id].relative_to(self.root).as_posix()
+        return entity.path if entity is not None else self.paths[entity_id][0].relative_to(self.root).as_posix()
 
     def outputs(self) -> dict[str, str | None]:
         """Each touched file's new text, or None to delete it."""
@@ -399,6 +419,17 @@ def _unplan(files: _Files, line: Line, log: Folded, undoing: set[str]) -> bool:
         raise _UnwritableError("the entity was changed by hand since it was created; change or delete its file")
     files.set(entity_id, None)
     return True
+
+
+def _named(files: _Files, line: Line, log: Folded) -> set[str]:
+    """The entity file a log line changes: a create's new file, an add's file, and for an undo its op's."""
+    target = log.by_id.get(line.of or "") if line.op == "undo" else line
+    if target is None or target.change is None:
+        return set()
+    if target.change.entity is not None:
+        return {entity_rel(target.change.entity.type, target.change.entity.id)}
+    path = files.file(cast(str, target.entity))
+    return {path.relative_to(files.root).as_posix()} if path is not None else set()
 
 
 def _message(lines: Sequence[Line]) -> str:
@@ -469,7 +500,7 @@ class EntityStore:
                     targets.append(line)
             files = _Files(self.root)
             only: list[str] = []
-            for line in sorted(targets, key=lambda t: (t.at, t.id), reverse=True):
+            for line in sorted(targets, key=curatelog.order, reverse=True):
                 try:
                     if not _unplan(files, line, log, {t.id for t in targets}):
                         only.append(line.id)
@@ -503,8 +534,8 @@ class EntityStore:
         edited = {*git.changed_against_head("entities"), *git.untracked("entities", ignored_too=True)}
         taken: list[str] = []
         for entity_id in files.now:
-            path = files.paths.get(entity_id)
-            rel = path.relative_to(self.root).as_posix() if path is not None else None
+            paths = files.paths.get(entity_id)
+            rel = paths[0].relative_to(self.root).as_posix() if paths else None
             if rel in edited:
                 self.vault.commit([rel], f"Entity: {entity_id} hand edit")
                 taken.append(rel)
@@ -537,7 +568,7 @@ class EntityStore:
                     path.unlink()
                 else:
                     write_replacing(home, path, text, "entity")
-            return self.vault.commit([*logs, *originals], message)
+            return self.vault.commit(list(dict.fromkeys([*logs, *originals])), message)
         except BaseException:
             for rel, before in originals.items():
                 self.vault.git.run("reset", "-q", "--", rel, check=False)
@@ -554,13 +585,18 @@ class EntityStore:
             return ()
         log = curatelog.fold(curatelog.read_all(self.root).lines)
         files = _Files(self.root)
+        named: set[str] = set()
         for line in pending:
             with contextlib.suppress(_UnwritableError):
+                named |= _named(files, line, log)
                 if line.change is not None:
                     _plan(files, Planned(0, cast(str, line.entity), line.change))
                 elif line.op == "undo" and line.of in log.by_id:
                     _unplan(files, log.by_id[line.of], log, set())
+        # A write killed after its file's rename left the change in the tree: it goes in with its line.
+        git = self.vault.git
+        edited = {*git.changed_against_head("entities"), *git.untracked("entities", ignored_too=True)}
+        logs = sorted({line.rel for line in pending} | (named & edited))
         body = "\n".join(f"Curate: {line.id} {line.op} {line.entity}" for line in pending)
-        message = f"Entities: finish a write that stopped\n\n{body}"
-        self._write([], files.outputs(), message, sorted({line.rel for line in pending}))
+        self._write([], files.outputs(), f"Entities: finish a write that stopped\n\n{body}", logs)
         return tuple(line.id for line in pending)

@@ -242,3 +242,12 @@ def test_an_entity_s_value_is_held_to_the_people_list_in_both_name_orders_and_to
     assert listed("Dóra Minta Nagy", lists) is None
     assert listed("Dóra", lists) is None
     assert listed("Dóra Minta", NeverStore()) is None
+
+
+@pytest.mark.parametrize(
+    "value", ["Dóra Minta", "Minta Dóra", "Minta, Dóra", "Dóra  Minta", "Dóra Minta,", "dora-minta"]
+)
+def test_a_name_is_held_to_both_lists_by_its_words_in_both_orders(value: str) -> None:
+    assert listed(value, NeverStore(keywords=["Dóra Minta"])) == "keywords"
+    assert listed(value, NeverStore(people=["Dóra Minta"])) == "people"
+    assert listed(value, NeverStore(people=["Minta, Dóra"])) == "people"

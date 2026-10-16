@@ -92,7 +92,7 @@ def test_a_time_is_kept_in_utc() -> None:
     "change",
     [
         {"schema_version": 2},
-        {"colour": "blue"},
+        {"change": {"alias": {"text": "x", "colour": "blue"}}},
         {"id": "16-10-2026-desk-1"},
         {"at": "2026-10-16T09:14:02"},
         {"machine": "Desk Top"},
@@ -105,7 +105,6 @@ def test_a_time_is_kept_in_utc() -> None:
         {"key": ""},
         {"change": {"alias": {"text": "x"}, "name": {"lang": "en", "text": "x"}}},
         {"change": {}},
-        {"evidence": {"chunks": 1, "containers": 1, "locators": ["a", "b", "c", "d", "e", "f"]}},
     ],
 )
 def test_a_line_of_another_shape_doesn_t_read(change: dict[str, Any]) -> None:
@@ -220,6 +219,30 @@ def test_the_log_folder_is_never_read_through_a_link(tmp_path: Path, monkeypatch
     monkeypatch.setattr(curatelog, "_linked", lambda path: path.name == "_log")
     with pytest.raises(DocketError, match="is a link"):
         read_all(tmp_path)
+
+
+def test_a_field_the_reader_doesn_t_know_is_ignored_so_a_later_writer_can_add_one() -> None:
+    data = json.loads(line().text()) | {"hash": "abc", "evidence": {"chunks": 2, "containers": 1, "weight": 3}}
+    found, problems = parse(json.dumps(data), "x")
+    assert problems == []
+    assert found[0].evidence == curatelog.Evidence(chunks=2, containers=1)
+    assert "hash" not in found[0].text()
+
+
+def test_a_reader_keeps_a_long_list_of_locators_first_five() -> None:
+    locators = [f"r:plaud:rec-{n:04d}" for n in range(1, 8)]
+    data = json.loads(line().text()) | {"evidence": {"chunks": 7, "containers": 7, "locators": locators}}
+    found, problems = parse(json.dumps(data), "x")
+    assert problems == []
+    assert found[0].evidence is not None
+    assert found[0].evidence.locators == tuple(locators[:5])
+
+
+def test_ops_of_one_second_sort_by_their_number_as_a_number() -> None:
+    lines = [line(n=n) for n in (10, 2, 1, 11, 9)]
+    assert [x.id.rsplit("-", 1)[1] for x in curatelog._ordered(lines)] == ["1", "2", "9", "10", "11"]
+    later = line(n=1, at=T0 + timedelta(seconds=1))
+    assert curatelog.order(later) > curatelog.order(line(n=11))
 
 
 def test_new_ids_follow_the_highest_of_their_second_on_their_machine() -> None:

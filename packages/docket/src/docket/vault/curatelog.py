@@ -207,14 +207,25 @@ class Change(_Model):
         return self
 
 
-class Evidence(_Model):
+def _first(value: Any) -> Any:
+    """A line's first locators: the writer keeps at most five, and a reader keeps a longer list's first five."""
+    return cast(list[Any], value)[:MAX_LOCATORS] if isinstance(value, list) else value
+
+
+class Evidence(BaseModel):
+    # A reader ignores a field it doesn't know, so a later writer of schema 1 can add one (DR-0460).
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
     chunks: int = Field(ge=0)
     containers: int = Field(ge=0)
-    locators: tuple[str, ...] = Field(default=(), max_length=MAX_LOCATORS)
+    locators: Annotated[tuple[str, ...], BeforeValidator(_first)] = ()
 
 
-class Line(_Model):
-    """One op, as one line of the log."""
+class Line(BaseModel):
+    """One op, as one line of the log. A reader ignores a field it doesn't know, so a later writer of schema 1 can add
+    one; what a change holds is read strictly, since an entity's file is written from it."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
 
     schema_version: Literal[1]
     id: str
@@ -334,8 +345,15 @@ def parse(text: str, where: str) -> tuple[list[Line], list[str]]:
     return lines, problems
 
 
+def order(line: Line) -> tuple[datetime, str, str, int]:
+    """Where a line sorts: by its time, then its id's second, machine and number, the number as a number, so a
+    second's tenth op comes after its ninth."""
+    stamp, machine, n = cast(re.Match[str], OP_ID.match(line.id)).group(1, 2, 3)
+    return (line.at, stamp, machine, int(n))
+
+
 def _ordered(lines: Iterable[Line]) -> tuple[Line, ...]:
-    return tuple(sorted(lines, key=lambda line: (line.at, line.id)))
+    return tuple(sorted(lines, key=order))
 
 
 def read_all(root: Path) -> LogRead:

@@ -740,14 +740,20 @@ def curate_log(
     vault: VaultOption = None,
 ) -> None:
     """Every change Docket made to entities, and every rejection, undo and lift, newest first, with the ids undo
-    takes."""
-    read = curatelog.read_all(find_vault(vault).root)
+    takes. A line a stopped write left is marked: the next write finishes it."""
+    v = find_vault(vault)
+    read = curatelog.read_all(v.root)
+    unfinished = {line.id for line in curatelog.unfinished(v)}
     lines = [line for line in reversed(read.lines) if entity is None or line.entity == entity][:n]
     if as_json:
         # ASCII only: a name's text can't put a terminal code on the screen.
-        typer.echo(json.dumps([line.model_dump(mode="json", exclude_none=True) for line in lines], indent=2))
+        dumped = [
+            line.model_dump(mode="json", exclude_none=True) | ({"finished": False} if line.id in unfinished else {})
+            for line in lines
+        ]
+        typer.echo(json.dumps(dumped, indent=2))
         return
-    say_all(render.curate_log(lines, curatelog.fold(read.lines).undone_by, read.problems))
+    say_all(render.curate_log(lines, curatelog.fold(read.lines).undone_by, read.problems, unfinished))
 
 
 @contextlib.contextmanager
