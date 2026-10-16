@@ -444,35 +444,36 @@ def test_a_failure_in_either_run_shows_its_tail(tmp_path: Path, monkeypatch: pyt
         assert [ln for ln in out.detail if "broke" in ln] == broke
 
 
-def test_each_step_gives_both_runs_one_templates_folder_and_each_run_a_temp_folder(
+def test_each_step_gives_both_runs_one_templates_folder_and_the_timed_run_a_temp_folder(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    seen: list[tuple[Path, Path, list[str]]] = []
+    seen: list[tuple[Path, list[Path], list[str]]] = []
 
     def fake_run(_ctx: gate.Ctx, cmd: list[str], *, env: dict[str, str] | None = None) -> tuple[int, list[str]]:
         templates = Path((env or {})[gate.TEMPLATES_ENV])
-        [basetemp] = [Path(a.removeprefix("--basetemp=")) for a in cmd if a.startswith("--basetemp=")]
+        basetemps = [Path(a.removeprefix("--basetemp=")) for a in cmd if a.startswith("--basetemp=")]
         built = sorted(p.name for p in templates.iterdir()) if templates.exists() else []
-        seen.append((templates, basetemp, built))
-        # What a run leaves: a template's git objects, which git makes read-only, and its own temp folder.
+        seen.append((templates, basetemps, built))
+        # What a run leaves: a template's git objects, which git makes read-only, and its temp folder.
         templates.mkdir(exist_ok=True)
         (templates / f"object-{len(seen)}").write_bytes(b"x")
         (templates / f"object-{len(seen)}").chmod(0o444)
-        basetemp.mkdir()
+        for basetemp in basetemps:
+            basetemp.mkdir()
         return 0, ["1 passed in 1.00s"]
 
     monkeypatch.setattr(gate, "_run", fake_run)
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
-    for ci in (False, False, True):
-        assert gate.step_tests(gate.Ctx(root=tmp_path, lane="os", ci=ci, base=None, pr=None)).status == "ok"
-    parallel, timed, again, _, on_ci, _ = seen
+    for _ in range(2):
+        assert gate.step_tests(gate.Ctx(root=tmp_path, lane="os", ci=True, base=None, pr=None)).status == "ok"
+    parallel, timed, again, _ = seen
     # One templates folder for both runs: the timed run finds what the parallel run built.
     assert parallel[0] == timed[0] and (parallel[2], timed[2]) == ([], ["object-1"])
-    # A temp folder of each run's own, beside the templates, so pytest never deletes the other run's.
-    assert parallel[1] != timed[1] and parallel[1].parent == timed[1].parent == parallel[0].parent
-    # Each step starts empty and removes its folder, but on CI, whose runner goes with its disk.
+    # The parallel run keeps pytest's numbered folder; the timed run takes none, so it never deletes the other's.
+    assert parallel[1] == [] and [b.parent for b in timed[1]] == [parallel[0].parent]
+    # Each step starts empty and removes its folder.
     assert again[0] != parallel[0] and again[2] == []
-    assert not parallel[0].parent.exists() and not again[0].parent.exists() and on_ci[0].parent.exists()
+    assert not parallel[0].parent.exists() and not again[0].parent.exists()
 
 
 def test_under_coverage_the_timed_tests_stay_in_the_one_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
