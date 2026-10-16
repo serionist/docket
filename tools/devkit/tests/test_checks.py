@@ -397,11 +397,15 @@ def test_timed_lines_are_read_from_pytest_s_passes_section() -> None:
     assert gate.timed(["1 passed in 0.50s"]) == []
 
 
-def _fake_pytest(monkeypatch: pytest.MonkeyPatch, codes: tuple[int, int] = (0, 0)) -> list[list[str]]:
+def _fake_pytest(
+    monkeypatch: pytest.MonkeyPatch, codes: tuple[int, int] = (0, 0), envs: list[dict[str, str]] | None = None
+) -> list[list[str]]:
     calls: list[list[str]] = []
 
     def fake_run(_ctx: gate.Ctx, cmd: list[str], *, env: dict[str, str] | None = None) -> tuple[int, list[str]]:
         calls.append(cmd)
+        if envs is not None:
+            envs.append(dict(env or {}))
         if "-n" in cmd:
             lines = ["....", "12.34s call     t.py::test_slow", "9 passed, 2 deselected in 3.00s", "a test broke"]
             return codes[0], lines
@@ -439,13 +443,39 @@ def test_a_failure_in_either_run_shows_its_tail(tmp_path: Path, monkeypatch: pyt
         assert [ln for ln in out.detail if "broke" in ln] == broke
 
 
+def test_both_runs_build_their_templates_in_one_empty_folder_the_step_removes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[tuple[Path, list[str]]] = []
+
+    def fake_run(_ctx: gate.Ctx, cmd: list[str], *, env: dict[str, str] | None = None) -> tuple[int, list[str]]:
+        folder = Path((env or {})[gate.TEMPLATES_ENV])
+        seen.append((folder, sorted(p.name for p in folder.iterdir())))
+        # What a run leaves: a template's git objects, which git makes read-only.
+        (folder / f"built-{len(seen)}").mkdir()
+        (folder / f"built-{len(seen)}" / "object").write_bytes(b"x")
+        (folder / f"built-{len(seen)}" / "object").chmod(0o444)
+        return 0, ["1 passed in 1.00s"]
+
+    monkeypatch.setattr(gate, "_run", fake_run)
+    for _ in range(2):
+        assert gate.step_tests(gate.Ctx(root=tmp_path, lane="os", ci=False, base=None, pr=None)).status == "ok"
+    (first, at_first), (second, at_second), (again, at_again) = seen[:3]
+    assert first == second and (at_first, at_second) == ([], ["built-1"])
+    assert again != first and at_again == []
+    assert not first.exists() and not again.exists()
+
+
 def test_under_coverage_the_timed_tests_stay_in_the_one_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = _fake_pytest(monkeypatch, codes=(1, 0))
+    envs: list[dict[str, str]] = []
+    calls = _fake_pytest(monkeypatch, codes=(1, 0), envs=envs)
     ctx = gate.Ctx(root=tmp_path, lane="full", ci=False, base=None, pr=None)
     # Their limits are off under coverage, so nothing waits for the other steps either.
     ctx.alone.clear()
     out = gate.step_tests(ctx)
     [run] = calls
+    # One run builds its own templates, as on main.
+    assert gate.TEMPLATES_ENV not in envs[0]
     assert "-m" not in run[3:] and run[run.index("-n") + 1] == "auto"
     assert "--cov" in run and any(a.startswith("--cov-report=json:") for a in run) and "--cov-append" not in run
     assert out.status == "fail" and "a test broke" in out.detail

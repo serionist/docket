@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import MAIL, REC, THREAD, at, copy_vault, make_record, note, sh, template_vault
+from docket_testkit import MAIL, REC, THREAD, at, copy_vault, make_record, note, sh, shared, template_vault
 
 from docket import recall
 from docket.errors import DocketError
@@ -691,6 +691,18 @@ def test_a_hand_edit_with_a_credential_is_taken_in_redacted(vault: Vault) -> Non
     assert SECRET not in log_p(vault)
 
 
+@pytest.fixture
+def screened(template: Path, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> Vault:
+    """The note put with "dora example" on the never-store list and phone redaction on: built once, copied."""
+
+    def build(base: Path) -> Path:
+        vault = with_settings(copy_vault(template, base), keywords=["dora example"])
+        recall.doc_put(vault, note())
+        return vault.root
+
+    return copy_vault(shared(build, "docstore-screened", tmp_path_factory), tmp_path)
+
+
 @pytest.mark.parametrize(
     ("old", "new", "what"),
     [
@@ -722,10 +734,9 @@ def test_a_hand_edit_with_a_credential_is_taken_in_redacted(vault: Vault) -> Non
     ],
 )
 def test_a_hand_edit_that_says_a_keyword_or_holds_a_secret_in_its_frontmatter_is_refused(
-    vault: Vault, old: str, new: str, what: str
+    screened: Vault, old: str, new: str, what: str
 ) -> None:
-    vault = with_settings(vault, keywords=["dora example"])
-    recall.doc_put(vault, note())
+    vault = screened
     before = head(vault)
     hand_edit(vault, old, new)
     edited = (vault.root / NOTE_PATH).read_text(encoding="utf-8")

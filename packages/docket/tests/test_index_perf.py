@@ -5,6 +5,9 @@ with a title of five words so the title order runs on every candidate (DR-0231),
 compounds from a pool of 2,000, repeating as prose repeats them (DR-0280), written through the build's own insert path.
 Wall times are asserted only when no tracer runs: under coverage they are printed, and the fuzzy walk's work and the
 word check's split scans are counted instead.
+
+Only the timed tests carry `perf`. The vaults are shared templates that the untimed tests ask for first, so in a lane
+without coverage the parallel run builds them and the timed run, alone, only times (DR-0492).
 """
 
 from __future__ import annotations
@@ -27,6 +30,7 @@ from docket_testkit import (
     fts_and_check,
     index_config,
     query_words,
+    shared,
     stem_every_word,
     template_with,
     traced,
@@ -42,9 +46,6 @@ from docket.index.text import Analyzer, fold, words_and_compounds
 from docket.models.catalogue import Embedder, Reranker, input_hash
 from docket.vault.entities import Alias, Entities, Entity
 from docket.vault.vault import Vault
-
-# The whole file runs alone: its untimed tests share the timed ones' vault, which takes most of its time to build.
-pytestmark = pytest.mark.perf
 
 CHUNKS = 100_000
 WORDS_PER_CHUNK = 60
@@ -183,25 +184,34 @@ class PerfReranking(PerfModels):
         return [float(len(t) % 7) for t in texts]
 
 
-@pytest.fixture(scope="module")
-def vault(tmp_path_factory: pytest.TempPathFactory) -> Vault:
-    started = time.monotonic()
-    root = template_with(tmp_path_factory, make_perf_vault)
-    print(f"\nbuilt {CHUNKS} chunks in {time.monotonic() - started:.1f} s")
-    return Vault.open(root)
-
-
-@pytest.fixture(scope="module")
-def vectors_vault(vault: Vault, tmp_path_factory: pytest.TempPathFactory) -> Vault:
+def with_vectors(perf: Path, root: Path) -> Path:
     """A copy of the perf vault with a vector per chunk: the keyword timings keep the index main measures."""
-    v = copy_vault(vault.root, tmp_path_factory.mktemp("perf-vectors"))
+    v = copy_vault(perf, root)
     conn = sqlite3.connect(build.db_path(v), isolation_level=None)
     try:
         write_vectors(conn)
     finally:
         conn.close()
-    # The first search of a file opens it cold (and a virus scanner may read it whole): that is no search's time.
+    return v.root
+
+
+@pytest.fixture(scope="module")
+def vault(tmp_path_factory: pytest.TempPathFactory) -> Vault:
+    started = time.monotonic()
+    v = Vault.open(template_with(tmp_path_factory, make_perf_vault))
+    # The first search of a file opens it cold (and a virus scanner may read it whole): that is no search's time. The
+    # parallel run may have built it minutes before.
+    search(v, "warm", now=NOW)
+    print(f"\n{CHUNKS} chunks ready in {time.monotonic() - started:.1f} s")
+    return v
+
+
+@pytest.fixture(scope="module")
+def vectors_vault(vault: Vault, tmp_path_factory: pytest.TempPathFactory) -> Vault:
+    started = time.monotonic()
+    v = Vault.open(shared(lambda root: with_vectors(vault.root, root), "perf-vectors", tmp_path_factory))
     search(v, "warm", now=NOW, models=PerfModels())
+    print(f"\n{CHUNKS} vectors ready in {time.monotonic() - started:.1f} s")
     return v
 
 
@@ -212,6 +222,17 @@ def timed(vault: Vault, query: str, **kwargs: object) -> tuple[float, int, str]:
     return time.monotonic() - started, sum(len(g.hits) for g in result.groups), result.models.state
 
 
+def test_every_chunk_of_the_vectors_vault_has_its_vector(vectors_vault: Vault) -> None:
+    conn = sqlite3.connect(build.db_path(vectors_vault))
+    try:
+        found = conn.execute("SELECT count(*) FROM chunks").fetchone()[0]
+        held = conn.execute(f"SELECT count(*) FROM {vectors.table_of(PERF).name}").fetchone()[0]  # noqa: S608
+    finally:
+        conn.close()
+    assert held == found == CHUNKS
+
+
+@pytest.mark.perf
 def test_queries_answer_in_well_under_a_second(vault: Vault, vectors_vault: Vault) -> None:
     conn = sqlite3.connect(build.db_path(vault))
     by_doc = conn.execute("SELECT term, doc FROM vocab WHERE col = 'folded' ORDER BY doc DESC").fetchall()
@@ -271,6 +292,7 @@ def test_queries_answer_in_well_under_a_second(vault: Vault, vectors_vault: Vaul
     assert all(h.ts is not None and since <= h.ts < until for g in result.groups for h in g.hits)
 
 
+@pytest.mark.perf
 def test_the_mention_pass_stays_under_two_seconds(vault: Vault, tmp_path: Path) -> None:
     # On a copy: the template is shared, and never written.
     db = tmp_path / "docket.sqlite"
@@ -352,6 +374,7 @@ def test_the_word_check_agrees_with_fts5_on_a_sample(vault: Vault) -> None:
         assert found == held, query
 
 
+@pytest.mark.perf
 def test_the_word_check_with_splits_stays_fast(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
     conn = sqlite3.connect(build.db_path(vault))
     try:
@@ -396,6 +419,7 @@ def test_the_word_check_with_splits_stays_fast(vault: Vault, monkeypatch: pytest
         assert times[1] < SECONDS
 
 
+@pytest.mark.perf
 def test_the_fuzzy_walk_over_a_large_vocabulary() -> None:
     rng = random.Random(7)  # noqa: S311 - seeded test words, not secrets
     vocab = vocabulary(rng, 300_000)

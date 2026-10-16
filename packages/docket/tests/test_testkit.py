@@ -56,11 +56,12 @@ class Factory:
 @pytest.fixture
 def factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> pytest.TempPathFactory:
     monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
+    monkeypatch.delenv(kit.TEMPLATES_ENV, raising=False)
     return cast(pytest.TempPathFactory, Factory(tmp_path))
 
 
 def test_two_workers_asking_at_once_build_a_template_once(tmp_path: Path) -> None:
-    env = {k: v for k, v in os.environ.items() if k != "PYTEST_XDIST_WORKER"}
+    env = {k: v for k, v in os.environ.items() if k not in ("PYTEST_XDIST_WORKER", kit.TEMPLATES_ENV)}
     script = tmp_path / "worker.py"
     script.write_text(TWO_WORKERS, encoding="utf-8")
     tests = str(Path(kit.__file__).parent)
@@ -89,6 +90,28 @@ def test_a_failed_build_is_cleared_and_the_next_gives_its_own_result(factory: py
     assert kit.shared(failing, "once", factory) == made
 
 
+def test_a_template_in_the_folder_the_gate_names_is_built_once_for_both_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(kit.TEMPLATES_ENV, str(tmp_path / "named"))
+    builds: list[Path] = []
+
+    def build(folder: Path) -> Path:
+        builds.append(folder)
+        (folder / "made.txt").write_text("made", encoding="utf-8")
+        return folder
+
+    # Two sessions, each with its own temp folder: the parallel run, then the timed run.
+    parallel, alone = (cast(pytest.TempPathFactory, Factory(tmp_path / run)) for run in ("parallel", "alone"))
+    made = kit.shared(build, "named", parallel)
+    assert kit.shared(build, "named", alone) == made
+    assert len(builds) == 1 and made.parent == kit.templates_folder(alone) == tmp_path / "named"
+    (made / "made.txt").write_text("written", encoding="utf-8")
+    # The timed run's check reads the same folder, so a write there into what the parallel run built is named.
+    changes = kit.template_changes(kit.templates_folder(alone))
+    assert [line.split("/", 1)[1] for line in changes] == ["made.txt: changed"]
+
+
 def test_a_write_into_a_template_is_named_and_a_reader_s_cache_is_not(
     tmp_path: Path, factory: pytest.TempPathFactory
 ) -> None:
@@ -99,14 +122,14 @@ def test_a_write_into_a_template_is_named_and_a_reader_s_cache_is_not(
         return folder
 
     made = kit.shared(build, "kept", factory)
-    assert kit.template_changes(tmp_path) == []
+    assert kit.template_changes(tmp_path / "templates") == []
     (made / "new.txt").write_text("new", encoding="utf-8")
     (made / "a.txt").write_text("a, longer", encoding="utf-8")
     (made / "b.txt").unlink()
     (made / "sub" / "__pycache__").mkdir()
     (made / "sub" / "__pycache__" / "m.cpython-312.pyc").write_bytes(b"")
     (made / "index.sqlite-wal").write_bytes(b"")
-    assert [line.split("/", 1)[1] for line in kit.template_changes(tmp_path)] == [
+    assert [line.split("/", 1)[1] for line in kit.template_changes(tmp_path / "templates")] == [
         "a.txt: changed",
         "b.txt: removed",
         "new.txt: added",

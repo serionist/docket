@@ -5,15 +5,14 @@ above every test of the packages."""
 from __future__ import annotations
 
 import pytest
-from docket_testkit import template_changes
+from docket_testkit import template_changes, templates_folder
 
 
 def pytest_sessionfinish(session: pytest.Session) -> None:
     # Once, after every worker has finished: the controller under xdist, or the one process without it.
     if hasattr(session.config, "workerinput"):
         return
-    root = session.config._tmp_path_factory.getbasetemp()  # type: ignore[attr-defined]
-    problems = template_changes(root)
+    problems = template_changes(templates_folder(session.config._tmp_path_factory))  # type: ignore[attr-defined]
     if problems:
         print("\ntests wrote into shared templates, which only their copies may take:")
         for line in problems:
