@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, BinaryIO, TextIO, cast
 
 from docket.documents.limits import LIMITS, Limits, NotReadError, mib
+from docket.documents.parts import Format
 
 if sys.platform == "linux":  # pragma: no cover - one of the three runs on each system; test_documents_extract runs them
     import resource
@@ -72,7 +73,7 @@ def handle(request: dict[str, Any], limits: Limits = LIMITS) -> Iterator[dict[st
     from docket.documents import formats  # noqa: PLC0415
 
     path = Path(str(request["path"]))
-    fmt = cast(formats.Format, request["format"])
+    fmt = cast(Format, request["format"])
     try:
         info = path.stat()
         if not stat.S_ISREG(info.st_mode):

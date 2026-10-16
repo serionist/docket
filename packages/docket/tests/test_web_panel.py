@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote
 
@@ -10,7 +11,9 @@ from docket_webkit import a11y_problems, html_problems, parse, signed_in
 from starlette.testclient import TestClient
 
 from docket import recall
+from docket.documents import records
 from docket.vault.processed import DocMeta, ProcessedDoc
+from docket.vault.records import RawRecord
 from docket.vault.vault import Vault
 
 CALL = "r:calls:rec-0100@01:50-03:20"
@@ -209,3 +212,24 @@ def test_the_whole_page_opens_with_the_panel(client: TestClient) -> None:
     assert close.attrs["href"] == "/search?query=Nortwin"
     assert close.attrs["hx-get"] == "/search/panel?query=Nortwin"
     assert not a11y_problems(page.text)
+
+
+def test_a_folder_file_that_went_shows_its_last_text_with_a_note_in_place_of_the_latest_badge(
+    client: TestClient, tmp_path: Path
+) -> None:
+    vault = Vault.open(tmp_path / "vault")
+    when = datetime(2026, 10, 14, 9, 0, tzinfo=UTC)
+    first = RawRecord(
+        rid="documents:0123456789ab", source="documents", kind="document", ts=when, title="q3.md",
+        text="the gearbox overheated", native={"format": "md"}, fetched=when, via=records.VIA,
+    )  # fmt: skip
+    vault.write_run("documents", [first], when)
+    gone = records.gone_version(first, at=when, day="2026-10-16", moved_to="documents:ba9876543210")
+    vault.write_run("documents", [gone], datetime(2026, 10, 16, 9, 0, tzinfo=UTC))
+    tree = parse(panel(client, f"r:{first.rid}"))
+    text = tree.text()
+    assert "the gearbox overheated" in text
+    assert "the last version with text; the latest says: Not read from the folder since 2026-10-16." in text
+    assert "It moved to documents:ba9876543210." in text
+    # The badge belongs to the newest version alone, the gone one; the old text carries the note instead.
+    assert text.count("this is the latest") == 1

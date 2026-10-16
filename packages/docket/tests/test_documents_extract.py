@@ -17,10 +17,10 @@ import pytest
 from documents_kit import docx, pdf, replaced, wp
 
 from docket import childproc
-from docket.documents import child, extract, formats
+from docket.documents import child, extract, formats, parts
 from docket.documents.extract import Done, Extractor, Failed, NotRead
-from docket.documents.formats import Part
 from docket.documents.limits import LIMITS, MIB, Limits
+from docket.documents.parts import Part
 from docket.errors import DocketError
 
 FAKE = Path(__file__).with_name("documents_fake_child.py")
@@ -310,7 +310,7 @@ def test_a_library_s_print_goes_to_stderr_not_into_the_protocol(
 ) -> None:
     real_extract = formats.extract
 
-    def chatty(data: bytes, fmt: formats.Format, limits: Limits = LIMITS) -> formats.Extracted:
+    def chatty(data: bytes, fmt: parts.Format, limits: Limits = LIMITS) -> parts.Extracted:
         print("a library talking")
         return real_extract(data, fmt, limits)
 
@@ -352,7 +352,7 @@ def test_the_real_child_refuses_a_dtd_openpyxl_would_have_parsed(real: Extractor
 
 
 def test_running_out_of_memory_ends_the_child(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    def hungry(data: bytes, fmt: formats.Format, limits: Limits = LIMITS) -> formats.Extracted:
+    def hungry(data: bytes, fmt: parts.Format, limits: Limits = LIMITS) -> parts.Extracted:
         raise MemoryError
 
     monkeypatch.setattr(formats, "extract", hungry)

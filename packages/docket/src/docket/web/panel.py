@@ -75,6 +75,8 @@ class SpanView:
     segments: list[SegmentView]
     paragraphs: list[ParagraphView]
     mark: bool
+    # Said in place of the versions badge when the span is an earlier version than the newest (DR-0491).
+    note: str | None = None
 
 
 @dataclass(frozen=True)
@@ -161,7 +163,7 @@ def summary_view(doc: DocView, state: SearchState, cited: set[int] | None = None
 def span_view(span: Span, tz: ZoneInfo, hit: Anchor | None = None, whole: bool = False) -> SpanView:
     """The raw an anchor points at; the hit's own stretch marked, or the whole span when it is the hit's message."""
     head = " - ".join(p for p in (span.kind, at(span.ts, tz), span.author or "", span.title or "") if p)
-    versions = f"{span.versions} versions; this is the latest" if span.versions > 1 else ""
+    versions = f"{span.versions} versions; this is the latest" if span.versions > 1 and span.note is None else ""
     segments: list[SegmentView] = []
     for seg in span.segments:
         mark = False
@@ -177,7 +179,7 @@ def span_view(span: Span, tz: ZoneInfo, hit: Anchor | None = None, whole: bool =
             n = first + i
             mark = hit is not None and hit.kind == "part" and hit.start <= n <= hit.last
             paras.append(ParagraphView(n, text, mark))
-    return SpanView(span.rid, span.anchor, head, versions, span.problem, segments, paras, whole)
+    return SpanView(span.rid, span.anchor, head, versions, span.problem, segments, paras, whole, span.note)
 
 
 def _around(state: SearchState, kind: str, view: PanelView) -> None:

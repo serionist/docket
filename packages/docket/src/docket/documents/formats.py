@@ -21,11 +21,10 @@ import logging
 import sys
 import warnings
 from collections.abc import Callable, Iterable, Iterator
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from functools import partial
 from importlib.metadata import version
-from typing import Literal
 from xml.etree.ElementTree import Element
 
 from defusedxml import DefusedXmlException
@@ -37,17 +36,8 @@ from pypdf import PasswordType, PdfReader
 from docket.documents import text as texts
 from docket.documents.limits import LIMITS, Limits, NotReadError, mib, over
 from docket.documents.ooxml import UNSAFE_XML, Package, damaged, local, namespace
+from docket.documents.parts import Extracted, Format, Part
 
-Format = Literal["pdf", "docx", "xlsx", "pptx", "md", "txt"]
-FORMATS: dict[str, Format] = {
-    ".pdf": "pdf",
-    ".docx": "docx",
-    ".xlsx": "xlsx",
-    ".pptx": "pptx",
-    ".md": "md",
-    ".txt": "txt",
-}
-PartKind = Literal["page", "slide", "sheet"]
 NO_TEXT = "No text on this page: a scan or an image, and Docket doesn't run OCR."
 NOTES = "Speaker notes:"
 
@@ -64,40 +54,9 @@ MC_FALLBACK = "{http://schemas.openxmlformats.org/markup-compatibility/2006}Fall
 R_ID = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
 DOCX_ENGINE = "docket-docx 1"
 PPTX_ENGINE = "docket-pptx 1"
-TEXT_ENGINE = "docket-text 1"
 # Every parse openpyxl makes, through defusedxml with no DTD: openpyxl calls it with its defaults, which take one.
 SAFE_FROMSTRING = partial(defused_fromstring, forbid_dtd=True)
 SAFE_ITERPARSE = partial(defused_iterparse, forbid_dtd=True)
-
-
-@dataclass(frozen=True)
-class Part:
-    kind: PartKind
-    n: int
-    # The part's own words: `page 3`, `slide 4`, `sheet Costs`; the record adds the file's name.
-    title: str
-    text: str
-    hidden: bool = False
-
-
-@dataclass(frozen=True)
-class Extracted:
-    """What a file says: one text for docx, md and txt, a part each for a pdf's pages, a deck's slides and a workbook's
-    sheets, and the people its core properties and comments name."""
-
-    format: Format
-    engine: str
-    text: str = ""
-    parts: list[Part] = field(default_factory=list[Part])
-    creator: str | None = None
-    last_modified_by: str | None = None
-    authors: list[str] = field(default_factory=list[str])
-    note: str | None = None
-
-
-def format_of(name: str) -> Format | None:
-    dot = name.rfind(".")
-    return FORMATS.get(name[dot:].lower()) if dot >= 0 else None
 
 
 def extract(data: bytes, fmt: Format, limits: Limits = LIMITS) -> Extracted:
@@ -165,8 +124,8 @@ def _check_text(extracted: Extracted, limits: Limits) -> None:
 
 
 def read_text(data: bytes, limits: Limits) -> Extracted:
-    decoded, note = texts.decode(data)
-    return Extracted("txt", TEXT_ENGINE, text=texts.join(texts.paragraphs(texts.blocks_of(decoded))), note=note)
+    text, note = texts.plain(data)
+    return Extracted("txt", texts.TEXT_ENGINE, text=text, note=note)
 
 
 # -- docx -----------------------------------------------------------------------------------------------------------

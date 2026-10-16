@@ -25,6 +25,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from docket.documents import records as documents
 from docket.errors import DocketError
 from docket.index import lookup
 from docket.index.lookup import ReadIndex
@@ -223,9 +224,16 @@ def _read(call: _Call, locator: str, view: View, around: int, rev: int | None) -
             anchor = _placed(timed[0], anchor)
             versions = call.raw.versions(timed[0])
             result.resolved = anchor.token[1:-1]
-    record = versions[-1]
+    record = documents.resolving(versions)
     if view != "summary":
         result.spans = _raw_spans(call.raw, record, anchor, len(versions), around)
+        if record is not versions[-1]:
+            # A folder record that went or wasn't read: its newest version first, then the last one with text, which
+            # anchors resolve on and which says so (DR-0491).
+            newest = versions[-1]
+            note = documents.gone_note(newest)
+            earlier = [s.model_copy(update={"note": note}) if s.rid == newest.rid else s for s in result.spans]
+            result.spans = [span(Anchor(newest.rid, "record"), newest, len(versions)), *earlier]
     if view != "raw":
         # A transcript is read as one with its recording: the recording a time was placed from (DR-0370), or the one
         # it is under (DR-0391). A recording read whole is read with the transcripts under it (DR-0440); a paragraph
@@ -336,7 +344,11 @@ def _verify_one(lookup: RawLookup, anchor: Anchor, covers: list[str], window: in
     versions = lookup.versions(rid)
     if not versions:
         return Span(rid=rid, anchor=anchor.token, problem=f"{rid} isn't in the raw log")
-    return span(anchor, versions[-1], len(versions), window=window, lookup=lookup)
+    record = documents.resolving(versions)
+    found = span(anchor, record, len(versions), window=window, lookup=lookup)
+    if record is not versions[-1]:
+        found = found.model_copy(update={"note": documents.gone_note(versions[-1])})
+    return found
 
 
 def _load(store: DocStore, kind: str, value: str, rev: int | None) -> ProcessedDoc:
@@ -399,6 +411,8 @@ def _read_doc(call: _Call, doc: ProcessedDoc, locator: str, view: View) -> ReadR
 
 def _raw_spans(lookup: RawLookup, record: RawRecord, anchor: Anchor, versions: int, around: int) -> list[Span]:
     if anchor.kind == "record" and around > 0 and not segments(record):
+        if documents.is_folder(record) and record.kind in documents.PART_KINDS:
+            return [_resolved(lookup, rid) for rid in _neighbour_parts(lookup, record.rid, around)]
         return [
             span(Anchor(r.rid, "record"), r, len(lookup.versions(r.rid))) for r in lookup.neighbours(record, around)
         ]
@@ -406,6 +420,24 @@ def _raw_spans(lookup: RawLookup, record: RawRecord, anchor: Anchor, versions: i
     if found.problem is not None:
         raise DocketError(found.problem)
     return [found]
+
+
+def _neighbour_parts(lookup: RawLookup, rid: str, around: int) -> list[str]:
+    """A page, slide or sheet and up to `around` of its file's parts either side, in the file's order: by kind, then
+    by number as a number, never by time or as text, so page 2's neighbours are pages 1 and 3."""
+    parts = sorted({r.rid for r in lookup.under(documents.file_of(rid))} | {rid}, key=documents.part_order)
+    at = parts.index(rid)
+    return parts[max(0, at - around) : at + around + 1]
+
+
+def _resolved(lookup: RawLookup, rid: str) -> Span:
+    """A record whole, at the version anchors on it resolve against, with the note when that isn't its newest."""
+    versions = lookup.versions(rid)
+    record = documents.resolving(versions)
+    found = span(Anchor(rid, "record"), record, len(versions))
+    if record is not versions[-1]:
+        found = found.model_copy(update={"note": documents.gone_note(versions[-1])})
+    return found
 
 
 def _on(call: _Call, rids: list[str], at: Anchor, around: int) -> tuple[list[CitingLine], list[LegacyRef]]:

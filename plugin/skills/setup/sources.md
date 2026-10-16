@@ -14,7 +14,7 @@ fills from a saved payload.
 | `calendar` | work | a calendar MCP server or connector (Microsoft 365, Google Calendar) | no |
 | `gmail` | mixed | a Gmail MCP server or connector | no |
 | `claude-sessions` | work | Claude Code's own session logs on this machine; no tool needed | no |
-| `documents` | work | a work folder of the user's own documents; no tool needed | no |
+| `documents` | work | a work folder of the user's own documents; no tool needed: a folder source, `--folder <folder>`, read by `docket scan` | no |
 
 - A source's tools go in `vault.yaml` by their own names, without the host's prefix: `mcp__plaud__list_files` is
   `list_files`, `mcp__plugin_slack_slack__slack_read_channel` is `slack_read_channel`. Pass the ones that return the

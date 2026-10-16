@@ -86,11 +86,16 @@ For each chosen source, with the vault named:
 ```
 docket source new <name> --vault <path> --sensitivity <work|mixed|private> --tool <tool>
 docket source new plaud --vault <path> --example
+docket source new documents --vault <path> --folder <folder>
 ```
 
 One `--tool` per tool. `--example` where sources.md lists a reference; its sensitivity and tools come with it. Each
 command prints the folder it wrote, under the project's `.claude/skills/sources/`. Claude Code doesn't load those
 folders as skills: whatever runs a source reads its `SKILL.md` by path.
+
+`--folder` adds a folder source instead: no skill or mapper, the folder in the repo or under the user's home. Ask
+which folder, and suggest `exclude` patterns for notes already imported. The user runs `docket scan documents`, then
+`docket staging promote`.
 
 ## The service
 
