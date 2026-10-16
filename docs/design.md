@@ -442,10 +442,18 @@ role: the customer's site lead
   (DR-0281).
 - Aliases match as written, and in their case forms in languages that give them (Hungarian, not English: `Mark`
   would match `marking`): `Acménél`, `Sammal`, and `Sammel` as Hungarian says a foreign name by its sound. A case
-  form counts beside one of the name's kept stem forms, in a chunk or a query: a stem form alone meets "the same",
-  which the Hungarian stemmer cuts to Sam's `sam`, and a case form alone `benne`, which folds like Ben's `benné`. One
-  the stemmer leaves whole (`Nimishsel`) counts on its own. A stem form under three letters, or one that floods the
-  index (`Rob` stems to `rob`, which `robot` gives too), is dropped and listed for curation (DR-0350).
+  form counts beside a stem form the stemmer cuts it to, with or without its accents (`Zoltannak` as chat writes it),
+  in a chunk or a query: a stem form alone meets "the same", which the Hungarian stemmer cuts to Sam's `sam`, and a
+  case form alone `benne`, which folds like Ben's `benné` and stems to `benn`. One the stemmer leaves whole
+  (`Nimishsel`) counts on its own. A stem form under three letters, or one that floods the index (`Rob` stems to
+  `rob`, which `robot` gives too), is dropped and listed for curation; the case forms count while any stem form of the
+  name is kept, so `Markkal`, cut to `mar`, counts while `már` floods it, and with every one dropped they don't. A
+  case form that floods the index is a common word and is dropped too: past ten times the name as written, as a stem
+  form, or past twice where every stem form it is cut to is short or common. That covers a short stem (`annál`, cut
+  to `an`, isn't Ann then; a colleague named more than half as often as the word still collides with it) and a
+  crowded one (`Markkal` counts while it is in at most twice Mark's bare chunks). One the stemmer leaves whole
+  (`Nimishsel`) is judged at ten times. The mention pass leaves out case forms no chunk holds, since stemming them
+  was most of its time (DR-0350).
 - Aliases marked `asr` also match vocabulary words within one edit of a word of 5 to 7 letters, two of 8 or more.
 - Aliases with `needs` count only when one of the named entities is in the same chunk.
 - A diarized speaker, or an author whose id an entity lists, counts as a mention of that person.

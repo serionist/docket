@@ -198,12 +198,18 @@ def test_hungarian_case_forms_let_a_foreign_name_sound_front() -> None:
 def test_only_languages_with_case_forms_match_aliases_on_stems() -> None:
     # Without case forms an alias matches as written only (DR-0350).
     assert [lang.code for lang in matching.alias_langs(Analyzer(resolve(["en", "hu", "de"])))] == ["hu"]
-    # Only the last word inflects.
+    # Only the last word inflects, and each case form comes with the stem form the stemmer cuts it to.
     analyzer = Analyzer(resolve(["en", "hu"]))
     cases = matching.cases_of(analyzer, ["northwind", "traders"], language("hu"))
-    assert cases.reached[0] == ("northwind", "tradersnak")
-    assert all(form[0] == "northwind" for form in (*cases.reached, *cases.alone))
+    assert cases.reached[0] == (("northwind", "tradersnak"), ("northwin", "traders"))
+    assert all(form[0] == "northwind" for form in (*(form for form, _ in cases.reached), *cases.alone))
     assert matching.cases_of(analyzer, ["mark"], language("en")) == matching.Cases((), ())
+    # Ödönnel and Ödönnél fold alike and are cut to two stem forms: the folded form is listed with each.
+    odon = matching.cases_of(analyzer, ["ödön"], language("hu"))
+    assert {stem for form, stem in odon.reached if form == ("odonnel",)} == {("od",), ("odon",)}
+    # Zoltánnak is cut to zolt, and Zoltannak, as chat writes it without accents, to zoltan: both are listed.
+    zoltan = matching.cases_of(analyzer, ["zoltán"], language("hu"))
+    assert {stem for form, stem in zoltan.reached if form == ("zoltannak",)} == {("zolt",), ("zoltan",)}
 
 
 def test_the_seeds_are_the_dative_stem_and_the_word() -> None:

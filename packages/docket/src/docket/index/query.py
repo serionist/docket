@@ -76,9 +76,10 @@ QUOTED = re.compile(r'"([^"]*)"')
 # The open ends of a range given only one side: far enough, and still printable in any time zone.
 FAR_PAST = datetime(1900, 1, 1, tzinfo=UTC)
 FAR_FUTURE = datetime(9000, 1, 1, tzinfo=UTC)
-# Query words, folded, to the entities they name; an alias's kept stem forms.
+# Query words, folded, to the entities they name; a case form, folded, to each entity, column and stem form the stemmer
+# cuts it to, one entry per stem form.
 Names = dict[tuple[str, ...], set[str]]
-Stems = frozenset[tuple[str, ...]]
+Reached = dict[tuple[str, ...], list[tuple[str, str, tuple[str, ...]]]]
 
 
 class EntityFound(BaseModel):
@@ -258,39 +259,45 @@ class _Search:
 
     # -- reading the query --------------------------------------------------------------------------------------
 
-    def _lookups(self) -> tuple[Names, Names, dict[tuple[str, ...], list[tuple[str, str, Stems]]], int]:
-        """Each alias as written, folded, to its entities, and its case forms in a language where one of its stem forms
-        is kept: those the stemmer leaves whole to their entities, the others to their entities, columns and kept stem
-        forms, which a query word must stem to as well (DR-0350). Aliases with `needs` left out, they count only in
-        chunks."""
+    def _lookups(self) -> tuple[Names, Names, Reached, int]:
+        """Each alias as written, folded, to its entities, and its case forms but the common ones in a language where
+        one of its stem forms is kept: those the stemmer leaves whole to their entities, the others to their entities,
+        columns and the stem forms each is cut to, one of which a query word must stem to as well (DR-0350). Aliases
+        with `needs` left out, they count only in chunks."""
         lookup: Names = {}
-        kept: dict[tuple[str, str, str], set[tuple[str, ...]]] = {}
-        for entity, col, term, how, text in self.conn.execute(
-            "SELECT t.entity, t.col, t.term, t.how, a.text FROM alias_terms t JOIN aliases a ON a.entity = t.entity "
-            "AND a.ordinal = t.ordinal WHERE t.word = -1 AND t.how IN ('written', 'stem') AND a.needs = '[]'"
+        kept: dict[tuple[str, int, str, str], None] = {}
+        common: set[tuple[str, int, tuple[str, ...]]] = set()
+        for entity, ordinal, col, term, how, text in self.conn.execute(
+            "SELECT t.entity, t.ordinal, t.col, t.term, t.how, a.text FROM alias_terms t JOIN aliases a "
+            "ON a.entity = t.entity AND a.ordinal = t.ordinal WHERE t.word = -1 AND a.needs = '[]' "
+            "AND (t.how IN ('written', 'stem') OR (t.col = 'folded' AND t.how = 'common'))"
         ):
             if how == "written":
                 lookup.setdefault(tuple(term.split()), set()).add(entity)
+            elif how == "common":
+                common.add((entity, ordinal, tuple(term.split())))
             else:
-                kept.setdefault((entity, col, text), set()).add(tuple(term.split()))
+                kept[(entity, ordinal, col, text)] = None
         alone: Names = {}
-        reached: dict[tuple[str, ...], list[tuple[str, str, Stems]]] = {}
-        for (entity, col, text), stems in kept.items():
+        reached: Reached = {}
+        for entity, ordinal, col, text in kept:
             cases = _cases(text, self.alias_langs[col])
             for form in cases.alone:
-                alone.setdefault(form, set()).add(entity)
-            for form in cases.reached:
-                reached.setdefault(form, []).append((entity, col, frozenset(stems)))
+                if (entity, ordinal, form) not in common:
+                    alone.setdefault(form, set()).add(entity)
+            for form, stem in cases.reached:
+                if (entity, ordinal, form) not in common:
+                    reached.setdefault(form, []).append((entity, col, stem))
         return lookup, alone, reached, max((len(form) for form in lookup), default=0)
 
     def _names(self, run: list[str]) -> set[str]:
         """The entities a run of query words names: an alias as written, or in one of its case forms as a chunk must
-        hold it. `same` stems like Sam and is none of his case forms; `benne` folds like Ben's `benné` and stems to
-        `benn`, none of his stem forms."""
+        hold it, stemming to a stem form the case form is cut to. `same` stems like Sam and is none of his case forms;
+        `benne` folds like Ben's `benné` and stems to `benn`, where `benné` is cut to `ben`."""
         folded = tuple(fold(t) for t in run)
         hits = self.lookup.get(folded, set()) | self.alone.get(folded, set())
-        for entity, col, stems in self.reached.get(folded, []):
-            if tuple(self.analyzer.stem(t, self.alias_langs[col]) for t in run) in stems:
+        for entity, col, stem in self.reached.get(folded, []):
+            if tuple(self.analyzer.stem(t, self.alias_langs[col]) for t in run) == stem:
                 hits.add(entity)
         return hits
 
