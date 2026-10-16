@@ -659,15 +659,16 @@ Phase 0's plugin, by piece:
 | Piece | What |
 |---|---|
 | the MCP entry | the server `docket`, http to `127.0.0.1` at `DOCKET_PORT` or 8741, the token from `docket service token --header`; its tools show as `mcp__plugin_docket_docket__<tool>` (DR-0160) |
-| the status hook | SessionStart runs `docket hook session-start`: the service's state, the vault's, the port; Claude gets every line, the user the ones that need them (DR-0161, DR-0163) |
+| the status hook | SessionStart runs `docket hook session-start`: the service's state, the vault's, the port, and for Claude a curate round due; Claude gets every line, the user the ones that need them (DR-0161, DR-0163, DR-0474) |
 | `recall` | the rules above as a method, with the read-only tools pre-approved and the command line when the service is down (DR-0164) |
 | `setup` | DR-0103's round: sources first, the vault named on every command, each override asked (DR-0165) |
+| `curate` | a round in chat over `docket curate`: the cards in one table with Claude's call and why, each decided only on the user's answer for it; seeding from a people directory or glossary in `seeding.md`; only `status`, `show` and `log` pre-approved (DR-0472) |
 | `cuts` | the owner's words for a held recording's left-out stretches placed as time ranges, in a proposals file, and the release handed to the owner's own terminal; only `docket hold list` and `show` pre-approved (DR-0207) |
 | the capture hook | PostToolUse for `mcp__.*` runs `docket hook post-tool-use`: binds a run, posts the captures an open run of this session wants, one line to Claude each (DR-0242) |
 
 - The plugin holds no scripts: its hook and token helper run the `docket` command, which must be on PATH (DR-0162).
 - A plugin can't ship a `CLAUDE.md`, so the rules live in the MCP server's instructions and the recall skill.
-- Sync, tasks and curate come later; a sync starts today with `run_open` (DR-0251).
+- Sync and tasks come later; a sync starts today with `run_open` (DR-0251).
 
 **Claude inside the service** (phase 3) does processing, not harvesting: notes and minutes, digests, briefs,
 proposals, meeting prep, draft replies, through the Claude Agent SDK loading the same plugin. It runs on the user's

@@ -8,6 +8,9 @@ Unreleased in the same PR.
 
 ### Added
 
+- `/docket:curate` in the plugin: Claude runs a curate round with you, the cards in one table with its call and
+  why, and decides each card only on your answer; it seeds entities from a people directory or glossary you point
+  at on your yes. The session-start status tells Claude when a round is due, a week after the last.
 - Curate rounds: `docket curate round` mines at most 15 cards from what the index holds (names your labels,
   notes and mail spell, joined with how transcripts misheard them), ranked by what search misses; `show`,
   `accept`, `reject`, `lift` and `status` work through them, every decision in the curate log, and a round

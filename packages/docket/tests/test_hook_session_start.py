@@ -1,10 +1,12 @@
 """`docket hook session-start`: the service's line, the vault's and the port, as Claude Code's SessionStart JSON;
-shown to the user only when a line needs them, never a record's content, never a git process, never a failure."""
+shown to the user only when a line needs them, never a record's content, never a git process, never a failure; and
+for Claude alone, whether a curate round is due."""
 
 from __future__ import annotations
 
 import json
 import subprocess
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -14,9 +16,12 @@ from docket_testkit import host_repo, make_config
 
 from docket import hooks, userconfig
 from docket.cli import app, main
+from docket.curate import batch
 from docket.errors import DocketError
 from docket.service import install
 from docket.service.install import ServiceStatus
+from docket.vault import curatelog
+from docket.vault.curatelog import Line
 from docket.vault.vault import Vault
 
 
@@ -153,6 +158,58 @@ def test_docket_s_own_error_is_said(tmp_path: Path) -> None:
     assert "service must be a map" in start(status())["systemMessage"]
 
 
+def an_entity(vault: Vault) -> None:
+    path = vault.root / "entities" / "person" / "cleo-test.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("id: cleo-test\ntype: person\nname: {en: Cleo Test}\n", encoding="utf-8")
+
+
+def a_round(vault: Vault, days_ago: int) -> None:
+    """A round started that many days ago on this machine, with a card decided one minute in and one three in."""
+    begun = batch.now_utc() - timedelta(days=days_ago)
+    round_ = batch.round_id(begun, "test-box")
+    for n, minutes in enumerate((1, 3), start=1):
+        at = begun + timedelta(minutes=minutes)
+        line = Line.model_validate({
+            "schema_version": 1, "id": f"{at:%Y%m%dT%H%M%S}-test-box-{n}", "op": "reject", "at": at,
+            "machine": "test-box", "by": "user", "via": "cli", "key": f"new:-:name {n}", "round": round_,
+        })  # fmt: skip
+        path = vault.root / line.rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8", newline="\n") as log:
+            log.write(line.text() + "\n")
+
+
+def curate_lines(out: dict[str, Any]) -> list[str]:
+    return [line for line in context(out).splitlines() if line.startswith("curate:")]
+
+
+def test_a_round_due_tells_claude_alone_with_the_minutes(tmp_path: Path) -> None:
+    vault = folder_vault(tmp_path)
+    assert curate_lines(start(status())) == []
+    an_entity(vault)
+    due = "; mention it once, and run /docket:curate only when asked"
+    assert curate_lines(start(status())) == [f"curate: a round is due (none yet){due}"]
+    a_round(vault, 10)
+    out = start(status())
+    year, week, _ = (batch.now_utc() - timedelta(days=10)).isocalendar()
+    since = f"the last started 10 days ago, 3 min of review in {year}-W{week:02d}"
+    assert curate_lines(out) == [f"curate: a round is due ({since}){due}"]
+    assert "systemMessage" not in out
+    a_round(vault, 2)
+    assert curate_lines(start(status())) == []
+
+
+def test_a_curate_log_that_can_t_be_read_is_said(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    folder_vault(tmp_path)
+
+    def linked(root: Path) -> curatelog.LogRead:
+        raise DocketError("entities/_log is a link")
+
+    monkeypatch.setattr(curatelog, "read_all", linked)
+    assert start(status())["systemMessage"].splitlines()[-1] == "curate: entities/_log is a link"
+
+
 def test_control_characters_are_escaped() -> None:
     out = start(status(vault="D:/x\x1b]52;y", vault_problem="bad\x07"))
     text = json.dumps(out)
@@ -169,6 +226,8 @@ def test_no_git_process_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, st
         vault = Vault.init(tmp_path / "vault", make_config(), "test-box")
         userconfig.set_default_vault(vault.root)
     stage_files(vault, 2)
+    an_entity(vault)
+    a_round(vault, 10)
     started: list[Any] = []
     real_run, real_popen = subprocess.run, subprocess.Popen
 
@@ -191,6 +250,7 @@ def test_no_git_process_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, st
     monkeypatch.setattr(subprocess, "Popen", Popen)
     out = start(status())
     assert "2 record(s) wait in staging" in out["systemMessage"]
+    assert "curate: a round is due" in context(out)
     assert started == []
 
 
