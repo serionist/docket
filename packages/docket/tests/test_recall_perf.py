@@ -1,8 +1,8 @@
 """A read on a big source: by its place in the index it doesn't grow with the source's raw (#76, DR-0446).
 
 The vault holds about 50 MB of invented Plaud raw in one source, 5 MB under coverage, where nothing is timed. Each
-read is timed by place and with the source loaded whole, the route a read takes when the index isn't current for it,
-and both give the same result. Wall times are asserted only when no tracer runs.
+read is timed by place, best of five, and once with the source loaded whole, the route a read takes when the index
+isn't current for it, and both give the same result. Wall times are asserted only when no tracer runs.
 """
 
 from __future__ import annotations
@@ -38,10 +38,10 @@ def big(tmp_path_factory: pytest.TempPathFactory) -> tuple[Vault, str]:
     return vault, recording
 
 
-def best(read: Callable[[], object]) -> tuple[float, object]:
+def best(read: Callable[[], object], times: int = TIMES) -> tuple[float, object]:
     out: list[float] = []
     result: object = None
-    for _ in range(TIMES):
+    for _ in range(times):
         started = time.perf_counter()
         result = read()
         out.append(time.perf_counter() - started)
@@ -72,7 +72,8 @@ def test_a_read_by_place_doesn_t_grow_with_its_source(big: tuple[Vault, str], mo
         by_place, placed = best(lambda read=read: read(True))
         with monkeypatch.context() as m:
             m.setattr(ReadIndex, "raw_current", lambda self, source: False)
-            loading, whole = best(lambda read=read: read(False))
+            # Once: it is printed, never asserted, and each costs a whole load of the source.
+            loading, whole = best(lambda read=read: read(False), times=1)
         assert placed == whole, name
         print(f"{name:22} by place {by_place * 1000:6.1f} ms, loaded {loading * 1000:7.1f} ms")
         if not traced():

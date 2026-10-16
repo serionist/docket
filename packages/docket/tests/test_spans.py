@@ -12,11 +12,12 @@ from docket_testkit import (
     SIDE,
     THREAD,
     VENDOR,
-    build_index_vault,
     copy_vault,
+    digest,
+    index_template,
     make_record,
     plaud_records,
-    template_with,
+    shared,
     write_raw,
 )
 
@@ -206,22 +207,28 @@ def put_run(root: Path, source: str, name: str, records: list[RawRecord], newlin
     return path
 
 
-def build_places_vault(root: Path) -> Vault:
-    """The index fixture, a recording kept as Plaud keeps one, a message in four runs whose order the path's text
-    reverses, one version in two machines' runs, and the thread with two messages in one millisecond."""
-    vault = build_index_vault(root)
+def add_places_runs(vault: Vault) -> None:
+    """A recording kept as Plaud keeps one, a message in four runs whose order the path's text reverses, one version in
+    two machines' runs, and the thread with two messages in one millisecond, committed."""
     put_run(vault.root, "plaud", "2026-10-14T0900-test-box.jsonl", plaud_records("transaction", "polish"))
     for n, name in enumerate(ORDER_RUNS, start=1):
         same = [make_record(rid=TWICE, container="chat:C0ORD", text="the same everywhere")] if n in (1, 4) else []
         put_run(vault.root, "chat", name, [make_record(rid=ORDERED, container="chat:C0ORD", text=f"v{n}"), *same])
     put_run(vault.root, "chat", "2026-10-14T1100-test-box.jsonl", window_records())
     vault.commit([], "Raw: by place")
-    return vault
 
 
 @pytest.fixture(scope="module")
 def places_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    return template_with(tmp_path_factory, build_places_vault)
+    """The index fixture's template, copied, with the runs above: built once per session."""
+    base = index_template(tmp_path_factory)
+
+    def build(folder: Path) -> Path:
+        vault = copy_vault(base, folder)
+        add_places_runs(vault)
+        return vault.root
+
+    return shared(build, "places-" + digest(str(base)), tmp_path_factory)
 
 
 @pytest.fixture
