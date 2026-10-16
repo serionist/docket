@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0500
+    title: docket search asks the running service when it serves the vault with the same embedder, and searches by itself otherwise
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#110"]
+    description: "docket search updates the index itself as before, then asks the running service when service.json names the same vault, this machine's token reads, and /api/models says the service's worker is up with the embedder the command would use, or both have models off. It sends /api/search the flags as given and prints the answer with the same renderer, so the output is the same either way for the same index; the service keeps its worker and reranker loaded, so on a GPU machine the hits are reranked and the \"not reranked\" line goes. Anything else (no service, another vault, no token, another embedder or a worker that is down, any answer but a result within 40 s: the service's 30 s wait for its own update, and 10 s) and the command searches by itself and says nothing; a refusal comes from the command's own search, in its own words. --no-update and --no-models search by themselves, since the service's search updates the index first and uses its models."
+    not_chosen:
+      - "Leave the index update to the service: its search waits 30 s for an update and then refuses, where the command waits out a rebuild and says it rebuilt."
+      - "Send --no-update and --no-models to the service: two parameters on /api/search for two flags whose point is to skip what the service always does."
+      - "Print the service's refusal: it names the tool's parameters (since, not --since)."
+      - "Ask the service whatever its models: one started before docket models install answers without the vectors the command has."

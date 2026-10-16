@@ -21,7 +21,7 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 | `docket doc redact` | redact the docs already stored with the settings as they are now, as their next revs in one commit; once after upgrading, and again after turning a rule on or adding a pattern or a keyword; `--dry-run` first; a doc it can't redact is named and left, with exit 1 |
 | `docket doc read <locator>` | a doc, or a record and the doc lines that point at it; `--view raw` or `both` for the raw, `--around` for minutes, paragraphs or messages either side, `--rev` for an earlier revision |
 | `docket doc verify <doc>` | each line of a doc next to the raw its anchors point at; `--line` for chosen lines |
-| `docket search <query>` | hits grouped by recording or thread, each with its locator and the group's summary; `--since`, `--until`, `--source`, `--person`, `--entity`, `-k`; it updates the index first unless `--no-update` |
+| `docket search <query>` | hits grouped by recording or thread, each with its locator and the group's summary; `--since`, `--until`, `--source`, `--person`, `--entity`, `-k`; it updates the index first unless `--no-update`, then asks the running service when it serves the vault, and searches by itself otherwise |
 | `docket index rebuild` | build this machine's index from the vault, from scratch |
 | `docket index update` | index what changed since; it rebuilds when it has to |
 | `docket index status` | whether the index is there and current, its languages, counts, what is new, and its problems |
@@ -340,7 +340,7 @@ Who embeds what:
 |---|---|
 | the service | what each index update added, in the background, a few seconds for a sync run's chunks on a CPU |
 | `docket index update`, `docket index rebuild` | what has no vector, with a progress line; when the service runs for the vault with the same model it leaves that to the service |
-| `docket search`, `docket eval` | only the query, on a worker they start for themselves (a second or two, about 8 s for `docket eval` on a GPU, where its reranker runs); `--no-models` skips it |
+| `docket search`, `docket eval` | only the query: `docket search` through the service when it serves the vault with the same model and its worker is up; otherwise, and always for `docket eval`, on a worker they start for themselves (a second or two, about 8 s for `docket eval` on a GPU, where its reranker runs); `--no-models` skips it |
 
 A first pass over a year of chunks takes a minute or two on a GPU and half an hour or more on a CPU; search uses what is
 there meanwhile, and a rebuild keeps every vector it had. When the worker is down or slow, search answers with keywords
@@ -357,7 +357,8 @@ The reranker:
 - The install times it on this machine. A GPU, or a CPU of about 8 cores or more, reranks within 0.6 s and the
   reranker is on; on a slower CPU it stays off, and the install and `docket models status` say the time.
   `docket models install --no-reranker` frees its files.
-- `docket search` reranks on the CPU only; on a GPU machine the service reranks, and the command's line says so.
+- `docket search` reranks as the service does when the service answers it. On its own (no service for the vault,
+  `--no-update`) it reranks on the CPU only; on a GPU machine it goes without, and its line says so.
   `docket eval` reranks where the service does, with no time limit, and says how many questions went without it.
 
 ## Entities

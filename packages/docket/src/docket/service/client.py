@@ -44,10 +44,12 @@ def port() -> int:
     return userconfig.service().port or DEFAULT_PORT
 
 
-def call(method: str, path: str, *, token: str | None = None, at: int | None = None) -> Answer | None:
-    """A request to the service on this machine; None when nothing answers. Proxies are never used: a corporate
-    proxy from the environment would carry a loopback request, and the token, off the machine."""
-    return _send(method, path, b"" if method == "POST" else None, token=token, at=at, timeout=TIMEOUT_SECONDS)
+def call(
+    method: str, path: str, *, token: str | None = None, at: int | None = None, timeout: float = TIMEOUT_SECONDS
+) -> Answer | None:
+    """A request to the service on this machine; None when nothing answers in time. Proxies are never used: a
+    corporate proxy from the environment would carry a loopback request, and the token, off the machine."""
+    return _send(method, path, b"" if method == "POST" else None, token=token, at=at, timeout=timeout)
 
 
 def call_json(

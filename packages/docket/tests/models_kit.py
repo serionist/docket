@@ -8,6 +8,7 @@ A pair's score is its two vectors' dot product, unless the text carries a plante
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import os
@@ -22,8 +23,9 @@ from typing import Any
 
 import pytest
 
+from docket import userconfig
 from docket.index.vectors import load_extension
-from docket.models import config
+from docket.models import catalogue, config, runtime
 from docket.models.catalogue import RERANK_BATCH, Embedder, ModelFile, Reranker
 from docket.models.client import Skip, Worker
 from docket.models.provider import Models
@@ -224,3 +226,43 @@ def make_env(device: config.Device, **marker: Any) -> None:
         "python": config.python_version(), **marker,
     }  # fmt: skip
     (env / config.MARKER).write_text(json.dumps(found), encoding="utf-8")
+
+
+# -- models chosen on this machine, as the CLI and the service read them ----------------------------------------------
+
+GPU_RERANKER = dataclasses.replace(FAKE_RERANKER, name="fake-gpu-reranker", device="cuda")
+
+
+def choose(block: dict[str, Any]) -> None:
+    """The models block of the user's config; the rest, such as the service's token store, stays."""
+    userconfig.set_section("models", block)
+
+
+def choose_fake(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(catalogue.EMBEDDERS, FAKE.name, FAKE)
+    choose({"device": "cpu", "embedder": FAKE.name})
+
+
+def timing(reranker: Reranker, seconds: float | None = 0.42, why: str | None = None) -> dict[str, Any]:
+    return {
+        "name": reranker.name,
+        "revision": reranker.revision,
+        "pairs": reranker.pairs,
+        "seconds": seconds,
+        "why": why,
+    }
+
+
+def rerank_worker(monkeypatch: pytest.MonkeyPatch, **knobs: Any) -> None:
+    def worker(choice: config.Choice, device: str, rerank: dict[str, Any] | None = None) -> Worker:
+        return Worker(fake_command(**({"reranker": rerank, **knobs} if rerank is not None else {})))
+
+    monkeypatch.setattr(runtime, "worker_for", worker)
+
+
+def with_reranker(monkeypatch: pytest.MonkeyPatch, reranker: Reranker = FAKE_RERANKER, seconds: float = 0.42) -> None:
+    monkeypatch.setitem(catalogue.EMBEDDERS, FAKE.name, FAKE)
+    monkeypatch.setitem(catalogue.RERANKERS, reranker.name, reranker)
+    choose({"device": reranker.device, "embedder": FAKE.name, "reranker": reranker.name})
+    make_env(reranker.device, reranker=timing(reranker, seconds))
+    monkeypatch.setattr(runtime, "missing_files", lambda model: [])

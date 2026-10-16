@@ -12,9 +12,11 @@ from collections.abc import Callable, Generator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, cast
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 import typer
+from pydantic import ValidationError
 
 from docket import __version__, index, questions, recall, render, userconfig
 from docket.curate import batch as curate
@@ -31,6 +33,7 @@ from docket.plaintext import printable
 from docket.service import client
 from docket.service.platforms import Installer
 from docket.service.token import Tokens
+from docket.service.writer import UPDATE_WAIT_SECONDS
 from docket.sources import release, scaffold
 from docket.sources.contract import Manifest
 from docket.sources.ingest import IngestReport, ingest_run
@@ -100,6 +103,9 @@ app.add_typer(curate_app, name="curate")
 
 # How often the embedding pass says how far it got.
 PROGRESS_SECONDS = 10.0
+# How long docket search waits for the service: its own wait for an index update, then the search. Past it the
+# command searches by itself.
+SERVICE_SEARCH_SECONDS = UPDATE_WAIT_SECONDS + 10.0
 VaultOption = Annotated[Path | None, typer.Option("--vault", help="The vault; default: DOCKET_VAULT, here, ./vault")]
 NoModels = Annotated[bool, typer.Option("--no-models", help="Keyword search alone: start no models' worker.")]
 
@@ -962,17 +968,25 @@ def _query_models(no_models: bool, *, measure: bool = False) -> Generator[Models
             models.close()
 
 
-def _service_models(vault: Vault | None = None) -> dict[str, Any] | None:
-    """The running service's models in its own words, when it runs for this vault (any vault without one); None when
-    no Docket service answers with this machine's token."""
+def _service_token(vault: Vault | None = None) -> str | None:
+    """This machine's token, when the running service recorded itself for this vault (any vault without one); None
+    when it didn't or the token can't be read."""
     if vault is not None:
         found = client.recorded()
         named = found.get("vault") if found else None
         if not isinstance(named, str) or Path(named).resolve() != vault.root.resolve():
             return None
     try:
-        token = _tokens().read()
+        return _tokens().read()
     except DocketError:
+        return None
+
+
+def _service_models(vault: Vault | None = None) -> dict[str, Any] | None:
+    """The running service's models in its own words, when it runs for this vault (any vault without one); None when
+    no Docket service answers with this machine's token."""
+    token = _service_token(vault)
+    if token is None:
         return None
     answer = client.call("GET", "/api/models", token=token, at=client.port())
     return answer.body if answer is not None and answer.status == 200 else None
@@ -1095,19 +1109,52 @@ def search_command(
             for problem in report.problems:
                 if problem.startswith("vault.yaml"):
                     say(f"! {problem}")
-    with _query_models(no_models) as models:
-        result = index.search(
-            v,
-            " ".join(query),
-            people=person or [],
-            entities=entity or [],
-            sources=source or [],
-            since=index.parse_when(since, "--since"),
-            until=index.parse_when(until, "--until"),
-            k=k,
-            models=models,
-        )
+    text, people, entities, sources = " ".join(query), person or [], entity or [], source or []
+    start, end = index.parse_when(since, "--since"), index.parse_when(until, "--until")
+    # The service's search brings the index up to date and uses its models, so --no-update and --no-models stay here.
+    asked = {"query": text, "people": people, "entities": entities, "sources": sources, "since": since, "until": until}
+    result = None if no_update or no_models else _service_search(v, {**asked, "k": k})
+    if result is None:
+        with _query_models(no_models) as models:
+            result = index.search(
+                v, text, people=people, entities=entities, sources=sources, since=start, until=end, k=k, models=models
+            )
     say_all(render.search(result, ZoneInfo(v.config.owner.time_zone)))
+
+
+def _service_search(vault: Vault, asked: dict[str, Any]) -> index.SearchResult | None:
+    """The running service's answer, when it serves this vault, answers with this machine's token and searches with
+    the embedder this command would (DR-0500): it keeps its worker and its reranker loaded. None for anything else, a
+    refusal included, and the command searches by itself as before, so an error reads as it always did."""
+    token = _service_token(vault)
+    if token is None:
+        return None
+    at = client.port()
+    status = client.call("GET", "/api/models", token=token, at=at)
+    if status is None or status.status != 200 or not _same_embedder(status.body):
+        return None
+    given = {key: value for key, value in asked.items() if value is not None}
+    path = f"/api/search?{urlencode(given, doseq=True)}"
+    answer = client.call("GET", path, token=token, at=at, timeout=SERVICE_SEARCH_SECONDS)
+    if answer is None or answer.status != 200:
+        return None
+    try:
+        return index.SearchResult.model_validate(answer.body)
+    except ValidationError:
+        return None
+
+
+def _same_embedder(status: dict[str, Any]) -> bool:
+    """Whether the service's models, in its own words, search as this command's would: both off, or its worker up
+    with the same embedder. A service started before an install or a remove, or whose worker is down, would answer
+    without the vectors this command has, or with vectors it hasn't."""
+    models = open_models(start=False, rerank=False)
+    if isinstance(models, Off):
+        return status.get("state") == "off"
+    try:
+        return status.get("state") == "up" and status.get("model") == models.embedder.name
+    finally:
+        models.close()
 
 
 @app.command("eval")
