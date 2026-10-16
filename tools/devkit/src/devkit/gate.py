@@ -9,8 +9,9 @@ Lanes:
 
 In a lane with tests, the tests start first and the other steps run beside them; each run prints its slowest tests. In a
 lane without coverage (os) the timed tests (marked `perf`) run after the rest, alone and one at a time, once the other
-steps are done, and the run prints what they printed: their times. Under coverage the index's time limits are off, so
-the full lane keeps them in its one run.
+steps are done, and the run prints what they printed: their times. The two runs share one templates folder, so the
+timed run reuses the vaults the parallel run built, and the timed run has a temp folder of its own. Under coverage the
+index's time limits are off, so the full lane keeps them in its one run.
 
 `gate check-text <file>` checks a text that is about to be posted (an issue or PR body) for private names and tool
 attribution.
@@ -26,6 +27,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from collections.abc import Callable, Sequence
@@ -282,6 +284,8 @@ def slowest(lines: list[str]) -> list[str]:
 
 # The marker of a test that asserts an elapsed time (DR-0430).
 PERF = "perf"
+# Where the app's test kit builds its shared templates, named for both runs of a lane without coverage (DR-0492).
+TEMPLATES_ENV = "DOCKET_TEST_TEMPLATES"
 # pytest's rules: "==== PASSES ====" opens a section, "____ test ____" and "---- Captured stdout call ----" its parts.
 _RULE = re.compile(r"^([=_-])\1+ .+ \1+$")
 # The last line under -q, which follows the PASSES section with no rule: "2 passed, 9 deselected in 41.20s (0:00:41)".
@@ -325,9 +329,15 @@ def step_tests(ctx: Ctx) -> Outcome:
         # Without coverage the timed tests assert their limits, so they leave the parallel run and run alone after it;
         # under coverage the index's limits are off and they stay in it (DR-0430).
         cmd += ["-m", f"not {PERF}"]
+        # A folder of the step's own, made empty: one templates folder for both runs, so the timed run finds the vaults
+        # the parallel run built and only times, and the timed run's temp folder, so it takes no numbered folder of
+        # pytest's and never ends by deleting the parallel run's, as pytest does with a session three back (DR-0492).
+        with tempfile.TemporaryDirectory(prefix="docket-tests-", ignore_cleanup_errors=True) as at:
+            env[TEMPLATES_ENV] = str(Path(at, "templates"))
+            code, lines = _run(ctx, cmd, env=env)
+            alone = [*pytest, "-m", PERF, "-raP", f"--basetemp={Path(at, 'timed')}"]
+            return _alone_after(ctx, code, lines, alone, env)
     code, lines = _run(ctx, cmd, env=env)
-    if not covered:
-        return _alone_after(ctx, code, lines, [*pytest, "-m", PERF, "-raP"], env)
     if code != 0:
         return Outcome.fail(*lines[-80:])
     measures = coverage.measure(json.loads(report.read_text(encoding="utf-8")))

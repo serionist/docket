@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,7 @@ from docket_testkit import (
     notes_template,
     plaud_records,
     read_route,
+    shared,
     template_vault,
 )
 
@@ -47,9 +49,32 @@ def plain(imported: Path, tmp_path: Path) -> Vault:
 
 
 @pytest.fixture(params=READ_ROUTES)
-def vault(plain: Vault, request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> Vault:
+def route(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> str:
     read_route(request.param, monkeypatch)
+    return request.param
+
+
+@pytest.fixture
+def vault(plain: Vault, route: str) -> Vault:
     return plain
+
+
+@pytest.fixture
+def plaud(imported: Path, tmp_path: Path, route: str) -> Callable[..., Vault]:
+    """The imported vault with the recording in Plaud's shape (with_plaud), built once per set of blocks: each test
+    gets a copy, as it would get the imported vault."""
+
+    def build(base: Path, blocks: tuple[str, ...]) -> Path:
+        shutil.copytree(imported / "vault", base / "vault")
+        with_plaud(Vault.open(base / "vault"), *blocks)
+        return base / "vault"
+
+    def copy(*blocks: str) -> Vault:
+        built = shared(lambda base: build(base, blocks), f"recall-legacy-plaud-{'+'.join(blocks) or 'none'}")
+        shutil.copytree(built, tmp_path / "vault")
+        return Vault.open(tmp_path / "vault")
+
+    return copy
 
 
 def test_an_old_path_reads_its_legacy_note(vault: Vault) -> None:
@@ -129,8 +154,10 @@ def with_plaud(vault: Vault, *blocks: str) -> None:
 @pytest.mark.parametrize(
     ("locator", "doc"), [(f"{SYNC}@10:42", SYNC_ID), (f"plaud:{SYNC}@10:42", SYNC_ID), (f"r:{PLAUD}@10:42", None)]
 )
-def test_a_time_on_a_recording_is_read_on_its_transcript(vault: Vault, locator: str, doc: str | None) -> None:
-    with_plaud(vault, "transaction_polish")
+def test_a_time_on_a_recording_is_read_on_its_transcript(
+    plaud: Callable[..., Vault], locator: str, doc: str | None
+) -> None:
+    vault = plaud("transaction_polish")
     both = recall.read(vault, locator, view="both")
     assert (both.resolved, both.problems) == (f"r:{POLISHED}@10:42", [])
     assert [s.rid for s in both.spans] == [POLISHED]
@@ -140,8 +167,10 @@ def test_a_time_on_a_recording_is_read_on_its_transcript(vault: Vault, locator: 
 
 
 @pytest.mark.parametrize("locator", [f"r:{PLAUD}@10:42", f"r:{POLISHED}@10:42", f"{SYNC}@10:42", f"plaud:{SYNC}@10:42"])
-def test_a_recording_s_time_lists_the_lines_on_the_whole_recording_on_every_read(vault: Vault, locator: str) -> None:
-    with_plaud(vault, "transaction_polish")
+def test_a_recording_s_time_lists_the_lines_on_the_whole_recording_on_every_read(
+    plaud: Callable[..., Vault], locator: str
+) -> None:
+    vault = plaud("transaction_polish")
     whole = "recording-note:2026-10-14-whole"
     about, both = f"- About the call. [r:{PLAUD}]", f"- Ten million. [r:{PLAUD}] [r:{POLISHED}@10:42]"
     recall.doc_put(vault, note(whole, covers=[PLAUD, POLISHED], lines=[about, both]))
@@ -155,9 +184,9 @@ def test_a_recording_s_time_lists_the_lines_on_the_whole_recording_on_every_read
 
 
 @pytest.mark.parametrize("locator", [f"r:{PLAUD}", PLAUD, f"[r:{PLAUD}]"])
-def test_a_recording_read_whole_lists_the_lines_on_its_transcripts(vault: Vault, locator: str) -> None:
+def test_a_recording_read_whole_lists_the_lines_on_its_transcripts(plaud: Callable[..., Vault], locator: str) -> None:
     # A search hit on the recording, as the web panel opens it, shows the minutes anchored on its transcripts.
-    with_plaud(vault, "transaction", "transaction_polish")
+    vault = plaud("transaction", "transaction_polish")
     whole, said = "recording-note:2026-10-14-whole", "recording-note:2026-10-14-said"
     about, both = f"- About the call. [r:{PLAUD}]", f"- Ten million. [r:{PLAUD}] [r:{POLISHED}@10:42]"
     recall.doc_put(vault, note(whole, covers=[PLAUD, POLISHED], lines=[about, both]))
@@ -174,8 +203,8 @@ def test_a_recording_read_whole_lists_the_lines_on_its_transcripts(vault: Vault,
     assert [ref.id for ref in found.legacy] == [SYNC_ID]
 
 
-def test_a_recording_s_other_records_and_paragraphs_stay_its_own(vault: Vault) -> None:
-    with_plaud(vault, "transaction_polish")
+def test_a_recording_s_other_records_and_paragraphs_stay_its_own(plaud: Callable[..., Vault]) -> None:
+    vault = plaud("transaction_polish")
     summary = f"{PLAUD}/summary"
     recall.doc_put(vault, note("brief:2026-10-14-summary", covers=[summary], lines=[f"- Agreed. [r:{summary}]"]))
     # Only a transcript under the recording is read with it, never its vendor summary.
@@ -187,8 +216,8 @@ def test_a_recording_s_other_records_and_paragraphs_stay_its_own(vault: Vault) -
     assert recall.read(vault, f"r:{PLAUD}#1").lines == []
 
 
-def test_two_transcripts_of_a_recording_are_named_to_choose_from(vault: Vault) -> None:
-    with_plaud(vault, "transaction", "transaction_polish")
+def test_two_transcripts_of_a_recording_are_named_to_choose_from(plaud: Callable[..., Vault]) -> None:
+    vault = plaud("transaction", "transaction_polish")
     options = f"r:{PLAUD}/transaction@10:42, r:{POLISHED}@10:42"
     two = recall.read(vault, f"{SYNC}@10:42", view="both")
     assert two.problems == [f"{SYNC_ID} covers 2 transcripts; read one of {options}"]
@@ -198,8 +227,8 @@ def test_two_transcripts_of_a_recording_are_named_to_choose_from(vault: Vault) -
     assert recall.read(vault, f"r:{POLISHED}@10:42", view="raw").spans[0].rid == POLISHED
 
 
-def test_a_recording_with_no_transcript_under_it_places_no_time(vault: Vault) -> None:
-    with_plaud(vault)
+def test_a_recording_with_no_transcript_under_it_places_no_time(plaud: Callable[..., Vault]) -> None:
+    vault = plaud()
     none = recall.read(vault, f"{SYNC}@10:42")
     assert none.problems == [
         f"{SYNC_ID} covers no recording with a transcript in the raw log, so @10:42 can't be placed; "
@@ -210,9 +239,9 @@ def test_a_recording_with_no_transcript_under_it_places_no_time(vault: Vault) ->
 
 
 @pytest.mark.parametrize("locator", [f"r:{POLISHED}", POLISHED, f"r:{POLISHED}@10:42"])
-def test_a_transcript_s_read_names_what_covers_its_recording(vault: Vault, locator: str) -> None:
+def test_a_transcript_s_read_names_what_covers_its_recording(plaud: Callable[..., Vault], locator: str) -> None:
     # A search hit on the transcript, as the web panel opens it, names the legacy note and the lines on the recording.
-    with_plaud(vault, "transaction_polish")
+    vault = plaud("transaction_polish")
     whole = "recording-note:2026-10-14-whole"
     about = f"- About the call. [r:{PLAUD}]"
     recall.doc_put(vault, note(whole, covers=[PLAUD], lines=[about]))
@@ -249,9 +278,9 @@ def test_a_transcript_s_read_names_what_covers_its_recording(vault: Vault, locat
     ],
 )
 def test_a_time_on_a_recording_is_refused_naming_its_transcripts(
-    vault: Vault, blocks: list[str], time: str, hint: str
+    plaud: Callable[..., Vault], blocks: list[str], time: str, hint: str
 ) -> None:
-    with_plaud(vault, *blocks)
+    vault = plaud(*blocks)
     doc_id = "recording-note:2026-10-14-on-the-recording"
     doc = note(doc_id, covers=[PLAUD], lines=[f"- Ten million. {time}"])
     with pytest.raises(DocRefusedError) as refused:

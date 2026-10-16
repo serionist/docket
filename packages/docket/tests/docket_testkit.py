@@ -189,6 +189,10 @@ def fixture_vault(tmp_path: Path) -> Vault:
 # Copies of a template are what tests write; a reader's caches in a template are not a write.
 _CACHES = re.compile(r"(-wal|-shm|-journal|\.pyc)$")
 _FACTORY: list[pytest.TempPathFactory] = []
+# The folder the gate names for both pytest runs of a lane without coverage, so the timed run finds the templates the
+# parallel run built and only times (DR-0492). The gate makes it empty for each run, so no template outlives the code
+# that built it.
+TEMPLATES_ENV = "DOCKET_TEST_TEMPLATES"
 
 
 def use_factory(factory: pytest.TempPathFactory) -> None:
@@ -202,6 +206,12 @@ def shared_root(factory: pytest.TempPathFactory) -> Path:
     return base.parent if os.environ.get("PYTEST_XDIST_WORKER") else base
 
 
+def templates_folder(factory: pytest.TempPathFactory) -> Path:
+    """Where the session's templates are built: the folder the gate names, or the session's own shared folder."""
+    named = os.environ.get(TEMPLATES_ENV)
+    return Path(named) if named else shared_root(factory) / "templates"
+
+
 def digest(*parts: str) -> str:
     return hashlib.sha256("\0".join(parts).encode()).hexdigest()[:12]
 
@@ -211,7 +221,7 @@ def _template(build: Callable[[Path], Path], key: str, factory: pytest.TempPathF
     a lock, the tests' isolation and a git home of its own; the others wait and reuse it (DR-0220)."""
     # A readable tail, short enough for Windows' path limit, and the whole key's digest, so two keys never share one.
     name = re.sub(r"[^A-Za-z0-9_.-]", "-", key)[-32:].lstrip(".-") + "-" + digest(key)
-    templates = shared_root(factory or _FACTORY[0]) / "templates"
+    templates = templates_folder(factory or _FACTORY[0])
     templates.mkdir(parents=True, exist_ok=True)
     folder, done = templates / name, templates / f"{name}.done"
     with FileLock(str(templates / f"{name}.lock")):
@@ -301,10 +311,9 @@ def manifest(folder: Path) -> dict[str, list[Any]]:
     return found
 
 
-def template_changes(root: Path) -> list[str]:
-    """What tests wrote into the session's templates: each path added, removed or changed since its build."""
+def template_changes(templates: Path) -> list[str]:
+    """What tests wrote into the templates in this folder: each path added, removed or changed since its build."""
     problems: list[str] = []
-    templates = root / "templates"
     for recorded in sorted(templates.glob("*.manifest.json")) if templates.is_dir() else []:
         folder = templates / recorded.name.removesuffix(".manifest.json")
         before, after = json.loads(recorded.read_text(encoding="utf-8")), manifest(folder)

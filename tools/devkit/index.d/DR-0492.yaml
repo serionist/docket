@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0492
+    title: The two test runs of a lane without coverage share one templates folder, and the timed run finds its vaults built
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#116"]
+    description: "In a lane without coverage (gate os) the tests step makes one empty folder of its own and removes it at its end: both pytest runs build their shared templates in its templates/ folder, named to them in DOCKET_TEST_TEMPLATES, instead of in each session's own temp folder (DR-0220), and the timed run takes its temp folder there with --basetemp. The timed tests' vaults (test_index_perf's 100,000 chunks and their vectors, test_recall_perf's 50 MB of raw, indexed) are shared templates that an untimed test asks for too, so xdist's workers build them in the parallel run, beside the rest, and the timed run, alone, finds them built and only times (DR-0430). On main the timed run built them one at a time before timing anything and then, at its end, deleted the parallel run's temp folder (about 175,000 files and 100,000 folders on Windows CI): pytest deletes the numbered folder three sessions back, and the tests' own pytest subprocesses take numbers between the two runs. That was 147 to 302 s of Windows CI's tests step, against 20 to 40 s of timing. With a temp folder it is given, the timed run takes no number and deletes nothing; the parallel run keeps pytest's numbered folder and its retention, as on main. Only the timed tests carry perf now; test_index_perf's two untimed checks move to the parallel run, which DR-0430 kept out of it only because they would have built the vault twice. A timed test reads its vault where it was built, after reading the index file through once and one untimed search, so the first timed query doesn't pay for pages the parallel run wrote minutes before and the OS has since dropped; the template check at each session's end walks the named folder, so a write into a vault the parallel run built fails the timed run. The limits and the assertions don't change. The full lane keeps its one covered run, building its templates in its own session, as before."
+    binds:
+      - A timed test's vault is a shared template an untimed test also asks for, so the parallel run builds it; only a test that asserts an elapsed time carries perf.
+      - The tests step's folder is new and empty for each step, never reused, so no template outlives the code that built it.
+    not_chosen:
+      - "Templates kept between runs, keyed by a hash of the code that builds them: every file under packages/docket/src, the test kit, the test modules, uv.lock and the Python version would all be in the key, a PR changes some of them, so CI would rebuild on almost every run, and a key that missed one file would let a stale vault pass a broken change (DR-0220 turned it down for the same reason)."
+      - "A pytest hook that builds the perf fixtures in the parallel run whatever its tests ask for: the same result, but a fixture would be built by a hook nobody reads next to the test."
+      - "Building the fixtures in a step of their own before the timed run: still serial, still before anything is timed."

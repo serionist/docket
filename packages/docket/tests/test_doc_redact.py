@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import configure, copy_vault, git, note, sh, template_vault
+from docket_testkit import configure, copy_vault, git, note, sh, shared, template_vault
 
 from docket import index, recall, render
 from docket.cli import main
@@ -23,20 +23,29 @@ MINUTES_ID = "minutes:2026-10-14-supplier-call"
 MINUTES_PATH = "processed/minutes/2026/10/2026-10-14-supplier-call.md"
 
 
-@pytest.fixture(scope="module")
-def template(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    return template_vault(tmp_path_factory)
-
-
-@pytest.fixture
-def vault(template: Path, tmp_path: Path) -> Vault:
+def two_docs_put_with_credentials_off(fixture: Path, base: Path) -> Path:
     """A vault holding two docs put while credentials redaction was off, then turned back on."""
-    root = copy_vault(template, tmp_path).root
+    root = copy_vault(fixture, base).root
     configure(root, credentials=False)
     recall.doc_put(Vault.open(root), note(lines=[f"- the wifi password: {SECRET} @12:08"]))
     recall.doc_put(Vault.open(root), note(MINUTES_ID, lines=[f"- the door password: {SECRET}x @14:30"]))
     configure(root, credentials=True)
-    return Vault.open(root)
+    return root
+
+
+@pytest.fixture(scope="module")
+def plain(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return template_vault(tmp_path_factory)
+
+
+@pytest.fixture(scope="module")
+def template(plain: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return shared(lambda base: two_docs_put_with_credentials_off(plain, base), "doc-redact", tmp_path_factory)
+
+
+@pytest.fixture
+def vault(template: Path, tmp_path: Path) -> Vault:
+    return copy_vault(template, tmp_path)
 
 
 def redact(vault: Vault, *flags: str) -> int:
@@ -206,6 +215,6 @@ def test_a_vault_in_a_folder_says_whose_history_holds_the_old_text() -> None:
     )
 
 
-def test_a_vault_with_no_processed_docs_has_nothing_to_redact(tmp_path: Path, template: Path) -> None:
-    empty = copy_vault(template, tmp_path)
+def test_a_vault_with_no_processed_docs_has_nothing_to_redact(tmp_path: Path, plain: Path) -> None:
+    empty = copy_vault(plain, tmp_path)
     assert DocStore(empty).redact_all().docs == []

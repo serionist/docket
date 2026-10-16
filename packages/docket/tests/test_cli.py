@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from docket_testkit import host_repo, make_config, make_record, sh
+from docket_testkit import copied, host_repo, make_config, make_record, sh
 
 from docket import __version__, userconfig
 from docket.cli import main
@@ -332,10 +332,16 @@ def test_the_console_speaks_utf8_through_a_pipe(tmp_path: Path) -> None:
 
 
 def staging_vault(tmp_path: Path) -> tuple[Path, Gate]:
-    path = tmp_path / "vault"
-    flags = ["chat=work" if flag == "chat" else flag for flag in FLAGS]
-    main(["init", "--yes", "--path", str(path), "--remote", "none", *flags])
+    """A vault `docket init` made with chat as work: a copy of one built once per session."""
+    path = copied(tmp_path, _init_staging_vault, "cli-staging-vault")
     return path, Gate(Vault.open(path))
+
+
+def _init_staging_vault(folder: Path) -> Path:
+    path = folder / "vault"
+    flags = ["chat=work" if flag == "chat" else flag for flag in FLAGS]
+    assert main(["init", "--yes", "--path", str(path), "--remote", "none", *flags]) == 0
+    return path
 
 
 def call(n: int, text: str) -> RawRecord:

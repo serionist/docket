@@ -3,6 +3,9 @@
 The vault holds about 50 MB of invented Plaud raw in one source, 5 MB under coverage, where nothing is timed. Each
 read is timed by place, best of five, and once with the source loaded whole, the route a read takes when the index
 isn't current for it, and both give the same result. Wall times are asserted only when no tracer runs.
+
+Only the timed test carries `perf`. The vault is a shared template the untimed test asks for too, so in a lane
+without coverage the parallel run builds it and the timed run, alone, only times (DR-0492).
 """
 
 from __future__ import annotations
@@ -12,14 +15,13 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from docket_testkit import BIG_NOTE, BIG_OLD, big_raw, traced
+from docket_testkit import BIG_NOTE, BIG_OLD, big_raw, shared, traced
 
 from docket import index, recall
 from docket.index.lookup import ReadIndex, open_read
+from docket.vault.docstore import DocStore
 from docket.vault.spans import RawLookup
 from docket.vault.vault import Vault
-
-pytestmark = pytest.mark.perf
 
 MEGABYTES = 50
 TRACED_MEGABYTES = 5
@@ -28,14 +30,26 @@ SECONDS = 0.1
 TIMES = 5
 
 
-@pytest.fixture(scope="module")
-def big(tmp_path_factory: pytest.TempPathFactory) -> tuple[Vault, str]:
+def indexed_big_raw(root: Path, megabytes: float) -> Path:
     started = time.monotonic()
-    vault, recording = big_raw(tmp_path_factory.mktemp("big"), TRACED_MEGABYTES if traced() else MEGABYTES)
+    vault, _ = big_raw(root, megabytes)
     written = time.monotonic() - started
     index.update(vault)
     print(f"\nwrote the raw in {written:.1f} s, indexed it in {time.monotonic() - started - written:.1f} s")
-    return vault, recording
+    return vault.root
+
+
+@pytest.fixture(scope="module")
+def big(tmp_path_factory: pytest.TempPathFactory) -> tuple[Vault, str]:
+    """The indexed vault, read where it was built: a read writes nothing, and the template check says if one did."""
+    started = time.monotonic()
+    megabytes = TRACED_MEGABYTES if traced() else MEGABYTES
+    root = shared(lambda folder: indexed_big_raw(folder, megabytes), f"big-raw-{megabytes}", tmp_path_factory)
+    vault = Vault.open(root)
+    note = DocStore(vault).get(BIG_NOTE)
+    assert note is not None
+    print(f"\n{megabytes} MB of raw, indexed, ready in {time.monotonic() - started:.1f} s")
+    return vault, note.meta.covers[0]
 
 
 def best(read: Callable[[], object], times: int = TIMES) -> tuple[float, object]:
@@ -57,6 +71,7 @@ def rid_check(vault: Vault, rid: str, place: bool) -> bool:
             found.close()
 
 
+@pytest.mark.perf
 def test_a_read_by_place_doesn_t_grow_with_its_source(big: tuple[Vault, str], monkeypatch: pytest.MonkeyPatch) -> None:
     vault, recording = big
     megabytes = sum(p.stat().st_size for p in (vault.root / "raw" / "plaud").rglob("*.jsonl")) / 1e6
