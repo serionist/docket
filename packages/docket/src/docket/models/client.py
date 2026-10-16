@@ -113,6 +113,7 @@ class Worker:
         self._turn = threading.Condition()
         self._queries = 0
         self._stderr = bytearray()
+        self._stderr_reader: threading.Thread | None = None
         # A query passed its time and the worker hasn't answered since: it is working through something long.
         self.busy = False
 
@@ -142,7 +143,8 @@ class Worker:
         self._proc = proc
         pipes = cast(tuple[IO[bytes], IO[bytes]], (proc.stdout, proc.stderr))
         threading.Thread(target=self._read, args=(proc, pipes[0]), daemon=True).start()
-        threading.Thread(target=self._keep_stderr, args=(pipes[1],), daemon=True).start()
+        self._stderr_reader = threading.Thread(target=self._keep_stderr, args=(pipes[1],), daemon=True)
+        self._stderr_reader.start()
         answer = self._ask(proc, {"op": "hello"}, self.hello_seconds)
         if answer is None:
             code = proc.poll()
@@ -197,6 +199,7 @@ class Worker:
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
+        self._drain_stderr()
 
     def _fail(self, proc: subprocess.Popen[bytes], why: str) -> None:
         if self._proc is proc:
@@ -207,6 +210,12 @@ class Worker:
             proc.kill()
         proc.wait()
         _close_stdin(proc)
+        self._drain_stderr()
+
+    def _drain_stderr(self) -> None:
+        """Wait for the stderr reader to take the stopped worker's last lines, so the error that follows shows them."""
+        if self._stderr_reader is not None:
+            self._stderr_reader.join(STOP_SECONDS)
 
     def _read(self, proc: subprocess.Popen[bytes], pipe: IO[bytes]) -> None:
         with pipe:
