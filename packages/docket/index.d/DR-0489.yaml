@@ -6,7 +6,7 @@ decisions:
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#69"]
-    description: "An attachment becomes a record <mail rid>/att<n> of kind attachment, its pages, slides or sheets under it as a folder file's are, its container the mail and its thread the mail's thread, built by the same docket.documents code in the same child with the same limits. A mapper never extracts: it names the attachment, and the core reads the bytes. How a mail run hands the bytes over is settled with the first mail source."
+    description: "An attachment becomes a record <mail rid>/att<n> of kind attachment, its pages, slides or sheets under it as a folder file's are, its container the mail and its thread the mail's thread, read by the same docket.documents readers in the same child with the same limits. A mapper never extracts: it names the attachment, and the core reads the bytes. How a mail run hands the bytes over is settled in an issue of its own, with the first mail source."
     binds: [A mapper never parses a document.]
     not_chosen:
       - "A mapper importing docket.documents: against DR-0119, and every mapper would be tied to Docket's version."

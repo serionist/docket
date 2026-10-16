@@ -1,13 +1,16 @@
 decisions:
   - id: DR-0488
-    title: A promotion writes each source's records in run files of at most 16 MiB
+    title: A promotion writes each source's records in the order they were staged, in run files of at most 16 MiB
     status: proposed
     at: "2026-10-16"
     by: Claude (autonomy grant)
     cost: medium
-    sources: ["#69"]
-    description: When a source's ready records pass 16 MiB of JSON lines, the promotion writes them in order into several run files, each named as a run of its own by DR-0014's rule (the minute, the machine, a counter), and commits them together. A record is never split. The names and the layout of raw don't change, so an older Docket reads them; this refines DR-0014's one file per run for large promotions.
-    binds: ["No run file Docket writes passes 16 MiB, unless one record alone does."]
+    sources: ["#69", "#107"]
+    description: Promotion writes a source's ready records in staged_at order, so the last version staged of a record is the last in raw, which the index takes as current. When they pass 16 MiB of JSON lines, it writes them in that order into several run files, each named as a run of its own by DR-0014's rule (the minute, the machine, a counter), and commits them together. A record is never split. The names and the layout of raw don't change, so an older Docket reads them; this refines DR-0014's one file per run for large promotions.
+    binds:
+      - No run file Docket writes passes 16 MiB, unless one record alone does.
+      - Of two staged versions of one record, the one staged later is written later.
     not_chosen:
+      - "The staging key's order, a sha256 of rid and version (DR-0024): the older version can land last in raw."
       - "One file per promotion: a first scan of a large folder writes a file past GitHub's 100 MB limit."
       - "Splitting in the scan: promotion is the user's, and one promote would still join every batch in one file."

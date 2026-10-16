@@ -1,14 +1,16 @@
 decisions:
   - id: DR-0483
-    title: "The core sets each format's text: a sheet's row n is its paragraph n, and ts is the file's modification time"
+    title: "The core sets each format's text: paragraphs apart by blank lines, a sheet's row n as paragraph n, ts the modification time"
     status: proposed
     at: "2026-10-16"
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#69"]
-    description: "pdf: each page's text layer, and a page without one says so. pptx: each slide's shapes, groups and tables in order, then its speaker notes. xlsx: each sheet's saved cell values, dates as ISO dates, one line per row from 1 to the last with a value, starting with its own row number (41: a | b), an empty row as 41:, a cell's line breaks as spaces, rows numbered by the sheet's r attribute; so paragraph n is row n, and #41-80 is Costs!41:80. docx: body paragraphs and tables in order, content controls, text boxes, field results, tracked insertions in and deletions out, then headers and footers, footnotes, endnotes and comments. md and txt: as written, read as UTF-8, UTF-16 by its BOM, else Windows-1252, which the record says. All text is NFC with LF line ends and no control characters but the tab; a table row is one line, its cells joined by ' | '. ts is the file's modification time; engine names the reader and its version; native holds the bytes' sha256 and size, the format, the part count, and capped, problem, gone, moved_to and moved_from when they apply."
+    description: "Paragraphs are separated by a blank line: a docx paragraph or table row, a slide's shape, a sheet's row. pdf: each page's text layer, and a page without one says so. pptx: each slide's shapes, groups and tables in order, then its speaker notes. xlsx: each sheet's saved cell values, dates as ISO dates, a paragraph per row from 1 to the last with a value, starting with its own row number (41: a | b), an empty row as 41:, a cell's line breaks as spaces, rows numbered by the sheet's r attribute; so paragraph n is row n, and #41-80 is Costs!41:80. docx: body paragraphs and tables in order, content controls, text boxes, field results, tracked insertions in and deletions out, then headers and footers, footnotes, endnotes and comments. md and txt: as written, read as UTF-8, UTF-16 by its BOM, else Windows-1252, which the record says. A paragraph over 500 words is split at sentence ends into paragraphs of at most 500 words, else at the last space before the 500th word; a sheet's row is never split. All text is NFC with LF line ends and no control characters but the tab; a table row's cells are joined by ' | '. ts is the file's modification time; a gone version's ts, and that of a file or part coming back after one, is the scan's time (DR-0487). engine names the reader and its version. native holds the bytes' sha256 and size, the format, the part count, each record's text_sha256 (its text as extracted, before redaction), the people the file names (creator and last_modified_by from docProps/core.xml, and a docx's comment authors), and problem, gone, moved_to and moved_from when they apply."
     binds:
       - "A later reader keeps a sheet's row n as its paragraph n: anchors into sheets lean on it."
+      - The people a file names are in native, so the never-store people list reaches them.
     not_chosen:
       - "A docx cut at its headings: rids that change whenever a heading does."
       - "A sheet without its empty rows: rows and paragraphs would differ."
+      - "A line per row with no blank line between: the lines make one paragraph, and a sheet one chunk."

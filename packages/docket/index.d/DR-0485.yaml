@@ -1,12 +1,15 @@
 decisions:
   - id: DR-0485
-    title: Document text is extracted in a child process with a time limit, a memory cap and size caps, and a file that fails is a record
+    title: Document text is extracted in a child process with limits, and a file is stored whole or not at all
     status: proposed
     at: "2026-10-16"
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#69"]
-    description: "The scan starts python -I -X utf8 -m docket.documents.child in a temp folder with the mapper runner's stripped environment and hands it one file at a time. The child reads the file once, hashes those bytes, extracts from them and sends a part a line. Limits: 120 s a file, after which the parts sent so far are kept and the record says where it stopped; 2 GiB of memory where the system enforces it (RLIMIT_AS on Linux, a job object on Windows); 64 MiB a file; 1 MiB of text a part and 4 MiB a file; 2,000 pages, 1,000 slides, 100 sheets, and 10,000 rows and 256 columns a sheet; in a zip, 10,000 members, 64 MiB each and 256 MiB together as declared, and 100 to 1 for a member over 1 MiB; every XML part through defusedxml, and no DTD. A file that fails is a record that says why, with an exception's type and never its message; a crash or a stop starts a new child for the next file. A file the system won't let the scan read now is skipped without a record."
-    binds: [No document is parsed in the service's or the CLI's own process.]
+    description: "The scan starts python -I -X utf8 -m docket.documents.child in a temp folder with the mapper runner's stripped environment, a fresh one every 100 files, and hands it one file at a time. The child reads the file once, hashes those bytes, extracts from them and sends a part a line; the scan keeps a file's parts only once the child says the file is done. Limits: 120 s a file; 2 GiB of memory per child where the system enforces it, RLIMIT_AS on Linux and on Windows a job object with JOB_OBJECT_LIMIT_PROCESS_MEMORY and JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, the child assigned to it before the first file is sent; 64 MiB a file; 2,000 pages, 1,000 slides, 100 sheets, and 10,000 rows and 256 columns a sheet; 1 MiB of text a part and 4 MiB a file; in a zip, 10,000 members, 64 MiB each and 256 MiB together as declared, and 100 to 1 for a member over 1 MiB; every XML part through defusedxml, and no DTD. A file past a cap, damaged or protected gets one record saying why, with no parts and no text, and is read again only when its bytes change; an exception's type is named, never its message. A file stopped at the time limit, or whose child crashed, keeps its last version and gets no record; it is tried once more on the same bytes, and a second stop or crash makes the record. A file the system won't let the scan read now is skipped without a record."
+    binds:
+      - No document is parsed in the service's or the CLI's own process.
+      - A file is stored whole or not at all, so the never-store check covers all the text it has.
     not_chosen:
       - "Extraction in the scan's own process with a timer: a thread can't be stopped, and a crash or a memory blow-up takes the service with it."
+      - "Text kept up to a cap: the never-store check would miss what lies past it."
