@@ -396,3 +396,19 @@ def test_an_edit_not_committed_yet_is_committed_on_its_own_first(tmp_path: Path)
     # With nothing uncommitted, there is nothing to take in.
     again = settings.add_listed(vault, "people", "Cleo Test", shown=shown(vault))
     assert again.written.taken_in is None
+
+
+def test_a_change_s_commit_that_fails_puts_vault_yaml_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    vault = make_vault(tmp_path)
+    before = text(vault)
+    plain = Vault.commit
+
+    def change_fails(self: Vault, paths: list[str], message: str) -> str | None:
+        if message == settings.TAKEN_IN:
+            return plain(self, paths, message)
+        raise OSError("the disk is full")
+
+    monkeypatch.setattr(Vault, "commit", change_fails)
+    with pytest.raises(OSError, match="the disk is full"):
+        settings.add_listed(vault, "people", "Dora Example", shown=shown(vault))
+    assert text(vault) == before

@@ -5,6 +5,7 @@ bodies alone, never in a URL, the log or a commit message. Invented people only:
 from __future__ import annotations
 
 import logging
+import sqlite3
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,6 +19,7 @@ from staging_kit import signed_in
 from starlette.testclient import TestClient
 
 from docket import index
+from docket.errors import DocketError
 from docket.service import logs
 from docket.service import state as service_state
 from docket.vault.config import CONFIG_FILE, VaultConfig
@@ -25,6 +27,7 @@ from docket.vault.gate import Gate
 from docket.vault.records import RawRecord
 from docket.vault.settings import file_hash
 from docket.vault.vault import Vault
+from docket.web import settings as settings_routes
 from docket.web.templating import PAGE_CSP
 
 SAME = {"Origin": OURS, "Sec-Fetch-Site": "same-origin"}
@@ -264,4 +267,26 @@ def test_a_post_without_a_session_is_refused_and_a_get_is_405(client: TestClient
         ADD, data={"list": "people", "value": NAME, "shown": shown(vault), "confirmed": "1"}, headers=SAME
     )
     assert answer.status_code == 401
+    assert commits(vault) == 0
+
+
+def test_what_the_index_can_t_say_is_said_and_the_question_still_asked(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def none(*_args: object) -> object:
+        raise DocketError("there is no index yet; run docket index rebuild")
+
+    def busy(*_args: object) -> object:
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(settings_routes, "reach", none)
+    assert "can't be counted: there is no index yet." in said(ask(client, NAME))
+    monkeypatch.setattr(settings_routes, "reach", busy)
+    text = said(ask(client, NAME))
+    assert "can't be counted: the index is busy being brought up to date" in text
+    assert "It drops 1 record waiting in staging now." in text
+
+
+def test_a_body_that_isn_t_a_form_is_refused(client: TestClient, vault: Vault) -> None:
+    assert client.post(ADD, json={"list": "people", "value": NAME}, headers=SAME).status_code == 415
     assert commits(vault) == 0
