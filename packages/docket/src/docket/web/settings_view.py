@@ -23,14 +23,18 @@ from docket.index.query import Reach
 from docket.models.report import Report
 from docket.vault import redaction
 from docket.vault.config import SourceConfig, VaultConfig
-from docket.vault.settings import LISTS, RANK, item_line, key_line, pattern_block, source_block
+from docket.vault.settings import BUILTIN_RULES, LISTS, RANK, item_line, key_line, pattern_block, source_block
 from docket.web.commands import filled
 
 PATH = "/settings"
 ADD = "/settings/never-store"
 SHOWS = ("lists",)
 # What the last post did, by kind and count only: never a value (DR-0512).
-DONE = re.compile(r"^listed-(people|containers|keywords)-([01])$")
+DONE = re.compile(
+    r"^(?:listed-(?P<list>people|containers|keywords)-(?P<count>[01])"
+    r"|(?P<rule>credentials|phone|pattern)-on"
+    r"|(?P<source>[a-z0-9][a-z0-9._-]*)-(?P<act>mixed|private|off))$"
+)
 # Past this share of the index's chunks, a keyword's confirm view warns that it takes work too.
 BROAD = 0.05
 
@@ -137,6 +141,8 @@ class Change:
     where: str
     effect: str
     looser: bool
+    # What a page's button posts for it, for a change pages make (DR-0506); None for one named only.
+    act: str | None = None
 
 
 @dataclass(frozen=True)
@@ -180,6 +186,8 @@ class Rule:
     looser: bool
     # The vault.yaml line the command would print, for a file Docket won't rewrite.
     line: str | None
+    # Off, and named so a page can turn it on: a built-in rule, or a pattern whose name is its own.
+    can_turn_on: bool = False
 
 
 @dataclass(frozen=True)
@@ -236,9 +244,9 @@ def build(facts: Facts, state: SettingsState) -> SettingsView:
     )
     if facts.docket_form:
         form = (
-            "vault.yaml is as Docket writes it: a never-store value is added here, and every other change below is a "
-            "command to run or a line to change by hand. vault.yaml is committed, so a change reaches your other "
-            "machines with the vault."
+            "vault.yaml is as Docket writes it: a change that keeps more out has its button here, and every change "
+            "that lets more in is a command to run or a line to change by hand. vault.yaml is committed, so a change "
+            "reaches your other machines with the vault."
         )
     else:
         form = (
@@ -267,11 +275,24 @@ def build(facts: Facts, state: SettingsState) -> SettingsView:
 
 
 def done_line(done: str | None, config: VaultConfig) -> str | None:
-    """What the last post did, in words: from `done`, which holds a list and a count, never a value."""
+    """What the last post did, in words: from `done`, which holds a list and a count, a rule turned on, or a source
+    and what became of it; never a value or a pattern's name. A rule's and a source's say how things stand, which is
+    as true after a post sent twice."""
     found = DONE.match(done or "")
     if found is None:
         return None
-    name, count = found.group(1), found.group(2)
+    if found.group("rule"):
+        what = {"credentials": "Credentials", "phone": "Phone numbers", "pattern": "Your pattern's matches"}
+        on = redaction.TURNED_ON[:1].upper() + redaction.TURNED_ON[1:]
+        return f"{what[found.group('rule')]} are redacted from now on. {on}."
+    if found.group("source"):
+        source = found.group("source")
+        return {
+            "private": f"{source} is private: nothing from it is stored, and what waited from it in staging is gone.",
+            "mixed": f"{source} is mixed: each record from it waits on the Staging page for work or private.",
+            "off": f"{source} is off: its syncs and scans stop, and what waits from it stays.",
+        }[found.group("act")]
+    name, count = found.group("list"), found.group("count")
     if count == "0":
         return f"The {name} list held that already, so nothing changed."
     travels = "your own push" if config.storage == "folder" else "docket sync"
@@ -305,11 +326,17 @@ def _source(facts: SourceFacts) -> SourceView:
             if level != entry.sensitivity:
                 looser = RANK[level] < RANK[entry.sensitivity]
                 effect = SENSITIVITY_EFFECT[(entry.sensitivity, level)]
-                changes.append(Change(f"Make it {level}", key_line("sensitivity", level), where, effect, looser))
+                act = None if looser else level
+                changes.append(Change(f"Make it {level}", key_line("sensitivity", level), where, effect, looser, act))
     if entry.enabled:
         changes.append(
             Change(
-                "Turn it off", key_line("enabled", False), where, "its syncs and scans stop; what waits stays", False
+                "Turn it off",
+                key_line("enabled", False),
+                where,
+                "its syncs and scans stop; what waits stays",
+                looser=False,
+                act="off",
             )
         )
     else:
@@ -341,6 +368,7 @@ def _rules(config: VaultConfig, vault: str, docket_form: bool, unfilled: list[tu
         (redaction.PHONE, False, settings.phone, redaction.BUILTIN[redaction.PHONE]),
     ]
     found += [(p.name, True, p.enabled, p.pattern) for p in settings.patterns]
+    names = [p.name for p in settings.patterns]
     rules: list[Rule] = []
     for name, pattern, on, what in found:
         rule = filled(name, "pattern", unfilled) if pattern else name
@@ -352,7 +380,8 @@ def _rules(config: VaultConfig, vault: str, docket_form: bool, unfilled: list[tu
         line = None if docket_form else redaction.by_hand(name, not on, pattern)
         named = f'"{rule}"' if pattern else rule
         command = f'docket redaction set {named} {turn} --vault "{vault}"'
-        rules.append(Rule(name, pattern, on, what, command, note, looser=on, line=line))
+        own = not pattern or (names.count(name) == 1 and name not in BUILTIN_RULES)
+        rules.append(Rule(name, pattern, on, what, command, note, looser=on, line=line, can_turn_on=not on and own))
     return rules
 
 
@@ -456,5 +485,40 @@ def build_confirm(
         docket_form=docket_form,
         shown=shown,
         line=item_line(value),
+        stale=stale,
+    )
+
+
+@dataclass(frozen=True)
+class SourceConfirm:
+    """Making a source private, asked once more (DR-0509): what it drops now, what it stops, and the form that makes
+    it, or the line to change when vault.yaml isn't Docket's own."""
+
+    source: str
+    lines: list[str]
+    docket_form: bool
+    shown: str
+    line: str
+    stale: bool
+
+
+def build_source_confirm(
+    source: str, *, staged: int, shown: str, docket_form: bool, stale: bool = False, takes_in: bool = False
+) -> SourceConfirm:
+    lines = [
+        f"It drops {_n(staged, 'record')} of {source} waiting in staging now."
+        if staged
+        else f"Nothing of {source} waits in staging now."
+    ]
+    lines.append(f"From the next sync, nothing from {source} is stored; its records already stored stay in raw.")
+    lines.append("Making it mixed or work again is a line to change in vault.yaml by hand: it lets more in.")
+    if takes_in:
+        lines.append("Your edit of vault.yaml that isn't committed yet goes in first, as a commit of its own.")
+    return SourceConfirm(
+        source=source,
+        lines=lines,
+        docket_form=docket_form,
+        shown=shown,
+        line=key_line("sensitivity", "private"),
         stale=stale,
     )

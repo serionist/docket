@@ -474,3 +474,89 @@ def test_a_committed_vault_yaml_that_is_gone_or_doesn_t_read_takes_nothing_in(tm
         settings.add_listed(vault, "people", "Dora Example", shown=shown(vault))
     assert text(vault) == good
     assert sh(vault.root, "git", "rev-parse", "HEAD") == head
+
+
+# -- PR 3: a rule on, a source stricter or off ------------------------------------------------------------------------
+
+
+def rules_vault(tmp_path: Path) -> Vault:
+    config = make_config()
+    config.sources["memo"] = SourceConfig()
+    config.sources["documents"] = SourceConfig(folder="docs")
+    config.redaction = Redaction(
+        patterns=[
+            RedactionPattern(name="ticket", pattern="TCK", enabled=False),
+            RedactionPattern(name="twin", pattern="A", enabled=False),
+            RedactionPattern(name="twin", pattern="B", enabled=False),
+            RedactionPattern(name="phone", pattern="P", enabled=False),
+        ]
+    )
+    return empty_vault(tmp_path, config)
+
+
+def test_a_rule_is_turned_on_and_never_off(tmp_path: Path) -> None:
+    vault = rules_vault(tmp_path)
+    done = settings.rule_on(vault, "credentials", shown=shown(vault))
+    assert done == Rewritten()
+    with pytest.raises(DocketError, match="no redaction rule by that name, or more than one"):
+        settings.rule_on(vault, "phone", shown=shown(vault))
+    on = settings.rule_on(vault, "ticket", shown=shown(vault))
+    assert on.changed
+    assert [p.enabled for p in VaultConfig.load(vault.root / CONFIG_FILE).redaction.patterns] == [
+        True,
+        False,
+        False,
+        False,
+    ]
+    assert last_message(vault) == "Config: redaction ticket on\n\nvia page"
+    for name in ("twin", "nope", ""):
+        with pytest.raises(DocketError, match="no redaction rule by that name, or more than one"):
+            settings.rule_on(vault, name, shown=shown(vault))
+    with pytest.raises(settings.StaleError):
+        settings.turn_off(vault, "memo", shown="0" * 64)
+
+
+def test_the_built_in_phone_rule_is_turned_on_by_its_key(tmp_path: Path) -> None:
+    vault = make_vault(tmp_path)
+    assert settings.rule_on(vault, "phone", shown=shown(vault)).changed
+    assert VaultConfig.load(vault.root / CONFIG_FILE).redaction.phone
+    assert settings.rule_on(vault, "phone", shown="a page from before") == Rewritten()
+
+
+def test_a_source_is_made_only_stricter_and_turned_only_off(tmp_path: Path) -> None:
+    vault = rules_vault(tmp_path)
+    assert settings.stricter(vault, "memo", "mixed", shown=shown(vault)).changed
+    assert settings.stricter(vault, "memo", "mixed", shown="a page from before") == Rewritten()
+    with pytest.raises(LooseningError, match="memo is mixed; a page makes a source only stricter"):
+        settings.stricter(vault, "memo", "work", shown=shown(vault))
+    assert settings.stricter(vault, "memo", "private", shown=shown(vault)).changed
+    assert settings.turn_off(vault, "memo", shown=shown(vault)).changed
+    assert settings.turn_off(vault, "memo", shown="a page from before") == Rewritten()
+    memo = VaultConfig.load(vault.root / CONFIG_FILE).sources["memo"]
+    assert (memo.sensitivity, memo.enabled) == ("private", False)
+    assert subjects(vault)[:3] == [
+        "Config: source memo off",
+        "Config: source memo private",
+        "Config: source memo mixed",
+    ]
+    with pytest.raises(DocketError, match=r"the change doesn.t fit vault.yaml"):
+        settings.stricter(vault, "documents", "mixed", shown=shown(vault))
+    with pytest.raises(DocketError, match="no source attic"):
+        settings.turn_off(vault, "attic", shown=shown(vault))
+    with pytest.raises(DocketError, match="work, mixed or private"):
+        settings.stricter(vault, "memo", "secret", shown=shown(vault))
+
+
+def test_the_take_in_rule_holds_for_a_rule_and_a_source(tmp_path: Path) -> None:
+    vault = rules_vault(tmp_path)
+    path = vault.root / CONFIG_FILE
+    edited = text(vault).replace("credentials: true", "credentials: false", 1)
+    path.write_text(edited, encoding="utf-8", newline="\n")
+    for write in (
+        lambda: settings.rule_on(vault, "ticket", shown=shown(vault)),
+        lambda: settings.stricter(vault, "memo", "mixed", shown=shown(vault)),
+        lambda: settings.turn_off(vault, "memo", shown=shown(vault)),
+    ):
+        with pytest.raises(settings.UncommittedLooseningError):
+            write()
+    assert text(vault) == edited

@@ -107,6 +107,9 @@ def test_the_writer_s_general_entry_is_called_only_by_the_cli_s_two_writers_and_
         ("vault/redaction.py", "set_rule"),
         ("sources/scaffold.py", "_register"),
         ("vault/settings.py", "add_listed"),
+        ("vault/settings.py", "rule_on"),
+        ("vault/settings.py", "stricter"),
+        ("vault/settings.py", "turn_off"),
     }
 
 

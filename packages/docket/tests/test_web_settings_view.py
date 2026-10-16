@@ -25,6 +25,7 @@ from docket.web.settings_view import (
     SourceFacts,
     build,
     build_confirm,
+    build_source_confirm,
     done_line,
 )
 
@@ -216,7 +217,7 @@ def test_done_holds_a_list_and_a_count_and_never_reaches_a_link() -> None:
     state = SettingsState.read({"done": "listed-keywords-1", "show": "lists"})
     assert state.url() == "/settings?show=lists"
     assert state.url(done=True) == "/settings?show=lists&done=listed-keywords-1"
-    for bad in ("listed-keywords-2", "listed-Dora-1", "phone-on"):
+    for bad in ("listed-keywords-2", "listed-Dora-1", "phone-maybe", "Calls-private", "calls-work", "-off"):
         with pytest.raises(SettingsStateError, match="done says what the last change did"):
             SettingsState.read({"done": bad})
     config = make_config()
@@ -258,3 +259,67 @@ def test_the_confirm_view_names_what_a_value_drops_and_what_holds_it() -> None:
     ]
     empty = build_confirm("people", "Cleo Test", staged=0, stored=Reach(0, 0, 0), why=None, shown="h", docket_form=True)
     assert empty.lines[1] == "Nothing already stored holds it, of 0 chunks."
+
+
+def test_a_rule_s_and_a_source_s_done_say_how_things_stand() -> None:
+    config = make_config()
+    phone = done_line("phone-on", config) or ""
+    assert phone.startswith("Phone numbers are redacted from now on. Run docket doc redact")
+    assert (done_line("pattern-on", config) or "").startswith("Your pattern's matches are redacted from now on.")
+    assert done_line("memo-private", config) == (
+        "memo is private: nothing from it is stored, and what waited from it in staging is gone."
+    )
+    assert (
+        done_line("calls.v2-off", config) == "calls.v2 is off: its syncs and scans stop, and what waits from it stays."
+    )
+    assert (done_line("memo-mixed", config) or "").startswith("memo is mixed: each record from it waits")
+
+
+def test_a_rule_that_is_off_and_its_own_can_be_turned_on_from_the_page() -> None:
+    config = make_config()
+    config.redaction = Redaction(
+        credentials=False,
+        patterns=[
+            RedactionPattern(name="ticket", pattern="T", enabled=False),
+            RedactionPattern(name="twin", pattern="A", enabled=False),
+            RedactionPattern(name="twin", pattern="B", enabled=False),
+            RedactionPattern(name="phone", pattern="P", enabled=False),
+            RedactionPattern(name="live", pattern="L"),
+        ],
+    )
+    turned = [(r.name, r.can_turn_on) for r in view(config).rules]
+    assert turned == [
+        ("credentials", True),
+        ("phone", True),
+        ("ticket", True),
+        ("twin", False),
+        ("twin", False),
+        ("phone", False),
+        ("live", False),
+    ]
+
+
+def test_a_stricter_change_carries_what_its_button_posts() -> None:
+    config = make_config()
+    config.sources = {"memo": SourceConfig(), "notes": SourceConfig(sensitivity="private", enabled=False)}
+    found = {s.name: s for s in view(config).sources}
+    assert [(c.what, c.act) for c in found["memo"].changes] == [
+        ("Make it private", "private"),
+        ("Make it mixed", "mixed"),
+        ("Turn it off", "off"),
+    ]
+    assert [c.act for c in found["notes"].changes] == [None, None, None]
+
+
+def test_making_a_source_private_names_what_waits_and_what_goes_in_first() -> None:
+    asked = build_source_confirm("memo", staged=2, shown="h", docket_form=True, takes_in=True)
+    assert asked.lines == [
+        "It drops 2 records of memo waiting in staging now.",
+        "From the next sync, nothing from memo is stored; its records already stored stay in raw.",
+        "Making it mixed or work again is a line to change in vault.yaml by hand: it lets more in.",
+        "Your edit of vault.yaml that isn't committed yet goes in first, as a commit of its own.",
+    ]
+    assert asked.line == "sensitivity: private"
+    calm = build_source_confirm("memo", staged=0, shown="h", docket_form=False)
+    assert calm.lines[0] == "Nothing of memo waits in staging now."
+    assert len(calm.lines) == 3

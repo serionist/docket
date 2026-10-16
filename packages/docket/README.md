@@ -557,7 +557,8 @@ DR-0384).
 ### The Settings page
 
 `/settings` shows what the gate obeys and this machine's models, and names every change (DR-0505, DR-0506, DR-0510).
-In this version the one change it makes itself is a value added to a never-store list.
+It makes the changes that keep more out, each with its button: a never-store value added, a redaction rule turned
+on, a source made mixed or private, or turned off. Every other change it names.
 
 | Part | Shows |
 |---|---|
@@ -569,6 +570,9 @@ In this version the one change it makes itself is a value added to a never-store
 - A change that lets more in (a rule turned off, a never-store value taken off, a source made looser, turned on or
   added, its tools, mapper or folder) is never made from a page: the page names the command or the line, for your
   terminal or your editor, where Claude Code asks you first. What it lets in reaches git for good.
+- A rule turned on, or a source made mixed or turned off, is one click; a source made private asks once more first,
+  naming what waits from it in staging, which it drops. Turning a rule on names `docket doc redact` for the docs
+  already stored. A click on a page older than `vault.yaml` writes nothing, and a click sent twice writes once.
 - A `vault.yaml` with comments or a layout of your own is never rewritten: the page says so, and each change is a
   line to make by hand.
 - Adding a never-store value asks once more first: the records it drops from staging now, and how many records and
