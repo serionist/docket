@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import json
 import os
 import sys
@@ -842,11 +843,14 @@ def curate_log(
     vault: VaultOption = None,
 ) -> None:
     """Every change Docket made to entities, and every rejection, undo and lift, newest first, with the ids undo
-    takes. A line a stopped write left is marked: the next write finishes it."""
+    takes. A line a stopped write left is marked: the next write finishes it. What a never-store list holds now is
+    hidden, as curate show hides it."""
     v = find_vault(vault)
     read = curatelog.read_all(v.root)
     unfinished = {line.id for line in curatelog.unfinished(v)}
-    lines = [line for line in reversed(read.lines) if entity is None or line.entity == entity][:n]
+    # Filtered by the entity as logged, then shown by the lists as they are now (DR-0501); ids stay, for undo.
+    kept = [line for line in reversed(read.lines) if entity is None or line.entity == entity][:n]
+    lines = [curate.hidden_line(line, v.config.never_store) for line in kept]
     if as_json:
         # ASCII only: a name's text can't put a terminal code on the screen.
         dumped = [
@@ -866,7 +870,9 @@ def _curate_write(v: Vault, write: Callable[[], Written]) -> None:
     except RefusedError as e:
         say_all(render.curate_refused(e.problems))
         raise typer.Exit(1) from None
-    say_all(render.curate_written(written))
+    # Its own lines as curate log shows them: the store refuses a listed value, not an id whose slug spells one.
+    lines = tuple(curate.hidden_line(line, v.config.never_store) for line in written.lines)
+    say_all(render.curate_written(dataclasses.replace(written, lines=lines)))
     batch = curate.load(v)
     if batch is not None and batch.after is None:
         measured = curate.after(v, batch)

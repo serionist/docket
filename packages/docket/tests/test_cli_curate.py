@@ -130,6 +130,69 @@ def test_log_marks_a_line_a_stopped_write_left(
     assert "not finished" not in capsys.readouterr().out
 
 
+SECOND_BEN = """\
+changes:
+  - create: {id: ben-sample-2, type: person, name: {en: Ben Sample}}
+  - entity: northwind
+    add: {aliases: [{text: Nortwin, kind: asr}]}
+"""
+BENNIE = "changes: [{entity: ben-sample-2, add: {aliases: [{text: Bennie}]}}]"
+# What a never-store list gained after the lines were logged, an id whose slug spells a listed name among them.
+GAINED = ("nortwin", "bennie", "ben sample", "ben-sample")
+
+
+def test_log_and_a_write_hide_what_a_list_gained_after_the_line_was_logged(
+    vault: Vault, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert add(tmp_path, SECOND_BEN, capsys)[0] == 0
+    # A write that stopped before its commit: its line is in the log, not in HEAD.
+    with monkeypatch.context() as m:
+        m.setattr(vault, "commit", lambda paths, message: None)
+        EntityStore(vault).apply(load_changes(Path(changes_file(tmp_path, BENNIE))))
+    logged = curatelog.read_all(vault.root).lines
+    config = vault.root / "vault.yaml"
+    data = yaml.safe_load(config.read_text(encoding="utf-8"))
+    data["never_store"] = {"keywords": ["Nortwin", "Bennie"], "people": ["Ben Sample"]}
+    config.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+
+    assert main(["curate", "log"]) == 0
+    out = capsys.readouterr().out
+    created, nortwin, bennie = logged
+    hidden = curate.HIDDEN
+    assert out.splitlines() == [
+        f"{bennie.at:%Y-%m-%d %H:%M}Z  {bennie.id}  add    {hidden}  alias {hidden}  (user, cli)  not finished: the "
+        "next write commits it",
+        f"{nortwin.at:%Y-%m-%d %H:%M}Z  {nortwin.id}  add    northwind  alias {hidden} (asr)  (user, cli)",
+        f"{created.at:%Y-%m-%d %H:%M}Z  {created.id}  create {hidden}  person, {hidden}  (user, cli)",
+    ]
+    assert main(["curate", "log", "--json"]) == 0
+    shown = json.loads(capsys.readouterr().out)
+    # Every field as logged, the ids too, so undo still takes them; only the values a list holds are replaced.
+    assert [line["id"] for line in shown] == [bennie.id, nortwin.id, created.id]
+    assert [set(line) - {"finished"} for line in shown] == [
+        set(line.model_dump(exclude_none=True)) for line in (bennie, nortwin, created)
+    ]
+    assert [(line["entity"], line["key"]) for line in shown] == [
+        (hidden, f"alias:{hidden}:{hidden}"), ("northwind", f"alias:northwind:{hidden}"), (hidden, f"new:-:{hidden}")
+    ]  # fmt: skip
+    assert shown[2]["change"]["entity"]["id"] == hidden and shown[2]["change"]["entity"]["name"] == {"en": hidden}
+    for text in (out, json.dumps(shown)):
+        assert not [word for word in GAINED if word in text.casefold()]
+
+    # The next write finishes the stopped one and names it by its id; its own line on ben-sample-2 shows hidden.
+    code, wrote = add(tmp_path, "changes: [{entity: ben-sample-2, add: {aliases: [{text: Sammy}]}}]", capsys)
+    assert code == 0 and wrote[0] == f"finished first, what a stopped write left: {bennie.id}"
+    sammy = curatelog.read_all(vault.root).lines[-1]
+    assert wrote[1] == f"{sammy.id}  add    {hidden}  alias Sammy"
+    assert not [word for word in GAINED if word in "\n".join(wrote).casefold()]
+    # Undo takes the id as logged, and its own line hides the entity too.
+    assert main(["curate", "undo", sammy.id]) == 0
+    undone = capsys.readouterr().out.splitlines()
+    assert undone[0].endswith(f"  undo   {hidden}  undoes {sammy.id}") and "ben" not in undone[0].casefold()
+    # Only shown: the log keeps what it wrote.
+    assert {line.entity for line in curatelog.read_all(vault.root).lines} == {"ben-sample-2", "northwind"}
+
+
 def test_a_log_file_that_isn_t_utf_8_is_skipped_by_log_and_refuses_a_write(
     vault: Vault, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
