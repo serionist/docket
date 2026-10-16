@@ -4,6 +4,7 @@ import json
 import threading
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -479,29 +480,49 @@ def test_the_models_lane_needs_the_models_and_holds_their_floors(repo: Path, mon
     monkeypatch.delenv(gate.MODELS_ENV, raising=False)
     assert gate.step_models(ctx).status == "fail"
     monkeypatch.setenv(gate.MODELS_ENV, str(repo / "models"))
+    monkeypatch.setattr(gate, "cpu_name", lambda: "a test CPU")
     floors = repo / evalfloors.FLOORS_MODELS
     floors.parent.mkdir(parents=True)
     floors.write_text(json.dumps({"$above": "print", "typo": {"recall": 0.5, "mrr": 0.4}}), encoding="utf-8")
+    (repo / evalfloors.FLOORS_RERANK).write_text(
+        json.dumps({"$above": "print", "typo": {"recall": 0.9, "mrr": 0.7}}), encoding="utf-8"
+    )
 
-    def ran(_ctx: gate.Ctx, cmd: list[str], *, env: dict[str, str] | None = None) -> tuple[int, list[str]]:
-        assert env is not None and "embedder" in cmd
-        Path(env[evalfloors.REPORT_MODELS_ENV]).write_text(
-            json.dumps({"typo": {"recall": 0.5, "mrr": 0.4}}), encoding="utf-8"
-        )
-        return 0, ["1 passed"]
+    def measured(embedder: float, reranked: float) -> Any:
+        def ran(_ctx: gate.Ctx, cmd: list[str], *, env: dict[str, str] | None = None) -> tuple[int, list[str]]:
+            # Both runs of the set, the embedder alone and the reranker on, each writing where the lane asks.
+            assert env is not None and cmd[-2:] == ["-k", "embedder or reranker"]
+            Path(env[evalfloors.REPORT_MODELS_ENV]).write_text(
+                json.dumps({"typo": {"recall": embedder, "mrr": 0.4}}), encoding="utf-8"
+            )
+            Path(env[evalfloors.REPORT_RERANK_ENV]).write_text(
+                json.dumps({"typo": {"recall": reranked, "mrr": 0.7}}), encoding="utf-8"
+            )
+            return 0, ["2 passed"]
 
-    monkeypatch.setattr(gate, "_run", ran)
+        return ran
+
+    monkeypatch.setattr(gate, "_run", measured(0.5, 0.9))
     out = gate.step_models(ctx)
     assert out.status == "ok" and "typo 0.50/0.40" in out.detail[0]
+    assert out.detail[1] == "reranked on a test CPU: eval recall@10/MRR: typo 0.90/0.70"
     monkeypatch.setattr(gate, "_run", lambda _ctx, cmd, *, env=None: (1, ["a test failed"]))
     assert gate.step_models(ctx).status == "fail"
-
-    def below(_ctx: gate.Ctx, cmd: list[str], *, env: dict[str, str] | None = None) -> tuple[int, list[str]]:
-        assert env is not None
-        Path(env[evalfloors.REPORT_MODELS_ENV]).write_text(
-            json.dumps({"typo": {"recall": 0.4, "mrr": 0.4}}), encoding="utf-8"
-        )
-        return 0, ["1 passed"]
-
-    monkeypatch.setattr(gate, "_run", below)
+    monkeypatch.setattr(gate, "_run", measured(0.4, 0.9))
     assert gate.step_models(ctx).status == "fail"
+    monkeypatch.setattr(gate, "_run", measured(0.5, 0.8))
+    out = gate.step_models(ctx)
+    assert out.status == "fail" and "eval typo recall: 0.80 is below its floor of 0.90" in out.detail
+
+
+def test_the_cpu_is_named_from_its_system(monkeypatch: pytest.MonkeyPatch) -> None:
+    import platform
+
+    from devkit import gate
+
+    name = gate.cpu_name()
+    assert name and isinstance(name, str)
+    monkeypatch.setattr(Path, "is_file", lambda self: False)
+    monkeypatch.setattr(platform, "processor", lambda: "")
+    monkeypatch.setattr(platform, "machine", lambda: "")
+    assert gate.cpu_name() == "an unknown CPU"

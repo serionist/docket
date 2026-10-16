@@ -143,6 +143,8 @@ def search(result: SearchResult, tz: ZoneInfo) -> list[str]:
         lines.append(f"in no chunk: {', '.join(reading.absent)}")
     if result.models.state == "skipped" and result.models.why:
         lines.append(f"no vectors in this search: {result.models.why}")
+    if result.rerank.state == "skipped" and result.rerank.why:
+        lines.append(f"not reranked: {result.rerank.why}")
     if not result.groups:
         lines.append("nothing found")
     for group in result.groups:
@@ -176,6 +178,13 @@ def eval_report(report: EvalReport) -> list[str]:
         lines.append(f"vectors   {seen.model}: {seen.have} of {seen.total} chunks")
         if seen.skipped:
             lines.append(f"          {seen.skipped} question(s) ran without them: {seen.why}")
+    reranked = report.rerank
+    if reranked is not None and reranked.model is None:
+        lines.append(f"reranker  off: {reranked.off}")
+    elif reranked is not None:
+        lines.append(f"reranker  {reranked.model}: the top {reranked.pairs}, with no time budget")
+        if reranked.skipped:
+            lines.append(f"          {reranked.skipped} question(s) ran without it: {reranked.why}")
     lines.append(f"{'kind':<14}{'n':>4}{f'recall@{report.k}':>12}{'MRR':>7}")
     lines += [_score_row(kind, s) for kind, s in report.kinds.items()]
     lines.append("")

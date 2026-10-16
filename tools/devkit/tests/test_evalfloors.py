@@ -99,3 +99,17 @@ def test_the_models_floors_print_a_rise_until_three_runs_agree(repo: Path) -> No
         f"add it to {evalfloors.FLOORS_MODELS}"
         in evalfloors.judge(measured, {}, None, file=evalfloors.FLOORS_MODELS)[0][0]
     )
+
+
+def test_the_reranked_floors_are_a_file_of_their_own_under_the_same_rules(repo: Path) -> None:
+    floors = repo / evalfloors.FLOORS_RERANK
+    floors.parent.mkdir(parents=True)
+    floors.write_text(json.dumps({"$above": "print", **FLOORS}), encoding="utf-8")
+    numbers = repo / evalfloors.REPORT_RERANK
+    numbers.parent.mkdir()
+    numbers.write_text(json.dumps({**FLOORS, "exact-name": {"recall": 0.9, "mrr": 0.78}}), encoding="utf-8")
+    assert evalfloors.check(repo, None, rerank=True)[0] == ["eval exact-name recall: 0.90 is below its floor of 0.92"]
+    numbers.write_text(json.dumps(FLOORS), encoding="utf-8")
+    assert evalfloors.check(repo, None, rerank=True)[0] == []
+    # The repo's own file starts by printing a rise, until three CI runs agree (DR-0458).
+    assert not evalfloors.above_fails(Path(__file__).resolve().parents[3], evalfloors.FLOORS_RERANK)

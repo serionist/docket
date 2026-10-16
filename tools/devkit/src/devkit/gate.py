@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -350,22 +351,40 @@ def _alone_after(ctx: Ctx, code: int, lines: list[str], cmd: list[str], env: dic
     return Outcome.ok(_summary(lines), alone, *timed(timed_lines), *slowest(lines))
 
 
+def cpu_name() -> str:
+    """The machine's CPU, printed beside the reranked numbers: the reranker's own time depends on it (DR-0458)."""
+    info = Path("/proc/cpuinfo")
+    if info.is_file():
+        for line in info.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith("model name") and ":" in line:
+                return line.split(":", 1)[1].strip()
+    return platform.processor() or platform.machine() or "an unknown CPU"
+
+
 def step_models(ctx: Ctx) -> Outcome:
-    """The question set with the embedder, against floors of its own (DR-0339): the models CI job runs it."""
+    """The question set with the embedder, and with the CPU reranker on its 30 pairs, against floors of their own
+    (DR-0339, DR-0458): the models CI job runs it."""
     folder = os.environ.get(MODELS_ENV)
     if not folder:
         return Outcome.fail(
             f"set {MODELS_ENV} to a folder `docket models install --device cpu` filled (it sets DOCKET_MODELS_DIR)"
         )
     numbers = ctx.root / evalfloors.REPORT_MODELS
+    reranked = ctx.root / evalfloors.REPORT_RERANK
     numbers.parent.mkdir(exist_ok=True)
     numbers.unlink(missing_ok=True)
-    cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", MODELS_TEST, "-k", "embedder"]
-    code, lines = _run(ctx, cmd, env={evalfloors.REPORT_MODELS_ENV: str(numbers)})
+    reranked.unlink(missing_ok=True)
+    cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", MODELS_TEST, "-k", "embedder or reranker"]
+    env = {evalfloors.REPORT_MODELS_ENV: str(numbers), evalfloors.REPORT_RERANK_ENV: str(reranked)}
+    code, lines = _run(ctx, cmd, env=env)
     if code != 0:
         return Outcome.fail(*lines[-60:])
     failures, line = evalfloors.check(ctx.root, ctx.base, models=True)
-    return Outcome.fail(*failures) if failures else Outcome.ok(line)
+    more, rerank_line = evalfloors.check(ctx.root, ctx.base, rerank=True)
+    reranked_line = f"reranked on {cpu_name()}: {rerank_line}"
+    if failures or more:
+        return Outcome.fail(*failures, *more, line, reranked_line)
+    return Outcome.ok(line, reranked_line)
 
 
 STEPS = [

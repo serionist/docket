@@ -37,6 +37,7 @@ from docket.errors import DocketError
 from docket.index import SearchResult, parse_when, search, status, vectors
 from docket.index.build import open_index
 from docket.index.query import MAX_K
+from docket.index.rerank import Reranks
 from docket.models.provider import Off
 from docket.vault.anchors import Anchor, AnchorError, parse_anchor
 from docket.vault.processed import DOC_TYPES, id_problem
@@ -132,11 +133,23 @@ class EvalVectors(BaseModel):
     why: str | None = None
 
 
+class EvalRerank(BaseModel):
+    """The reranker the questions ran with: its model and pairs, or why it is off, and how many questions went without
+    it, with why for the first (DR-0459)."""
+
+    model: str | None = None
+    pairs: int = 0
+    off: str | None = None
+    skipped: int = 0
+    why: str | None = None
+
+
 class EvalReport(BaseModel):
     file: str
     k: int
     behind: str | None = None
     vectors: EvalVectors | None = None
+    rerank: EvalRerank | None = None
     all: Score
     kinds: dict[str, Score]
     langs: dict[str, Score]
@@ -439,16 +452,26 @@ def summarize(path: str, k: int, results: list[QuestionResult], unknown: list[st
     )
 
 
+def _eval_rerank(models: object) -> EvalRerank | None:
+    if not isinstance(models, Reranks):
+        return None
+    if models.reranker is None:
+        return EvalRerank(off=models.rerank_why) if models.rerank_why else None
+    return EvalRerank(model=models.reranker.name, pairs=models.pairs)
+
+
 def run(
     vault: Vault, questions: QuestionSet, k: int = K, models: vectors.QueryVectors | Off | None = None
 ) -> EvalReport:
     """Every question through search at k, with its asked as now, scored; nothing is written. With models, the report
-    says what the vectors covered and how many questions ran without them."""
+    says what the vectors covered and how many questions ran without them, and the reranker's the same. A rerank
+    has no budget here, so the numbers don't move with how busy the machine is (DR-0454)."""
     if not 1 <= k <= MAX_K:
         raise DocketError(f"k is from 1 to {MAX_K}")
     late = behind(vault)
     conn = open_index(vault)
     seen: EvalVectors | None = None
+    reranked: EvalRerank | None = None
     try:
         if models is not None and not isinstance(models, Off):
             table = vectors.table_of(models.embedder)
@@ -458,12 +481,13 @@ def run(
                 # No table yet: none of the chunks has a vector.
                 have, total = 0, int(conn.execute("SELECT count(*) FROM chunks").fetchone()[0])
             seen = EvalVectors(model=models.embedder.name, have=have, total=total)
+        reranked = _eval_rerank(models)
         wanted = {w.text: w for q in questions.questions for w in q.want}
         unknown = [text for text, w in wanted.items() if not _exists(conn, w)]
         results: list[QuestionResult] = []
         for question in questions.questions:
             try:
-                result = search(vault, question.q, k=k, now=question.asked, models=models)
+                result = search(vault, question.q, k=k, now=question.asked, models=models, rerank_budget=None)
             except DocketError as e:
                 missed = score_question(question, [], k)
                 results.append(missed.model_copy(update={"refused": str(e)}))
@@ -471,9 +495,13 @@ def run(
             if seen is not None and result.models.state == "skipped":
                 seen.skipped += 1
                 seen.why = seen.why or result.models.why
+            if reranked is not None and reranked.model is not None and result.rerank.state != "on":
+                reranked.skipped += 1
+                reranked.why = reranked.why or result.rerank.why
             results.append(score_question(question, found_in(conn, result), k))
     finally:
         conn.close()
     report = summarize(questions.path, k, results, unknown, late)
     report.vectors = seen
+    report.rerank = reranked
     return report

@@ -248,7 +248,7 @@ flowchart TB
 |---|---|---|---|---|
 | Speech | faster-whisper large-v3, float16, about 10x real time | whisper.cpp or mlx-whisper | the source's own transcript; turbo int8 overnight as an optional extra | the source's own transcript |
 | Embeddings | multilingual-e5-small on ONNX Runtime's CUDA provider (DR-0331, DR-0334) | the same on the CPU, until MPS or CoreML is measured | the same on the CPU | keyword search only |
-| Reranker | bge-reranker-v2-m3 (#88) | the CPU's, within a time budget (#88) | a small cross-encoder within a time budget (#88) | rank fusion only |
+| Reranker | bge-reranker-v2-m3, the top 50 (DR-0450, DR-0455) | the CPU's | mmarco-mMiniLMv2-L12-H384-v1, the top 30, on where the install timed it within 0.6 s (about 8 cores or more) | rank fusion only |
 
 `docket doctor` says what a machine can do and why not.
 
@@ -503,8 +503,9 @@ The dashboard shows review minutes per week, a number to keep down.
    whose lead holds most of the query's words goes first; the any-word stage matches the words BM25 still weighs and
    ranks chunks holding more of the words first. A word also matches its compound's other spellings, and a chunk
    holding a word only through a split goes after the rest (DR-0282).
-3. Fuse by reciprocal rank, the vector list at half weight (DR-0338); rerank the top 50 with a small cross-encoder
-   (#88); keep the top k.
+3. Fuse by reciprocal rank, the vector list at half weight (DR-0338). With a reranker on, rerank the top N (50 on a
+   GPU, 30 on a CPU): the chunks behind today's k hits, then the fusion at full weight (DR-0453), in two tiers, the
+   all-words hits first and boosted chunks first within each (DR-0452), within 0.75 s (DR-0454). Keep the top k.
 4. Group by container (a recording, a thread, a mail conversation), attach its summary, return locators.
 
 Without models, or when the worker can't answer, steps 2 and 3 are FTS5 and the mentions, fused by rank (DR-0117), and

@@ -16,6 +16,7 @@ import random
 import shutil
 import sqlite3
 import time
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -30,7 +31,7 @@ from docket_testkit import (
     template_with,
     traced,
 )
-from models_kit import CANT_SEARCH, FAKE
+from models_kit import CANT_SEARCH, FAKE, FAKE_RERANKER
 
 from docket.index import build, matching, search, vectors
 from docket.index import text as text_module
@@ -38,7 +39,7 @@ from docket.index.chunks import Chunk, iso
 from docket.index.schema import create
 from docket.index.terms import Checker, Word, phrase_of
 from docket.index.text import Analyzer, fold, words_and_compounds
-from docket.models.catalogue import Embedder, input_hash
+from docket.models.catalogue import Embedder, Reranker, input_hash
 from docket.vault.entities import Alias, Entities, Entity
 from docket.vault.vault import Vault
 
@@ -165,6 +166,23 @@ class PerfModels:
         return unit_rows(1, len(words))[0].astype("<f4").tobytes()
 
 
+class PerfReranking(PerfModels):
+    """The same, and a reranker that answers at once on the GPU's 50 pairs: what is timed is the core's share, two
+    fusions, the top 50's text read by id and the tiers (#88); the model's own time is the install's to measure."""
+
+    reranker: Reranker | None = FAKE_RERANKER
+    pairs = 50
+    rerank_why: str | None = None
+    rerank_said = False
+
+    def __init__(self) -> None:
+        self.asked = 0
+
+    def rerank(self, query: str, texts: Sequence[str], budget: float | None) -> list[float] | str:
+        self.asked += 1
+        return [float(len(t) % 7) for t in texts]
+
+
 @pytest.fixture(scope="module")
 def vault(tmp_path_factory: pytest.TempPathFactory) -> Vault:
     started = time.monotonic()
@@ -234,12 +252,19 @@ def test_queries_answer_in_well_under_a_second(vault: Vault, vectors_vault: Vaul
         seconds, found, _ = timed(vault, query, **kwargs)
         # The same with the vector stage on, its scan over 100,000 vectors running beside the FTS stages.
         with_vectors, found_too, state = timed(vectors_vault, query, models=PerfModels(), **kwargs)
-        print(f"{name:16} {seconds * 1000:7.1f} ms, {with_vectors * 1000:7.1f} with vectors  {found} hits  {query!a}")
+        # And with the reranker on: the same search with the core's rerank step around an answer that takes no time.
+        reranking = PerfReranking()
+        reranked, _, _ = timed(vectors_vault, query, models=reranking, **kwargs)
+        print(
+            f"{name:16} {seconds * 1000:7.1f} ms, {with_vectors * 1000:7.1f} with vectors, "
+            f"{reranked * 1000:7.1f} reranked  {found} hits  {query!a}"
+        )
         assert found and found_too, name
+        assert reranking.asked == (0 if name == "a time word" else 1) or CANT_SEARCH is not None, name
         # A stage skipped for a fault would time keyword search alone; a query of time words has nothing to embed.
         assert state == ("skipped" if name == "a time word" else "on") or CANT_SEARCH is not None, f"{name}: {state}"
         if not traced():
-            assert seconds < SECONDS and with_vectors < SECONDS, name
+            assert seconds < SECONDS and with_vectors < SECONDS and reranked < SECONDS, name
     result = search(vault, f"{common} múlt héten", now=NOW)
     since, until = result.query.since, result.query.until
     assert since is not None and until is not None

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from pathlib import Path
 from typing import Any
@@ -9,14 +10,14 @@ from typing import Any
 import pytest
 import yaml
 from docket_testkit import copy_vault, index_template, make_record
-from models_kit import FAKE, fake_command, make_env, needs_vectors
+from models_kit import FAKE, FAKE_RERANKER, fake_command, make_env, needs_vectors
 
 from docket import cli, userconfig
 from docket.cli import main
 from docket.errors import DocketError
 from docket.index.embedpass import PassReport
 from docket.models import catalogue, install, runtime
-from docket.models.catalogue import E5_SMALL
+from docket.models.catalogue import E5_SMALL, Reranker
 from docket.models.client import Worker
 from docket.models.config import Choice
 from docket.service import client
@@ -53,7 +54,7 @@ def test_status_shows_the_choice_the_environment_and_the_files(
     assert "files      missing: onnx/model.onnx, tokenizer.json" in out
     assert "! the models aren't installed for cpu on this machine; run docket models install" in out
     make_env("cpu")
-    monkeypatch.setattr(runtime, "worker_for", lambda choice, device: Worker(fake_command()))
+    monkeypatch.setattr(runtime, "worker_for", lambda choice, device, rerank=None: Worker(fake_command()))
     monkeypatch.setattr(install, "vectors_problem", lambda: None)
     code, out = run(capsys, "status", "--check")
     assert code == 0 and "env cpu    ready, batches of 8,192 characters" in out
@@ -71,7 +72,7 @@ def test_a_check_that_fails_shows_the_workers_last_lines(
     code, out = run(capsys, "status", "--check")
     assert code == 1 and "env cpu    the models' environment is from another Docket or Python" in out
     make_env("cpu")
-    monkeypatch.setattr(runtime, "worker_for", lambda choice, device: Worker(fake_command(bad_hello=True)))
+    monkeypatch.setattr(runtime, "worker_for", lambda choice, device, rerank=None: Worker(fake_command(bad_hello=True)))
     code, out = run(capsys, "status", "--check")
     assert code == 1
     assert "! the models' worker said hello in a form this Docket doesn't read" in out
@@ -83,7 +84,7 @@ def test_install_and_remove_run_their_steps(
 ) -> None:
     asked: list[str] = []
 
-    def fake_install(device: str, *, say: Any) -> Choice:
+    def fake_install(device: str, *, rerank: bool = True, say: Any) -> Choice:
         asked.append(device)
         say("ready")
         return Choice("cpu", E5_SMALL)
@@ -111,7 +112,7 @@ def vault(template: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Va
     choose_fake(monkeypatch)
     make_env("cpu")
     monkeypatch.setattr(runtime, "missing_files", lambda embedder: [])
-    monkeypatch.setattr(runtime, "worker_for", lambda choice, device: Worker(fake_command()))
+    monkeypatch.setattr(runtime, "worker_for", lambda choice, device, rerank=None: Worker(fake_command()))
     v = copy_vault(template, tmp_path)
     v.write_run("chat", [make_record(rid=ZEBRA, container="chat:C0OPS", text="Quarterly zebra migration budget.")])
     return v
@@ -161,11 +162,11 @@ def test_index_update_says_why_it_can_embed_nothing(
 ) -> None:
     code, out = at(vault, capsys, "index", "update", "--no-models")
     assert code == 0 and "vectors    " not in out
-    monkeypatch.setattr(runtime, "worker_for", lambda choice, device: Worker(fake_command(bad_hello=True)))
+    monkeypatch.setattr(runtime, "worker_for", lambda choice, device, rerank=None: Worker(fake_command(bad_hello=True)))
     code, out = at(vault, capsys, "index", "update")
     assert "! the models' worker said hello in a form this Docket doesn't read" in out
     monkeypatch.setattr(
-        runtime, "worker_for", lambda choice, device: Worker(fake_command(refuse_on="__never__", delay=0))
+        runtime, "worker_for", lambda choice, device, rerank=None: Worker(fake_command(refuse_on="__never__", delay=0))
     )
     choose({"device": "tpu"})
     code, out = at(vault, capsys, "index", "update")
@@ -286,3 +287,125 @@ def test_status_shows_the_vaults_vectors_and_the_services_worker(
     assert lines[-3:] == ["service    fake, down: the models' worker stopped (exit 5)", *service.body["errors"]]
     with pytest.raises(DocketError, match="no vault at or above"):
         cli._models_vectors(vault.root.parent / "elsewhere", on=True)
+
+
+# -- the reranker (#88) ------------------------------------------------------------------------------------------------
+
+GPU_RERANKER = dataclasses.replace(FAKE_RERANKER, name="fake-gpu-reranker", device="cuda")
+
+
+def timing(reranker: Reranker, seconds: float | None = 0.42, why: str | None = None) -> dict[str, Any]:
+    return {
+        "name": reranker.name,
+        "revision": reranker.revision,
+        "pairs": reranker.pairs,
+        "seconds": seconds,
+        "why": why,
+    }
+
+
+def rerank_worker(monkeypatch: pytest.MonkeyPatch, **knobs: Any) -> None:
+    def worker(choice: Choice, device: str, rerank: dict[str, Any] | None = None) -> Worker:
+        return Worker(fake_command(**({"reranker": rerank, **knobs} if rerank is not None else {})))
+
+    monkeypatch.setattr(runtime, "worker_for", worker)
+
+
+def with_reranker(monkeypatch: pytest.MonkeyPatch, reranker: Reranker = FAKE_RERANKER, seconds: float = 0.42) -> None:
+    monkeypatch.setitem(catalogue.EMBEDDERS, FAKE.name, FAKE)
+    monkeypatch.setitem(catalogue.RERANKERS, reranker.name, reranker)
+    choose({"device": reranker.device, "embedder": FAKE.name, "reranker": reranker.name})
+    make_env(reranker.device, reranker=timing(reranker, seconds))
+    monkeypatch.setattr(runtime, "missing_files", lambda model: [])
+
+
+def test_status_and_its_check_show_the_reranker(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(install, "vectors_problem", lambda: None)
+    with_reranker(monkeypatch)
+    rerank_worker(monkeypatch)
+    code, out = run(capsys, "status", "--check")
+    assert code == 0 and "reranker   fake-reranker (Apache-2.0) on cpu: 30 pairs in 0.42 s" in out
+    assert "reranker   up: CPUExecutionProvider" in out
+    rerank_worker(monkeypatch, reranker_off="the reranker didn't load: KeyError")
+    code, out = run(capsys, "status", "--check")
+    assert code == 1 and "reranker   ! off in the worker: the reranker didn't load: KeyError" in out
+    rerank_worker(monkeypatch, rerank_refuse=True)
+    code, out = run(capsys, "status", "--check")
+    assert code == 1 and "reranker   ! the reranker refused a request: ValueError" in out
+    # A reranker the install couldn't run fails the check; one only too slow here doesn't.
+    make_env("cpu", reranker=timing(FAKE_RERANKER, None, "the reranker didn't load: KeyError"))
+    code, out = run(capsys, "status", "--check")
+    assert code == 1 and "reranker   fake-reranker is off on this machine: the reranker didn't load: KeyError" in out
+    make_env("cpu", reranker=timing(FAKE_RERANKER, 0.9))
+    code, out = run(capsys, "status", "--check")
+    assert code == 0
+    assert "reranker   fake-reranker is off on this machine: 30 pairs took 0.90 s, past 0.6 s;" in out
+    assert "docket models install times it again" in out
+    make_env("cpu", requirements="old")
+    code, out = run(capsys, "status")
+    assert "reranker   the models' environment is from another Docket or Python" in out
+    choose({"device": "cpu", "embedder": FAKE.name, "reranker": "none"})
+    code, out = run(capsys, "status")
+    assert "reranker   none (docket models install adds one)" in out
+    choose({"device": "cpu", "embedder": FAKE.name})
+    code, out = run(capsys, "status")
+    assert "reranker   no reranker is installed; docket models install adds it" in out
+
+
+def test_install_without_the_reranker_says_so_to_the_install(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked: list[bool] = []
+
+    def fake_install(device: str, *, rerank: bool = True, say: Any) -> Choice:
+        asked.append(rerank)
+        return Choice("cpu", E5_SMALL)
+
+    monkeypatch.setattr(install, "install", fake_install)
+    assert run(capsys, "install", "--device", "cpu", "--no-reranker")[0] == 0 and asked == [False]
+
+
+def test_the_service_line_counts_its_reranks(
+    vault: Vault, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = Service(monkeypatch, vault)
+    service.body = {**UP, "reranker": "fake-reranker", "rerank_why": None, "reranked": 12, "past_budget": 1}
+    out = run(capsys, "status", "--vault", str(vault.root))[1]
+    assert "service    fake-reranker: 12 reranked, 1 past the budget" in out
+    service.body = {**UP, "reranker": "fake-reranker", "rerank_why": "the reranker didn't load: KeyError"}
+    out = run(capsys, "status", "--vault", str(vault.root))[1]
+    assert "service    fake-reranker: off: the reranker didn't load: KeyError" in out
+
+
+@needs_vectors
+def test_search_and_eval_rerank_where_the_reranker_runs(
+    vault: Vault, capsys: pytest.CaptureFixture[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    at(vault, capsys, "index", "update")
+    questions = tmp_path / "q.yaml"
+    questions.write_text(
+        'schema_version: 1\nasked: "2026-10-14T12:00:00+02:00"\nquestions:\n'
+        f'  - {{q: zebbra migrashun, want: ["r:{ZEBRA}"], kind: paraphrase, lang: en}}\n',
+        encoding="utf-8",
+    )
+    code, out = at(vault, capsys, "eval", str(questions))
+    assert "reranker  off: no reranker is installed; docket models install adds it" in out
+    with_reranker(monkeypatch)
+    rerank_worker(monkeypatch)
+    code, out = at(vault, capsys, "search", "zebra migration", "--no-update")
+    assert code == 0 and "not reranked" not in out and ZEBRA in out
+    code, out = at(vault, capsys, "eval", str(questions))
+    assert "reranker  fake-reranker: the top 30, with no time budget" in out and "ran without it" not in out
+    rerank_worker(monkeypatch, rerank_refuse=True)
+    code, out = at(vault, capsys, "eval", str(questions))
+    assert "          1 question(s) ran without it: the reranker refused a request: ValueError" in out
+    # On a GPU machine docket search goes without the reranker and says the service has it; eval starts on the GPU.
+    with_reranker(monkeypatch, GPU_RERANKER, 0.13)
+    rerank_worker(monkeypatch)
+    code, out = at(vault, capsys, "search", "zebra migration", "--no-update")
+    assert "not reranked: the reranker runs on the GPU in the service; docket search goes without it" in out
+    code, out = at(vault, capsys, "eval", str(questions))
+    assert "(the reranker runs on the GPU, so this worker took a few seconds to start)" in out
+    assert "reranker  fake-gpu-reranker: the top 30, with no time budget" in out

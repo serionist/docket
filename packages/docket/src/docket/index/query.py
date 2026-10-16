@@ -14,7 +14,10 @@
 5. With models on, vector candidates: the query's vector's top 200 (DR-0338).
 6. Fuse the lists by reciprocal rank, the vectors' at half weight, so a boost lifts a chunk and never drops one; a chunk
    only the vectors found goes after every all-words hit.
-7. Collapse hits on the same stretch, group them by recording or thread, attach each group's summary.
+7. With a reranker on, rerank the top N within a budget: the chunks behind the k hits step 6 gives, then the fusion at
+   vector weight 1 from its top, in two tiers, all-words hits first (DR-0452, DR-0453, DR-0454); skipped, the order
+   stays step 6's and the result says why.
+8. Collapse hits on the same stretch, group them by recording or thread, attach each group's summary.
 
 The parameters follow the design's MCP `search` tool, which the service (#8) maps one to one (DR-0117).
 """
@@ -37,7 +40,7 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel
 
 from docket.errors import DocketError
-from docket.index import matching, vectors
+from docket.index import matching, rerank, vectors
 from docket.index.build import db_path, languages_of, open_index
 from docket.index.languages import Language, Languages
 from docket.index.terms import Checker, Word, phrase_of, tokens
@@ -57,8 +60,8 @@ from docket.index.text import (
     words_and_compounds,
 )
 from docket.index.timewords import Range, read_time
-from docket.models.catalogue import input_hash
-from docket.models.provider import Off
+from docket.models.catalogue import input_hash, rerank_passage
+from docket.models.provider import RERANK_SECONDS, Off
 from docket.vault.vault import Vault
 
 CANDIDATES = 200
@@ -67,6 +70,8 @@ RRF = 60
 # The vector list counts half in the fusion: on the invented set that kept the paraphrase and typo lift and every kind's
 # MRR within 0.01 of keyword search's, where a full weight cost names and inflections (DR-0338).
 VECTOR_WEIGHT = 0.5
+# The reranker's candidates come from the fusion at full weight, which fed it better (DR-0453).
+RERANK_WEIGHT = 1.0
 # The query's vector waits at most 2 s in the worker's client; the scan itself is bounded by this.
 VECTOR_SECONDS = 10.0
 MAX_K = 100
@@ -167,12 +172,23 @@ class VectorsRun(BaseModel):
     why: str | None = None
 
 
+class RerankRun(BaseModel):
+    """Whether the reranker ran (DR-0459): off (none here, or off on this machine, with why), on with the pairs it
+    reranked, or skipped with why."""
+
+    state: Literal["off", "on", "skipped"] = "off"
+    model: str | None = None
+    pairs: int = 0
+    why: str | None = None
+
+
 class SearchResult(BaseModel):
     query: QueryReading
     groups: list[Group] = []
     facets: dict[str, dict[str, int]] = {}
     candidates: int = 0
     models: VectorsRun = VectorsRun()
+    rerank: RerankRun = RerankRun()
 
 
 @dataclass
@@ -821,6 +837,98 @@ def _start_vectors(
     return _VectorStage(models, db, text, filters), run
 
 
+def _fuse(lists: Sequence[tuple[Sequence[int], float]], found_by: dict[int, str]) -> list[int]:
+    """The lists fused by reciprocal rank, each at its weight, then every chunk only the vectors found moved after the
+    last all-words hit, at any k (DR-0338): those it passed in the fusion go just after it, in their order."""
+    score: dict[int, float] = {}
+    for ids, weight in lists:
+        for n, chunk in enumerate(ids, start=1):
+            score[chunk] = score.get(chunk, 0.0) + weight / (RRF + n)
+    ranked = sorted(score, key=lambda c: (-score[c], c))
+    last_all = max((n for n, chunk in enumerate(ranked) if found_by[chunk] == "all"), default=0)
+    early = [chunk for chunk in ranked[:last_all] if found_by[chunk] == "vector"]
+    if early:
+        ranked = [c for c in ranked[: last_all + 1] if found_by[c] != "vector"] + early + ranked[last_all + 1 :]
+    return ranked
+
+
+def _walked(ranked: list[int], rows: dict[int, _Row], k: int) -> list[int]:
+    """The chunks behind the first k hits of an order, walked as the search collapses them: every chunk up to the one
+    that would be the next hit, so a chunk folded into a hit's `also` is among them."""
+    kept: list[_Row] = []
+    for n, chunk in enumerate(ranked):
+        row = rows[chunk]
+        if any(h.grp == row.grp and _overlaps(h, row) for h in kept):
+            continue
+        if len(kept) == k:
+            return ranked[:n]
+        kept.append(row)
+    return ranked
+
+
+def _boosted(conn: sqlite3.Connection, chunks: list[int], boosts: Sequence[str]) -> set[int]:
+    """The chunks that mention an entity the search was asked to lift, by its people or entities."""
+    if not boosts:
+        return set()
+    marks = ", ".join("?" * len(chunks))
+    wanted = ", ".join("?" * len(boosts))
+    found = conn.execute(
+        f"SELECT DISTINCT chunk FROM mentions WHERE chunk IN ({marks}) AND entity IN ({wanted})",  # noqa: S608 - placeholders only
+        [*chunks, *boosts],
+    )
+    return {int(chunk) for (chunk,) in found}
+
+
+@dataclass
+class _Fused:
+    """What the rerank step works from: today's order, the lists to fuse again at full weight, and the rest."""
+
+    today: list[int]
+    keyword: list[int]
+    by_entity: list[int]
+    by_vector: list[int]
+    found_by: dict[int, str]
+    rows: dict[int, _Row]
+
+    def at(self, vector_weight: float) -> list[int]:
+        lists = [(self.keyword, 1.0), (self.by_entity, 1.0), (self.by_vector, vector_weight)]
+        return _fuse(lists, self.found_by)
+
+
+def _rerank(
+    s: _Search,
+    models: vectors.QueryVectors | Off | None,
+    asked: str,
+    fused: _Fused,
+    *,
+    k: int,
+    boosts: Sequence[str],
+    budget: float | None,
+) -> tuple[list[int], RerankRun]:
+    """Today's order with its top N reranked, or today's order and why it isn't (DR-0452, DR-0453, DR-0454)."""
+    if not isinstance(models, rerank.Reranks):
+        return fused.today, RerankRun()
+    if models.reranker is None:
+        state = "skipped" if models.rerank_said else "off"
+        return fused.today, RerankRun(state=state, why=models.rerank_why)
+    run = RerankRun(state="on", model=models.reranker.name)
+    if not asked:
+        run.state, run.why = "skipped", "nothing to compare: the query is only time words or filters"
+        return fused.today, run
+    top = rerank.candidates(_walked(fused.today, fused.rows, k), fused.at(RERANK_WEIGHT), models.pairs)
+    run.pairs = len(top)
+    if len(top) < 2:
+        return fused.today, run
+    texts = [rerank_passage(fused.rows[c].title, fused.rows[c].text) for c in top]
+    scores = models.rerank(asked, texts, budget)
+    if isinstance(scores, str):
+        run.state, run.why, run.pairs = "skipped", scores, 0
+        return fused.today, run
+    head = rerank.order(top, scores, fused.found_by, _boosted(s.conn, top, boosts))
+    chosen = set(head)
+    return head + [c for c in fused.today if c not in chosen], run
+
+
 def _iso(value: datetime) -> str:
     at = value.astimezone(UTC)
     return f"{at:%Y-%m-%dT%H:%M:%S}.{at.microsecond // 1000:03d}Z"
@@ -838,9 +946,11 @@ def search(
     k: int = 20,
     now: datetime | None = None,
     models: vectors.QueryVectors | Off | None = None,
+    rerank_budget: float | None = RERANK_SECONDS,
 ) -> SearchResult:
     """Find chunks for a query; see the module's docstring for how. With models, a vector stage runs beside the FTS
-    stages, and is skipped, with the reason in the result, whenever it can't run."""
+    stages, and a reranker after the fusion, each skipped, with the reason in the result, whenever it can't run. A
+    rerank has `rerank_budget` seconds, or no limit for None, as `docket eval` asks."""
     if not 1 <= k <= MAX_K:
         raise DocketError(f"k is from 1 to {MAX_K}")
     conn = open_index(vault)
@@ -848,7 +958,7 @@ def search(
         s = _Search(conn, vault, languages_of(vault))
         return _run(
             s, query, people=people, entities=entities, sources=sources, since=since, until=until, k=k, now=now,
-            models=models,
+            models=models, rerank_budget=rerank_budget,
         )  # fmt: skip
     finally:
         conn.close()
@@ -866,6 +976,7 @@ def _run(
     k: int,
     now: datetime | None,
     models: vectors.QueryVectors | Off | None = None,
+    rerank_budget: float | None = RERANK_SECONDS,
 ) -> SearchResult:
     reading = QueryReading(text=query)
     reading.phrases = [p.strip() for p in QUOTED.findall(query) if words(p)]
@@ -944,26 +1055,17 @@ def _run(
         take(s.newest(filters), "time")
     rank = {chunk: n for n, chunk in enumerate(order, start=1)}
     by_entity = s.entity_list(all_entities, filters, rank) if all_entities else []
-    score: dict[int, float] = {}
-    for n, chunk in enumerate(order, start=1):
-        score[chunk] = score.get(chunk, 0.0) + 1 / (RRF + n)
-    for n, chunk in enumerate(by_entity, start=1):
-        score[chunk] = score.get(chunk, 0.0) + 1 / (RRF + n)
+    for chunk in by_entity:
         found_by.setdefault(chunk, "entity")
-    if stage is not None:
-        for n, chunk in enumerate(stage.ids(s.conn), start=1):
-            score[chunk] = score.get(chunk, 0.0) + VECTOR_WEIGHT / (RRF + n)
-            found_by.setdefault(chunk, "vector")
-        if stage.why is not None:
-            run.state, run.why = "skipped", stage.why
-    ranked = sorted(score, key=lambda c: (-score[c], c))
-    # A chunk only the vectors found never passes an all-words hit, at any k (DR-0338): those it passed in the fusion
-    # move to just after the last one, in their order.
-    last_all = max((n for n, chunk in enumerate(ranked) if found_by[chunk] == "all"), default=0)
-    early = [chunk for chunk in ranked[:last_all] if found_by[chunk] == "vector"]
-    if early:
-        ranked = [c for c in ranked[: last_all + 1] if found_by[c] != "vector"] + early + ranked[last_all + 1 :]
-    rows = s.rows(ranked)
+    by_vector = stage.ids(s.conn) if stage is not None else []
+    for chunk in by_vector:
+        found_by.setdefault(chunk, "vector")
+    if stage is not None and stage.why is not None:
+        run.state, run.why = "skipped", stage.why
+    fused = _Fused([], order, by_entity, by_vector, found_by, {})
+    ranked = fused.today = fused.at(VECTOR_WEIGHT)
+    rows = fused.rows = s.rows(ranked)
+    ranked, reranked = _rerank(s, models, asked, fused, k=k, boosts=reading.boosts, budget=rerank_budget)
     mentioned: dict[int, set[str]] = {}
     for start in range(0, len(ranked), 500):
         part = ranked[start : start + 500]
@@ -986,7 +1088,7 @@ def _run(
     # and in the candidates alike.
     shown = {row.id for row in kept}
     counted = [rows[c] for c in ranked if found_by[c] != "vector" or c in shown]
-    result = SearchResult(query=reading, candidates=len(counted), models=run)
+    result = SearchResult(query=reading, candidates=len(counted), models=run, rerank=reranked)
     hit_rank = {row.id: n for n, row in enumerate(kept, start=1)}
     by_group: dict[str, list[_Row]] = {}
     for row in kept:

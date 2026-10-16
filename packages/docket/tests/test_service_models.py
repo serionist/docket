@@ -12,12 +12,13 @@ from typing import Any
 
 import pytest
 from docket_testkit import index_template, make_record
-from models_kit import FAKE, fake_models, fake_worker, needs_vectors
+from models_kit import FAKE, FAKE_RERANKER, fake_models, fake_worker, needs_vectors
 from starlette.testclient import TestClient
 from test_index_vectors import choose
 
 from docket.errors import DocketError
 from docket.index import rebuild
+from docket.models.client import PAST_BUDGET, Skip
 from docket.models.provider import Models, Off
 from docket.service import models as service_models
 from docket.service.app import create_app
@@ -69,6 +70,7 @@ def test_the_keeper_runs_a_pass_at_start_and_after_each_poke(vault: Vault) -> No
         assert first is not None and first.have == first.total > 0 and worker.ensured >= 1
         assert keeper.status().model_dump() == {
             "state": "up", "model": "fake", "why": None, "embedded": first.have, "errors": [],
+            "reranker": None, "rerank_why": None, "reranked": 0, "past_budget": 0,
         }  # fmt: skip
         vault.write_run("chat", [make_record(rid="chat:C0OPS/1791480100.000100", text="Another zebra.")], None)
         from docket.index import update
@@ -123,7 +125,7 @@ def test_a_keeper_with_models_off_says_why_and_starts_nothing(vault: Vault, capl
     keeper.close()
     assert keeper.status().model_dump() == {
         "state": "off", "model": None, "why": "the models block in config.yaml doesn't read", "embedded": None,
-        "errors": [],
+        "errors": [], "reranker": None, "rerank_why": None, "reranked": 0, "past_budget": 0,
     }  # fmt: skip
     assert "models are off: the models block in config.yaml doesn't read" in caplog.text
     quiet = ModelsKeeper(lambda: vault, opener(Off()))
@@ -183,3 +185,37 @@ def test_the_service_searches_with_vectors_once_its_pass_has_run(client: tuple[T
     worker.up, worker.why = False, "the models' worker stopped (exit 5)"
     answer = http.get("/api/search", params={"query": "zebbra migrashun"}, headers=BEARER).json()
     assert answer["models"] == {"state": "skipped", "model": "fake", "why": "the models' worker stopped (exit 5)"}
+
+
+# -- the reranker (#88) ------------------------------------------------------------------------------------------------
+
+
+def test_the_status_counts_reranks_and_says_why_the_reranker_is_off(vault: Vault) -> None:
+    models, inproc = fake_models(pairs=30)
+    keeper = ModelsKeeper(lambda: vault, opener(models))
+    keeper.start()
+    try:
+        models.rerank("q", ["a", "b"], 0.75)
+        inproc.rerank_answer = Skip(PAST_BUDGET, budget=True)
+        models.rerank("q", ["a", "b"], 0.75)
+        status = keeper.status()
+        assert (status.reranker, status.rerank_why, status.reranked, status.past_budget) == (
+            "fake-reranker",
+            None,
+            1,
+            1,
+        )
+    finally:
+        keeper.close()
+    # A worker whose reranker didn't load serves vectors on, and the status says why the reranker is off.
+    worker = fake_worker(reranker={"name": "fake-reranker"}, reranker_off="the reranker didn't load: KeyError")
+    off = Models(FAKE, worker, 8192, reranker=FAKE_RERANKER, pairs=30)
+    keeper = ModelsKeeper(lambda: vault, opener(off))
+    keeper.start()
+    try:
+        wait_for(lambda: worker.up)
+        status = keeper.status()
+        assert status.state == "up" and status.rerank_why == "the reranker didn't load: KeyError"
+        assert isinstance(off.query_vector("zebra"), bytes)
+    finally:
+        keeper.close()

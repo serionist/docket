@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 from markupsafe import Markup
 
 from docket.index import EntityLabel, SearchResult
-from docket.index.query import DocRef, Group, Hit, QueryReading, VectorsRun
+from docket.index.query import DocRef, Group, Hit, QueryReading, RerankRun, VectorsRun
 from docket.index.text import words
 from docket.vault.anchors import parse_locator
 from docket.vault.processed import DOC_TYPES
@@ -169,6 +169,11 @@ def reading_line(reading: QueryReading, names: dict[str, EntityLabel], tz: ZoneI
 def vectors_line(run: VectorsRun) -> list[str]:
     """A line only when models are on here and this search went without vectors, with why."""
     return [f"no vectors in this search: {run.why}"] if run.state == "skipped" and run.why else []
+
+
+def rerank_line(run: RerankRun) -> list[str]:
+    """A line only when the reranker is on here and this search went without it, with why (DR-0459)."""
+    return [f"not reranked: {run.why}"] if run.state == "skipped" and run.why else []
 
 
 def resolved(
@@ -349,7 +354,7 @@ def _when(group: Group, tz: ZoneInfo) -> str:
 def build(result: SearchResult, state: SearchState, names: dict[str, EntityLabel], tz: ZoneInfo) -> SearchView:
     marks = terms(result.query)
     view = SearchView(
-        reading=[*reading_line(result.query, names, tz), *vectors_line(result.models)],
+        reading=[*reading_line(result.query, names, tz), *vectors_line(result.models), *rerank_line(result.rerank)],
         chips=chips(state, names, result.query),
         facets=facets(result, state, names),
         candidates=result.candidates,

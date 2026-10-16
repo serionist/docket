@@ -1,8 +1,9 @@
-"""The models' test doubles: a deterministic embedder, a worker process that runs it with Docket's own Python, and the
-same embedder in-process for the index and search tests. No model, no ONNX Runtime, no network.
+"""The models' test doubles: a deterministic embedder and reranker, a worker process that runs them with Docket's own
+Python, and the same in-process for the index and search tests. No model, no ONNX Runtime, no network.
 
 A text's vector is its character trigrams hashed into a few dims, signed and normalized: texts sharing letters lie
 close, so a test can plant a chunk only the vector list finds by giving it the query's letters and none of its words.
+A pair's score is its two vectors' dot product, unless the text carries a planted score (`[score 0.9]`).
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import struct
 import sys
@@ -22,9 +24,10 @@ import pytest
 
 from docket.index.vectors import load_extension
 from docket.models import config
-from docket.models.catalogue import Embedder, ModelFile
-from docket.models.client import Worker
+from docket.models.catalogue import RERANK_BATCH, Embedder, ModelFile, Reranker
+from docket.models.client import Skip, Worker
 from docket.models.provider import Models
+from docket.models.worker import PastBudget, RerankerOff
 
 FAKE_WORKER = Path(__file__).with_name("fake_worker.py")
 
@@ -60,6 +63,31 @@ FAKE = Embedder(
 )
 
 
+FAKE_RERANKER = Reranker(
+    name="fake-reranker",
+    repo="example/fake-reranker",
+    revision="89abcdef0123456789abcdef0123456789abcdef",
+    device="cpu",
+    model_file=ModelFile("onnx/model.onnx", 5, hashlib.sha256(b"three").hexdigest()),
+    tokenizer_file=ModelFile("tokenizer.json", 4, hashlib.sha256(b"four").hexdigest()),
+    max_tokens=256,
+    pairs=30,
+    licence="Apache-2.0",
+    trained_on="trained on invented pairs",
+)
+PLANTED = re.compile(r"\[score (-?[0-9.]+)\]")
+
+
+def pair_score(query: str, text: str) -> float:
+    """A pair's score: the planted one when the text carries `[score x]`, else its two vectors' dot product."""
+    planted = PLANTED.search(text)
+    if planted:
+        return float(planted.group(1))
+    a = struct.unpack(f"<{DIMS}f", trigram_vector(query))
+    b = struct.unpack(f"<{DIMS}f", trigram_vector(text))
+    return sum(x * y for x, y in zip(a, b, strict=True))
+
+
 def trigram_vector(text: str, dims: int = DIMS) -> bytes:
     """A text's vector: its prefix cut off, its lowercase character trigrams hashed into `dims` signed buckets."""
     body = text.split(": ", 1)[1] if text.startswith(("query: ", "passage: ")) else text
@@ -85,7 +113,35 @@ class FakeBackend:
         time.sleep(float(self.spec.get("slow_hello", 0)))
         if self.spec.get("bad_hello"):
             return {"dims": "many"}
-        return {"dims": self.dims, "device": "cpu", "provider": "CPUExecutionProvider", "onnxruntime": "fake"}
+        out: dict[str, object] = {
+            "dims": self.dims, "device": "cpu", "provider": "CPUExecutionProvider", "onnxruntime": "fake",
+        }  # fmt: skip
+        rerank = self.spec.get("reranker")
+        if rerank is not None:
+            off = self.spec.get("reranker_off")
+            provider = None if off else self.spec.get("rerank_provider", "CPUExecutionProvider")
+            out["reranker"] = {"name": rerank["name"], "provider": provider, "off": off}
+            if self.spec.get("bad_reranker_hello"):
+                out["reranker"] = "loaded"
+        return out
+
+    def rerank(self, query: str, texts: list[str], deadline: float | None) -> bytes:
+        if self.spec.get("reranker") is None or self.spec.get("reranker_off"):
+            raise RerankerOff
+        if self.spec.get("rerank_refuse"):
+            raise ValueError
+        if self.spec.get("rerank_die"):
+            sys.exit(5)
+        # Batch by batch, as the real reranker goes: none starts that its last one's time says ends past the deadline.
+        took = float(self.spec["reranker"].get("batch_seconds", 0))
+        for _ in range(0, max(1, len(texts)), RERANK_BATCH):
+            if deadline is not None and time.time() + took > deadline:
+                raise PastBudget
+            began = time.time()
+            time.sleep(float(self.spec.get("rerank_delay", 0)))
+            took = time.time() - began
+        data = struct.pack(f"<{len(texts)}f", *(pair_score(query, t) for t in texts))
+        return data[:-4] if self.spec.get("rerank_wrong_size") else data
 
     def embed(self, texts: list[str]) -> bytes:
         self.calls += 1
@@ -123,6 +179,9 @@ class InProcess:
         self.batches: list[list[str]] = []
         self.queries: list[str] = []
         self.ensured = 0
+        # The reranks asked: (query, texts, deadline); and how the next ones answer, when a test sets it.
+        self.reranks: list[tuple[str, list[str], float | None]] = []
+        self.rerank_answer: Skip | None = None
 
     def ensure(self) -> bool:
         self.ensured += 1
@@ -138,13 +197,21 @@ class InProcess:
         self.batches.append(list(texts))
         return [trigram_vector(t) for t in texts]
 
+    def rerank(self, query: str, texts: Sequence[str], deadline: float | None) -> list[float] | Skip:
+        self.reranks.append((query, list(texts), deadline))
+        if self.rerank_answer is not None:
+            return self.rerank_answer
+        return [pair_score(query, t) for t in texts]
+
     def stop(self) -> None:
         self.up = False
 
 
-def fake_models(budget: int = 8192) -> tuple[Models, InProcess]:
+def fake_models(budget: int = 8192, *, pairs: int = 0, **kwargs: Any) -> tuple[Models, InProcess]:
+    """The fake embedder in-process, and the fake reranker on with `pairs`."""
     worker = InProcess()
-    return Models(FAKE, worker, budget), worker
+    reranker = FAKE_RERANKER if pairs else None
+    return Models(FAKE, worker, budget, reranker=reranker, pairs=pairs, **kwargs), worker
 
 
 def make_env(device: config.Device, **marker: Any) -> None:
