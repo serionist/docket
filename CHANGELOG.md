@@ -8,6 +8,10 @@ Unreleased in the same PR.
 
 ### Added
 
+- The Settings page, `/settings` in the web app: each source's settings, the never-store lists (their values only
+  when you ask), redaction and this machine's models in one place, with every change named as the command to run or
+  the `vault.yaml` line to change. No page ever makes a change that lets more in: turning a rule off, taking a
+  never-store value off, or making a source looser stays at your console or in your editor.
 - Tier 1 of curation: on the vault's primary machine, a round first applies by itself an address or a chat id
   that mail or chat writes beside a known full name, a name a system shows beside an id an entity lists, and a
   spelling two engines agree on, each logged and undoable; anything less certain becomes a card. A shared sender
@@ -123,6 +127,8 @@ Unreleased in the same PR.
 
 ### Changed
 
+- A `vault.yaml` that doesn't read as YAML is named by its line and column and what was wrong there, no longer with
+  the line's text, so a never-store value on it never shows in a page, a terminal or a log.
 - Verifying a doc and writing one no longer load the raw log of each source it covers when the search index is
   current for that source: their anchors are checked against the records' own lines where the index says they are.
   On 50 MB of call recordings in one source, `verify` went from about 580 ms to 5 ms and a `doc_put` from about

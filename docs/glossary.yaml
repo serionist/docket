@@ -78,6 +78,9 @@ terms:
   - term: locator
     definition: "What read takes: a doc's id or path, or a record part such as r:<rid>@12:08, the same in brackets, or a bare rid."
     see: [packages/docket/src/docket/vault/anchors.py]
+  - term: loosening
+    definition: "Any vault.yaml change outside DR-0506's short list (a never-store value added, a redaction rule or pattern turned on, a source made stricter or turned off): a value taken off, a rule turned off, a source added, made looser or turned on, its tools, mapper, hosts or folder, and any key added later. What it lets in reaches git for good, so it is made at the console or by hand, never by a page."
+    see: [packages/docket/src/docket/vault/settings.py]
   - term: mapper
     definition: "A source's code in the consuming project, map_run(run) in .claude/skills/sources/<source>/mapper.py: a run's captures and manifest in, records in the core's shape out, as plain JSON. Docket runs it in its own process and checks what it returns."
     see: [packages/docket/src/docket/sources/contract.py]

@@ -26,7 +26,6 @@ from docket.imports import notes
 from docket.index.build import db_path
 from docket.index.embedpass import fill
 from docket.models.client import Worker
-from docket.models.config import Choice
 from docket.models.provider import Models, Off
 from docket.models.runtime import open_models
 from docket.plaintext import printable
@@ -1389,40 +1388,19 @@ def models_status(
 ) -> None:
     """What this machine's models are: the choice, the environments, the files, the vault's vectors and the service's
     worker."""
-    from docket.models import config  # noqa: PLC0415
+    from docket.models import config, report  # noqa: PLC0415
     from docket.models.config import RerankTiming  # noqa: PLC0415
-    from docket.models.install import vectors_problem  # noqa: PLC0415
     from docket.models.provider import Off  # noqa: PLC0415
     from docket.models.runtime import rerank_spec, timed, worker_for  # noqa: PLC0415
 
-    choice = config.read()
-    if isinstance(choice, Off):
-        say(f"models     off{f': {choice.why}' if choice.why else ' (docket models install turns them on)'}")
-    else:
-        say(f"models     {choice.embedder.name} on {choice.device}")
-    for device in config.DEVICES:
-        if config.env_dir(device).exists():
-            found = config.installed(device)
-            line = found if isinstance(found, str) else f"ready, batches of {found.budget:,} characters"
-            say(f"env {device:<6} {line} ({config.env_dir(device)})")
-    if not isinstance(choice, Off):
-        missing = config.missing_files(choice.embedder)
-        say(f"files      {'missing: ' + ', '.join(f.path for f in missing) if missing else 'all here'}")
-        problem = vectors_problem()
-        say(f"search     {'! ' + problem if problem else 'uses the vectors'}")
-        say(f"reranker   {_reranker_line(choice)}")
-    _models_vectors(vault, on=not isinstance(choice, Off))
+    found_report = report.read()
+    choice = found_report.choice
+    say_all(report.lines(found_report))
+    _models_vectors(vault, on=found_report.on)
     service = _service_models()
     if service is not None:
-        why = service.get("why")
-        state = f"{service.get('model')}, {service.get('state')}" if service.get("model") else "off"
-        say(f"service    {state}{f': {why}' if why else ''}")
-        if service.get("reranker"):
-            reranks = f"{service.get('reranked', 0)} reranked, {service.get('past_budget', 0)} past the budget"
-            off = service.get("rerank_why")
-            say(f"service    {service.get('reranker')}: {f'off: {off}' if off else reranks}")
-        errors = service.get("errors")
-        say_all([str(line) for line in cast(list[object], errors)] if isinstance(errors, list) else [])
+        said, errors = report.service_lines(service)
+        say_all([f"service    {line}" for line in said] + errors)
     if check:
         found = choice if isinstance(choice, Off) else config.installed(choice.device)
         if isinstance(choice, Off) or isinstance(found, (Off, str)):
@@ -1446,25 +1424,6 @@ def models_status(
                 raise typer.Exit(1)
         finally:
             worker.stop()
-
-
-def _reranker_line(choice: Choice) -> str:
-    """The reranker as the install left it: its timing, or why it is off here (DR-0455)."""
-    from docket.models import config  # noqa: PLC0415
-    from docket.models.config import RerankTiming  # noqa: PLC0415
-    from docket.models.runtime import timed  # noqa: PLC0415
-
-    reranker = choice.reranker
-    if reranker is None:
-        return choice.reranker_why or "none (docket models install adds one)"
-    found = config.installed(choice.device)
-    if isinstance(found, str):
-        return found
-    timing = timed(choice, found)
-    if isinstance(timing, RerankTiming):
-        took = f"{timing.pairs} pairs in {timing.seconds or 0:.2f} s"
-        return f"{reranker.name} ({reranker.licence}) on {reranker.device}: {took}"
-    return str(timing)
 
 
 def _check_reranker(worker: Worker) -> bool:

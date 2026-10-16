@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0510
+    title: The Settings page shows this machine's models and config.yaml and writes none of it; install and remove stay in the terminal
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#73"]
+    description: "The models part shows what docket models status prints, from one function both use: the provider, the embedder and its device, each environment, the files, the reranker's timing or why it is off, the service's worker from its own state, and the vectors from a count rather than index.status(), which hashes every doc. It names docket models install with --device and --no-reranker, docket models remove, and docket service install to restart, with docket service stop first where the worker holds the files. Install and remove download hundreds of MB of model files and up to 1.3 GB of packages, on Windows the service's own worker holds the files they replace, and the service reads its models only when it starts. The models block, the folders block and the rest of config.yaml are shown for this machine and never written: a change applies only after a restart, and the file's rewrite drops its comments."
+    not_chosen:
+      - "Install and remove from the page: downloads inside the service, its own worker holding the files, and a job runner the service doesn't have."
+      - "The page writing the models block: it applies only at the next start, and userconfig rewrites the file without its comments."

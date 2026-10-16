@@ -21,6 +21,7 @@ import uvicorn
 from curate_kit import curate_vault
 from docket_testkit import index_template
 from playwright.sync_api import Page, expect, sync_playwright
+from settings_kit import settings_template
 from staging_kit import staging_vault
 from sync_kit import as_structured, as_text, memo, sync_template
 
@@ -60,6 +61,18 @@ def sync_service(sync_project: Path, tmp_path: Path) -> Iterator[tuple[int, str]
 def staging_service(tmp_path: Path) -> Iterator[tuple[int, str]]:
     """The real service over a vault with a transcript and a mail waiting, and a memo ready."""
     yield from _serve(staging_vault(tmp_path).root)
+
+
+@pytest.fixture(scope="module")
+def settings_project(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return settings_template(tmp_path_factory)
+
+
+@pytest.fixture
+def settings_service(settings_project: Path, tmp_path: Path) -> Iterator[tuple[int, str]]:
+    """The real service over a consuming project with a mixed, a work and a folder source, and never-store values."""
+    shutil.copytree(settings_project, tmp_path / "project")
+    yield from _serve(tmp_path / "project" / "vault")
 
 
 @pytest.fixture
@@ -386,6 +399,52 @@ def test_the_curate_page_in_a_browser(curate_service: tuple[int, str], tmp_path:
         page.goto(f"{base}/curate")
         _fits(page, ".lead", ".log-line", '[data-action="keys"]')
         page.screenshot(path=str(shots / "curate-390-list.png"), full_page=True)
+        assert not errors, errors
+        browser.close()
+
+
+def test_the_settings_page_in_a_browser(settings_service: tuple[int, str], tmp_path: Path) -> None:
+    port, token = settings_service
+    shots = Path(os.environ.get("DOCKET_TEST_SCREENSHOTS") or tmp_path)
+    shots.mkdir(parents=True, exist_ok=True)
+    link = client.call("POST", "/api/session", token=token, at=port)
+    assert link is not None
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel=None if BROWSER == "chromium" else BROWSER)
+        page = browser.new_page(viewport={"width": 1280, "height": 900})
+        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.on("requestfailed", lambda r: errors.append(f"request failed: {r.method} {r.url} ({r.failure})"))
+        page.on(
+            "response", lambda r: errors.append(f"{r.status} {r.request.method} {r.url}") if r.status >= 400 else None
+        )
+        base = f"http://127.0.0.1:{port}"
+        page.goto(f"{link.body['url']}&next=/settings")
+        page.wait_for_url(f"{base}/settings")
+        expect(page.locator(".lead")).to_contain_text("4 sources, 4 on; 4 never-store values")
+        # No value of a list in the page until asked for, and no form: every change is named.
+        expect(page.locator("main")).not_to_contain_text("Dora #2")
+        expect(page.locator("form")).to_have_count(0)
+
+        # A source's changes fold out without JavaScript's help, stricter first, each with its line.
+        page.click("text=Change calls")
+        changes = page.locator("#source-calls li.change")
+        expect(changes.first).to_contain_text("Make it private")
+        expect(changes.nth(2)).to_contain_text("lets more in")
+        page.screenshot(path=str(shots / "settings.png"), full_page=True)
+
+        page.click("a.show-values")
+        page.wait_for_url(f"{base}/settings?show=lists")
+        expect(page.locator("#list-people .value")).to_have_text(["Cleo Test", "Dora #2"])
+        page.screenshot(path=str(shots / "settings-values.png"), full_page=True)
+
+        # At phone width the cards stack, and nothing scrolls sideways.
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.reload()
+        page.click("text=Change calls")
+        _fits(page, "#source-calls", "#source-calls .paste-text", "#list-people", ".setting-facts.models")
+        page.screenshot(path=str(shots / "settings-390.png"), full_page=True)
         assert not errors, errors
         browser.close()
 

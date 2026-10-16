@@ -73,15 +73,17 @@ def test_the_navigation_has_a_slot_for_every_page_and_links_the_built_ones(clien
     assert len(slots) == len(pages.PAGES) - len(built)
     assert len(pages.PAGES) == 12
     assert [s.attrs["title"].split(":")[0] for s in slots[:5]] == ["Today", "Queue", "Ledger", "Meetings", "Outbox"]
-    # No number beside a slot, which would read as a count: one muted "later" per group, the phase in the tooltip and
-    # the screen-reader text.
-    assert [li.text() for li in nav.find_all("li", class_="nav-later")] == ["later"] * 3
+    # No number beside a slot, which would read as a count: one muted "later" per group with a page to come, the phase
+    # in the tooltip and the screen-reader text.
+    waiting = sum(1 for g in pages.NAV if not all(p.built for p in g.pages))
+    assert [li.text() for li in nav.find_all("li", class_="nav-later")] == ["later"] * waiting == ["later"] * 2
     assert all(li.attrs["aria-hidden"] == "true" for li in nav.find_all("li", class_="nav-later"))
     assert not any(ch.isdigit() for s in slots for ch in "".join(c for c in s.children if isinstance(c, str)))
-    settings = next(s for s in slots if s.text().startswith("Settings"))
-    assert "arrives in phase 1" in settings.text()
+    recording = next(s for s in slots if s.text().startswith("Recording"))
+    assert "arrives in phase 2" in recording.text()
     assert (
-        settings.attrs["title"] == "Settings: sources, never-store lists, models, redaction rules; arrives in phase 1"
+        recording.attrs["title"]
+        == "Recording: the summary next to the transcript, both transcripts; arrives in phase 2"
     )
     finding = nav.find_all("ul", class_="nav-group")[1]
     assert [c.text() for c in finding.find_all("li")][:2] == ["Search", "later"]
@@ -100,6 +102,7 @@ def test_the_navigation_has_a_slot_for_every_page_and_links_the_built_ones(clien
         "/staging/panel",
         "/curate",
         "/curate/panel",
+        "/settings",
     ],
 )
 def test_every_page_and_fragment_carries_the_page_csp_and_no_store(client: TestClient, path: str) -> None:
@@ -112,7 +115,7 @@ def test_every_page_and_fragment_carries_the_page_csp_and_no_store(client: TestC
 
 
 def test_a_page_that_isnt_there_is_html_and_the_api_keeps_json(client: TestClient) -> None:
-    page = client.get("/settings")
+    page = client.get("/today")
     assert page.status_code == 404
     assert "There is no page here" in page.text
     assert page.headers["Content-Security-Policy"] == PAGE_CSP
@@ -191,7 +194,7 @@ def test_the_pages_a_stranger_reaches_name_neither_the_vault_nor_the_machine(
     assert 'docket open "/search?query=x"' in parse(used.text).find("code").text()
     assert stranger.get("/static/nope.css").text == "not found"
     with signed_in(template, tmp_path / "other") as client:
-        missing = client.get("/settings")
+        missing = client.get("/today")
         shell = client.get("/search")
     for answer in (sign_in, used, missing):
         assert FOLDER not in answer.text

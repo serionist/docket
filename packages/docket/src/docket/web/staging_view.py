@@ -30,6 +30,7 @@ from docket.vault.redact import Redactor
 from docket.vault.releaselog import Releases
 from docket.vault.segments import segments
 from docket.vault.staging import Entry, Staged, State
+from docket.web.commands import filled
 
 PATH = "/staging"
 PANEL = "/staging/panel"
@@ -50,12 +51,6 @@ DONE = re.compile(
     r"^(?:(?P<label>work|private)-(?P<key>[0-9a-f]{12})|promoted-(?P<written>\d{1,7})-(?P<held>\d{1,7}))$"
 )
 PICK = re.compile(r"^(\d{1,6})(?:-(\d{1,6}))?$")
-# What a value in a copied command may hold, inside double quotes: letters and digits in any script, and these. An
-# allow-list, since shells read more than they show: PowerShell takes the curly quotes for a quote too, so a held id
-# holding one would end the string and run what follows it.
-_SAFE = frozenset(" ._-:/\\@+,~")
-# On top: a backslash before the closing quote, or two of them, change what bash reads.
-_BACKSLASHES = re.compile(r"\\\\|\\$")
 
 KIND_ICON = {
     "transcript": "recording",
@@ -819,14 +814,14 @@ def build_held(
             continue
         unfilled: list[tuple[str, str]] = []
         known = folders.get(source, [])
-        folder = _filled(known[0], "folder", unfilled) if len(known) == 1 else "<folder>"
+        folder = filled(known[0], "folder", unfilled) if len(known) == 1 else "<folder>"
         if len(known) != 1:
             unfilled += [("folder", f) for f in known]
-        vault = _filled(root, "vault", unfilled)
+        vault = filled(root, "vault", unfilled)
         granted = releases.of(source)
         ids: list[HeldId] = []
         for native in sorted(holds.of(source)):
-            name = _filled(native, "id", unfilled)
+            name = filled(native, "id", unfilled)
             where = f'--from "{folder}" --vault "{vault}"'
             again = granted.get(native)
             if again is not None:
@@ -850,13 +845,3 @@ def build_held(
             )
         )
     return out
-
-
-def _filled(value: str, name: str, unfilled: list[tuple[str, str]]) -> str:
-    """A value as the command can carry it in double quotes, or its placeholder when it holds anything but letters,
-    digits and the few characters every shell reads as themselves: then the value is listed beside the command, to put
-    in by hand."""
-    if not all(ch.isalnum() or ch in _SAFE for ch in value) or _BACKSLASHES.search(value):
-        unfilled.append((name, value))
-        return f"<{name}>"
-    return value

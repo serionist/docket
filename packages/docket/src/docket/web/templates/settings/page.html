@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% from "macros.html" import notice, paste %}
+{% block main %}
+<div class="settings">
+<header class="settings-head">
+  <h1>Settings</h1>
+  {% if view %}
+  <p class="meta">{{ view.machine }}, {% if view.machine == view.primary %}the primary machine{% else %}not the primary machine, {{ view.primary }}{% endif %}</p>
+  {% endif %}
+</header>
+{% if problem %}
+{{ notice('error', problem) }}
+{% else %}
+<p class="lead">{{ view.lead }}</p>
+{{ notice('info', view.form) }}
+{% if view.unfilled %}
+<p class="meta">Put these in by hand where a command holds their placeholder: {% for name, value in view.unfilled %}<code>&lt;{{ name }}&gt;</code> is <code dir="auto">{{ value }}</code>{{ '; ' if not loop.last }}{% endfor %}.</p>
+{% endif %}
+
+<section class="part" aria-labelledby="sources-title">
+  <h2 id="sources-title">Sources</h2>
+  {% if view.folders_problem %}{{ notice('warn', view.folders_problem) }}{% endif %}
+  {% if view.sources %}
+  <ul class="settings-cards">
+    {% for s in view.sources %}
+    <li class="setting-card{% if not s.enabled %} off{% endif %}" id="source-{{ s.name }}">
+      <div class="setting-head">
+        <h3>{{ s.name }}</h3>
+        <span class="badge">{{ s.sensitivity }}</span>
+        <span class="badge">{{ 'on' if s.enabled else 'off' }}</span>
+        {% if s.folder %}<span class="badge">folder</span>{% endif %}
+      </div>
+      <dl class="setting-facts">
+        {% for label, value in s.facts %}<div><dt>{{ label }}</dt><dd dir="auto">{{ value }}</dd></div>{% endfor %}
+      </dl>
+      {% if s.problem %}{{ notice('warn', s.problem) }}{% endif %}
+      <details class="changes">
+        <summary>Change {{ s.name }}</summary>
+        <ul class="change-list">
+          {% for c in s.changes %}
+          <li class="change{% if c.looser %} looser{% endif %}">
+            <p><span class="change-what">{{ c.what }}</span>{% if c.looser %} <span class="badge">lets more in</span>{% endif %}: {{ c.effect }}. In vault.yaml, under <code>{{ c.where }}</code>:</p>
+            {{ paste(c.line, 'the line: ' ~ c.what ~ ', ' ~ s.name) }}
+          </li>
+          {% endfor %}
+        </ul>
+        <p>Its {{ 'folder and exclude' if s.folder else 'tools, mapper and media hosts' }} change in its entry, by hand: that lets more in, or changes what the service runs or reads. Its entry as Docket writes it, to change under <code>sources</code>:</p>
+        <pre class="entry">{{ s.entry }}</pre>
+      </details>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty-line">No source yet.</p>
+  {% endif %}
+  <p class="meta">A new source, a folder source too, comes in with <code>docket source new &lt;name&gt;</code>.</p>
+</section>
+
+<section class="part" aria-labelledby="lists-title">
+  <div class="part-head">
+    <h2 id="lists-title">Never store</h2>
+    {% if view.shown %}<a class="show-values" href="/settings">Hide the values</a>{% else %}<a class="show-values" href="{{ shown_url }}">Show the values</a>{% endif %}
+  </div>
+  <ul class="settings-cards">
+    {% for l in view.lists %}
+    <li class="setting-card" id="list-{{ l.name }}">
+      <div class="setting-head">
+        <h3>{{ l.name }}</h3>
+        <span class="badge">{{ l.count }} {{ 'value' if l.count == 1 else 'values' }}</span>
+      </div>
+      <p class="meta">It {{ l.matches }}.</p>
+      {% if view.shown %}
+      {% if l.values %}
+      <ul class="values">
+        {% for v in l.values %}
+        <li><span class="value" dir="auto">{{ v.value }}</span> <code class="line" dir="auto" title="its line in vault.yaml">{{ v.line }}</code></li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="empty-line">Nothing on it.</p>
+      {% endif %}
+      {% endif %}
+      <details class="changes">
+        <summary>Add to {{ l.name }}</summary>
+        <p>Add a line under <code>never_store:</code> <code>{{ l.name }}:</code> in vault.yaml, quoted as Docket writes it, such as:</p>
+        {{ paste(l.example, 'an example line for ' ~ l.name) }}
+      </details>
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="meta">A value is committed in vault.yaml as you write it: it is in your repo's history, and goes wherever the vault is pushed. Taking one off lets in what it kept out, from the next sync: delete its line by hand.</p>
+</section>
+
+<section class="part" aria-labelledby="redaction-title">
+  <h2 id="redaction-title">Redaction</h2>
+  {% if view.credentials_off %}{{ notice('warn', 'Credentials are not redacted: ' ~ view.credentials_off ~ '.') }}{% endif %}
+  <ul class="settings-cards">
+    {% for r in view.rules %}
+    <li class="setting-card{% if not r.on %} off{% endif %}">
+      <div class="setting-head">
+        <h3>{{ r.name }}</h3>
+        <span class="badge">{{ 'on' if r.on else 'off' }}</span>
+        {% if r.pattern %}<span class="badge">your pattern</span>{% endif %}
+      </div>
+      <p class="meta">{% if r.pattern %}<code dir="ltr">{{ r.what }}</code>{% else %}Redacts {{ r.what }}.{% endif %}</p>
+      <p><span class="change-what">{{ 'Turn it off' if r.on else 'Turn it on' }}</span>{% if r.looser %} <span class="badge">lets more in</span>{% endif %}: {{ r.note }}.</p>
+      {{ paste(r.command, 'the command that turns ' ~ r.name ~ (' off' if r.on else ' on')) }}
+      {% if r.line %}<p class="meta">vault.yaml isn't as Docket writes it, so the command prints the line instead: {{ r.line }}.</p>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="meta">{{ view.names }}.</p>
+  <details class="changes">
+    <summary>A pattern of your own</summary>
+    <p>Add, change or remove one by hand, under <code>redaction:</code> <code>patterns:</code> in vault.yaml. It is committed as written, so write the shape, never the secret itself. Such as:</p>
+    <pre class="entry">{{ view.pattern_example }}</pre>
+  </details>
+</section>
+
+<section class="part" aria-labelledby="models-title">
+  <h2 id="models-title">Models on {{ view.machine }}</h2>
+  <dl class="setting-facts models">
+    {% for label, value in view.models.rows %}<div><dt>{{ label }}</dt><dd>{{ value }}</dd></div>{% endfor %}
+  </dl>
+  {% if view.models.errors %}
+  <details class="changes">
+    <summary>What the service's worker wrote last</summary>
+    <pre class="entry">{% for line in view.models.errors %}{{ line }}
+{% endfor %}</pre>
+  </details>
+  {% endif %}
+  <details class="changes"{% if not view.models.on %} open{% endif %}>
+    <summary>Install, remove or turn them off</summary>
+    <ul class="change-list">
+      {% for c in view.models.commands %}
+      <li class="change"><p>{{ c.what }}:</p>{{ paste(c.text, c.what) }}</li>
+      {% endfor %}
+      <li class="change">
+        <p>Off on this machine, the files kept: this line under <code>models:</code> in <code dir="ltr">{{ view.models.config_path }}</code>, then restart the service.</p>
+        {{ paste(view.models.off_line, 'the line that turns models off here') }}
+      </li>
+    </ul>
+  </details>
+</section>
+{% endif %}
+</div>
+{% endblock %}

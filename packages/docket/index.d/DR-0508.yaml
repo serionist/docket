@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0508
+    title: A never-store value typed into the Settings page travels only in a post's body and lands only in vault.yaml
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#73"]
+    description: "The add form posts the list and the value; the confirm view is that post's own answer, never a URL, and the 303 after the add carries done with the list and a count only. The page works without JavaScript and has no htmx-only path: back never shows the value in the address bar, and a value already on its list as the matcher folds it is a no-op, nothing written and the same 303, so a resubmitted post writes nothing. The field has autocomplete off, spellcheck false, autocapitalize off and autocorrect off, so the browser keeps no form history and sends nothing to a spell check service. The service logs route templates, never a body (DR-0155). The commit says Config: never-store <list>, 1 added; the value is in vault.yaml as written, where every machine reads it (DR-0021), and the form says it is committed and pushed with the vault. A value is refused when empty, past 200 characters or holding a control character. No command takes a never-store value: on a command line it would land in the shell's history."
+    binds: ["The value never appears in a URL, a log line, a commit message or done."]
+    not_chosen:
+      - "A GET confirm: the value in the address bar, the history and the sign-in page's command."
+      - "The value in the commit message: git log --oneline shows it everywhere."
+      - "Hashed entries in vault.yaml: keywords match by words and shapes, a hash only whole values, and a format change is a door."
+      - "docket never-store add <value>: the shell's history keeps it."
+      - "A value already listed refused: a resubmitted post shows an error for what already went in."

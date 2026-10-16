@@ -497,8 +497,8 @@ What the service refuses, and what it doesn't:
 
 ## The web app
 
-`docket open` signs your browser in to the service's own pages. In this version that is Search, Sync and Staging;
-the navigation shows the pages still to come, with the phase each arrives in.
+`docket open` signs your browser in to the service's own pages. In this version that is Search, Sync, Staging, Curate
+and Settings; the navigation shows the pages still to come, with the phase each arrives in.
 
 - Search runs the search Claude runs: the same words, names, time words and dates. Sources and a month narrow it;
   people and entities favour the hits that mention them, as Claude's boosts do. Facet counts are within the top 200.
@@ -553,6 +553,27 @@ DR-0384).
 - Its URL holds `source`, `state`, `k`, the open record (`open`), what you checked (`u`, `line`), typed cuts (`cut`),
   `picked=1` when you cleared a record's cuts on purpose, and the drop's question (`confirm=private`).
 - Keys: `j` and `k` through the records, `Enter` to open one, `Esc` to close it, `?`. No key writes.
+
+### The Settings page
+
+`/settings` shows what the gate obeys and this machine's models, and names every change (DR-0505, DR-0506, DR-0510).
+In this version it changes nothing itself.
+
+| Part | Shows |
+|---|---|
+| Sources | each source's sensitivity, on or off, tools, mapper and whether the runner takes it; a folder source's folder, this machine's own folder and exclude; each change as the `vault.yaml` line that makes it, stricter first |
+| Never store | each list's count and what it keeps out; the values only with `show=lists`; the line to add one |
+| Redaction | each rule and pattern of yours, on or off, with the `docket redaction set` command that turns it the other way and the warning it prints; the block for a new pattern |
+| Models | what `docket models status` says, the service's worker, the vectors; the commands to install, remove or restart |
+
+- A change that lets more in (a rule turned off, a never-store value taken off, a source made looser, turned on or
+  added, its tools, mapper or folder) is never made from a page: the page names the command or the line, for your
+  terminal or your editor, where Claude Code asks you first. What it lets in reaches git for good.
+- A `vault.yaml` with comments or a layout of your own is never rewritten: the page says so, and each change is a
+  line to make by hand.
+- A never-store value is committed in `vault.yaml` as you write it, so it is in your repo's history and goes wherever
+  the vault is pushed.
+- Keys: `?`.
 
 The pages' browser test runs on CI. To run it here, against your own Chrome or Edge:
 `DOCKET_TEST_BROWSER=chrome uv run pytest packages/docket/tests/test_web_browser.py` (or `msedge`).

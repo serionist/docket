@@ -263,6 +263,29 @@ def test_a_source_registered_as_it_stands_needs_no_commit(tmp_path: Path, capsys
     assert head(top) == before
 
 
+def test_a_source_already_as_it_stands_in_a_hand_edited_file_needs_no_paste(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The writer looks for no change before Docket's form: an entry already as `docket source new` would write it, in
+    a vault.yaml with the user's own lines, is registered as it stands, with no commit and no block to paste again."""
+    top = host_repo(tmp_path)
+    vault = folder_vault_in(top)
+    assert main(["source", "new", "zebra-notes", "--vault", str(vault.root)]) == 0
+    path = vault.root / "vault.yaml"
+    mine = path.read_text(encoding="utf-8").replace("sources:\n", "sources:   # mine\n", 1)
+    path.write_text(mine, encoding="utf-8", newline="\n")
+    before = head(top)
+    sh(top, "git", "clean", "-qfdx", ".claude")
+    capsys.readouterr()
+    assert main(["source", "new", "zebra-notes", "--vault", str(vault.root)]) == 0
+    out = capsys.readouterr().out
+    assert "source   zebra-notes in vault.yaml: mixed" in out
+    assert "add under sources:" not in out
+    assert "committed" not in out
+    assert path.read_text(encoding="utf-8") == mine
+    assert head(top) == before
+
+
 def test_a_vault_yaml_written_before_the_redaction_switches_is_still_docket_s_own(tmp_path: Path) -> None:
     top = host_repo(tmp_path)
     vault = folder_vault_in(top)

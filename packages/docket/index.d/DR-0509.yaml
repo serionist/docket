@@ -1,0 +1,13 @@
+decisions:
+  - id: DR-0509
+    title: A settings change that drops something asks once more, naming what it drops now and what already stored holds it
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#73"]
+    description: "A never-store value and a source made private answer a confirm view before anything is written: the staged records the sweep would drop, counted by Gate.would_drop under the lock with nothing written; for a value, the records and chunks already stored that hold it, at least, by index.query.reach, each candidate held to the gate's own rule so the count never overstates: people by records' authors and segments' speakers held to the people rule; keywords by the chunks NameQuery picks as candidates, each chunk's text then held to neverstore.matches_text with the value as the only keyword; containers by records' container and thread, folded as the gate folds them. The share of the index comes with the count, so a broad keyword shows what it would take. Those stay in raw until docket forget. Turning a rule on, making a source mixed and turning one off drop nothing and ask nothing. The view guards a slip, not an agent: it asks for a click, never typed words."
+    not_chosen:
+      - "A typed confirmation: it stops no agent and slows the owner."
+      - "One click: a slip drops what waits, and a broad keyword what comes, for good."
+      - "NameQuery's candidates as the count: a broad keyword's count overstated."
