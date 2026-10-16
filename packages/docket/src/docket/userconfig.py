@@ -122,3 +122,15 @@ def set_service(
     data["service"] = section
     _save(data)
     return service()
+
+
+def curate_questions() -> Path | None:
+    """`curate.questions`: the question file a curate round measures before and after (DR-0475), or None when unset.
+    A value of another kind is refused, as the service's keys are."""
+    raw: Any = load().get("curate")
+    if raw is None:
+        return None
+    value: Any = cast(dict[str, Any], raw).get("questions") if isinstance(raw, dict) else None
+    if not isinstance(value, str) or not value:
+        raise DocketError(f"{config_path()}: curate.questions must be a question file's path")
+    return Path(value).expanduser()

@@ -8,6 +8,10 @@ Unreleased in the same PR.
 
 ### Added
 
+- Curate rounds: `docket curate round` mines at most 15 cards from what the index holds (names your labels,
+  notes and mail spell, joined with how transcripts misheard them), ranked by what search misses; `show`,
+  `accept`, `reject`, `lift` and `status` work through them, every decision in the curate log, and a round
+  measures your own question set before and after when `curate.questions` names it.
 - `docket curate add`, `docket curate log` and `docket curate undo`: entity changes from a file (seed your people
   and terms from what you keep), each logged in `entities/_log/` and committed with the file it changed, and each
   one undoable. Docket never rewrites an entity file that holds a comment or reads with a problem.

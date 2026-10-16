@@ -8,7 +8,7 @@ import os
 import sys
 import time
 import webbrowser
-from collections.abc import Generator, Sequence
+from collections.abc import Callable, Generator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, cast
@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 import typer
 
 from docket import __version__, index, questions, recall, render, userconfig
+from docket.curate import batch as curate
 from docket.errors import DocketError
 from docket.imports import notes
 from docket.index.build import db_path
@@ -36,7 +37,7 @@ from docket.sources.local import record as record_import_folder
 from docket.sources.runner import MapperFailedError
 from docket.vault import convert, curatelog, cuts, holds, redaction, releaselog
 from docket.vault.docstore import DocStore
-from docket.vault.entitystore import EntityStore, RefusedError, load_changes
+from docket.vault.entitystore import EntityStore, RefusedError, Written, load_changes
 from docket.vault.gate import Gate, Label
 from docket.vault.processed import DocRefusedError
 from docket.vault.records import RawRecord, source_name_problem
@@ -712,12 +713,15 @@ def curate_add(
     {entity: northwind, add: {aliases: [{text: Nortwin, kind: asr}]}}]"""
     if not file.is_file():
         raise DocketError(f"no file {file}")
-    try:
-        written = EntityStore(find_vault(vault)).apply(load_changes(file))
-    except RefusedError as e:
-        say_all(render.curate_refused(e.problems))
-        raise typer.Exit(1) from None
-    say_all(render.curate_written(written))
+    v = find_vault(vault)
+
+    def write() -> Written:
+        # A change naming a card settles it in this machine's round, and the card's spellings it leaves out are
+        # rejected as that entity's aliases.
+        planned, unticked = curate.settle(v, curate.load(v), load_changes(file))
+        return EntityStore(v).apply(planned, rejects=unticked)
+
+    _curate_write(v, write)
 
 
 @curate_app.command("undo")
@@ -726,12 +730,9 @@ def curate_undo(
     vault: VaultOption = None,
 ) -> None:
     """Undo logged changes, the latest first, in one commit; refused whole when one can't be undone."""
-    try:
-        written = EntityStore(find_vault(vault)).undo(ops)
-    except RefusedError as e:
-        say_all(render.curate_refused(e.problems))
-        raise typer.Exit(1) from None
-    say_all(render.curate_written(written))
+    v = find_vault(vault)
+    batch = curate.load(v)
+    _curate_write(v, lambda: EntityStore(v).undo(ops, round_id=batch.round if batch is not None else None))
 
 
 @curate_app.command("log")
@@ -756,6 +757,98 @@ def curate_log(
         typer.echo(json.dumps(dumped, indent=2))
         return
     say_all(render.curate_log(lines, curatelog.fold(read.lines).undone_by, read.problems, unfinished))
+
+
+def _curate_write(v: Vault, write: Callable[[], Written]) -> None:
+    """Run a curate write and print what it did, or its refusal with exit 1; then measure the round again once its last
+    card is decided."""
+    try:
+        written = write()
+    except RefusedError as e:
+        say_all(render.curate_refused(e.problems))
+        raise typer.Exit(1) from None
+    say_all(render.curate_written(written))
+    batch = curate.load(v)
+    if batch is not None and batch.after is None:
+        measured = curate.after(v, batch)
+        if measured.after is not None:
+            say_all(render.curate_measures(measured.before, measured.after))
+
+
+@curate_app.command("round")
+def curate_round(vault: VaultOption = None) -> None:
+    """Start a round on this machine: the index brought up to date, at most 15 cards mined from it, ranked by what
+    search misses, and your question set measured when curate.questions names one in Docket's config."""
+    v = find_vault(vault)
+    say_all(render.curate_round(curate.view(v, curate.start(v))))
+
+
+@curate_app.command("show")
+def curate_show(
+    as_json: Annotated[bool, typer.Option("--json", help="The round as JSON, snippets included.")] = False,
+    vault: VaultOption = None,
+) -> None:
+    """This machine's round: each card with its state, its spellings, its count and snippets, and what was applied
+    without a card since it started."""
+    v = find_vault(vault)
+    batch = curate.load(v)
+    if batch is None:
+        raise DocketError("no round on this machine yet; start one with docket curate round")
+    shown = curate.view(v, batch)
+    if as_json:
+        # ASCII only: a snippet's text can't put a terminal code on the screen.
+        typer.echo(json.dumps(shown.model_dump(mode="json"), indent=2))
+        return
+    say_all(render.curate_round(shown))
+
+
+CardsArg = Annotated[list[str], typer.Argument(help="Cards by id, or by number with --round.")]
+RoundOption = Annotated[str | None, typer.Option("--round", help="The round the card numbers are from.")]
+
+
+@curate_app.command("accept")
+def curate_accept(
+    cards: CardsArg,
+    round_: RoundOption = None,
+    entity_type: Annotated[str | None, typer.Option("--type", help="Another type for one new entity.")] = None,
+    entity_id: Annotated[str | None, typer.Option("--id", help="Another id for one new entity.")] = None,
+    vault: VaultOption = None,
+) -> None:
+    """Accept cards as they are: a new entity with the card's name and aliases, or new aliases for an entity. To
+    change more than a new entity's type or id, write the change to a file naming the card and use docket curate
+    add."""
+    v = find_vault(vault)
+    batch, chosen = curate.cards_for(curate.load(v), cards, round_)
+    _curate_write(v, lambda: curate.accept(v, batch, chosen, entity_type=entity_type, entity_id=entity_id))
+
+
+@curate_app.command("reject")
+def curate_reject(cards: CardsArg, round_: RoundOption = None, vault: VaultOption = None) -> None:
+    """Reject cards: a new card's name and the spellings that only joined it go on the stoplist, and an alias card's
+    aliases for that entity; a label or a written name that stands on its own stays a candidate."""
+    v = find_vault(vault)
+    batch, chosen = curate.cards_for(curate.load(v), cards, round_)
+    _curate_write(v, lambda: curate.reject(v, batch, chosen))
+
+
+@curate_app.command("lift")
+def curate_lift(
+    keys: Annotated[list[str], typer.Argument(help="Stoplisted keys, as docket curate log prints them.")],
+    vault: VaultOption = None,
+) -> None:
+    """Take keys off the stoplist, so curation may offer them again."""
+    v = find_vault(vault)
+    _curate_write(v, lambda: EntityStore(v).lift(keys))
+
+
+@curate_app.command("status")
+def curate_status(
+    again: Annotated[bool, typer.Option("--eval", help="Measure your question set now, as the round's after.")] = False,
+    vault: VaultOption = None,
+) -> None:
+    """Whether a round is due, this machine's round, the review minutes per week, the stoplist, and your question set
+    before and after."""
+    say_all(render.curate_status(curate.status(find_vault(vault), again=again), userconfig.config_path()))
 
 
 @contextlib.contextmanager

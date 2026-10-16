@@ -357,6 +357,29 @@ changes:
   the change by its position (`change 3`), never the value (DR-0476).
 - A hand edit of a file the change touches is committed on its own first.
 
+### Rounds
+
+A round is at most 15 cards Docket mines from what the index holds: names a speaker label, your notes, mail or chat
+spell, joined with how speech recognition heard them and their Hungarian case forms, and ranked by how much search
+misses today (chunks holding a spelling that a search for the name doesn't find).
+
+| Command | Does |
+|---|---|
+| `docket curate round` | starts a round on this machine: the index brought up to date, the cards mined, your question set measured |
+| `docket curate show` | the round's cards with their state, spellings, counts and snippets; `--json` |
+| `docket curate accept <card>...` | as a card says: a new entity, or new aliases; `--type`, `--id` for one new entity |
+| `docket curate reject <card>...` | the card's name and what only joined it go on the stoplist; a label or a name written on its own stays a candidate |
+| `docket curate lift <key>...` | takes keys off the stoplist |
+| `docket curate status` | whether a round is due (a week after the last on any machine), review minutes per week, the stoplist, your questions before and after; `--eval` measures again |
+
+- Name a card by its id, or by its number with `--round <round>`; a round that isn't this machine's current one is
+  refused.
+- To change more than a new entity's type or id, write a changes file whose change names the card (`card: <id>`) and
+  run `docket curate add`: the card's spellings you leave out are rejected as that entity's aliases.
+- The round lives in `.git/docket/curate/batch.json` (a folder vault: the host's git dir), per machine, and can be
+  deleted: decisions are in the curate log.
+- Set `curate.questions` in Docket's config to your question file, and a round measures it before and after.
+
 ## The service
 
 One Docket process per user serves Claude and the web app on one 127.0.0.1 port, 8741 unless you choose another. It

@@ -11,6 +11,8 @@ import re
 from collections.abc import Iterable
 from zoneinfo import ZoneInfo
 
+from docket.curate.batch import BatchView, Measure, Status
+from docket.curate.propose import CardSpelling
 from docket.index import SearchResult
 from docket.questions import EvalReport, Score
 from docket.recall import ReadResult, VerifyResult
@@ -225,7 +227,7 @@ def curate_written(written: Written) -> list[str]:
     if written.finished:
         lines.append(f"finished first, what a stopped write left: {', '.join(written.finished)}")
     lines += [f"a hand edit of {rel} went in first, on its own" for rel in written.taken_in]
-    lines += [f"{line.id}  {line.op:<6} {line.entity}  {_part(line)}" for line in written.lines]
+    lines += [f"{line.id}  {line.op:<6} {line.entity or '-'}  {_part(line)}" for line in written.lines]
     if written.only_logged:
         lines.append(f"only logged, the file no longer held what they added: {', '.join(written.only_logged)}")
     if written.already:
@@ -253,3 +255,74 @@ def curate_log(
     if not lines:
         out.append("no changes logged yet")
     return out + [f"! {problem}" for problem in problems]
+
+
+ADDS = {"name": "the name", "plain": "alias", "asr": "asr alias", "no": "found already"}
+
+
+def _spellings(spellings: list[CardSpelling]) -> str:
+    return "  ".join(f"{s.text} ({s.trust}, {ADDS[s.add]})" for s in spellings)
+
+
+def curate_round(view: BatchView) -> list[str]:
+    states = [c.state for c in view.cards]
+    lines = [
+        f"round    {view.round}, started {view.started:%Y-%m-%d %H:%M}Z: {len(states)} card(s), "
+        f"{states.count('open')} open"
+    ]
+    if view.left_out:
+        counts = sorted(view.left_out.items(), key=lambda kv: (-kv[1], kv[0]))
+        lines.append("left out " + ", ".join(f"{n} {why}" for why, n in counts))
+    lines += [f"applied  by itself: {line.id}  {line.op} {line.entity or '-'}  {_part(line)}" for line in view.applied]
+    for shown in view.cards:
+        c = shown.card
+        what = f"new {c.type}  {c.name} ({c.entity})" if c.kind == "new" else f"alias for {c.name} ({c.entity})"
+        gap = (
+            f"missed in {c.missed_chunks} chunk(s) of {c.missed_containers} container(s)"
+            if c.missed_containers
+            else f"found already, in {c.chunks} chunk(s) of {c.containers} container(s)"
+        )
+        lines.append(f"{c.n:>2}  {c.id}  {what}  {gap}, newest {c.newest[:10]}  {shown.state}")
+        lines.append(f"      {_spellings(c.spellings)}")
+        for snippet in shown.snippets:
+            text = snippet.text
+            if snippet.mark is not None:
+                a, b = snippet.mark
+                text = f"{text[:a]}»{text[a:b]}«{text[b:]}"
+            lines.append(f"      ... {text} ...  {snippet.locator}")
+    if not view.cards:
+        lines.append("no cards this round")
+    if view.before is not None:
+        lines += curate_measures(view.before, view.after)
+    return lines
+
+
+def _score(pair: tuple[float, float]) -> str:
+    return f"{pair[0]:.2f}/{pair[1]:.2f}"
+
+
+def curate_measures(before: Measure | None, after: Measure | None) -> list[str]:
+    """Your question set's recall at 10 and MRR, before the round and after it."""
+    if before is None:
+        return []
+    if after is None:
+        return [f"questions before {_score(before.all)}, after: when the round's last card is decided"]
+    kinds = ", ".join(
+        f"{kind} {_score(score)} -> {_score(after.kinds.get(kind, score))}" for kind, score in before.kinds.items()
+    )
+    return [f"questions {_score(before.all)} -> {_score(after.all)} (recall@10/MRR); {kinds}"]
+
+
+def curate_status(status: Status, config: object) -> list[str]:
+    when = f", the last started {status.last:%Y-%m-%d}" if status.last is not None else ""
+    lines = [f"due      {'yes' if status.due else 'no'}{when}"]
+    if status.round is not None:
+        lines.append(f"round    {status.round}: {status.cards} card(s), {status.open} open")
+    weeks = list(status.minutes.items())[:4]
+    lines.append("review   " + (", ".join(f"{week} {m:.0f} min" for week, m in weeks) or "no rounds yet"))
+    lines.append(f"stoplist {status.stoplist} key(s)")
+    if status.questions is None:
+        lines.append(f"questions set curate.questions in {config} to a question file to measure a round")
+    else:
+        lines += curate_measures(status.before, status.after) or [f"questions {status.questions}, measured at a round"]
+    return lines
