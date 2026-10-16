@@ -123,6 +123,11 @@ Unreleased in the same PR.
 
 ### Changed
 
+- Verifying a doc and writing one no longer load the raw log of each source it covers when the search index is
+  current for that source: their anchors are checked against the records' own lines where the index says they are.
+  On 50 MB of call recordings in one source, `verify` went from about 580 ms to 5 ms and a `doc_put` from about
+  1.1 s to 0.3 s, the rest of it git. After a sync or a pull the index hasn't seen yet, they load the source as
+  before.
 - Reading a record no longer loads its source's whole raw log when the search index is current for that source: it
   reads the record's own lines where the index says they are. On 50 MB of call recordings in one source, a read went
   from about 750 ms to under 10 ms, and so did the check whether a `plaud:<path>` is a record. The index rebuilds

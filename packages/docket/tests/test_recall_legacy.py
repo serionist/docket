@@ -143,12 +143,14 @@ MINUTES = "recording-note:2026-10-14-supplier-sync"
 
 def with_plaud(vault: Vault, *blocks: str) -> None:
     """The recording with a transcript per block, the legacy note covering it, and minutes citing its polished
-    transcript at 10:42 when there is one."""
+    transcript at 10:42 when there is one. Put by the store itself, so the template is the same whatever route the test
+    asking for it takes."""
     vault.write_run("plaud", plaud_records(*blocks), run_at=at(12))
     head = DocMeta(id=SYNC_ID, type="legacy-note", covers=[PLAUD], by="claude-test", old_paths=[SYNC])
-    recall.doc_put(vault, ProcessedDoc(head, "# Supplier sync\n\nPrice agreed, signed by Friday.\n", 0).render())
+    store = DocStore(vault)
+    store.put(ProcessedDoc(head, "# Supplier sync\n\nPrice agreed, signed by Friday.\n", 0).render())
     if "transaction_polish" in blocks:
-        recall.doc_put(vault, note(MINUTES, covers=[POLISHED], lines=["- Cleo agreed to ten million. @10:42"]))
+        store.put(note(MINUTES, covers=[POLISHED], lines=["- Cleo agreed to ten million. @10:42"]))
 
 
 @pytest.mark.parametrize(

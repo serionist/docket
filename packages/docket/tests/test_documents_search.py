@@ -4,11 +4,12 @@ DR-0487, DR-0491)."""
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
-from docket_testkit import copied, make_config, make_record, note
+from docket_testkit import READ_ROUTES, copied, make_config, make_record, note, read_route
 from documents_kit import docx, pdf, wp, xlsx
 from documents_scan_kit import SOURCE, cycle, folder_vault, name, put, rid
 from openpyxl import Workbook
@@ -16,6 +17,7 @@ from openpyxl import Workbook
 from docket import recall, render
 from docket.documents.ooxml import OLE
 from docket.index import rebuild, search
+from docket.index.build import db_path
 from docket.index.query import Hit
 from docket.vault import spans
 from docket.vault.anchors import format_anchor
@@ -45,6 +47,18 @@ def library(tmp_path: Path) -> tuple[Vault, Path]:
     vault = Vault.open(root)
     name(vault, tmp_path / "work")
     return vault, tmp_path / "work"
+
+
+@pytest.fixture(params=READ_ROUTES)
+def routed(
+    library: tuple[Vault, Path], request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Vault, Path]:
+    """The library with every read, verify and doc_put through one route (DR-0446, DR-0515): the parse route starts
+    without the template's index."""
+    if request.param == "parse":
+        db_path(library[0]).unlink()
+    read_route(request.param, monkeypatch)
+    return library
 
 
 def built(folder: Path) -> Path:
@@ -87,8 +101,8 @@ def test_rows_41_to_80_read_as_the_anchor_says(library: tuple[Vault, Path]) -> N
     assert (len(lines), lines[0].split(" | ")[0], lines[-1].split(" | ")[0]) == (40, "41: item 41", "80: item 80")
 
 
-def test_a_file_that_went_is_read_verified_and_cited_from_its_last_text(library: tuple[Vault, Path]) -> None:
-    vault, work = library
+def test_a_file_that_went_is_read_verified_and_cited_from_its_last_text(routed: tuple[Vault, Path]) -> None:
+    vault, work = routed
     page = f"{rid(REVIEW)}/page2"
     doc = note("brief:q3-review", covers=[page], lines=[f"- The gearbox overheated. {format_anchor(page, 'part', 1)}"])
     assert recall.doc_put(vault, doc).notes == []
@@ -178,9 +192,11 @@ def test_a_mapper_s_page_or_document_is_neither_placed_nor_grouped_as_a_document
     assert all(hit.place is None for group in found.groups for hit in group.hits)
 
 
+@pytest.mark.parametrize("route", READ_ROUTES)
 def test_a_file_that_turns_protected_is_verified_and_cited_from_its_last_text(
-    tmp_path: Path, config: VaultConfig
+    tmp_path: Path, config: VaultConfig, monkeypatch: pytest.MonkeyPatch, route: str
 ) -> None:
+    read_route(route, monkeypatch)
     work = tmp_path / "work"
     vault = folder_vault(tmp_path, config, work)
     put(work, "plan.docx", docx(wp("one") + wp("two") + wp("three")))
@@ -202,10 +218,17 @@ def test_a_file_that_turns_protected_is_verified_and_cited_from_its_last_text(
     assert [s.text for s in read.spans] == ["Not read: protected, or in an old binary format.", "one\n\ntwo\n\nthree"]
 
 
+@pytest.mark.parametrize("index", ["current", "none", "a run not current"])
 def test_doc_put_reads_a_covered_source_s_raw_once(
-    library: tuple[Vault, Path], monkeypatch: pytest.MonkeyPatch
+    library: tuple[Vault, Path], monkeypatch: pytest.MonkeyPatch, index: str
 ) -> None:
+    """At its places when the index is current for the source (DR-0515), else loaded once for the whole check."""
     vault, _ = library
+    if index == "none":
+        db_path(vault).unlink()
+    elif index == "a run not current":
+        run = next((vault.root / "raw" / SOURCE).rglob("*.jsonl"))
+        os.utime(run, ns=(run.stat().st_atime_ns, run.stat().st_mtime_ns + 1_000_000_000))
     page = f"{rid(REVIEW)}/page2"
     loads: list[str] = []
     real = spans.RawLookup._source  # pyright: ignore[reportPrivateUsage]
@@ -217,4 +240,4 @@ def test_doc_put_reads_a_covered_source_s_raw_once(
 
     monkeypatch.setattr(spans.RawLookup, "_source", counting)
     recall.doc_put(vault, note("brief:q3", covers=[page], lines=[f"- Hot. {format_anchor(page, 'part', 1)}"]))
-    assert loads == [SOURCE]
+    assert loads == ([] if index == "current" else [SOURCE])

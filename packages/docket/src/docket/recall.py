@@ -13,13 +13,16 @@ recording it is under too (DR-0391), as a recording read whole does those on its
 
 What a read asks about docs other than the one it shows (an old path's note, the docs superseding it, the docs covering
 a record) comes from the index when it is current for processed/, else from one parse of every doc for the whole call;
-either way the same code decides (DR-0321, DR-0322). A read takes a record's lines at their places when the index is
-current for the record's source, else loads that source's raw once (DR-0446, DR-0447).
+either way the same code decides (DR-0321, DR-0322). A read, a verify and a put's anchor checks take a record's lines at
+their places when the index is current for the record's source, else load that source's raw once (DR-0446, DR-0447,
+DR-0515). A put holds the index only while it checks, never under the vault's lock (DR-0516).
 """
 
 from __future__ import annotations
 
 import os
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -113,8 +116,20 @@ class VerifyResult(BaseModel):
 
 
 def doc_put(vault: Vault, text: str) -> PutResult:
-    """Store a processed doc; `DocRefusedError` carries every problem when it can't be stored."""
-    return DocStore(vault).put(text)
+    """Store a processed doc; `DocRefusedError` carries every problem when it can't be stored. Its anchors are checked
+    at their records' places when the index is current for their source (DR-0515)."""
+    return DocStore(vault).put(text, raw=lambda: _raw(vault))
+
+
+@contextmanager
+def _raw(vault: Vault) -> Generator[RawLookup]:
+    """A lookup that reads a source at its places when the index is current for it, else loads it once; the index it
+    opens stays open, in one read transaction, only until the block ends (DR-0516)."""
+    index = _Index(vault)
+    try:
+        yield RawLookup(vault.root, index)
+    finally:
+        index.close()
 
 
 def read(vault: Vault, locator: str, view: str = "summary", around: int = 0, rev: int | None = None) -> ReadResult:
@@ -133,28 +148,40 @@ def read(vault: Vault, locator: str, view: str = "summary", around: int = 0, rev
         call.close()
 
 
+class _Index:
+    """The index for one call: opened at its first question, then held in one read transaction until `close`."""
+
+    def __init__(self, vault: Vault) -> None:
+        self.vault = vault
+        self._opened = False
+        self._index: ReadIndex | None = None
+
+    def __call__(self) -> ReadIndex | None:
+        if not self._opened:
+            self._opened = True
+            self._index = lookup.open_read(self.vault)
+        return self._index
+
+    def close(self) -> None:
+        if self._index is not None:
+            self._index.close()
+
+
 class _Call:
-    """What one read shares: the store, the index opened at its first question, one `RawLookup` that reads a source
-    at its places when the index is current for it (DR-0446) and else loads it once, and the answers about docs other
-    than the one it shows. Those come from the index when it is current for processed/ (DR-0321), else from one parse
-    of every doc; the index only narrows, and the same code decides (DR-0322, DR-0447)."""
+    """What one read or verify shares: the store, the index opened at its first question, one `RawLookup` that reads a
+    source at its places when the index is current for it (DR-0446) and else loads it once, and the answers about docs
+    other than the one it shows. Those come from the index when it is current for processed/ (DR-0321), else from one
+    parse of every doc; the index only narrows, and the same code decides (DR-0322, DR-0447)."""
 
     def __init__(self, vault: Vault) -> None:
         self.store = DocStore(vault)
-        self._opened = False
-        self._index: ReadIndex | None = None
-        self.raw = RawLookup(vault.root, self._open)
+        self._index = _Index(vault)
+        self.raw = RawLookup(vault.root, self._index)
         self._every: list[ProcessedDoc] | None = None
         self._supersedes: list[tuple[str, list[str]]] | None = None
 
-    def _open(self) -> ReadIndex | None:
-        if not self._opened:
-            self._opened = True
-            self._index = lookup.open_read(self.store.vault)
-        return self._index
-
     def _ask(self) -> ReadIndex | None:
-        index = self._open()
+        index = self._index()
         return index if index is not None and index.docs_current() else None
 
     def _all(self) -> list[ProcessedDoc]:
@@ -192,8 +219,7 @@ class _Call:
         return [d for d in self._all() if rid in d.meta.covers]
 
     def close(self) -> None:
-        if self._index is not None:
-            self._index.close()
+        self._index.close()
 
 
 def _read(call: _Call, locator: str, view: View, around: int, rev: int | None) -> ReadResult:
@@ -299,16 +325,24 @@ def _options(rids: list[str], at: Anchor) -> str:
 
 def verify(vault: Vault, doc: str, lines: list[int] | None = None, window: int = WINDOW) -> VerifyResult:
     """Each anchored line of a doc, or the lines asked for by their number in the file, next to the raw spans its
-    anchors point at. An anchor that doesn't resolve comes back with its problem."""
-    store = DocStore(vault)
+    anchors point at. An anchor that doesn't resolve comes back with its problem. Records are read at their places when
+    the index is current for their source, else their source loads once (DR-0515)."""
+    call = _Call(vault)
+    try:
+        return _verify(call, doc, lines, window)
+    finally:
+        call.close()
+
+
+def _verify(call: _Call, doc: str, lines: list[int] | None, window: int) -> VerifyResult:
     try:
         loc = parse_locator(doc, DOC_TYPES)
     except AnchorError as e:
         raise DocketError(str(e)) from None
     if loc.kind == "record":
         raise DocketError(f"{doc} is a record; verify takes a doc: its id or its path")
-    found = _load(store, loc.kind, loc.value, None)
-    lookup = RawLookup(vault.root)
+    found = _load(call.store, loc.kind, loc.value, None)
+    lookup = call.raw
     covers = found.meta.covers
     wanted = set(lines) if lines else None
     out: list[VerifiedLine] = []

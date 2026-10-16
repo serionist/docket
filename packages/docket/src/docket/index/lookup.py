@@ -12,6 +12,7 @@ check and the questions. Two checks, made apart, each at the read's first questi
 Anything else (no index, another schema or languages, a file that isn't an index, no FTS5, an update holding the index,
 a doc changed, a run new or gone) gives None or False, and `read` parses every doc or loads the source whole instead,
 never waiting for the index. The index only narrows: `read` runs the same code on what it gets back as on everything.
+`verify` and a put's anchor checks ask about raw the same way, a put only until its check ends (DR-0515, DR-0516).
 Nothing here writes the index.
 """
 
