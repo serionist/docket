@@ -1,0 +1,11 @@
+decisions:
+  - id: DR-0511
+    title: Redaction patterns are added, changed and removed in vault.yaml by hand; the Settings page shows the block
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#73"]
+    description: "The Settings page turns a pattern on and names docket redaction set <name> off; adding, changing or removing one is a hand edit, and the page shows the block to paste under redaction.patterns with an invented example, its regular expression quoted for YAML. A pattern typed into a page runs over every text the gate stores: a broad one turns records into markers for good, and Python's re can't be stopped once it runs, so a safe preview would need a child process of its own. The page also says a pattern is committed as written, so it names the shape, never the secret."
+    not_chosen:
+      - "A pattern typed in the page: a slip redacts what comes for good, and testing it safely needs a child process."

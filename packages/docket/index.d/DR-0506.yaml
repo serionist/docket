@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0506
+    title: No page, route or MCP tool loosens the gate; the Settings page names the command or the vault.yaml line
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#73"]
+    description: "A loosening lets more into the vault: a redaction rule or pattern turned off, a pattern changed or removed, a never-store value taken off, a source made less strict or turned on, or its tools, mapper, media hosts, folder or exclude changed. None is made from a page, a route or an MCP tool: the Settings page names docket redaction set <rule> off with the warning it prints, or the vault.yaml line to change by hand. A typed confirmation stops no agent: Claude reaches a session through docket open or the token (DR-0152), and a browser agent reads and types what a page asks, with no prompt of Claude Code's in between. In Claude Code's shell the command or the edit passes the user's own prompts and allow rules. It is not a wall, as DR-0202 isn't: Claude can still run the command or edit the file, and the skills forbid it. What a loosening lets in reaches raw, every clone and git history, as a release does. Proposed for AGENTS.md's doors, beside the release's yes."
+    binds:
+      - vault/settings.py offers the web only stricter operations, and a test scans that docket.web imports no writer that can loosen, redaction.set_rule among them.
+    not_chosen:
+      - "A looser change behind a typed confirmation: Claude in Chrome or Playwright types it in normal use."
+      - "Every change in the page: the browser is the one path Claude Code's prompts don't see."
+      - "An OS prompt (Windows Hello, Touch ID, polkit): a human-only factor, for the release too; an issue of its own."

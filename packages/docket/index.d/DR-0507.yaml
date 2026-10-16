@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0507
+    title: The Settings page writes vault.yaml through the writer the CLI uses, only in Docket's own form and only as the page showed it, by same-origin form posts on the writer thread
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#73"]
+    description: "vault/settings.py is the one vault.yaml writer: docket redaction set, docket source new and the Settings page go through it. Under the vault lock it reads the file, refuses when its sha256 isn't the one the page showed (409, with the page as the file stands), and rewrites it only when its text is what Docket writes for it, the old redaction form included (DR-0192); otherwise it writes nothing and gives the line to change, as the CLI prints it (DR-0166, DR-0193). A file that differs from HEAD but is still in Docket's form is committed on its own first, as Config: vault.yaml as edited. The change is built through the schema and read back through VaultConfig.load, written through a temp file and a rename, and committed alone as Config: <what>, with via page in the body for the page's; a failed commit puts the file back. The gate's sweep runs right after, so what the change forbids leaves staging at once. The page's writes are plain urlencoded posts the Guard checks, at most 64 KB, run on the writer thread and answered with a 303 to the page, which sends Referrer-Policy same-origin, as the Staging and Curate pages do (DR-0381, DR-0473)."
+    binds: ["A hand-edited vault.yaml is never rewritten, by the page or the CLI."]
+    not_chosen:
+      - "ruamel.yaml's round trip, keeping comments: a dependency, and the page and the CLI would keep different rules."
+      - "A second writer in the web: two places that know the rewrite rule."
+      - "The change alone, with no hash: a click decides on a page another tab, the CLI or Claude changed under it."
+      - "One commit holding a hand change and the page's: its message hides a change it didn't make."
