@@ -11,9 +11,10 @@ one stem form is kept, whichever they are cut to (Mark's `Markkal` is cut to `ma
 form is a common word and doesn't count when the index holds it, folded, in over ten times as many chunks as the alias
 as written (at least five), as a stem form; or in over twice as many when every stem form it is cut to is short or
 common, so no kept stem form checks it (`annál` for Ann's `Annál`, `évet` for Eve's `Evét`, cut to `an` and `ev`). One
-the stemmer leaves whole is a spelling no ordinary word has (`Nimishsel`, `Maxszal`) and is judged at ten times. An
-`asr` alias also matches through vocabulary words within one edit of a word of 5 to 7 letters, two of 8 or more, found
-per word by a bounded Levenshtein walk (DR-0350).
+the stemmer leaves whole is a spelling no ordinary word has (`Nimishsel`, `Maxszal`) and is judged at ten times. Case
+forms no chunk holds are left out: they match nothing, and stemming them was most of the mention pass. An `asr` alias
+also matches through vocabulary words within one edit of a word of 5 to 7 letters, two of 8 or more, found per word by
+a bounded Levenshtein walk (DR-0350).
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ import json
 import re
 import sqlite3
 from bisect import bisect_left
-from collections.abc import Iterable, Sequence
+from collections.abc import Container, Iterable, Sequence
 from dataclasses import dataclass
 from typing import NamedTuple
 
@@ -211,18 +212,22 @@ class Cases(NamedTuple):
         return list(dict.fromkeys([*(form for form, _ in self.reached), *self.alone]))
 
 
-def cases_of(analyzer: Analyzer, ws: list[str], lang: Language) -> Cases:
+def cases_of(analyzer: Analyzer, ws: list[str], lang: Language, held: Container[str] | None = None) -> Cases:
     """An alias's case forms in a language, folded; only its last word inflects. One the stemmer cuts to one of the
     alias's stem forms counts only beside that stem form: an ordinary word can fold to it and stem elsewhere (`benné`,
     Ben's translative, folds to the Hungarian `benne`, which stems to `benn`), and the stem form it is cut to may be
     crowded out while another is kept (Mark's `mar` by `már`, his `mark` kept). The form is cut with its accents and
     without, since chat often drops them and Snowball cuts the two apart (`zoltánnak` to `zolt`, `zoltannak` to
     `zoltan`); a form two endings fold to is cut for each. It is listed with every stem form these reach. One the
-    stemmer leaves whole (`Nimishsel`) counts on its own (DR-0350)."""
+    stemmer leaves whole (`Nimishsel`) counts on its own. Given `held`, the folded last words some chunk holds, a form
+    outside it is left out (DR-0350)."""
     head = tuple(fold(w) for w in ws[:-1])
     stem_forms = {form[-1]: form for form in _stem_forms(analyzer, ws, lang)}
     cut_to: dict[tuple[str, ...], list[tuple[str, ...]]] = {}
     for case in lang.cases(ws[-1]) if lang.cases is not None else []:
+        # A form no chunk holds matches nothing, so it isn't stemmed: Snowball is most of the mention pass.
+        if held is not None and fold(case) not in held:
+            continue
         stems = cut_to.setdefault((*head, fold(case)), [])
         for cut in (analyzer.stem(case, lang), analyzer.stem(fold(case), lang)):
             stem = stem_forms.get(cut)
@@ -232,6 +237,18 @@ def cases_of(analyzer: Analyzer, ws: list[str], lang: Language) -> Cases:
         tuple((form, stem) for form, stems in cut_to.items() for stem in stems),
         tuple(form for form, stems in cut_to.items() if not stems),
     )
+
+
+def held_cases(conn: sqlite3.Connection, ws: list[str], lang: Language) -> set[str]:
+    """The folded last words of an alias's case forms that some chunk holds, in one query of the vocabulary; a word
+    the tokenizer may fold otherwise than `fold` (not plain ASCII letters) is kept."""
+    folded = {fold(case) for case in (lang.cases(ws[-1]) if lang.cases is not None and ws else [])}
+    plain = sorted(t for t in folded if t.isascii() and t.isalpha())
+    if not plain:
+        return folded
+    # Only `?` placeholders are joined into the statement; the words go in as parameters.
+    sql = f"SELECT term FROM vocab WHERE col = 'folded' AND term IN ({', '.join('?' * len(plain))})"  # noqa: S608
+    return (folded - set(plain)) | {r[0] for r in conn.execute(sql, plain)}
 
 
 def judge_forms(conn: sqlite3.Connection, analyzer: Analyzer, aliases: list[AliasRow]) -> None:
@@ -261,7 +278,7 @@ def judge_forms(conn: sqlite3.Connection, analyzer: Analyzer, aliases: list[Alia
                     how = "stem"
                     kept.add(form)
                 rows.add((alias.entity, alias.ordinal, lang.column, -1, " ".join(form), how, 0))
-            cases = cases_of(analyzer, ws, lang)
+            cases = cases_of(analyzer, ws, lang, held_cases(conn, ws, lang))
             checked = {form for form, stem in cases.reached if stem in kept} | set(cases.alone)
             for form in cases.forms():
                 times = COMMON_TIMES if form in checked else CASE_COMMON_TIMES
@@ -355,7 +372,8 @@ def expressions(
     # that fold the same (`benne` for Benné): each case form counts beside the stem forms it is cut to, even one crowded
     # out (Mark's `mar` by `már`), and one the stemmer leaves whole (`Nimishsel`) on its own.
     for (entity, ordinal, col), text in kept.items():
-        cases = cases_of(analyzer, words(text), langs[col])
+        ws = words(text)
+        cases = cases_of(analyzer, ws, langs[col], held_cases(conn, ws, langs[col]))
         dropped = common.get((entity, ordinal), set())
         by_stem: dict[tuple[str, ...], list[str]] = {}
         for form, stem in cases.reached:

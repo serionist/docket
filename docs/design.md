@@ -452,7 +452,8 @@ role: the customer's site lead
   form, or past twice where every stem form it is cut to is short or common. That covers a short stem (`annál`, cut
   to `an`, isn't Ann then; a colleague named more than half as often as the word still collides with it) and a
   crowded one (`Markkal` counts while it is in at most twice Mark's bare chunks). One the stemmer leaves whole
-  (`Nimishsel`) is judged at ten times (DR-0350).
+  (`Nimishsel`) is judged at ten times. The mention pass leaves out case forms no chunk holds, since stemming them
+  was most of its time (DR-0350).
 - Aliases marked `asr` also match vocabulary words within one edit of a word of 5 to 7 letters, two of 8 or more.
 - Aliases with `needs` count only when one of the named entities is in the same chunk.
 - A diarized speaker, or an author whose id an entity lists, counts as a mention of that person.

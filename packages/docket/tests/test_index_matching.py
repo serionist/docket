@@ -10,7 +10,7 @@ import pytest
 from docket_testkit import copy_vault, index_config, make_record, template_with
 
 from docket.index import build, matching, rebuild, search
-from docket.index.languages import resolve
+from docket.index.languages import hungarian_cases, resolve
 from docket.index.schema import create
 from docket.index.text import Analyzer
 from docket.vault.vault import Vault
@@ -774,9 +774,20 @@ def test_an_entity_with_only_needs_aliases_has_no_query_expression() -> None:
     assert matching.expressions(conn, Analyzer(resolve(["en"])), ["e"]) == {("e", 0): 'folded : "cond"'}
 
 
+def hold(conn: sqlite3.Connection, analyzer: Analyzer, *texts: str) -> None:
+    """Chunks holding the texts, in the full-text index only: what the vocabulary and a match read."""
+    start = conn.execute("SELECT count(*) FROM chunks_fts").fetchone()[0]
+    marks = ", ".join("?" * len(analyzer.columns))
+    sql = f"INSERT INTO chunks_fts (rowid, {', '.join(analyzer.columns)}) VALUES (?, {marks})"  # noqa: S608
+    conn.executemany(sql, [(start + n + 1, *analyzer.index_values(text)) for n, text in enumerate(texts)])
+
+
 def test_a_case_form_counts_beside_the_stem_form_it_is_cut_to_or_where_the_stemmer_leaves_it_whole() -> None:
     conn = sqlite3.connect(":memory:")
     create(conn, resolve(["en", "hu"]))
+    analyzer = Analyzer(resolve(["en", "hu"]))
+    # Chunks holding every case form of each name, since a form no chunk holds is left out.
+    hold(conn, analyzer, *(" ".join(hungarian_cases(name)) for name in ("sam", "nimish", "rob", "mark", "bálint")))
     conn.executemany(
         "INSERT INTO aliases VALUES (?, 0, ?, 'name', NULL, '[]', ?)",
         [
@@ -807,7 +818,7 @@ def test_a_case_form_counts_beside_the_stem_form_it_is_cut_to_or_where_the_stemm
             ("bal", "stem_hu", "balint", "stem"),
         ],
     )
-    exprs = matching.expressions(conn, Analyzer(resolve(["en", "hu"])))
+    exprs = matching.expressions(conn, analyzer)
     sam = exprs[("sam", 0)]
     assert sam.startswith('(folded : "sam" OR (stem_hu : "sam" AND (folded : "samnak" OR ')
     assert sam.endswith('folded : "sammel")))')
@@ -828,3 +839,35 @@ def test_a_case_form_counts_beside_the_stem_form_it_is_cut_to_or_where_the_stemm
     assert balint.count(" AND ") == 2
     assert '(stem_hu : "balint" AND (folded : "balintnak" OR ' in balint
     assert '(stem_hu : "balin" AND ' in balint
+
+
+def test_a_case_form_no_chunk_holds_is_left_out_until_one_does() -> None:
+    # Stemming every case form of every name was most of the mention pass; a form no chunk holds matches nothing.
+    conn = sqlite3.connect(":memory:")
+    create(conn, resolve(["en", "hu"]))
+    analyzer = Analyzer(resolve(["en", "hu"]))
+    conn.execute("INSERT INTO aliases VALUES ('sam', 0, 'Sam', 'name', NULL, '[]', 'sam')")
+    conn.executemany(
+        "INSERT INTO alias_terms VALUES ('sam', 0, ?, -1, ?, ?, 0)",
+        [("folded", "sam", "written"), ("stem_hu", "sam", "stem")],
+    )
+    hold(conn, analyzer, "Sam is on site.")
+    assert matching.expressions(conn, analyzer) == {("sam", 0): 'folded : "sam"'}
+    hold(conn, analyzer, "Sammal beszéltem.")
+    assert matching.expressions(conn, analyzer) == {
+        ("sam", 0): '(folded : "sam" OR (stem_hu : "sam" AND folded : "sammal"))'
+    }
+
+
+def test_a_case_form_the_tokenizer_may_fold_otherwise_is_kept_though_no_chunk_holds_it() -> None:
+    # fold keeps ø, which the full-text tokenizer may fold to o, so the vocabulary can't say whether a chunk holds it.
+    conn = sqlite3.connect(":memory:")
+    create(conn, resolve(["en", "hu"]))
+    analyzer = Analyzer(resolve(["en", "hu"]))
+    hu = analyzer.languages[1]
+    every = matching.cases_of(analyzer, ["søren"], hu)
+    held = matching.held_cases(conn, ["søren"], hu)
+    assert every.forms() and all(not form[-1].isascii() for form in every.forms())
+    assert matching.cases_of(analyzer, ["søren"], hu, held) == every
+    # A plain ASCII form no chunk holds is left out.
+    assert matching.held_cases(conn, ["sam"], hu) == set()
