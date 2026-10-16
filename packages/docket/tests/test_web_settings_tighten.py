@@ -235,3 +235,9 @@ def test_a_get_is_405_and_a_body_that_isn_t_a_form_is_refused(client: TestClient
         assert client.get(route).status_code == 405
         assert client.post(route, json={"rule": "phone"}, headers=SAME).status_code == 415
     assert redaction.CREDENTIALS in config(vault).redaction.model_dump()
+
+
+def test_a_source_nobody_has_gets_no_question(client: TestClient, vault: Vault) -> None:
+    answer = client.post(SOURCE, data={"source": "attic", "act": "private", "shown": shown(vault)}, headers=SAME)
+    assert answer.status_code == 400
+    assert "no source attic in vault.yaml" in said(answer.text)
