@@ -365,9 +365,12 @@ def scan_lines(report: documents_scan.ScanReport) -> list[str]:
         lines.append(f"kept out {outcomes['kept out']:,}, by the never-store lists")
     if outcomes["retry"]:
         lines.append(f"retry    {outcomes['retry']:,}: the reader stopped or crashed; tried once more at the next scan")
-    waiting = _counts({k: outcomes[k] for k in ("unreadable", "on hold", "placeholders", "lfs pointers")})
+    later = ("unreadable", "on hold", "placeholders", "lfs pointers", "folders not listed")
+    waiting = _counts({k: outcomes[k] for k in later})
     if waiting:
         lines.append(f"later    {waiting}: they keep their last version")
+    if report.unlisted:
+        lines.append(f"         not listed now: {', '.join(report.unlisted)}")
     if report.skipped:
         lines.append(f"skipped  {_counts(report.skipped)}")
     staged = report.staged

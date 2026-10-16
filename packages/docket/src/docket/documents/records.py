@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import re
 import unicodedata
+from collections.abc import Collection
 from datetime import datetime
 from pathlib import PurePosixPath
 from typing import Any
@@ -37,6 +38,8 @@ GONE_PART = "Not read from the file since {day}."
 BYTES_HASH = "sha256"
 TEXT_HASH = "redacted_sha256"
 _PART_RID = re.compile(r"/(page|slide|sheet)([1-9][0-9]*)$")
+# A folder source's rid: a file's 12 hex digits, and a part's kind and number under it (DR-0482).
+FOLDER_RID = re.compile(r"^([^:]+):[0-9a-f]{12}(?:/(page|slide|sheet)([1-9][0-9]*))?$")
 
 
 def file_id(rel: str) -> str:
@@ -57,12 +60,32 @@ def file_of(rid: str) -> str:
     return _PART_RID.sub("", rid)
 
 
+def is_folder_rid(rid: str, sources: Collection[str]) -> bool:
+    """Whether a rid has a folder source's shape and its source is one of `sources`, the folder sources vault.yaml
+    names: a mapper's record of kind `page` or `document` is neither."""
+    m = FOLDER_RID.match(rid)
+    return m is not None and m.group(1) in sources
+
+
 def is_folder(record: RawRecord) -> bool:
-    return record.via == VIA
+    """A record the scan wrote: by its `via` and its rid's shape."""
+    return record.via == VIA and FOLDER_RID.match(record.rid) is not None
 
 
 def is_gone(record: RawRecord) -> bool:
     return is_folder(record) and "gone" in record.native
+
+
+def is_not_read(record: RawRecord) -> bool:
+    """A folder file whose newest bytes weren't read: past a cap, damaged or protected, its text the line saying why."""
+    return is_folder(record) and record.kind == FILE_KIND and "problem" in record.native
+
+
+def part_order(rid: str) -> tuple[str, int]:
+    """A part's place among its file's parts: by kind, then by its number as a number, so page 2 comes before page
+    12."""
+    m = _PART_RID.search(rid)
+    return (m.group(1), int(m.group(2))) if m else ("", 0)
 
 
 def identity(record: RawRecord) -> str | None:
@@ -72,9 +95,9 @@ def identity(record: RawRecord) -> str | None:
 
 
 def readable(versions: list[RawRecord]) -> RawRecord | None:
-    """The last version that isn't gone: what `read` shows beside a gone one, and where anchors on it resolve
-    (DR-0491)."""
-    return next((v for v in reversed(versions) if not is_gone(v)), None)
+    """The last version with text, neither gone nor not read: what `read` shows beside the newest when that one is,
+    and where anchors on it resolve (DR-0491)."""
+    return next((v for v in reversed(versions) if not (is_gone(v) or is_not_read(v))), None)
 
 
 def name_of(rel: str) -> str:
@@ -155,14 +178,15 @@ def place(kind: str, title: str | None, first: int | None = None, last: int | No
 
 
 def resolving(versions: list[RawRecord]) -> RawRecord:
-    """The version an anchor on a record resolves against: its latest, but for a folder record whose latest is gone,
-    the last one with text (DR-0491). `versions` is never empty."""
+    """The version an anchor on a record resolves against: its latest, but for a folder record whose latest is gone
+    or not read, the last one with text (DR-0491). `versions` is never empty."""
     newest = versions[-1]
-    return (readable(versions) or newest) if is_gone(newest) else newest
+    return (readable(versions) or newest) if is_gone(newest) or is_not_read(newest) else newest
 
 
 def gone_note(gone: RawRecord) -> str:
-    """What a span read from before a file went says about it, naming where it moved (DR-0491)."""
+    """What a span read from an earlier version says about the newest, gone or not read, naming where the file moved
+    (DR-0491)."""
     moved = gone.native.get("moved_to")
     where = f" It moved to {moved}." if isinstance(moved, str) else ""
     return f"the last version with text; the latest says: {gone.text}{where}"

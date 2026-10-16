@@ -10,6 +10,7 @@ import os
 import shutil
 import stat
 import sys
+import threading
 from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -22,6 +23,7 @@ from documents_kit import docx, pdf, wp, xlsx
 from documents_scan_kit import (
     MTIME,
     SOURCE,
+    can_deny,
     cycle,
     folder_vault,
     junction,
@@ -32,6 +34,7 @@ from documents_scan_kit import (
     rid,
     run,
     staged,
+    unlistable,
     versions,
 )
 from filelock import FileLock
@@ -44,6 +47,7 @@ from docket.documents.extract import Done, Extractor, Failed, NotRead, Outcome
 from docket.documents.limits import Limits
 from docket.documents.parts import Extracted, Part
 from docket.errors import DocketError
+from docket.imports import notes as importing
 from docket.vault.config import NeverStore, RedactionPattern, SourceConfig, VaultConfig
 from docket.vault.gate import Gate
 from docket.vault.records import RawRecord
@@ -483,8 +487,8 @@ def test_an_lfs_pointer_and_what_isn_t_a_document_are_left_out(
     put(work, "twin.md", "# Twin\n")
     real = folders.list_folder
 
-    def doubled(*args: Any) -> list[folders.Found]:
-        found = real(*args)
+    def doubled(*args: Any, **kwargs: Any) -> list[folders.Found]:
+        found = real(*args, **kwargs)
         twin = next(f for f in found if f.rel == "twin.md")
         return [*found, twin]
 
@@ -732,3 +736,228 @@ def test_new_bytes_with_the_same_text_and_time_are_a_new_version_at_the_scan_s_t
     newest = versions(vault, rid("brief.docx"))
     assert [(r.ts, r.native["creator"]) for r in newest] == [(newest[0].ts, "Ada Example"), (LATER, "Ben Sample")]
     assert cycle(vault).outcomes == {"same": 1}
+
+
+# -- the review's findings ----------------------------------------------------------------------------------------
+
+deny = pytest.mark.skipif(not can_deny(), reason="root lists every folder whatever its permissions")
+
+
+@deny
+def test_a_subfolder_that_can_t_be_listed_is_a_passing_reason_walked(vault: Vault, work: Path) -> None:
+    put(work, "plan.md", "# Plan\n")
+    for n in range(3):
+        put(work, f"team/note-{n}.md", f"# Note {n}\n")
+    cycle(vault)
+    with unlistable(work / "team"):
+        report = cycle(vault)
+    assert (report.gone, report.unlisted) == (0, ["team"])
+    assert report.outcomes == {"same": 1, "folders not listed": 1}
+    assert not any(records.is_gone(r) for r in raw(vault))
+
+
+@deny
+def test_a_subfolder_git_can_t_open_is_a_passing_reason(tmp_path: Path) -> None:
+    top = host_repo(tmp_path / "host")
+    work = top / "docs"
+    put(work, "plan.md", "# Plan\n")
+    for n in range(3):
+        put(work, f"team/note-{n}.md", f"# Note {n}\n")
+    config = make_config("folder")
+    config.sources[SOURCE] = SourceConfig(folder="docs")
+    vault = Vault.init(top / "vault", config, "test-box")
+    cycle(vault)
+    with unlistable(work / "team"):
+        report = cycle(vault)
+    assert (report.gone, report.unlisted) == (0, ["team"])
+    assert not any(records.is_gone(r) for r in raw(vault))
+
+
+@deny
+def test_a_bad_folder_can_be_excluded_and_a_never_store_one_isn_t_named(vault: Vault, work: Path) -> None:
+    put(work, "plan.md", "# Plan\n")
+    put(work, "team/note.md", "# Note\n")
+    put(work, "zebrafinch/diary.md", "# Diary\n")
+    cycle(vault)
+    vault = rewrite(vault, lambda c: setattr(c, "never_store", NeverStore(keywords=["zebrafinch"])))
+    with unlistable(work / "zebrafinch"):
+        report = run(vault)
+    assert (report.outcomes["folders not listed"], report.unlisted) == (1, [])
+    vault = rewrite(vault, lambda c: c.sources[SOURCE].exclude.append("team/*"))
+    with unlistable(work / "team"):
+        report = cycle(vault)
+    assert (report.gone, report.unlisted, report.skipped["excluded"]) == (1, [], 1)
+
+
+@deny
+def test_the_notes_import_skips_a_folder_it_can_t_list_and_says_so(tmp_path: Path) -> None:
+    notes = tmp_path / "notes"
+    put(notes, "a.md", "# a\n")
+    put(notes, "locked/b.md", "# b\n")
+    skipped: Counter[str] = Counter()
+    unlisted: list[str] = []
+    with unlistable(notes / "locked"):
+        found = folders.list_folder(notes.resolve(), None, (tmp_path / "vault").resolve(), skipped, unlisted=unlisted)
+        listed = importing.list_folder(notes.resolve(), "notes", None, (tmp_path / "vault").resolve(), skipped)
+    assert ([f.rel for f in found], unlisted) == (["a.md"], ["locked"])
+    assert ([item.old_path for item in listed], skipped) == (["notes/a.md"], {"folders not listed": 1})
+
+
+def test_a_scan_reads_the_vault_under_its_lock_so_a_promotion_beside_it_never_doubles_a_version(
+    vault: Vault, work: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    put(work, "deck.pdf", three_pages())
+    put(work, "plan.md", "# Plan\n")
+    cycle(vault)
+    put(work, "deck.pdf", three_pages("changed"), mtime=MTIME + 60)
+    put(work, "plan.md", "# Plan, changed\n", mtime=MTIME + 60)
+    run(vault)
+    real = scanning.Staging  # pyright: ignore[reportPrivateImportUsage]
+    beside: list[threading.Thread] = []
+
+    def promoting(*args: Any, **kwargs: Any) -> Any:
+        # Another process promotes while the scan reads what the vault holds: it waits for the scan's lock.
+        if not beside:
+            other = Vault.open(vault.root)
+            beside.append(threading.Thread(target=lambda: Gate(other).promote(SOURCE)))
+            beside[0].start()
+            beside[0].join(1.0)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(scanning, "Staging", promoting)
+    report = run(vault)
+    beside[0].join(30)
+    assert report.outcomes == {"same": 2}
+    promote(vault)
+    assert [r.text for r in versions(vault, rid("plan.md"))] == ["# Plan", "# Plan, changed"]
+
+
+@pytest.mark.parametrize("limit", ["BATCH_FILES", "BATCH_SECONDS"])
+def test_an_interrupted_first_scan_goes_on_where_it_stopped(
+    vault: Vault, work: Path, monkeypatch: pytest.MonkeyPatch, limit: str
+) -> None:
+    for n in range(4):
+        put(work, f"brief-{n}.docx", docx(wp(f"Brief {n}.")))
+    monkeypatch.setattr(scanning, limit, 1 if limit == "BATCH_FILES" else 0.0)
+
+    def interrupted(path: Path) -> Outcome:
+        raise KeyboardInterrupt
+
+    _, factory = counted({"brief-3.docx": interrupted})
+    with pytest.raises(KeyboardInterrupt):
+        run(vault, extractor=factory)
+    made, factory = counted()
+    report = run(vault, extractor=factory)
+    assert (made.asked, report.outcomes) == (["brief-3.docx"], {"same": 3, "new": 1})
+
+
+def test_a_folder_vault_yaml_names_never_leads_out_of_home_or_the_repo(vault: Vault) -> None:
+    userconfig.set_section("folders", None)
+    for value in ("~//Work", "~/../elsewhere"):
+        entry = SourceConfig.model_construct(folder=value)
+        with pytest.raises(DocketError, match="leads out of"):
+            scanning.folder_of(vault, SOURCE, entry)
+
+
+def test_a_file_gone_between_the_walk_s_listing_and_its_stat_is_left_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Vanished:
+        name = "gone.md"
+        path = str(tmp_path / "gone.md")
+
+        def is_symlink(self) -> bool:
+            return False
+
+        def is_junction(self) -> bool:
+            return False
+
+        def is_dir(self, *, follow_symlinks: bool = True) -> bool:
+            return False
+
+        def stat(self, *, follow_symlinks: bool = True) -> os.stat_result:
+            raise FileNotFoundError(2, "gone")
+
+    monkeypatch.setattr(os, "scandir", lambda _: iter([Vanished()]))
+    skipped: Counter[str] = Counter()
+    assert folders.list_folder(tmp_path, None, tmp_path / "vault", skipped) == []
+    assert skipped == {}
+
+
+def test_a_folder_whose_git_can_t_be_looked_for_is_walked_into(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def denied(self: Path, *, follow_symlinks: bool = True) -> bool:
+        raise PermissionError(13, "denied")
+
+    monkeypatch.setattr(Path, "exists", denied)
+    assert not folders._nested_repo(tmp_path)  # pyright: ignore[reportPrivateUsage]
+
+
+@deny
+def test_tracked_files_in_a_folder_that_can_t_be_read_never_turn_gone(tmp_path: Path) -> None:
+    top = host_repo(tmp_path / "host")
+    work = top / "docs"
+    put(work, "plan.md", "# Plan\n")
+    for n in range(3):
+        put(work, f"team/note-{n}.md", f"# Note {n}\n")
+    git(top, "add", "docs")
+    git(top, "commit", "-q", "-m", "docs")
+    config = make_config("folder")
+    config.sources[SOURCE] = SourceConfig(folder="docs")
+    vault = Vault.init(top / "vault", config, "test-box")
+    cycle(vault)
+    with unlistable(work / "team"):
+        report = cycle(vault)
+    assert report.gone == 0
+    assert not any(records.is_gone(r) for r in raw(vault))
+
+
+@pytest.mark.parametrize("in_git", [False, True], ids=["walked", "git"])
+def test_a_file_whose_stat_is_refused_names_its_folder_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, in_git: bool
+) -> None:
+    top = host_repo(tmp_path / "host") if in_git else tmp_path / "plain"
+    work = top / "docs"
+    put(work, "plan.md", "# Plan\n")
+    put(work, "team/a.md", "# A\n")
+    put(work, "team/b.md", "# B\n")
+    real = folders._file  # pyright: ignore[reportPrivateUsage]
+
+    def refusing(path_: Path, rel: str, skipped: Counter[str], info: os.stat_result | None = None) -> Any:
+        if rel.startswith("team/"):
+            raise PermissionError(13, "denied")
+        return real(path_, rel, skipped, info)
+
+    monkeypatch.setattr(folders, "_file", refusing)
+    unlisted: list[str] = []
+    repo = top.resolve() if in_git else None
+    found = folders.list_folder(work.resolve(), repo, (tmp_path / "vault").resolve(), Counter(), unlisted=unlisted)
+    assert ([f.rel for f in found], unlisted) == (["plan.md"], ["team"])
+
+
+def test_tracked_files_whose_lstat_is_refused_keep_their_last_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What POSIX does to the files of a folder without permissions, played on every system: each lstat is refused,
+    the link check's included."""
+    top = host_repo(tmp_path / "host")
+    work = top / "docs"
+    put(work, "plan.md", "# Plan\n")
+    for n in range(2):
+        put(work, f"team/note-{n}.md", f"# Note {n}\n")
+    git(top, "add", "docs")
+    git(top, "commit", "-q", "-m", "docs")
+    config = make_config("folder")
+    config.sources[SOURCE] = SourceConfig(folder="docs")
+    vault = Vault.init(top / "vault", config, "test-box")
+    cycle(vault)
+    real = Path.lstat
+    team = (work / "team").resolve()
+
+    def refusing(self: Path) -> os.stat_result:
+        if team in self.resolve().parents:
+            raise PermissionError(13, "denied")
+        return real(self)
+
+    monkeypatch.setattr(Path, "lstat", refusing)
+    report = cycle(vault)
+    assert (report.gone, report.unlisted, report.outcomes) == (0, ["team"], {"same": 1, "folders not listed": 1})

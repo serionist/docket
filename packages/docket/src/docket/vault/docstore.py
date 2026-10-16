@@ -203,15 +203,17 @@ class DocStore:
             message = "the frontmatter can't be written so that it reads back the same; a value holds what YAML can't"
             raise DocRefusedError([DocProblem(None, message)])
         doc, redacted = derived.check(doc, head[1 : doc.head_lines - 1], self.redactor, self.lists)
-        problems = self._against_raw(doc, head)
+        notes: list[str] = []
+        problems = self._against_raw(doc, head, notes)
         if problems:
             raise DocRefusedError(problems)
         with self.vault.writing():
             result = self._put_locked(doc, head, redacted)
-        return result.model_copy(update={"notes": _gone_notes(RawLookup(self.root), doc.meta.covers)})
+        return result.model_copy(update={"notes": notes})
 
-    def _against_raw(self, doc: ProcessedDoc, head: list[str]) -> list[DocProblem]:
-        """What the raw log decides: every covered rid is in it, and every content line's anchors resolve."""
+    def _against_raw(self, doc: ProcessedDoc, head: list[str], notes: list[str] | None = None) -> list[DocProblem]:
+        """What the raw log decides: every covered rid is in it, and every content line's anchors resolve. Into
+        `notes`, each covered folder record read from an earlier version than its newest (DR-0491)."""
         meta = doc.meta
         lookup = RawLookup(self.root)
         problems: list[DocProblem] = []
@@ -225,6 +227,8 @@ class DocStore:
                 problems.append(DocProblem(None if line is None else line + 1, f"covers: {rid} isn't in the raw log"))
             else:
                 records[rid] = record
+                if notes is not None and record is not versions[-1]:
+                    notes.append(f"{rid}: {documents.gone_note(versions[-1])}")
         if meta.type == "legacy-note":
             return problems
         for n, line, role in doc.roles():
@@ -557,13 +561,3 @@ def _told(redacted: derived.Redacted, text: str) -> tuple[dict[str, int], list[i
     close = normalize_newlines(text).split("\n").index("---", 1)
     # The body starts on the line after the closing ---: index close is line close + 1, so body line i is close + 2 + i.
     return dict(sorted(redacted.counts.items())), [close + 2 + i for i in redacted.lines]
-
-
-def _gone_notes(lookup: RawLookup, covers: list[str]) -> list[str]:
-    """For each covered folder record that went, that the doc's anchors on it were read from before it did."""
-    notes: list[str] = []
-    for rid in covers:
-        versions = lookup.versions(rid)
-        if versions and documents.resolving(versions) is not versions[-1]:
-            notes.append(f"{rid}: {documents.gone_note(versions[-1])}")
-    return notes

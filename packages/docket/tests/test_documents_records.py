@@ -110,23 +110,49 @@ def record(rid: str, text: str, **native: object) -> RawRecord:
                      native=dict(native), fetched=NOW, via=records.VIA)  # fmt: skip
 
 
+FILE = "documents:0123456789ab"
+MOVED = "documents:ba9876543210"
+
+
 def test_a_gone_version_keeps_the_title_and_says_since_when() -> None:
-    newest = record("documents:abc", "the text", format="md", redacted_sha256="0" * 64)
-    gone = records.gone_version(newest, at=NOW, day="2026-10-16", moved_to="documents:def")
+    newest = record(FILE, "the text", format="md", redacted_sha256="0" * 64)
+    gone = records.gone_version(newest, at=NOW, day="2026-10-16", moved_to=MOVED)
     assert (gone.title, gone.text, gone.ts) == ("a.md", "Not read from the folder since 2026-10-16.", NOW)
-    assert gone.native == {"gone": "2026-10-16", "format": "md", "moved_to": "documents:def"}
+    assert gone.native == {"gone": "2026-10-16", "format": "md", "moved_to": MOVED}
     assert records.is_gone(gone) and records.identity(gone) is None
     assert records.identity(newest) == "0" * 64
-    page = newest.model_copy(update={"rid": "documents:abc/page1", "kind": "page", "native": {}})
+    page = newest.model_copy(update={"rid": f"{FILE}/page1", "kind": "page", "native": {}})
     assert records.gone_version(page, at=NOW, day="2026-10-16").text == "Not read from the file since 2026-10-16."
     assert records.resolving([newest, gone]) is newest
     assert records.resolving([gone]) is gone
     assert records.resolving([gone, newest]) is newest
     assert records.readable([gone]) is None
     assert records.gone_note(gone) == (
-        "the last version with text; the latest says: Not read from the folder since 2026-10-16. It moved to "
-        "documents:def."
+        f"the last version with text; the latest says: Not read from the folder since 2026-10-16. It moved to {MOVED}."
     )
-    # Another source's record is never gone, whatever its native says.
-    other = newest.model_copy(update={"via": "slack", "native": {"gone": "x"}})
-    assert not records.is_gone(other)
+    # Another source's record is never gone, whatever its native says, and nor is one whose rid isn't a folder's.
+    assert not records.is_gone(newest.model_copy(update={"via": "slack", "native": {"gone": "x"}}))
+    assert not records.is_gone(gone.model_copy(update={"rid": "documents:a-page"}))
+
+
+def test_a_file_not_read_resolves_to_its_last_version_with_text() -> None:
+    """DR-0491, extended: a file now past a cap, damaged or protected is read from before, as a gone one is."""
+    first = record(FILE, "one\n\ntwo", format="docx", sha256="0" * 64, size=9)
+    protected = record(FILE, "Not read: protected, or in an old binary format.", format="docx", problem="protected",
+                       sha256="1" * 64, size=4096)  # fmt: skip
+    assert records.is_not_read(protected) and not records.is_not_read(first)
+    assert records.resolving([first, protected]) is first
+    assert records.resolving([protected]) is protected
+    assert records.gone_note(protected).endswith("the latest says: Not read: protected, or in an old binary format.")
+
+
+def test_a_folder_rid_is_a_folder_source_s_by_its_shape() -> None:
+    folder = frozenset({"documents"})
+    assert records.is_folder_rid(FILE, folder)
+    assert records.is_folder_rid(f"{FILE}/sheet12", folder)
+    for other in (f"{FILE}/page0", "documents:0123456789AB", "documents:abc/page1", "chat:0123456789ab"):
+        assert not records.is_folder_rid(other, folder), other
+    assert records.part_order(f"{FILE}/page12") == ("page", 12)
+    assert sorted([f"{FILE}/page12", f"{FILE}/page2", f"{FILE}/slide1"], key=records.part_order) == [
+        f"{FILE}/page2", f"{FILE}/page12", f"{FILE}/slide1"]  # fmt: skip
+    assert records.part_order(FILE) == ("", 0)

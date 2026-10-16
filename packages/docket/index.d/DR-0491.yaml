@@ -6,7 +6,7 @@ decisions:
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#69"]
-    description: "verify and doc_put resolve an anchor whose record belongs to a folder source and whose newest version is gone (DR-0487) against the last version that has text, as read shows it, and name moved_to when the gone version carries one. This refines how DR-0198 resolves an anchor, against the record's latest version, for gone folder records only: the grammar doesn't change, and every other record resolves as before."
+    description: "verify and doc_put resolve an anchor whose record belongs to a folder source and whose newest version is gone (DR-0487) against the last version that has text, as read shows it, and name moved_to when the gone version carries one. This refines how DR-0198 resolves an anchor, against the record's latest version, for gone folder records only: the grammar doesn't change, and every other record resolves as before. The same holds for a folder file whose newest version is a file not read (past a cap, damaged or protected): read, verify and doc_put resolve against its last version with text, and say what the newest says."
     binds: ["A summary written before a file went keeps verifying, and its next rev is accepted."]
     not_chosen:
       - "Resolving against the gone version: its one line has no paragraph 2, so a summary of the file would fail verify, and doc_put would refuse its next rev."

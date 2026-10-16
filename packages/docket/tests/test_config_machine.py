@@ -183,6 +183,8 @@ def test_a_folder_source_round_trips_and_a_vault_without_one_writes_neither_key(
         ({"folder": "//server/share/Work"}, "is an absolute path"),
         ({"folder": r"docs\papers"}, "written with /"),
         ({"folder": "~ada/Work"}, "another user's isn't taken"),
+        ({"folder": "~//Work"}, "is an absolute path"),
+        ({"folder": "~/C:/Work"}, "is an absolute path"),
         ({"folder": "docs/../../elsewhere"}, r"with no \.\."),
         ({"folder": " "}, r"with no \.\."),
         ({"folder": "docs", "sensitivity": "mixed"}, "mixed would hold every page on the Staging page"),

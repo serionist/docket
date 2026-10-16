@@ -179,7 +179,11 @@ def clean_prefix(given: str) -> str:
 def list_folder(folder: Path, prefix: str, repo: Path | None, vault_root: Path, skipped: Counter[str]) -> list[Listed]:
     """Every file in the folder as (old path, path), in old-path order: the shared listing (DR-0480), which counts
     links, junctions and nested repos only."""
-    found = folders.list_folder(folder, repo, vault_root, skipped)
+    unlisted: list[str] = []
+    found = folders.list_folder(folder, repo, vault_root, skipped, unlisted=unlisted)
+    if unlisted:
+        # Skipped as before, and now said: a folder that couldn't be listed shows in the report by count.
+        skipped["folders not listed"] += len(unlisted)
     out = [Listed(unicodedata.normalize("NFC", f"{prefix}/{f.rel}" if prefix else f.rel), f.path) for f in found]
     return sorted(out, key=lambda item: item.old_path)
 

@@ -176,7 +176,9 @@ def folder_problem(value: str) -> str | None:
     under the home folder as ~/..., so it reads the same on every machine (DR-0481)."""
     if "\\" in value:
         return f"{value!r}: a folder is written with /, such as docs or ~/Work"
-    if PurePosixPath(value).is_absolute() or PureWindowsPath(value).anchor:
+    # Under ~/ the rest is held to the same rule: ~//Work would be the drive's root.
+    rest = value[2:] if value.startswith("~/") else value
+    if PurePosixPath(rest).is_absolute() or PureWindowsPath(rest).anchor:
         return (
             f"{value!r} is an absolute path, which names one machine's drive: write the folder relative to the repo "
             "(docs) or under your home folder (~/Work), and give a machine whose folder is elsewhere its own path in "

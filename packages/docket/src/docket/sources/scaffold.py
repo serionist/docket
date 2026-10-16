@@ -128,11 +128,19 @@ def new_folder_source(vault: Vault, name: str, given: Path) -> NewFolderSource:
     if existing is not None and existing.folder is None and (existing.mapper or existing.tools):
         raise DocketError(f"source {name} in vault.yaml has a mapper or tools; a folder source is a source of its own")
     folder = written_folder(vault, given)
-    entry = SourceConfig(
-        enabled=existing.enabled if existing is not None else True,
-        folder=folder,
-        exclude=existing.exclude if existing is not None else [],
-    )
+    # What vault.yaml already says stays: a source the user made mixed or private is refused with the validator's
+    # own fix, never turned to work and committed.
+    kept = existing or SourceConfig()
+    try:
+        entry = SourceConfig(
+            enabled=kept.enabled,
+            sensitivity=kept.sensitivity,
+            media_hosts=kept.media_hosts,
+            folder=folder,
+            exclude=kept.exclude,
+        )
+    except ValidationError as e:
+        raise DocketError(f"source {name}: " + "; ".join(str(err["msg"]) for err in e.errors())) from None
     registered, block_text, commit = _register(vault, name, entry)
     return NewFolderSource(name, entry, registered, block_text, commit)
 

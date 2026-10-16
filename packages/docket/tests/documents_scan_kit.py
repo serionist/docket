@@ -4,7 +4,10 @@ machine in the user's config (DR-0490), and the records a scan leaves in staging
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -91,3 +94,27 @@ def junction(target: Path, link: Path) -> None:
         _winapi.CreateJunction(str(target), str(link))
     else:
         raise OSError("junctions are Windows' own")
+
+
+@contextmanager
+def unlistable(folder: Path) -> Iterator[None]:
+    """A folder its own user can't list for a while: a deny entry in its ACL on Windows, no permissions on POSIX."""
+    if sys.platform == "win32":
+        user = os.environ["USERNAME"]
+        subprocess.run(["icacls", str(folder), "/deny", f"{user}:(OI)(CI)(RD)"], check=True, capture_output=True)
+        try:
+            yield
+        finally:
+            subprocess.run(["icacls", str(folder), "/remove:d", user], check=True, capture_output=True)
+    else:
+        mode = folder.stat().st_mode
+        folder.chmod(0)
+        try:
+            yield
+        finally:
+            folder.chmod(mode)
+
+
+def can_deny() -> bool:
+    """Whether a folder can be made unlistable here: root on POSIX lists every folder whatever its permissions."""
+    return sys.platform == "win32" or os.geteuid() != 0

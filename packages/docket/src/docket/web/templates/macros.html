@@ -42,6 +42,7 @@ href="{{ link.url }}" hx-get="{{ link.fragment }}" hx-target="{{ target }}"
 <article class="span{% if s.mark %} mark{% endif %}">
   <header class="span-head">{{ locator(s.anchor) }}<span class="meta" dir="auto">{{ s.head }}</span>{% if s.versions %}<span class="badge">{{ s.versions }}</span>{% endif %}</header>
   {% if s.problem %}{{ notice('error', s.problem) }}{% endif %}
+  {% if s.note %}{{ notice('info', s.note) }}{% endif %}
   {% if s.segments %}
   <ol class="segments">
     {% for seg in s.segments %}

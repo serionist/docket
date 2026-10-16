@@ -144,13 +144,17 @@ sources:
       documents: E:/Work
   ```
 
-- `exclude` takes fnmatch patterns on the path inside the folder, any case. Notes you also import with `docket import
-  notes` are best left out here.
+- `exclude` takes fnmatch patterns on the path inside the folder, any case, and leaves out folders too
+  (`archive/*`). Notes you also import with `docket import notes` are best left out here.
 - It is `work`, with no mapper or tools: `mixed` would hold every page on the Staging page, and to store nothing from
   it, set `enabled: false`. Only the vault's primary machine scans.
 - In a git repo the folder is listed through git's ignore rules, and git's index is never refreshed; elsewhere it is
   walked, dot folders and nested repos left out. Links and junctions inside it are left out, and so are Office lock
   files, git-lfs pointers, cloud placeholders whose bytes aren't on disk, and a path holding a never-store keyword.
+- A folder inside it that can't be listed now (a permission, a share gone) keeps its files' last versions, and the
+  report names it under `later`; exclude it if it should go.
+- Reading a file moves its last-access time where the file system keeps one (NTFS and most Linux mounts, relatime):
+  a scan reads a file only when its stat moved, and never writes to it.
 
 | Format | Gives | Misses |
 |---|---|---|
@@ -167,8 +171,8 @@ sources:
   saying why, with no text; one that stops or crashes the reader is tried once more.
 - A second scan reads only what changed: a stat each, a hash when the stat moved, the reader when the bytes did. A
   file deleted, moved or excluded gets one gone version that says since when; `docket doc read` shows it and the last
-  version with text, and anchors on it still verify. A scan that would find more than half the files gone, and at
-  least 20, stages nothing until `--accept-gone`.
+  version with text, and anchors on it still verify, as they do on a file that turned protected. A scan that would
+  find more than half the files gone, and at least 20, stages nothing until `--accept-gone`.
 
 ## Live runs
 

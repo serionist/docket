@@ -275,6 +275,8 @@ class _Search:
         self.langs = langs
         self.analyzer = Analyzer(langs)
         self.tz = ZoneInfo(vault.config.owner.time_zone)
+        # The sources whose records are documents, by their rids' shape: a mapper's `page` is none of them.
+        self.folder_sources = frozenset(n for n, c in vault.config.sources.items() if c.folder is not None)
         self.terms: set[str] = set()
         self.alias_langs = {lang.column: lang for lang in matching.alias_langs(self.analyzer)}
         self.lookup, self.alone, self.reached, self.longest = self._lookups()
@@ -659,7 +661,7 @@ class _Search:
 
     def place(self, row: _Row) -> str | None:
         """Where a document's hit sits in its file: its page, slide, or sheet rows (DR-0483)."""
-        if row.rid is None or row.kind != "record":
+        if row.rid is None or row.kind != "record" or not documents.is_folder_rid(row.rid, self.folder_sources):
             return None
         found = self.conn.execute("SELECT kind FROM records WHERE rid = ?", (row.rid,)).fetchone()
         return documents.place(found[0], row.title, row.para_from, row.para_to) if found else None
@@ -668,7 +670,7 @@ class _Search:
         record = self.conn.execute("SELECT title, source, kind FROM records WHERE rid = ?", (key,)).fetchone()
         doc = self.conn.execute("SELECT title FROM docs WHERE id = ?", (key,)).fetchone()
         if record is not None:
-            if record[2] == documents.FILE_KIND:
+            if record[2] == documents.FILE_KIND and documents.is_folder_rid(key, self.folder_sources):
                 # A folder source's file: its pages, slides and sheets are under it (DR-0482).
                 kind = "document"
             elif self.conn.execute("SELECT 1 FROM segments WHERE rid = ? LIMIT 1", (key,)).fetchone():

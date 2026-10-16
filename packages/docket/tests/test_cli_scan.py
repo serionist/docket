@@ -77,10 +77,21 @@ def test_every_line_of_a_report() -> None:
         SOURCE,
         folder="W",
         files=9,
-        outcomes=Counter({"same": 2, "changed": 1, "kept out": 1, "retry": 1, "on hold": 1, "placeholders": 2}),
+        outcomes=Counter(
+            {
+                "same": 2,
+                "changed": 1,
+                "kept out": 1,
+                "retry": 1,
+                "on hold": 1,
+                "placeholders": 2,
+                "folders not listed": 1,
+            }
+        ),
         skipped=Counter({"excluded": 1}),
         gone=2,
         not_read=[rid("a.pdf")],
+        unlisted=["team/archive"],
         staged=StageResult(ready=3, dropped=Counter({"never-store": 1})),
     )
     assert scan_lines(report) == [
@@ -90,7 +101,8 @@ def test_every_line_of_a_report() -> None:
         f"not read {rid('a.pdf')}",
         "kept out 1, by the never-store lists",
         "retry    1: the reader stopped or crashed; tried once more at the next scan",
-        "later    on hold 1, placeholders 2: they keep their last version",
+        "later    folders not listed 1, on hold 1, placeholders 2: they keep their last version",
+        "         not listed now: team/archive",
         "skipped  excluded 1",
         "staged   documents: 0 pending, 3 ready, 0 already staged or in raw",
         "dropped  never-store 1",
@@ -155,3 +167,25 @@ def test_a_hand_written_vault_yaml_gets_the_entry_to_paste(tmp_path: Path, capsy
     assert "add under sources:" in out
     assert "  documents:\n" in out
     assert "    folder: .\n" in out
+
+
+@pytest.mark.parametrize(
+    ("level", "hosts", "fix"),
+    [
+        ("mixed", [], "mixed would hold every page"),
+        ("mixed", ["media.example.invalid"], "has no mapper, tools or media_hosts"),
+        ("private", [], "enabled: false"),
+    ],
+)
+def test_a_mixed_or_private_source_isn_t_turned_into_a_work_folder_source(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], level: str, hosts: list[str], fix: str
+) -> None:
+    top = host_repo(tmp_path)
+    config = make_config("folder")
+    config.sources["journal"] = SourceConfig(sensitivity=level, media_hosts=hosts)  # type: ignore[arg-type]
+    vault = Vault.init(top / "vault", config, "test-box")
+    before = (vault.root / "vault.yaml").read_bytes()
+    assert main(["source", "new", "journal", "--folder", str(top), "--vault", str(vault.root)]) == 2
+    assert fix in capsys.readouterr().err
+    assert (vault.root / "vault.yaml").read_bytes() == before
+    assert Vault.open(vault.root).config.sources["journal"].sensitivity == level

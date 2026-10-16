@@ -17,10 +17,10 @@ after each, so an interrupted scan goes on where it stopped. Only the primary ma
 
 from __future__ import annotations
 
-import fnmatch
 import hashlib
 import json
 import os
+import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -50,8 +50,11 @@ from docket.vault.redact import Redactor
 from docket.vault.staging import Staged, Staging
 from docket.vault.vault import Vault
 
-# The text a call to the gate takes at most: each call reads all of staging.
+# The text a call to the gate takes at most: each call reads all of staging. A batch also goes in after this many
+# files or seconds, and the cache is saved with it, so an interrupted scan goes on where it stopped.
 BATCH_TEXT = 32 * MIB
+BATCH_FILES = 200
+BATCH_SECONDS = 60.0
 # A scan that would make more than half the files it knew gone, and at least this many, stages nothing unasked.
 GONE_GUARD = 20
 CACHE_DIR = "documents"
@@ -81,6 +84,8 @@ class ScanReport:
     skipped: Counter[str] = field(default_factory=Counter[str])
     gone: int = 0
     not_read: list[str] = field(default_factory=list[str])
+    # Folders that couldn't be listed now, by their paths inside the folder: their files keep their last version.
+    unlisted: list[str] = field(default_factory=list[str])
     # Set when the guard stopped the scan: the files that would have gone, of the ones the vault held.
     guarded: int | None = None
     known: int = 0
@@ -132,16 +137,24 @@ def folder_of(vault: Vault, source: str, config: SourceConfig) -> Path:
     mine = userconfig.folder_for(vault.root, source)
     if mine is not None:
         folder = mine
-    elif value == "~" or value.startswith("~/"):
-        folder = Path.home() / value[2:]
     else:
-        repo = toplevel(vault.root.parent)
-        if repo is None:
+        if value == "~" or value.startswith("~/"):
+            base = Path.home()
+            folder = base / value[2:]
+        else:
+            repo = toplevel(vault.root.parent)
+            if repo is None:
+                raise DocketError(
+                    f"{source}'s folder {value} is relative to the repo that holds the vault, and {vault.root} isn't "
+                    "in one; write it under ~/, or give this machine's folder in Docket's config.yaml, under folders"
+                )
+            base = repo
+            folder = repo / value
+        # Before links are followed: vault.yaml's folder is under the home folder or in the repo, never past them.
+        if not Path(os.path.normpath(folder)).is_relative_to(base):
             raise DocketError(
-                f"{source}'s folder {value} is relative to the repo that holds the vault, and {vault.root} isn't in "
-                "one; write it under ~/, or give this machine's folder in Docket's config.yaml, under folders"
+                f"{source}'s folder {value} leads out of {base}; vault.yaml names one under ~/ or in the repo"
             )
-        folder = repo / value
     folder = folder.resolve()
     root = vault.root.resolve()
     if folder == root or root in folder.parents:
@@ -269,7 +282,10 @@ class _Scan:
         self.held = holds.read(vault.root, source)
         self.cache_path = private / f"{source}.json"
         self.cache = self._load()
-        self.holdings = _Holdings(vault, source)
+        # Under the vault's lock: a promotion between reading raw and reading staging would show a version twice
+        # or not at all, and an unchanged file would be read as changed.
+        with vault.lock:
+            self.holdings = _Holdings(vault, source)
         self.gate = Gate(vault)
         self.batch: list[RawRecord] = []
         self.batch_text = 0
@@ -320,7 +336,9 @@ class _Scan:
         report = self.report
         skipped = report.skipped
         repo = folders.repo_root(self.folder)
-        listed = folders.list_folder(self.folder, repo, self.vault.root.resolve(), skipped)
+        unlisted: list[str] = []
+        root = self.vault.root.resolve()
+        listed = folders.list_folder(self.folder, repo, root, skipped, exclude=self.config.exclude, unlisted=unlisted)
         report.files = len(listed)
         present: set[str] = set()
         todo: list[_Candidate] = []
@@ -329,6 +347,7 @@ class _Scan:
             if candidate is not None:
                 todo.append(candidate)
         known = self.holdings.files()
+        self._unlisted(unlisted, known, present)
         leaving = sorted(set(known) - present)
         report.known = len(known)
         if len(leaving) >= GONE_GUARD and len(leaving) * 2 > len(known) and not accept_gone:
@@ -339,10 +358,13 @@ class _Scan:
             if found_identity is not None:
                 self.leaving.setdefault(found_identity, []).append(rid)
         try:
+            files, since = 0, time.monotonic()
             for candidate in todo:
                 self._one(candidate)
-                if self.batch_text >= BATCH_TEXT:
+                files += 1
+                if self.batch_text >= BATCH_TEXT or files >= BATCH_FILES or time.monotonic() - since >= BATCH_SECONDS:
                     self._flush()
+                    files, since = 0, time.monotonic()
         finally:
             if self.extractor is not None:
                 self.extractor.close()
@@ -354,6 +376,19 @@ class _Scan:
         self._flush()
         return report
 
+    def _unlisted(self, unlisted: list[str], known: dict[str, RawRecord], present: set[str]) -> None:
+        """A folder that couldn't be listed now is a passing reason (DR-0487): the files the vault holds under it stay
+        present, never gone, and the report names it by its path inside the folder, unless a never-store keyword is
+        in that path. One `exclude` names is left out, and its files go as excluded files do."""
+        exclude = self.config.exclude
+        kept = [u for u in unlisted if not (folders.excluded(u, exclude) or folders.excluded(f"{u}/", exclude))]
+        for folder in kept:
+            prefix = "" if folder == "." else f"{folder}/"
+            present.update(rid for rid, record in known.items() if (record.title or "").startswith(prefix))
+        if kept:
+            self.report.outcomes["folders not listed"] += len(kept)
+        self.report.unlisted = [u for u in kept if not neverstore.matches_text(u, self.lists)]
+
     def _candidate(self, found: folders.Found, present: set[str]) -> _Candidate | None:
         """A listed file the scan looks at, or None with the reason counted. A path holding a never-store keyword is
         checked first, before anything reads, logs or reports it; it stays present, so it never turns gone."""
@@ -363,8 +398,7 @@ class _Scan:
             skipped["never-store"] += 1
             present.add(rid)
             return None
-        folded = found.rel.casefold()
-        if any(fnmatch.fnmatchcase(folded, pattern.casefold()) for pattern in self.config.exclude):
+        if folders.excluded(found.rel, self.config.exclude):
             skipped["excluded"] += 1
             return None
         if found.path.name.startswith(OFFICE_LOCK):
