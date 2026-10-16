@@ -271,7 +271,7 @@ vault/
   vault.yaml                     the owner, time zone, languages, sources, primary machine, redaction, never-store
   staging/                       new records waiting for the gate                          -> never committed
   raw/<source>/<yyyy>/<mm>/<yyyy-mm-dd>T<hhmm>-<machine>.jsonl
-                                 one file per sync run, written once                       -> plain git
+                                 a file per sync run and 16 MiB, written once              -> plain git
   media/<source>/<yyyy>/<mm>/<id>.<ext>.age
                                  audio and attachments, encrypted per file                 -> LFS
   processed/<type>/<...>.md      notes, digests, briefs, minutes                            -> plain git

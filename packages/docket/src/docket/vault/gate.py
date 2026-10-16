@@ -20,7 +20,7 @@ import logging
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
@@ -42,6 +42,9 @@ Label = Literal["work", "private"]
 # source's rule, or classified.
 Why = Literal["on-hold", "held-back", "released", "by-hand", "mixed", "work", "classified"]
 MIN_KEY_PREFIX = 6
+# Each staged record's time is after the one before (DR-0488), even when the clock hasn't moved: Windows' moves every
+# 15.6 ms.
+TICK = timedelta(microseconds=1)
 
 
 @dataclass
@@ -57,11 +60,13 @@ class StageResult:
 @dataclass(frozen=True)
 class SourceRun:
     source: str
+    # The first run file the promotion wrote, or None; `files` holds them all, in run order (DR-0488).
     run: Path | None
     written: int
     skipped: int
     commit: str | None
     redactions: Counter[str]
+    files: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -128,7 +133,8 @@ class Gate:
             decided = self.staging.decided()
             cut_in_staging = _cut_rids(scan)
             redactor = Redactor.from_config(config.redaction)
-            now = datetime.now(UTC)
+            # The order promotion keeps (DR-0488): after everything staging holds, then in the batch's order.
+            now = max([datetime.now(UTC), *(e.staged.staged_at + TICK for e in scan.entries)])
             for record in batch:
                 sensitivity = config.sources[record.source].sensitivity
                 if sensitivity == "private":
@@ -160,6 +166,7 @@ class Gate:
                     continue
                 pending = sensitivity == "mixed" or self._by_hand(redacted, decided, cut_in_staging)
                 self.staging.write(Staged(state="pending" if pending else "ready", staged_at=now, record=redacted))
+                now += TICK
                 staged_keys.add(key)
                 result.pending += pending
                 result.ready += not pending
@@ -226,7 +233,8 @@ class Gate:
             return staged
 
     def promote(self, source: str | None = None) -> PromoteResult:
-        """Write every ready record to the raw log: cut, redacted with the current rules, one run per source."""
+        """Write every ready record to the raw log: cut, redacted with the current rules, one run per source, in the
+        order the records were staged, so of two versions of one record the later one is the later line (#107)."""
         with self.vault.lock:
             # Before anything is written: commit what an earlier promotion left behind, so a repo Docket can't commit
             # to (a rebase in progress, a detached HEAD) stops the promotion here, with no new run file on disk.
@@ -235,7 +243,9 @@ class Gate:
             result = PromoteResult(dropped=self._sweep(config))
             redactor = Redactor.from_config(config.redaction)
             groups: dict[str, list[tuple[Entry, RawRecord]]] = {}
-            for entry in self.staging.scan().entries:
+            # Staging's files sort by key, a hash; raw's order is the order things were staged, then their own time.
+            entries = sorted(self.staging.scan().entries, key=lambda e: (e.staged.staged_at, e.staged.record.ts, e.key))
+            for entry in entries:
                 staged = entry.staged
                 name = staged.record.source
                 if staged.state != "ready" or (source is not None and name != source):
@@ -268,7 +278,8 @@ class Gate:
 
     def _promote_source(self, name: str, items: list[tuple[Entry, RawRecord]]) -> SourceRun:
         run = self.vault.rawlog.write_run(name, [final for _, final in items])
-        what = f"{run.written} record(s)" if run.written else "an interrupted run"
+        files = f" in {len(run.paths)} run files" if len(run.paths) > 1 else ""
+        what = f"{run.written} record(s){files}" if run.written else "an interrupted run"
         # Committed even when nothing new was written: a crash between an earlier write and its commit left the run
         # file behind, and its staged files must not go before it is committed.
         commit = self.vault.commit([], f"Raw: {name}, {what} from {self.vault.machine}")
@@ -276,7 +287,7 @@ class Gate:
         for entry, _ in items:
             self.staging.delete(entry.path)
         redactions = sum((markers(final) for _, final in items), Counter[str]())
-        return SourceRun(name, run.path, run.written, run.skipped, commit, redactions)
+        return SourceRun(name, run.path, run.written, run.skipped, commit, redactions, run.paths)
 
     def _uncommitted_runs_with(self, rid: str) -> list[str]:
         """The run files git hasn't committed yet that hold a record, vault-relative."""

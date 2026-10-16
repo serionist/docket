@@ -6,20 +6,24 @@ import ast
 import logging
 from collections import Counter
 from collections.abc import Callable
+from datetime import datetime, tzinfo
 from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import empty_vault, make_record, sh
+from docket_testkit import empty_vault, make_record, plaud_records, sh
 
 from docket.errors import DocketError
+from docket.vault import gate as gate_module
+from docket.vault import rawlog
 from docket.vault.config import RedactionPattern, SourceConfig, VaultConfig
 from docket.vault.cuts import CUT_MARKER, Cut
 from docket.vault.gate import Gate
 from docket.vault.rawlog import RawLog
-from docket.vault.records import RawRecord
+from docket.vault.records import RawRecord, version
 from docket.vault.redact import Redactor
 from docket.vault.staging import Staging
+from docket.vault.staging import key_of as staging_key
 from docket.vault.vault import Vault
 
 SECRET = "hunter2-" + "Example"
@@ -88,6 +92,76 @@ def test_promote_can_take_one_source(gate: Gate, vault: Vault) -> None:
     assert [r.source for r in gate.promote("notes").runs] == ["notes"]
     assert raw_rids(vault) == Counter({"notes:n-2": 1})
     assert gate.list().counts() == Counter({"ready": 1})
+
+
+class StillClock:
+    """A clock that doesn't move between two stagings, as Windows' doesn't for 15.6 ms."""
+
+    @staticmethod
+    def now(tz: tzinfo | None = None) -> datetime:
+        return datetime(2026, 10, 16, 9, 0, tzinfo=tz)
+
+
+def versions_staging_sorts_backwards() -> tuple[RawRecord, RawRecord]:
+    """Two versions of one note, with the same time, whose staging keys sort the newer one first."""
+    newer = note(1, text="the final wording")
+    older = next(
+        older
+        for n in range(200)
+        if staging_key((older := note(1, text=f"a draft, take {n}")).rid, version(older))
+        > staging_key(newer.rid, version(newer))
+    )
+    return older, newer
+
+
+@pytest.mark.parametrize("together", [False, True], ids=["two-stagings", "one-batch"])
+def test_of_two_staged_versions_of_a_record_the_later_one_is_current(
+    gate: Gate, vault: Vault, monkeypatch: pytest.MonkeyPatch, together: bool
+) -> None:
+    monkeypatch.setattr(gate_module, "datetime", StillClock)
+    older, newer = versions_staging_sorts_backwards()
+    if together:
+        assert gate.stage([older, newer]).ready == 2
+    else:
+        assert (gate.stage([older]).ready, gate.stage([newer]).ready) == (1, 1)
+    staged = {e.staged.record.text: e for e in gate.list().entries}
+    # Staging's own order, by key, is the trap #107 fell in: it would write the newer version first.
+    assert staged[older.text].key > staged[newer.text].key
+    assert staged[older.text].staged.staged_at < staged[newer.text].staged.staged_at
+    gate.promote()
+    log = RawLog(vault.root, vault.machine, vault.lock)
+    assert [r.text for r in log.read(older.rid)] == [older.text, newer.text]
+    latest = log.latest(older.rid)
+    assert latest is not None
+    assert latest.text == newer.text
+
+
+def test_a_promotion_past_the_cap_is_one_commit_of_runs_in_staging_order(
+    gate: Gate, vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rewrite(vault, lambda c: c.sources.__setitem__("plaud", SourceConfig()))
+    monkeypatch.setattr(rawlog, "RUN_FILE_BYTES", 1500)
+    first = plaud_records("first", "second")
+    # A re-pull: the recording renamed, two new transcripts, its notes as they were.
+    later = plaud_records("third", "fourth", title="Supplier sync, renamed")
+    gate.stage(first)
+    assert gate.stage(later).skipped == 1
+    before = sh(vault.root, "git", "rev-list", "--count", "HEAD")
+    [run] = gate.promote().runs
+    assert run.source == "plaud"
+    assert len(run.files) > 2
+    assert run.run == run.files[0]
+    assert run.written == len(first) + len(later) - 1
+    assert int(sh(vault.root, "git", "rev-list", "--count", "HEAD")) == int(before) + 1
+    assert run.commit is not None
+    assert f"in {len(run.files)} run files" in sh(vault.root, "git", "log", "-1", "--format=%s")
+    committed = sh(vault.root, "git", "show", "--name-only", "--format=", run.commit).split()
+    assert sorted(committed) == sorted(f.relative_to(vault.root).as_posix() for f in run.files)
+    assert vault.git.untracked("raw") == []
+    assert [r.rid for r in in_raw(vault)] == [r.rid for r in first + later[:-1]]
+    recording = RawLog(vault.root, vault.machine, vault.lock).latest(first[0].rid)
+    assert recording is not None
+    assert recording.title == "Supplier sync, renamed"
 
 
 def test_a_private_source_is_dropped_and_only_counted(gate: Gate, vault: Vault) -> None:
