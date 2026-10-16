@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0455
+    title: The reranker takes 50 pairs on a GPU and 30 on a CPU, and runs only where the install timed them within 0.6 s
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#88"]
+    description: "docket models install times the device's reranker on that many invented pairs of real length, each at the token limit, the median of three after a warm-up, and writes the pairs and the time into the environment's marker. Within 0.6 s, which leaves the 0.75 s budget room for a busy moment, the reranker is on; past it, it stays installed but off on this machine, and the install and docket models status say the time and that --no-reranker frees its files. Measured on the desktop: the RTX 5090 reranks 50 pairs in 0.13 s; the CPU 30 pairs in 0.42 s on its 16 cores and 0.56 s on 8, so 8 cores qualify, and 4 (0.87 s) and 2 (1.32 s, what a 4-vCPU CI runner has) don't. On the set, 20 pairs on the CPU gained MRR only (all kinds 0.86 and 0.69 against 0.86 and 0.65), so there is no step down to 20."
+    not_chosen:
+      - "20 pairs where 30 don't fit: paraphrase recall 0.50 against 0.67, and the same typo question lost."
+      - "Timing again at every start: one busy moment would turn the reranker off until the next; the budget covers busy moments."

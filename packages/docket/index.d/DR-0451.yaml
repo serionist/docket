@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0451
+    title: The worker runs the reranker as a second ONNX Runtime session and answers rerank, by batches of 10 pairs up to a deadline
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#88"]
+    description: "The worker's spec names the reranker's model and tokenizer files, its token limit (512 on CUDA, 256 on the CPU) and its device. The worker loads it after the embedder and scores one pair before its hello, which names the reranker and the provider its session got, so the install sees a CUDA session that fell back to the CPU. A request is {id, op: rerank, query, texts, deadline}, the deadline a wall-clock time in seconds; the answer is the scores as base64 float32, one per text in order, or an error by its type only (DR-0155): PastBudget when the deadline came first. Each pair is the query and a chunk's input without the passage prefix, which the core caps at 4,096 characters and the tokenizer truncates longest-first, so a long query never fails. Pairs go in batches of 10; before each the worker stops when the batch would end past the deadline, by the last batch's time. The CPU session takes ONNX Runtime's default threads, one per physical core, since a rerank is short and someone waits on it, where the embedding pass keeps to half the cores; the CUDA session's arena grows by what it asks for. Measured on the desktop: batches of 10 took the same time as one of 50 on the GPU (124 against 134 ms) with 2.3 GB of VRAM against 4.8 GB, and less on the CPU (0.87 against 0.92 s on 4 threads); 32 threads on the 16-core CPU took 0.86 s against 0.42 s. The client counts a rerank as a query, so the pass's batches wait behind it, and stops waiting at the deadline plus 0.2 s."
+    binds: [No text of a rerank reaches a log or an error message.]
+    not_chosen:
+      - "A worker process of its own for the reranker: a second start, check and restart path for a model the same environment runs."
+      - "One batch of every pair: twice the VRAM on the GPU, slower on the CPU, and no point to stop at the deadline."
+      - "The pass's half of the cores for the reranker: 0.56 s instead of 0.42 s for 30 pairs on the desktop."
+      - "Answering the scores done by the deadline: a top half reranked is harder to read and to test, and the issue keeps the fused order past the budget."

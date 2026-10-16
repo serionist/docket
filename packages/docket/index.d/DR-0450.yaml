@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0450
+    title: The rerankers are bge-reranker-v2-m3 in fp16 on an NVIDIA GPU and mmarco-mMiniLMv2-L12-H384-v1 in fp32 on a CPU, pinned like the embedder
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#88"]
+    description: "On CUDA, onnx-community's fp16 ONNX export of BAAI/bge-reranker-v2-m3 (revision 6f5ff65, onnx/model_fp16.onnx, 1.14 GB; Apache-2.0 from its base, the export has no licence file of its own); on the CPU, the fp32 ONNX file in cross-encoder/mmarco-mMiniLMv2-L12-H384-v1 (revision 1427fd6, onnx/model.onnx, 471 MB, Apache-2.0); each with its tokenizer.json, pinned by revision and sha256 in the catalogue (DR-0333), with the licence. On the invented set under DR-0452 the GPU model takes paraphrase recall at 10 and MRR from 0.44 and 0.22 to 0.78 and 0.58 and all kinds from 0.86 and 0.65 to 0.94 and 0.82; the CPU model takes paraphrase to 0.67 and 0.35 and all kinds to 0.90 and 0.70. On the maintainer's desktop the GPU model reranks 50 pairs of 512 tokens in 124 to 134 ms on an RTX 5090, and the CPU model 30 pairs of 256 tokens in 0.42 s on 16 cores, 0.56 s on 8, 0.87 s on 4 and 1.32 s on 2. The CPU model's card names its training data, mMARCO (Apache-2.0), a machine translation of MS MARCO, whose own terms are for non-commercial research; the model's licence governs its use, and Docket never ships the files: the user's install fetches them."
+    not_chosen:
+      - "gte-multilingual-reranker-base (Apache-2.0): better MRR on the set (all kinds 0.90 and 0.77) but 12 layers of 768: 30 pairs took 3.76 s in fp32 and 1.85 s in int8 on 4 threads."
+      - "bge-reranker-v2-m3 on a CPU: the best CPU numbers (all kinds 0.93 and 0.81 in int8 at 30 pairs), at 3.67 s on 4 threads."
+      - "mmarco's int8 files: 1.6 times faster on 4 threads (0.53 s), but the hub has one per instruction set (AVX2, AVX-512, VNNI, ARM64) and int8 kernels differ by CPU, so one search would rank differently on two machines; the VNNI file lost a paraphrase question on the set (0.61 against 0.67)."
+      - "jina-reranker-v2-base-multilingual and jina-reranker-v3: CC BY-NC 4.0."
+      - "nreimers/mmarco-mMiniLMv2-L6-H384-v1, half the layers: no licence on its card."
+      - "unicamp-dl/mMiniLM-L6-v2-mmarco-v2 (MIT) and amber-tech/bert-multilingual-passage-reranking-msmarco (Apache-2.0): PyTorch pickles only, no ONNX file to pin."
+      - "bge-reranker-base: Chinese and English only. Qwen3-Reranker-0.6B and mxbai-rerank-base-v2: decoders of half a billion parameters, slow on a CPU, and Qwen3 weaker on the set (#67)."

@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0452
+    title: "The reranker orders its top N in two tiers: the all-words hits first, then every other candidate, each tier by score"
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#88"]
+    description: "The reranker gets the top N of the fusion (DR-0453, DR-0455) and orders it in two tiers: the chunks the all-words stage found, by the reranker's score, then the rest of the top N (any-word, prefix, entity and vector-only), by score, ties in fused order. So it keeps DR-0338's rule that a chunk found only by meaning never passes an all-words hit, and keeps any-word, prefix and entity hits below them too, which DR-0338 doesn't ask. Measured on the invented set against the alternatives: the reranker's order alone gave the same on the GPU but inflection MRR 0.92 against 0.96, and on the CPU exact-name recall 0.93 against 1.00 and inflection MRR 0.87 against 0.96; a free rerank with DR-0338's rule applied after it gave the same on the GPU and exact-name recall 0.93 on the CPU, lost to an any-word hit; paraphrase was the same under all three. Inside the all-words tier the reranker's order replaces the title-lead order of DR-0231 and DR-0232 for that search, which costs exact-name MRR 0.88 to 0.84 on the GPU and 0.76 on the CPU while recall stays 1.00; leaving that tier in keyword order kept exact-name MRR at 0.86 but cost time-bound 0.95 to 0.82 on the GPU and 0.81 to 0.72 on the CPU. A boost lifts a chunk into the top N, and the reranker orders it within its tier."
+    binds:
+      - A chunk the all-words stage found ranks above every other chunk of the reranked top N.
+      - A search whose rerank is skipped returns the order it returns with no reranker.
+    not_chosen:
+      - "The reranker's order alone, overriding DR-0338: the CPU lost an exact name, and inflection MRR fell on both devices."
+      - "A free rerank, then DR-0338's rule applied again: the CPU lost an exact name to an any-word hit."
+      - "The all-words tier left in keyword order: time-bound MRR fell on both devices for 0.02 to 0.10 of exact-name MRR."
+      - "The fused rank and the reranker's fused by reciprocal rank, #67's direction for the CPU: it kept a typo question on the CPU, but paraphrase MRR fell to 0.45 against 0.58 on the GPU and 0.32 against 0.35 on the CPU, and all kinds' MRR to 0.74 and 0.67 against 0.82 and 0.70."

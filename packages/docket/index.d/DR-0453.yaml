@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0453
+    title: A search that reranks takes its candidates from the fusion at vector weight 1, and the weight-0.5 order for the rest and for a skipped rerank
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#88"]
+    description: "Fusion costs next to nothing beside a rerank, so a search with a reranker fuses twice: at vector weight 1 to pick the top N, which fed the reranker better (paraphrase recall and MRR 0.78 and 0.58 against 0.72 and 0.53 on the GPU, 0.67 and 0.35 against 0.61 and 0.29 on the CPU), and at weight 0.5 (DR-0338) for everything past the reranked top N and for the whole order when the rerank is skipped, since weight 1 alone costs inflection MRR 0.86 to 0.80 and time-bound 0.78 to 0.70. DR-0338's all-words rule applies to both orders."
+    not_chosen:
+      - "Weight 1 throughout: a skipped rerank would cost inflection and time-bound MRR."
+      - "Weight 0.5 for the candidates too: one paraphrase question fewer on each device."
