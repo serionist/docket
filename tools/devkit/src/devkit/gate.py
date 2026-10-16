@@ -369,7 +369,12 @@ def step_models(ctx: Ctx) -> Outcome:
 
 
 STEPS = [
-    Step("lock", ("quick", "full"), "uv.lock matches the pyproject files; the models' pins the dev group's", step_lock),
+    Step(
+        "lock",
+        ("quick", "full"),
+        "uv.lock matches the pyproject files; the models' pins the dev group's, each with a wheel for its systems",
+        step_lock,
+    ),
     Step("ruff", ("quick", "full"), "lint", step_ruff),
     Step("format", ("quick", "full"), "formatting", step_format),
     Step("types", ("quick", "full", "os"), "pyright (strict on src/)", step_types),

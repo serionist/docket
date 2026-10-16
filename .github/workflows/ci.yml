@@ -108,6 +108,14 @@ jobs:
           enable-cache: true
       - name: Install
         run: uv sync --locked
+      # The CUDA environment's hashed requirements resolve on the systems that run it, reading the index's metadata and
+      # downloading no wheel: a universal compile once pinned nvidia-cublas 13.8.1.7, which has no Windows wheel
+      # (#109). The gate's pins check catches that offline from tools/devkit/models-wheels.json; this asks the index.
+      - name: The CUDA environment resolves
+        if: matrix.name != 'macOS'
+        run: >-
+          uv pip install --dry-run --require-hashes --python 3.12 --target "${{ runner.temp }}/cuda-resolve"
+          -r packages/docket/src/docket/models/requirements-cuda.txt
       # Only the model files: the environment is rebuilt each run, since it points at the runner's own Python.
       - name: The model files
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

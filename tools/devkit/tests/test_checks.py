@@ -450,32 +450,7 @@ def test_under_coverage_the_timed_tests_stay_in_the_one_run(tmp_path: Path, monk
     assert out.status == "fail" and "a test broke" in out.detail
 
 
-def test_models_lock_compiles_each_requirements_file_from_versions_a_week_old(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    import subprocess
-    from datetime import date
-
-    from devkit import cli
-
-    folder = tmp_path / cli.MODELS
-    folder.mkdir(parents=True)
-    for device in ("cuda", "cpu"):
-        (folder / f"requirements-{device}.in").write_text("numpy==2.5.3\n", encoding="utf-8")
-    calls: list[list[str]] = []
-
-    def fake_run(cmd: list[str], **_: object) -> subprocess.CompletedProcess[str]:
-        calls.append(cmd)
-        return subprocess.CompletedProcess(cmd, 0, "", "")
-
-    monkeypatch.setattr(cli, "repo_root", lambda: tmp_path)
-    monkeypatch.setattr(cli, "_today", lambda: date(2026, 10, 15))
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    assert cli.main(["models-lock"]) == 0
-    assert [Path(c[3]).name for c in calls] == ["requirements-cpu.in", "requirements-cuda.in"]
-    assert all(c[c.index("--exclude-newer") + 1] == "2026-10-08" and "--generate-hashes" in c for c in calls)
-    assert all(c[-1].endswith(".txt") for c in calls)
-    assert "from versions published before 2026-10-08" in capsys.readouterr().out
+# What models-lock compiles, and how it leaves out a release without a wheel for a system: test_pins.py.
 
 
 def test_models_lock_says_why_it_failed(
