@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0474
+    title: Review minutes are estimated from the log's times, per ISO week, and shown on the Curate page and in docket curate status
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#68"]
+    description: For each round, the gaps from its start through each of its decisions, each gap capped at 5 minutes, summed per ISO week of the round's start, from the committed log, so rounds on every machine and in every place (page, CLI, skill) count. The Curate page's head and docket curate status show the last weeks, the dashboard until Today (phase 3). The session-start status tells Claude when a round is due, with last week's minutes; it isn't shown to the user each session.
+    not_chosen:
+      - "A timer in the page: rounds in chat wouldn't count."
+      - "The session-start line shown to the user: a weekly nudge in every session."

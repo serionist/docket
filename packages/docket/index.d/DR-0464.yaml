@@ -1,0 +1,11 @@
+decisions:
+  - id: DR-0464
+    title: An entity change that a never-store list matches, or that a redaction rule would change, is refused
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#68"]
+    description: "Every name, alias, id and role a change writes is held to the never-store people and keywords lists as records are (DR-0026): folded, failing closed. A match refuses the change, naming the list, never the value. A value a redaction rule would change is refused too, naming the rule, rather than stored with a marker. Names themselves are never redacted (DR-0194)."
+    not_chosen:
+      - "Redacting the value: an alias holding [redacted:phone] matches nothing, and the entity looks complete."

@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0476
+    title: docket curate add applies entity changes from a YAML file, for seeding and for edits
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#68"]
+    description: "A changes file lists creates (an entity's fields, as in its file) and adds (aliases, names, ids, related links for an entity), each optionally naming the card it settles. Every change is checked as an entity file is and passes the store's checks (DR-0463, DR-0464); all go in one commit, each with its log line, or none. The skill writes it for an edited card and for seeding from a people directory or a glossary. It isn't a door: a later Docket can read it differently."
+    not_chosen:
+      - "An editor opened by the CLI: the skill can't drive it."
+      - "One flag per field on accept: an entity with several names and aliases needs a file anyway."

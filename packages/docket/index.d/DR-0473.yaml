@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0473
+    title: The Curate page writes only through same-origin form posts on the writer thread, and refuses a decision on an entity changed since it was shown
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#68"]
+    description: "GET /curate never writes. Starting a round, accept, edit, reject, undo and lift are posts to /curate/round, /curate/decide, /curate/undo and /curate/lift: plain HTML forms the Guard checks (DR-0152), run on the service's writer thread and answered with a 303 to the page, as the Staging page's are (DR-0381). A decision carries the card and the hash of the entity file it was shown with; under the lock a changed file refuses it and the page shows the card as it stands. The edit form opens in place with htmx, and without JavaScript through edit= in the URL, which also holds open and done. Keys move and open; no key writes."
+    not_chosen:
+      - "htmx posts: nothing would work without JavaScript."
+      - "A decision without the file's hash: a hand edit made after the page loaded would be overwritten unseen."

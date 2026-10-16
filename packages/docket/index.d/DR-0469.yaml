@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0469
+    title: Tier 1 applies four kinds of fact, each to one entity or none, and never creates an entity
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#68"]
+    description: "An address: a record's author or recipient written Name <address> gives ids.email to the one person or org whose name or plain alias the name folds to. A chat id: an author written Name <id>, the id not an address, gives ids.<source> the same way. A shown name: the name a system shows for an address or id an entity already lists, when it isn't one of its names or aliases, becomes a plain alias, a trailing (...) dropped. Two engines: one spelling, capitalised, in two engines' transcripts on overlapping utterances of a recording becomes an asr alias of the one entity it is within matching's fuzzy distance of, when the recording mentions that entity. A fact that matches two entities becomes a tier 2 card; one that matches none waits for the miner. A recorder's polished transcript is the raw one rewritten, not a second engine."
+    not_chosen:
+      - "A new person from every sender: newsletters and one-off senders would fill the entities."
+      - "Speaker labels as tier 1: a label names no entity until one exists, and a near match is a judgement."

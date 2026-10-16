@@ -1,0 +1,10 @@
+decisions:
+  - id: DR-0465
+    title: Tier 3 is the miner's filter, never shown, its counts in one line
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#68"]
+    description: Before anything is ranked, the miner leaves out a spelling found in one container only, a run of words seen under three times, a word written lower case in over a fifth of its mid-sentence uses, a language's time words and language names, a spelling under three letters or of digits only, a spelling an alias already covers (alias_terms), and a key on the stoplist. The round shows how many it left out by reason. The thresholds are constants, the first thing raised when the review minutes climb (the design's Risks).
+    not_chosen: ["A filter nobody sees: what it costs in missed names would never show."]

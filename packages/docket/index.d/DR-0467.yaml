@@ -1,0 +1,11 @@
+decisions:
+  - id: DR-0467
+    title: Cards are ranked by the chunks a search misses today that the change would find, distinct containers first
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#68"]
+    description: For an alias card, the missed chunks hold the spelling and don't mention the entity, which is what accepting adds. For a new-entity card, they hold any of its spellings and the FTS expression search builds for its name doesn't match them (query.py's word groups). Cards rank by missed containers (recordings, threads, docs), then missed chunks, then the newest; a name always spelled the same and always found ranks below every name with a gap, by its containers. The card shows the count as the chunks and containers missed, and the newest date.
+    not_chosen:
+      - "Raw counts: a name always spelled right would fill every batch while the misheard ones wait."

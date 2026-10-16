@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0470
+    title: Tier 1 runs on the vault's primary machine only, at the start of a round, in one commit
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#68"]
+    description: Tier 1 runs before the miner when a round starts on the machine vault.yaml names as primary, and writes all its changes in one commit with their log lines. Its changes are listed at the head of the round with an undo each. Another machine runs none, since two machines changing one entity file would conflict in git. It doesn't run while a log line fails to read (DR-0460).
+    not_chosen:
+      - "After each index update in the service: commits at odd times, on every machine."
+      - "Lazily on the first search: a read would write."

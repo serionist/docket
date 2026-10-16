@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0463
+    title: Docket writes an entity file whole in one canonical form, reads it back, and commits it with its log line under the vault lock
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#68"]
+    description: "An entity change is written as the whole file in one canonical form: DR-0113's keys in its order, name, related and ids as flow maps, each alias a flow map on its own line, a value quoted only when YAML would read it otherwise. The written text is read back through the entity loader and must give the entity intended, or nothing is written. A file holding a comment is refused, naming the line to add by hand. Under the vault lock the file is read again; an uncommitted hand edit of it is committed on its own first, as a doc's is taken in; then the log line is appended, the file written through a temp file and a rename, and both committed in one commit (Entity: <id> <op>, the op ids in its body). A failure puts the file and the log back and unstages them. A crash between the log line and the file leaves a logged change the file lacks, which the next round shows again."
+    binds:
+      - No entity write keeps a value the loader would read otherwise.
+      - "Entity writes go through the vault lock, never the staging gate: entities aren't records."
+    not_chosen:
+      - "ruamel.yaml's round trip: a dependency for the comments few entity files hold."
+      - "Editing lines in place: each of YAML's styles for a list or a map needs its own edit."

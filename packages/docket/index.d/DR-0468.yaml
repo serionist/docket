@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0468
+    title: A round's batch is at most 15 cards, kept per machine in the private folder and disposable; snippets are cut when shown
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#68"]
+    description: "A round starts from the Curate page, docket curate round or the skill: the index is brought up to date, tier 1 runs on the primary machine, then the miner. Its batch, at most 15 cards, one per entity or new name, is <private>/curate/batch.json: ids, keys, spellings, counts and locators, per machine and never committed. A card's state is folded from the log by its key, so the page, the CLI and the skill on one machine show one batch and a decision synced from another machine closes the card; a card whose change a hand edit already made shows as done. A round is due 7 days after the last on any machine, from the log, and another starts whenever asked. Snippets, up to three a card, are cut from the index's chunk text when the card is shown: one per container, newest first, the first where the name is written too; about 160 characters around the marked spelling, with the chunk's locator."
+    binds:
+      - Deleting the batch loses only the open round's view; decisions live in the log.
+      - No snippet is stored anywhere by curation.
+    not_chosen:
+      - "A batch built every Monday: the service has no scheduler before phase 3, and a batch nobody opens goes stale."
+      - "Snippets in the batch: a second copy of raw text, which forgetting a record wouldn't reach."

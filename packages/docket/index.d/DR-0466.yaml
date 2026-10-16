@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0466
+    title: "Proposals are mined from the index alone: speaker labels, written and heard spellings, grouped and matched to entities first"
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#68"]
+    description: "The miner reads the index, never the vault's files. Its spellings: a transcript's speaker labels except generic ones (Speaker 1, Beszélő 2, Unknown), as the user typed them in the recorder's app; written spellings from docs, record titles, vendor summaries, mail and chat; heard spellings from transcript text, each line's label prefix left out. A spelling is a capitalised word or a run of two or three, an all-caps word of 2 to 6 letters, or a mixed-case word; a single word counts away from a sentence's start (a chunk's or line's start, after . ! or ?), a run wherever it starts, and a spelling that qualifies is then counted everywhere it is. Spellings group when they fold the same; when one is a Hungarian case form of another (Language.cases, as matching uses it) or an English one with 's; when two words are seen in both orders (the Hungarian order becomes the hu name); when a heard spelling is within matching's fuzzy distance of a written or label spelling and the two meet in at least two recordings, a recording counting with the docs that cover it (it joins as an asr alias); and when a single word's recordings are mostly a run's (it joins as a plain alias). A group within that distance of an entity's name or alias, seen where the entity is mentioned, or a label whose first word is one person's name or alias, becomes an alias card for that entity; the rest become new-entity cards, guessed a person when a label or an author backs them and a term otherwise."
+    binds: ["The miner never reads a model or Claude, so a round runs without a session."]
+    not_chosen:
+      - "A Claude pass over the transcripts: the service has no Claude before phase 3; the skill adds judgement on top of the cards."
+      - "A named-entity model: a dependency for two languages, and speech recognition's text defeats it."
+      - "Lower-case words as candidates: every word would be one."
+      - "Near spellings joined without meeting: two people with close names would become one."
