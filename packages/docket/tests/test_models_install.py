@@ -58,9 +58,13 @@ class Hub(http.server.BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         self.seen.append((self.path, self.headers.get("Range")))
         if "/resolve/" in self.path:
-            # The hub sends a file on to its CDN, as huggingface.co does.
-            self.send_response(302)
-            self.send_header("Location", "/cdn/" + self.path.split("/resolve/", 1)[1].split("/", 1)[1])
+            # The hub sends a file on to its CDN, as huggingface.co does: to one of its own file names, never to text
+            # taken from the request, so no header carries what the client sent.
+            asked = "/" + self.path.split("/resolve/", 1)[1].split("/", 1)[1]
+            name = next((known for known in self.files if known == asked), None)
+            self.send_response(302 if name is not None else 404)
+            if name is not None:
+                self.send_header("Location", "/cdn" + name)
             self.end_headers()
             return
         data = self.files.get(self.path.removeprefix("/cdn"))
