@@ -6,6 +6,6 @@ decisions:
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#88"]
-    description: "rerank holds the state (off: no reranker here or off on this machine; on; skipped), the model, the pairs it reranked, and why it was skipped. The CLI, the MCP text and the Search page add one line only when the reranker is on and was skipped, as they do for the vector stage (DR-0338). docket eval prints the reranker and its pairs above its table, and how many questions ran without it. found_by and the hits' fields don't change, and a hit's rank is its place after the rerank. The MCP search tool keeps its parameters (DR-0150); the field is additive."
+    description: "rerank holds the state (off: no reranker here or off on this machine; on; skipped), the model, the pairs it reranked, and why it was skipped. The CLI, the MCP text and the Search page add one line only when the reranker is on and was skipped, as they do for the vector stage (DR-0338). docket eval prints the reranker and its pairs above its table, and how many questions ran without it. found_by and the hits' fields don't change, and a hit's rank is its place after the rerank. The MCP search tool keeps its parameters (DR-0150); the field is additive. A rerank is skipped past its budget, while paused after three budget skips, with the worker down or the reranker off in it, on an error, or with no words to compare; vectors stay on in each case."
     not_chosen:
       - "A flag on every hit saying it was reranked: the field says it once for the top N."

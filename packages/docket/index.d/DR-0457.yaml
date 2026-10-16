@@ -5,8 +5,8 @@ decisions:
     at: "2026-10-16"
     by: Claude (autonomy grant)
     cost: cheap
-    sources: ["#88"]
+    sources: ["#88", "#110"]
     description: "The service's worker loads the reranker with the embedder and keeps both (DR-0330); the MCP search tool, the Search page and /api/search go through it. docket eval starts its worker on the chosen device when a reranker is on, so it measures what the service does: on CUDA that is about 8 s to start, once a run, and it says so. docket search keeps its CPU worker (DR-0330), which takes about half a second more to start with the CPU reranker; on a CUDA machine it goes without the reranker, and its line says the service reranks on the GPU. --no-models skips both stages."
     not_chosen:
       - "docket search on the GPU: about 8 s to start a CUDA worker for one query."
-      - "docket search through the running service's /api/search: Claude's answers with no worker to start, but a change to the command's own path (its index update, --no-update) beyond this issue; a follow-up if wanted."
+      - "docket search through the running service's /api/search: Claude's answers with no worker to start, but a change to the command's own path (its index update, --no-update) beyond this issue; #110."
