@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -443,27 +444,35 @@ def test_a_failure_in_either_run_shows_its_tail(tmp_path: Path, monkeypatch: pyt
         assert [ln for ln in out.detail if "broke" in ln] == broke
 
 
-def test_both_runs_build_their_templates_in_one_empty_folder_the_step_removes(
+def test_each_step_gives_both_runs_one_templates_folder_and_each_run_a_temp_folder(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    seen: list[tuple[Path, list[str]]] = []
+    seen: list[tuple[Path, Path, list[str]]] = []
 
     def fake_run(_ctx: gate.Ctx, cmd: list[str], *, env: dict[str, str] | None = None) -> tuple[int, list[str]]:
-        folder = Path((env or {})[gate.TEMPLATES_ENV])
-        seen.append((folder, sorted(p.name for p in folder.iterdir())))
-        # What a run leaves: a template's git objects, which git makes read-only.
-        (folder / f"built-{len(seen)}").mkdir()
-        (folder / f"built-{len(seen)}" / "object").write_bytes(b"x")
-        (folder / f"built-{len(seen)}" / "object").chmod(0o444)
+        templates = Path((env or {})[gate.TEMPLATES_ENV])
+        [basetemp] = [Path(a.removeprefix("--basetemp=")) for a in cmd if a.startswith("--basetemp=")]
+        built = sorted(p.name for p in templates.iterdir()) if templates.exists() else []
+        seen.append((templates, basetemp, built))
+        # What a run leaves: a template's git objects, which git makes read-only, and its own temp folder.
+        templates.mkdir(exist_ok=True)
+        (templates / f"object-{len(seen)}").write_bytes(b"x")
+        (templates / f"object-{len(seen)}").chmod(0o444)
+        basetemp.mkdir()
         return 0, ["1 passed in 1.00s"]
 
     monkeypatch.setattr(gate, "_run", fake_run)
-    for _ in range(2):
-        assert gate.step_tests(gate.Ctx(root=tmp_path, lane="os", ci=False, base=None, pr=None)).status == "ok"
-    (first, at_first), (second, at_second), (again, at_again) = seen[:3]
-    assert first == second and (at_first, at_second) == ([], ["built-1"])
-    assert again != first and at_again == []
-    assert not first.exists() and not again.exists()
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    for ci in (False, False, True):
+        assert gate.step_tests(gate.Ctx(root=tmp_path, lane="os", ci=ci, base=None, pr=None)).status == "ok"
+    parallel, timed, again, _, on_ci, _ = seen
+    # One templates folder for both runs: the timed run finds what the parallel run built.
+    assert parallel[0] == timed[0] and (parallel[2], timed[2]) == ([], ["object-1"])
+    # A temp folder of each run's own, beside the templates, so pytest never deletes the other run's.
+    assert parallel[1] != timed[1] and parallel[1].parent == timed[1].parent == parallel[0].parent
+    # Each step starts empty and removes its folder, but on CI, whose runner goes with its disk.
+    assert again[0] != parallel[0] and again[2] == []
+    assert not parallel[0].parent.exists() and not again[0].parent.exists() and on_ci[0].parent.exists()
 
 
 def test_under_coverage_the_timed_tests_stay_in_the_one_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

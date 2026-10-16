@@ -77,6 +77,14 @@ jobs:
           enable-cache: true
       - name: Install
         run: uv sync --locked
+      # The tests' temp folders on the Windows runner's D:, its local disk: the tests write thousands of small git repos,
+      # and on C:, its OS disk, the same parallel run took 24 to 44% longer (DR-0493).
+      - name: Temp on the local disk
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
       - name: Types and tests
         run: uv run gate os
 

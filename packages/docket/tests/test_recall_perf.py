@@ -4,7 +4,7 @@ The vault holds about 50 MB of invented Plaud raw in one source, 5 MB under cove
 read is timed by place, best of five, and once with the source loaded whole, the route a read takes when the index
 isn't current for it, and both give the same result. Wall times are asserted only when no tracer runs.
 
-Only the timed test carries `perf`. The vault is a shared template the untimed test asks for first, so in a lane
+Only the timed test carries `perf`. The vault is a shared template the untimed test asks for too, so in a lane
 without coverage the parallel run builds it and the timed run, alone, only times (DR-0492).
 """
 

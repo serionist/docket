@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0493
+    title: "Tests (Windows) keeps the tests' temp folders on the runner's local disk, D:"
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#116"]
+    description: "On Windows the tests job points TEMP and TMP at the runner's temp folder (RUNNER_TEMP) before gate os, so pytest's folders, the templates folder (DR-0492) and the temp files of git and of the code under test go on D:, the runner's local temporary disk, instead of C:, its OS disk. The tests write thousands of small git repos and copies of them: one runner ran the parallel run in 316 s with its temp on D: and in 455 s on C:, another in 519 s on D: and 644 s on C:, the two runners taking the drives in opposite orders (#116). Nothing a test asserts changes: its folders are still Windows paths with a drive letter under the runner's own folder, and about 25 characters shorter than on C:. macOS and the other jobs keep their temp."
+    binds:
+      - A test never depends on the drive or the length of its temp folder's path; the Windows CI job may put it on any local disk.
+    not_chosen:
+      - "pytest's --basetemp on D: alone: pytest empties a basetemp it is given at each session, so the two runs couldn't share their templates (DR-0492), and git and the code under test would still write their temp files on C:."
+      - "Fewer xdist workers, or a larger paid runner: the first makes the whole run slower, the second costs money for what a setting gives."

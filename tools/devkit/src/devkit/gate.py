@@ -10,8 +10,8 @@ Lanes:
 In a lane with tests, the tests start first and the other steps run beside them; each run prints its slowest tests. In a
 lane without coverage (os) the timed tests (marked `perf`) run after the rest, alone and one at a time, once the other
 steps are done, and the run prints what they printed: their times. The two runs share one templates folder, so the
-timed run reuses the vaults the parallel run built. Under coverage the index's time limits are off, so the full lane
-keeps them in its one run.
+timed run reuses the vaults the parallel run built, and each has a temp folder of its own. Under coverage the index's
+time limits are off, so the full lane keeps them in its one run.
 
 `gate check-text <file>` checks a text that is about to be posted (an issue or PR body) for private names and tool
 attribution.
@@ -329,12 +329,14 @@ def step_tests(ctx: Ctx) -> Outcome:
         # Without coverage the timed tests assert their limits, so they leave the parallel run and run alone after it;
         # under coverage the index's limits are off and they stay in it (DR-0430).
         cmd += ["-m", f"not {PERF}"]
-        # One templates folder for both runs, empty for each: the timed run finds the vaults the parallel run built
-        # and only times (DR-0492).
-        with tempfile.TemporaryDirectory(prefix="docket-templates-", ignore_cleanup_errors=True) as templates:
-            env[TEMPLATES_ENV] = templates
-            code, lines = _run(ctx, cmd, env=env)
-            return _alone_after(ctx, code, lines, [*pytest, "-m", PERF, "-raP"], env)
+        # A folder of the step's own, made empty: one templates folder for both runs, so the timed run finds the vaults
+        # the parallel run built and only times, and a temp folder for each run, so the timed run never ends by deleting
+        # the parallel run's, as pytest does with a session three back (DR-0492). CI's runner goes with its disk.
+        with tempfile.TemporaryDirectory(prefix="docket-tests-", ignore_cleanup_errors=True, delete=not ctx.ci) as at:
+            env[TEMPLATES_ENV] = str(Path(at, "templates"))
+            code, lines = _run(ctx, [*cmd, f"--basetemp={Path(at, 'parallel')}"], env=env)
+            alone = [*pytest, "-m", PERF, "-raP", f"--basetemp={Path(at, 'timed')}"]
+            return _alone_after(ctx, code, lines, alone, env)
     code, lines = _run(ctx, cmd, env=env)
     if code != 0:
         return Outcome.fail(*lines[-80:])

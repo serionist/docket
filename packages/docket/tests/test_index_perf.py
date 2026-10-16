@@ -6,7 +6,7 @@ compounds from a pool of 2,000, repeating as prose repeats them (DR-0280), writt
 Wall times are asserted only when no tracer runs: under coverage they are printed, and the fuzzy walk's work and the
 word check's split scans are counted instead.
 
-Only the timed tests carry `perf`. The vaults are shared templates that the untimed tests ask for first, so in a lane
+Only the timed tests carry `perf`. The vaults are shared templates that the untimed tests ask for too, so in a lane
 without coverage the parallel run builds them and the timed run, alone, only times (DR-0492).
 """
 
