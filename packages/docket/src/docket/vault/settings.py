@@ -4,17 +4,16 @@
 the file only when its text is what Docket writes for it, so no comment or layout of the user's is lost (DR-0166,
 DR-0193, DR-0507). `docket redaction set` and `docket source new` write through it, and so does every page.
 
-A page's write is held to `loosens`, an allowlist: pages make only the changes that keep more out, and every other
-vault.yaml change is named with its command or its line, never made (DR-0506). What a page may import from here is
-`FOR_PAGES`; a test holds the web and the service to it.
+A page's write is held to `loosens` (from `inforce`, the settings in force's one rule): pages make only the changes
+that keep more out, and every other vault.yaml change is named with its command or its line, never made (DR-0506).
+What a page may import from here is `FOR_PAGES`; a test holds the web and the service to it.
 """
 
 from __future__ import annotations
 
 import hashlib
 import unicodedata
-from collections import Counter
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -22,25 +21,18 @@ import yaml
 from pydantic import ValidationError
 
 from docket.errors import DocketError
-from docket.vault import neverstore
-from docket.vault.config import (
-    CONFIG_FILE,
-    NeverStore,
-    Redaction,
-    SourceConfig,
-    UniqueKeyLoader,
-    VaultConfig,
-    write_config,
-)
+from docket.vault import inforce, neverstore
+from docket.vault.config import CONFIG_FILE, SourceConfig, UniqueKeyLoader, VaultConfig, write_config
 from docket.vault.neverstore import ListName
 from docket.vault.vault import Vault
 
 Via = Literal["cli", "page"]
+# The rank, the lists and the door are the settings in force's one rule; pages read them from here.
+RANK = inforce.RANK
+LISTS = inforce.LISTS
+loosens = inforce.loosens
 # The built-in redaction switches, by their keys in vault.yaml's redaction block.
 BUILTIN_RULES = ("credentials", "phone")
-# Stricter to the right: work stores everything, mixed waits for a classification, private stores nothing.
-RANK = {"work": 0, "mixed": 1, "private": 2}
-LISTS: tuple[ListName, ...] = ("people", "containers", "keywords")
 # The names docket.web and docket.service may import from here: the read-only helpers and the stricter operations,
 # with what they raise. Never `rewrite`, which makes any change (DR-0506).
 FOR_PAGES = frozenset(
@@ -286,71 +278,6 @@ def _reads_back(text: str) -> None:
     except ValidationError as e:
         problems = "; ".join(f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in e.errors())
         raise DocketError(f"the change doesn't fit vault.yaml: {problems}") from None
-
-
-# -- the door ---------------------------------------------------------------------------------------------------------
-
-
-def loosens(before: VaultConfig, after: VaultConfig) -> bool:
-    """Whether `after` is anything but `before` with the changes pages may make (DR-0506): a value added to a
-    never-store list, credentials or phone turned on, a pattern turned on with nothing else of it changed, a source made
-    stricter, a source turned off. Everything else loosens: a value taken off, a rule turned off, a pattern added or
-    changed, a source added, removed, made looser or turned on, its tools, mapper, hosts, folder or exclude, the owner,
-    the storage, the primary machine, and any key added later.
-
-    An allowlist at every level: each helper copies `before`'s value back into `after` only for a field a page may
-    change and only where the change is one it may make, and the whole models are then compared, so a field this code
-    doesn't name, at the top or inside a list, a rule or a pattern, counts as it stands."""
-    allowed = after.model_copy(
-        update={
-            "never_store": _lists_back(before.never_store, after.never_store),
-            "redaction": _redaction_back(before.redaction, after.redaction),
-            "sources": _sources_back(before.sources, after.sources),
-        }
-    )
-    return allowed != before
-
-
-def _lists_back(before: NeverStore, after: NeverStore) -> NeverStore:
-    """`after` with each list that only grew put back as it was."""
-    grown = {
-        name: getattr(before, name) for name in LISTS if Counter(getattr(before, name)) <= Counter(getattr(after, name))
-    }
-    return after.model_copy(update=grown)
-
-
-def _redaction_back(before: Redaction, after: Redaction) -> Redaction:
-    """`after` with credentials and phone put back where they weren't turned off, and each pattern's `enabled` put back
-    where it wasn't turned off, the patterns matched by position; their names, expressions and anything else stay as
-    `after` has them, so the comparison sees a change to them."""
-    update: dict[str, object] = {}
-    if after.credentials >= before.credentials:
-        update["credentials"] = before.credentials
-    if after.phone >= before.phone:
-        update["phone"] = before.phone
-    if len(after.patterns) == len(before.patterns):
-        update["patterns"] = [
-            new.model_copy(update={"enabled": old.enabled}) if new.enabled >= old.enabled else new
-            for old, new in zip(before.patterns, after.patterns, strict=True)
-        ]
-    return after.model_copy(update=update)
-
-
-def _sources_back(before: Mapping[str, SourceConfig], after: Mapping[str, SourceConfig]) -> dict[str, SourceConfig]:
-    """`after`'s sources with each one's sensitivity put back where it was made stricter or kept, and `enabled` where
-    it was turned off or kept; every other key stays as `after` has it. A source added or removed stays a difference."""
-    if list(before) != list(after):
-        return dict(after)
-    out: dict[str, SourceConfig] = {}
-    for name, new in after.items():
-        old = before[name]
-        update: dict[str, object] = {}
-        if RANK[new.sensitivity] >= RANK[old.sensitivity]:
-            update["sensitivity"] = old.sensitivity
-        if new.enabled <= old.enabled:
-            update["enabled"] = old.enabled
-        out[name] = new.model_copy(update=update)
-    return out
 
 
 # -- the lines to paste -----------------------------------------------------------------------------------------------
