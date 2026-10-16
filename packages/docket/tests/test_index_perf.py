@@ -15,6 +15,7 @@ from __future__ import annotations
 import dataclasses
 import functools
 import itertools
+import os
 import random
 import shutil
 import sqlite3
@@ -294,9 +295,12 @@ def test_queries_answer_in_well_under_a_second(vault: Vault, vectors_vault: Vaul
 
 @pytest.mark.perf
 def test_the_mention_pass_stays_under_two_seconds(vault: Vault, tmp_path: Path) -> None:
-    # On a copy: the template is shared, and never written.
+    # On a copy: the template is shared, and never written. The copy is on disk before the clock starts, so the OS
+    # flushing a few hundred megabytes doesn't run beside the pass.
     db = tmp_path / "docket.sqlite"
     shutil.copyfile(build.db_path(vault), db)
+    with db.open("rb+") as copy:
+        os.fsync(copy.fileno())
     analyzer = Analyzer(build.languages_of(vault))
     conn = sqlite3.connect(db, isolation_level=None)
     try:
