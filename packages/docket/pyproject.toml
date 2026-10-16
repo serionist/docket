@@ -10,7 +10,7 @@ dependencies = [
   # Documents' text (DR-0484): XML parts through defusedxml, workbooks through openpyxl, which uses defusedxml once
   # it is installed, and pdfs through pypdf, its crypto extra for AES; all read in a child with limits (DR-0485).
   "defusedxml>=0.7.1",
-  "fastapi>=0.142.4",
+  "fastapi>=0.143.0",
   "filelock>=4.0.7",
   "jinja2>=3.1.6",
   "keyring>=25.7.0",
