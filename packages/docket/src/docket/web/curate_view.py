@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 from starlette.datastructures import QueryParams
 
 from docket.curate import batch, schedule
-from docket.curate.batch import HIDDEN, Batch, Measure, Snippet, State, hides, id_hidden, shown_key
+from docket.curate.batch import HIDDEN, Batch, Measure, Snippet, State, hides, id_hidden, shown_entity, shown_key
 from docket.curate.propose import UNSEEN, Card
 from docket.errors import DocketError
 from docket.index.build import open_index
@@ -475,7 +475,7 @@ def describe(line: Line, lists: NeverStore) -> str:
     if change.id is not None:
         return f"id {change.id.key} {shown(change.id.value, lists)}"
     related = change.related
-    return f"related {related.type} {related.target}" if related is not None else ""
+    return f"related {related.type} {shown_entity(related.target, lists)}" if related is not None else ""
 
 
 def log_row(line: Line, facts: Facts) -> LogRow:
@@ -483,7 +483,7 @@ def log_row(line: Line, facts: Facts) -> LogRow:
         id=line.id,
         at=line.at,
         op=line.op,
-        entity=line.entity or "-",
+        entity=shown_entity(line.entity, facts.lists) or "-",
         part=describe(line, facts.lists),
         by=line.by,
         via=line.via,

@@ -497,6 +497,35 @@ def test_show_hides_what_a_list_gains_on_a_card_after_the_round(
     assert batch.load(vault).cards[0] == rita  # type: ignore[union-attr]
 
 
+def test_the_log_hides_an_entity_whose_slug_spells_a_listed_name(
+    vault: Vault, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The second Rita Sample's chat id, and a message where the chat shows her as R. Sample: tier 1's shown name.
+    second = "entities/person/rita-sample-2.yaml"
+    (vault.root / second).write_text(ENTITIES[second] + "ids: {chat: U0R2}\n", encoding="utf-8", newline="\n")
+    vault.commit([second], "her chat id")
+    vault.write_run("chat", [_chat(4, "R. Sample <U0R2>", "Booked the van.")])
+    index.update(vault)
+    monkeypatch.setenv("DOCKET_VAULT", str(vault.root))
+    with signed_in(vault) as client:
+        assert client.post("/curate/round", headers=SAME).status_code == 303
+        out, _ = show(capsys)
+        assert re.search(r"applied  by itself: \S+  add rita-sample-2  alias R\. Sample\n", out)
+        assert "rita-sample-2" in client.get("/curate").text
+        # Her name, and the address both Rita cards of the round hold, so nothing of hers is left to show.
+        config(vault, never_store={"keywords": ["rita@example.com"], "people": ["Rita Sample"]})
+        page = client.get("/curate").text
+        out, shown = show(capsys)
+    hidden = re.escape(batch.HIDDEN)
+    assert re.search(rf"applied  by itself: \S+  add {hidden}  alias R\. Sample\n", out)
+    line = next(ln for ln in shown["applied"] if ln["key"].endswith(":r sample"))
+    assert (line["entity"], line["key"]) == (batch.HIDDEN, "alias:(on a never-store list):r sample")
+    for text in (page, out, json.dumps(shown)):
+        assert "rita" not in text.casefold()
+    # Only shown: the log keeps the entity it wrote.
+    assert "alias:rita-sample-2:r sample" in {ln.key for ln in read_all(vault.root).lines}
+
+
 def test_two_people_whose_names_only_start_alike_share_an_address(tmp_path: Path) -> None:
     anna = {"entities/person/anna-example.yaml": "id: anna-example\ntype: person\nname: {en: Anna Example}\n"}
     v = small_vault(tmp_path, anna, mail=[

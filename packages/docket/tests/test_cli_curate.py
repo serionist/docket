@@ -187,7 +187,7 @@ def test_show_hides_what_a_never_store_list_holds_in_each_kind_of_change() -> No
     dora = EntityFields(
         id="dora-minta", type="person", name={"en": "Dora Minta", "hu": "Minta Dora"},
         aliases=(AliasFields(text="Dory"), AliasFields(text="Dee")), ids={"email": ("dee@example.org",)},
-        role="Buyer", note="Runs the secret pilot",
+        role="Buyer", note="Runs the secret pilot", related={"person": ("ben-sample", "dora-minta-2")},
     )  # fmt: skip
     lines = [
         line(Change(alias=AliasFields(text="Northwind Kft", kind="asr")), key="alias:northwind:northwind kft"),
@@ -199,6 +199,12 @@ def test_show_hides_what_a_never_store_list_holds_in_each_kind_of_change() -> No
         line(Change(entity=dora), "create", key="new:-:dora minta", entity="dora-minta"),
         line(None, "reject", key="new:-:dora minta"),
         line(Change(alias=AliasFields(text="North Wind")), key="alias:northwind:north wind"),
+        # An id whose slug spells a listed name, as the line's entity and as a related link's other end.
+        line(Change(alias=AliasFields(text="Dee")), key="alias:dora-minta-2:dee", entity="dora-minta-2"),
+        line(
+            Change(related=RelatedFields(type="person", target="dora-minta-2")),
+            key="related:northwind:person=dora-minta-2",
+        ),
     ]
     hidden = [curate.hidden_line(ln, lists) for ln in lines]
     view = curate.BatchView(round="r", started=datetime(2026, 10, 1, tzinfo=UTC), cards=[], left_out={}, applied=hidden)
@@ -208,18 +214,23 @@ def test_show_hides_what_a_never_store_list_holds_in_each_kind_of_change() -> No
         "add northwind  name hu (on a never-store list)",
         "add northwind  id domain (on a never-store list)",
         "add northwind  related person ben-sample",
-        "create dora-minta  person, (on a never-store list); (on a never-store list)",
+        "create (on a never-store list)  person, (on a never-store list); (on a never-store list)",
         "reject -  new:-:(on a never-store list)",
         "add northwind  alias North Wind",
+        "add (on a never-store list)  alias Dee",
+        "add northwind  related person (on a never-store list)",
     ]
     assert [ln.key for ln in hidden] == [
         "alias:northwind:(on a never-store list)", "name:northwind:hu=(on a never-store list)",
         "id:northwind:domain=(on a never-store list)", "related:northwind:person=ben-sample",
         "new:-:(on a never-store list)", "new:-:(on a never-store list)", "alias:northwind:north wind",
+        "alias:(on a never-store list):dee", "related:northwind:person=(on a never-store list)",
     ]  # fmt: skip
     created = hidden[4].change.entity  # type: ignore[union-attr]
     assert created is not None and created.model_dump(mode="json") == {
         **dora.model_dump(mode="json"),
+        "id": curate.HIDDEN,
+        "related": {"person": ["ben-sample", curate.HIDDEN]},
         "name": {"en": curate.HIDDEN, "hu": curate.HIDDEN},
         "aliases": [
             {"text": curate.HIDDEN, "kind": "plain", "needs": []},
