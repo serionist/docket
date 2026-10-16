@@ -15,6 +15,7 @@ write the names right, and mail. Built once per session; each test copies it.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -117,6 +118,24 @@ def build_curate_vault(folder: Path) -> Path:
 def curate_vault(tmp_path: Path) -> Vault:
     """The invented vault above, with its index, copied for one test."""
     return Vault.open(copied(tmp_path, build_curate_vault, "curate-vault"))
+
+
+def more_recordings(vault: Vault, heard: Sequence[str], noted: Sequence[str] = ()) -> None:
+    """More recordings, `plaud:rec-x000` on, each a transcript of one turn by `Speaker 1`, and a note covering each of
+    the first ones, its one line from `noted`; the index brought up to date."""
+    records: list[RawRecord] = []
+    for n, text in enumerate(heard):
+        key = f"plaud:rec-x{n:03d}"
+        under = {"source": "plaud", "container": key, "thread": key, "author": None, "ts": _when(20 + n)}
+        said = [{"start_ms": 0, "end_ms": 9_000, "speaker": "Speaker 1", "text": text}]
+        records.append(
+            make_record(rid=f"{key}/transaction", kind="transcript", segments=said, text=f"Speaker 1: {text}", **under)
+        )
+    vault.write_run("plaud", records)
+    for n, text in enumerate(noted):
+        covers, lines = [f"plaud:rec-x{n:03d}/transaction"], [f"- {text} @00:00"]
+        recall.doc_put(vault, note(f"recording-note:2026-11-{n + 1:02d}-extra-{n}", covers=covers, lines=lines))
+    index.update(vault)
 
 
 def entity(vault: Vault, rel: str, text: str) -> None:

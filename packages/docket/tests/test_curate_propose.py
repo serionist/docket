@@ -7,8 +7,10 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from curate_kit import ANN, NORTHWIND, curate_vault, entity, rid
+from curate_kit import ANN, NORTHWIND, curate_vault, entity, more_recordings, rid
+from docket_testkit import note
 
+from docket import index, recall
 from docket.curate import propose
 from docket.curate.propose import Card, Mined, card_id, mine, slug
 from docket.curate.spellings import DOCS, HEARD, LABEL, Seen
@@ -81,7 +83,7 @@ def test_a_label_heads_a_person_with_its_first_word_and_the_hungarian_order(vaul
     assert spellings(cleo) == [
         ("Cleo Test", "label", "name"),
         ("Cleo", "docs", "plain"),
-        ("Test Cleo", "label", "plain"),
+        ("Test Cleo", "unseen", "plain"),
     ]
     assert cleo.spellings[2].chunks == 0
     assert (cleo.missed_chunks, cleo.containers) == (0, 3)
@@ -152,11 +154,66 @@ def test_a_stoplisted_spelling_never_shows_in_the_role_its_key_names(vault: Vaul
     rejected = [line("reject", 1, "new:-:northwind"), line("reject", 2, "new:-:nortwin")]
     found = mined(vault, rejected)
     assert "Northwind" not in names(found)
-    assert found.left_out["rejected"] == 1
+    assert found.left_out["rejected"] == 2
     entity(vault, NORTHWIND, "id: northwind\ntype: customer\nname: {en: Northwind}\n")
     assert any(c.kind == "alias" for c in mined(vault, rejected).cards)
     stopped = [line("reject", 1, "alias:northwind:nortwin")]
     assert all(c.kind != "alias" for c in mined(vault, stopped).cards)
+
+
+def test_a_rejected_alias_stays_a_candidate_as_a_new_name(vault: Vault) -> None:
+    entity(vault, "entities/person/anna-sample.yaml", "id: anna-sample\ntype: person\nname: {en: Anna Sample}\n")
+    found = mined(vault, [line("reject", 1, "alias:anna-sample:anna")])
+    assert all(c.entity != "anna-sample" for c in found.cards)
+    anna = card(found, "Anna")
+    assert (anna.kind, spellings(anna)) == ("new", [("Anna", "label", "name")])
+
+
+def test_a_case_form_matching_judges_common_for_an_entity_doesn_t_reach_it(vault: Vault) -> None:
+    # Jane's accusative is Janet. Where Janet is everywhere, matching doesn't count it as Jane (#93): Janet is a name.
+    agreed = "Yes, Janet sent the drawings over. Ok, Jane agreed."
+    more_recordings(vault, [agreed] * 3 + ["Yes, Janet sent the drawings over."] * 57)
+    text = "id: jane-sample\ntype: person\nname: {en: Jane Sample}\naliases:\n  - {text: Jane}\n"
+    entity(vault, "entities/person/jane-sample.yaml", text)
+    found = mined(vault)
+    assert all(c.entity != "jane-sample" for c in found.cards)
+    janet = card(found, "Janet")
+    assert (janet.kind, spellings(janet)) == ("new", [("Janet", "heard", "name")])
+
+
+def test_an_entity_s_case_form_adds_nothing_to_its_card(vault: Vault) -> None:
+    heard = ["We sent Otilia the proofs.", "We called Otilia back.", "Tegnap is Ottiliával.", "Holnap is Ottiliával."]
+    more_recordings(vault, heard, noted=["Ottilia sent the proofs."] * 4)
+    text = "id: ottilia-sample\ntype: person\nname: {en: Ottilia Sample}\naliases:\n  - {text: Ottilia}\n"
+    entity(vault, "entities/person/ottilia-sample.yaml", text)
+    ottilia = [c for c in mined(vault).cards if c.entity == "ottilia-sample"]
+    assert [spellings(c) for c in ottilia] == [[("Otilia", "heard", "asr"), ("Ottiliával", "heard", "no")]]
+
+
+def test_a_written_name_near_an_entity_s_is_a_name_of_its_own(vault: Vault) -> None:
+    for n in (0, 1):
+        covers, lines = [f"{rid(n)}/transaction"], ["- The pallets go to Northwood, our other customer. @00:00"]
+        recall.doc_put(vault, note(f"minutes:2026-10-0{5 + n}-extra-{n}", covers=covers, lines=lines))
+    index.update(vault)
+    entity(vault, NORTHWIND, "id: northwind\ntype: customer\nname: {en: Northwind}\n")
+    found = mined(vault)
+    assert spellings(card(found, "Northwood")) == [("Northwood", "docs", "name")]
+    assert [(c.entity, c.key) for c in found.cards if c.kind == "alias"] == [("northwind", "alias:northwind:nortwin")]
+
+
+def test_two_misspellings_of_one_entity_make_one_card(vault: Vault) -> None:
+    more_recordings(vault, ["We sent Norwind the pallets."] * 2, noted=["Northwind waits."] * 2)
+    entity(vault, NORTHWIND, "id: northwind\ntype: customer\nname: {en: Northwind}\n")
+    northwind = [c for c in mined(vault).cards if c.entity == "northwind"]
+    assert [spellings(c) for c in northwind] == [[("Nortwin", "heard", "asr"), ("Norwind", "heard", "asr")]]
+
+
+def test_spellings_that_reach_an_entity_go_on_besides_the_window(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
+    entity(vault, NORTHWIND, "id: northwind\ntype: customer\nname: {en: Northwind}\n")
+    monkeypatch.setattr(propose, "TOP", 0)
+    found = mined(vault)
+    assert [c.key for c in found.cards if c.kind == "alias"] == ["alias:northwind:nortwin"]
+    assert sorted(c.name for c in found.cards if c.kind == "new") == ["Anna", "Cleo Test", "Rita Sample"]
 
 
 def test_a_rejected_name_s_label_stays_a_candidate(vault: Vault) -> None:
@@ -206,6 +263,17 @@ def test_a_person_s_other_order_written_once_is_their_alias(vault: Vault) -> Non
     rita = card(mined(vault), "Rita Sample")
     assert spellings(rita) == [("Rita Sample", "label", "name"), ("Sample Rita", "docs", "plain")]
     assert (rita.type, rita.spellings[1].chunks) == ("person", 1)
+
+
+def test_the_other_order_goes_on_only_where_nothing_else_holds_it(vault: Vault) -> None:
+    stopped = card(mined(vault, [line("reject", 1, "new:-:test cleo")]), "Cleo Test")
+    assert [s.text for s in stopped.spellings] == ["Cleo Test", "Cleo"]
+    text = "id: other-orders\ntype: term\nname: {en: Test Cleo}\naliases:\n  - {text: Sample Rita}\n"
+    entity(vault, "entities/term/other-orders.yaml", text)
+    found = mined(vault)
+    assert [s.text for s in card(found, "Cleo Test").spellings] == ["Cleo Test", "Cleo"]
+    rita = card(found, "Rita Sample")
+    assert ([s.text for s in rita.spellings], rita.type) == (["Rita Sample"], "person")
 
 
 def test_no_hungarian_no_unwritten_order(vault: Vault) -> None:

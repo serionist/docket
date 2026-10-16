@@ -12,7 +12,7 @@ from collections.abc import Iterable
 from zoneinfo import ZoneInfo
 
 from docket.curate.batch import BatchView, Measure, Status
-from docket.curate.propose import CardSpelling
+from docket.curate.propose import UNSEEN, CardSpelling
 from docket.index import SearchResult
 from docket.questions import EvalReport, Score
 from docket.recall import ReadResult, VerifyResult
@@ -258,10 +258,11 @@ def curate_log(
 
 
 ADDS = {"name": "the name", "plain": "alias", "asr": "asr alias", "no": "found already"}
+TRUST_SHOWN = {UNSEEN: "other order, not seen"}
 
 
 def _spellings(spellings: list[CardSpelling]) -> str:
-    return "  ".join(f"{s.text} ({s.trust}, {ADDS[s.add]})" for s in spellings)
+    return "  ".join(f"{s.text} ({TRUST_SHOWN.get(s.trust, s.trust)}, {ADDS[s.add]})" for s in spellings)
 
 
 def curate_round(view: BatchView) -> list[str]:

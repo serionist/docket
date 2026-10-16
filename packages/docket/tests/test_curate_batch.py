@@ -10,6 +10,7 @@ from curate_kit import NORTHWIND, curate_vault, entity, rid
 
 from docket import userconfig
 from docket.curate import batch as curate
+from docket.curate import propose
 from docket.curate.batch import Batch, Measure
 from docket.curate.propose import Card
 from docket.errors import DocketError
@@ -140,6 +141,30 @@ def test_an_alias_card_s_rejection_stoplists_each_alias(vault: Vault) -> None:
     assert [r.key for r in curate.rejects(alias, batch.round)] == ["alias:northwind:nortwin"]
 
 
+def test_a_lifted_rejection_opens_its_card_again(vault: Vault, started: Batch) -> None:
+    northwind = by_name(started, "Northwind")
+    written = curate.reject(vault, started, [northwind])
+    EntityStore(vault).lift([ln.key for ln in written.lines])
+    assert states(vault, started)["Northwind"] == "open"
+    again = curate.start(vault)
+    back = by_name(again, "Northwind")
+    assert back.id == northwind.id and states(vault, again)["Northwind"] == "open"
+    assert [ln.op for ln in curate.accept(vault, again, [back]).lines] == ["create"]
+    assert states(vault, again)["Northwind"] == "accepted"
+
+
+def test_later_rounds_reach_past_what_earlier_ones_rejected(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(propose, "TOP", 3)
+    shown: list[str] = []
+    batch = curate.start(vault)
+    while batch.cards and len(shown) < 50:
+        shown += [c.name for c in batch.cards]
+        curate.reject(vault, batch, batch.cards)
+        batch = curate.start(vault)
+    assert batch.cards == [] and batch.left_out["rejected"] > 0
+    assert {"Northwind", "Dóra", "Harbour Fair", "Cleo Test", "Anna", "Rita Sample"} <= set(shown)
+
+
 def test_a_hand_edit_that_makes_a_card_s_change_shows_it_done(vault: Vault, started: Batch) -> None:
     entity(vault, "entities/person/anna.yaml", "id: anna\ntype: person\nname: {en: Anna}\n")
     assert states(vault, started)["Anna"] == "done"
@@ -170,6 +195,12 @@ def test_an_edit_naming_a_card_settles_it_and_rejects_what_it_left_out(vault: Va
     assert curate.settle(vault, started, [plain]) == ([plain], [])
     with pytest.raises(DocketError, match="no card"):
         curate.settle(vault, started, [Planned(1, "x", Change(alias=AliasFields(text="X")), card="abcdef")])
+
+
+def test_an_edit_that_moves_the_other_order_to_a_name_rejects_nothing(vault: Vault, started: Batch) -> None:
+    rita = by_name(started, "Rita Sample")
+    fields = EntityFields(id="rita-sample", type="person", name={"en": "Rita Sample", "hu": "Sample Rita"})
+    assert curate.settle(vault, started, [Planned(1, "rita-sample", Change(entity=fields), card=rita.id)])[1] == []
 
 
 def test_a_round_is_measured_before_and_after_its_last_card(vault: Vault, tmp_path: Path) -> None:

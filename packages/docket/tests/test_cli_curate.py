@@ -210,6 +210,7 @@ def test_a_round_from_start_to_status(kit_vault: Vault, tmp_path: Path, capsys: 
     assert out[2].startswith(" 1  ") and "new term  Northwind (northwind)  missed in 3 chunk(s)" in out[2]
     assert "Nortwin (heard, asr alias)" in out[3]
     assert "»Nortwin«" in out[4]
+    assert any("Test Cleo (other order, not seen, alias)" in ln for ln in out)
     assert main(["curate", "show", "--json"]) == 0
     shown = json.loads(capsys.readouterr().out)
     cards = {c["card"]["name"]: c for c in shown["cards"]}

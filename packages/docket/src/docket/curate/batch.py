@@ -136,16 +136,18 @@ def measure(vault: Vault) -> Measure | None:
 
 
 def states(vault: Vault, batch: Batch, lines: Sequence[Line]) -> dict[str, State]:
-    """Each card's state: accepted or rejected by a line naming it and not undone, done when the files hold its change
-    already (a hand edit, another machine's), open otherwise."""
-    undone = curatelog.fold(lines).undone_by
+    """Each card's state: accepted by a line naming it and not undone, rejected by one whose key the stoplist still
+    holds (a lift opens the card again), done when the files hold its change already (a hand edit, another machine's),
+    open otherwise."""
+    log = curatelog.fold(lines)
     held: dict[str, set[str]] = {}
     for e in load_entities(vault.root).entities:
         held[e.id] = {folded(t) for t in (*e.names.values(), *(a.text for a in e.aliases))}
     every = set[str]().union(*held.values())
     out: dict[str, State] = {}
     for card in batch.cards:
-        ops = {line.op for line in lines if line.card == card.id and line.id not in undone}
+        named = [line for line in lines if line.card == card.id and line.id not in log.undone_by]
+        ops = {line.op for line in named if line.op != "reject" or line.key in log.stoplist}
         ops &= {"create", "add", "reject"}
         if ops - {"reject"}:
             out[card.id] = "accepted"
@@ -238,8 +240,8 @@ def reject(vault: Vault, batch: Batch, cards: Sequence[Card]) -> Written:
 
 
 def settle(vault: Vault, batch: Batch | None, planned: Sequence[Planned]) -> tuple[list[Planned], list[Reject]]:
-    """A changes file's parts that name a card, given the round, and the card's spellings the edit left out, each
-    rejected as that entity's alias, so it stays a candidate elsewhere (DR-0461)."""
+    """A changes file's parts that name a card, given the round, and the card's spellings the edit left out, as a name
+    or an alias, each rejected as that entity's alias, so it stays a candidate elsewhere (DR-0461)."""
     named = [p for p in planned if p.card is not None]
     if not named:
         return list(planned), []
@@ -250,7 +252,7 @@ def settle(vault: Vault, batch: Batch | None, planned: Sequence[Planned]) -> tup
     unticked: list[Reject] = []
     for card in cards:
         mine_ = [p for p in out if p.card == card.id]
-        kept = {folded(a.text) for p in mine_ for a in _parts(p.change)}
+        kept = {folded(text) for p in mine_ for text in _texts(p.change)}
         entity = mine_[0].entity
         unticked += [
             Reject(f"alias:{entity}:{folded(s.text)}", s.text, entity, round_, card.id)
@@ -260,10 +262,11 @@ def settle(vault: Vault, batch: Batch | None, planned: Sequence[Planned]) -> tup
     return out, unticked
 
 
-def _parts(change: Change) -> tuple[AliasFields, ...]:
+def _texts(change: Change) -> list[str]:
+    """The names and aliases a change writes: an edit may move a spelling from the aliases to a name."""
     if change.entity is not None:
-        return change.entity.aliases
-    return (change.alias,) if change.alias is not None else ()
+        return [*change.entity.name.values(), *(a.text for a in change.entity.aliases)]
+    return [part.text for part in (change.alias, change.name) if part is not None]
 
 
 def after(vault: Vault, batch: Batch) -> Batch:

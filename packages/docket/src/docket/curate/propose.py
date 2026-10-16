@@ -6,18 +6,23 @@ from a sentence's start (or never capitalised but there); a run every word of wh
 three times; a spelling an alias already holds as written or as a misspelling; one a never-store list matches; one in a
 single container. A run whose first word is common and stands at a sentence's start gives its count to the rest of it.
 
-Every label and the 300 spellings capitalised most often go on: each is found in the index's folded column, so a chat
-message written in lower case counts as its, and they group where they meet:
+Every label, every spelling that reaches an entity by its text, and the 300 other spellings capitalised most often that
+no rejection stoplists as a new name go on, so the window moves past what was rejected. Each is found in the index's
+folded column, so a chat message written in lower case counts as its, and they group where they meet:
 
 - folded the same, or two words seen in both orders;
 - a Hungarian case form joins the word it is a case of, whatever that word's trust, and a heard word within matching's
   fuzzy distance of a written or label one joins it, each only where the two meet in at least two places (a container,
   or a recording a doc covers); a case form never joins when it is a label or the first word of a written run;
-- a single word joins the one run whose places hold most of its own.
+- a single word joins the one run it starts, where the two meet in two places.
 
-A group that reaches an entity's name or alias, as a case form or within the fuzzy distance, where the entity is
-mentioned, or a label whose first word is one person's, becomes an alias card for it when accepting it would add a
-mention; the rest become new-entity cards, named by the run a single word joined or else the most trusted spelling.
+A group reaches an entity, where the entity is mentioned, by a word that is a case form of one of its names or aliases
+(not one matching judged a common word for it, and never a label or a written run's first word), by a heard word within
+the fuzzy distance of one, or by a word that starts one entity's name of several words; and a label reaches the one
+person whose name its first word starts. It becomes that entity's alias card, one per entity, when accepting it would
+add a mention, its case forms adding nothing; when the entity's alias stoplist holds every spelling it would add, it
+goes on to the next entity it reaches, or a new card. The rest become new-entity cards, named by the run a single word
+joined or else the most trusted spelling.
 """
 
 from __future__ import annotations
@@ -44,9 +49,11 @@ from docket.vault.processed import SLUG_MAX
 from docket.vault.vault import Vault
 
 MAX_CARDS = 15
-# The spellings past tier 3 that go on to be found and grouped, most often capitalised first, besides every label: the
-# rest wait for a later round, when the frequent ones are decided.
+# The spellings past tier 3 that go on to be found and grouped, most often capitalised first, besides every label and
+# every spelling that reaches an entity: the rest wait for a later round, when the frequent ones are decided.
 TOP = 300
+# The trust of a person's other name order added though nothing holds it: shown as such, never as a label.
+UNSEEN = "unseen"
 MEET = 2
 COMMON_SHARE = 0.2
 RUN_SEEN = 3
@@ -63,6 +70,7 @@ REASONS = ("one-off words", "rare phrases", "common words", "short", "known", "n
 
 Add = Literal["name", "plain", "asr", "no"]
 Role = Literal["same", "order", "case", "asr", "part"]
+Way = Literal["case", "near", "first", "label"]
 
 
 class CardSpelling(BaseModel):
@@ -174,6 +182,15 @@ def _known(conn: sqlite3.Connection) -> set[str]:
         "SELECT term FROM alias_terms WHERE col = 'folded' AND (how = 'written' OR (word >= 0 AND how = 'asr'))"
     )
     return {r[0] for r in rows}
+
+
+def _common(conn: sqlite3.Connection) -> dict[str, set[str]]:
+    """Per entity, the case forms of its names and aliases matching judged common words: they don't count as it."""
+    out: dict[str, set[str]] = {}
+    sql = "SELECT entity, term FROM alias_terms WHERE col = 'folded' AND how = 'common' AND word = -1"
+    for entity, term in conn.execute(sql):
+        out.setdefault(entity, set()).add(term)
+    return out
 
 
 def _authors(conn: sqlite3.Connection) -> set[str]:
@@ -326,6 +343,63 @@ def _group(g: _Groups, langs: list[Language]) -> None:
                 g.join(i, best, "part")
 
 
+# -- reaching an entity -------------------------------------------------------------------------------------------
+
+
+@dataclass
+class _Reach:
+    """What a spelling reaches by its text alone, before any meeting is checked, each as folded words to entities: the
+    case forms of a single-word name or alias, all of them and those matching doesn't judge common for it; heard words
+    within the fuzzy distance of one; the first word of a name of several words; a person's first word."""
+
+    forms: dict[str, set[str]] = field(default_factory=dict[str, set[str]])
+    cases: dict[str, set[str]] = field(default_factory=dict[str, set[str]])
+    near: dict[str, set[str]] = field(default_factory=dict[str, set[str]])
+    first: dict[str, set[str]] = field(default_factory=dict[str, set[str]])
+    people: dict[str, set[str]] = field(default_factory=dict[str, set[str]])
+    # The first words of written runs: as in the joins, a name of its own, never a case form.
+    heads: set[str] = field(default_factory=set[str])
+
+    @classmethod
+    def read(cls, aliases: list[_Alias], common: dict[str, set[str]], passed: list[Seen], vault: Vault) -> _Reach:
+        out = cls(heads={s.words[0] for s in passed if len(s.words) > 1 and s.written})
+        heard = sorted({s.words[0] for s in passed if len(s.words) == 1 and not (s.written or s.label)})
+        langs = _case_langs(vault)
+        for a in aliases:
+            ws = folded(a.text).split()
+            if a.type == "person":
+                out.people.setdefault(ws[0], set()).add(a.entity)
+            if len(ws) > 1:
+                out.first.setdefault(ws[0], set()).add(a.entity)
+                continue
+            for form in {fold(c) for lang in langs for c in _cases(lang, a.text)}:
+                out.forms.setdefault(form, set()).add(a.entity)
+                if form not in common.get(a.entity, set()):
+                    out.cases.setdefault(form, set()).add(a.entity)
+            for word, _ in within(ws[0], max_distance(ws[0]), heard) if max_distance(ws[0]) else []:
+                out.near.setdefault(word, set()).add(a.entity)
+        return out
+
+    def ways(self, s: Seen) -> list[tuple[str, Way]]:
+        """The entities a spelling reaches and how: a case form unless it is a label or a written run's first word; a
+        heard word within the distance; a word that starts one entity's name of several; a label that starts one
+        person's."""
+        out: list[tuple[str, Way]] = []
+        word = s.words[0]
+        if len(s.words) == 1:
+            if not (s.label or word in self.heads):
+                out.extend((e, "case") for e in sorted(self.cases.get(word, ())))
+            if not (s.written or s.label):
+                out.extend((e, "near") for e in sorted(self.near.get(word, ())))
+            firsts = self.first.get(word, set())
+            if len(firsts) == 1:
+                out.append((next(iter(firsts)), "first"))
+        people = self.people.get(word, set())
+        if s.label and len(people) == 1:
+            out.append((next(iter(people)), "label"))
+        return out
+
+
 # -- cards --------------------------------------------------------------------------------------------------------
 
 
@@ -341,13 +415,25 @@ class _Miner:
         self.names = NameQuery(conn, vault)
         self.lang = next((c for c in (code_of(name) for name in vault.config.owner.languages) if c is not None), "en")
         self.mentions: dict[str, set[int]] = {}
+        self.spots: dict[str, set[str]] = {}
         self.hungarian = "hu" in resolve(vault.config.owner.languages).codes
+        self.reach = _Reach()
+        # What an entity holds, and what this round's spellings are, as folded words: a name's other order isn't added
+        # to a card when either holds it.
+        self.held = {tuple(folded(a.text).split()) for a in self.aliases}
+        self.grouped: set[tuple[str, ...]] = set()
 
     def mentioned(self, entity: str) -> set[int]:
         if entity not in self.mentions:
             rows = self.conn.execute("SELECT chunk FROM mentions WHERE entity = ?", (entity,))
             self.mentions[entity] = {r[0] for r in rows}
         return self.mentions[entity]
+
+    def places(self, entity: str) -> set[str]:
+        """Where an entity is mentioned: the containers, and the recordings docs that mention it cover."""
+        if entity not in self.spots:
+            self.spots[entity] = self.index.where(self.mentioned(entity))
+        return self.spots[entity]
 
     def new_stoplist(self) -> set[str]:
         """The new: keys rejected or undone, and those of each undone create, worked out from the index now: its name,
@@ -377,74 +463,97 @@ class _Miner:
             else:
                 left[why] += 1
         passed.sort(key=lambda s: (not s.label, -(s.mid + s.start), s.text))
-        labels = sum(s.label for s in passed)
-        g = _Groups(passed[: labels + TOP], self.index)
-        _group(g, _case_langs(self.vault))
         stop = self.new_stoplist()
+        self.reach = _Reach.read(self.aliases, _common(self.conn), passed, self.vault)
+        g = _Groups(self.window(passed, stop, left), self.index)
+        _group(g, _case_langs(self.vault))
+        self.grouped = {s.words for s in g.spellings}
         authors = _authors(self.conn)
+        chosen = [(members, self.choose(g, members)) for members in g.groups()]
+        # One card per entity: the groups that reach it make one.
+        merged: dict[str, list[int]] = {}
+        for members, entity in chosen:
+            if entity is not None:
+                merged.setdefault(entity, []).extend(members)
         cards: list[Card] = []
-        for members in g.groups():
-            entity = self.reached(g, members)
-            card = (
-                self.alias_card(g, members, entity)
-                if entity is not None
-                else self.new_card(g, members, stop, authors, left)
-            )
+        for members, entity in chosen:
+            if entity is None:
+                card = self.new_card(g, members, stop, authors, left)
+            elif entity in merged:
+                card = self.alias_card(g, merged.pop(entity), entity)
+            else:
+                continue
             if card is not None:
                 cards.append(card)
         cards.sort(key=_rank, reverse=True)
         cards = [c.model_copy(update={"n": n}) for n, c in enumerate(cards[:MAX_CARDS], start=1)]
         return Mined(cards, left)
 
+    def window(self, passed: list[Seen], stop: set[str], left: Counter[str]) -> list[Seen]:
+        """What goes on to be found and grouped, in order: every label and every spelling that reaches an entity by its
+        text, and the 300 others capitalised most often that no rejection stoplists as a new name, so a later round
+        reaches past what earlier ones rejected."""
+        out: list[Seen] = []
+        top = 0
+        for s in passed:
+            if s.label or self.reach.ways(s):
+                out.append(s)
+            elif f"new:-:{' '.join(s.words)}" in stop:
+                left["rejected"] += 1
+            elif top < TOP:
+                out.append(s)
+                top += 1
+        return out
+
     # -- an alias card --------------------------------------------------------------------------------------------
 
-    def reached(self, g: _Groups, members: list[int]) -> str | None:
-        """The entity a group reaches, as a case form or within the fuzzy distance of its name or alias where it is
-        mentioned, or by a label's first word being one person's; the one it meets most."""
-        best: tuple[int, str] | None = None
-        heads = {s.words[0] for s in g.spellings if len(s.words) > 1 and s.written}
+    def reached(self, g: _Groups, members: list[int]) -> list[str]:
+        """The entities a group reaches, best first: by a case form or a heard word near a name or alias, where the
+        entity is mentioned, the one met most first; then by a word that starts one entity's name of several words,
+        where it is mentioned, or a label whose first word is one person's."""
+        met: dict[str, int] = {}
+        after: list[str] = []
         for i in members:
-            s = g.spellings[i]
-            if len(s.words) != 1:
-                continue
-            word = s.words[0]
-            # As in the joins, a label or a written run's first word is a name of its own, never a case form.
-            cased = not (s.label or word in heads)
-            for a in self.aliases:
-                text = folded(a.text)
-                near = " " not in text and (
-                    (cased and word in {fold(c) for lang in _case_langs(self.vault) for c in _cases(lang, a.text)})
-                    or bool(max_distance(text) and within(text, max_distance(text), [word]))
-                )
-                meet = len(g.places[i] & self.index.where(self.mentioned(a.entity))) if near else 0
-                if meet >= MEET and (best is None or (meet, a.entity) > best):
-                    best = (meet, a.entity)
-        if best is not None:
-            return best[1]
-        for i in members:
-            s = g.spellings[i]
-            # A word that starts one entity's name of several words, where that entity is mentioned.
-            firsts = {a.entity for a in self.aliases if _first_of_several(a.text) == s.words[0]}
-            if len(s.words) == 1 and len(firsts) == 1:
-                entity = next(iter(firsts))
-                if len(g.places[i] & self.index.where(self.mentioned(entity))) >= MEET:
-                    return entity
-            if s.label:
-                people = {
-                    a.entity for a in self.aliases if a.type == "person" and folded(a.text).split()[0] == s.words[0]
-                }
-                if len(people) == 1:
-                    return people.pop()
-        return None
+            for entity, way in self.reach.ways(g.spellings[i]):
+                # A label names its person wherever it is: it needs no meeting.
+                meet = len(g.places[i] & self.places(entity)) if way != "label" else MEET
+                if meet < MEET:
+                    continue
+                if way in ("first", "label"):
+                    after.append(entity)
+                else:
+                    met[entity] = max(met.get(entity, 0), meet)
+        best = sorted(met, key=lambda e: (met[e], e), reverse=True)
+        return list(dict.fromkeys([*best, *after]))
+
+    def choose(self, g: _Groups, members: list[int]) -> str | None:
+        """The first entity the group reaches whose alias stoplist doesn't hold every spelling it would add: a rejected
+        alias stays a candidate elsewhere, for another entity or as a new name (DR-0461)."""
+        return next((e for e in self.reached(g, members) if not self.refused(g, members, e)), None)
+
+    def refused(self, g: _Groups, members: list[int], entity: str) -> bool:
+        adds = [g.spellings[i].text for i in members if self.offered(g, i, entity) != "no"]
+        return bool(adds) and all(f"alias:{entity}:{folded(text)}" in self.log.stoplist for text in adds)
+
+    def offered(self, g: _Groups, i: int, entity: str) -> Add:
+        """What accepting an entity's alias card does with a spelling: nothing for a case form, of the group's word or
+        of the entity's name (matching counts it, or judged it a common word on purpose), else an alias, `asr` when
+        heard."""
+        s = g.spellings[i]
+        ways = {way for e, way in self.reach.ways(s) if e == entity}
+        form = len(s.words) == 1 and entity in self.reach.forms.get(s.words[0], set())
+        if g.role.get(i) == "case" or (form and not ways - {"case"}):
+            return "no"
+        return "asr" if s.trust >= HEARD else "plain"
 
     def alias_card(self, g: _Groups, members: list[int], entity: str) -> Card | None:
-        """A group that reaches an entity: a card when its aliases would add a mention, else none, and never a new
+        """The groups that reach an entity: a card when its aliases would add a mention, else none, and never a new
         entity."""
         spellings: list[CardSpelling] = []
         holding: set[int] = set()
         for i in members:
             s = g.spellings[i]
-            add: Add = "no" if g.role.get(i) == "case" else "asr" if s.trust >= HEARD else "plain"
+            add = self.offered(g, i, entity)
             if add != "no" and f"alias:{entity}:{folded(s.text)}" in self.log.stoplist:
                 continue
             spellings.append(_spelling(s, add, g.chunks[i]))
@@ -479,12 +588,17 @@ class _Miner:
         found = [s for s in self.scan.seen.values() if s.words == head.words[::-1]]
         return min(found, key=lambda s: (s.trust, s.text), default=None)
 
+    def free(self, words: tuple[str, ...], stop: set[str]) -> bool:
+        """Whether a name's other order may go on its card: no entity holds it, no spelling of this round is it, and no
+        rejection stoplists it as a new name."""
+        return words not in self.held and words not in self.grouped and f"new:-:{' '.join(words)}" not in stop
+
     def new_card(
         self, g: _Groups, members: list[int], stop: set[str], authors: set[str], left: Counter[str]
     ) -> Card | None:
         kept = [i for i in members if f"new:-:{' '.join(g.spellings[i].words)}" not in stop]
+        left["rejected"] += len(members) - len(kept)
         if not kept:
-            left["rejected"] += 1
             return None
         sp = g.spellings
         runs = [i for i in kept if len(sp[i].words) > 1]
@@ -512,19 +626,20 @@ class _Miner:
         # A two-word name's other order counts however rarely it is written: tier 3's count is for noise, and the
         # order Hungarian writes a name in is the name.
         other = self.order_of(sp[head]) if not orders else None
-        if other is not None:
+        if other is not None and self.free(other.words, stop):
             spellings.append(_spelling(other, "plain", other.chunks))
         found = {r[0] for r in self.conn.execute(
             "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ?", (self.names.expression(name),)
         )}  # fmt: skip
         person = any(sp[i].label for i in kept) or bool(orders) or other is not None or folded(name) in authors
         # A person's two-word name in a vault whose owner writes Hungarian, which puts the family name first: the other
-        # order too, even unwritten, so a question in that order names them (no chunk holds it yet: 0).
+        # order too, even unwritten, so a question in that order names them. No chunk holds it, and the card says so:
+        # Hungarian has given names that are family names too, so it may be another person, to untick.
         words = name.split()
-        if person and not orders and other is None and len(words) == 2 and self.hungarian:
-            reversed_ = f"{words[1]} {words[0]}"
-            trust = TRUSTS[sp[head].trust]
-            spellings.append(CardSpelling(text=reversed_, trust=trust, add="plain", alone=True, chunks=0))
+        reversed_ = f"{words[-1]} {words[0]}"
+        unseen = person and not orders and other is None and len(words) == 2 and self.hungarian
+        if unseen and self.free(tuple(folded(reversed_).split()), stop):
+            spellings.append(CardSpelling(text=reversed_, trust=UNSEEN, add="plain", alone=True, chunks=0))
         entity = slug(name) or "entity"
         n = 2
         while entity in self.taken:
@@ -616,9 +731,3 @@ def _rank(card: Card) -> tuple[int, int, int, str]:
 
 def mine(conn: sqlite3.Connection, vault: Vault, log: Folded) -> Mined:
     return _Miner(conn, vault, log).run()
-
-
-def _first_of_several(text: str) -> str | None:
-    """A name's first word, folded, when it has several."""
-    words = folded(text).split()
-    return words[0] if len(words) > 1 else None
