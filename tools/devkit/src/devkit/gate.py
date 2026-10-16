@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from devkit import commits, content, coverage, evalfloors
+from devkit import commits, content, coverage, evalfloors, pins
 from devkit.regime import Regime
 from devkit.repo import KitError, default_base, listed_files, repo_root, utf8_stdio
 from devkit.store import Store
@@ -113,6 +113,9 @@ def step_lock(ctx: Ctx) -> Outcome:
     uv = shutil.which("uv")
     if uv is None:
         return Outcome.fail("uv isn't on PATH")
+    found = pins.problems(ctx.root)
+    if found:
+        return Outcome.fail(*found)
     return _tool(ctx, [uv, "lock", "--check"])
 
 
@@ -366,7 +369,7 @@ def step_models(ctx: Ctx) -> Outcome:
 
 
 STEPS = [
-    Step("lock", ("quick", "full"), "uv.lock matches the pyproject files", step_lock),
+    Step("lock", ("quick", "full"), "uv.lock matches the pyproject files; the models' pins the dev group's", step_lock),
     Step("ruff", ("quick", "full"), "lint", step_ruff),
     Step("format", ("quick", "full"), "formatting", step_format),
     Step("types", ("quick", "full", "os"), "pyright (strict on src/)", step_types),

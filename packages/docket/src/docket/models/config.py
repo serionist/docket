@@ -17,6 +17,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any, Literal, cast
 
+import yaml
 from platformdirs import user_cache_path, user_data_path
 
 from docket import userconfig
@@ -42,7 +43,11 @@ class Choice:
 def read() -> Choice | Off:
     """The user's choice, or Off: with no reason when there is no block or it says provider none, with one when the
     block doesn't read."""
-    raw: Any = userconfig.load().get("models")
+    try:
+        raw: Any = userconfig.load().get("models")
+    except (yaml.YAMLError, UnicodeDecodeError, OSError):
+        # Every command reads the models, so a config that doesn't read turns them off rather than stopping them.
+        return Off(f"{userconfig.config_path()} doesn't read as YAML, so models are off")
     where = f"the models block in {userconfig.config_path()}"
     if raw is None:
         return Off()

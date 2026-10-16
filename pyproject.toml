@@ -23,8 +23,8 @@ dev = [
   "pytest-cov==7.1.0",
   "pytest-xdist==3.8.0",
   # The models' worker runs in an environment of its own (DR-0332); its backend is type-checked and tested here on the
-  # CPU builds, pinned at least a week old (DR-0157).
-  "onnxruntime==1.30.0",
+  # CPU builds, pinned at least a week old (DR-0157). ONNX Runtime 1.30 ships no Intel Mac build.
+  "onnxruntime==1.30.0; sys_platform != 'darwin' or platform_machine == 'arm64'",
   "tokenizers==0.23.2",
   "numpy==2.5.3",
   "types-PyYAML==6.0.12.20260906",

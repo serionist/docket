@@ -16,6 +16,18 @@ updates:
     # No group: a grouped title ("Bump x from a to b in the <group> group across 1 directory") can pass the 72
     # characters a commit on main may have, so each Python update comes as its own short-titled PR.
 
+  # The models' worker requirements (DR-0332): the .in files and their hashed .txt. The gate's lock step fails while
+  # onnxruntime, tokenizers or numpy here differ from the dev group's pins, so a bump here and its twin from the uv
+  # entry above go in together, recompiled with `uv run devkit models-lock`.
+  - package-ecosystem: pip
+    directory: /packages/docket/src/docket/models
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

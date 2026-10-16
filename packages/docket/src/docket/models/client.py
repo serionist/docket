@@ -122,7 +122,8 @@ class Worker:
                 proc,
                 f"the models' worker didn't say hello in {self.hello_seconds:g} s"
                 if code is None
-                else f"the models' worker stopped as it started (exit {code}); docket models status shows its errors",
+                else f"the models' worker stopped as it started (exit {code}); docket models status --check shows its "
+                "errors",
             )
             raise WorkerError(self.why or "")
         try:
@@ -195,7 +196,7 @@ class Worker:
         if self._proc is proc:
             self._proc = None
             self.hello = None
-            self.why = f"the models' worker stopped (exit {code}); docket models status shows its errors"
+            self.why = f"the models' worker stopped (exit {code}); docket models status --check shows its errors"
         with self._lock:
             left, self._pending = self._pending, {}
         for pending in left.values():
@@ -276,6 +277,10 @@ class Worker:
                 raise WorkerError(self.why or "the models' worker isn't running")
             answer = self._ask(proc, {"op": "embed", "texts": list(texts)}, self.batch_seconds)
             if answer is None:
+                code = proc.poll()
+                if code is not None:
+                    # It ended mid-batch, and its reader has said so with the exit code.
+                    raise WorkerError(self.why or f"the models' worker stopped (exit {code})")
                 self._fail(proc, f"a batch passed {self.batch_seconds:g} s, so the models' worker was stopped")
                 raise WorkerError(self.why or "")
             return self._vectors(answer, len(texts))

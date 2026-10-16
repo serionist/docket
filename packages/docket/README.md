@@ -254,26 +254,30 @@ Runtime in a worker process of its own, on the CPU or an NVIDIA GPU.
 | Command | Does |
 |---|---|
 | `docket models install [--device auto\|cpu\|cuda]` | builds the models' environment with uv, fetches the embedder's pinned files, checks the worker runs and turns models on for this machine |
-| `docket models status [--check]` | the choice, the environment, the files; `--check` starts the worker once and says what it runs on |
-| `docket models remove` | deletes the environment, the files and the choice; search goes on with keywords |
+| `docket models status [--check]` | the choice, the environment, the files, each model's vectors in the vault's index, and the running service's worker with the last lines it wrote to stderr; `--check` starts a worker once and says what it runs on |
+| `docket models remove` | deletes the environment, the files and the choice; search goes on with keywords. On Windows the service's worker holds its files: models go off at once, and the remove asks you to stop the service and run it again |
 
 - Downloads, once: 0.49 GB of model files, and about 50 MB of packages for the CPU or 1.3 GB for CUDA (NVIDIA's CUDA
   13 and cuDNN wheels, under NVIDIA's licences, in that environment only). `auto` takes CUDA when `nvidia-smi` lists a
   GPU; CUDA 13 needs a driver of R580 or later, and the install says when ONNX Runtime fell back to the CPU.
 - The choice is this machine's, in your config's `models:` block, never in `vault.yaml`: each machine embeds with what
-  it has. A block Docket can't read turns models off and says why.
+  it has. A block Docket can't read, or a config that isn't YAML, turns models off and says why.
 - Nothing leaves the machine. The files live under your user cache and data folders, never in the vault or a repo,
   and after the install nothing touches the network.
 - Vectors need a Python whose SQLite can load extensions. uv's own Pythons can; some others can't (the one on
   GitHub's macOS runners, for one), and `docket models install` says so. `uv tool install --python-preference
   only-managed docket` installs Docket on uv's own.
+- ONNX Runtime ships for Windows, Linux, and Macs with Apple silicon on macOS 14 or later. On an Intel Mac or an
+  older macOS, `docket models install` says so and keyword search works as before.
+- The service reads the choice when it starts: after an install, `docket service stop` and `docket service install`
+  start it with the models. Until then `docket index update` embeds for it and says so.
 
 Who embeds what:
 
 | Where | Embeds |
 |---|---|
 | the service | what each index update added, in the background, a few seconds for a sync run's chunks on a CPU |
-| `docket index update`, `docket index rebuild` | what has no vector, with a progress line; when the service runs for the vault it leaves that to the service |
+| `docket index update`, `docket index rebuild` | what has no vector, with a progress line; when the service runs for the vault with the same model it leaves that to the service |
 | `docket search`, `docket eval` | only the query, on a worker they start for themselves (a second or two); `--no-models` skips it |
 
 A first pass over a year of chunks takes a minute or two on a GPU and half an hour or more on a CPU; search uses what is

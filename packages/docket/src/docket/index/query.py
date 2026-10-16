@@ -1,4 +1,4 @@
-"""Search: one query over the index, keyword-only, answered in well under a second.
+"""Search: one query over the index, answered in well under a second.
 
 1. Read the query: quoted phrases, words, time words (a range), and names or aliases found in it (its entities).
 2. Each word becomes an OR of its forms across the columns, its joined words' forms (two query words in a row, the
@@ -11,8 +11,10 @@
    any-word and prefix stages leave out words in half the chunks or more, which BM25 gives no weight; they still count
    in the order, and the least common joins one more any-word query when the stages leave fewer than k.
 4. Entity candidates, top 200: chunks mentioning the query's or the boosts' entities.
-5. Fuse the two lists by reciprocal rank, so a boost lifts a chunk and never drops one.
-6. Collapse hits on the same stretch, group them by recording or thread, attach each group's summary.
+5. With models on, vector candidates: the query's vector's top 200 (DR-0338).
+6. Fuse the lists by reciprocal rank, the vectors' at half weight, so a boost lifts a chunk and never drops one; a chunk
+   only the vectors found goes after every all-words hit.
+7. Collapse hits on the same stretch, group them by recording or thread, attach each group's summary.
 
 The parameters follow the design's MCP `search` tool, which the service (#8) maps one to one (DR-0117).
 """
@@ -955,6 +957,12 @@ def _run(
         if stage.why is not None:
             run.state, run.why = "skipped", stage.why
     ranked = sorted(score, key=lambda c: (-score[c], c))
+    # A chunk only the vectors found never passes an all-words hit, at any k (DR-0338): those it passed in the fusion
+    # move to just after the last one, in their order.
+    last_all = max((n for n, chunk in enumerate(ranked) if found_by[chunk] == "all"), default=0)
+    early = [chunk for chunk in ranked[:last_all] if found_by[chunk] == "vector"]
+    if early:
+        ranked = [c for c in ranked[: last_all + 1] if found_by[c] != "vector"] + early + ranked[last_all + 1 :]
     rows = s.rows(ranked)
     mentioned: dict[int, set[str]] = {}
     for start in range(0, len(ranked), 500):
@@ -974,7 +982,11 @@ def _run(
             kept.append(row)
         else:
             break
-    result = SearchResult(query=reading, candidates=len(ranked), models=run)
+    # The vector list's tail would swamp the counts: a chunk only it found counts when it made the top k, in the facets
+    # and in the candidates alike.
+    shown = {row.id for row in kept}
+    counted = [rows[c] for c in ranked if found_by[c] != "vector" or c in shown]
+    result = SearchResult(query=reading, candidates=len(counted), models=run)
     hit_rank = {row.id: n for n, row in enumerate(kept, start=1)}
     by_group: dict[str, list[_Row]] = {}
     for row in kept:
@@ -1004,12 +1016,9 @@ def _run(
                 )
             )
         result.groups.append(group)
-    # The vector list's tail would swamp the counts: a chunk only it found counts when it made the top k.
-    shown = {row.id for row in kept}
-    candidates = [rows[c] for c in ranked if found_by[c] != "vector" or c in shown]
     result.facets = {
-        "sources": dict(sorted(Counter(r.source for r in candidates if r.source).items())),
-        "entities": dict(sorted(Counter(e for r in candidates for e in mentioned.get(r.id, set())).items())),
-        "months": dict(sorted(Counter(r.ts[:7] for r in candidates if r.ts).items())),
+        "sources": dict(sorted(Counter(r.source for r in counted if r.source).items())),
+        "entities": dict(sorted(Counter(e for r in counted for e in mentioned.get(r.id, set())).items())),
+        "months": dict(sorted(Counter(r.ts[:7] for r in counted if r.ts).items())),
     }
     return result

@@ -452,7 +452,11 @@ def run(
     try:
         if models is not None and not isinstance(models, Off):
             table = vectors.table_of(models.embedder)
-            have, total = vectors.coverage(conn, table) if vectors.holds(conn, "main", table.name) else (0, 0)
+            if vectors.holds(conn, "main", table.name):
+                have, total = vectors.coverage(conn, table)
+            else:
+                # No table yet: none of the chunks has a vector.
+                have, total = 0, int(conn.execute("SELECT count(*) FROM chunks").fetchone()[0])
             seen = EvalVectors(model=models.embedder.name, have=have, total=total)
         wanted = {w.text: w for q in questions.questions for w in q.want}
         unknown = [text for text, w in wanted.items() if not _exists(conn, w)]

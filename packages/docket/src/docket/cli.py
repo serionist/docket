@@ -5,14 +5,13 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import socket
 import sys
 import time
 import webbrowser
 from collections.abc import Generator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, cast
+from typing import Annotated, Any, cast
 from zoneinfo import ZoneInfo
 
 import typer
@@ -710,30 +709,44 @@ def _query_models(no_models: bool) -> Generator[Models | Off | None]:
             models.close()
 
 
-def _service_embeds(vault: Vault) -> bool:
-    """Whether the service runs for this vault: then it runs the pass, and the command leaves it to the service."""
-    found = client.recorded()
-    named = found.get("vault") if found else None
-    if not isinstance(named, str) or Path(named).resolve() != vault.root.resolve():
-        return False
-    with contextlib.suppress(OSError), socket.create_connection(("127.0.0.1", client.port()), timeout=0.5):
-        return True
-    return False
+def _service_models(vault: Vault | None = None) -> dict[str, Any] | None:
+    """The running service's models in its own words, when it runs for this vault (any vault without one); None when
+    no Docket service answers with this machine's token."""
+    if vault is not None:
+        found = client.recorded()
+        named = found.get("vault") if found else None
+        if not isinstance(named, str) or Path(named).resolve() != vault.root.resolve():
+            return None
+    try:
+        token = _tokens().read()
+    except DocketError:
+        return None
+    answer = client.call("GET", "/api/models", token=token, at=client.port())
+    return answer.body if answer is not None and answer.status == 200 else None
 
 
 def _embed(vault: Vault, no_models: bool) -> None:
-    """The embedding pass after an update or a rebuild, with a progress line now and then (DR-0336)."""
+    """The embedding pass after an update or a rebuild, with a progress line now and then (DR-0336); left to the
+    service when it runs for the vault with the same model."""
     if no_models:
         return
-    if _service_embeds(vault):
-        say("vectors    the service embeds what is new")
-        return
-    models = open_models()
+    models = open_models(start=False)
     if isinstance(models, Off):
         if models.why:
             say(f"! {models.why}")
         return
     try:
+        service = _service_models(vault)
+        if service is not None:
+            if service.get("state") != "off" and service.get("model") == models.embedder.name:
+                say("vectors    the service embeds what is new")
+                return
+            # A service started before the install reads no models until it starts again (DR-0330).
+            say(
+                f"! the service runs without {models.embedder.name}, so this command embeds; docket service stop, "
+                "then docket service install, and the service embeds after its updates"
+            )
+        models.worker.ensure()
         if models.why is not None:
             say(f"! {models.why}")
             return
@@ -1068,8 +1081,10 @@ def models_install(
 @models_app.command("status")
 def models_status(
     check: Annotated[bool, typer.Option("--check", help="Start the worker once and say what it runs on.")] = False,
+    vault: VaultOption = None,
 ) -> None:
-    """What this machine's models are: the choice, the environments, the files."""
+    """What this machine's models are: the choice, the environments, the files, the vault's vectors and the service's
+    worker."""
     from docket.models import config  # noqa: PLC0415
     from docket.models.install import vectors_problem  # noqa: PLC0415
     from docket.models.provider import Off  # noqa: PLC0415
@@ -1090,6 +1105,14 @@ def models_status(
         say(f"files      {'missing: ' + ', '.join(f.path for f in missing) if missing else 'all here'}")
         problem = vectors_problem()
         say(f"search     {'! ' + problem if problem else 'uses the vectors'}")
+    _models_vectors(vault, on=not isinstance(choice, Off))
+    service = _service_models()
+    if service is not None:
+        why = service.get("why")
+        state = f"{service.get('model')}, {service.get('state')}" if service.get("model") else "off"
+        say(f"service    {state}{f': {why}' if why else ''}")
+        errors = service.get("errors")
+        say_all([str(line) for line in cast(list[object], errors)] if isinstance(errors, list) else [])
     if check:
         found = choice if isinstance(choice, Off) else config.installed(choice.device)
         if isinstance(choice, Off) or isinstance(found, (Off, str)):
@@ -1104,6 +1127,20 @@ def models_status(
             say(f"worker     up: {worker.hello.provider}, {worker.hello.dims} dims")
         finally:
             worker.stop()
+
+
+def _models_vectors(vault: Path | None, *, on: bool) -> None:
+    """Each model's vectors in the vault's index (DR-0332), when a vault resolves and its index reads."""
+    try:
+        st = index.status(find_vault(vault))
+    except DocketError:
+        if vault is not None:
+            raise
+        return
+    for coverage in st.vectors:
+        say(f"vectors    {coverage.model}  {coverage.have} of {coverage.total} chunks ({st.path})")
+    if on and st.exists and not st.vectors:
+        say(f"vectors    none yet in {st.path}; docket index update embeds")
 
 
 @models_app.command("remove")

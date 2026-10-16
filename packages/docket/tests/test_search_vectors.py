@@ -3,6 +3,7 @@ checked against the chunks, the facets, and every way it is skipped, each leavin
 
 from __future__ import annotations
 
+import dataclasses
 import importlib
 import sqlite3
 import time
@@ -12,15 +13,15 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from docket_testkit import copy_vault, index_template, make_record
-from models_kit import FAKE, fake_models, needs_vectors, trigram_vector
+from models_kit import FAKE, InProcess, fake_models, needs_vectors, trigram_vector
 from test_index_vectors import choose
 
 from docket import questions, recall, render
 from docket.index import build, query, rebuild, search, update, vectors
 from docket.index.embedpass import fill
-from docket.models.provider import Off
+from docket.models.provider import Models, Off
 from docket.vault.vault import Vault
-from docket.web.views import vectors_line
+from docket.web.views import FOUND_BY, vectors_line
 
 NOW = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
 ZEBRA = "chat:C0OPS/1791480000.000100"
@@ -109,6 +110,50 @@ def test_facets_count_a_vector_only_chunk_only_when_it_made_the_top(vault: Vault
     wide = search(vault, "zebbra migrashun", k=50, now=NOW, models=models)
     assert sum(narrow.facets["sources"].values()) == 1
     assert sum(wide.facets["sources"].values()) > 1
+    # The candidates count the same chunks as the facets (docs among them, which have no source), so the vector
+    # list's tail doesn't swell them either.
+    assert narrow.candidates == 1 and wide.candidates >= sum(wide.facets["sources"].values())
+
+
+@needs_vectors
+def test_a_chunk_only_the_vectors_find_never_passes_an_all_words_hit(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    herd = [
+        make_record(
+            n,
+            rid=f"chat:C0H{n:02d}/{1791490000 + n}.000100",
+            container=f"chat:C0H{n:02d}",
+            text=f"Herd count {n}: the zebra migration passed the river.",
+            ts=datetime(2026, 10, 9, 9, n % 60, tzinfo=UTC),
+        )
+        for n in range(70)
+    ]
+    vault.write_run("chat", herd, datetime(2026, 10, 9, 10, 0, tzinfo=UTC))
+    update(vault)
+    models, _ = fake_models()
+    fill(vault, models)
+    conn = sqlite3.connect(build.db_path(vault))
+    words = {r[0] for r in conn.execute("SELECT id FROM chunks WHERE text LIKE '%zebra migration%'")}
+    conn.close()
+    real = vectors.scan
+
+    def apart(*args: object, **kwargs: object) -> list[tuple[int, str]] | str:
+        found = real(*args, **kwargs)  # type: ignore[arg-type]
+        assert not isinstance(found, str)
+        # The vector list without the all-words hits: past the 62nd of them its first place, 0.5/61, outscores theirs.
+        return [f for f in found if f[0] not in words]
+
+    monkeypatch.setattr(vectors, "scan", apart)
+    found = hits(search(vault, "zebra migration", k=100, now=NOW, models=models))
+    by_all = [h.rank for h in found if h.found_by == "all"]
+    by_vector = [h.rank for h in found if h.found_by == "vector"]
+    assert len(by_all) > 62 and by_vector
+    assert max(by_all) < min(by_vector)
+
+
+def test_the_search_page_says_a_chunk_only_the_vectors_found_was_found_by_meaning() -> None:
+    assert FOUND_BY["vector"] == "by meaning"
 
 
 @needs_vectors
@@ -222,6 +267,10 @@ def test_eval_says_what_the_vectors_covered_and_how_many_questions_went_without(
     assert "          2 question(s) ran without them: the models' worker stopped (exit 5)" in render.eval_report(report)
     assert questions.run(vault, asked).vectors is None
     assert questions.run(vault, asked, models=Off("off")).vectors is None
+    # A model the index has no table for yet: none of the chunks has a vector, and they are still counted.
+    other = Models(dataclasses.replace(FAKE, name="fake-two"), InProcess(), 8192)
+    seen_other = questions.run(vault, asked, models=other).vectors
+    assert seen_other is not None and seen_other.have == 0 and seen_other.total == seen.total
 
 
 def test_a_stage_that_raises_is_skipped_with_its_type(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import socket
+import re
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +13,7 @@ from models_kit import FAKE, fake_command, make_env, needs_vectors
 
 from docket import cli, userconfig
 from docket.cli import main
+from docket.errors import DocketError
 from docket.index.embedpass import PassReport
 from docket.models import catalogue, install, runtime
 from docket.models.catalogue import E5_SMALL
@@ -159,7 +160,7 @@ def test_index_update_says_why_it_can_embed_nothing(
     vault: Vault, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     code, out = at(vault, capsys, "index", "update", "--no-models")
-    assert code == 0 and "vectors" not in out
+    assert code == 0 and "vectors    " not in out
     monkeypatch.setattr(runtime, "worker_for", lambda choice, device: Worker(fake_command(bad_hello=True)))
     code, out = at(vault, capsys, "index", "update")
     assert "! the models' worker said hello in a form this Docket doesn't read" in out
@@ -186,22 +187,102 @@ def fail_report() -> PassReport:
     return PassReport(model="fake", why="the models' worker stopped (exit 5)")
 
 
-def test_with_the_service_running_for_the_vault_the_pass_is_left_to_it(
+class Token:
+    def __init__(self, why: str | None = None) -> None:
+        self.why = why
+
+    def read(self) -> str:
+        if self.why is not None:
+            raise DocketError(self.why)
+        return "t0ken-for-tests-only"
+
+
+UP = {"state": "up", "model": "fake", "why": None, "embedded": 3, "errors": []}
+
+
+class Service:
+    """The running service's /api/models, as the CLI asks for it: None when nothing answers."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, vault: Vault) -> None:
+        self.body: dict[str, Any] | None = UP
+        self.asked: list[str] = []
+        monkeypatch.setattr(client, "call", self.call)
+        monkeypatch.setattr(client, "recorded", lambda: {"vault": str(vault.root)})
+        monkeypatch.setattr(cli, "_tokens", Token)
+
+    def call(self, method: str, path: str, *, token: str | None = None, at: int | None = None) -> client.Answer | None:
+        self.asked.append(path)
+        return None if self.body is None else client.Answer(200, self.body)
+
+
+def test_the_pass_is_left_to_a_service_that_runs_for_the_vault_with_the_model(
     vault: Vault, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    listening = socket.socket()
-    listening.bind(("127.0.0.1", 0))
-    listening.listen(1)
-    try:
-        monkeypatch.setattr(client, "port", lambda: listening.getsockname()[1])
-        monkeypatch.setattr(client, "recorded", lambda: {"vault": str(vault.root)})
-        code, out = at(vault, capsys, "index", "update")
-        assert "vectors    the service embeds what is new" in out
-        monkeypatch.setattr(client, "recorded", lambda: {"vault": str(vault.root.parent)})
-        code, out = at(vault, capsys, "index", "update")
-        assert "the service embeds" not in out
-    finally:
-        listening.close()
-    monkeypatch.setattr(client, "recorded", lambda: {"vault": str(vault.root)})
+    service = Service(monkeypatch, vault)
     code, out = at(vault, capsys, "index", "update")
-    assert code == 0 and "the service embeds" not in out
+    assert code == 0 and "vectors    the service embeds what is new" in out and service.asked == ["/api/models"]
+    # A worker that is down comes back on the service's own clock: the pass is still the service's.
+    service.body = {**UP, "state": "down", "why": "the models' worker stopped (exit 5)"}
+    code, out = at(vault, capsys, "index", "update")
+    assert "vectors    the service embeds what is new" in out
+
+
+@pytest.mark.parametrize(
+    "body", [{**UP, "state": "off", "model": None}, {**UP, "model": "another-model"}], ids=["off", "another model"]
+)
+def test_a_service_started_before_the_install_leaves_the_pass_to_the_command_and_it_says_so(
+    vault: Vault, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, body: dict[str, Any]
+) -> None:
+    Service(monkeypatch, vault).body = body
+    code, out = at(vault, capsys, "index", "update")
+    assert code == 0 and "vectors    the service embeds what is new" not in out
+    assert (
+        "! the service runs without fake, so this command embeds; docket service stop, then docket service install, "
+        "and the service embeds after its updates"
+    ) in out
+    assert out.splitlines()[-1].startswith("vectors    fake  ")
+
+
+def test_the_command_embeds_when_no_service_answers_for_the_vault(
+    vault: Vault, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = Service(monkeypatch, vault)
+    service.body = None
+    code, out = at(vault, capsys, "index", "update")
+    assert code == 0 and "the service" not in out and out.splitlines()[-1].startswith("vectors    fake  ")
+    # One for another vault isn't asked; one whose token can't be read can't be either.
+    service.body = UP
+    monkeypatch.setattr(client, "recorded", lambda: {"vault": str(vault.root.parent)})
+    code, out = at(vault, capsys, "index", "update")
+    assert "the service" not in out and service.asked == ["/api/models"]
+    monkeypatch.setattr(client, "recorded", lambda: {"vault": str(vault.root)})
+    monkeypatch.setattr(cli, "_tokens", lambda: Token("no token yet"))
+    code, out = at(vault, capsys, "index", "update")
+    assert "the service" not in out and service.asked == ["/api/models"]
+
+
+def test_status_shows_the_vaults_vectors_and_the_services_worker(
+    vault: Vault, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    code, out = run(capsys, "status", "--vault", str(vault.root))
+    assert code == 0 and "vectors    " not in out
+    # An index built before the models were on has no table for them yet.
+    choose({"provider": "none"})
+    at(vault, capsys, "index", "update")
+    choose_fake(monkeypatch)
+    code, out = run(capsys, "status", "--vault", str(vault.root))
+    assert "vectors    none yet in index/docket.sqlite; docket index update embeds" in out
+    at(vault, capsys, "index", "update")
+    code, out = run(capsys, "status", "--vault", str(vault.root))
+    assert re.search(r"vectors    fake  (\d+) of \1 chunks \(index/docket\.sqlite\)", out), out
+    assert "service" not in out
+    service = Service(monkeypatch, vault)
+    service.body = {
+        **UP, "state": "down", "why": "the models' worker stopped (exit 5)",
+        "errors": ["Traceback (most recent call last):", "MemoryError"],
+    }  # fmt: skip
+    code, out = run(capsys, "status", "--vault", str(vault.root))
+    lines = out.splitlines()
+    assert lines[-3:] == ["service    fake, down: the models' worker stopped (exit 5)", *service.body["errors"]]
+    with pytest.raises(DocketError, match="no vault at or above"):
+        cli._models_vectors(vault.root.parent / "elsewhere", on=True)

@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 from docket_testkit import index_template, make_record
-from models_kit import fake_models, needs_vectors
+from models_kit import FAKE, fake_models, fake_worker, needs_vectors
 from starlette.testclient import TestClient
 from test_index_vectors import choose
 
@@ -67,7 +67,9 @@ def test_the_keeper_runs_a_pass_at_start_and_after_each_poke(vault: Vault) -> No
         wait_for(lambda: keeper.last is not None)
         first = keeper.last
         assert first is not None and first.have == first.total > 0 and worker.ensured >= 1
-        assert keeper.status().model_dump() == {"state": "up", "model": "fake", "why": None, "embedded": first.have}
+        assert keeper.status().model_dump() == {
+            "state": "up", "model": "fake", "why": None, "embedded": first.have, "errors": [],
+        }  # fmt: skip
         vault.write_run("chat", [make_record(rid="chat:C0OPS/1791480100.000100", text="Another zebra.")], None)
         from docket.index import update
 
@@ -79,6 +81,41 @@ def test_the_keeper_runs_a_pass_at_start_and_after_each_poke(vault: Vault) -> No
     assert not worker.up and keeper.status().state == "down"
 
 
+def test_the_keeper_looks_again_unasked_and_finds_a_worker_that_came_back(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(service_models, "WAKE_SECONDS", 0.05)
+    rebuild(vault)
+    models, worker = fake_models()
+    worker.up, worker.why = False, "the models' worker stopped (exit 5)"
+    keeper = ModelsKeeper(lambda: vault, opener(models))
+    keeper.start()
+    try:
+        # The poke at start, then a look on the clock alone.
+        wait_for(lambda: worker.ensured >= 2)
+        assert keeper.last is None
+        worker.up, worker.why = True, None
+        wait_for(lambda: keeper.last is not None)
+    finally:
+        keeper.close()
+    assert keeper.last is not None and keeper.last.have == keeper.last.total > 0
+
+
+def test_status_shows_the_end_of_what_a_worker_wrote_to_stderr(vault: Vault) -> None:
+    worker = fake_worker(bad_hello=True)
+    keeper = ModelsKeeper(lambda: vault, opener(Off()))
+    keeper.models = Models(FAKE, worker, 8192)
+    try:
+        assert not worker.ensure()
+        # Its stderr is read on a thread of its own.
+        wait_for(lambda: "fake worker starting" in keeper.status().errors)
+        status = keeper.status()
+    finally:
+        worker.stop()
+    assert status.state == "down" and status.why == "the models' worker said hello in a form this Docket doesn't read"
+    assert len(status.errors) <= service_models.ERROR_LINES
+
+
 def test_a_keeper_with_models_off_says_why_and_starts_nothing(vault: Vault, caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.INFO, "docket.service")
     keeper = ModelsKeeper(lambda: vault, opener(Off("the models block in config.yaml doesn't read")))
@@ -86,6 +123,7 @@ def test_a_keeper_with_models_off_says_why_and_starts_nothing(vault: Vault, capl
     keeper.close()
     assert keeper.status().model_dump() == {
         "state": "off", "model": None, "why": "the models block in config.yaml doesn't read", "embedded": None,
+        "errors": [],
     }  # fmt: skip
     assert "models are off: the models block in config.yaml doesn't read" in caplog.text
     quiet = ModelsKeeper(lambda: vault, opener(Off()))
@@ -140,6 +178,8 @@ def test_the_service_searches_with_vectors_once_its_pass_has_run(client: tuple[T
     assert body["groups"][0]["hits"][0]["found_by"] == "vector"
     status = http.get("/api/status", headers=BEARER).json()
     assert status["models"]["state"] == "up" and status["models"]["model"] == "fake"
+    assert http.get("/api/models", headers=BEARER).json() == status["models"]
+    assert http.get("/api/models").status_code == 401
     worker.up, worker.why = False, "the models' worker stopped (exit 5)"
     answer = http.get("/api/search", params={"query": "zebbra migrashun"}, headers=BEARER).json()
     assert answer["models"] == {"state": "skipped", "model": "fake", "why": "the models' worker stopped (exit 5)"}

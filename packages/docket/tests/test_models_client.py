@@ -84,6 +84,15 @@ def test_a_batch_past_its_timeout_stops_the_worker(stopping: list[Worker]) -> No
         w.batch(["passage: again"])
 
 
+def test_a_worker_that_dies_mid_batch_says_it_stopped_not_that_it_was_slow(stopping: list[Worker]) -> None:
+    w = running(stopping, die_on="passage: crash", batch_seconds=30)
+    started = time.monotonic()
+    with pytest.raises(WorkerError, match=r"the models' worker stopped \(exit 5\)"):
+        w.batch(["passage: crash"])
+    # Its exit ends the wait at once, rather than at the batch's timeout.
+    assert time.monotonic() - started < 10 and not w.up
+
+
 def test_a_worker_that_stops_is_started_again_at_most_once_a_minute(stopping: list[Worker]) -> None:
     now = [100.0]
     w = Worker(fake_command(die_on="query: crash"), clock=lambda: now[0])
@@ -91,13 +100,13 @@ def test_a_worker_that_stops_is_started_again_at_most_once_a_minute(stopping: li
     assert w.ensure() and w.up
     assert w.ensure()
     assert w.query("query: crash") in (
-        "the models' worker stopped (exit 5); docket models status shows its errors",
+        "the models' worker stopped (exit 5); docket models status --check shows its errors",
         "the models' worker didn't answer in 2 s",
     )
     deadline = time.monotonic() + 10
     while w.up and time.monotonic() < deadline:
         time.sleep(0.01)
-    assert w.why == "the models' worker stopped (exit 5); docket models status shows its errors"
+    assert w.why == "the models' worker stopped (exit 5); docket models status --check shows its errors"
     now[0] += 30
     assert not w.ensure()
     now[0] += 31

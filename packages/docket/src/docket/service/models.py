@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from docket.errors import DocketError
 from docket.index.embedpass import PassReport, fill
+from docket.models.client import Worker
 from docket.models.provider import Models, Off
 from docket.models.runtime import open_models
 from docket.vault.vault import Vault
@@ -28,15 +29,19 @@ log = logging.getLogger("docket.service")
 # How often the pass looks again with no update to wake it: a stopped worker starts again then too.
 WAKE_SECONDS = 60.0
 STOP_SECONDS = 10.0
+# The worker's last lines of stderr that status shows: a traceback's end says why it stopped.
+ERROR_LINES = 10
 
 
 class ModelsStatus(BaseModel):
-    """The service's models for its status: off, or a model and whether its worker is up, with why not."""
+    """The service's models for its status: off, or a model and whether its worker is up, with why not and the end of
+    what the worker wrote to stderr."""
 
     state: Literal["off", "up", "down"] = "off"
     model: str | None = None
     why: str | None = None
     embedded: int | None = None
+    errors: list[str] = []
 
 
 class ModelsKeeper:
@@ -99,11 +104,13 @@ class ModelsKeeper:
         if isinstance(models, Off):
             return ModelsStatus(why=models.why)
         why = models.why
+        worker = models.worker
         return ModelsStatus(
             state="up" if why is None else "down",
             model=models.embedder.name,
             why=why,
             embedded=self.last.have if self.last is not None else None,
+            errors=worker.stderr().strip().splitlines()[-ERROR_LINES:] if isinstance(worker, Worker) else [],
         )
 
     def close(self) -> None:

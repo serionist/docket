@@ -35,6 +35,9 @@ A test that asserts how long something took carries `@pytest.mark.perf`: `gate o
 those after the rest, alone and one at a time, and prints what they print, so the other tests' workers never decide a
 time limit. `gate full` keeps them in its one run, since under coverage the index's limits are off (DR-0430).
 
+Tests never touch the real Docket folders or the keychain, not even to read them: `conftest.py` points the config,
+state and models folders at a temp folder of the session's before any fixture runs, and each test at its own.
+
 ## Open the pull request
 
 1. Fork, and branch from `main` as `<issue>-<slug>`, such as `42-search-paging`.

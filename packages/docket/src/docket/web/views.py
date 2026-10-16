@@ -29,7 +29,13 @@ PANEL = "/search/panel"
 
 KIND_ICON = {"recording": "recording", "thread": "thread", "record": "record", "doc": "doc"}
 HIT_ICON = {"transcript": "recording", "message": "thread", "thread": "thread", "record": "record", "doc": "doc"}
-FOUND_BY = {"any": "some words", "prefix": "a word's start", "entity": "by name", "time": "by time"}
+FOUND_BY = {
+    "any": "some words",
+    "prefix": "a word's start",
+    "entity": "by name",
+    "time": "by time",
+    "vector": "by meaning",
+}
 
 
 @dataclass(frozen=True)

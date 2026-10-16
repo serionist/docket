@@ -7,6 +7,7 @@ import hashlib
 import http.server
 import importlib.util
 import json
+import platform
 import subprocess
 import sys
 import threading
@@ -23,6 +24,7 @@ from docket.models.catalogue import Embedder, ModelFile
 from docket.models.client import Worker
 from docket.models.config import Choice
 from docket.models.provider import Off
+from docket.vault.vault import remove_tree
 
 ONE = b"the model's bytes " * 50
 # The real check, kept before the fixture below stands in for it in every other test.
@@ -49,6 +51,8 @@ class Hub(http.server.BaseHTTPRequestHandler):
     files: ClassVar[dict[str, bytes]] = {}
     ranges = True
     seen: ClassVar[list[tuple[str, str | None]]] = []
+    # How the CDN fails: "500" answers an error, "cut" closes the connection half way through the body.
+    breaks: ClassVar[str | None] = None
 
     def do_GET(self) -> None:
         self.seen.append((self.path, self.headers.get("Range")))
@@ -59,8 +63,8 @@ class Hub(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             return
         data = self.files.get(self.path.removeprefix("/cdn"))
-        if data is None:
-            self.send_response(404)
+        if data is None or self.breaks == "500":
+            self.send_response(404 if data is None else 500)
             self.end_headers()
             return
         wanted = self.headers.get("Range")
@@ -72,16 +76,22 @@ class Hub(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-        self.wfile.write(data)
+        self.wfile.write(data[: len(data) // 2] if self.breaks == "cut" else data)
 
     def log_message(self, format: str, *args: Any) -> None:
         pass
 
 
+# The real check, kept before the fixture below stands in for it.
+RUNTIME_PROBLEM = install.runtime_problem
+
+
 @pytest.fixture(autouse=True)
 def vectors_here(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The install's own steps, on any Python: whether this one's SQLite loads extensions has a test of its own."""
+    """The install's own steps, on any Python and any Mac: whether this one's SQLite loads extensions, and whether
+    ONNX Runtime ships for the system, have tests of their own."""
     monkeypatch.setattr(install, "vectors_problem", lambda: None)
+    monkeypatch.setattr(install, "runtime_problem", lambda: None)
 
 
 @pytest.fixture
@@ -89,6 +99,7 @@ def hub(monkeypatch: pytest.MonkeyPatch) -> Iterator[type[Hub]]:
     Hub.files = {"/onnx/model.onnx": ONE, "/tokenizer.json": TWO}
     Hub.ranges = True
     Hub.seen = []
+    Hub.breaks = None
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Hub)
     threading.Thread(target=server.serve_forever, args=(0.05,), daemon=True).start()
     monkeypatch.setattr(install, "HUB", f"http://127.0.0.1:{server.server_address[1]}")
@@ -142,6 +153,24 @@ def test_a_file_whose_hash_differs_is_removed_and_refused(hub: type[Hub]) -> Non
         install.fetch(embedder, embedder.tokenizer_file)
     target = config.file_path(embedder, embedder.tokenizer_file)
     assert not target.exists() and not target.with_name("tokenizer.json.part").exists()
+
+
+def test_a_download_that_fails_says_so_and_the_next_install_resumes_it(hub: type[Hub]) -> None:
+    embedder = small()
+    again = r"; run docket models install again, it resumes"
+    hub.breaks = "500"
+    with pytest.raises(DocketError, match=r"downloading onnx/model\.onnx stopped \(HTTP Error 500: .*\)" + again):
+        install.fetch(embedder, embedder.model_file)
+    # A connection closed early ends the body without an error from urllib: the size says it.
+    hub.breaks = "cut"
+    with pytest.raises(DocketError, match=r"downloading onnx/model\.onnx stopped at 450 of 900 bytes" + again):
+        install.fetch(embedder, embedder.model_file)
+    part = config.file_path(embedder, embedder.model_file).with_name("model.onnx.part")
+    assert part.stat().st_size == len(ONE) // 2
+    hub.breaks = None
+    assert install.fetch(embedder, embedder.model_file)
+    assert config.file_path(embedder, embedder.model_file).read_bytes() == ONE
+    assert hub.seen[-1] == ("/cdn/onnx/model.onnx", f"bytes={len(ONE) // 2}-")
 
 
 def done(code: int = 0, out: str = "", err: str = "") -> subprocess.CompletedProcess[str]:
@@ -231,7 +260,62 @@ def test_a_failing_uv_step_says_which_and_shows_its_last_lines(hub: type[Hub], m
     monkeypatch.setitem(catalogue.EMBEDDERS, "fake", small())
     with pytest.raises(DocketError, match=r"installing the models' packages failed \(uv exit 2\):\nerror: no matching"):
         install.install("cpu", embedder_name="fake", say=lambda _: None, which=lambda n: n, run=Uv("pip"))
-    assert config.installed("cpu") != "" and config.read() != Choice("cpu", small())
+    assert isinstance(config.installed("cpu"), str) and config.read() != Choice("cpu", small())
+
+
+def test_an_environment_whose_marker_holds_but_whose_check_fails_is_built_again(
+    hub: type[Hub], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(catalogue.EMBEDDERS, "fake", small())
+    install.install("cpu", embedder_name="fake", say=lambda _: None, which=lambda n: n, run=Uv(), start=fake_start)
+    # Such as one a remove stopped half way left: the marker and the Python, the packages gone.
+    starts = iter([Worker(fake_command(bad_hello=True)), Worker(fake_command())])
+    uv = Uv()
+    said: list[str] = []
+    found = install.install(
+        "cpu", embedder_name="fake", say=said.append, which=lambda n: n, run=uv, start=lambda c, d: next(starts)
+    )
+    assert [call[1] for call in uv.calls] == ["venv", "pip"]
+    assert f"environment: {config.env_dir('cpu')} didn't pass its check, so it is built again" in said
+    assert config.installed("cpu") == found
+    # A fresh environment that fails its check is refused, not built a third time.
+    starts = iter([Worker(fake_command(bad_hello=True))])
+    uv = Uv()
+    install.remove(lambda _: None)
+    with pytest.raises(DocketError, match="said hello in a form this Docket doesn't read"):
+        install.install(
+            "cpu", embedder_name="fake", say=lambda _: None, which=lambda n: n, run=uv, start=lambda c, d: next(starts)
+        )
+    assert [call[1] for call in uv.calls] == ["venv", "pip"]
+
+
+@pytest.mark.parametrize(
+    ("system", "release", "machine", "refused"),
+    [
+        ("linux", "", "x86_64", False),
+        ("win32", "", "AMD64", False),
+        ("darwin", "14.5", "arm64", False),
+        ("darwin", "26.0", "arm64", False),
+        ("darwin", "13.7.1", "arm64", True),
+        ("darwin", "15.1", "x86_64", True),
+        ("darwin", "", "arm64", True),
+    ],
+)
+def test_onnx_runtime_ships_for_macs_with_apple_silicon_on_macos_14_or_later(
+    monkeypatch: pytest.MonkeyPatch, *, system: str, release: str, machine: str, refused: bool
+) -> None:
+    monkeypatch.setattr(sys, "platform", system)
+    monkeypatch.setattr(platform, "mac_ver", lambda: (release, ("", "", ""), machine))
+    monkeypatch.setattr(platform, "machine", lambda: machine)
+    problem = RUNTIME_PROBLEM()
+    if not refused:
+        assert problem is None
+        return
+    assert problem is not None and "Apple silicon on macOS 14 or later only" in problem
+    assert problem.endswith("keyword search works without it")
+    monkeypatch.setattr(install, "runtime_problem", RUNTIME_PROBLEM)
+    with pytest.raises(DocketError, match="Apple silicon"):
+        install.install("cpu", say=lambda _: None)
 
 
 def test_install_refuses_without_sqlite_vec_without_uv_or_for_an_unknown_embedder(
@@ -293,3 +377,42 @@ def test_remove_deletes_the_environments_the_files_and_the_choice(
     assert config.read() == Off() and said[-1] == "models are off on this machine; keyword search goes on"
     install.remove(said.append)
     assert json.dumps(said).count("removed") == 2
+
+
+def test_a_remove_a_worker_stops_half_way_turns_models_off_and_says_what_to_do(
+    hub: type[Hub], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(catalogue.EMBEDDERS, "fake", small())
+    install.install("cpu", embedder_name="fake", say=lambda _: None, which=lambda n: n, run=Uv(), start=fake_start)
+    real = remove_tree
+
+    def held(path: Path) -> None:
+        if path == config.env_dir("cpu"):
+            raise PermissionError(13, "The process cannot access the file because it is being used by another process")
+        real(path)
+
+    monkeypatch.setattr(install, "remove_tree", held)
+    said: list[str] = []
+    with pytest.raises(
+        DocketError, match=r"the service's worker holds these files \(.*env-cpu\): docket service stop, then"
+    ):
+        install.remove(said.append)
+    # Models are off and the environment left behind no longer passes for an installed one.
+    assert config.read() == Off() and isinstance(config.installed("cpu"), str)
+    assert not config.files_dir().exists() and said == [f"removed {config.files_dir()}"]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows alone refuses to delete a file a process holds open")
+def test_on_windows_a_file_held_open_stops_the_remove_and_models_are_off(
+    hub: type[Hub], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(catalogue.EMBEDDERS, "fake", small())
+    install.install("cpu", embedder_name="fake", say=lambda _: None, which=lambda n: n, run=Uv(), start=fake_start)
+    loaded = config.env_dir("cpu") / "Lib" / "site-packages" / "onnxruntime_pybind11_state.pyd"
+    loaded.parent.mkdir(parents=True)
+    loaded.write_bytes(b"a library a running worker has loaded")
+    with loaded.open("rb"), pytest.raises(DocketError, match="docket service stop, then docket models remove"):
+        install.remove(lambda _: None)
+    assert config.read() == Off() and isinstance(config.installed("cpu"), str)
+    install.remove(lambda _: None)
+    assert not config.env_dir("cpu").exists()

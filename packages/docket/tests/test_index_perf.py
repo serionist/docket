@@ -23,7 +23,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from docket_testkit import copy_vault, fts_and_check, index_config, query_words, stem_every_word, template_with
-from models_kit import FAKE
+from models_kit import CANT_SEARCH, FAKE
 
 from docket.index import build, matching, search, vectors
 from docket.index import text as text_module
@@ -190,10 +190,11 @@ def vectors_vault(vault: Vault, tmp_path_factory: pytest.TempPathFactory) -> Vau
     return v
 
 
-def timed(vault: Vault, query: str, **kwargs: object) -> tuple[float, int]:
+def timed(vault: Vault, query: str, **kwargs: object) -> tuple[float, int, str]:
+    """A search's seconds, its hits and whether its vector stage ran."""
     started = time.monotonic()
     result = search(vault, query, now=NOW, **kwargs)  # type: ignore[arg-type]
-    return time.monotonic() - started, sum(len(g.hits) for g in result.groups)
+    return time.monotonic() - started, sum(len(g.hits) for g in result.groups), result.models.state
 
 
 def test_queries_answer_in_well_under_a_second(vault: Vault, vectors_vault: Vault) -> None:
@@ -233,11 +234,13 @@ def test_queries_answer_in_well_under_a_second(vault: Vault, vectors_vault: Vaul
         "common split": (f"{plain[0] + plain[1]} {rare}", {}),
     }
     for name, (query, kwargs) in shapes.items():
-        seconds, found = timed(vault, query, **kwargs)
+        seconds, found, _ = timed(vault, query, **kwargs)
         # The same with the vector stage on, its scan over 100,000 vectors running beside the FTS stages.
-        with_vectors, found_too = timed(vectors_vault, query, models=PerfModels(), **kwargs)
+        with_vectors, found_too, state = timed(vectors_vault, query, models=PerfModels(), **kwargs)
         print(f"{name:16} {seconds * 1000:7.1f} ms, {with_vectors * 1000:7.1f} with vectors  {found} hits  {query!a}")
         assert found and found_too, name
+        # A stage skipped for a fault would time keyword search alone; a query of time words has nothing to embed.
+        assert state == ("skipped" if name == "a time word" else "on") or CANT_SEARCH is not None, f"{name}: {state}"
         if not traced():
             assert seconds < SECONDS and with_vectors < SECONDS, name
     result = search(vault, f"{common} múlt héten", now=NOW)

@@ -288,6 +288,19 @@ def test_the_pass_says_why_it_stopped(vault: Vault, monkeypatch: pytest.MonkeyPa
     assert fill(empty, fake_models()[0]).why == "there is no index yet"
 
 
+def test_an_index_busy_past_its_timeout_stops_the_pass_and_says_so(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def locked(*args: object) -> object:
+        raise sqlite3.OperationalError("database is locked")
+
+    busy = "the index was busy past its timeout, so the pass stopped; the next one goes on from there"
+    monkeypatch.setattr(embedpass, "_write", locked)
+    assert fill(vault, fake_models()[0]).why == busy
+    monkeypatch.setattr(embedpass, "_missing", locked)
+    assert fill(vault, fake_models()[0]).why == busy
+
+
 def test_a_table_a_rebuild_took_away_stops_the_pass(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
     class Rebuilding:
         embedder = FAKE

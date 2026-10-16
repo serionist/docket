@@ -9,7 +9,9 @@ really runs on the GPU: a driver too old for CUDA 13 falls back to the CPU witho
 from __future__ import annotations
 
 import hashlib
+import http.client
 import importlib.util
+import platform
 import shutil
 import sqlite3
 import subprocess
@@ -42,6 +44,8 @@ MIN_BUDGET = CHAR_CAP
 MAX_BUDGET = 1_000_000
 CALIBRATION = ["passage: " + ("The printer sent a new quote for the second print run. " * 30)[:1200]] * 16
 PACKAGES = {"cpu": "about 50 MB", "cuda": "about 1.3 GB"}
+# ONNX Runtime 1.30's Mac wheels are for Apple silicon on macOS 14 or later.
+MACOS_MIN = 14
 CUDA_SYSTEMS = ("win32", "linux")
 
 Run = Callable[..., subprocess.CompletedProcess[str]]
@@ -55,6 +59,20 @@ class Opener(Protocol):
 
 def _open(request: urllib.request.Request, *, timeout: float) -> AbstractContextManager[IO[bytes]]:
     return urllib.request.urlopen(request, timeout=timeout)  # noqa: S310 - the hub's https URL, built from the catalogue
+
+
+def runtime_problem() -> str | None:
+    """Why ONNX Runtime has no build for this system: on a Mac it ships for Apple silicon on macOS 14 or later only."""
+    if sys.platform != "darwin":
+        return None
+    release = platform.mac_ver()[0]
+    major = int(release.split(".")[0]) if release.split(".")[0].isdigit() else 0
+    if platform.machine() != "arm64" or major < MACOS_MIN:
+        return (
+            f"the models' ONNX Runtime ships for Macs with Apple silicon on macOS {MACOS_MIN} or later only, and this "
+            f"is macOS {release or 'unknown'} on {platform.machine()}; keyword search works without it"
+        )
+    return None
 
 
 def vectors_problem() -> str | None:
@@ -137,12 +155,24 @@ def fetch(embedder: Embedder, file: ModelFile, opener: Opener = _open) -> bool:
         have = 0
     url = f"{HUB}/{embedder.repo}/resolve/{embedder.revision}/{file.path}"
     headers = {"Range": f"bytes={have}-"} if have else {}
-    with opener(urllib.request.Request(url, headers=headers), timeout=FETCH_SECONDS) as answer:  # noqa: S310
-        # A server that ignores the range sends the whole file again.
-        resumed = have > 0 and getattr(answer, "status", 200) == 206
-        with part.open("ab" if resumed else "wb") as out:
-            shutil.copyfileobj(answer, out, CHUNK)
-    if part.stat().st_size != file.size or _sha256(part) != file.sha256:
+    try:
+        with opener(urllib.request.Request(url, headers=headers), timeout=FETCH_SECONDS) as answer:  # noqa: S310
+            # A server that ignores the range sends the whole file again.
+            resumed = have > 0 and getattr(answer, "status", 200) == 206
+            with part.open("ab" if resumed else "wb") as out:
+                shutil.copyfileobj(answer, out, CHUNK)
+    except (OSError, http.client.HTTPException) as e:
+        raise DocketError(
+            f"downloading {file.path} stopped ({e}); run docket models install again, it resumes"
+        ) from None
+    got = part.stat().st_size
+    if got < file.size:
+        # A connection closed early ends the body without an error: what came is kept for the next install.
+        raise DocketError(
+            f"downloading {file.path} stopped at {got:,} of {file.size:,} bytes; run docket models install again, "
+            "it resumes"
+        )
+    if got != file.size or _sha256(part) != file.sha256:
         part.unlink()
         raise DocketError(
             f"{file.path} didn't match its pinned sha256 and was removed; run docket models install again"
@@ -187,7 +217,7 @@ def install(
     opener: Opener = _open,
     start: Starter = worker_for,
 ) -> Installed:
-    problem = vectors_problem()
+    problem = runtime_problem() or vectors_problem()
     if problem is not None:
         raise DocketError(problem)
     embedder = EMBEDDERS.get(embedder_name)
@@ -201,13 +231,23 @@ def install(
         f"models: {embedder.name} ({embedder.licence}) on {device}; downloads {embedder.download / 1e6:,.0f} MB of "
         f"model files and {PACKAGES[device]} of packages, once"
     )
-    if isinstance(config.installed(device), str):
+    built = isinstance(config.installed(device), str)
+    if built:
         say(f"environment: {config.env_dir(device)}")
         build_env(device, uv, run)
     for file in embedder.files:
         say(f"{file.path}: {'downloaded' if fetch(embedder, file, opener) else 'already here'}")
     choice = Choice(device, embedder)
-    budget = check_and_time(start(choice, device), embedder, device)
+    try:
+        budget = check_and_time(start(choice, device), embedder, device)
+    except DocketError:
+        if built:
+            raise
+        # An environment that fails its check is built again rather than trusted for its marker: a remove that a
+        # running worker stopped half way could leave both the marker and the Python behind.
+        say(f"environment: {config.env_dir(device)} didn't pass its check, so it is built again")
+        build_env(device, uv, run)
+        budget = check_and_time(start(choice, device), embedder, device)
     found = Installed(device, budget, config.requirements_hash(device), config.python_version())
     config.mark(found)
     config.write(device, embedder)
@@ -216,15 +256,26 @@ def install(
 
 
 def remove(say: Callable[[str], None] = print) -> None:
-    """The environments, the model files and the config block, gone; the index keeps working without them."""
-    for device in DEVICES:
-        env = config.env_dir(device)
-        if env.exists():
-            remove_tree(env)
-            say(f"removed {env}")
-    files = config.files_dir()
-    if files.exists():
-        remove_tree(files)
-        say(f"removed {files}")
+    """The environments, the model files and the config block, gone; the index keeps working without them.
+
+    The choice and each environment's marker go first, so whatever happens next models are off and no half-deleted
+    environment passes for an installed one: on Windows a running worker holds its environment's files."""
     config.forget()
+    for device in DEVICES:
+        (config.env_dir(device) / config.MARKER).unlink(missing_ok=True)
+    held: list[str] = []
+    for folder in [*(config.env_dir(device) for device in DEVICES), config.files_dir()]:
+        if not folder.exists():
+            continue
+        try:
+            remove_tree(folder)
+        except OSError:
+            held.append(str(folder))
+            continue
+        say(f"removed {folder}")
+    if held:
+        raise DocketError(
+            f"the service's worker holds these files ({', '.join(held)}): docket service stop, then docket models "
+            "remove"
+        )
     say("models are off on this machine; keyword search goes on")

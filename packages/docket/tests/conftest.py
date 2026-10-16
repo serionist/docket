@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import os
+import shutil
+import tempfile
 from collections.abc import Callable
+from pathlib import Path
 
 import keyring
 import pytest
@@ -9,6 +13,35 @@ from keyring.backends.fail import Keyring as FailKeyring
 
 from docket.vault.config import VaultConfig
 from docket.vault.records import RawRecord
+
+# The session's own folders, set before any fixture runs: tests never touch the real Docket folders, not even to read
+# them, and a module's fixtures run before `isolated` gives each test folders of its own.
+HOME_VAR = "DOCKET_TEST_HOME"
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    home = Path(tempfile.mkdtemp(prefix="docket-tests-"))
+    gitconfig = home / "gitconfig"
+    gitconfig.write_text(TEST_GITCONFIG, encoding="utf-8")
+    os.environ.update(
+        {
+            HOME_VAR: str(home),
+            "GIT_CONFIG_GLOBAL": str(gitconfig),
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "DOCKET_CONFIG_DIR": str(home / "docket"),
+            "DOCKET_STATE_DIR": str(home / "docket-state"),
+            "DOCKET_MODELS_DIR": str(home / "docket-models"),
+            "PYTHON_KEYRING_BACKEND": "keyring.backends.fail.Keyring",
+        }
+    )
+    os.environ.pop("DOCKET_VAULT", None)
+    keyring.set_keyring(FailKeyring())
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:
+    home = os.environ.pop(HOME_VAR, None)
+    if home is not None:
+        shutil.rmtree(home, ignore_errors=True)
 
 
 @pytest.fixture(scope="session", autouse=True)

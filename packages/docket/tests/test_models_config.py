@@ -14,6 +14,7 @@ import yaml
 from models_kit import FAKE, make_env
 
 from docket import userconfig
+from docket.index import build
 from docket.models import config, runtime
 from docket.models.catalogue import E5_SMALL
 from docket.models.client import Worker
@@ -48,6 +49,18 @@ def test_a_block_that_doesnt_read_turns_models_off_and_says_why(block: Any, said
     assert isinstance(got, Off) and got.why is not None
     assert said in got.why and got.why.endswith("so models are off")
     assert str(userconfig.config_path()) in got.why
+
+
+@pytest.mark.parametrize(
+    "content", [b"models:\n  provider: local\n\tdevice: cpu\n", b"models: {device: cpu}\n# caf\xe9\n"]
+)
+def test_a_config_that_isnt_yaml_turns_models_off_and_says_why(content: bytes) -> None:
+    path = userconfig.config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    assert read() == Off(f"{path} doesn't read as YAML, so models are off")
+    # A rebuild then keeps no vector table, and nothing raises on the way.
+    assert build.configured_table() is None
 
 
 def test_provider_none_is_off_quietly_and_a_good_block_is_a_choice() -> None:

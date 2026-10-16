@@ -123,7 +123,7 @@ def fill(
         try:
             batch, have = _missing(conn, table, rows)
         except sqlite3.OperationalError:
-            report.why = "the vector table went with a rebuild"
+            report.why = _stopped(conn, table)
             break
         finally:
             conn.close()
@@ -141,7 +141,7 @@ def fill(
             try:
                 written = _write(conn, table, batch, vecs)
             except sqlite3.OperationalError:
-                report.why = "the vector table went with a rebuild"
+                report.why = _stopped(conn, table)
                 break
             finally:
                 conn.close()
@@ -158,6 +158,18 @@ def fill(
     if report.why is None and not stop() and report.have == report.total:
         report.dropped = _drop_others(vault, table)
     return report
+
+
+def _stopped(conn: sqlite3.Connection, table: VecTable) -> str:
+    """Why a statement on the vector table failed: the table went with a rebuild, or the index stayed busy past the
+    connection's timeout, which the next pass waits out."""
+    try:
+        gone = not vectors.holds(conn, "main", table.name)
+    except sqlite3.OperationalError:
+        gone = False
+    if gone:
+        return "the vector table went with a rebuild"
+    return "the index was busy past its timeout, so the pass stopped; the next one goes on from there"
 
 
 def _coverage(db: Path, table: VecTable) -> tuple[int, int]:
