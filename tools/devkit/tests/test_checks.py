@@ -448,3 +448,85 @@ def test_under_coverage_the_timed_tests_stay_in_the_one_run(tmp_path: Path, monk
     assert "-m" not in run[3:] and run[run.index("-n") + 1] == "auto"
     assert "--cov" in run and any(a.startswith("--cov-report=json:") for a in run) and "--cov-append" not in run
     assert out.status == "fail" and "a test broke" in out.detail
+
+
+def test_models_lock_compiles_each_requirements_file_from_versions_a_week_old(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import subprocess
+    from datetime import date
+
+    from devkit import cli
+
+    folder = tmp_path / cli.MODELS
+    folder.mkdir(parents=True)
+    for device in ("cuda", "cpu"):
+        (folder / f"requirements-{device}.in").write_text("numpy==2.5.3\n", encoding="utf-8")
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(cli, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(cli, "_today", lambda: date(2026, 10, 15))
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert cli.main(["models-lock"]) == 0
+    assert [Path(c[3]).name for c in calls] == ["requirements-cpu.in", "requirements-cuda.in"]
+    assert all(c[c.index("--exclude-newer") + 1] == "2026-10-08" and "--generate-hashes" in c for c in calls)
+    assert all(c[-1].endswith(".txt") for c in calls)
+    assert "from versions published before 2026-10-08" in capsys.readouterr().out
+
+
+def test_models_lock_says_why_it_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import subprocess
+
+    from devkit import cli
+
+    monkeypatch.setattr(cli, "repo_root", lambda: tmp_path)
+    (tmp_path / cli.MODELS).mkdir(parents=True)
+    assert cli.main(["models-lock"]) == 2
+    assert "no requirements-*.in" in capsys.readouterr().err
+    (tmp_path / cli.MODELS / "requirements-cpu.in").write_text("x\n", encoding="utf-8")
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **_: subprocess.CompletedProcess(cmd, 1, "", "no solution"))
+    assert cli.main(["models-lock"]) == 2
+    assert "no solution" in capsys.readouterr().err
+
+
+def test_the_models_lane_needs_the_models_and_holds_their_floors(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
+    from devkit import evalfloors, gate
+
+    ctx = gate.Ctx(root=repo, lane="models", ci=False, base=None, pr=None)
+    monkeypatch.delenv(gate.MODELS_ENV, raising=False)
+    assert gate.step_models(ctx).status == "fail"
+    monkeypatch.setenv(gate.MODELS_ENV, str(repo / "models"))
+    floors = repo / evalfloors.FLOORS_MODELS
+    floors.parent.mkdir(parents=True)
+    floors.write_text(json.dumps({"$above": "print", "typo": {"recall": 0.5, "mrr": 0.4}}), encoding="utf-8")
+
+    def ran(_ctx: gate.Ctx, cmd: list[str], *, env: dict[str, str] | None = None) -> tuple[int, list[str]]:
+        assert env is not None and "embedder" in cmd
+        Path(env[evalfloors.REPORT_MODELS_ENV]).write_text(
+            json.dumps({"typo": {"recall": 0.5, "mrr": 0.4}}), encoding="utf-8"
+        )
+        return 0, ["1 passed"]
+
+    monkeypatch.setattr(gate, "_run", ran)
+    out = gate.step_models(ctx)
+    assert out.status == "ok" and "typo 0.50/0.40" in out.detail[0]
+    monkeypatch.setattr(gate, "_run", lambda _ctx, cmd, *, env=None: (1, ["a test failed"]))
+    assert gate.step_models(ctx).status == "fail"
+
+    def below(_ctx: gate.Ctx, cmd: list[str], *, env: dict[str, str] | None = None) -> tuple[int, list[str]]:
+        assert env is not None
+        Path(env[evalfloors.REPORT_MODELS_ENV]).write_text(
+            json.dumps({"typo": {"recall": 0.4, "mrr": 0.4}}), encoding="utf-8"
+        )
+        return 0, ["1 passed"]
+
+    monkeypatch.setattr(gate, "_run", below)
+    assert gate.step_models(ctx).status == "fail"

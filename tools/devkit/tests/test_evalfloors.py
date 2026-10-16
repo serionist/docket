@@ -72,3 +72,30 @@ def test_check_reads_the_test_s_numbers_and_the_base_s_floors(repo: Path, git: C
     assert evalfloors.check(repo, base)[0] == [
         "eval paraphrase: recall lowered from the base; say why in a new lowered note on it"
     ]
+
+
+def test_the_models_floors_print_a_rise_until_three_runs_agree(repo: Path) -> None:
+    floors = repo / evalfloors.FLOORS_MODELS
+    floors.parent.mkdir(parents=True)
+    floors.write_text(json.dumps({"$above": "print", **FLOORS}), encoding="utf-8")
+    numbers = repo / evalfloors.REPORT_MODELS
+    numbers.parent.mkdir()
+    numbers.write_text(json.dumps({**FLOORS, "paraphrase": {"recall": 0.2, "mrr": 0.06}}), encoding="utf-8")
+    failures, line = evalfloors.check(repo, None, models=True)
+    assert failures == []
+    assert line.endswith(
+        "; above the floor, to raise once three runs agree: eval paraphrase recall: 0.20, floor 0.11: raise it to 0.20"
+    )
+    floors.write_text(json.dumps({"$above": "fail", **FLOORS}), encoding="utf-8")
+    assert evalfloors.check(repo, None, models=True)[0] == [
+        "eval paraphrase recall: 0.20, floor 0.11: raise it to 0.20"
+    ]
+    numbers.unlink()
+    assert evalfloors.check(repo, None, models=True)[0] == [
+        f"eval: the question set's test wrote no numbers to {evalfloors.REPORT_MODELS}"
+    ]
+    measured = {"typo": {"recall": 0.5, "mrr": 0.4}}
+    assert (
+        f"add it to {evalfloors.FLOORS_MODELS}"
+        in evalfloors.judge(measured, {}, None, file=evalfloors.FLOORS_MODELS)[0][0]
+    )

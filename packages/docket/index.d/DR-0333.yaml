@@ -1,0 +1,11 @@
+decisions:
+  - id: DR-0333
+    title: Model files come from Hugging Face at pinned revisions with their sha256, fetched once at install into the user's cache
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#67"]
+    description: The catalogue, data in the package, gives each model's repo, revision, files with sha256 and size, dims, pooling, prefixes and licence. The install downloads them, resumable, into models/<repo>/<revision>/ under the user's cache folder, refuses and removes a file whose hash differs, and never writes into a vault or a repo. The worker reads them by path, so nothing touches the network after install.
+    not_chosen:
+      - "A hub client in the worker: a network path at run time, and files that change under a moving revision."

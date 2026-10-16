@@ -19,12 +19,22 @@ from eval_vault import EVAL_QUESTIONS, eval_template
 
 from docket.index import rebuild
 from docket.index.build import db_path
+from docket.index.embedpass import fill
+from docket.models import config
+from docket.models.catalogue import E5_SMALL
+from docket.models.provider import Models
+from docket.models.runtime import open_models
 from docket.questions import KINDS, EvalReport, Found, QuestionSet, answers, load, run
 from docket.vault.anchors import parse_anchor
 from docket.vault.vault import Vault
 
 FLOORS = Path(__file__).resolve().parents[3] / "tools" / "devkit" / "eval-floors.json"
 REPORT = "DOCKET_EVAL_REPORT"
+# The question set with the embedder (DR-0339): a folder `docket models install --device cpu` filled, as the models CI
+# job's cache does; its numbers go where the gate's models lane asks, against floors of their own.
+MODELS = "DOCKET_TEST_MODELS"
+MODELS_FLOORS = FLOORS.with_name("eval-floors-models.json")
+MODELS_REPORT = "DOCKET_EVAL_MODELS_REPORT"
 
 
 @pytest.fixture(scope="module")
@@ -74,14 +84,14 @@ def test_some_chunk_answers_every_wanted_locator(vault: Vault, questions: Questi
     assert dead == []
 
 
-def floors() -> dict[str, dict[str, float]]:
-    data: dict[str, dict[str, float]] = json.loads(FLOORS.read_text(encoding="utf-8"))
+def floors(file: Path = FLOORS) -> dict[str, dict[str, float]]:
+    data: dict[str, dict[str, float]] = json.loads(file.read_text(encoding="utf-8"))
     return {kind: floor for kind, floor in data.items() if not kind.startswith("$")}
 
 
-def write_report(report: EvalReport) -> None:
-    """The numbers per kind, for the gate's full lane to hold against the floors."""
-    path = os.environ.get(REPORT)
+def write_report(report: EvalReport, env: str = REPORT) -> None:
+    """The numbers per kind, for the gate's full lane (or its models lane) to hold against the floors."""
+    path = os.environ.get(env)
     if path:
         numbers = {kind: {"recall": s.recall, "mrr": s.mrr} for kind, s in report.kinds.items()}
         Path(path).write_text(json.dumps(numbers, indent=2) + "\n", encoding="utf-8")
@@ -90,7 +100,11 @@ def write_report(report: EvalReport) -> None:
 def test_no_kind_falls_below_its_floor(vault: Vault, questions: QuestionSet) -> None:
     report = run(vault, questions, k=10)
     write_report(report)
-    wanted = floors()
+    below_floors(report, floors())
+    assert report.unknown == [] and not any(r.refused for r in report.questions)
+
+
+def below_floors(report: EvalReport, wanted: dict[str, dict[str, float]]) -> None:
     assert set(report.kinds) == set(wanted)
     below = [
         f"{kind} {measure}: {getattr(score, measure):.4f} is below its floor {wanted[kind][measure]}"
@@ -99,4 +113,24 @@ def test_no_kind_falls_below_its_floor(vault: Vault, questions: QuestionSet) -> 
         if getattr(score, measure) + 1e-9 < wanted[kind][measure]
     ]
     assert below == [], below
-    assert report.unknown == [] and not any(r.refused for r in report.questions)
+
+
+@pytest.mark.skipif(not os.environ.get(MODELS), reason="the models: docket models install, then DOCKET_TEST_MODELS")
+def test_with_the_embedder_no_kind_falls_below_its_floor(
+    tmp_path_factory: pytest.TempPathFactory, questions: QuestionSet, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DOCKET_MODELS_DIR", os.environ[MODELS])
+    config.write("cpu", E5_SMALL)
+    models = open_models()
+    assert isinstance(models, Models) and models.why is None, getattr(models, "why", None)
+    try:
+        v = copy_vault(eval_template(tmp_path_factory), tmp_path_factory.mktemp("eval-models"))
+        rebuild(v)
+        embedded = fill(v, models)
+        assert embedded.why is None and embedded.have == embedded.total
+        report = run(v, questions, k=10, models=models)
+    finally:
+        models.close()
+    write_report(report, MODELS_REPORT)
+    assert report.vectors is not None and report.vectors.skipped == 0, report.vectors
+    below_floors(report, floors(MODELS_FLOORS))

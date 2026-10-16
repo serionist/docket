@@ -44,6 +44,7 @@ async def search(
             since=index.parse_when(since, "since"),
             until=index.parse_when(until, "until"),
             k=k,
+            models=service.models.for_search(),
         )
         return result, render.text(render.search(result, ZoneInfo(vault.config.owner.time_zone)))
 

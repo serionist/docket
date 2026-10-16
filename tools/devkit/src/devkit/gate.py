@@ -33,13 +33,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from devkit import commits, content, coverage, evalfloors
+from devkit import commits, content, coverage, evalfloors, pins
 from devkit.regime import Regime
 from devkit.repo import KitError, default_base, listed_files, repo_root, utf8_stdio
 from devkit.store import Store
 
 AGENTS_MAX_LINES = 150
-LANES = ("quick", "full", "os")
+LANES = ("quick", "full", "os", "models")
+MODELS_ENV = "DOCKET_TEST_MODELS"
+MODELS_TEST = "packages/docket/tests/test_eval_set.py"
 
 
 @dataclass
@@ -111,6 +113,9 @@ def step_lock(ctx: Ctx) -> Outcome:
     uv = shutil.which("uv")
     if uv is None:
         return Outcome.fail("uv isn't on PATH")
+    found = pins.problems(ctx.root)
+    if found:
+        return Outcome.fail(*found)
     return _tool(ctx, [uv, "lock", "--check"])
 
 
@@ -345,8 +350,26 @@ def _alone_after(ctx: Ctx, code: int, lines: list[str], cmd: list[str], env: dic
     return Outcome.ok(_summary(lines), alone, *timed(timed_lines), *slowest(lines))
 
 
+def step_models(ctx: Ctx) -> Outcome:
+    """The question set with the embedder, against floors of its own (DR-0339): the models CI job runs it."""
+    folder = os.environ.get(MODELS_ENV)
+    if not folder:
+        return Outcome.fail(
+            f"set {MODELS_ENV} to a folder `docket models install --device cpu` filled (it sets DOCKET_MODELS_DIR)"
+        )
+    numbers = ctx.root / evalfloors.REPORT_MODELS
+    numbers.parent.mkdir(exist_ok=True)
+    numbers.unlink(missing_ok=True)
+    cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", MODELS_TEST, "-k", "embedder"]
+    code, lines = _run(ctx, cmd, env={evalfloors.REPORT_MODELS_ENV: str(numbers)})
+    if code != 0:
+        return Outcome.fail(*lines[-60:])
+    failures, line = evalfloors.check(ctx.root, ctx.base, models=True)
+    return Outcome.fail(*failures) if failures else Outcome.ok(line)
+
+
 STEPS = [
-    Step("lock", ("quick", "full"), "uv.lock matches the pyproject files", step_lock),
+    Step("lock", ("quick", "full"), "uv.lock matches the pyproject files; the models' pins the dev group's", step_lock),
     Step("ruff", ("quick", "full"), "lint", step_ruff),
     Step("format", ("quick", "full"), "formatting", step_format),
     Step("types", ("quick", "full", "os"), "pyright (strict on src/)", step_types),
@@ -356,6 +379,7 @@ STEPS = [
     Step("secrets", ("quick", "full"), "gitleaks", step_secrets),
     Step("harness", ("quick", "full"), "AGENTS.md, skills, plugin manifests", step_harness),
     Step("tests", ("full", "os"), "pytest; coverage floors in the full lane, the timed tests alone in os", step_tests),
+    Step("models", ("models",), "the question set with the embedder, against its floors", step_models),
 ]
 
 

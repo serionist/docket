@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0331
+    title: The worker runs ONNX Runtime with tokenizers and numpy, on the CPU or an NVIDIA GPU, with no torch
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#67"]
+    description: "The worker loads each model's ONNX file and its tokenizer.json, pools and normalizes in numpy, and runs on ONNX Runtime's CPU provider, or on its CUDA provider from onnxruntime-gpu with the CUDA 13 and cuDNN wheels. CUDA's first run sets up its kernels for about 6 s, after which any length takes milliseconds, so the worker runs one input as it loads, before its hello. Measured with multilingual-e5-small on the maintainer's desktop: it starts in 0.8 s against torch's 7 s, holds 0.75 GB on a CPU against 1.5 GB, embeds 7,400 chunks in 111 s on 16 threads and 177 s on 4 and in 4.2 s on an RTX 5090, a query in 3 to 4 ms, and its fp32 vectors equal torch's to four decimals. The CUDA environment is a 1.27 GB download against torch's 2.75 GB on Windows. Macs run the CPU provider until MPS or CoreML is measured on one."
+    not_chosen:
+      - "sentence-transformers and torch: a 2.75 GB CUDA wheel on Windows, 7 s to start, twice the memory on a CPU, and its ONNX extra can't install beside transformers 5."
+      - "int8 ONNX files: the vectors drift to a cosine of 0.996 from fp32's, for no speed on a desktop CPU."

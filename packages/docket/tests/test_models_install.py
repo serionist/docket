@@ -1,0 +1,436 @@
+"""`docket models install` and `remove` with no network and no uv: the files come from a local HTTP server on a free
+port that redirects and serves ranges as the hub does, uv is a stub, and the worker is the fake one."""
+
+from __future__ import annotations
+
+import hashlib
+import http.server
+import importlib.util
+import json
+import platform
+import subprocess
+import sys
+import threading
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any, ClassVar
+
+import pytest
+from models_kit import FAKE, fake_command
+
+from docket.errors import DocketError
+from docket.models import catalogue, config, install
+from docket.models.catalogue import Embedder, ModelFile
+from docket.models.client import Worker
+from docket.models.config import Choice
+from docket.models.provider import Off
+from docket.service import client
+from docket.vault.vault import remove_tree
+
+ONE = b"the model's bytes " * 50
+# The real check, kept before the fixture below stands in for it in every other test.
+VECTORS_PROBLEM = install.vectors_problem
+TWO = b'{"tokenizer": true}'
+
+
+def small(name: str = "fake") -> Embedder:
+    return Embedder(
+        name=name,
+        repo="example/fake-embedder",
+        revision=FAKE.revision,
+        model_file=ModelFile("onnx/model.onnx", len(ONE), hashlib.sha256(ONE).hexdigest()),
+        tokenizer_file=ModelFile("tokenizer.json", len(TWO), hashlib.sha256(TWO).hexdigest()),
+        dims=FAKE.dims,
+        max_tokens=512,
+        query_prefix="query: ",
+        passage_prefix="passage: ",
+        licence="MIT",
+    )
+
+
+class Hub(http.server.BaseHTTPRequestHandler):
+    files: ClassVar[dict[str, bytes]] = {}
+    ranges = True
+    seen: ClassVar[list[tuple[str, str | None]]] = []
+    # How the CDN fails: "500" answers an error, "cut" closes the connection half way through the body.
+    breaks: ClassVar[str | None] = None
+
+    def do_GET(self) -> None:
+        self.seen.append((self.path, self.headers.get("Range")))
+        if "/resolve/" in self.path:
+            # The hub sends a file on to its CDN, as huggingface.co does.
+            self.send_response(302)
+            self.send_header("Location", "/cdn/" + self.path.split("/resolve/", 1)[1].split("/", 1)[1])
+            self.end_headers()
+            return
+        data = self.files.get(self.path.removeprefix("/cdn"))
+        if data is None or self.breaks == "500":
+            self.send_response(404 if data is None else 500)
+            self.end_headers()
+            return
+        wanted = self.headers.get("Range")
+        if wanted and self.ranges:
+            start = int(wanted.removeprefix("bytes=").rstrip("-"))
+            self.send_response(206)
+            data = data[start:]
+        else:
+            self.send_response(200)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data[: len(data) // 2] if self.breaks == "cut" else data)
+
+    def log_message(self, format: str, *args: Any) -> None:
+        pass
+
+
+# The real check, kept before the fixture below stands in for it.
+RUNTIME_PROBLEM = install.runtime_problem
+
+
+@pytest.fixture(autouse=True)
+def vectors_here(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The install's own steps, on any Python and any Mac: whether this one's SQLite loads extensions, and whether
+    ONNX Runtime ships for the system, have tests of their own."""
+    monkeypatch.setattr(install, "vectors_problem", lambda: None)
+    monkeypatch.setattr(install, "runtime_problem", lambda: None)
+
+
+@pytest.fixture
+def hub(monkeypatch: pytest.MonkeyPatch) -> Iterator[type[Hub]]:
+    Hub.files = {"/onnx/model.onnx": ONE, "/tokenizer.json": TWO}
+    Hub.ranges = True
+    Hub.seen = []
+    Hub.breaks = None
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Hub)
+    threading.Thread(target=server.serve_forever, args=(0.05,), daemon=True).start()
+    monkeypatch.setattr(install, "HUB", f"http://127.0.0.1:{server.server_address[1]}")
+    yield Hub
+    server.shutdown()
+    server.server_close()
+
+
+def test_a_file_is_fetched_through_the_redirect_and_kept_when_its_hash_holds(hub: type[Hub]) -> None:
+    embedder = small()
+    assert install.fetch(embedder, embedder.model_file) is True
+    target = config.file_path(embedder, embedder.model_file)
+    assert target.read_bytes() == ONE and not target.with_name("model.onnx.part").exists()
+    assert hub.seen[0] == (f"/example/fake-embedder/resolve/{FAKE.revision}/onnx/model.onnx", None)
+    assert install.fetch(embedder, embedder.model_file) is False
+
+
+def test_a_broken_download_resumes_from_its_part(hub: type[Hub]) -> None:
+    embedder = small()
+    target = config.file_path(embedder, embedder.model_file)
+    target.parent.mkdir(parents=True)
+    target.with_name("model.onnx.part").write_bytes(ONE[:100])
+    assert install.fetch(embedder, embedder.model_file)
+    assert target.read_bytes() == ONE
+    assert hub.seen[-1] == ("/cdn/onnx/model.onnx", "bytes=100-")
+
+
+def test_a_server_that_ignores_the_range_sends_it_whole(hub: type[Hub]) -> None:
+    hub.ranges = False
+    embedder = small()
+    target = config.file_path(embedder, embedder.model_file)
+    target.parent.mkdir(parents=True)
+    target.with_name("model.onnx.part").write_bytes(b"x" * 100)
+    assert install.fetch(embedder, embedder.model_file)
+    assert target.read_bytes() == ONE
+
+
+def test_a_part_as_long_as_the_file_starts_over(hub: type[Hub]) -> None:
+    embedder = small()
+    target = config.file_path(embedder, embedder.model_file)
+    target.parent.mkdir(parents=True)
+    target.with_name("model.onnx.part").write_bytes(b"x" * len(ONE))
+    assert install.fetch(embedder, embedder.model_file)
+    assert target.read_bytes() == ONE
+
+
+def test_a_file_whose_hash_differs_is_removed_and_refused(hub: type[Hub]) -> None:
+    hub.files["/tokenizer.json"] = b'{"tokenizer": fake}'
+    embedder = small()
+    with pytest.raises(DocketError, match=r"tokenizer\.json didn't match its pinned sha256 and was removed"):
+        install.fetch(embedder, embedder.tokenizer_file)
+    target = config.file_path(embedder, embedder.tokenizer_file)
+    assert not target.exists() and not target.with_name("tokenizer.json.part").exists()
+
+
+def test_a_download_that_fails_says_so_and_the_next_install_resumes_it(hub: type[Hub]) -> None:
+    embedder = small()
+    again = r"; run docket models install again, it resumes"
+    hub.breaks = "500"
+    with pytest.raises(DocketError, match=r"downloading onnx/model\.onnx stopped \(HTTP Error 500: .*\)" + again):
+        install.fetch(embedder, embedder.model_file)
+    # A connection closed early ends the body without an error from urllib: the size says it.
+    hub.breaks = "cut"
+    with pytest.raises(DocketError, match=r"downloading onnx/model\.onnx stopped at 450 of 900 bytes" + again):
+        install.fetch(embedder, embedder.model_file)
+    part = config.file_path(embedder, embedder.model_file).with_name("model.onnx.part")
+    assert part.stat().st_size == len(ONE) // 2
+    hub.breaks = None
+    assert install.fetch(embedder, embedder.model_file)
+    assert config.file_path(embedder, embedder.model_file).read_bytes() == ONE
+    assert hub.seen[-1] == ("/cdn/onnx/model.onnx", f"bytes={len(ONE) // 2}-")
+
+
+def done(code: int = 0, out: str = "", err: str = "") -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess([], code, out, err)
+
+
+@pytest.mark.parametrize(
+    ("wanted", "smi", "answer", "system", "device"),
+    [
+        ("auto", None, done(), "linux", "cpu"),
+        ("auto", "nvidia-smi", done(0, "GPU 0: An Example GPU"), "win32", "cuda"),
+        ("auto", "nvidia-smi", done(9, "", "NVIDIA-SMI has failed"), "linux", "cpu"),
+        ("auto", "nvidia-smi", done(0, "GPU 0: An Example GPU"), "darwin", "cpu"),
+        ("cpu", None, done(), "darwin", "cpu"),
+        ("cuda", None, done(), "linux", "cuda"),
+    ],
+)
+def test_the_device_is_the_one_asked_for_or_found(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    wanted: str,
+    smi: str | None,
+    answer: subprocess.CompletedProcess[str],
+    system: str,
+    device: str,
+) -> None:
+    monkeypatch.setattr(sys, "platform", system)
+    assert install.pick_device(wanted, which=lambda _: smi, run=lambda *a, **k: answer) == device
+
+
+def test_cuda_on_a_mac_and_an_unknown_device_are_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "platform", "darwin")
+    with pytest.raises(DocketError, match="CUDA runs on Windows and Linux"):
+        install.pick_device("cuda")
+    with pytest.raises(DocketError, match=r"--device is auto, cpu or cuda, not 'tpu'"):
+        install.pick_device("tpu")
+
+
+class Uv:
+    """uv as the install calls it: a venv makes the environment's Python, an install takes the hashed file."""
+
+    def __init__(self, fail_at: str | None = None) -> None:
+        self.calls: list[list[str]] = []
+        self.fail_at = fail_at
+
+    def __call__(self, args: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        self.calls.append(args)
+        step = args[1]
+        if step == self.fail_at:
+            return done(2, "", "error: no matching distribution\nhint: check the index")
+        if step == "venv":
+            python = config.env_python(Path(args[-1]))
+            python.parent.mkdir(parents=True, exist_ok=True)
+            python.write_bytes(b"")
+        return done()
+
+
+def fake_start(choice: Choice, device: str) -> Worker:
+    return Worker(fake_command(dims=choice.embedder.dims))
+
+
+def test_install_builds_fetches_checks_times_and_turns_models_on(
+    hub: type[Hub], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(catalogue.EMBEDDERS, "fake", small())
+    uv = Uv()
+    said: list[str] = []
+    found = install.install(
+        "cpu", embedder_name="fake", say=said.append, which=lambda name: f"/bin/{name}", run=uv, start=fake_start
+    )
+    assert found.device == "cpu" and install.MIN_BUDGET <= found.budget <= install.MAX_BUDGET
+    assert uv.calls[0][:5] == ["/bin/uv", "venv", "--clear", "--python", sys.executable]
+    assert uv.calls[1][:3] == ["/bin/uv", "pip", "install"] and "--require-hashes" in uv.calls[1]
+    assert uv.calls[1][-1].endswith("requirements-cpu.txt")
+    assert config.installed("cpu") == found
+    assert config.read() == Choice("cpu", small())
+    assert said[0].startswith("models: fake (MIT) on cpu; downloads 0 MB of model files and about 50 MB of packages")
+    assert "onnx/model.onnx: downloaded" in said and said[-1].startswith("ready: fake on cpu")
+    # Again: the environment and the files are there, so only the check and the timing run.
+    uv.calls.clear()
+    said.clear()
+    install.install("cpu", embedder_name="fake", say=said.append, which=lambda n: f"/bin/{n}", run=uv, start=fake_start)
+    assert uv.calls == [] and "onnx/model.onnx: already here" in said
+
+
+def test_a_failing_uv_step_says_which_and_shows_its_last_lines(hub: type[Hub], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(catalogue.EMBEDDERS, "fake", small())
+    with pytest.raises(DocketError, match=r"installing the models' packages failed \(uv exit 2\):\nerror: no matching"):
+        install.install("cpu", embedder_name="fake", say=lambda _: None, which=lambda n: n, run=Uv("pip"))
+    assert isinstance(config.installed("cpu"), str) and config.read() != Choice("cpu", small())
+
+
+def test_a_build_that_fails_with_a_service_recorded_says_to_stop_it(
+    hub: type[Hub], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Such as an install right after a remove the service's worker stopped: on Windows uv can't clear the folder."""
+    monkeypatch.setitem(catalogue.EMBEDDERS, "fake", small())
+    with pytest.raises(DocketError) as alone:
+        install.install("cpu", embedder_name="fake", say=lambda _: None, which=lambda n: n, run=Uv("venv"))
+    assert "docket service stop" not in str(alone.value)
+    monkeypatch.setattr(client, "recorded", lambda: {"pid": 4242, "port": 8799})
+    with pytest.raises(DocketError) as held:
+        install.install("cpu", embedder_name="fake", say=lambda _: None, which=lambda n: n, run=Uv("venv"))
+    assert str(held.value) == (
+        "making the models' environment failed (uv exit 2):\nerror: no matching distribution\nhint: check the index\n"
+        "the service's worker may hold the environment's files: docket service stop, then docket models install"
+    )
+
+
+def test_an_environment_whose_marker_holds_but_whose_check_fails_is_built_again(
+    hub: type[Hub], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(catalogue.EMBEDDERS, "fake", small())
+    install.install("cpu", embedder_name="fake", say=lambda _: None, which=lambda n: n, run=Uv(), start=fake_start)
+    # Such as one a remove stopped half way left: the marker and the Python, the packages gone.
+    starts = iter([Worker(fake_command(bad_hello=True)), Worker(fake_command())])
+    uv = Uv()
+    said: list[str] = []
+    found = install.install(
+        "cpu", embedder_name="fake", say=said.append, which=lambda n: n, run=uv, start=lambda c, d: next(starts)
+    )
+    assert [call[1] for call in uv.calls] == ["venv", "pip"]
+    assert f"environment: {config.env_dir('cpu')} didn't pass its check, so it is built again" in said
+    assert config.installed("cpu") == found
+    # A fresh environment that fails its check is refused, not built a third time.
+    starts = iter([Worker(fake_command(bad_hello=True))])
+    uv = Uv()
+    install.remove(lambda _: None)
+    with pytest.raises(DocketError, match="said hello in a form this Docket doesn't read"):
+        install.install(
+            "cpu", embedder_name="fake", say=lambda _: None, which=lambda n: n, run=uv, start=lambda c, d: next(starts)
+        )
+    assert [call[1] for call in uv.calls] == ["venv", "pip"]
+
+
+@pytest.mark.parametrize(
+    ("system", "release", "machine", "refused"),
+    [
+        ("linux", "", "x86_64", False),
+        ("win32", "", "AMD64", False),
+        ("darwin", "14.5", "arm64", False),
+        ("darwin", "26.0", "arm64", False),
+        ("darwin", "13.7.1", "arm64", True),
+        ("darwin", "15.1", "x86_64", True),
+        ("darwin", "", "arm64", True),
+    ],
+)
+def test_onnx_runtime_ships_for_macs_with_apple_silicon_on_macos_14_or_later(
+    monkeypatch: pytest.MonkeyPatch, *, system: str, release: str, machine: str, refused: bool
+) -> None:
+    monkeypatch.setattr(sys, "platform", system)
+    monkeypatch.setattr(platform, "mac_ver", lambda: (release, ("", "", ""), machine))
+    monkeypatch.setattr(platform, "machine", lambda: machine)
+    problem = RUNTIME_PROBLEM()
+    if not refused:
+        assert problem is None
+        return
+    assert problem is not None and "Apple silicon on macOS 14 or later only" in problem
+    assert problem.endswith("keyword search works without it")
+    monkeypatch.setattr(install, "runtime_problem", RUNTIME_PROBLEM)
+    with pytest.raises(DocketError, match="Apple silicon"):
+        install.install("cpu", say=lambda _: None)
+
+
+def test_install_refuses_without_sqlite_vec_without_uv_or_for_an_unknown_embedder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(DocketError, match="no embedder 'large'; there is e5-small"):
+        install.install("cpu", embedder_name="large", say=lambda _: None)
+    with pytest.raises(DocketError, match="built with uv, which isn't on PATH"):
+        install.install("cpu", say=lambda _: None, which=lambda _: None)
+    monkeypatch.setattr(install, "vectors_problem", lambda: "vectors need sqlite-vec")
+    with pytest.raises(DocketError, match="vectors need sqlite-vec"):
+        install.install("cpu", say=lambda _: None)
+
+
+def test_vectors_need_sqlite_vec_and_a_python_whose_sqlite_loads_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(install, "load_extension", lambda conn: None)
+    assert VECTORS_PROBLEM() is None
+    monkeypatch.setattr(install, "load_extension", lambda conn: "no")
+    assert VECTORS_PROBLEM() == (
+        "the Python Docket runs on can't load SQLite extensions, so search can't use vectors; uv's own Pythons "
+        "can: uv tool install --python-preference only-managed docket"
+    )
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
+    problem = VECTORS_PROBLEM()
+    assert problem is not None and problem.startswith("vectors need sqlite-vec, which has no build for this system")
+
+
+@pytest.mark.parametrize(
+    ("spec", "device", "said"),
+    [
+        ({"dims": 32}, "cpu", "the worker's model gives 32 dims, not 64"),
+        ({}, "cuda", "ONNX Runtime fell back to the CPU: CUDA 13 needs an NVIDIA driver of R580 or later"),
+        ({"bad_hello": True}, "cpu", "said hello in a form this Docket doesn't read\nfake worker starting"),
+    ],
+)
+def test_the_check_refuses_a_worker_that_isnt_right(spec: dict[str, Any], device: str, said: str) -> None:
+    worker = Worker(fake_command(**spec))
+    with pytest.raises(DocketError, match=said):
+        install.check_and_time(worker, small(), device)  # type: ignore[arg-type]
+    assert not worker.up
+
+
+def test_the_budget_is_what_the_machine_embeds_in_its_time() -> None:
+    clock = iter([0.0, 2.0])
+    worker = Worker(fake_command())
+    # 16 inputs of 1,209 characters (the prefix and 1,200) in 2 s: 9,672 a second, 2,901 in 0.3 s.
+    assert install.check_and_time(worker, small(), "cpu", clock=lambda: next(clock)) == 2901
+
+
+def test_remove_deletes_the_environments_the_files_and_the_choice(
+    hub: type[Hub], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(catalogue.EMBEDDERS, "fake", small())
+    install.install("cpu", embedder_name="fake", say=lambda _: None, which=lambda n: n, run=Uv(), start=fake_start)
+    said: list[str] = []
+    install.remove(said.append)
+    assert not config.env_dir("cpu").exists()
+    assert not config.files_dir().exists()
+    assert config.read() == Off() and said[-1] == "models are off on this machine; keyword search goes on"
+    install.remove(said.append)
+    assert json.dumps(said).count("removed") == 2
+
+
+def test_a_remove_a_worker_stops_half_way_turns_models_off_and_says_what_to_do(
+    hub: type[Hub], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(catalogue.EMBEDDERS, "fake", small())
+    install.install("cpu", embedder_name="fake", say=lambda _: None, which=lambda n: n, run=Uv(), start=fake_start)
+    real = remove_tree
+
+    def held(path: Path) -> None:
+        if path == config.env_dir("cpu"):
+            raise PermissionError(13, "The process cannot access the file because it is being used by another process")
+        real(path)
+
+    monkeypatch.setattr(install, "remove_tree", held)
+    said: list[str] = []
+    with pytest.raises(
+        DocketError, match=r"the service's worker holds these files \(.*env-cpu\): docket service stop, then"
+    ):
+        install.remove(said.append)
+    # Models are off and the environment left behind no longer passes for an installed one.
+    assert config.read() == Off() and isinstance(config.installed("cpu"), str)
+    assert not config.files_dir().exists() and said == [f"removed {config.files_dir()}"]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows alone refuses to delete a file a process holds open")
+def test_on_windows_a_file_held_open_stops_the_remove_and_models_are_off(
+    hub: type[Hub], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(catalogue.EMBEDDERS, "fake", small())
+    install.install("cpu", embedder_name="fake", say=lambda _: None, which=lambda n: n, run=Uv(), start=fake_start)
+    loaded = config.env_dir("cpu") / "Lib" / "site-packages" / "onnxruntime_pybind11_state.pyd"
+    loaded.parent.mkdir(parents=True)
+    loaded.write_bytes(b"a library a running worker has loaded")
+    with loaded.open("rb"), pytest.raises(DocketError, match="docket service stop, then docket models remove"):
+        install.remove(lambda _: None)
+    assert config.read() == Off() and isinstance(config.installed("cpu"), str)
+    install.remove(lambda _: None)
+    assert not config.env_dir("cpu").exists()

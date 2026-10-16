@@ -26,7 +26,7 @@ from filelock import FileLock
 from pydantic import BaseModel, ValidationError
 
 from docket.errors import DocketError
-from docket.index import matching
+from docket.index import matching, vectors
 from docket.index.chunks import (
     COLUMNS,
     Chunk,
@@ -44,6 +44,8 @@ from docket.index.chunks import (
 from docket.index.languages import Languages, resolve
 from docket.index.schema import check_sqlite, create, stale
 from docket.index.text import Analyzer, fold, words
+from docket.models import config as models_config
+from docket.models.provider import Off
 from docket.vault import legacy
 from docket.vault.entities import entity_files, load_entities
 from docket.vault.processed import doc_path, parse_doc
@@ -74,6 +76,12 @@ class BuildReport(BaseModel):
     seconds: float = 0.0
 
 
+class VectorCoverage(BaseModel):
+    model: str
+    have: int
+    total: int
+
+
 class IndexStatus(BaseModel):
     exists: bool
     path: str
@@ -86,6 +94,7 @@ class IndexStatus(BaseModel):
     changed_docs: int = 0
     entities_changed: bool = False
     problems: list[str] = []
+    vectors: list[VectorCoverage] = []
 
 
 class RecordLocation(BaseModel):
@@ -172,8 +181,17 @@ def read_run(root: Path, run: RunFile) -> tuple[list[tuple[int, RawRecord]], lis
 class Indexer:
     """Writes the index's rows for records, threads, docs and entities, on a connection inside a transaction."""
 
-    def __init__(self, conn: sqlite3.Connection, vault: Vault, analyzer: Analyzer, *, collect: bool) -> None:
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        vault: Vault,
+        analyzer: Analyzer,
+        *,
+        collect: bool,
+        vectors: vectors.Keeper | None = None,
+    ) -> None:
         self.conn = conn
+        self.vectors = vectors
         self.root = vault.root
         self.vault = vault
         self.analyzer = analyzer
@@ -194,11 +212,15 @@ class Indexer:
             cur = self.conn.execute(self.insert_sql, chunk.row())
             values = self.analyzer.index_values(chunk.text)
             self.conn.execute(self.fts_sql, (cur.lastrowid, *values))
+            if self.vectors is not None:
+                self.vectors.add(cast(int, cur.lastrowid), chunk.title, chunk.text, chunk.ts, chunk.source)
             if self.collect:
                 for col, value in zip(self.analyzer.columns, values, strict=True):
                     self.new_words[col].update(fold(w) for w in words(value))
 
     def drop_owner(self, owner: str) -> None:
+        if self.vectors is not None:
+            self.vectors.drop(owner)
         rows = self.conn.execute("SELECT id, text FROM chunks WHERE owner = ?", (owner,)).fetchall()
         for chunk_id, text in rows:
             self.conn.execute(self.delete_sql, (chunk_id, *self.analyzer.index_values(text)))
@@ -474,17 +496,22 @@ def _rebuild(vault: Vault, reason: str | None, started: float) -> BuildReport:
         conn.execute("PRAGMA journal_mode = OFF")
         conn.execute("PRAGMA synchronous = OFF")
         create(conn, langs)
+        keeper = _carry(conn, db)
         conn.execute("BEGIN")
         conn.executemany(
             "INSERT INTO problems (kind, place, message) VALUES ('language', 'vault.yaml', ?)",
             [(p,) for p in sorted(set(langs.problems))],
         )
-        indexer = Indexer(conn, vault, analyzer, collect=False)
+        indexer = Indexer(conn, vault, analyzer, collect=False, vectors=keeper)
         _, runs = indexer.add_runs(vault.rawlog.run_files())
         docs = indexer.sync_docs(set())
         indexer.sync_entities(force=True)
         matching.refresh(conn, analyzer, full=True)
+        if keeper is not None:
+            keeper.close()
         conn.execute("COMMIT")
+        if keeper is not None and keeper.carry is not None:
+            conn.execute(f"DETACH DATABASE {keeper.carry}")
         conn.execute("INSERT INTO chunks_fts (chunks_fts) VALUES ('optimize')")
         report = BuildReport(
             rebuilt=True, reason=reason, runs=runs, docs=docs, entities=True, counts=_counts(conn),
@@ -498,6 +525,43 @@ def _rebuild(vault: Vault, reason: str | None, started: float) -> BuildReport:
         tmp.unlink(missing_ok=True)
     report.seconds = round(time.monotonic() - started, 3)
     return report
+
+
+def configured_table() -> vectors.VecTable | None:
+    """The vector table of the embedder the user's config names, whether or not a worker runs: a rebuild keeps it."""
+    choice = models_config.read()
+    return None if isinstance(choice, Off) else vectors.table_of(choice.embedder)
+
+
+def _carry(conn: sqlite3.Connection, old: Path) -> vectors.Keeper | None:
+    """A rebuild's keeper for the configured embedder's table, taking vectors from the file it replaces when that file
+    can be read; one that can't is rebuilt without them, and the pass embeds again."""
+    table = configured_table()
+    if table is None:
+        return None
+    vectors.create(conn, table)
+    carry: str | None = None
+    if old.exists():
+        # SQLite refuses a file that isn't a database as it attaches it.
+        with contextlib.suppress(sqlite3.DatabaseError):
+            conn.execute("ATTACH DATABASE ? AS old", (str(old),))
+            conn.execute("SELECT count(*) FROM old.sqlite_master").fetchone()
+            carry = "old"
+    return vectors.Keeper(conn, [table], carry=carry)
+
+
+def write_connection(db: Path) -> sqlite3.Connection:
+    """The index opened to write, in autocommit, as updates open it: the caller takes the index's lock first."""
+    return _connect(db)
+
+
+def read_connection(db: Path) -> sqlite3.Connection:
+    return _reader(db)
+
+
+def index_lock(vault: Vault) -> FileLock:
+    """The index's own lock: updates and rebuilds hold it throughout, the embedding pass for each batch it writes."""
+    return _lock(vault)
 
 
 def _lock(vault: Vault) -> FileLock:
@@ -543,12 +607,16 @@ def update(vault: Vault) -> BuildReport:
             analyzer = Analyzer(langs)
             conn.execute("BEGIN IMMEDIATE")
             try:
-                indexer = Indexer(conn, vault, analyzer, collect=True)
+                kept = vectors.tables(conn)
+                keeper = vectors.Keeper(conn, kept) if kept else None
+                indexer = Indexer(conn, vault, analyzer, collect=True, vectors=keeper)
                 touched, runs = indexer.add_runs(new)
                 docs = indexer.sync_docs(touched)
                 entities = indexer.sync_entities()
                 if runs or docs or entities:
                     matching.refresh(conn, analyzer, full=entities, new_words=indexer.new_words)
+                if keeper is not None:
+                    keeper.close()
                 conn.execute("COMMIT")
             except BaseException:
                 conn.execute("ROLLBACK")
@@ -601,6 +669,9 @@ def status(vault: Vault) -> IndexStatus:
         base.columns = list(langs.columns)
         base.counts = _counts(conn)
         base.problems = _problems(conn)
+        for table in vectors.tables(conn):
+            have, total = vectors.coverage(conn, table)
+            base.vectors.append(VectorCoverage(model=table.model, have=have, total=total))
         new, base.changed_runs = _changed_runs(conn, vault)
         base.new_runs = len(new)
         base.changed_docs = changed_docs(conn, vault.root)

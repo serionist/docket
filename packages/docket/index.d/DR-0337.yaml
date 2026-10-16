@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0337
+    title: The vector scan is sqlite-vec's scalar cosine distance over the plain table, on a mapped reader in a thread beside the FTS stages
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#67"]
+    description: sqlite-vec (0.3 MB, MIT or Apache-2.0) joins the core's dependencies with an environment marker for the systems it has wheels for (Windows x86_64, macOS, Linux x86_64 and aarch64; none for Windows on Arm or musl, and no sdist), is imported only by the vector stage and loaded on its connection only; where it is missing, or Python was built without SQLite extension loading, the stage is skipped with the reason. The stage orders the model's table by vec_distance_cosine with the search's time and source filters and takes 200, on its own reader with mmap_size set, in a thread while the FTS stages run, since Python's sqlite3 lets go of the GIL. Over 100,000 chunks of 384 dims it took 67 ms, 17 ms for a month and 38 ms for one source, and 205 ms without the map.
+    not_chosen:
+      - "sqlite-vec's vec0 index: 33 ms unfiltered but 161 ms with a month's filter, and a virtual table more to rebuild."
+      - "numpy over the vectors in memory: 5 ms, but 154 MB held per 100,000 chunks, loaded again in each CLI call."
+      - "int8 vectors: 58 ms, no faster with the map, and a drift."
+      - "An unmarked dependency: Docket would not install on Windows on Arm."

@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
+import time
 import webbrowser
-from collections.abc import Sequence
+from collections.abc import Generator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any, cast
 from zoneinfo import ZoneInfo
 
 import typer
@@ -18,7 +20,11 @@ from docket import __version__, index, questions, recall, render, userconfig
 from docket.errors import DocketError
 from docket.imports import notes
 from docket.index.build import db_path
+from docket.index.embedpass import fill
+from docket.models.provider import Models, Off
+from docket.models.runtime import open_models
 from docket.render import printable
+from docket.service import client
 from docket.service.platforms import Installer
 from docket.service.token import Tokens
 from docket.sources import release, scaffold
@@ -77,8 +83,16 @@ SENSITIVITIES = ("work", "mixed", "private")
 # The Claude Code plugin's hooks run these; they print what Claude Code reads, not what a person does.
 hook_app = typer.Typer(help="What the Claude Code plugin's hooks run.", no_args_is_help=True)
 app.add_typer(hook_app, name="hook", hidden=True)
+models_app = typer.Typer(
+    help="The models on this machine: an embedder that lets search find what a question means. Optional.",
+    no_args_is_help=True,
+)
+app.add_typer(models_app, name="models")
 
+# How often the embedding pass says how far it got.
+PROGRESS_SECONDS = 10.0
 VaultOption = Annotated[Path | None, typer.Option("--vault", help="The vault; default: DOCKET_VAULT, here, ./vault")]
+NoModels = Annotated[bool, typer.Option("--no-models", help="Keyword search alone: start no models' worker.")]
 
 
 class TyperPrompter:
@@ -680,6 +694,77 @@ def doc_redact(
         raise typer.Exit(1)
 
 
+@contextlib.contextmanager
+def _query_models(no_models: bool) -> Generator[Models | Off | None]:
+    """The models for a command that only asks queries: a worker on the CPU, started for the command and stopped at
+    its end; None with --no-models."""
+    if no_models:
+        yield None
+        return
+    models = open_models(queries_only=True)
+    try:
+        yield models
+    finally:
+        if isinstance(models, Models):
+            models.close()
+
+
+def _service_models(vault: Vault | None = None) -> dict[str, Any] | None:
+    """The running service's models in its own words, when it runs for this vault (any vault without one); None when
+    no Docket service answers with this machine's token."""
+    if vault is not None:
+        found = client.recorded()
+        named = found.get("vault") if found else None
+        if not isinstance(named, str) or Path(named).resolve() != vault.root.resolve():
+            return None
+    try:
+        token = _tokens().read()
+    except DocketError:
+        return None
+    answer = client.call("GET", "/api/models", token=token, at=client.port())
+    return answer.body if answer is not None and answer.status == 200 else None
+
+
+def _embed(vault: Vault, no_models: bool) -> None:
+    """The embedding pass after an update or a rebuild, with a progress line now and then (DR-0336); left to the
+    service when it runs for the vault with the same model."""
+    if no_models:
+        return
+    models = open_models(start=False)
+    if isinstance(models, Off):
+        if models.why:
+            say(f"! {models.why}")
+        return
+    try:
+        service = _service_models(vault)
+        if service is not None:
+            if service.get("state") != "off" and service.get("model") == models.embedder.name:
+                say("vectors    the service embeds what is new")
+                return
+            # A service started before the install reads no models until it starts again (DR-0330).
+            say(
+                f"! the service runs without {models.embedder.name}, so this command embeds; docket service stop, "
+                "then docket service install, and the service embeds after its updates"
+            )
+        models.worker.ensure()
+        if models.why is not None:
+            say(f"! {models.why}")
+            return
+        shown = [time.monotonic()]
+
+        def progress(have: int, total: int) -> None:
+            if time.monotonic() - shown[0] >= PROGRESS_SECONDS:
+                shown[0] = time.monotonic()
+                say(f"vectors    {have} of {total} chunks")
+
+        report = fill(vault, models, progress=progress)
+        say(f"vectors    {report.model}  {report.have} of {report.total} chunks ({report.embedded} embedded)")
+        if report.why:
+            say(f"! {report.why}")
+    finally:
+        models.close()
+
+
 def _report(report: index.BuildReport) -> None:
     if report.rebuilt:
         say(f"rebuilt{f' ({report.reason})' if report.reason else ''} in {report.seconds:.1f} s")
@@ -694,15 +779,19 @@ def _report(report: index.BuildReport) -> None:
 
 
 @index_app.command("rebuild")
-def index_rebuild(vault: VaultOption = None) -> None:
-    """Build this machine's index from the vault, from scratch."""
-    _report(index.rebuild(find_vault(vault)))
+def index_rebuild(no_models: NoModels = False, vault: VaultOption = None) -> None:
+    """Build this machine's index from the vault, from scratch, then embed what has no vector."""
+    v = find_vault(vault)
+    _report(index.rebuild(v))
+    _embed(v, no_models)
 
 
 @index_app.command("update")
-def index_update(vault: VaultOption = None) -> None:
-    """Index what changed in the vault since the last build; rebuild when it has to."""
-    _report(index.update(find_vault(vault)))
+def index_update(no_models: NoModels = False, vault: VaultOption = None) -> None:
+    """Index what changed in the vault since the last build, rebuilding when it has to, then embed what is new."""
+    v = find_vault(vault)
+    _report(index.update(v))
+    _embed(v, no_models)
 
 
 @index_app.command("status")
@@ -718,6 +807,8 @@ def index_status(vault: VaultOption = None) -> None:
         raise typer.Exit(1)
     say(f"languages  {', '.join(st.languages)} (columns {', '.join(st.columns)})")
     say("counts     " + "  ".join(f"{table} {n}" for table, n in st.counts.items()))
+    for coverage in st.vectors:
+        say(f"vectors    {coverage.model}  {coverage.have} of {coverage.total} chunks")
     if st.new_runs or st.changed_docs or st.entities_changed:
         entities = ", the entity files" if st.entities_changed else ""
         say(f"new since  {st.new_runs} run file(s), {st.changed_docs} doc(s){entities}: docket index update")
@@ -739,6 +830,7 @@ def search_command(
     entity: Annotated[list[str] | None, typer.Option("--entity", help="Lift what mentions this (repeat).")] = None,
     k: Annotated[int, typer.Option("-k", help="How many hits, 1 to 100.")] = 20,
     no_update: Annotated[bool, typer.Option("--no-update", help="Search the index as it is.")] = False,
+    no_models: NoModels = False,
     vault: VaultOption = None,
 ) -> None:
     """Search everything kept: hits grouped by recording or thread, each with its locator for docket doc read."""
@@ -750,16 +842,18 @@ def search_command(
             for problem in report.problems:
                 if problem.startswith("vault.yaml"):
                     say(f"! {problem}")
-    result = index.search(
-        v,
-        " ".join(query),
-        people=person or [],
-        entities=entity or [],
-        sources=source or [],
-        since=index.parse_when(since, "--since"),
-        until=index.parse_when(until, "--until"),
-        k=k,
-    )
+    with _query_models(no_models) as models:
+        result = index.search(
+            v,
+            " ".join(query),
+            people=person or [],
+            entities=entity or [],
+            sources=source or [],
+            since=index.parse_when(since, "--since"),
+            until=index.parse_when(until, "--until"),
+            k=k,
+            models=models,
+        )
     say_all(render.search(result, ZoneInfo(v.config.owner.time_zone)))
 
 
@@ -769,11 +863,14 @@ def eval_command(
     *,
     k: Annotated[int, typer.Option("-k", "--k", help="Score the top k hits, 1 to 100.")] = questions.K,
     as_json: Annotated[bool, typer.Option("--json", help="The numbers and each question's ranks, as JSON.")] = False,
+    no_models: NoModels = False,
     vault: VaultOption = None,
 ) -> None:
     """Measure search with your own questions: recall at k and MRR per kind of question. Writes nothing."""
     v = find_vault(vault)
-    report = questions.run(v, questions.load(file, ZoneInfo(v.config.owner.time_zone)), k=k)
+    asked = questions.load(file, ZoneInfo(v.config.owner.time_zone))
+    with _query_models(no_models) as models:
+        report = questions.run(v, asked, k=k, models=models)
     if as_json:
         # ASCII only: a question's text can't put a terminal code on the screen.
         typer.echo(json.dumps(report.model_dump(mode="json"), indent=2))
@@ -924,6 +1021,12 @@ def service_status(
         for key in ("pid", "version", "started", "vault", "machine"):
             if key in st.body:
                 say(f"{key:<10} {st.body[key]}")
+        found: object = st.body.get("models")
+        models = cast(dict[str, object], found) if isinstance(found, dict) else {}
+        if models.get("state", "off") != "off" or models.get("why"):
+            state = f"{models.get('model')}, {models.get('state')}" if models.get("model") else "off"
+            why = models.get("why")
+            say(f"models     {state}{f': {why}' if why else ''}")
         if st.body.get("vault_problem"):
             say(f"! {st.body['vault_problem']}")
         say(f"token      {st.store}")
@@ -963,6 +1066,89 @@ def service_token(
             say("a new token; restart `docket serve` to use it")
         return
     typer.echo(tokens.header() if header else tokens.read())
+
+
+@models_app.command("install")
+def models_install(
+    device: Annotated[str, typer.Option("--device", help="auto, cpu or cuda (an NVIDIA GPU).")] = "auto",
+) -> None:
+    """Build the models' environment, fetch the embedder's files, check it runs, and turn models on here."""
+    from docket.models import install  # noqa: PLC0415
+
+    install.install(device, say=say)
+
+
+@models_app.command("status")
+def models_status(
+    check: Annotated[bool, typer.Option("--check", help="Start the worker once and say what it runs on.")] = False,
+    vault: VaultOption = None,
+) -> None:
+    """What this machine's models are: the choice, the environments, the files, the vault's vectors and the service's
+    worker."""
+    from docket.models import config  # noqa: PLC0415
+    from docket.models.install import vectors_problem  # noqa: PLC0415
+    from docket.models.provider import Off  # noqa: PLC0415
+    from docket.models.runtime import worker_for  # noqa: PLC0415
+
+    choice = config.read()
+    if isinstance(choice, Off):
+        say(f"models     off{f': {choice.why}' if choice.why else ' (docket models install turns them on)'}")
+    else:
+        say(f"models     {choice.embedder.name} on {choice.device}")
+    for device in config.DEVICES:
+        if config.env_dir(device).exists():
+            found = config.installed(device)
+            line = found if isinstance(found, str) else f"ready, batches of {found.budget:,} characters"
+            say(f"env {device:<6} {line} ({config.env_dir(device)})")
+    if not isinstance(choice, Off):
+        missing = config.missing_files(choice.embedder)
+        say(f"files      {'missing: ' + ', '.join(f.path for f in missing) if missing else 'all here'}")
+        problem = vectors_problem()
+        say(f"search     {'! ' + problem if problem else 'uses the vectors'}")
+    _models_vectors(vault, on=not isinstance(choice, Off))
+    service = _service_models()
+    if service is not None:
+        why = service.get("why")
+        state = f"{service.get('model')}, {service.get('state')}" if service.get("model") else "off"
+        say(f"service    {state}{f': {why}' if why else ''}")
+        errors = service.get("errors")
+        say_all([str(line) for line in cast(list[object], errors)] if isinstance(errors, list) else [])
+    if check:
+        found = choice if isinstance(choice, Off) else config.installed(choice.device)
+        if isinstance(choice, Off) or isinstance(found, (Off, str)):
+            say(f"! {found if isinstance(found, str) else 'models are off'}")
+            raise typer.Exit(1)
+        worker = worker_for(choice, choice.device)
+        try:
+            if not worker.ensure() or worker.hello is None:
+                say(f"! {worker.why}")
+                say_all(worker.stderr().strip().splitlines()[-10:])
+                raise typer.Exit(1)
+            say(f"worker     up: {worker.hello.provider}, {worker.hello.dims} dims")
+        finally:
+            worker.stop()
+
+
+def _models_vectors(vault: Path | None, *, on: bool) -> None:
+    """Each model's vectors in the vault's index (DR-0332), when a vault resolves and its index reads."""
+    try:
+        st = index.status(find_vault(vault))
+    except DocketError:
+        if vault is not None:
+            raise
+        return
+    for coverage in st.vectors:
+        say(f"vectors    {coverage.model}  {coverage.have} of {coverage.total} chunks ({st.path})")
+    if on and st.exists and not st.vectors:
+        say(f"vectors    none yet in {st.path}; docket index update embeds")
+
+
+@models_app.command("remove")
+def models_remove() -> None:
+    """Delete the models' environments, files and choice; keyword search goes on."""
+    from docket.models import install  # noqa: PLC0415
+
+    install.remove(say=say)
 
 
 @hook_app.command("session-start")

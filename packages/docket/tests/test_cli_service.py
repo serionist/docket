@@ -176,6 +176,34 @@ def test_status_in_full(
     assert f"log        {userconfig.log_dir() / 'service.log'}" in out
 
 
+@pytest.mark.parametrize(
+    ("models", "line"),
+    [
+        (
+            {"state": "down", "model": "e5-small", "why": "the models' worker is starting"},
+            "models     e5-small, down: the models' worker is starting",
+        ),
+        ({"state": "up", "model": "e5-small", "why": None}, "models     e5-small, up"),
+        (
+            {"state": "off", "model": None, "why": "the models block doesn't read"},
+            "models     off: the models block doesn't read",
+        ),
+        ({"state": "off", "model": None, "why": None}, None),
+    ],
+)
+def test_status_says_what_the_models_are_doing(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    registration: Registration,
+    models: dict[str, Any],
+    line: str | None,
+) -> None:
+    body = {"pid": 4242, "version": "0.0.0", "vault": "/v", "models": models}
+    monkeypatch.setattr(install, "status", lambda installer, tokens: a_status(True, body=body))
+    _, out, _ = run(capsys, "service", "status")
+    assert (line in out) if line else ("models" not in out)
+
+
 def test_status_not_running_exits_1_and_quiet_is_one_line(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, registration: Registration
 ) -> None:

@@ -21,6 +21,7 @@ from docket.index import SearchResult
 from docket.index.query import MAX_K
 from docket.recall import ReadResult, VerifyResult
 from docket.service import calls, sync
+from docket.service.models import ModelsStatus
 from docket.service.runs import BUDGET, CAPTURE_CAP
 from docket.service.sessions import CODE_SECONDS
 from docket.service.state import Service, Status
@@ -131,6 +132,11 @@ def router(service: Service) -> APIRouter:
     @api.get("/status")
     def status() -> Status:  # pyright: ignore[reportUnusedFunction]
         return service.status()
+
+    @api.get("/models")
+    def models() -> ModelsStatus:  # pyright: ignore[reportUnusedFunction]
+        # The models alone, for the CLI: status also hashes the vault's files for the index's state.
+        return service.models.status()
 
     @api.post("/session")
     def session_link() -> SessionLink:  # pyright: ignore[reportUnusedFunction]

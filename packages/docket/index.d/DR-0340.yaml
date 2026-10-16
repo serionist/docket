@@ -1,0 +1,11 @@
+decisions:
+  - id: DR-0340
+    title: The API provider is an interface only until its own issue
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#67"]
+    description: "The provider interface (embed, rerank) has local and none; api in the user's config is refused as not yet. Its issue decides which API (one with multilingual embeddings and a reranker), the key in the keychain through keyring (never the vault or the config), an opt-in per vault in vault.yaml (a DR-0021 door, since the vault's text leaves the machine), and what is sent: chunks as stored, already redacted at intake (DR-0025) and past the never-store lists, and the query and the top candidates on every search."
+    not_chosen:
+      - "An API in this issue: which one, the keychain and the vault's opt-in are decisions of their own."

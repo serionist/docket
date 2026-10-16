@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0336
+    title: Vectors are chunk_vec_<model> tables in the index, keyed by input hash and kept in step with the chunks by every update and rebuild
+    status: proposed
+    at: "2026-10-15"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#67"]
+    description: "A vector is made from one string: the embedder's passage prefix, the chunk's title on a line of its own unless the text's first 200 characters hold it, then the chunk's text; a transcript window carries its recording's name only in its title. One table per model, named from the catalogue's name and revision (chunk_vec_e5_small_614241f6), holds chunk (the key), input_hash (sha256 of exactly that string, indexed), ts and source (copied from the chunk, so the search's filters need no join) and vec (float32, little-endian); a meta row gives the model, revision and dims. An update keeps every vector table in step inside its own transaction, with no worker call: a dropped chunk's vector moves to a temp table keyed by input hash and its row goes, and an added chunk gets the vector for its input hash back with its new id, ts and source, so a re-put doc, an edited record and a re-windowed thread keep their vectors and a reused id never keeps an old one. A rebuild does the same from the old file before replacing it, for the configured embedder's table whenever the config names one, worker or not, docket doc redact's rebuild included. The embedding pass embeds only inputs with no vector: it reads a batch's chunks and closes the statement before calling the worker, so no open read holds up an update's COMMIT, then writes the batch under the index lock in a short transaction, only for chunks whose input hash is still the one embedded. A model change fills the new table while search uses it as far as it goes, and drops the old one once the new one covers every chunk. Existing indexes need no rebuild, and without models no table is made, so two rebuilds still give the same database."
+    binds:
+      - No vector row outlives its chunk past the transaction that dropped the chunk.
+      - A rebuild or a schema change never embeds an input whose vector the index already holds.
+    not_chosen:
+      - "Vectors left for the pass to sweep: ids that are gone reach the search, and a reused id gives old text's vector to new text."
+      - "Keyed by the chunk's text hash: the input also holds the title, so a renamed recording would keep its old vectors."
+      - "Embedding inside the update: searches would wait minutes for it on a CPU."

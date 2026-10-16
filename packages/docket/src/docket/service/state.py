@@ -15,6 +15,7 @@ from docket import __version__, index, userconfig
 from docket.errors import DocketError
 from docket.index import IndexStatus
 from docket.service.history import RunHistory
+from docket.service.models import ModelsKeeper, ModelsStatus
 from docket.service.runs import Runs
 from docket.service.sessions import Sessions
 from docket.service.writer import IndexUpdater, Writer
@@ -48,6 +49,7 @@ class Status(BaseModel):
     # Where the service token lives.
     store: str
     index: IndexStatus | None = None
+    models: ModelsStatus = ModelsStatus()
 
 
 @dataclass(frozen=True)
@@ -69,12 +71,15 @@ class Service:
         # Open sync runs, in memory only; the hook's marker goes in the state folder (DR-0240).
         self.runs = Runs(userconfig.state_dir(), ended=self.history.add)
         self.updater = IndexUpdater(self._update)
+        # The embedder's worker and the embedding pass, started by the app's lifespan (DR-0330).
+        self.models = ModelsKeeper(self.vault)
         # Kept for the web app's footer: index.status() hashes every doc and entity file, too much for each page.
         self.last_update: LastUpdate | None = None
 
     def _update(self) -> None:
         report = index.update(self.vault())
         self.last_update = LastUpdate(datetime.now(UTC), dict(report.counts))
+        self.models.poke()
 
     def _home(self) -> Home:
         return self.vault().home
@@ -108,6 +113,7 @@ class Service:
             vault_problem=problem,
             store=self.settings.store,
             index=found,
+            models=self.models.status(),
         )
 
     @staticmethod
