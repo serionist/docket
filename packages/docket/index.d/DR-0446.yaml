@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0446
+    title: read takes a source's records at their places only when the index is current for that source's run files
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#76"]
+    description: At a read's first question about a source, inside the read transaction the call holds (DR-0321), the source is read by place when the index opens as this Docket writes it, the run files under raw/<source>/ are exactly those run_files lists, each with the size and modification time it was indexed with (listed with os.scandir, filtered as parse_run_file filters), none of them has a line the index reports as a problem, and no record of the source lies in another source's folder. Each line read by place must hold the rid and version the index holds. Anything else loads that source whole for the rest of the call, as before, and other sources keep their places. The build reports a line that isn't UTF-8 and a record outside its source's folder as problems, so a source the load route fails on takes that route and fails the same way. Read never writes, updates or waits for the index.
+    binds:
+      - "Docs and raw are checked apart: a new run file never sends a doc question to the parse route, and a changed doc never sends a raw question to the load route."
+      - The place route and the load route give the same answer, or the same failure.
+    not_chosen:
+      - "A sha256 per run file: it reads every byte, the cost this removes; size and modification time are what update trusts to follow runs (DR-0115)."
+      - "One check for all of raw/: a chat run would send every Plaud read to the load route."
+      - "Places for the indexed run files and a load of only the new ones: two routes merged in run order on every question, for a state the service ends within seconds."
+      - "Updating the index first: a read would write, and wait behind a rebuild (DR-0321)."

@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0445
+    title: The index keeps each record version's byte offset in its run file
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#76"]
+    description: "record_versions gains offset: where the version's line starts in its run file, in bytes, counted as the build reads the file, in binary and split at each newline byte. A read opens the run file in binary, seeks there and reads to the next newline, so a line with CRLF reads as the load route reads it, the carriage return included, which JSON skips. The line number stays, for problems and locate. A new schema version, 7 unless another change takes it first, so every index rebuilds once."
+    binds:
+      - "The raw log's format doesn't change for it: the offset is the index's, rebuilt from the files (DR-0115)."
+    not_chosen:
+      - "The line alone: a read would scan the file up to it."
+      - "A table of its own: record_versions already has a row per version."
+      - "Offset and length: a line ends at its newline, and a short read fails the rid check anyway."
