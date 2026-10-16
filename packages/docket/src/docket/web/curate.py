@@ -133,7 +133,7 @@ def router(service: Service) -> APIRouter:
                 begun = schedule.now_utc()
                 found = await asyncio.to_thread(lambda: tier1.plan(service.vault()))
                 ran = await service.writer.run(lambda: tier1.apply(service.vault(), found, via="page"))
-                if ran.written is not None and ran.written.lines:
+                if ran.wrote:
                     await service.updater.fresh()
                 made = await asyncio.to_thread(lambda: batch.build(service.vault(), ran, started=begun))
                 await service.writer.run(lambda: batch.save(service.vault(), made))

@@ -276,6 +276,7 @@ def curate_round(view: BatchView) -> list[str]:
         + ("  not finished: the next write commits it" if line.id in view.unfinished else "")
         for line in view.applied
     ]
+    lines += [f"taken back by itself: {what}" for what in view.taken_back]
     lines += [f"skipped  by itself: {why}" for why in view.skipped]
     lines += [f"tier 1   {view.tier1}"] if view.tier1 else []
     for shown in view.cards:

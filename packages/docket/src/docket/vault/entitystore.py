@@ -534,10 +534,18 @@ class EntityStore:
             lines = self._lines([{"op": "lift", "key": key} for key in dict.fromkeys(keys)], "user", via)
             return Written(lines, self._write(lines, {}, _message(lines)), finished)
 
-    def undo(self, op_ids: Sequence[str], *, via: Via = "cli", round_id: str | None = None) -> Written:
+    def undo(
+        self,
+        op_ids: Sequence[str],
+        *,
+        via: Via = "cli",
+        round_id: str | None = None,
+        by: By = "user",
+        why: str | None = None,
+    ) -> Written:
         """Undo logged ops by their ids, the latest first, in one commit; refused whole when one can't be undone. The
         round open on this machine goes on each line: an undo of a decision of that round reopens its card and
-        stoplists nothing (DR-0462)."""
+        stoplists nothing (DR-0462). Tier 1's undo of its own carries the op's rule and why (DR-0469)."""
         with self.vault.writing():
             finished = self._finish()
             log = curatelog.fold(curatelog.read_all(self.root).lines)
@@ -569,11 +577,12 @@ class EntityStore:
             if not targets:
                 return Written(finished=finished)
             taken = self._take_in(files)
-            lines = self._lines(
-                [{"op": "undo", "key": t.key, "entity": t.entity, "of": t.id, "round": round_id} for t in targets],
-                "user",
-                via,
-            )
+            parts: list[dict[str, Any]] = [
+                {"op": "undo", "key": t.key, "entity": t.entity, "of": t.id, "round": round_id}
+                | ({"rule": t.rule, "why": why} if by == "tier1" else {})
+                for t in targets
+            ]
+            lines = self._lines(parts, by, via)
             commit = self._write(lines, files.outputs(), _message(lines))
             return Written(lines, commit, finished, taken, only_logged=tuple(only))
 

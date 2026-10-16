@@ -29,10 +29,12 @@ from docket.curate.tier1 import Tier1
 from docket.errors import DocketError
 from docket.index.build import open_index
 from docket.vault import curatelog
+from docket.vault.config import NeverStore
 from docket.vault.curatelog import AliasFields, Change, EntityFields, IdFields, Line, Via, folded
 from docket.vault.entities import load_entities
 from docket.vault.entitystore import EntityStore, Planned, Reject, Written
 from docket.vault.home import make_private
+from docket.vault.neverstore import listed
 from docket.vault.staging import write_replacing
 from docket.vault.vault import Vault
 
@@ -40,6 +42,7 @@ FILE = "curate/batch.json"
 SNIPPETS = 3
 ID_LENGTH = 6
 WIDTH = 80
+HIDDEN = "(on a never-store list)"
 
 State = Literal["open", "accepted", "rejected", "done"]
 
@@ -97,7 +100,7 @@ def start(vault: Vault, *, via: Via = "cli") -> Batch:
     index.update(vault)
     begun = now_utc()
     ran = tier1.run(vault, via=via)
-    if ran.written is not None and ran.written.lines:
+    if ran.wrote:
         index.update(vault)
     batch = build(vault, ran, started=begun)
     save(vault, batch)
@@ -329,6 +332,8 @@ class BatchView(BaseModel):
     applied: list[Line]
     skipped: list[str] = []
     tier1: str | None = None
+    # What tier 1 took back since the round started: each undo's id, entity, why and key, a never-store value hidden.
+    taken_back: list[str] = []
     # The applied lines a stopped write left: HEAD doesn't have them yet, and the next write commits them.
     unfinished: list[str] = []
     before: Measure | None = None
@@ -362,7 +367,9 @@ def view(vault: Vault, batch: Batch) -> BatchView:
     index.update(vault)
     lines = curatelog.read_all(vault.root).lines
     now = states(vault, batch, lines)
-    applied = [ln for ln in lines if ln.at >= batch.started and ln.by == "tier1"]
+    by_tier1 = [ln for ln in lines if ln.at >= batch.started and ln.by == "tier1"]
+    lists = vault.config.never_store
+    applied = [ln for ln in by_tier1 if ln.op != "undo"]
     unfinished = {ln.id for ln in curatelog.unfinished(vault)}
     with closing(open_index(vault)) as conn:
         cards = [CardView(card=c, state=now[c.id], snippets=snippets(conn, c)) for c in batch.cards]
@@ -374,10 +381,19 @@ def view(vault: Vault, batch: Batch) -> BatchView:
         applied=applied,
         skipped=batch.skipped,
         tier1=batch.tier1,
-        unfinished=[ln.id for ln in applied if ln.id in unfinished],
+        taken_back=[
+            f"{ln.id}  {ln.entity or '-'}  {ln.why}, {shown_key(ln.key, lists)}" for ln in by_tier1 if ln.op == "undo"
+        ],
+        unfinished=[ln.id for ln in by_tier1 if ln.id in unfinished],
         before=batch.before,
         after=batch.after,
     )
+
+
+def shown_key(key: str, lists: NeverStore) -> str:
+    """A key as the CLI and the page show it: the value it names hidden when a never-store list holds it."""
+    text = curatelog.key_text(key)
+    return key[: len(key) - len(text)] + HIDDEN if text and listed(text, lists) is not None else key
 
 
 # -- the measures -------------------------------------------------------------------------------------------------

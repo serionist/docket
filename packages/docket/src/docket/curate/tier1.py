@@ -5,14 +5,17 @@ on the vault's primary machine, before the miner, in one commit.
   alias, two words or more, the name folds to;
 - chat id: an author written `Name <id>`, the id not an address, gives `ids.<source>` to that one entity;
 - shown name: the name a system shows for an address or id an entity already lists, not yet one of its names, not
-  another entity's, and like one of its own, becomes its plain alias, a trailing `(...)` dropped;
+  another entity's, and one of its own shortened, never lengthened, becomes its plain alias, a trailing `(...)`
+  dropped;
 - engines: one spelling, capitalised alike in two engines' transcripts on overlapping utterances of a recording,
   becomes an `asr` alias of the one entity the recording mentions that it is within matching's fuzzy distance of.
 
-An address or id shown with names of more than one person is a shared sender, a service's notification address or a
-team's: it gives nothing, and since the index keeps every chunk, it stays shared at every later round. A fact that
-matches two entities, a one-word name, and a spelling the miner's own screens catch (a common word or one only at a
-sentence's start, a case form of the name it is near, a word of another entity's name) are cards, never facts.
+An address or id shown with names that can't all be one person's is a shared sender, a service's notification address
+or a team's: it gives nothing, and since the index keeps every chunk, it stays shared at every later round. An address
+or id tier 1 gave before it looked shared, and no one undid, it takes back itself: an undo line `by: tier1` with the
+fact's rule and `why: now shared`, which stoplists it. A fact that matches two entities, a one-word name, and a
+spelling the miner's own screens catch (a common word or one only at a sentence's start, a case form of the name it is
+near, a word of another entity's name) are cards, never facts.
 
 Authors only: the index keeps no recipients. Tier 1 never creates an entity, and never applies a key the log shows it
 applied before, whatever happened to it since, nor one the stoplist holds (DR-0461). A fact the store refuses (a
@@ -40,7 +43,7 @@ from docket.index.matching import EMAIL, max_distance, within
 from docket.index.text import phrase
 from docket.plaintext import WORD, fold
 from docket.vault import curatelog
-from docket.vault.curatelog import MAX_LOCATORS, AliasFields, Change, Evidence, IdFields, Via, folded, key_of
+from docket.vault.curatelog import MAX_LOCATORS, AliasFields, Change, Evidence, IdFields, Line, Via, folded, key_of
 from docket.vault.entitystore import EntityStore, Planned, RefusedError, Written, screen
 from docket.vault.vault import Vault
 
@@ -50,30 +53,39 @@ AUTHOR = re.compile(r"^\s*(?P<name>[^<>]*?)\s*<(?P<id>[^<>\s]+)>\s*$")
 # What a system adds after a shown name: `Ada Example (Northwind)`.
 TAIL = re.compile(r"\s*\([^()]*\)\s*$")
 PEOPLE = ("person", "org")
-# A word of a name stands for another when it is it, its initial, or a start of it this long or longer.
+# A shown name's word shortens an entity's word when it is it, its initial, or a start of it this long or longer.
 PREFIX = 3
+# Why tier 1 takes back an address or id it gave.
+NOW_SHARED = "now shared"
 Segment = tuple[int, int, str]
 
 
 @dataclass(frozen=True)
 class Plan:
-    """What tier 1 found, worked out beside the writer: the changes to apply, the facts that are cards, and why it
-    doesn't run, when it doesn't."""
+    """What tier 1 found, worked out beside the writer: the changes to apply, its own lines to take back, the facts
+    that are cards, and why it doesn't run, when it doesn't."""
 
     planned: tuple[Planned, ...] = ()
     proposals: tuple[Proposal, ...] = ()
     note: str | None = None
+    take_back: tuple[Line, ...] = ()
 
 
 @dataclass(frozen=True)
 class Tier1:
     """What tier 1 did: its commit, the facts the store refused (named by rule and entity, never by value), the facts
-    that are cards, for the miner, and why it didn't run, when it didn't."""
+    that are cards, for the miner, why it didn't run, when it didn't, and the commit taking back what it gave before
+    the sender looked shared."""
 
     written: Written | None = None
     skipped: tuple[str, ...] = ()
     proposals: tuple[Proposal, ...] = ()
     note: str | None = None
+    taken_back: Written | None = None
+
+    @property
+    def wrote(self) -> bool:
+        return any(w is not None and bool(w.lines) for w in (self.written, self.taken_back))
 
 
 @dataclass
@@ -87,6 +99,15 @@ class _Found:
     # A fact one of the screens caught: a card even when one entity matches.
     card: bool = False
     chunks: set[int] = field(default_factory=set[int])
+
+
+@dataclass(frozen=True)
+class Findings:
+    """What the index holds: the facts, each with the entities it matched, and the shared senders, each an id's key
+    and its value, casefolded."""
+
+    facts: list[_Found]
+    shared: frozenset[tuple[str, str]]
 
 
 @dataclass
@@ -132,9 +153,11 @@ class _Entities:
         return bool((self.full.get(name, set()) | self.one.get(name, set())) - {entity})
 
 
-def find(conn: sqlite3.Connection, vault: Vault) -> list[_Found]:
-    """Every fact the index holds, each with the entities it matched, in a stable order."""
+def find(conn: sqlite3.Connection, vault: Vault) -> Findings:
+    """Every fact the index holds, each with the entities it matched, in a stable order, and the shared senders."""
     entities = _Entities.read(conn)
+    shown = _shown(conn)
+    shared = frozenset((key, value.casefold()) for (key, value, _), names in shown.items() if _shared(list(names)))
     found: dict[tuple[str, tuple[str, ...], str], _Found] = {}
 
     def note(fact: _Found, chunks: set[int]) -> None:
@@ -144,19 +167,22 @@ def find(conn: sqlite3.Connection, vault: Vault) -> list[_Found]:
         kept.chunks.update(chunks)
         kept.card = kept.card or fact.card
 
-    for fact, chunks in _from_authors(conn, entities):
+    for fact, chunks in _from_authors(shown, shared, entities):
         note(fact, chunks)
     for fact, chunks in _from_engines(conn, vault, entities):
         note(fact, chunks)
-    return sorted(found.values(), key=lambda f: (f.rule, f.entities, f.text))
+    return Findings(sorted(found.values(), key=lambda f: (f.rule, f.entities, f.text)), shared)
 
 
 # -- authors ----------------------------------------------------------------------------------------------------------
 
+Shown = dict[tuple[str, str, Rule], dict[str, set[int]]]
 
-def _from_authors(conn: sqlite3.Connection, entities: _Entities) -> Iterator[tuple[_Found, set[int]]]:
-    """The facts each address or id gives, from every name it is shown with: none from a shared sender."""
-    shown: dict[tuple[str, str, str], dict[str, set[int]]] = {}
+
+def _shown(conn: sqlite3.Connection) -> Shown:
+    """Each address or id authors are written with, by its id's key, its value and its rule, and every name it is
+    shown with, each with the chunks it is in."""
+    shown: Shown = {}
     sql = "SELECT id, source, authors FROM chunks WHERE authors != '[]' AND source IS NOT NULL"
     for chunk, source, authors in conn.execute(sql):
         for author in json.loads(authors):
@@ -169,8 +195,15 @@ def _from_authors(conn: sqlite3.Connection, entities: _Entities) -> Iterator[tup
             key = "email" if address else source
             value = ident.casefold() if address else ident
             shown.setdefault((key, value, "address" if address else "chat id"), {}).setdefault(name, set()).add(chunk)
+    return shown
+
+
+def _from_authors(
+    shown: Shown, shared: frozenset[tuple[str, str]], entities: _Entities
+) -> Iterator[tuple[_Found, set[int]]]:
+    """The facts each address or id gives, from every name it is shown with: none from a shared sender."""
     for (key, value, rule), names in sorted(shown.items()):
-        if _shared(list(names)):
+        if (key, value.casefold()) in shared:
             continue
         holders = sorted(entities.ids.get((key, value.casefold()), set()))
         for name, chunks in sorted(names.items()):
@@ -180,36 +213,40 @@ def _from_authors(conn: sqlite3.Connection, entities: _Entities) -> Iterator[tup
 
 
 def _shared(names: Sequence[str]) -> bool:
-    """Whether the names an address or id is shown with are more than one person's: two of them unalike."""
+    """Whether the names an address or id is shown with are more than one person's: two of them not one person's."""
     words = [folded(n).split() for n in names]
-    return any(not _alike(a, b) for a, b in combinations(words, 2))
+    return any(not _one_person(a, b) for a, b in combinations(words, 2))
 
 
-def _alike(a: list[str], b: list[str]) -> bool:
-    """Whether two names may be one person's: every word of the shorter stands for a word of the other, in any order
-    (`Cleo T.` and `Cleo Test`, `Example, Ada` and `Ada Example`)."""
+def _one_person(a: list[str], b: list[str]) -> bool:
+    """Whether two names are one person's: every word of the shorter is a word of the other, its initial, or has it as
+    its initial, in any order (`Example, Ada`, `A. Example` and `Ada Example`). A word that only starts another
+    (`Ann` and `Anna`) may be someone else's: a shared sender then, a miss rather than a wrong fact."""
     short, long_ = sorted((a, b), key=len)
-    return all(any(_stands_for(w, v) for v in long_) for w in short)
+    return all(any(w == v or _initial(w, v) or _initial(v, w) for v in long_) for w in short)
 
 
-def _stands_for(w: str, v: str) -> bool:
-    if w == v:
-        return True
-    if len(w) == 1 or len(v) == 1:
-        return w[0] == v[0]
-    return min(len(w), len(v)) >= PREFIX and (w.startswith(v) or v.startswith(w))
+def _initial(w: str, v: str) -> bool:
+    return len(w) == 1 and v.startswith(w)
+
+
+def _shortens(shown: list[str], own: list[str]) -> bool:
+    """Whether a shown name is an entity's own, shortened: each of its words is a word of the own name, its initial,
+    or a start of it of three letters or more, in any order (`Cleo T.` for `Cleo Test`); never one longer than the
+    word it stands for (`Gáborné` for `Gábor`, `Adam` for `Ada`)."""
+    return all(any(w == v or (v.startswith(w) and (len(w) == 1 or len(w) >= PREFIX)) for v in own) for w in shown)
 
 
 def _shown_name(name: str, holders: Sequence[str], entities: _Entities) -> _Found | None:
     """The name a system shows beside an id an entity lists: its alias, when it isn't one of its names yet, isn't
-    another entity's, and is like one of its own."""
+    another entity's, and is one of its own shortened."""
     key = folded(name)
     new = tuple(
         h
         for h in holders
         if key not in entities.names.get(h, set())
         and not entities.other(key, h)
-        and any(_alike(key.split(), own.split()) for own in entities.names.get(h, set()))
+        and any(_shortens(key.split(), own.split()) for own in entities.names.get(h, set()))
     )
     if not new:
         return None
@@ -338,13 +375,24 @@ def plan(vault: Vault) -> Plan:
     applied_before = {line.key for line in read.lines if line.by == "tier1"}
     try:
         with closing(open_index(vault)) as conn:
-            found = find(conn, vault)
+            findings = find(conn, vault)
             where = {c: (grp, loc) for c, grp, loc in conn.execute("SELECT id, grp, locator FROM chunks")}
     except (DocketError, sqlite3.Error):
         return Plan(note="tier 1 didn't run: there is no index to read yet")
+    # What it gave from a sender that looked like one person's then and looks shared now, if no one undid it.
+    take_back = tuple(
+        line
+        for line in read.lines
+        if line.by == "tier1"
+        and line.op == "add"
+        and line.id not in log.undone_by
+        and line.change is not None
+        and line.change.id is not None
+        and (line.change.id.key, line.change.id.value.casefold()) in findings.shared
+    )
     planned: list[Planned] = []
     proposals: list[Proposal] = []
-    for fact in found:
+    for fact in findings.facts:
         change = Change(id=fact.id) if fact.id is not None else Change(alias=fact.alias)
         if fact.card or len(fact.entities) > 1:
             proposals += [
@@ -367,19 +415,23 @@ def plan(vault: Vault) -> Plan:
     # A card for a key a fact applies would ask about what is done already.
     keys = {key_of(p.entity, p.change) for p in planned}
     kept = [p for p in proposals if key_of(p.entity, Change(id=p.id) if p.id else Change(alias=p.alias)) not in keys]
-    return Plan(tuple(planned), tuple(kept))
+    return Plan(tuple(planned), tuple(kept), take_back=take_back)
 
 
 def apply(vault: Vault, found: Plan, *, via: Via = "cli") -> Tier1:
-    """The plan's facts in one commit, on the writer: a key the log took since the plan is left out, and each fact
-    the store refuses is skipped and listed, by its rule and entity only."""
+    """On the writer: first what the plan takes back, in one commit, then its facts, in another. A line undone or a
+    key the log took since the plan is left out, and each the store refuses is skipped and listed, by its rule and
+    entity only."""
     if found.note is not None:
         return Tier1(note=found.note)
     lines = curatelog.read_all(vault.root).lines
-    taken = {line.key for line in lines if line.by == "tier1"} | curatelog.fold(lines).stoplist
+    log = curatelog.fold(lines)
+    skipped: list[str] = []
+    store = EntityStore(vault)
+    back = _take_back(store, [ln for ln in found.take_back if ln.id not in log.undone_by], skipped, via)
+    taken = {line.key for line in lines if line.by == "tier1"} | log.stoplist
     planned = [p for p in found.planned if key_of(p.entity, p.change) not in taken]
     by_n = {p.n: p for p in planned}
-    skipped: list[str] = []
 
     def skip(problems: Sequence[str]) -> set[int]:
         out: set[int] = set()
@@ -393,14 +445,30 @@ def apply(vault: Vault, found: Plan, *, via: Via = "cli") -> Tier1:
 
     refused = skip(screen(vault, planned))
     kept: list[Planned] = [p for p in planned if p.n not in refused]
-    store = EntityStore(vault)
     while kept:
         try:
-            return Tier1(store.apply(kept, by="tier1", via=via), tuple(skipped), found.proposals)
+            written = store.apply(kept, by="tier1", via=via)
+            return Tier1(written, tuple(skipped), found.proposals, taken_back=back)
         except RefusedError as e:
             gone = skip(e.problems)
             kept = [p for p in kept if p.n not in gone]
-    return Tier1(None, tuple(skipped), found.proposals)
+    return Tier1(None, tuple(skipped), found.proposals, taken_back=back)
+
+
+def _take_back(store: EntityStore, lines: list[Line], skipped: list[str], via: Via) -> Written | None:
+    """Undo tier 1's own lines in one commit, each `by: tier1` with its rule and why; one the store refuses (a value a
+    never-store list now holds, a file it can't rewrite) is skipped and listed, by its rule and entity only."""
+    by_id = {line.id: line for line in lines}
+    while by_id:
+        try:
+            return store.undo(list(by_id), via=via, by="tier1", why=NOW_SHARED)
+        except RefusedError as e:
+            for problem in e.problems:
+                # The store names each op it refuses by its id, never by its value.
+                op_id, _, why = problem.partition(": ")
+                line = by_id.pop(op_id)
+                skipped.append(f"taking back {line.rule} for {line.entity}: {why}")
+    return None
 
 
 def run(vault: Vault, *, via: Via = "cli") -> Tier1:

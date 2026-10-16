@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 from starlette.datastructures import QueryParams
 
 from docket.curate import batch, schedule
-from docket.curate.batch import Batch, Measure, Snippet, State
+from docket.curate.batch import HIDDEN, Batch, Measure, Snippet, State, shown_key
 from docket.curate.propose import UNSEEN, Card
 from docket.errors import DocketError
 from docket.index.build import open_index
@@ -48,7 +48,6 @@ DONE = re.compile(
 LOG_LINES = 20
 # The forms matching left out, listed for curation; more than this is a list for the CLI.
 DROPPED = 50
-HIDDEN = "(on a never-store list)"
 NO_FILE = "none"
 TRUST = {UNSEEN: "other order, not seen"}
 ADDS = {"name": "the name", "plain": "added as an alias", "asr": "added as an asr alias", "no": "found already"}
@@ -476,7 +475,9 @@ def describe(line: Line, lists: NeverStore) -> str:
 
     change = line.change
     if change is None:
-        return f"undoes {line.of}" if line.op == "undo" else stop_key(line.key, lists)
+        if line.op == "undo":
+            return f"taken back: {line.why}, {stop_key(line.key, lists)}" if line.why else f"undoes {line.of}"
+        return stop_key(line.key, lists)
     if change.entity is not None:
         return f"{change.entity.type}, {'; '.join(shown(n, lists) for n in sorted(change.entity.name.values()))}"
     if change.alias is not None:
@@ -576,8 +577,7 @@ def build(facts: Facts, state: CurateState) -> View:
 
 def stop_key(key: str, lists: NeverStore) -> str:
     """A key as the page shows it: the value it names hidden when a never-store list holds it."""
-    text = curatelog.key_text(key)
-    return key[: len(key) - len(text)] + HIDDEN if text and hidden(key, lists) else key
+    return shown_key(key, lists)
 
 
 def done_line(done: str | None) -> str | None:

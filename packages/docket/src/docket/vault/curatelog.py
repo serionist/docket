@@ -242,6 +242,8 @@ class Line(BaseModel):
     change: Change | None = None
     of: str | None = None
     evidence: Evidence | None = None
+    # Why tier 1 undid one of its own (DR-0469): `now shared`.
+    why: str | None = None
 
     @field_validator("id", "of")
     @classmethod

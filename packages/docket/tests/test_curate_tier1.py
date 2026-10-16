@@ -5,6 +5,8 @@ round, the page and `show` listing what it did."""
 
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -24,7 +26,7 @@ from docket.curate.tier1 import Tier1
 from docket.errors import DocketError
 from docket.index import build as index_build
 from docket.vault import curatelog
-from docket.vault.curatelog import Change, IdFields, Line, read_all
+from docket.vault.curatelog import Change, IdFields, Line, folded, read_all
 from docket.vault.entitystore import EntityStore, Planned, Reject
 from docket.vault.vault import Vault
 
@@ -32,7 +34,7 @@ SAME = {"Origin": OURS, "Sec-Fetch-Site": "same-origin"}
 RECORDING = "plaud:rec-two"
 ENTITIES = {
     "entities/person/ada-example.yaml": "id: ada-example\ntype: person\nname: {en: Ada Example}\n",
-    "entities/person/ben-sample.yaml": "id: ben-sample\ntype: person\nname: {en: Ben Sample}\nids: {chat: U0BEN}\n",
+    "entities/person/ben-sample.yaml": "id: ben-sample\ntype: person\nname: {en: Benny Sample}\nids: {chat: U0BEN}\n",
     "entities/person/cleo-test.yaml": (
         "id: cleo-test\ntype: person\nname: {en: Cleo Test}\nids: {email: cleo@example.com}\n"
     ),
@@ -239,7 +241,7 @@ def test_an_undone_or_hand_removed_fact_never_comes_back(vault: Vault) -> None:
     lines = {ln.key: ln for ln in ran.written.lines}  # type: ignore[union-attr]
     EntityStore(vault).undo([lines["alias:northwind:nortwind"].id])
     path = vault.root / "entities/person/ben-sample.yaml"
-    path.write_text("id: ben-sample\ntype: person\nname: {en: Ben Sample}\nids: {chat: U0BEN}\n", encoding="utf-8")
+    path.write_text("id: ben-sample\ntype: person\nname: {en: Benny Sample}\nids: {chat: U0BEN}\n", encoding="utf-8")
     vault.commit(["entities/person/ben-sample.yaml"], "Benny S. out by hand")
     index.update(vault)
     again = tier1.run(vault)
@@ -249,7 +251,7 @@ def test_an_undone_or_hand_removed_fact_never_comes_back(vault: Vault) -> None:
 def test_two_engines_must_agree_where_the_recording_names_the_entity(vault: Vault) -> None:
     conn = index_build.open_index(vault)
     try:
-        found = [f for f in tier1.find(conn, vault) if f.rule == "engines"]
+        found = [f for f in tier1.find(conn, vault).facts if f.rule == "engines"]
     finally:
         conn.close()
     assert [(f.entities, f.text) for f in found] == [(("northwind",), "Nortwind")]
@@ -263,7 +265,7 @@ def test_two_engines_must_agree_where_the_recording_names_the_entity(vault: Vaul
     index.rebuild(vault)
     conn = index_build.open_index(vault)
     try:
-        assert [f for f in tier1.find(conn, vault) if f.rule == "engines"] == []
+        assert [f for f in tier1.find(conn, vault).facts if f.rule == "engines"] == []
     finally:
         conn.close()
 
@@ -344,29 +346,142 @@ def test_a_shared_sender_gives_no_one_its_address(tmp_path: Path) -> None:
     assert "ids" not in entity_file(v, "entities/person/ben-sample.yaml")
 
 
-def test_a_sender_found_shared_later_gives_no_names_and_stays_shared(tmp_path: Path) -> None:
+ADA = "entities/person/ada-example.yaml"
+
+
+def taken_back_vault(tmp_path: Path) -> tuple[Vault, Line]:
+    """Ada's address, given by tier 1 while she was the only name shown with it, then shown with Ben's and Carol's."""
     v = small_vault(tmp_path, ADA_BEN, mail=[_mail(1, f"Ada Example <{SHARED}>", "Merged the pull request.")])
     first = tier1.run(v)
-    # With one name seen, the address is Ada's: the round lists it with its undo.
     assert facts(first) == [("address", "ada-example", f"id:ada-example:email={SHARED}")]
     v.write_run("mail", [
         _mail(2, f"Ben Sample <{SHARED}>", "Commented on the issue."),
         _mail(3, f"Carol Test <{SHARED}>", "Opened an issue."),
     ])  # fmt: skip
     index.update(v)
-    assert tier1.run(v).written is None
-    assert "aliases" not in entity_file(v, "entities/person/ada-example.yaml")
-    EntityStore(v).undo([line.id for line in first.written.lines])  # type: ignore[union-attr]
+    return v, first.written.lines[0]  # type: ignore[union-attr]
+
+
+def test_an_address_tier1_gave_is_taken_back_once_its_sender_looks_shared(tmp_path: Path) -> None:
+    v, given = taken_back_vault(tmp_path)
+    ran = tier1.run(v)
+    assert ran.written is None and ran.skipped == () and ran.proposals == ()
+    back = ran.taken_back.lines  # type: ignore[union-attr]
+    assert [(ln.op, ln.by, ln.rule, ln.why, ln.of, ln.key) for ln in back] == [
+        ("undo", "tier1", "address", "now shared", given.id, given.key)
+    ]
+    assert "ids" not in entity_file(v, ADA) and "aliases" not in entity_file(v, ADA)
+    assert given.key in curatelog.fold(read_all(v.root).lines).stoplist
+    # It stays taken back, and no one else gets it.
     index.update(v)
-    assert tier1.run(v).written is None
+    again = tier1.run(v)
+    assert again.written is None and again.taken_back is None
     assert "ids" not in entity_file(v, "entities/person/ben-sample.yaml")
 
 
-def test_a_shown_name_unlike_the_holder_s_is_no_alias(tmp_path: Path) -> None:
-    entities = {"entities/person/ada-example.yaml": f"id: ada-example\ntype: person\nname: {{en: Ada Example}}\n"
-                f"ids: {{email: {SHARED}}}\n"}  # fmt: skip
-    v = small_vault(tmp_path, entities, mail=[_mail(1, f"Carol Test <{SHARED}>", "Opened an issue.")])
+def test_a_take_back_the_store_refuses_is_skipped_and_listed(tmp_path: Path) -> None:
+    v, _ = taken_back_vault(tmp_path)
+    path = v.root / ADA
+    path.write_text("# kept by hand\n" + path.read_text(encoding="utf-8"), encoding="utf-8")
+    v.commit([ADA], "a comment")
+    ran = tier1.run(v)
+    assert ran.taken_back is None and not ran.wrote
+    assert ran.skipped == (
+        "taking back address for ada-example: the entity's file holds a comment on line 1, which a rewrite would "
+        "lose; take it out, or make the change by hand",
+    )
+
+
+def test_the_round_lists_what_tier1_took_back_a_never_store_value_hidden(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    v, _ = taken_back_vault(tmp_path)
+    with signed_in(v) as client:
+        assert client.post("/curate/round", headers=SAME).status_code == 303
+        assert f"taken back: now shared, id:ada-example:email={SHARED}" in client.get("/curate").text
+        monkeypatch.setenv("DOCKET_VAULT", str(v.root))
+        assert main(["curate", "show"]) == 0
+        shown = rf"taken back by itself: \S+  ada-example  now shared, id:ada-example:email={re.escape(SHARED)}\n"
+        assert re.search(shown, capsys.readouterr().out)
+        # Once a never-store list holds the value, neither shows it.
+        config(v, never_store={"keywords": ["notifications"]})
+        page = client.get("/curate").text
+        assert "taken back: now shared, id:ada-example:email=(on a never-store list)" in page
+        assert main(["curate", "show"]) == 0
+        out = capsys.readouterr().out
+        assert "now shared, id:ada-example:email=(on a never-store list)\n" in out
+        assert f"email={SHARED}" not in out
+        assert main(["curate", "show", "--json"]) == 0
+        taken = json.loads(capsys.readouterr().out)["taken_back"]
+        assert len(taken) == 1 and taken[0].endswith("email=(on a never-store list)")
+
+
+def test_two_people_whose_names_only_start_alike_share_an_address(tmp_path: Path) -> None:
+    anna = {"entities/person/anna-example.yaml": "id: anna-example\ntype: person\nname: {en: Anna Example}\n"}
+    v = small_vault(tmp_path, anna, mail=[
+        _mail(1, "Ann Example <family@example.com>", "Dinner on Friday."),
+        _mail(2, "Anna Example <family@example.com>", "The tickets are booked."),
+    ])  # fmt: skip
+    ran = tier1.run(v)
+    assert ran.written is None and ran.proposals == ()
+
+
+def test_a_shown_name_longer_than_the_holder_s_is_no_alias(tmp_path: Path) -> None:
+    gabor = {"entities/person/kovacs-gabor.yaml": (
+        "id: kovacs-gabor\ntype: person\nname: {hu: Kovács Gábor}\nids: {email: info@kovacs.example}\n"
+    )}  # fmt: skip
+    v = small_vault(tmp_path, gabor, mail=[_mail(1, "Kovács Gáborné <info@kovacs.example>", "Köszönöm a csomagot.")])
     assert tier1.run(v).written is None
+
+
+def test_one_person_written_three_ways_still_gets_the_address_and_the_id(tmp_path: Path) -> None:
+    ada = {ADA: ADA_BEN[ADA]}
+    v = small_vault(tmp_path, ada, mail=[
+        _mail(1, "Ada Example <ada@example.com>", "One."),
+        _mail(2, "Example, Ada <ada@example.com>", "Two."),
+        _mail(3, "A. Example <ada@example.com>", "Three."),
+    ], chat=[_chat(1, "Ada Example <U0ADA>", "Hi."), _chat(2, "ada.e <U0ADA>", "Hi again.")])  # fmt: skip
+    assert sorted(facts(tier1.run(v))) == [
+        ("address", "ada-example", "id:ada-example:email=ada@example.com"),
+        ("chat id", "ada-example", "id:ada-example:chat=u0ada"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "one"),
+    [
+        ("Ada Example", "Example, Ada", True),
+        ("A. Example", "Ada Example", True),
+        ("Ada E.", "Ada Example", True),
+        ("Ada", "Ada Example", True),
+        ("Ann Example", "Anna Example", False),
+        ("Gab Sample", "Gabriella Sample", False),
+        ("Dan Kovács", "Dániel Kovács", False),
+        ("Kovács Gáborné", "Kovács Gábor", False),
+        ("Ada Example", "Adam Example", False),
+        ("Bob Sample", "Robert Sample", False),
+        ("Ada Example", "Ada Sample", False),
+    ],
+)
+def test_two_names_are_one_person_s_word_for_word_or_by_an_initial(a: str, b: str, one: bool) -> None:
+    assert tier1._one_person(folded(a).split(), folded(b).split()) is one  # pyright: ignore[reportPrivateUsage]
+    assert tier1._shared([a, b]) is not one  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.parametrize(
+    ("shown", "own", "shortens"),
+    [
+        ("Cleo T.", "Cleo Test", True),
+        ("Kat Nagy", "Katalin Nagy", True),
+        ("Example, Ada", "Ada Example", True),
+        ("Ka Nagy", "Katalin Nagy", False),
+        ("Kovács Gáborné", "Kovács Gábor", False),
+        ("Adam Example", "Ada Example", False),
+        ("Ada B. Example", "Ada Example", False),
+    ],
+)
+def test_a_shown_name_shortens_the_holder_s_never_lengthens_it(shown: str, own: str, shortens: bool) -> None:
+    assert tier1._shortens(folded(shown).split(), folded(own).split()) is shortens  # pyright: ignore[reportPrivateUsage]
 
 
 def chase_vault(tmp_path: Path, said: list[tuple[int, str]], entities: dict[str, str], **runs: list[Any]) -> Vault:
