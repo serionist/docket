@@ -17,6 +17,7 @@ from docket_testkit import copied, make_config, shared, traced
 from documents_scan_kit import SOURCE, cycle, name, put, raw, run
 
 from docket.documents import records
+from docket.documents import scan as scan_module
 from docket.vault.config import SourceConfig
 from docket.vault.vault import Vault
 
@@ -42,7 +43,11 @@ def scanned(folder: Path, work: Path) -> Path:
     config.sources[SOURCE] = SourceConfig(folder="~/Work")
     vault = Vault.init(folder / "vault", config, "test-box")
     name(vault, work)
-    cycle(vault)
+    # The first scan hands its files to the gate in one call: each call reads all of staging, so batches of 200 would
+    # read it once per 200 files. The vault is the same, but for the records' fetched times.
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(scan_module, "BATCH_FILES", files())
+        cycle(vault)
     return vault.root
 
 

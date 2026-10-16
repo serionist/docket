@@ -11,6 +11,7 @@ import pytest
 
 from devkit import commits, content, coverage, gate
 from devkit.cli import cmd_commit_msg
+from devkit.repo import KitError
 
 
 def test_attribution_is_found_and_stripped() -> None:
@@ -315,6 +316,28 @@ def test_slowest_tests_are_read_from_pytest_s_output() -> None:
     ]
 
 
+def test_a_tests_step_past_eleven_minutes_warns_on_github_actions_only(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    took = [0.0]
+    monkeypatch.setattr(gate, "STEPS", [gate.Step("tests", ("os",), "", lambda _ctx: gate.Outcome.ok("1 passed"))])
+    monkeypatch.setattr(gate, "_timed", lambda step, ctx: (step.run(ctx), took[0]))
+    for actions, seconds, warned in (("true", 661.0, True), ("true", 660.0, False), ("", 900.0, False)):
+        monkeypatch.setenv("GITHUB_ACTIONS", actions)
+        took[0] = seconds
+        assert gate.run("os") == 0
+        warnings = [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("::warning")]
+        assert warnings == (
+            [
+                "::warning title=Slow tests::the tests step took 11.0 minutes, past 11: its job is "
+                "past 12 about then; the step's slowest tests are in its log"
+            ]
+            if warned
+            else []
+        )
+    assert gate.slow_tests_warning("types", 900.0) is None
+
+
 def test_a_lane_runs_its_tests_beside_its_other_steps(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -434,6 +457,22 @@ def test_the_tests_step_runs_the_timed_tests_alone_after_the_rest(
         "timed: mention pass: 300 aliases, 100000 chunks, 512 ms, 2210 mentions",
         "slowest: 12.34s call     t.py::test_slow",
     ]
+
+
+def test_a_share_s_two_runs_keep_the_same_share_of_the_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _fake_pytest(monkeypatch)
+    ctx = gate.Ctx(root=tmp_path, lane="os", ci=False, base=None, pr=None, shard="2/2")
+    assert gate.step_tests(ctx).status == "ok"
+    for run in calls:
+        assert run[run.index("devkit.shard") - 1] == "-p" and "--shard=2/2" in run
+
+
+def test_only_the_os_lane_takes_a_share_and_only_k_of_n(repo: Path) -> None:
+    with pytest.raises(KitError, match="full lane runs every test"):
+        gate.run("full", shard="1/2")
+    with pytest.raises(KitError, match="K/N"):
+        gate.run("os", shard="3/2")
+    assert gate.main(["os", "--shard", "0/2"]) == 2
 
 
 def test_a_failure_in_either_run_shows_its_tail(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
