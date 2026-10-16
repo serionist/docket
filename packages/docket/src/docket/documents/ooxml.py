@@ -10,6 +10,7 @@ inflated once, a MiB at a time from its raw bytes, counting what it really holds
 from __future__ import annotations
 
 import io
+import itertools
 import posixpath
 import struct
 import zipfile
@@ -32,6 +33,7 @@ CP = "{http://schemas.openxmlformats.org/package/2006/metadata/core-properties}"
 UNSAFE_XML = "its XML declares a DTD or entities"
 LOCAL_HEADER = b"PK\x03\x04"
 METHODS = {zipfile.ZIP_BZIP2: "bzip2", zipfile.ZIP_LZMA: "lzma"}
+CONTENT_TYPES = "[Content_Types].xml"
 
 
 def local(tag: str) -> str:
@@ -55,19 +57,46 @@ class Rel:
     target: str
 
 
+@dataclass(frozen=True)
+class Span:
+    """Where a part's raw bytes are in the package, after its local header."""
+
+    info: zipfile.ZipInfo
+    begin: int
+    end: int
+
+
+def span(data: bytes, info: zipfile.ZipInfo) -> Span:
+    start = info.header_offset
+    if len(data) < start + 30 or data[start : start + 4] != LOCAL_HEADER:
+        raise NotReadError("damaged", "damaged (a part's header is missing)")
+    name_length, extra_length = struct.unpack_from("<HH", data, start + 26)
+    begin = start + 30 + name_length + extra_length
+    if begin + info.compress_size > len(data):
+        raise NotReadError("damaged", "damaged (a part is cut short)")
+    return Span(info, begin, begin + info.compress_size)
+
+
 def check(data: bytes, infos: list[zipfile.ZipInfo], limits: Limits) -> None:
-    """The package's parts counted before any is read: how many, how they are packed, and what each really holds, not
-    what it declares."""
+    """The package's parts counted before any is read: how many, how they are packed, where they are, and what each
+    really holds, not what it declares. Parts that share or overlap their bytes are refused, as zipfile refuses them
+    on a read, and what is left of the package's cap caps the next part, so many entries over one stream stop early."""
     if len(infos) > limits.zip_members:
         raise NotReadError("zip", f"{len(infos):,} parts in its package, over the cap of {limits.zip_members:,}")
     if any(info.flag_bits & 0x1 for info in infos):
         raise NotReadError("protected", "protected, or in an old binary format")
-    total = 0
     for info in infos:
         if info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
             method = METHODS.get(info.compress_type, f"method {info.compress_type}")
             raise NotReadError("zip", f"a part in its package packed with {method}, which Docket doesn't read")
-        size = max(info.file_size, real_size(data, info, limits.member_bytes))
+    spans = sorted((span(data, info) for info in infos), key=lambda s: s.info.header_offset)
+    for before, after in itertools.pairwise(spans):
+        if after.info.header_offset < before.end:
+            raise NotReadError("damaged", "damaged (its parts overlap)")
+    total = 0
+    for part in spans:
+        info = part.info
+        size = max(info.file_size, real_size(data, part, min(limits.member_bytes, limits.package_bytes - total)))
         if size > limits.member_bytes:
             raise NotReadError(
                 "zip", f"a part of {mib(size)} in its package, over the cap of {mib(limits.member_bytes)}"
@@ -78,22 +107,17 @@ def check(data: bytes, infos: list[zipfile.ZipInfo], limits: Limits) -> None:
                 "zip", f"a part compressed {ratio:,} to 1 in its package, over the cap of {limits.ratio:,} to 1"
             )
         total += size
-    if total > limits.package_bytes:
-        raise NotReadError("zip", f"{mib(total)} of parts in its package, over the cap of {mib(limits.package_bytes)}")
+        if total > limits.package_bytes:
+            raise NotReadError(
+                "zip", f"{mib(total)} of parts in its package, over the cap of {mib(limits.package_bytes)}"
+            )
 
 
-def real_size(data: bytes, info: zipfile.ZipInfo, cap: int) -> int:
-    """What a part really holds, from its raw bytes after its local header: a stored part's length, or its deflate
-    stream inflated a MiB at a time, counting stopped once past `cap`."""
-    start = info.header_offset
-    if data[start : start + 4] != LOCAL_HEADER:
-        raise NotReadError("damaged", "damaged (a part's header is missing)")
-    name_length, extra_length = struct.unpack_from("<HH", data, start + 26)
-    begin = start + 30 + name_length + extra_length
-    raw = data[begin : begin + info.compress_size]
-    if len(raw) < info.compress_size:
-        raise NotReadError("damaged", "damaged (a part is cut short)")
-    if info.compress_type == zipfile.ZIP_STORED:
+def real_size(data: bytes, part: Span, cap: int) -> int:
+    """What a part really holds: a stored part's length, or its deflate stream inflated a MiB at a time, counting
+    stopped once past `cap`."""
+    raw = data[part.begin : part.end]
+    if part.info.compress_type == zipfile.ZIP_STORED:
         return len(raw)
     inflater = zlib.decompressobj(-zlib.MAX_WBITS)
     count = 0
@@ -136,13 +160,37 @@ class Package:
         infos = self.zip.infolist()
         check(data, infos, limits)
         self.names = frozenset(info.filename for info in infos)
+        images = self._images(infos)
         for info in infos:
-            self._no_dtd(info)
+            if info.filename not in images:
+                self._no_dtd(info)
+
+    def _images(self, infos: list[zipfile.ZipInfo]) -> frozenset[str]:
+        """The parts that are images, by the package's content types or an .svg name: neither our readers nor openpyxl
+        parse one, and an SVG commonly carries the SVG 1.1 DOCTYPE."""
+        defaults: set[str] = set()
+        overrides: dict[str, str] = {}
+        if CONTENT_TYPES in self.names:
+            self._no_dtd(self.zip.getinfo(CONTENT_TYPES))
+            for entry in self.xml(CONTENT_TYPES):
+                kind = entry.get("ContentType", "")
+                if local(entry.tag) == "Default" and kind.startswith("image/"):
+                    defaults.add(entry.get("Extension", "").lower())
+                elif local(entry.tag) == "Override":
+                    overrides[entry.get("PartName", "").lstrip("/").lower()] = kind
+        images: set[str] = set()
+        for info in infos:
+            name = info.filename.lower()
+            kind = overrides.get(name)
+            image = kind.startswith("image/") if kind is not None else name.rpartition(".")[2] in defaults
+            if image or name.endswith(".svg"):
+                images.add(info.filename)
+        return frozenset(images)
 
     def _no_dtd(self, info: zipfile.ZipInfo) -> None:
         """Refuse a part with a DTD before anything parses it, whatever its name: openpyxl's own parse takes one. A DTD
-        comes before the root element, so a part is read only up to that; one that isn't XML, an image, stops at its
-        first bytes and is judged when it is read."""
+        comes before the root element, so a part is read only up to that; one that isn't XML stops at its first bytes
+        and is judged when it is read."""
         try:
             with self.zip.open(info) as f:
                 next(iter(iterparse(f, events=("start",), forbid_dtd=True)), None)

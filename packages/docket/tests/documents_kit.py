@@ -6,6 +6,7 @@ from __future__ import annotations
 import io
 import struct
 import zipfile
+import zlib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from xml.sax.saxutils import escape
@@ -72,6 +73,44 @@ def patched(data: bytes, name: str, *, declared: int | None = None, compressed: 
                     struct.pack_into("<I", out, at + compressed_at, compressed)
             at = out.find(sig, at + 4)
     return bytes(out)
+
+
+def overlapping(entries: int, inflated: int, raw_size: int) -> bytes:
+    """A zip whose `entries` central-directory entries all point at one local header: a deflate stream of `inflated`
+    zero bytes, padded to `raw_size` raw bytes so each entry passes the ratio cap on its own."""
+    deflater = zlib.compressobj(9, zlib.DEFLATED, -15)
+    stream = deflater.compress(bytes(inflated)) + deflater.flush()
+    raw = stream + bytes(raw_size - len(stream))
+    crc = zlib.crc32(bytes(inflated))
+    name = b"p.xml"
+    local = struct.pack("<4sHHHHHIIIHH", b"PK\x03\x04", 20, 0, 8, 0, 0, crc, len(raw), inflated, len(name), 0) + name
+    central = b"".join(
+        struct.pack(
+            "<4sHHHHHHIIIHHHHHII",
+            b"PK\x01\x02",
+            20,
+            20,
+            0,
+            8,
+            0,
+            0,
+            crc,
+            len(raw),
+            inflated,
+            len(part := f"p{n}.xml".encode()),
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
+        + part
+        for n in range(entries)
+    )
+    body = local + raw
+    end = struct.pack("<4sHHHHIIH", b"PK\x05\x06", 0, 0, entries, entries, len(central), len(body), 0)
+    return body + central + end
 
 
 def rels(*entries: tuple[str, str, str]) -> str:

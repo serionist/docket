@@ -4,6 +4,7 @@ parsed with a DTD, and never named by an error's message. Every file is built he
 from __future__ import annotations
 
 import io
+import time
 import tracemalloc
 import zipfile
 
@@ -13,6 +14,7 @@ from documents_kit import (
     Slide,
     docx,
     encrypted,
+    overlapping,
     package,
     patched,
     pdf,
@@ -150,6 +152,22 @@ def test_a_part_without_its_header_or_cut_short_or_not_deflate_is_damaged() -> N
     assert refused(garbled, "docx").detail == "damaged (error)"
 
 
+@pytest.mark.perf
+def test_entries_that_share_one_stream_are_refused_before_any_is_inflated() -> None:
+    # 200 entries over one 64 MiB stream took 9 s to inflate one by one before the package's cap stopped them.
+    data = overlapping(200, 64 * MIB, 700 * 1024)
+    assert len(zipfile.ZipFile(io.BytesIO(data)).infolist()) == 200
+    started = time.perf_counter()
+    assert refused(data, "docx").detail == "damaged (its parts overlap)"
+    assert time.perf_counter() - started < 2.0
+
+
+def test_what_is_left_of_the_package_s_cap_caps_the_next_part() -> None:
+    members: dict[str, str | bytes] = {f"part{n}.bin": bytes(2 * MIB) for n in range(3)}
+    error = refused(package(members), "docx", Limits(package_bytes=3 * MIB, ratio=10**9))
+    assert (error.reason, error.detail) == ("zip", "4 MB of parts in its package, over the cap of 3 MB")
+
+
 def test_a_part_whose_bytes_don_t_match_its_crc_is_damaged() -> None:
     members: dict[str, str | bytes] = {
         "_rels/.rels": rels(("rId1", DOC_REL, "word/document.xml")),
@@ -219,6 +237,38 @@ def test_a_dtd_is_refused_in_a_part_whatever_its_name_and_an_image_isn_t_xml() -
     assert refused(data, "docx").detail == UNSAFE_XML
     image = replaced(docx(wp("Beside a picture")), "word/media/image1.png", b"\x89PNG\r\n\x1a\n" + bytes(64))
     assert extract(image, "docx").text == "Beside a picture"
+
+
+SVG = (
+    '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" '
+    '"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">\n'
+    '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>'
+)
+TYPES = "http://schemas.openxmlformats.org/package/2006/content-types"
+
+
+def test_an_image_s_dtd_never_keeps_the_file_out_by_its_name_or_its_content_type() -> None:
+    # The SVG 1.1 DOCTYPE that draw.io and matplotlib write; nothing parses an image.
+    named = replaced(docx(wp("Northwind plan")), "word/media/image1.svg", SVG)
+    assert extract(named, "docx").text == "Northwind plan"
+    types = (
+        f'<?xml version="1.0"?><Types xmlns="{TYPES}"><Default Extension="IMG" ContentType="image/svg+xml"/>'
+        '<Override PartName="/word/media/chart.bin" ContentType="image/svg+xml"/>'
+        '<Override PartName="/word/media/drawing.img" ContentType="application/xml"/></Types>'
+    )
+    typed = replaced(replaced(docx(wp("Northwind plan")), "[Content_Types].xml", types), "word/media/pic.img", SVG)
+    typed = replaced(typed, "word/media/chart.bin", SVG)
+    assert extract(typed, "docx").text == "Northwind plan"
+    # Its override says it isn't an image, whatever its extension's default says.
+    xml_part = replaced(typed, "word/media/drawing.img", SVG)
+    assert refused(xml_part, "docx").detail == UNSAFE_XML
+
+
+def test_content_types_with_a_dtd_are_refused() -> None:
+    data = replaced(
+        docx(wp("x")), "[Content_Types].xml", f'<?xml version="1.0"?><!DOCTYPE Types><Types xmlns="{TYPES}"/>'
+    )
+    assert refused(data, "docx").detail == UNSAFE_XML
 
 
 def test_malformed_xml_is_damaged() -> None:
