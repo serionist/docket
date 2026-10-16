@@ -345,9 +345,10 @@ vault/
 - `rid` is also the ledger's locator, so every ledger source resolves to a record. Older locators (a legacy note's
   path) resolve through the note's `old_paths`, which the index loads into its `old_paths` table (DR-0320); `read`
   asks the index when it is current and parses the docs otherwise (DR-0321).
-- `read`, `verify` and `doc_put`'s anchor checks take a record's lines at their places when the index is current for
-  the record's source: its run files as indexed, by name, size and modification time, and no problem among them;
-  otherwise they load the source's raw whole (DR-0446, DR-0515). The index only narrows what they look at, and the
+- `read`, and the anchor checks of `verify`, `doc_put` and a notes import, take a record's lines at their places when
+  the index is current for the record's source: its run files as indexed, by name, size and modification time, and no
+  problem among them; otherwise they load the source's raw whole, once for a call or a whole import (DR-0446,
+  DR-0522). The index only narrows what they look at, and the
   lines read decide (DR-0447). A put holds the index only while it checks, never under the vault's lock (DR-0516).
 
 ### 5.3 Processed docs

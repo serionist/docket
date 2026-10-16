@@ -20,6 +20,7 @@ import re
 import unicodedata
 from collections import Counter
 from collections.abc import Iterable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -28,7 +29,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
 
-from docket import folders
+from docket import folders, recall
 from docket.errors import DocketError
 from docket.vault import derived
 from docket.vault.anchors import normalize_newlines
@@ -49,7 +50,7 @@ from docket.vault.processed import (
 from docket.vault.records import RawRecord
 from docket.vault.redact import Redactor
 from docket.vault.segments import segments
-from docket.vault.spans import is_transcript, over
+from docket.vault.spans import RawLookup, is_transcript, over
 from docket.vault.vault import Vault
 
 log = logging.getLogger(__name__)
@@ -550,7 +551,12 @@ def _write(store: DocStore, plans: list[Plan], report: ImportReport, prefix: str
         return
     redacted = Counter[str]()
     subject = f"Import notes: {counts['new']} new, {len(plans) - counts['new']} updated from {prefix or '.'}"
-    results = store.put_many([p.text for p in plans], subject)
+
+    def raw() -> AbstractContextManager[RawLookup]:
+        # Every note's covers through one lookup: by place where the index is current, else a source loaded once.
+        return recall.raw_lookup(store.vault)
+
+    results = store.put_many([p.text for p in plans], subject, raw=raw)
     retry: list[Plan] = []
     for p, result in zip(plans, results, strict=True):
         if isinstance(result, DocRefusedError):
@@ -565,7 +571,9 @@ def _write(store: DocStore, plans: list[Plan], report: ImportReport, prefix: str
     for p in retry:
         counts[p.count] -= 1
     again = _again(store, retry, report, takes)
-    for p, result in zip(again, store.put_many([p.text for p in again], subject) if again else [], strict=True):
+    for p, result in zip(
+        again, store.put_many([p.text for p in again], subject, raw=raw) if again else [], strict=True
+    ):
         if isinstance(result, DocRefusedError):
             report.refused.append(f"{p.listed.old_path}: {result}")
             continue

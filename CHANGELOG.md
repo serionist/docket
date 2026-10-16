@@ -146,6 +146,9 @@ Unreleased in the same PR.
   On 50 MB of call recordings in one source, `verify` went from about 580 ms to 5 ms and a `doc_put` from about
   1.1 s to 0.3 s, the rest of it git. After a sync or a pull the index hasn't seen yet, they load the source as
   before.
+- `docket import notes` checks every note's records through one read of the raw log: at their places when the index
+  is current, else each source loaded once for the whole import, where it loaded a covered source once per note. 200
+  notes over 50 MB of call recordings went from about 155 s to 9 s.
 - `docket search` asks the running service when it serves the vault with the same model, so on a GPU machine its hits
   are reranked as Claude's are, with no worker to start. With no service for the vault, `--no-update` or
   `--no-models`, it searches by itself as before; the output reads the same either way.

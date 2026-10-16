@@ -49,7 +49,6 @@ from docket.imports.notes import (
     clean_prefix,
     head_of,
     head_tokens,
-    import_notes,
     list_folder,
     screened_path,
     short,
@@ -63,6 +62,7 @@ from docket.vault.neverstore import matches_text
 from docket.vault.processed import DocProblem, DocRefusedError, ProcessedDoc
 from docket.vault.records import RawRecord
 from docket.vault.segments import Segment
+from docket.vault.spans import RawLookup
 from docket.vault.vault import Vault
 
 CALL = "notes/calls/2026-09-10-supplier-call.md"
@@ -93,8 +93,16 @@ def imported(tmp_path_factory: pytest.TempPathFactory, template: Path, repo_temp
     return imported_template(tmp_path_factory, template, repo_template)
 
 
+@pytest.fixture(params=READ_ROUTES)
+def route(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> str:
+    """Each import, read, verify and doc_put of a test through one route: an import checks its notes' covers at their
+    places when the index is current, else loads each source once (DR-0522); both give the same result."""
+    read_route(request.param, monkeypatch)
+    return str(request.param)
+
+
 @pytest.fixture
-def vault(template: Path, tmp_path: Path) -> Vault:
+def vault(template: Path, tmp_path: Path, route: str) -> Vault:
     return screening(copy_vault(template, tmp_path))
 
 
@@ -105,7 +113,7 @@ def folder(repo_template: Path, tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def after(imported: Path, tmp_path: Path) -> tuple[Vault, Path]:
+def after(imported: Path, tmp_path: Path, route: str) -> tuple[Vault, Path]:
     """A copy of the vault after its first import, and a copy of the folder."""
     shutil.copytree(imported / "vault", tmp_path / "vault")
     shutil.copytree(imported / "work", tmp_path / "work")
@@ -113,7 +121,7 @@ def after(imported: Path, tmp_path: Path) -> tuple[Vault, Path]:
 
 
 def run(vault: Vault, folder: Path, **kwargs: Any) -> ImportReport:
-    return import_notes(vault, folder, **kwargs)
+    return notes.import_notes(vault, folder, **kwargs)
 
 
 def head(path: Path) -> str:
@@ -561,17 +569,31 @@ def plaud_notes(tmp_path: Path) -> Path:
     return folder
 
 
-@pytest.mark.parametrize("route", READ_ROUTES)
-def test_a_note_named_by_title_and_day_covers_a_recording_through_its_transcript(
-    vault: Vault, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, route: str
+def test_an_import_checks_its_notes_through_one_lookup(
+    vault: Vault, folder: Path, route: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    load = RawLookup._source  # pyright: ignore[reportPrivateUsage]
+    loads: Counter[str] = Counter()
+
+    def counted(self: RawLookup, source: str) -> dict[str, list[RawRecord]]:
+        if source not in self._sources:  # pyright: ignore[reportPrivateUsage]
+            loads[source] += 1
+        return load(self, source)
+
+    monkeypatch.setattr(RawLookup, "_source", counted)
+    report = run(vault, folder)
+    assert (report.new, report.covered) == (9, 3)
+    # Two notes cover calls:rec-0042: loaded, its source loads once for the whole import; by place, never (DR-0522).
+    assert loads == (Counter() if route == "index" else Counter({"calls": 1, "vendor": 1}))
+
+
+def test_a_note_named_by_title_and_day_covers_a_recording_through_its_transcript(vault: Vault, tmp_path: Path) -> None:
     vault.write_run("plaud", plaud_records("transaction_polish"), run_at=at(12))
     report = run(vault, plaud_notes(tmp_path))
     assert (report.new, report.covered) == (1, 1)
     doc = DocStore(vault).get(SYNC_ID)
     assert doc is not None
     assert (doc.meta.covers, doc.meta.old_paths) == ([PLAUD], [SYNC])
-    read_route(route, monkeypatch)
     found = recall.read(vault, f"{SYNC}@10:42", view="both")
     assert (found.resolved, found.problems) == (f"r:{POLISHED}@10:42", [])
     assert [s.text for s in found.spans[0].segments] == ["Ten million, signed by Friday."]
@@ -719,10 +741,10 @@ def test_a_hand_edit_made_during_the_run_is_kept(after: tuple[Vault, Path], monk
     real = DocStore.put_many
     path = vault.root / "processed" / "legacy-note" / "2026" / "09" / "2026-09-10-supplier-call.md"
 
-    def edited_meanwhile(self: DocStore, texts: list[str], subject: str) -> Any:
+    def edited_meanwhile(self: DocStore, texts: list[str], subject: str, **kwargs: Any) -> Any:
         if path.read_text(encoding="utf-8").endswith("(12:08).\n- The follow-up is `rec-0099`.\n"):
             path.write_text(path.read_text(encoding="utf-8") + "- Added by hand.\n", encoding="utf-8")
-        return real(self, texts, subject)
+        return real(self, texts, subject, **kwargs)
 
     monkeypatch.setattr(DocStore, "put_many", edited_meanwhile)
     report = run(vault, folder)
@@ -736,7 +758,7 @@ def test_a_doc_the_store_refuses_is_reported(after: tuple[Vault, Path], monkeypa
     vault, folder = after
     (folder / "calls" / "2026-09-10-supplier-call.md").write_text("# Changed\n", encoding="utf-8")
 
-    def refusing(self: DocStore, texts: list[str], subject: str) -> Any:
+    def refusing(self: DocStore, texts: list[str], subject: str, **kwargs: Any) -> Any:
         return [DocRefusedError([DocProblem(None, "a hook said no")]) for _ in texts]
 
     monkeypatch.setattr(DocStore, "put_many", refusing)
@@ -751,9 +773,9 @@ def test_a_stale_doc_gone_meanwhile_is_reported(after: tuple[Vault, Path], monke
     real = DocStore.put_many
     calls: list[int] = []
 
-    def stale_then_gone(self: DocStore, texts: list[str], subject: str) -> Any:
+    def stale_then_gone(self: DocStore, texts: list[str], subject: str, **kwargs: Any) -> Any:
         calls.append(1)
-        results = real(self, [t.replace("rev: 1\n", "rev: 9\n") for t in texts], subject)
+        results = real(self, [t.replace("rev: 1\n", "rev: 9\n") for t in texts], subject, **kwargs)
         path.unlink()
         return results
 
@@ -768,8 +790,8 @@ def test_a_second_refusal_is_reported(after: tuple[Vault, Path], monkeypatch: py
     (folder / "calls" / "2026-09-10-supplier-call.md").write_text("# Changed\n", encoding="utf-8")
     real = DocStore.put_many
 
-    def always_stale(self: DocStore, texts: list[str], subject: str) -> Any:
-        return real(self, [t.replace("rev: 1\n", "rev: 9\n") for t in texts], subject)
+    def always_stale(self: DocStore, texts: list[str], subject: str, **kwargs: Any) -> Any:
+        return real(self, [t.replace("rev: 1\n", "rev: 9\n") for t in texts], subject, **kwargs)
 
     monkeypatch.setattr(DocStore, "put_many", always_stale)
     report = run(vault, folder)
@@ -826,11 +848,11 @@ def test_a_frontmatter_edit_made_during_the_run_is_kept_and_the_note_still_lands
     real = DocStore.put_many
     path = vault.root / "processed" / "legacy-note" / "2026" / "09" / "2026-09-10-supplier-call.md"
 
-    def tagged_meanwhile(self: DocStore, texts: list[str], subject: str) -> Any:
+    def tagged_meanwhile(self: DocStore, texts: list[str], subject: str, **kwargs: Any) -> Any:
         text = path.read_text(encoding="utf-8")
         if "entities: []" in text:
             path.write_text(text.replace("entities: []", "entities: [ben-sample]"), encoding="utf-8")
-        return real(self, texts, subject)
+        return real(self, texts, subject, **kwargs)
 
     monkeypatch.setattr(DocStore, "put_many", tagged_meanwhile)
     report = run(vault, folder)

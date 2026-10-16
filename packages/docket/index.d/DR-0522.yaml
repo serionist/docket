@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0522
+    title: verify, doc_put and put_many check anchors at their records' places when the index is current for the source, one lookup per call or batch
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#111", "#136"]
+    supersedes: [DR-0515]
+    description: "verify's, doc_put's and put_many's anchor checks ask the raw log through RawLookup with the index's places, as read does since #76: a source is read at its records' places when the index is current for it by DR-0446's check (its run files as indexed by name, size and modification time, no problem line among them, no record of it in another source's folder, each line read holding its rid and version), else it loads whole once for the call, as before. Today's code decides on the lines read (DR-0447): the versions in run order, the version an anchor resolves on (the latest, or a folder record's last version with text when its newest is gone or not read, DR-0491), the transcripts under a record a time on it is placed on (DR-0391). A put loads each covered source once at most, through one lookup for its whole check. put_many, which docket import notes uses, checks every doc of its batch through one lookup its caller opens, as a put does, closed before the lock (DR-0516): docket import notes passes the same opener as doc_put, so an import reads each note's covers at their places, or loads each source once for the whole import. Without an opener, put_many makes one lookup for the batch, which loads each source once. Superseded DR-0515, which left put_many loading per doc."
+    binds:
+      - The place route and the load route give verify, doc_put and put_many the same answer, or the same failure.
+    not_chosen:
+      - "Answers from the index's own columns (records, segments): a second reading of a record to keep in step with RawRecord (DR-0447)."
+      - "A check of its own for a write, such as a hash of each run file: it reads every byte, the cost this removes."
+      - "A lookup per note, as before: 200 notes over 50 MB of one source loaded it 200 times, about 155 s against 9 s for the whole import."
+      - "The import's own pass over the raw log for covers: it keeps each record's newest version, where a check reads every version (DR-0491)."

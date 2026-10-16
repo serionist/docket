@@ -1,11 +1,12 @@
 decisions:
   - id: DR-0515
     title: verify and doc_put check anchors at their records' places when the index is current for the source
-    status: proposed
+    status: superseded
     at: "2026-10-16"
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#111"]
+    superseded_by: [DR-0522]
     description: "verify and doc_put's anchor checks ask the raw log through RawLookup with the index's places, as read does since #76: a source is read at its records' places when the index is current for it by DR-0446's check (its run files as indexed by name, size and modification time, no problem line among them, no record of it in another source's folder, each line read holding its rid and version), else it loads whole once for the call, as before. Today's code decides on the lines read (DR-0447): the versions in run order, the version an anchor resolves on (the latest, or a folder record's last version with text when its newest is gone or not read, DR-0491), the transcripts under a record a time on it is placed on (DR-0391). A put loads each covered source once at most, through one lookup for its whole check. put_many, which docket import notes uses, keeps loading per doc: the issue names doc_put only."
     binds:
       - The place route and the load route give verify and doc_put the same answer, or the same failure.

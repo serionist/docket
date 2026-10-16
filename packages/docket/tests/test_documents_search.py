@@ -53,7 +53,7 @@ def library(tmp_path: Path) -> tuple[Vault, Path]:
 def routed(
     library: tuple[Vault, Path], request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[Vault, Path]:
-    """The library with every read, verify and doc_put through one route (DR-0446, DR-0515): the parse route starts
+    """The library with every read, verify and doc_put through one route (DR-0446, DR-0522): the parse route starts
     without the template's index."""
     if request.param == "parse":
         db_path(library[0]).unlink()
@@ -222,7 +222,7 @@ def test_a_file_that_turns_protected_is_verified_and_cited_from_its_last_text(
 def test_doc_put_reads_a_covered_source_s_raw_once(
     library: tuple[Vault, Path], monkeypatch: pytest.MonkeyPatch, index: str
 ) -> None:
-    """At its places when the index is current for the source (DR-0515), else loaded once for the whole check."""
+    """At its places when the index is current for the source (DR-0522), else loaded once for the whole check."""
     vault, _ = library
     if index == "none":
         db_path(vault).unlink()
