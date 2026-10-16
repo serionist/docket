@@ -33,7 +33,9 @@ that patches something builds its copy before patching. Tests about `Vault.init`
 
 A test that asserts how long something took carries `@pytest.mark.perf`: `gate os`, which runs without coverage, runs
 those after the rest, alone and one at a time, and prints what they print, so the other tests' workers never decide a
-time limit. `gate full` keeps them in its one run, since under coverage the index's limits are off (DR-0430).
+time limit. `gate full` keeps them in its one run, since under coverage the index's limits are off (DR-0430). A vault
+a timed test needs is a shared template that an untimed test asks for too: the two runs of `gate os` share one
+templates folder, so the parallel run builds it and the timed run only times (DR-0492).
 
 Tests never touch the real Docket folders or the keychain, not even to read them: `conftest.py` points the config,
 state and models folders at a temp folder of the session's before any fixture runs, and each test at its own.

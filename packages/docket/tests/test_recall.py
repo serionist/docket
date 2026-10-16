@@ -13,6 +13,7 @@ from docket_testkit import (
     make_record,
     note,
     read_route,
+    shared,
     template_vault,
 )
 
@@ -28,15 +29,22 @@ NOTE_PATH = "processed/recording-note/2026/10/2026-10-14-supplier-call.md"
 LINES = ["- Ben put the consultant at 10 million forints. @12:08", "- Cleo wants the offer in writing. @14:30-14:52"]
 
 
+def with_the_note(fixture: Path, base: Path) -> Path:
+    v = copy_vault(fixture, base)
+    recall.doc_put(v, note(lines=LINES))
+    return v.root
+
+
 @pytest.fixture(scope="module")
 def template(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    return template_vault(tmp_path_factory)
+    """The fixture vault with the note put: built once, copied by each test."""
+    fixture = template_vault(tmp_path_factory)
+    return shared(lambda base: with_the_note(fixture, base), "recall-note", tmp_path_factory)
 
 
 @pytest.fixture(params=READ_ROUTES)
 def vault(template: Path, tmp_path: Path, request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> Vault:
     v = copy_vault(template, tmp_path)
-    recall.doc_put(v, note(lines=LINES))
     read_route(request.param, monkeypatch)
     return v
 
