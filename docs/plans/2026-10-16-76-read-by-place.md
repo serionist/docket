@@ -1,9 +1,9 @@
 ---
 title: Read a record by its place in the index, not by loading its raw log
 issue: "#76"
-status: draft
-approved_by:
-approved_at:
+status: approved
+approved_by: the lead (autonomy grant)
+approved_at: 2026-10-16
 ---
 
 # Read a record by its place in the index, not by loading its raw log
@@ -64,6 +64,10 @@ records read. The doc questions are #46's and cost what they cost there, a hash 
 
 - The build reads each run file in binary and splits at `\n`: the same lines text mode with `newline="\n"` gives,
   since UTF-8 never puts a `\n` byte inside a character. A read opens the file in binary, seeks, reads to the next `\n`.
+- The line read is decoded as strict UTF-8 and parsed as text, as the load route does, never `json.loads` on bytes,
+  which would drop a BOM and let an encoded surrogate through: such a line fails on both routes.
+- A line that isn't UTF-8 stays indexed for search as today, its bad bytes replaced, and is reported as a problem, so
+  its source loads whole for reads.
 - CRLF: Docket writes run files with `\n`, and the vault's `.gitattributes` keeps them LF on checkout (DR-0142). A
   file with CRLF anyway (an override, a hand copy) reads the same on both routes: the line runs to its `\n`, `\r`
   included, and JSON skips it.
@@ -99,7 +103,7 @@ The index narrows, today's code decides on the lines read, as #46 does for docs 
 | Read asks | From the index | Then |
 |---|---|---|
 | is this a rid in the raw log (`<source>:<path>` locators, a transcript's recordings) | a `record_versions` row in the source's folder | nothing read |
-| a record's versions: how many, and the latest | its `record_versions` rows there, in run order then line | each line read at its offset |
+| a record's versions: how many, and the latest | its `record_versions` rows there, in `RunFile.order` (date, time, machine, counter) as the build's `_order` uses, then line; never the path's text | each line read at its offset |
 | the transcripts under a record (DR-0370, DR-0440) | `records` rows of the source naming it as thread or container, of kind transcript, other than itself | each latest version read, kept by `over()` and `is_transcript()` |
 | a message's neighbours (`around` on a record without segments) | `records` rows of the source with its thread, else its container, by `(ts, rid)` to the millisecond: its own millisecond and n rows either side, each end widened to its whole millisecond | read, sorted by `(ts, rid)` as today, cut to the window |
 
@@ -160,9 +164,15 @@ them; invented names only.
 - `test_index_lookup.py`: a source is current after an update; not after a new run in it, while another source stays
   current; not after a run touched, grown or removed, or a problem line in it; the check never writes the index file.
 - `test_spans.py`: for every rid of the index fixture and the Plaud records, `versions`, `has`, `transcripts`,
-  `timed`, `recordings` and `neighbours` give the same by place as loaded, with one `(rid, v)` in two runs, a record in
-  two runs and two messages in one millisecond; a line rewritten in place with its size and time put back
-  (`os.utime`), and a run deleted after the check, send the source to the load route with the same answer.
+  `timed`, `recordings` and `neighbours` give the same by place as loaded, with one `(rid, v)` in two runs and a record
+  in two runs; a line rewritten in place with its size and time put back (`os.utime`), and a run deleted after the
+  check, send the source to the load route with the same answer.
+- The order: versions in runs of two machines whose names sort one way by path and the other by `RunFile.order`
+  (`desk`, `desk-2`) in one minute, and a run counter past 9 (`.2` and `.10`), come back in the load route's order.
+- The window: two messages in one millisecond whose microsecond order runs against their rid order, in a thread read
+  with every `around` from 1 to the thread's length, so the pair falls on each end of a window; both routes agree.
+- A record in another source's folder: neither its own source nor that folder's source is current.
+- A BOM line and a line holding an encoded surrogate fail on both routes.
 - `test_recall_perf.py`, marked `perf` (DR-0430): `big_raw()` in `docket_testkit.py` writes invented Plaud raw, 50 MB
   when timed and 5 MB under coverage, where nothing is timed; `read r:<transcript>`, `read r:<recording>`, `read
   plaud:<old path>` and the rid check each take under 100 ms by place, and the load route's times print beside them.
@@ -193,4 +203,12 @@ them; invented names only.
 
 ## Plan review
 
-Not reviewed yet.
+Round 1, 16 Oct 2026, the lead: approved with five minors, no blocker or major; all fixed in this version.
+
+| Finding | Severity | Status |
+|---|---|---|
+| The same-millisecond test didn't pin the widening | minor | fixed: a pair whose microsecond order runs against their rid order, read with every `around` from 1 to the thread's length |
+| Versions in run order could be read as the path's order | minor | fixed: `RunFile.order`, as the build's `_order` uses; a test with `desk` and `desk-2` in one minute and a counter past 9 |
+| A line by place must decode as the load route does | minor | fixed: strict UTF-8, parsed as text, never `json.loads` on bytes; in The place and DR-0445. The lead's call: a line that isn't UTF-8 stays indexed for search and is a problem, so its source loads whole for reads |
+| No test for a record in another source's folder | minor | fixed: neither source is current |
+| DR-0447's bind | minor | fixed: what a read shows of a record is decided on its lines read from the raw log; whether a rid exists is its row in a current source |
