@@ -24,6 +24,9 @@ terms:
   - term: chunk
     definition: "The unit search finds: a stretch of a transcript, a message, a thread window, part of a record, or a section of a processed doc, with the locator read takes."
     see: [packages/docket/src/docket/index/chunks.py]
+  - term: curate log
+    definition: "entities/_log/<yyyy-mm>-<machine>.jsonl in the vault: a line for every change Docket makes to an entity, and every rejection, undo and lift, committed with the change. Undo and the stoplist are read from it."
+    see: [packages/docket/src/docket/vault/curatelog.py]
   - term: cursor
     definition: "Where one machine's syncs of a source reached, in state/cursors-<machine>.yaml: the mark, the lookback, the retry set and the waiting set. A run's window starts at the furthest mark any machine reached, less the lookback."
     see: [packages/docket/src/docket/vault/cursors.py]
@@ -125,6 +128,9 @@ terms:
   - term: status hook
     definition: "The plugin's SessionStart hook: docket hook session-start tells Claude the service's state, the vault's and the port at each session's start, and the user only what needs them."
     see: [packages/docket/src/docket/hooks.py]
+  - term: stoplist
+    definition: "The keys curation never proposes again in the role they name: those a rejection or an undo put on and no lift took off. Folded from the curate log; it has no file of its own."
+    see: [packages/docket/src/docket/vault/curatelog.py]
   - term: sync run
     definition: "One harvest of one source from a Claude Code session: opened by run_open, fed by the capture hook, closed by ingest. It lives in the service's memory, closes only whole, and is dropped otherwise, with nothing staged and the mark kept."
     see: [packages/docket/src/docket/service/runs.py]

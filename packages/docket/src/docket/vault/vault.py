@@ -79,6 +79,8 @@ ATTRIBUTE_CHECKS = [
     ("processed/t/x.md", "filter", "unspecified"),
     ("state/holds/s.txt", "merge", "union"),
     ("state/releases/s.jsonl", "merge", "union"),
+    ("entities/_log/2026-01-m.jsonl", "merge", "union"),
+    ("entities/_log/2026-01-m.jsonl", "eol", "lf"),
 ]
 # A path in each place the vault commits; no ignore rule may match one.
 IGNORE_SAMPLES = [
@@ -88,6 +90,7 @@ IGNORE_SAMPLES = [
     "media/s/2026/01/x.age",
     "processed/t/x.md",
     "entities/t/x.yaml",
+    "entities/_log/2026-01-m.jsonl",
     "ledger/ops/2026-01-m.jsonl",
     "state/cursors-m.yaml",
     "state/holds/s.txt",

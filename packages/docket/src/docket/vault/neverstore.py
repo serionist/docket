@@ -153,6 +153,23 @@ def matches_text(text: str, lists: NeverStore) -> bool:
     return _says([text], lists.keywords)
 
 
+def _orders(value: str) -> list[str]:
+    """A value by its words, folded, one space between them, and for two words also the other way round: a list may
+    write a name family name first, and `Minta, Dóra` or a doubled space is still the name."""
+    words = _words(value).split()
+    return [" ".join(words), *([f"{words[1]} {words[0]}"] if len(words) == 2 else [])]
+
+
+def listed(value: str, lists: NeverStore) -> ListName | None:
+    """The list a value an entity holds (a name, an alias, an id, a role, a note) is on, or None. The people list
+    is held to it as to a record's author, and by its words in both orders; the keywords list, as text, in both orders
+    too."""
+    people = {form for p in lists.people for form in (*_forms(p), *_orders(p))}
+    if (_forms(value) | set(_orders(value))) & people:
+        return "people"
+    return "keywords" if _says([value, *_orders(value)[1:]], lists.keywords) else None
+
+
 def match(record: RawRecord, lists: NeverStore) -> ListName | None:
     """The list a record matches, or None."""
     people = set[str]().union(*(_forms(p) for p in lists.people)) if lists.people else set[str]()

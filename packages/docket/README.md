@@ -310,6 +310,32 @@ ids: {email_domain: northwind.example}
 
 A file with a mistake still loads where it can; `docket index status` lists what was wrong (DR-0113).
 
+### Changing entities
+
+`docket curate add <file>` makes the changes a file lists, all in one commit or none, and logs each one so it can
+be undone. Use it to seed entities from a people directory or a glossary you already keep:
+
+```yaml
+changes:
+  - create: {id: cleo-test, type: person, name: {en: Cleo Test}, aliases: [{text: Cleo}], role: rights agent}
+  - entity: northwind
+    add: {aliases: [{text: Nortwin, kind: asr}], ids: {email_domain: northwind.example}}
+```
+
+| Command | Does |
+|---|---|
+| `docket curate add <file>` | creates entities and adds aliases, names, ids and related links; what an entity holds already is counted and skipped |
+| `docket curate log` | every change, newest first, with the op id undo takes, and a change a stopped write left marked as not finished (the next write commits it); `--entity`, `-n`, `--json` |
+| `docket curate undo <op>...` | takes a change back out: an alias, name, id or link, or a created entity's file while it is as it was created |
+
+- Each change is a line of `entities/_log/<yyyy-mm>-<machine>.jsonl`, committed with the file it changed (DR-0460).
+- Docket writes an entity file whole, in the form above. It refuses a file that holds a comment, or reads with a
+  problem, since the rewrite would lose it: take the comment out, fix the file, or make the change by hand
+  (DR-0463).
+- A value on your never-store lists, or one a redaction rule would change, is refused (DR-0464). A refusal names
+  the change by its position (`change 3`), never the value (DR-0476).
+- A hand edit of a file the change touches is committed on its own first.
+
 ## The service
 
 One Docket process per user serves Claude and the web app on one 127.0.0.1 port, 8741 unless you choose another. It

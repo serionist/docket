@@ -8,6 +8,9 @@ Unreleased in the same PR.
 
 ### Added
 
+- `docket curate add`, `docket curate log` and `docket curate undo`: entity changes from a file (seed your people
+  and terms from what you keep), each logged in `entities/_log/` and committed with the file it changed, and each
+  one undoable. Docket never rewrites an entity file that holds a comment or reads with a problem.
 - Models, optional: `docket models install` sets up a multilingual embedder (multilingual-e5-small, on the CPU or an
   NVIDIA GPU) in a worker of its own, and search then also finds what a question means, not only its words. The
   service keeps the worker loaded and embeds what each sync adds; `docket models status` and `docket models remove`

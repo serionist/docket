@@ -1,0 +1,11 @@
+decisions:
+  - id: DR-0475
+    title: A round measures the user's own question set before and after, when curate.questions in their config names it
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#68"]
+    description: curate.questions in the user's Docket config (per machine, since the file lives outside any repo) names a question file docket eval reads. A round runs eval on it when it starts, and again when its last card is decided, waiting for the index update that follows that decision, or on docket curate status --eval once the index is current; recall at 10 and MRR per kind, before and after, are kept in the batch file and shown on the page and in the skill. Without the key, the page says how to set it.
+    not_chosen:
+      - "The question file in vault.yaml: a door, and the file is the user's, kept outside the vault."

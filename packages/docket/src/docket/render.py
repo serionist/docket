@@ -15,7 +15,9 @@ from docket.index import SearchResult
 from docket.questions import EvalReport, Score
 from docket.recall import ReadResult, VerifyResult
 from docket.vault.anchors import format_time
+from docket.vault.curatelog import Line
 from docket.vault.docstore import PutResult, RedactReport
+from docket.vault.entitystore import Written
 from docket.vault.processed import DocProblem
 from docket.vault.spans import Span
 
@@ -190,3 +192,55 @@ def eval_report(report: EvalReport) -> list[str]:
         lines += ["", "wanted, but naming no record, doc or thread in the index:"]
         lines += [f"  {text}" for text in report.unknown]
     return lines
+
+
+def _part(line: Line) -> str:
+    """What one op changed, in a few words."""
+    change = line.change
+    if change is None:
+        return f"undoes {line.of}" if line.op == "undo" else line.key
+    if change.entity is not None:
+        return f"{change.entity.type}, {'; '.join(sorted(change.entity.name.values()))}"
+    if change.alias is not None:
+        return f"alias {change.alias.text}{' (asr)' if change.alias.kind == 'asr' else ''}"
+    if change.name is not None:
+        return f"name {change.name.lang} {change.name.text}"
+    if change.id is not None:
+        return f"id {change.id.key} {change.id.value}"
+    related = change.related
+    return f"related {related.type} {related.target}" if related is not None else ""
+
+
+def curate_written(written: Written) -> list[str]:
+    lines: list[str] = []
+    if written.finished:
+        lines.append(f"finished first, what a stopped write left: {', '.join(written.finished)}")
+    lines += [f"a hand edit of {rel} went in first, on its own" for rel in written.taken_in]
+    lines += [f"{line.id}  {line.op:<6} {line.entity}  {_part(line)}" for line in written.lines]
+    if written.only_logged:
+        lines.append(f"only logged, the file no longer held what they added: {', '.join(written.only_logged)}")
+    if written.already:
+        lines.append(f"already there: {written.already}")
+    lines.append(f"committed {written.commit[:12]}" if written.commit else "nothing to write")
+    return lines
+
+
+def curate_refused(problems: list[str]) -> list[str]:
+    return ["refused; nothing was written", *(f"  {p}" for p in problems)]
+
+
+def curate_log(
+    lines: list[Line], undone_by: dict[str, str], problems: tuple[str, ...], unfinished: set[str] | None = None
+) -> list[str]:
+    def marks(line: Line) -> str:
+        undone = f"  undone by {undone_by[line.id]}" if line.id in undone_by else ""
+        return undone + ("  not finished: the next write commits it" if line.id in (unfinished or set()) else "")
+
+    out = [
+        f"{line.at:%Y-%m-%d %H:%M}Z  {line.id}  {line.op:<6} {line.entity or '-'}  {_part(line)}  ({line.by}, "
+        f"{line.via}){marks(line)}"
+        for line in lines
+    ]
+    if not lines:
+        out.append("no changes logged yet")
+    return out + [f"! {problem}" for problem in problems]

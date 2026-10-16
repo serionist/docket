@@ -428,6 +428,29 @@ def _build_host_repo(tmp_path: Path) -> Path:
     return top
 
 
+NORTHWIND_FILE = "entities/customer/northwind.yaml"
+BEN_FILE = "entities/person/ben-sample.yaml"
+
+
+def _build_entity_vault(folder: Path) -> Path:
+    vault = Vault.init(folder / "vault", make_config(), "test-box")
+    files = {
+        NORTHWIND_FILE: "id: northwind\ntype: customer\nname: {en: Northwind}\n"
+        "aliases:\n  - {text: Northwind Traders}\n",
+        BEN_FILE: "id: ben-sample\ntype: person\nname: {en: Ben Sample}\n",
+    }
+    for rel, text in files.items():
+        (vault.root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (vault.root / rel).write_text(text, encoding="utf-8", newline="\n")
+    vault.commit(list(files), "Two entities")
+    return vault.root
+
+
+def entity_vault(tmp_path: Path) -> Vault:
+    """A vault holding two committed entities, Northwind and Ben Sample: a copy of one built once per session."""
+    return Vault.open(copied(tmp_path, _build_entity_vault, "entity-vault"))
+
+
 def folder_vault(tmp_path: Path) -> Vault:
     """A folder vault at notes/vault of a host repo, two levels down so a path bug can't hide, with the user's own
     work around it: a staged change, an unstaged one, and a staged hand-made file inside the vault. A copy of one built

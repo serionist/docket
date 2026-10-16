@@ -1,0 +1,11 @@
+decisions:
+  - id: DR-0471
+    title: An author written Name <id> is matched by its bracketed part for a source's ids, as an address is
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#68"]
+    description: Matching already reads an address in angle brackets. It now reads any author written Name <id> by the bracketed part for the ids key named after the record's source, so a chat mapper can give the name a person shows with their id, which tier 1 needs, and keep its author mentions. An author written as a bare id matches as today. Recipients aren't indexed, so they aren't read. The index's schema version goes up, since mentions change.
+    not_chosen:
+      - "A new field on the raw record for the shown name: the record's version is a one-way door (DR-0020)."

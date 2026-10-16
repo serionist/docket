@@ -146,7 +146,7 @@ def test_check_gathers_every_finding(tmp_path: Path) -> None:
     assert report.ignored == ["media/s/2026/01/x.age (.gitignore:1: *.age)"]
     # The convert's own line, which it takes out, doesn't count.
     (top / ".gitignore").write_text("/notes/vault/\n", encoding="utf-8")
-    assert len(host.check(top, "notes/vault/", [], lambda _u: "local").ignored) == 10
+    assert len(host.check(top, "notes/vault/", [], lambda _u: "local").ignored) == 11
     assert host.check(top, "notes/vault/", [], lambda _u: "local", without="/notes/vault/").ignored == []
     blocking = report.blocking()
     assert blocking[0].startswith("https://example.invalid/open.git can be read without signing in")

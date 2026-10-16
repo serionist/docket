@@ -32,8 +32,9 @@ from docket.sources.contract import Manifest
 from docket.sources.ingest import IngestReport, ingest_run
 from docket.sources.local import record as record_import_folder
 from docket.sources.runner import MapperFailedError
-from docket.vault import convert, cuts, holds, redaction, releaselog
+from docket.vault import convert, curatelog, cuts, holds, redaction, releaselog
 from docket.vault.docstore import DocStore
+from docket.vault.entitystore import EntityStore, RefusedError, load_changes
 from docket.vault.gate import Gate, Label
 from docket.vault.processed import DocRefusedError
 from docket.vault.records import RawRecord, source_name_problem
@@ -88,6 +89,10 @@ models_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(models_app, name="models")
+curate_app = typer.Typer(
+    help="Entities and aliases: changes from a file, undo, and the log of every change.", no_args_is_help=True
+)
+app.add_typer(curate_app, name="curate")
 
 # How often the embedding pass says how far it got.
 PROGRESS_SECONDS = 10.0
@@ -692,6 +697,63 @@ def doc_redact(
         say("index    rebuilt here; on another machine, run docket index rebuild after it pulls")
     if report.left:
         raise typer.Exit(1)
+
+
+@curate_app.command("add")
+def curate_add(
+    file: Annotated[Path, typer.Argument(help="The changes file: creates and adds, YAML (docket curate --help).")],
+    vault: VaultOption = None,
+) -> None:
+    """Make the entity changes a file lists, all in one commit or none, each logged and undoable:
+
+    changes: [{create: {id: cleo-test, type: person, name: {en: Cleo Test}}},
+    {entity: northwind, add: {aliases: [{text: Nortwin, kind: asr}]}}]"""
+    if not file.is_file():
+        raise DocketError(f"no file {file}")
+    try:
+        written = EntityStore(find_vault(vault)).apply(load_changes(file))
+    except RefusedError as e:
+        say_all(render.curate_refused(e.problems))
+        raise typer.Exit(1) from None
+    say_all(render.curate_written(written))
+
+
+@curate_app.command("undo")
+def curate_undo(
+    ops: Annotated[list[str], typer.Argument(help="The ops to undo, by the ids docket curate log prints.")],
+    vault: VaultOption = None,
+) -> None:
+    """Undo logged changes, the latest first, in one commit; refused whole when one can't be undone."""
+    try:
+        written = EntityStore(find_vault(vault)).undo(ops)
+    except RefusedError as e:
+        say_all(render.curate_refused(e.problems))
+        raise typer.Exit(1) from None
+    say_all(render.curate_written(written))
+
+
+@curate_app.command("log")
+def curate_log(
+    n: Annotated[int, typer.Option("-n", min=1, help="How many ops, newest first.")] = 20,
+    entity: Annotated[str | None, typer.Option("--entity", help="Only this entity's ops, by id.")] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="The lines as JSON.")] = False,
+    vault: VaultOption = None,
+) -> None:
+    """Every change Docket made to entities, and every rejection, undo and lift, newest first, with the ids undo
+    takes. A line a stopped write left is marked: the next write finishes it."""
+    v = find_vault(vault)
+    read = curatelog.read_all(v.root)
+    unfinished = {line.id for line in curatelog.unfinished(v)}
+    lines = [line for line in reversed(read.lines) if entity is None or line.entity == entity][:n]
+    if as_json:
+        # ASCII only: a name's text can't put a terminal code on the screen.
+        dumped = [
+            line.model_dump(mode="json", exclude_none=True) | ({"finished": False} if line.id in unfinished else {})
+            for line in lines
+        ]
+        typer.echo(json.dumps(dumped, indent=2))
+        return
+    say_all(render.curate_log(lines, curatelog.fold(read.lines).undone_by, read.problems, unfinished))
 
 
 @contextlib.contextmanager

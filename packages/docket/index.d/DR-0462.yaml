@@ -1,0 +1,13 @@
+decisions:
+  - id: DR-0462
+    title: Undo applies the inverse of one logged op to the entity file as it stands; in the open round it reopens the card, after it it stoplists
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#68"]
+    description: "Undoing an add removes that alias, name, id or link when the file still holds it, and only logs when it doesn't. Undoing a create deletes the file when it is as the create wrote it, and otherwise refuses, naming the changes since. Undoing a reject lifts its keys. An undo of a decision from this machine's open round reopens its card and stoplists nothing: it fixes a click. An undo of an add from an earlier round or by tier 1 stoplists its key; of a create from an earlier round, the keys a rejection of its card would (DR-0461): new: for its name and for each spelling found only through a join, while a label or a written name that stands on its own stays a candidate. The undo's line names the create; the miner works out those keys from the index when it reads the log, as it judges any spelling, so a seeded entity follows the same rule and a label that appears later is never hidden. An undo is a log line written before the file changes, as any change is: a crash between the two leaves a line the next curate write finishes by removing what the file still holds (DR-0463). The index holds no curate state: the file's new hash makes the next index update reload the entity tables and recompute alias_terms, the misspellings and every mention, the rows a rebuild gives (DR-0115), and the batch drops a card the undo made stale."
+    not_chosen:
+      - "A git revert of the change's commit: it conflicts with any later edit of the file."
+      - "Archiving a created entity instead of deleting it: archived entities still match."
+      - "A stoplist entry for every undo: undoing a misclick in the open round would hide the card it meant to decide."
