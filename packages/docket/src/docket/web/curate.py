@@ -20,7 +20,7 @@ from pydantic import ValidationError
 from starlette.datastructures import QueryParams
 from starlette.responses import RedirectResponse, Response
 
-from docket.curate import batch
+from docket.curate import batch, schedule, tier1
 from docket.curate.batch import Batch
 from docket.curate.propose import Card
 from docket.errors import DocketError
@@ -127,9 +127,15 @@ def router(service: Service) -> APIRouter:
             if isinstance(form, Response):
                 return form
             try:
-                # The index first, then the miner beside the writer; only the batch's write goes on it.
+                # The index first; tier 1's facts found beside the writer and committed on it, then the index
+                # again; the miner beside the writer; only the batch's write goes on it (DR-0468, DR-0470).
                 await service.updater.fresh()
-                made = await asyncio.to_thread(lambda: batch.build(service.vault()))
+                begun = schedule.now_utc()
+                found = await asyncio.to_thread(lambda: tier1.plan(service.vault()))
+                ran = await service.writer.run(lambda: tier1.apply(service.vault(), found, via="page"))
+                if ran.wrote:
+                    await service.updater.fresh()
+                made = await asyncio.to_thread(lambda: batch.build(service.vault(), ran, started=begun))
                 await service.writer.run(lambda: batch.save(service.vault(), made))
             except DocketError as e:
                 return await whole(request, CurateState(), status=400, problem=str(e))

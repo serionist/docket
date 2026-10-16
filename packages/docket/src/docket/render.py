@@ -276,9 +276,18 @@ def curate_round(view: BatchView) -> list[str]:
         + ("  not finished: the next write commits it" if line.id in view.unfinished else "")
         for line in view.applied
     ]
+    lines += [f"taken back by itself: {what}" for what in view.taken_back]
+    lines += [f"skipped  by itself: {why}" for why in view.skipped]
+    lines += [f"tier 1   {view.tier1}"] if view.tier1 else []
     for shown in view.cards:
         c = shown.card
-        what = f"new {c.type}  {c.name} ({c.entity})" if c.kind == "new" else f"alias for {c.name} ({c.entity})"
+        what = (
+            f"new {c.type}  {c.name} ({c.entity})"
+            if c.kind == "new"
+            else f"id for {c.name} ({c.entity}): {c.fact[0]} {c.fact[1]}"
+            if c.fact is not None
+            else f"alias for {c.name} ({c.entity})"
+        )
         gap = (
             f"missed in {c.missed_chunks} chunk(s) of {c.missed_containers} container(s)"
             if c.missed_containers

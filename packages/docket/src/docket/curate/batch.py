@@ -22,15 +22,19 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ValidationError
 
 from docket import index, questions, userconfig
+from docket.curate import tier1
 from docket.curate.propose import Card, mine
 from docket.curate.schedule import DUE, last_round, minutes, now_utc, round_id
+from docket.curate.tier1 import Tier1
 from docket.errors import DocketError
 from docket.index.build import open_index
 from docket.vault import curatelog
-from docket.vault.curatelog import AliasFields, Change, EntityFields, Line, Via, folded
+from docket.vault.config import NeverStore
+from docket.vault.curatelog import AliasFields, Change, EntityFields, IdFields, Line, Via, folded
 from docket.vault.entities import load_entities
 from docket.vault.entitystore import EntityStore, Planned, Reject, Written
 from docket.vault.home import make_private
+from docket.vault.neverstore import listed
 from docket.vault.staging import write_replacing
 from docket.vault.vault import Vault
 
@@ -38,6 +42,7 @@ FILE = "curate/batch.json"
 SNIPPETS = 3
 ID_LENGTH = 6
 WIDTH = 80
+HIDDEN = "(on a never-store list)"
 
 State = Literal["open", "accepted", "rejected", "done"]
 
@@ -58,6 +63,9 @@ class Batch(BaseModel):
     left_out: dict[str, int]
     before: Measure | None = None
     after: Measure | None = None
+    # Tier 1's facts the store refused, by rule and entity, and why tier 1 didn't run, when it didn't (DR-0470).
+    skipped: list[str] = []
+    tier1: str | None = None
 
     def card(self, ref: str, numbered: bool) -> Card | None:
         if numbered:
@@ -86,27 +94,35 @@ def save(vault: Vault, batch: Batch) -> None:
 # -- a round ------------------------------------------------------------------------------------------------------
 
 
-def start(vault: Vault) -> Batch:
-    """Start a round: the index brought up to date, the miner over it, the question set measured, the batch kept."""
+def start(vault: Vault, *, via: Via = "cli") -> Batch:
+    """Start a round: the index brought up to date, tier 1's facts committed on the primary machine and the index
+    updated again, the miner over it, the question set measured, the batch kept (DR-0468, DR-0470)."""
     index.update(vault)
-    batch = build(vault)
+    begun = now_utc()
+    ran = tier1.run(vault, via=via)
+    if ran.wrote:
+        index.update(vault)
+    batch = build(vault, ran, started=begun)
     save(vault, batch)
     return batch
 
 
-def build(vault: Vault) -> Batch:
-    """A new round from the index as it is: the miner over it and the question set measured, nothing written. The
-    service brings the index up to date first, runs this beside the writer, and only the save on it (DR-0468)."""
+def build(vault: Vault, ran: Tier1 | None = None, *, started: datetime | None = None) -> Batch:
+    """A new round from the index as it is, with tier 1's facts that matched two entities as cards: the miner over it
+    and the question set measured, nothing written. The service brings the index up to date first, runs this beside
+    the writer, and only the save on it (DR-0468). A round starts when tier 1 did, so its lines are this round's."""
     log = curatelog.fold(curatelog.read_all(vault.root).lines)
     with closing(open_index(vault)) as conn:
-        mined = mine(conn, vault, log)
-    now = now_utc()
+        mined = mine(conn, vault, log, ran.proposals if ran is not None else ())
+    now = started or now_utc()
     return Batch(
         round=round_id(now, vault.machine),
         started=now,
         cards=mined.cards,
         left_out=dict(mined.left_out),
         before=measure(vault),
+        skipped=list(ran.skipped) if ran is not None else [],
+        tier1=ran.note if ran is not None else None,
     )
 
 
@@ -128,8 +144,10 @@ def states(vault: Vault, batch: Batch, lines: Sequence[Line]) -> dict[str, State
     machine's), open otherwise."""
     log = curatelog.fold(lines)
     held: dict[str, set[str]] = {}
+    ids: dict[str, set[tuple[str, str]]] = {}
     for e in load_entities(vault.root).entities:
         held[e.id] = {folded(t) for t in (*e.names.values(), *(a.text for a in e.aliases))}
+        ids[e.id] = {(key, value.casefold()) for key, values in e.ids.items() for value in values}
     every = set[str]().union(*held.values())
     out: dict[str, State] = {}
     for card in batch.cards:
@@ -140,8 +158,10 @@ def states(vault: Vault, batch: Batch, lines: Sequence[Line]) -> dict[str, State
             out[card.id] = "accepted"
         elif ops:
             out[card.id] = "rejected"
-        elif (card.kind == "new" and folded(card.name) in every) or (
-            card.kind == "alias" and all(folded(s.text) in held.get(card.entity, set()) for s in card.adds())
+        elif (
+            (card.kind == "new" and folded(card.name) in every)
+            or (card.kind == "alias" and all(folded(s.text) in held.get(card.entity, set()) for s in card.adds()))
+            or (card.fact is not None and (card.fact[0], card.fact[1].casefold()) in ids.get(card.entity, set()))
         ):
             out[card.id] = "done"
         else:
@@ -200,6 +220,10 @@ def accept(
         if card.kind == "alias":
             planned += [Planned(card.n, card.entity, Change(alias=a), batch.round, card.id) for a in _aliases(card)]
             continue
+        if card.fact is not None:
+            fact = IdFields(key=card.fact[0], value=card.fact[1])
+            planned.append(Planned(card.n, card.entity, Change(id=fact), batch.round, card.id))
+            continue
         try:
             fields = EntityFields(
                 id=entity_id or card.entity,
@@ -220,6 +244,8 @@ def rejects(card: Card, round_: str) -> list[Reject]:
         return [
             Reject(f"alias:{card.entity}:{folded(s.text)}", s.text, card.entity, round_, card.id) for s in card.adds()
         ]
+    if card.fact is not None:
+        return [Reject(card.key, card.fact[1], card.entity, round_, card.id)]
     joined = [s for s in card.spellings if s.add != "name" and not s.alone]
     return [
         Reject(card.key, card.name, None, round_, card.id),
@@ -239,6 +265,9 @@ def settle(vault: Vault, batch: Batch | None, planned: Sequence[Planned]) -> tup
     if not named:
         return list(planned), []
     batch, cards = cards_for(batch, list(dict.fromkeys(p.card for p in named if p.card is not None)), None)
+    for card in cards:
+        if card.kind == "id":
+            raise DocketError(f"card {card.id} gives an id: accept or reject it as it is")
     _open(vault, batch, cards)
     round_ = batch.round
     out = [Planned(p.n, p.entity, p.change, round_ if p.card else None, p.card) for p in planned]
@@ -301,6 +330,10 @@ class BatchView(BaseModel):
     cards: list[CardView]
     left_out: dict[str, int]
     applied: list[Line]
+    skipped: list[str] = []
+    tier1: str | None = None
+    # What tier 1 took back since the round started: each undo's id, entity, why and key, a never-store value hidden.
+    taken_back: list[str] = []
     # The applied lines a stopped write left: HEAD doesn't have them yet, and the next write commits them.
     unfinished: list[str] = []
     before: Measure | None = None
@@ -334,7 +367,9 @@ def view(vault: Vault, batch: Batch) -> BatchView:
     index.update(vault)
     lines = curatelog.read_all(vault.root).lines
     now = states(vault, batch, lines)
-    applied = [ln for ln in lines if ln.at >= batch.started and ln.by == "tier1"]
+    by_tier1 = [ln for ln in lines if ln.at >= batch.started and ln.by == "tier1"]
+    lists = vault.config.never_store
+    applied = [ln for ln in by_tier1 if ln.op != "undo"]
     unfinished = {ln.id for ln in curatelog.unfinished(vault)}
     with closing(open_index(vault)) as conn:
         cards = [CardView(card=c, state=now[c.id], snippets=snippets(conn, c)) for c in batch.cards]
@@ -344,10 +379,21 @@ def view(vault: Vault, batch: Batch) -> BatchView:
         cards=cards,
         left_out=batch.left_out,
         applied=applied,
-        unfinished=[ln.id for ln in applied if ln.id in unfinished],
+        skipped=batch.skipped,
+        tier1=batch.tier1,
+        taken_back=[
+            f"{ln.id}  {ln.entity or '-'}  {ln.why}, {shown_key(ln.key, lists)}" for ln in by_tier1 if ln.op == "undo"
+        ],
+        unfinished=[ln.id for ln in by_tier1 if ln.id in unfinished],
         before=batch.before,
         after=batch.after,
     )
+
+
+def shown_key(key: str, lists: NeverStore) -> str:
+    """A key as the CLI and the page show it: the value it names hidden when a never-store list holds it."""
+    text = curatelog.key_text(key)
+    return key[: len(key) - len(text)] + HIDDEN if text and listed(text, lists) is not None else key
 
 
 # -- the measures -------------------------------------------------------------------------------------------------

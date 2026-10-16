@@ -469,13 +469,15 @@ role: the customer's site lead
   was most of its time (DR-0350).
 - Aliases marked `asr` also match vocabulary words within one edit of a word of 5 to 7 letters, two of 8 or more.
 - Aliases with `needs` count only when one of the named entities is in the same chunk.
-- A diarized speaker, or an author whose id an entity lists, counts as a mention of that person.
+- A diarized speaker, or an author whose id an entity lists, counts as a mention of that person; an author
+  written `Name <id>` counts by its bracketed id for the record's source (DR-0471).
 
 ### 6.3 Keeping it up, in three tiers
 
 1. Seed from what exists: a people directory, a glossary, variant lists, the ledger's counterparts.
-2. Tier 1, applied by itself (logged, reversible): facts from a system (a chat id, an email address), and a name
-   spelled the same by two engines on the same stretch.
+2. Tier 1, applied by itself (logged, reversible): facts from a system (a chat id, an email address, the name a
+   system shows for an id), and a name spelled the same by two engines on the same stretch. It runs at a round's
+   start on the primary machine, in one commit; one that fits two entities is a tier 2 card (DR-0469, DR-0470).
 3. Tier 2, a weekly batch of at most about 15, ranked by how much the gap hurts search, each with a count, snippets
    and locators. Reviewed on the Curate page or in a `/curate` round; a rejection goes on a stoplist.
 4. Tier 3, never shown: one-off capitalized words, rare n-grams.

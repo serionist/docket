@@ -41,6 +41,8 @@ The table, one row a card:
 - Missed: `missed_containers`, the calls, mails or chats where a search for the name misses it today.
 - Calls: **accept** when the card is right as it is; **edit** when the name is right and a detail isn't (the type, the
   id, a spelling to drop, a `hu` name); **reject** when it isn't a name, or isn't this entity's.
+- An id card gives an entity an address or a chat id that fits two entities: accept it for the right one, reject
+  the other; it has no edit.
 - A spelling marked `unseen` is a Hungarian person's other name order, added though nothing holds it. Given names are
   family names too in Hungarian, so it may be someone else: say so when the snippets don't settle it.
 

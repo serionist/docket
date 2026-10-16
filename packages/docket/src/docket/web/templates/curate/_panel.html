@@ -71,7 +71,7 @@
   {% elif panel.state == "open" %}
   <div class="actions">
     <form method="post" action="/curate/decide">{{ hidden(panel.hidden) }}<button type="submit" class="button primary" name="act" value="accept">Accept</button></form>
-    <a class="button" href="{{ panel.edit_url }}" hx-get="{{ panel.edit_fragment }}" hx-target="#panel">Edit</a>
+    {% if panel.editable %}<a class="button" href="{{ panel.edit_url }}" hx-get="{{ panel.edit_fragment }}" hx-target="#panel">Edit</a>{% endif %}
     <form method="post" action="/curate/decide">{{ hidden(panel.hidden) }}<button type="submit" class="button danger" name="act" value="reject">Reject</button></form>
   </div>
   {% else %}

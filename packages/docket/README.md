@@ -434,6 +434,12 @@ misses today (chunks holding a spelling that a search for the name doesn't find)
 - The round lives in `.git/docket/curate/batch.json` (a folder vault: the host's git dir), per machine, and can be
   deleted: decisions are in the curate log.
 - Set `curate.questions` in Docket's config to your question file, and a round measures it before and after.
+- On the machine `vault.yaml` names as primary, a round first applies tier 1's facts by itself: an address or a
+  chat id that mail or chat writes beside a known full name (`Name <address>`, `Name <id>`), a name a system
+  shows beside an id an entity lists, and a spelling two engines' transcripts agree on. `show` and the page list
+  each with its undo, and what the store refused. A fact that fits two entities, a one-word name, or a spelling
+  that may be a common word or someone else's name becomes a card; a sender shown with several people's names,
+  such as a service's notification address, gives nothing.
 - The web app's Curate page (`docket open /curate`) does the same in the browser: a round, each card opened
   beside the list with its snippets, accept, edit and reject, and undo and lift from the log.
 

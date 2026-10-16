@@ -31,8 +31,9 @@ def _map_capture(capture: dict[str, Any], held: set[str], out: dict[str, Any]) -
 
     To write: find the item's own id first, and when it is in `held` add it to out["held"] and read nothing more of
     it; then append its records to out["records"] in the core's shape: rid `{{source}}:<its own id>`, kind, ts,
-    source, container, thread, title, text (or segments for a transcript), native, fetched, via and fidelity. An item
-    that can't be read goes to out["set_aside"] as {id, reason, tool, key}, short tokens only, never a title.
+    source, container, thread, title, text (or segments for a transcript), native, fetched, via and fidelity; the
+    author as the system shows them, `Name <address>` or `Name <their id>`, so curation ties the name to the id. An
+    item that can't be read goes to out["set_aside"] as {id, reason, tool, key}, short tokens only, never a title.
     """
     payload = unwrap(capture.get("result"))
     reason = "no-json" if payload is None else "not-mapped-yet"

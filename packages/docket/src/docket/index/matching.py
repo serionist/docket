@@ -48,6 +48,8 @@ MAX_PHRASES = 20
 # A mention's kinds, strongest first.
 STRENGTH = ("text", "speaker", "author", "tagged", "asr", "needs")
 EMAIL = re.compile(r"<([^<>@\s]+@[^<>\s]+)>|([^<>@\s]+@[^<>\s]+)")
+# An author written `Name <id>`: a chat mapper gives the name a person shows beside their id (DR-0471).
+BRACKETED = re.compile(r"<([^<>\s]+)>")
 
 
 @dataclass(frozen=True)
@@ -468,17 +470,20 @@ def _speakers(aliases: Iterable[AliasRow]) -> dict[str, str]:
 
 
 def _authors(author: str, source: str | None, ids: list[tuple[str, str, str]]) -> list[str]:
-    """The entities whose ids name an author. Ids are kept as written, for the entity tool, and compared ignoring
-    case."""
+    """The entities whose ids name an author: by its address, or for the ids named after its source by the author as
+    written or the id it brackets, `Name <id>` (DR-0471). Ids are kept as written, for the entity tool, and compared
+    ignoring case."""
     address = _address(author)
     domain = address.rpartition("@")[2] if address else None
+    bracketed = BRACKETED.search(author)
+    written = {author.casefold(), *([bracketed.group(1).casefold()] if bracketed else [])}
     out: list[str] = []
     for key, value, entity in ids:
         folded = value.casefold()
         if (
             (key == "email" and folded == address)
             or (key == "email_domain" and folded == domain)
-            or (key == source and folded == author.casefold())
+            or (key == source and folded in written)
         ):
             out.append(entity)
     return out

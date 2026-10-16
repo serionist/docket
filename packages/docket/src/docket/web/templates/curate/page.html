@@ -25,6 +25,11 @@
   {% else %}
   <p class="empty-line">Nothing was applied by itself{% if view.round %} since this round started{% endif %}.</p>
   {% endif %}
+  {% if view.skipped %}
+  <p class="hint">Left out, since Docket won't write them:</p>
+  <ul class="dropped">{% for s in view.skipped %}<li>{{ s }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if view.tier1 %}<p class="hint">{{ view.tier1[:1]|upper }}{{ view.tier1[1:] }}.</p>{% endif %}
 </section>
 
 <section class="part" aria-labelledby="round-title">

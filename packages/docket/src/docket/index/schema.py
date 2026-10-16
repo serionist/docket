@@ -22,7 +22,8 @@ from docket.index.text import snowball_version
 # a common word, so alias_terms and mentions change (DR-0350).
 # 7: each record version's byte offset in its run file (DR-0445); a line that isn't UTF-8 and a record in another
 # source's folder are problems (DR-0446).
-SCHEMA_VERSION = 7
+# 8: an author written Name <id> mentions the entity whose ids for the record's source hold the id (DR-0471).
+SCHEMA_VERSION = 8
 TOKENIZER = "unicode61 remove_diacritics 2"
 # remove_diacritics 2 came in SQLite 3.27.
 MIN_SQLITE = (3, 27, 0)

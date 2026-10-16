@@ -49,7 +49,7 @@ from docket.index.matching import SHORT, max_distance, within
 from docket.index.query import NameQuery
 from docket.index.text import phrase
 from docket.plaintext import fold
-from docket.vault.curatelog import Change, EntityFields, Folded, folded
+from docket.vault.curatelog import AliasFields, Change, EntityFields, Folded, IdFields, folded
 from docket.vault.neverstore import listed
 from docket.vault.processed import SLUG_MAX
 from docket.vault.vault import Vault
@@ -94,7 +94,8 @@ class CardSpelling(BaseModel):
 class Card(BaseModel):
     id: str
     n: int
-    kind: Literal["new", "alias"]
+    # An id card gives an entity an address or a chat id: tier 1's fact that matched two entities (DR-0469).
+    kind: Literal["new", "alias", "id"]
     key: str
     entity: str
     type: str
@@ -108,9 +109,24 @@ class Card(BaseModel):
     newest: str
     # (locator, the spelling there), in the order to show.
     evidence: list[tuple[str, str]]
+    # An id card's (ids key, value).
+    fact: tuple[str, str] | None = None
 
     def adds(self) -> list[CardSpelling]:
         return [s for s in self.spellings if s.add in ("plain", "asr")]
+
+
+@dataclass(frozen=True)
+class Proposal:
+    """A tier 1 fact that matched two entities, for one of them: an alias or an id it would give, the text to mark in
+    its snippets, its trust, and the chunks that hold it (DR-0469)."""
+
+    entity: str
+    text: str
+    trust: str
+    chunks: frozenset[int]
+    alias: AliasFields | None = None
+    id: IdFields | None = None
 
 
 @dataclass
@@ -448,10 +464,11 @@ def _typed(word: str, of: str) -> bool:
 
 
 class _Miner:
-    def __init__(self, conn: sqlite3.Connection, vault: Vault, log: Folded) -> None:
+    def __init__(self, conn: sqlite3.Connection, vault: Vault, log: Folded, proposals: Sequence[Proposal] = ()) -> None:
         self.conn = conn
         self.vault = vault
         self.log = log
+        self.proposals = proposals
         self.index = _Index.read(conn)
         self.scan = scan(conn)
         self.aliases = _aliases(conn)
@@ -533,6 +550,7 @@ class _Miner:
             else:
                 continue
             cards += [c for c in made if c is not None]
+        cards = self.proposed(cards, left)
         cards.sort(key=_rank, reverse=True)
         cards = [c.model_copy(update={"n": n}) for n, c in enumerate(cards[:MAX_CARDS], start=1)]
         return Mined(cards, left)
@@ -717,10 +735,73 @@ class _Miner:
             evidence=self.evidence(g, kept, g.chunks[head], head),
         )
 
+    # -- tier 1's cards ---------------------------------------------------------------------------------------------
+
+    def proposed(self, cards: list[Card], left: Counter[str]) -> list[Card]:
+        """Tier 1's facts that matched two entities, a card for each entity: an alias goes on that entity's alias card
+        when the round has one, so it keeps one card per entity; an id gets a card of its own. Tier 1 leaves out a key
+        the stoplist holds. One whose value a never-store list holds is left out, counted as tier 3 counts them."""
+        out = list(cards)
+        lists = self.vault.config.never_store
+        for p in self.proposals:
+            value = p.alias.text if p.alias is not None else cast(IdFields, p.id).value
+            if listed(value, lists) is not None:
+                left["never-store"] += 1
+                continue
+            if p.alias is not None:
+                key = f"alias:{p.entity}:{folded(p.alias.text)}"
+                spelling = CardSpelling(
+                    text=p.alias.text, trust=p.trust, add=p.alias.kind, alone=True, chunks=len(p.chunks)
+                )
+                at = next((i for i, c in enumerate(out) if c.kind == "alias" and c.entity == p.entity), None)
+                if at is not None:
+                    if all(folded(s.text) != folded(p.alias.text) for s in out[at].spellings):
+                        out[at] = out[at].model_copy(update={"spellings": [*out[at].spellings, spelling]})
+                    continue
+                card = self.proposal_card(p, "alias", key, [spelling], None)
+            else:
+                fact = cast(IdFields, p.id)
+                key = f"id:{p.entity}:{fact.key}={fact.value.casefold()}"
+                card = self.proposal_card(p, "id", key, [], (fact.key, fact.value))
+            if all(c.id != card.id for c in out):
+                out.append(card)
+        return out
+
+    def proposal_card(
+        self,
+        p: Proposal,
+        kind: Literal["alias", "id"],
+        key: str,
+        spellings: list[CardSpelling],
+        fact: tuple[str, str] | None,
+    ) -> Card:
+        holding = set(p.chunks)
+        named = [c for c in holding if c in self.index.locator]
+        # Newest first, one a container, as the miner's evidence is.
+        named.sort(key=lambda c: (self.index.ts[c], c), reverse=True)
+        evidence: list[tuple[str, str]] = []
+        used: set[str] = set()
+        for c in named:
+            if self.index.grp[c] not in used and len(evidence) < EVIDENCE:
+                used.add(self.index.grp[c])
+                evidence.append((self.index.locator[c], p.text))
+        return self._card(
+            kind=kind,
+            key=key,
+            entity=p.entity,
+            entity_type=next((a.type for a in self.aliases if a.entity == p.entity), "person"),
+            name=next((a.text for a in self.aliases if a.entity == p.entity and a.first), p.entity),
+            spellings=spellings,
+            holding=holding,
+            missed=holding - self.mentioned(p.entity),
+            evidence=evidence,
+            fact=fact,
+        )
+
     def _card(
         self,
         *,
-        kind: Literal["new", "alias"],
+        kind: Literal["new", "alias", "id"],
         key: str,
         entity: str,
         entity_type: str,
@@ -729,6 +810,7 @@ class _Miner:
         holding: set[int],
         missed: set[int],
         evidence: list[tuple[str, str]],
+        fact: tuple[str, str] | None = None,
     ) -> Card:
         index = self.index
         return Card(
@@ -745,8 +827,9 @@ class _Miner:
             containers=len(index.containers(holding)),
             missed_chunks=len(missed),
             missed_containers=len(index.containers(missed)),
-            newest=max((index.ts[c] for c in holding), default=""),
+            newest=max((index.ts[c] for c in holding if c in index.ts), default=""),
             evidence=evidence,
+            fact=fact,
         )
 
     def evidence(self, g: _Groups, members: list[int], named: set[int], head: int | None) -> list[tuple[str, str]]:
@@ -786,5 +869,6 @@ def _rank(card: Card) -> tuple[int, int, int, str]:
     return (0, card.containers, 0, card.newest)
 
 
-def mine(conn: sqlite3.Connection, vault: Vault, log: Folded) -> Mined:
-    return _Miner(conn, vault, log).run()
+def mine(conn: sqlite3.Connection, vault: Vault, log: Folded, proposals: Sequence[Proposal] = ()) -> Mined:
+    """A round's cards from the index, with tier 1's facts that matched two entities among them."""
+    return _Miner(conn, vault, log, proposals).run()
