@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import time
@@ -9,13 +10,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import empty_vault, make_record, sh
+from docket_testkit import empty_vault, make_record, plaud_records, sh
 
 from docket.errors import DocketError
+from docket.vault import rawlog
 from docket.vault.config import VaultConfig
 from docket.vault.git import sync_marker
 from docket.vault.lock import VaultLock, clear_stale_index_lock
-from docket.vault.rawlog import RawLog
+from docket.vault.rawlog import RawLog, parse_run_file
 from docket.vault.records import RawRecord
 from docket.vault.vault import Vault
 
@@ -152,6 +154,60 @@ def test_a_run_whose_commit_was_missed_goes_in_with_the_next(tmp_path: Path, con
     assert "raw/chat/2026/10/2026-10-14T1550-test-box.2.jsonl" in files
     assert not any(f.endswith((".DS_Store", ".tmp")) for f in files)
     assert vault.status().uncommitted_runs == []
+
+
+def test_a_run_past_its_cap_goes_on_in_runs_of_its_own_in_order(
+    tmp_path: Path, config: VaultConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Plaud's shape, as every source's raw is: the recording, transcripts with segments, its notes.
+    vault = new_vault(tmp_path, config)
+    records = plaud_records("first", "second", "third", "fourth")
+    monkeypatch.setattr(rawlog, "RUN_FILE_BYTES", 1500)
+    result = vault.rawlog.write_run("plaud", records, RUN_AT)
+    base = "2026-10-14T1550-test-box"
+    assert len(result.paths) > 2
+    names = [f"{base}.jsonl", *(f"{base}.{n}.jsonl" for n in range(2, len(result.paths) + 1))]
+    assert [p.name for p in result.paths] == names
+    assert result.path == result.paths[0]
+    assert (result.written, result.skipped) == (len(records), 0)
+    counts: list[int] = []
+    for path in result.paths:
+        lines = path.read_bytes().splitlines(keepends=True)
+        counts.append(len(lines))
+        assert len(lines) == 1 or len(b"".join(lines)) <= 1500
+        # Named and laid out as any run, so an older Docket reads it as one.
+        found = parse_run_file(vault.rawlog.raw_dir, path)
+        assert found is not None
+        assert all(json.loads(line)["run"] == found.stem for line in lines)
+    assert max(counts) > 1
+    assert [r.rid for _, _, r in vault.rawlog.iter_records()] == [r.rid for r in records]
+    again = vault.rawlog.write_run("plaud", records, RUN_AT)
+    assert (again.paths, again.written, again.skipped) == ((), 0, len(records))
+
+
+def test_the_cap_is_16_mib_and_a_record_is_never_split(tmp_path: Path, config: VaultConfig) -> None:
+    vault = new_vault(tmp_path, config)
+    big = ["x" * (7 * 1024 * 1024 + n) for n in range(3)]
+    records = [make_record(n, text=text) for n, text in enumerate(big)]
+    result = vault.rawlog.write_run("chat", records, RUN_AT)
+    assert [len(p.read_bytes().splitlines()) for p in result.paths] == [2, 1]
+    assert all(p.stat().st_size <= rawlog.RUN_FILE_BYTES for p in result.paths)
+    huge = vault.rawlog.write_run("chat", [make_record(9, text="y" * (17 * 1024 * 1024))], RUN_AT)
+    assert len(huge.paths) == 1
+    assert huge.paths[0].stat().st_size > rawlog.RUN_FILE_BYTES
+
+
+def test_a_new_run_sorts_after_every_run_its_minute_has(tmp_path: Path, config: VaultConfig) -> None:
+    vault = new_vault(tmp_path, config)
+    paths = [vault.rawlog.write_run("chat", [make_record(n)], RUN_AT).path for n in range(1, 4)]
+    assert [p.name for p in paths if p is not None][-1] == "2026-10-14T1550-test-box.3.jsonl"
+    # Two runs left uncommitted and deleted by hand: the next one still goes after the third, never into the gap.
+    for path in paths[:2]:
+        assert path is not None
+        path.unlink()
+    nxt = vault.rawlog.write_run("chat", [make_record(4)], RUN_AT).path
+    assert nxt is not None
+    assert nxt.name == "2026-10-14T1550-test-box.4.jsonl"
 
 
 def test_the_temp_file_never_lands_in_raw(tmp_path: Path, config: VaultConfig) -> None:

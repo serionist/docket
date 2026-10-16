@@ -1,7 +1,12 @@
 """The raw log: one JSONL file per source per sync run per machine, written once and never changed (DR-0014).
 
 `raw/<source>/<yyyy>/<mm>/<yyyy-mm-dd>T<hhmm>-<machine>.jsonl`, in UTC; a second run of a source in the same minute on
-the same machine gets `.2`, `.3` before `.jsonl`. A record whose `(rid, v)` is already in the log is not written again.
+the same machine gets `.2`, `.3` before `.jsonl`, always after the highest counter that minute has. A record whose
+`(rid, v)` is already in the log is not written again.
+
+A run file holds at most 16 MiB of lines (DR-0488): a write past that goes on in the next files, each a run of its own
+by the same rule, in the records' order, so a host's file limit (GitHub's 100 MB) is never met and an older Docket
+reads them as it reads any runs. A record is never split; one larger than the cap is a file of its own.
 """
 
 from __future__ import annotations
@@ -19,6 +24,8 @@ from docket.vault.home import make_private
 from docket.vault.lock import VaultLock
 from docket.vault.records import RawRecord, version
 
+# The most bytes of lines a run file takes before the next record goes to a file of its own (DR-0488).
+RUN_FILE_BYTES = 16 * 1024 * 1024
 RUN_FILE = re.compile(r"^(\d{4}-\d{2}-\d{2})T(\d{4})-([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)(?:\.(\d+))?\.jsonl$")
 
 # A run's place in run order: date, time, machine, counter, source.
@@ -45,9 +52,15 @@ class RunFile:
 
 @dataclass(frozen=True)
 class RunResult:
-    path: Path | None
+    # Every file the write made, in run order; none when everything was already in the log.
+    paths: tuple[Path, ...]
     written: int
     skipped: int
+
+    @property
+    def path(self) -> Path | None:
+        """The first file the write made, or None."""
+        return self.paths[0] if self.paths else None
 
 
 def parse_run_file(raw_dir: Path, path: Path) -> RunFile | None:
@@ -123,43 +136,67 @@ class RawLog:
         return {rid for rid, _ in self._seen}
 
     def _target(self, source: str, run_at: datetime) -> Path:
+        """The next run file of this minute and machine: after the highest counter the minute has, never in a gap a
+        deleted file left, so a newer run always sorts after an older one."""
         at = run_at.astimezone(UTC)
         folder = self.raw_dir / source / f"{at:%Y}" / f"{at:%m}"
         base = f"{at:%Y-%m-%dT%H%M}-{self.machine}"
-        counter = 1
-        while True:
-            name = f"{base}.jsonl" if counter == 1 else f"{base}.{counter}.jsonl"
-            if not (folder / name).exists():
-                return folder / name
-            counter += 1
+        names: list[str] = [p.name for p in folder.glob(f"{base}*.jsonl")] if folder.is_dir() else []
+        taken = [
+            int(m.group(4) or 1)
+            for name in names
+            if (m := RUN_FILE.match(name)) and f"{m.group(1)}T{m.group(2)}-{m.group(3)}" == base
+        ]
+        counter = max(taken, default=0) + 1
+        return folder / (f"{base}.jsonl" if counter == 1 else f"{base}.{counter}.jsonl")
 
     def write_run(self, source: str, records: list[RawRecord], run_at: datetime | None = None) -> RunResult:
-        """Write one run of a source. Records already in the log, or earlier in this batch, are skipped."""
+        """Write one run of a source, in the records' order, in as many files as 16 MiB of lines each takes. Records
+        already in the log, or earlier in this batch, are skipped."""
         foreign = next((r for r in records if r.source != source), None)
         if foreign is not None:
             raise DocketError(f"{foreign.rid} is from {foreign.source!r}, not this run's source {source!r}")
         with self.lock:
             self._refresh()
-            target = self._target(source, run_at or datetime.now(UTC))
-            stem = target.name[: -len(".jsonl")]
-            lines: list[str] = []
+            at = run_at or datetime.now(UTC)
+            fresh: list[RawRecord] = []
             batch: set[tuple[str, str]] = set()
             skipped = 0
             for record in records:
-                stored = record.model_copy(update={"v": version(record), "run": stem})
-                key = (stored.rid, stored.v)
+                v = version(record)
+                key = (record.rid, v)
                 if key in self._seen or key in batch:
                     skipped += 1
                     continue
                 batch.add(key)
-                lines.append(stored.to_json())
-            if not lines:
-                return RunResult(None, 0, skipped)
-            self._write_new(target, "".join(f"{line}\n" for line in lines))
-            # Only now are these records in the log: a write that failed leaves them free to be written again.
-            self._seen |= batch
-            self._read.add(target)
-            return RunResult(target, len(lines), skipped)
+                fresh.append(record.model_copy(update={"v": v}))
+            paths: list[Path] = []
+            lines: list[str] = []
+            keys: set[tuple[str, str]] = set()
+            size = 0
+            target = self._target(source, at)
+            for record in fresh:
+                line = _line(record, target)
+                if lines and size + len(line.encode("utf-8")) > RUN_FILE_BYTES:
+                    self._finish(target, lines, keys)
+                    paths.append(target)
+                    lines, keys, size = [], set[tuple[str, str]](), 0
+                    target = self._target(source, at)
+                    line = _line(record, target)
+                lines.append(line)
+                keys.add((record.rid, record.v))
+                size += len(line.encode("utf-8"))
+            if lines:
+                self._finish(target, lines, keys)
+                paths.append(target)
+            return RunResult(tuple(paths), len(fresh), skipped)
+
+    def _finish(self, target: Path, lines: list[str], keys: set[tuple[str, str]]) -> None:
+        """One run file written. Only now are its records in the log: a write that failed leaves them free to be
+        written again, and a file already written keeps its own."""
+        self._write_new(target, "".join(lines))
+        self._seen |= keys
+        self._read.add(target)
 
     def _write_new(self, target: Path, text: str) -> None:
         """A new file through a temp file and a rename; the temp file lives outside raw/, so it is never committed."""
@@ -189,6 +226,11 @@ class RawLog:
     def latest(self, rid: str) -> RawRecord | None:
         versions = self.read(rid)
         return versions[-1] if versions else None
+
+
+def _line(record: RawRecord, target: Path) -> str:
+    """A record as its run file's line, its `run` the file's stem."""
+    return record.model_copy(update={"run": target.name[: -len(".jsonl")]}).to_json() + "\n"
 
 
 def _lines(path: Path) -> Iterator[tuple[int, RawRecord]]:

@@ -583,7 +583,7 @@ def staging_promote(source: SourceOption = None, vault: VaultOption = None) -> N
     found = find_vault(vault)
     result = Gate(found).promote(source)
     for run in result.runs:
-        where = run.run.relative_to(found.root).as_posix() if run.run is not None else "nothing new"
+        where = ", ".join(f.relative_to(found.root).as_posix() for f in run.files) or "nothing new"
         redacted = ", ".join(f"{rule} {n}" for rule, n in sorted(run.redactions.items()))
         line = f"{run.source}: {run.written} written ({where}), {run.skipped} already in raw"
         typer.echo(line + (f"; redacted: {redacted}" if redacted else ""))

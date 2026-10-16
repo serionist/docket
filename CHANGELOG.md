@@ -151,3 +151,7 @@ Unreleased in the same PR.
   run them.
 - Folder vaults stop running git-lfs's post-commit hook on Docket's commits. They were meant to skip the host's
   hooks, but git-lfs wrote its hooks into the empty folder Docket used for that.
+- A promotion writes each source's records in the order they were staged. Before, two versions of one record staged
+  before the same promotion could land in either order, and the older one then counted as current.
+- A promotion past 16 MiB of a source's records writes them in several run files (`.2`, `.3` after the minute's
+  name), in one commit, so no file reaches a host's file size limit. An older Docket reads them as any runs.

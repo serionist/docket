@@ -10,10 +10,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from docket_testkit import CALL, INDEX_FIXTURE, PARENT, copy_vault, index_template, make_record
+from docket_testkit import CALL, INDEX_FIXTURE, PARENT, copy_vault, index_template, make_record, plaud_records
 
 from docket.errors import DocketError
-from docket.index import build, locate, matching, rebuild, status
+from docket.index import build, locate, matching, rebuild, status, update
+from docket.vault import rawlog
 from docket.vault.records import RawRecord
 from docket.vault.vault import Vault
 
@@ -94,6 +95,30 @@ def test_only_the_latest_version_is_chunked_and_versions_are_counted(vault: Vaul
         (2, "raw/chat/2026/10/2026-10-14T0900-test-box.jsonl")
     ]
     assert rows(vault, "SELECT text FROM chunks WHERE owner = ?", f"r {rid}") == [("A határidő csütörtök lett.",)]
+
+
+@pytest.mark.parametrize("how", ["update", "rebuild"])
+def test_a_promotion_split_over_run_files_is_indexed_in_its_order(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch, how: str
+) -> None:
+    rebuild(vault)
+    monkeypatch.setattr(rawlog, "RUN_FILE_BYTES", 1500)
+    # A Plaud recording and, at the end of the same promotion, its new title: two versions in two run files.
+    first = plaud_records("first", "second", "third")
+    renamed = plaud_records(title="Supplier sync, renamed")[0]
+    vault.write_run("plaud", [*first, renamed], datetime(2026, 10, 16, 9, 0, tzinfo=UTC))
+    files = [run.path for run in vault.rawlog.run_files() if run.source == "plaud"]
+    assert len(files) > 2
+    report = update(vault) if how == "update" else rebuild(vault)
+    # Every split file is a new run to an index already built; a rebuild reads the template's four runs too.
+    assert (report.rebuilt, report.runs) == ((False, len(files)) if how == "update" else (True, 4 + len(files)))
+    last = files[-1].relative_to(vault.root).as_posix()
+    assert rows(vault, "SELECT versions, title, path FROM records WHERE rid = ?", renamed.rid) == [
+        (2, "Supplier sync, renamed", last)
+    ]
+    indexed = rows(vault, "SELECT path FROM run_files WHERE path LIKE 'raw/plaud/%' ORDER BY path")
+    assert sorted(str(p) for (p,) in indexed) == sorted(f.relative_to(vault.root).as_posix() for f in files)
+    assert rows(vault, "SELECT count(*) FROM records WHERE source = 'plaud'") == [(len(first),)]
 
 
 def test_raw_lines_are_read_leniently(vault: Vault) -> None:
