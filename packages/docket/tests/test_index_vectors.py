@@ -231,6 +231,7 @@ class Blocking:
         return [trigram_vector(t) for t in inputs]
 
 
+@pytest.mark.perf
 def test_an_update_commits_while_the_worker_is_busy(vault: Vault) -> None:
     models = Blocking()
     reports: list[embedpass.PassReport] = []

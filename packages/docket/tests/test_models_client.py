@@ -84,6 +84,7 @@ def test_a_batch_past_its_timeout_stops_the_worker(stopping: list[Worker]) -> No
         w.batch(["passage: again"])
 
 
+@pytest.mark.perf
 def test_a_worker_that_dies_mid_batch_says_it_stopped_not_that_it_was_slow(stopping: list[Worker]) -> None:
     w = running(stopping, die_on="passage: crash", batch_seconds=30)
     started = time.monotonic()
@@ -176,6 +177,7 @@ def test_a_query_whose_line_cant_be_written_skips(stopping: list[Worker], monkey
     assert w.query("query: x") == "the models' worker didn't answer in 2 s"
 
 
+@pytest.mark.perf
 def test_stop_kills_a_worker_that_ignores_its_stdin(stopping: list[Worker], monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(client, "STOP_SECONDS", 0.2)
     w = running(stopping, ignore_eof=True)
