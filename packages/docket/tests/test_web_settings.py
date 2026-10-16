@@ -47,6 +47,7 @@ def page(client: TestClient, path: str = "/settings", status: int = 200) -> str:
     assert answer.status_code == status, answer.text
     assert answer.headers["Content-Security-Policy"] == PAGE_CSP
     assert answer.headers["Cache-Control"] == "no-store"
+    assert answer.headers["Referrer-Policy"] == "same-origin"
     assert not html_problems(answer.text), path
     assert not a11y_problems(answer.text), path
     return answer.text
@@ -83,8 +84,9 @@ def test_the_page_names_each_source_with_its_settings_and_writes_nothing(client:
     assert "docs" in documents
     assert "archive/*" in documents
     assert "folder" in documents
-    # The page makes no change: no form posts, and the file and its history are as they were.
-    assert not parse(html).find_all("form")
+    # A read writes nothing; the page's only forms add a never-store value, each through its own question.
+    forms = parse(html).find_all("form")
+    assert [(f.attrs["method"], f.attrs["action"]) for f in forms] == [("post", "/settings/never-store")] * 3
     assert (vault.root / "vault.yaml").read_bytes() == before
     assert sh(vault.root, "git", "rev-parse", "HEAD") == head
 

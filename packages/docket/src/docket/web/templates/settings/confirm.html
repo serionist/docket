@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% from "macros.html" import notice, paste %}
+{% block main %}
+<div class="settings confirm">
+<header class="settings-head">
+  <h1>Add to {{ confirm.name }}?</h1>
+</header>
+{% if confirm.stale %}{{ notice('warn', "vault.yaml changed since you saw this, so nothing was written. Here it is again, counted as the file stands now.") }}{% endif %}
+<p class="lead"><span class="confirm-value" dir="auto">{{ confirm.value }}</span></p>
+<ul class="confirm-lines">
+  {% for line in confirm.lines %}<li>{{ line }}</li>{% endfor %}
+</ul>
+{% if confirm.broad %}{{ notice('warn', confirm.broad) }}{% endif %}
+<p class="meta">{{ confirm.commits }}</p>
+{% if confirm.docket_form %}
+<form class="confirm-form" method="post" action="/settings/never-store">
+  <input type="hidden" name="list" value="{{ confirm.name }}">
+  <input type="hidden" name="value" value="{{ confirm.value }}">
+  <input type="hidden" name="shown" value="{{ confirm.shown }}">
+  <input type="hidden" name="confirmed" value="1">
+  <button type="submit" class="button primary">Add it to {{ confirm.name }}</button>
+  <a class="button" href="/settings">Back, adding nothing</a>
+</form>
+{% else %}
+<p>vault.yaml has comments or a layout of your own, so it is left as it is: add this line under <code>never_store:</code> <code>{{ confirm.name }}:</code> by hand.</p>
+{{ paste(confirm.line, 'the line that adds it') }}
+<p><a href="/settings">Back to Settings</a></p>
+{% endif %}
+</div>
+{% endblock %}

@@ -28,6 +28,7 @@ from sync_kit import as_structured, as_text, memo, sync_template
 from docket.service import client, server
 from docket.service.client import call_json
 from docket.service.token import Tokens
+from docket.vault.config import CONFIG_FILE, VaultConfig
 
 BROWSER = os.environ.get("DOCKET_TEST_BROWSER", "")
 pytestmark = pytest.mark.skipif(not BROWSER, reason="drives a real browser: DOCKET_TEST_BROWSER=chrome or msedge")
@@ -423,9 +424,9 @@ def test_the_settings_page_in_a_browser(settings_service: tuple[int, str], tmp_p
         page.goto(f"{link.body['url']}&next=/settings")
         page.wait_for_url(f"{base}/settings")
         expect(page.locator(".lead")).to_contain_text("4 sources, 4 on; 4 never-store values")
-        # No value of a list in the page until asked for, and no form: every change is named.
+        # No value of a list in the page until asked for; the only forms add a never-store value.
         expect(page.locator("main")).not_to_contain_text("Dora #2")
-        expect(page.locator("form")).to_have_count(0)
+        expect(page.locator("form")).to_have_count(3)
 
         # A source's changes fold out without JavaScript's help, stricter first, each with its line.
         page.click("text=Change calls")
@@ -445,8 +446,47 @@ def test_the_settings_page_in_a_browser(settings_service: tuple[int, str], tmp_p
         page.click("text=Change calls")
         _fits(page, "#source-calls", "#source-calls .paste-text", "#list-people", ".setting-facts.models")
         page.screenshot(path=str(shots / "settings-390.png"), full_page=True)
+
+        # A value added: its own question, then the add; the address bar never holds it, at either width.
+        page.set_viewport_size({"width": 1280, "height": 900})
+        _add(page, base, "Ada Sample", shots / "settings-confirm.png")
+        page.set_viewport_size({"width": 390, "height": 844})
+        _fits(page, ".notice", "#list-people")
         assert not errors, errors
+        # No entry of the tab's history holds the value: back lands on the question's answer, by its path alone.
+        history = page.context.new_cdp_session(page).send("Page.getNavigationHistory")
+        urls = [entry["url"] for entry in history["entries"]]
+        assert f"{base}/settings/never-store" in urls
+        assert not [u for u in urls if "Ada" in u or "Sample" in u], urls
         browser.close()
+
+        # The same without JavaScript: plain forms, the same two posts.
+        again = client.call("POST", "/api/session", token=token, at=port)
+        assert again is not None
+        scriptless = p.chromium.launch(channel=None if BROWSER == "chromium" else BROWSER)
+        bare = scriptless.new_context(java_script_enabled=False, viewport={"width": 390, "height": 844})
+        plain = bare.new_page()
+        plain.goto(f"{again.body['url']}&next=/settings")
+        plain.wait_for_url(f"{base}/settings")
+        _add(plain, base, "Ben Plain", shots / "settings-confirm-390.png")
+        scriptless.close()
+    held = VaultConfig.load(tmp_path / "project" / "vault" / CONFIG_FILE).never_store.people
+    assert held[-2:] == ["Ada Sample", "Ben Plain"]
+
+
+def _add(page: Page, base: str, value: str, shot: Path) -> None:
+    """A never-store value added through the page: the field, the question, the add, the notice."""
+    page.click("#list-people summary")
+    page.fill("#add-people", value)
+    page.click("#list-people form button")
+    expect(page.locator("h1")).to_have_text("Add to people?")
+    expect(page.locator(".confirm-value")).to_have_text(value)
+    assert value.split(maxsplit=1)[0] not in page.url
+    page.screenshot(path=str(shot), full_page=True)
+    page.click("text=Add it to people")
+    page.wait_for_url(f"{base}/settings?done=listed-people-1")
+    expect(page.locator("main")).to_contain_text("Added one value to people")
+    expect(page.locator("main")).not_to_contain_text(value)
 
 
 def _capture(service: tuple[int, str], run: str, n: int, tool: str, result: object) -> None:

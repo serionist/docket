@@ -102,8 +102,12 @@ def test_vault_yaml_is_written_only_by_its_one_writer() -> None:
     assert _calls("write_config") == {("vault/settings.py", "rewrite")}
 
 
-def test_the_writer_s_general_entry_is_called_only_by_the_cli_s_two_writers() -> None:
-    assert _calls("rewrite") == {("vault/redaction.py", "set_rule"), ("sources/scaffold.py", "_register")}
+def test_the_writer_s_general_entry_is_called_only_by_the_cli_s_two_writers_and_the_stricter_operations() -> None:
+    assert _calls("rewrite") == {
+        ("vault/redaction.py", "set_rule"),
+        ("sources/scaffold.py", "_register"),
+        ("vault/settings.py", "add_listed"),
+    }
 
 
 def test_the_writers_that_can_loosen_are_called_only_by_the_command_line() -> None:

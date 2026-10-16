@@ -557,7 +557,7 @@ DR-0384).
 ### The Settings page
 
 `/settings` shows what the gate obeys and this machine's models, and names every change (DR-0505, DR-0506, DR-0510).
-In this version it changes nothing itself.
+In this version the one change it makes itself is a value added to a never-store list.
 
 | Part | Shows |
 |---|---|
@@ -571,8 +571,18 @@ In this version it changes nothing itself.
   terminal or your editor, where Claude Code asks you first. What it lets in reaches git for good.
 - A `vault.yaml` with comments or a layout of your own is never rewritten: the page says so, and each change is a
   line to make by hand.
+- Adding a never-store value asks once more first: the records it drops from staging now, and how many records and
+  chunks already stored hold it, with their share of the index, so a word that would take half of everything shows
+  it (DR-0509). They stay in raw; from the next sync, what it names is dropped before it is stored.
+- The value goes in a form's body only: never in the address bar, the service's log or a commit message, which says
+  `Config: never-store people, 1 added`. The field asks the browser to keep nothing and check no spelling (DR-0508).
+  Sending the same add twice adds it once.
 - A never-store value is committed in `vault.yaml` as you write it, so it is in your repo's history and goes wherever
   the vault is pushed.
+- A change made while the page was open (another tab, the CLI, an editor) refuses the add, and the question comes
+  back counted again. An edit of `vault.yaml` not committed yet is committed on its own first, by the CLI too,
+  and the question says so; one that lets more in is never committed for you: the add is refused until you commit
+  or undo it.
 - Keys: `?`.
 
 The pages' browser test runs on CI. To run it here, against your own Chrome or Edge:

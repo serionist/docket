@@ -596,3 +596,21 @@ def test_only_the_gate_writes_the_raw_log() -> None:
                 callers.add(path.relative_to(src).as_posix())
     # vault.py's own Vault.write_run hands over to the raw log; nothing else may call either.
     assert callers == {"vault/gate.py", "vault/vault.py"}
+
+
+def test_what_the_sweep_would_drop_is_counted_and_nothing_is_written(gate: Gate, vault: Vault) -> None:
+    """A page names it before a change it asks about (DR-0509): the same rules the sweep applies, by why, no write."""
+    gate.stage([call(1, author="Dora Example"), call(2, text=f"the {PRIVATE_WORD} again"), note(3), note(4)])
+    staged = {p: p.read_bytes() for p in (vault.root / "staging").rglob("*.json")}
+    config = VaultConfig.load(vault.root / "vault.yaml")
+    assert gate.would_drop(config) == Counter()
+    stricter = config.model_copy(
+        update={
+            "never_store": config.never_store.model_copy(
+                update={"people": ["Dora Example"], "keywords": [PRIVATE_WORD]}
+            ),
+            "sources": {**config.sources, "notes": SourceConfig(sensitivity="private")},
+        }
+    )
+    assert gate.would_drop(stricter) == Counter({"never-store": 2, "private": 2})
+    assert {p: p.read_bytes() for p in (vault.root / "staging").rglob("*.json")} == staged
