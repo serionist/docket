@@ -3,7 +3,10 @@ written per test into a temp consuming project; the core never runs the Plaud ex
 
 from __future__ import annotations
 
+import contextlib
 import io
+import os
+import signal
 import time
 from pathlib import Path
 
@@ -113,16 +116,24 @@ def test_a_mapper_past_its_time_limit_is_stopped(tmp_path: Path) -> None:
 @pytest.mark.perf
 def test_a_helper_left_holding_the_output_fails_the_run_at_its_limit(tmp_path: Path) -> None:
     # The mapper answers at once, but a helper it started keeps its stdout and stderr open for longer than the limit.
+    pid = tmp_path / "helper.pid"
     code = (
-        "import subprocess, sys\n\n"
+        "import pathlib, subprocess, sys\n\n"
         "def map_run(run):\n"
-        "    subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        "    helper = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        f"    pathlib.Path({str(pid)!r}).write_text(str(helper.pid))\n"
         "    return {}\n"
     )
     started = time.monotonic()
-    with pytest.raises(MapperFailedError, match="the mapper left a process holding its output"):
-        runner.run(write_mapper(tmp_path, "helper", code), {}, time_limit=3)
-    assert time.monotonic() - started < 15
+    try:
+        with pytest.raises(MapperFailedError, match="the mapper left a process holding its output"):
+            runner.run(write_mapper(tmp_path, "helper", code), {}, time_limit=3)
+        assert time.monotonic() - started < 15
+    finally:
+        # The helper would sleep on after the test, and a CI job waits at its end for what a step left running.
+        if pid.exists():
+            with contextlib.suppress(OSError):
+                os.kill(int(pid.read_text()), signal.SIGTERM)
 
 
 def test_output_past_the_cap_stops_the_mapper(tmp_path: Path) -> None:
