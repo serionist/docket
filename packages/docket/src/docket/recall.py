@@ -15,7 +15,7 @@ What a read asks about docs other than the one it shows (an old path's note, the
 a record) comes from the index when it is current for processed/, else from one parse of every doc for the whole call;
 either way the same code decides (DR-0321, DR-0322). A read, a verify and a put's anchor checks take a record's lines at
 their places when the index is current for the record's source, else load that source's raw once (DR-0446, DR-0447,
-DR-0515). A put holds the index only while it checks, never under the vault's lock (DR-0516).
+DR-0522). A put holds the index only while it checks, never under the vault's lock (DR-0516).
 """
 
 from __future__ import annotations
@@ -117,14 +117,15 @@ class VerifyResult(BaseModel):
 
 def doc_put(vault: Vault, text: str) -> PutResult:
     """Store a processed doc; `DocRefusedError` carries every problem when it can't be stored. Its anchors are checked
-    at their records' places when the index is current for their source (DR-0515)."""
-    return DocStore(vault).put(text, raw=lambda: _raw(vault))
+    at their records' places when the index is current for their source (DR-0522)."""
+    return DocStore(vault).put(text, raw=lambda: raw_lookup(vault))
 
 
 @contextmanager
-def _raw(vault: Vault) -> Generator[RawLookup]:
+def raw_lookup(vault: Vault) -> Generator[RawLookup]:
     """A lookup that reads a source at its places when the index is current for it, else loads it once; the index it
-    opens stays open, in one read transaction, only until the block ends (DR-0516)."""
+    opens stays open, in one read transaction, only until the block ends (DR-0516). A put's anchor checks and a notes
+    import's, all of an import's notes through one (DR-0522)."""
     index = _Index(vault)
     try:
         yield RawLookup(vault.root, index)
@@ -326,7 +327,7 @@ def _options(rids: list[str], at: Anchor) -> str:
 def verify(vault: Vault, doc: str, lines: list[int] | None = None, window: int = WINDOW) -> VerifyResult:
     """Each anchored line of a doc, or the lines asked for by their number in the file, next to the raw spans its
     anchors point at. An anchor that doesn't resolve comes back with its problem. Records are read at their places when
-    the index is current for their source, else their source loads once (DR-0515)."""
+    the index is current for their source, else their source loads once (DR-0522)."""
     call = _Call(vault)
     try:
         return _verify(call, doc, lines, window)

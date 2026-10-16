@@ -6,10 +6,10 @@ that keeps it never makes a second rev with the same number, and a doc deleted b
 (DR-0112).
 
 A put checks what the raw log decides without the lock (raw records are written once), through the lookup its caller
-opens for that check alone: at the records' places in a current index (DR-0515), closed before the lock is taken
-(DR-0516). Then, inside `Vault.writing()`, what the stored docs decide: a hand edit is taken in as the next rev first,
-then the rev the put carries, `supersedes`, and whether anything changed. A failed write or commit leaves the file and
-git's index as they were.
+opens for that check alone, and `put_many` every doc of its batch through one: at the records' places in a current
+index (DR-0522), closed before the lock is taken (DR-0516). Then, inside `Vault.writing()`, what the stored docs
+decide: a hand edit is taken in as the next rev first, then the rev the put carries, `supersedes`, and whether anything
+changed. A failed write or commit leaves the file and git's index as they were.
 """
 
 from __future__ import annotations
@@ -276,27 +276,33 @@ class DocStore:
         commit = self._write_all_and_commit([(result.path, text)], f"Doc: {result.id} rev {result.rev}")
         return result.model_copy(update={"commit": commit})
 
-    def put_many(self, texts: list[str], subject: str) -> list[PutResult | DocRefusedError]:
+    def put_many(
+        self, texts: list[str], subject: str, raw: RawOpener | None = None
+    ) -> list[PutResult | DocRefusedError]:
         """Store several docs in one commit: each is checked as `put` checks one, and refused on its own; the accepted
         ones are written and committed together, the commit's body holding a `Doc: <id> rev <n>` line for each. If a
-        write or the commit fails, every file goes back as it was and nothing stays staged."""
+        write or the commit fails, every file goes back as it was and nothing stays staged. Every doc's anchors are
+        checked through the one lookup `raw` opens, so a source is read at its places or loaded once for the whole
+        batch (DR-0522); without `raw`, each covered source loads once."""
         out: list[PutResult | DocRefusedError | None] = [None] * len(texts)
         ready: list[tuple[int, ProcessedDoc, list[str], derived.Redacted]] = []
-        for i, text in enumerate(texts):
-            head = normalize_newlines(text.removeprefix("﻿")).split("\n")
-            try:
-                doc = parse_doc(text)
-                if not _reads_back(doc):
-                    raise DocRefusedError([DocProblem(None, "the frontmatter can't be written back")])
-                doc, redacted = derived.check(doc, head[1 : doc.head_lines - 1], self.redactor, self.lists)
-                problems = self._against_raw(doc, head, RawLookup(self.root))
-            except DocRefusedError as e:
-                out[i] = e
-                continue
-            if problems:
-                out[i] = DocRefusedError(problems)
-            else:
-                ready.append((i, doc, head, redacted))
+        # Closed before the lock, as `put`'s is (DR-0516).
+        with raw() if raw is not None else nullcontext(RawLookup(self.root)) as lookup:
+            for i, text in enumerate(texts):
+                head = normalize_newlines(text.removeprefix("﻿")).split("\n")
+                try:
+                    doc = parse_doc(text)
+                    if not _reads_back(doc):
+                        raise DocRefusedError([DocProblem(None, "the frontmatter can't be written back")])
+                    doc, redacted = derived.check(doc, head[1 : doc.head_lines - 1], self.redactor, self.lists)
+                    problems = self._against_raw(doc, head, lookup)
+                except DocRefusedError as e:
+                    out[i] = e
+                    continue
+                if problems:
+                    out[i] = DocRefusedError(problems)
+                else:
+                    ready.append((i, doc, head, redacted))
         writes: list[tuple[int, PutResult, str]] = []
         with self.vault.writing():
             seen: set[str] = set()

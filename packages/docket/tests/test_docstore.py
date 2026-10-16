@@ -54,7 +54,7 @@ def vault(template: Path, tmp_path: Path) -> Vault:
 @pytest.fixture(params=READ_ROUTES)
 def routed(vault: Vault, request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> Vault:
     """The vault with every doc_put through one route: its anchors checked at their records' places in a current
-    index, or against the sources loaded whole, with the same result (DR-0515)."""
+    index, or against the sources loaded whole, with the same result (DR-0522)."""
     read_route(request.param, monkeypatch)
     return vault
 
@@ -432,7 +432,7 @@ def test_a_thread_summary_across_records(routed: Vault) -> None:
     assert recall.doc_put(vault, summary).rev == 1
 
 
-# -- the index a put checks its anchors through (DR-0515, DR-0516) ----------------------------------------------------
+# -- the index a put checks its anchors through (DR-0522, DR-0516) ----------------------------------------------------
 
 
 def test_a_put_closes_the_index_before_it_takes_the_vault_s_lock(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -678,6 +678,45 @@ def test_put_many_puts_every_file_back_when_the_commit_fails(vault: Vault, monke
     assert one.read_bytes() == before
     assert not (vault.root / "processed" / "legacy-note" / "two.md").exists()
     assert staged(vault) == ""
+
+
+@pytest.mark.parametrize("route", READ_ROUTES)
+def test_put_many_checks_every_doc_through_one_lookup_with_the_same_result(
+    vault: Vault, route: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    texts = [
+        note(lines=["- Ben put it at 10 million. @12:08"]),
+        note("minutes:2026-10-14-supplier-call", covers=[REC, MAIL], lines=[f"- The offer. {format_anchor(MAIL)}"]),
+        note("recording-note:2026-10-14-past-the-end", lines=["- past the end @1:05:00"]),
+        note("recording-note:2026-10-14-nowhere", covers=["calls:nope"]),
+        legacy("covered").replace("by: docket", f"covers:\n  - {REC}\nby: docket"),
+    ]
+    if route == "index":
+        index.update(vault)
+    load = RawLookup._source  # pyright: ignore[reportPrivateUsage]
+    loads: list[str] = []
+
+    def counted(self: RawLookup, source: str) -> dict[str, list[Any]]:
+        if source not in self._sources:  # pyright: ignore[reportPrivateUsage]
+            assert route == "parse", f"put_many loaded {source} whole, though the index is current"
+            loads.append(source)
+        return load(self, source)
+
+    monkeypatch.setattr(RawLookup, "_source", counted)
+    results = DocStore(vault).put_many(texts, "Import notes", raw=lambda: recall.raw_lookup(vault))
+    shown = [[str(p) for p in r.problems] if isinstance(r, DocRefusedError) else r.id for r in results]
+    assert shown == [
+        "recording-note:2026-10-14-supplier-call",
+        "minutes:2026-10-14-supplier-call",
+        [
+            'line 11 ("- past the end @1:05:00"): @1:05:00: 1:05:00 is outside calls:rec-0042, which runs from 00:00 '
+            "to 1:02:10"
+        ],
+        ["line 5: covers: calls:nope isn't in the raw log"],
+        "legacy-note:covered",
+    ]
+    # Loaded, each source the docs cover once for the whole batch; by place, none.
+    assert sorted(loads) == ([] if route == "index" else ["calls", "mail"])
 
 
 # -- redaction and never-store (DR-0195) ---------------------------------------------------------------------------

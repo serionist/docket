@@ -339,22 +339,26 @@ def copy_vault(template: Path, tmp_path: Path) -> Vault:
 
 
 READ_ROUTES = ["parse", "index"]
-# The calls a route takes: each asks the raw log through the index when it is current (DR-0446, DR-0515).
+# The calls a route takes: each asks the raw log through the index when it is current (DR-0446, DR-0522).
 ROUTED = ("read", "verify", "doc_put")
+# And a notes import, which checks every note's covers through one lookup (DR-0522); it parses every legacy doc itself.
+IMPORTS = ("import_notes",)
 
 
 def read_route(route: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every `recall.read`, `recall.verify` and `recall.doc_put` in a test through one route (DR-0321, DR-0446,
-    DR-0515): `parse`, with no index, parses every doc and loads each source whole; `index` brings the index up to date
-    before each call, and parsing every doc or loading a source whole while the call runs fails the test, so the index
-    answers all that read asks and every record comes from its place. A test run both ways shows the two give the same
-    result."""
+    """Every `recall.read`, `recall.verify` and `recall.doc_put`, and every notes import, in a test through one route
+    (DR-0321, DR-0446, DR-0522): `parse`, with no index, parses every doc and loads each source whole; `index`
+    brings the index up to date before each call, and loading a source whole while the call runs fails the test, as
+    does parsing every doc outside an import, so the index answers all that read asks and every record comes from its
+    place. A test run both ways shows the two give the same result."""
     from docket import index, recall
+    from docket.imports import notes
     from docket.index.build import db_path
     from docket.vault.docstore import DocStore
     from docket.vault.spans import RawLookup
 
     load = RawLookup._source  # pyright: ignore[reportPrivateUsage]
+    parse_all = DocStore.all
     reading: list[str] = []
 
     def parsing(name: str, real: Callable[..., Any]) -> Callable[..., Any]:
@@ -376,6 +380,9 @@ def read_route(route: str, monkeypatch: pytest.MonkeyPatch) -> None:
         return call
 
     def every_doc(self: DocStore) -> list[Any]:
+        # An import lists every legacy doc to match its notes; only a read, verify or doc_put must not need them all.
+        if reading and reading[-1] in IMPORTS:
+            return parse_all(self)
         raise AssertionError(f"read parsed every doc in {self.root}, though the index is current")
 
     def whole_source(self: RawLookup, source: str) -> dict[str, list[RawRecord]]:
@@ -383,6 +390,9 @@ def read_route(route: str, monkeypatch: pytest.MonkeyPatch) -> None:
             raise AssertionError(f"{reading[-1]} loaded {source}'s raw whole, though the index is current")
         return load(self, source)
 
+    for name in IMPORTS:
+        real = getattr(notes, name)
+        monkeypatch.setattr(notes, name, parsing(name, real) if route == "parse" else through_index(name, real))
     for name in ROUTED:
         real = getattr(recall, name)
         monkeypatch.setattr(recall, name, parsing(name, real) if route == "parse" else through_index(name, real))
