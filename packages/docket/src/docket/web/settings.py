@@ -35,7 +35,7 @@ from docket.vault import neverstore
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.gate import Gate
 from docket.vault.neverstore import ListName
-from docket.vault.settings import LISTS, Added, StaleError, add_listed, checked_value, file_hash
+from docket.vault.settings import LISTS, Added, StaleError, add_listed, checked_value, edit_to_take_in, file_hash
 from docket.web import settings_view, templating
 from docket.web.settings_view import Facts, SettingsState, SettingsStateError, SourceFacts
 from docket.web.shell import shell
@@ -96,14 +96,18 @@ def _with(config: VaultConfig, name: ListName, value: str) -> VaultConfig:
     return config.model_copy(update={"never_store": lists.model_copy(update={name: [*getattr(lists, name), value]})})
 
 
-def _staged(service: Service, name: ListName, value: str) -> tuple[int, str, bool]:
+def _staged(service: Service, name: ListName, value: str) -> tuple[int, str, bool, bool]:
     """On the writer thread, so no write runs between the read and the count: what the value would drop from staging,
-    and vault.yaml's hash and form as read."""
+    vault.yaml's hash and form as read, and whether an edit not committed yet goes in first. An edit that lets more in
+    is refused here already, as the add would refuse it (DR-0507)."""
     vault = service.vault()
     data = (vault.root / CONFIG_FILE).read_bytes()
+    text = data.decode("utf-8")
     config = vault.config
+    docket_form = config.written_by_docket(text)
+    takes_in = edit_to_take_in(vault, config, text) if docket_form else False
     dropped = Gate(vault).would_drop(_with(config, name, value))
-    return dropped["never-store"], file_hash(data), config.written_by_docket(data.decode("utf-8"))
+    return dropped["never-store"], file_hash(data), docket_form, takes_in
 
 
 def _stored(service: Service, name: ListName, value: str) -> tuple[Reach | None, str | None]:
@@ -145,10 +149,18 @@ def router(service: Service) -> APIRouter:
     async def confirm(
         request: Request, name: ListName, value: str, *, status: int = 200, stale: bool = False
     ) -> Response:
-        staged, shown, docket_form = await service.writer.run(lambda: _staged(service, name, value))
+        staged, shown, docket_form, takes_in = await service.writer.run(lambda: _staged(service, name, value))
         stored, why = await asyncio.to_thread(_stored, service, name, value)
         view = settings_view.build_confirm(
-            name, value, staged=staged, stored=stored, why=why, shown=shown, docket_form=docket_form, stale=stale
+            name,
+            value,
+            staged=staged,
+            stored=stored,
+            why=why,
+            shown=shown,
+            docket_form=docket_form,
+            stale=stale,
+            takes_in=takes_in,
         )
         context = shell(service, request, f"Add to {name}", current="settings") | {"confirm": view}
         return templating.page("settings/confirm.html", context, status=status, referrer=templating.POSTS_FORMS)

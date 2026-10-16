@@ -413,6 +413,7 @@ def build_confirm(
     shown: str,
     docket_form: bool,
     stale: bool = False,
+    takes_in: bool = False,
 ) -> ConfirmView:
     """The confirm view for a value about to go on a list: the counts in words, the share of the index a keyword takes,
     and that the value is committed as typed."""
@@ -440,6 +441,8 @@ def build_confirm(
     if name == "keywords":
         lines.append("Docs that say it stay as they are; a later doc that says it is refused.")
     lines.append("From the next sync, a record it names is dropped before it is stored, with no trace.")
+    if takes_in:
+        lines.append("Your edit of vault.yaml that isn't committed yet goes in first, as a commit of its own.")
     commits = (
         "It is committed in vault.yaml as you typed it: it is in your repo's history, and goes wherever the vault is "
         "pushed. The commit message names the list, never the value."

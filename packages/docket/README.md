@@ -580,7 +580,9 @@ In this version the one change it makes itself is a value added to a never-store
 - A never-store value is committed in `vault.yaml` as you write it, so it is in your repo's history and goes wherever
   the vault is pushed.
 - A change made while the page was open (another tab, the CLI, an editor) refuses the add, and the question comes
-  back counted again. An edit of `vault.yaml` not committed yet is committed on its own first, by the CLI too.
+  back counted again. An edit of `vault.yaml` not committed yet is committed on its own first, by the CLI too,
+  and the question says so; one that lets more in is never committed for you: the add is refused until you commit
+  or undo it.
 - Keys: `?`.
 
 The pages' browser test runs on CI. To run it here, against your own Chrome or Edge:

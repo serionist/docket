@@ -136,7 +136,9 @@ Unreleased in the same PR.
 
 - An edit of `vault.yaml` not committed yet is committed on its own, as `Config: vault.yaml as edited`, before
   `docket redaction set`, `docket source new` or the Settings page commits a change to it, so each commit says what
-  it did.
+  it did. An edit that lets more in than the committed file (a rule turned off, a source made looser, a never-store
+  value taken off) is never committed this way: the change is refused, nothing is written, and you commit or undo the
+  edit yourself.
 - A `vault.yaml` that doesn't read as YAML is named by its line and column and what was wrong there, no longer with
   the line's text, so a never-store value on it never shows in a page, a terminal or a log.
 - Verifying a doc and writing one no longer load the raw log of each source it covers when the search index is

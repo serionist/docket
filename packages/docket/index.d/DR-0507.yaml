@@ -10,6 +10,7 @@ decisions:
     binds:
       - A hand-edited vault.yaml is never rewritten, by the page or the CLI.
       - A change that changes nothing is no write and no refusal, whatever the file did since, so a post sent twice adds once.
+      - An edit not committed yet is taken in only when it doesn't loosen against the committed vault.yaml, by loosens(); one that lets more in, or a committed file that is gone or doesn't read, refuses the write for every caller, page and CLI, naming no value, with nothing written or committed.
     not_chosen:
       - "ruamel.yaml's round trip, keeping comments: a dependency, and the page and the CLI would keep different rules."
       - "A second writer in the web: two places that know the rewrite rule."

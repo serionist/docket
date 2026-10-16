@@ -55,6 +55,7 @@ FOR_PAGES = frozenset(
         "add_listed",
         "Added",
         "StaleError",
+        "edit_to_take_in",
     }
 )
 # A line to paste never wraps: a long keyword stays one line.
@@ -70,6 +71,20 @@ class LooseningError(DocketError):
 
 class StaleError(DocketError):
     """vault.yaml changed since the page read it, so the change the page asked for is not made."""
+
+
+class UncommittedLooseningError(DocketError):
+    """vault.yaml holds an edit not committed yet that lets more in than the committed file, which no write of Docket's
+    takes in: committing it would carry a loosening to every clone (DR-0506, DR-0507)."""
+
+
+UNCOMMITTED_LOOSENING = (
+    "vault.yaml has an edit that isn't committed and lets more in; commit it yourself or undo it, then try again"
+)
+UNREADABLE_HEAD = (
+    "vault.yaml isn't in the last commit as a file Docket can read, so an edit of it can't be weighed; commit it "
+    "yourself, then try again"
+)
 
 
 @dataclass(frozen=True)
@@ -96,8 +111,9 @@ def rewrite(
     change is no write at all, whatever the file did since. Otherwise a page's change is refused when the file isn't
     the one it showed (`shown`, its hash) and held to `loosens`. A change is written only when the file is exactly what
     Docket writes for it, now or in the form before the redaction switches were split; an edit it holds that isn't
-    committed yet is committed on its own first, so each commit says what it did. The change is read back through the
-    schema, written through a temp file and a rename, and committed alone; a failure puts the file back."""
+    committed yet is committed on its own first, so each commit says what it did, and refused, with nothing written,
+    when that edit lets more in (`edit_to_take_in`). The change is read back through the schema, written through a temp
+    file and a rename, and committed alone; a failure puts the file back."""
     path = vault.root / CONFIG_FILE
     with vault.writing():
         data = path.read_bytes()
@@ -117,7 +133,7 @@ def rewrite(
             return Rewritten(by_hand=True)
         updated = after.dump()
         _reads_back(updated)
-        taken_in = vault.commit([CONFIG_FILE], TAKEN_IN)
+        taken_in = vault.commit([CONFIG_FILE], TAKEN_IN) if edit_to_take_in(vault, before, text) else None
         write_config(vault.home, path, updated)
         try:
             commit = vault.commit([CONFIG_FILE], message if via == "cli" else f"{message}\n\nvia page")
@@ -125,6 +141,26 @@ def rewrite(
             write_config(vault.home, path, text)
             raise
         return Rewritten(changed=True, commit=commit, taken_in=taken_in)
+
+
+def edit_to_take_in(vault: Vault, now: VaultConfig, text: str) -> bool:
+    """Whether vault.yaml holds an edit not committed yet, which a write commits on its own first. One that lets more in
+    than the committed file, by `loosens`, is refused instead, naming no value: a click must never carry a loosening
+    someone typed into history. A committed file that is gone or doesn't read is refused too, as nothing can be weighed
+    against it. Run under the vault lock by `rewrite`, and by a page before it asks."""
+    found = vault.git.run("show", f"HEAD:./{CONFIG_FILE}", check=False)
+    if found.returncode != 0:
+        raise UncommittedLooseningError(UNREADABLE_HEAD)
+    committed_text = found.stdout.replace("\r\n", "\n")
+    if committed_text == text.replace("\r\n", "\n"):
+        return False
+    try:
+        committed = VaultConfig.model_validate(yaml.load(committed_text, Loader=UniqueKeyLoader))  # noqa: S506 - a SafeLoader
+    except (yaml.YAMLError, ValidationError):
+        raise UncommittedLooseningError(UNREADABLE_HEAD) from None
+    if loosens(committed, now):
+        raise UncommittedLooseningError(UNCOMMITTED_LOOSENING)
+    return True
 
 
 # -- the stricter operations ------------------------------------------------------------------------------------------

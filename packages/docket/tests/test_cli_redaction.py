@@ -182,9 +182,10 @@ def test_a_commit_that_fails_puts_vault_yaml_back(tmp_path: Path, monkeypatch: p
 
 def test_an_edit_not_committed_yet_is_committed_on_its_own_before_the_set(tmp_path: Path) -> None:
     vault = make_vault(tmp_path)
-    edited = settings(vault).model_copy(update={"primary_machine": "other-box"})
+    lists = settings(vault).never_store.model_copy(update={"keywords": ["Project Phoenix"]})
+    edited = settings(vault).model_copy(update={"never_store": lists})
     (vault.root / "vault.yaml").write_text(edited.dump(), encoding="utf-8", newline="\n")
     assert main(["redaction", "set", "phone", "on", "--vault", str(vault.root)]) == 0
     assert subjects(vault)[:2] == ["Config: redaction phone on", "Config: vault.yaml as edited"]
-    assert settings(vault).primary_machine == "other-box"
+    assert settings(vault).never_store.keywords == ["Project Phoenix"]
     assert sh(vault.root, "git", "status", "--porcelain").strip() == ""

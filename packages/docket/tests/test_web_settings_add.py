@@ -290,3 +290,30 @@ def test_what_the_index_can_t_say_is_said_and_the_question_still_asked(
 def test_a_body_that_isn_t_a_form_is_refused(client: TestClient, vault: Vault) -> None:
     assert client.post(ADD, json={"list": "people", "value": NAME}, headers=SAME).status_code == 415
     assert commits(vault) == 0
+
+
+def test_an_uncommitted_edit_that_lets_more_in_is_refused_at_both_steps(client: TestClient, vault: Vault) -> None:
+    path = vault.root / CONFIG_FILE
+    edited = path.read_text(encoding="utf-8").replace("credentials: true", "credentials: false", 1)
+    path.write_text(edited, encoding="utf-8", newline="\n")
+    at = sh(vault.root, "git", "rev-parse", "HEAD")
+    asked = client.post(ADD, data={"list": "people", "value": NAME, "shown": shown(vault)}, headers=SAME)
+    added = client.post(
+        ADD, data={"list": "people", "value": NAME, "shown": shown(vault), "confirmed": "1"}, headers=SAME
+    )
+    for answer in (asked, added):
+        assert answer.status_code == 400
+        assert "vault.yaml has an edit that isn't committed and lets more in" in said(answer.text)
+        assert NAME not in answer.text
+    assert path.read_text(encoding="utf-8") == edited
+    assert sh(vault.root, "git", "rev-parse", "HEAD") == at
+
+
+def test_a_stricter_uncommitted_edit_is_named_and_goes_in_first(client: TestClient, vault: Vault) -> None:
+    path = vault.root / CONFIG_FILE
+    stricter = path.read_text(encoding="utf-8").replace("phone: false", "phone: true", 1)
+    path.write_text(stricter, encoding="utf-8", newline="\n")
+    html = ask(client, NAME)
+    assert "Your edit of vault.yaml that isn't committed yet goes in first, as a commit of its own." in said(html)
+    assert confirm(client, html).status_code == 303
+    assert sh(vault.root, "git", "log", "-2", "--format=%s").splitlines() == [SUBJECT, "Config: vault.yaml as edited"]
