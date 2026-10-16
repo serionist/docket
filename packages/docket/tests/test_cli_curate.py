@@ -123,6 +123,22 @@ def test_log_marks_a_line_a_stopped_write_left(
     assert "not finished" not in capsys.readouterr().out
 
 
+def test_a_log_file_that_isn_t_utf_8_is_skipped_by_log_and_refuses_a_write(
+    vault: Vault, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    bad = vault.root / LOG_DIR / "2026-09-test-box.jsonl"
+    bad.parent.mkdir(parents=True)
+    bad.write_bytes(b"\xff\xfe junk\n")
+    assert main(["curate", "log"]) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "no changes logged yet",
+        "! entities/_log/2026-09-test-box.jsonl: isn't UTF-8; skipped",
+    ]
+    assert main(["curate", "add", changes_file(tmp_path, ADD)]) == 2
+    err = capsys.readouterr().err
+    assert err == "docket: entities/_log/2026-09-test-box.jsonl isn't UTF-8; fix or delete it, then write again\n"
+
+
 def line(change: Change | None, op: str = "add", **fields: str) -> Line:
     return Line.model_validate(
         {

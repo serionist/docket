@@ -558,8 +558,10 @@ class EntityStore:
 
         try:
             for line in lines:
-                path = keep(line.rel)
-                text = path.read_bytes().decode("utf-8") if path.exists() else ""
+                # A log file that isn't UTF-8 is refused before anything of it is kept or written.
+                path = self.root / line.rel
+                text = curatelog.text_of(path, line.rel) if path.exists() else ""
+                keep(line.rel)
                 sep = "\n" if text and not text.endswith("\n") else ""
                 write_replacing(home, path, f"{text}{sep}{line.text()}\n", "curate-log")
             for rel, text in outputs.items():
@@ -580,7 +582,7 @@ class EntityStore:
 
     def _finish(self) -> tuple[str, ...]:
         """Finish the lines a write that stopped before its commit left, and commit them with what they change."""
-        pending = curatelog.unfinished(self.vault)
+        pending = curatelog.unfinished(self.vault, strict=True)
         if not pending:
             return ()
         log = curatelog.fold(curatelog.read_all(self.root).lines)

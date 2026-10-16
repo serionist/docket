@@ -379,15 +379,29 @@ def read_all(root: Path) -> LogRead:
     return LogRead(_ordered(lines), tuple(problems))
 
 
-def unfinished(vault: Vault) -> list[Line]:
+def text_of(path: Path, rel: str) -> str:
+    """A log file's text. One that isn't UTF-8 is refused, naming it: a write appends to it, and finishes from it."""
+    try:
+        return path.read_bytes().decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise DocketError(f"{rel} isn't UTF-8; fix or delete it, then write again") from None
+
+
+def unfinished(vault: Vault, *, strict: bool = False) -> list[Line]:
     """The lines the working tree's log files hold and HEAD doesn't: what a write that stopped before its commit
-    left, in the order they happened."""
+    left, in the order they happened. A file that isn't UTF-8 is skipped, as `read_all` skips it with a problem, or
+    with `strict`, for a write, refused."""
     git = vault.git
     rels = {*git.changed_against_head(LOG_DIR), *git.untracked(LOG_DIR, ignored_too=True)}
     out: list[Line] = []
     for rel in sorted(r for r in rels if (vault.root / r).is_file()):
+        try:
+            text = text_of(vault.root / rel, rel)
+        except DocketError:
+            if strict:
+                raise
+            continue
         committed = set(git.run("show", f"HEAD:./{rel}", check=False).stdout.splitlines())
-        text = (vault.root / rel).read_bytes().decode("utf-8-sig")
         out += parse("\n".join(line for line in text.splitlines() if line not in committed), rel)[0]
     return list(_ordered(out))
 

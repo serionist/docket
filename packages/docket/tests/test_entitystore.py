@@ -584,3 +584,29 @@ def test_one_id_in_two_files_is_refused_naming_both(vault: Vault, tmp_path: Path
     assert problems == [
         "change 1: two files have that id, entities/customer/northwind.yaml and entities/org/northwind.yaml; keep one"
     ]
+
+
+def test_a_log_file_that_isn_t_utf_8_refuses_a_write_naming_it(vault: Vault, tmp_path: Path) -> None:
+    bad = vault.root / LOG_DIR / "2026-09-test-box.jsonl"
+    bad.parent.mkdir(parents=True)
+    bad.write_bytes(b"\xff\xfe junk\n")
+    before = sh(vault.root, "git", "rev-parse", "HEAD").strip()
+    for write in (
+        lambda: apply(vault, tmp_path, "changes: [{entity: northwind, add: {aliases: [{text: Nortwin}]}}]"),
+        lambda: undo(vault, "20261001T091402-test-box-1"),
+    ):
+        with pytest.raises(DocketError, match=r"^entities/_log/2026-09-test-box.jsonl isn't UTF-8; fix or delete it"):
+            write()
+    assert curatelog.unfinished(vault) == []
+    vault.commit([f"{LOG_DIR}/2026-09-test-box.jsonl"], "a log file another tool wrote")
+    current = vault.root / LOG_DIR / f"{datetime.now(UTC):%Y-%m}-test-box.jsonl"
+    current.write_bytes(b"\xff\xfe junk\n")
+    vault.commit([current.relative_to(vault.root).as_posix()], "and this month's")
+    committed = sh(vault.root, "git", "rev-parse", "HEAD").strip()
+    with pytest.raises(DocketError, match="isn't UTF-8"):
+        apply(vault, tmp_path, "changes: [{entity: northwind, add: {aliases: [{text: Nortwin}]}}]")
+    assert committed != before
+    assert sh(vault.root, "git", "rev-parse", "HEAD").strip() == committed
+    assert current.read_bytes() == b"\xff\xfe junk\n"
+    assert "Nortwin" not in (vault.root / NORTHWIND).read_text(encoding="utf-8")
+    assert clean(vault)
