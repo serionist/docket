@@ -34,7 +34,8 @@ from docket.vault.curatelog import AliasFields, Change, EntityFields, IdFields, 
 from docket.vault.entities import load_entities
 from docket.vault.entitystore import EntityStore, Planned, Reject, Written
 from docket.vault.home import make_private
-from docket.vault.neverstore import listed
+from docket.vault.neverstore import fold as fold_listed
+from docket.vault.neverstore import listed, matches_text
 from docket.vault.staging import write_replacing
 from docket.vault.vault import Vault
 
@@ -43,6 +44,8 @@ SNIPPETS = 3
 ID_LENGTH = 6
 WIDTH = 80
 HIDDEN = "(on a never-store list)"
+# The number a slug takes when another entity already has its name: rita-sample-2.
+SLUG_NUMBER = re.compile(r"-[0-9]+$")
 
 State = Literal["open", "accepted", "rejected", "done"]
 
@@ -319,6 +322,7 @@ class Snippet(BaseModel):
 
 
 class CardView(BaseModel):
+    # The card with each value a never-store list holds now hidden, and only the snippets that name none (DR-0501).
     card: Card
     state: State
     snippets: list[Snippet]
@@ -329,6 +333,7 @@ class BatchView(BaseModel):
     started: datetime
     cards: list[CardView]
     left_out: dict[str, int]
+    # What tier 1 applied since the round started, as logged but for each value a never-store list holds now (DR-0501).
     applied: list[Line]
     skipped: list[str] = []
     tier1: str | None = None
@@ -369,10 +374,17 @@ def view(vault: Vault, batch: Batch) -> BatchView:
     now = states(vault, batch, lines)
     by_tier1 = [ln for ln in lines if ln.at >= batch.started and ln.by == "tier1"]
     lists = vault.config.never_store
-    applied = [ln for ln in by_tier1 if ln.op != "undo"]
+    applied = [hidden_line(ln, lists) for ln in by_tier1 if ln.op != "undo"]
     unfinished = {ln.id for ln in curatelog.unfinished(vault)}
     with closing(open_index(vault)) as conn:
-        cards = [CardView(card=c, state=now[c.id], snippets=snippets(conn, c)) for c in batch.cards]
+        cards = [
+            CardView(
+                card=hidden_card(c, lists),
+                state=now[c.id],
+                snippets=[s for s in snippets(conn, c) if not hides(s.text, c, lists)],
+            )
+            for c in batch.cards
+        ]
     return BatchView(
         round=batch.round,
         started=batch.started,
@@ -382,7 +394,9 @@ def view(vault: Vault, batch: Batch) -> BatchView:
         skipped=batch.skipped,
         tier1=batch.tier1,
         taken_back=[
-            f"{ln.id}  {ln.entity or '-'}  {ln.why}, {shown_key(ln.key, lists)}" for ln in by_tier1 if ln.op == "undo"
+            f"{ln.id}  {shown_entity(ln.entity, lists) or '-'}  {ln.why}, {shown_key(ln.key, lists)}"
+            for ln in by_tier1
+            if ln.op == "undo"
         ],
         unfinished=[ln.id for ln in by_tier1 if ln.id in unfinished],
         before=batch.before,
@@ -391,9 +405,112 @@ def view(vault: Vault, batch: Batch) -> BatchView:
 
 
 def shown_key(key: str, lists: NeverStore) -> str:
-    """A key as the CLI and the page show it: the value it names hidden when a never-store list holds it."""
+    """A key as the CLI and the page show it: the value it names hidden when a never-store list holds it, and the
+    entity it names, or a related key's other entity, when `slug_listed` says so."""
+    kind, _, rest = key.partition(":")
+    owner, colon, tail = rest.partition(":")
     text = curatelog.key_text(key)
-    return key[: len(key) - len(text)] + HIDDEN if text and listed(text, lists) is not None else key
+    if text and (listed(text, lists) is not None or (kind == "related" and slug_listed(text, lists))):
+        tail = tail[: len(tail) - len(text)] + HIDDEN
+    if colon and owner != "-" and slug_listed(owner, lists):
+        owner = HIDDEN
+    return f"{kind}:{owner}:{tail}" if colon else key
+
+
+def spelled(entity: str) -> str:
+    """The name an entity's id spells: its slug with a trailing -<n> taken off and its hyphens read as spaces, so
+    rita-sample-2, the second Rita Sample, spells Rita Sample."""
+    return SLUG_NUMBER.sub("", entity).replace("-", " ")
+
+
+def slug_listed(entity: str, lists: NeverStore) -> bool:
+    """Whether a never-store list holds an entity id as written or the name it spells."""
+    return any(listed(v, lists) is not None for v in (entity, spelled(entity)))
+
+
+def shown_entity(entity: str | None, lists: NeverStore) -> str | None:
+    """An entity id as the page and `show` print it beside a log line: hidden when `slug_listed` says so."""
+    return HIDDEN if entity is not None and slug_listed(entity, lists) else entity
+
+
+def id_hidden(card: Card, lists: NeverStore) -> bool:
+    """Whether the page and `show` hide a card's entity id: `slug_listed`, or a new card's id, made from a name a list
+    holds."""
+    return slug_listed(card.entity, lists) or (card.kind == "new" and listed(card.name, lists) is not None)
+
+
+def hides(text: str, card: Card, lists: NeverStore) -> bool:
+    """Whether a snippet names a never-store value, so neither the page nor `show` shows it: by the keywords list's
+    own reading of a text, or holding a name or spelling of the card that either list holds, put there after the round
+    started; its entity id counts as the name it spells too."""
+    if matches_text(text, lists):
+        return True
+    words = fold_listed(text)
+    values = (card.name, card.entity, spelled(card.entity), *(s.text for s in card.spellings))
+    return any(fold_listed(v) in words for v in values if listed(v, lists) is not None)
+
+
+def hidden_card(card: Card, lists: NeverStore) -> Card:
+    """A card as `show` and its JSON give it: each value a never-store list gained after the round hidden, as the
+    Curate page hides it (its name, its fact's value, its spellings, and its entity id as `id_hidden` says), and in
+    the fields only the JSON shows (its key, as `shown_key` gives it, and the spelling beside each
+    locator). Every field stays."""
+
+    def shown(text: str) -> str:
+        return HIDDEN if listed(text, lists) is not None else text
+
+    return card.model_copy(
+        update={
+            "key": shown_key(card.key, lists),
+            "entity": HIDDEN if id_hidden(card, lists) else card.entity,
+            "name": shown(card.name),
+            "spellings": [s.model_copy(update={"text": shown(s.text)}) for s in card.spellings],
+            "evidence": [(locator, shown(spelling)) for locator, spelling in card.evidence],
+            "fact": (card.fact[0], shown(card.fact[1])) if card.fact is not None else None,
+        }
+    )
+
+
+def hidden_line(line: Line, lists: NeverStore) -> Line:
+    """A logged line as `show` and its JSON give it: each value a never-store list holds now hidden, in its key, its
+    entity and its change, as the Curate page hides them; the rest as logged. A list can gain a value after tier 1
+    applied it. The copy is for showing only, never written: HIDDEN would fail the checks a change's fields have."""
+
+    def shown(text: str) -> str:
+        return HIDDEN if listed(text, lists) is not None else text
+
+    def shown_id(entity: str) -> str:
+        return HIDDEN if slug_listed(entity, lists) else entity
+
+    update: dict[str, object] = {"key": shown_key(line.key, lists), "entity": shown_entity(line.entity, lists)}
+    change = line.change
+    if change is None:
+        return line.model_copy(update=update)
+    part: dict[str, object] = {}
+    if change.alias is not None:
+        part["alias"] = change.alias.model_copy(update={"text": shown(change.alias.text)})
+    if change.name is not None:
+        part["name"] = change.name.model_copy(update={"text": shown(change.name.text)})
+    if change.id is not None:
+        part["id"] = change.id.model_copy(update={"value": shown(change.id.value)})
+    if change.related is not None:
+        part["related"] = change.related.model_copy(update={"target": shown_id(change.related.target)})
+    if change.entity is not None:
+        e = change.entity
+        part["entity"] = e.model_copy(
+            update={
+                # The same rule as the line's entity, which a create's must equal.
+                "id": shown_id(e.id),
+                "related": {kind: tuple(shown_id(s) for s in slugs) for kind, slugs in e.related.items()},
+                "name": {lang: shown(text) for lang, text in e.name.items()},
+                "aliases": tuple(a.model_copy(update={"text": shown(a.text)}) for a in e.aliases),
+                "ids": {key: tuple(shown(v) for v in values) for key, values in e.ids.items()},
+                "role": shown(e.role) if e.role else e.role,
+                "note": shown(e.note) if e.note else e.note,
+            }
+        )
+    update["change"] = change.model_copy(update=part)
+    return line.model_copy(update=update)
 
 
 # -- the measures -------------------------------------------------------------------------------------------------

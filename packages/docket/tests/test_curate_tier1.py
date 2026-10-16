@@ -22,6 +22,7 @@ from starlette.testclient import TestClient
 from docket import index
 from docket.cli import main
 from docket.curate import batch, tier1
+from docket.curate.propose import Card
 from docket.curate.tier1 import Tier1
 from docket.errors import DocketError
 from docket.index import build as index_build
@@ -414,6 +415,115 @@ def test_the_round_lists_what_tier1_took_back_a_never_store_value_hidden(
         assert main(["curate", "show", "--json"]) == 0
         taken = json.loads(capsys.readouterr().out)["taken_back"]
         assert len(taken) == 1 and taken[0].endswith("email=(on a never-store list)")
+
+
+def test_show_hides_a_value_tier1_applied_once_a_list_holds_it(
+    vault: Vault, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DOCKET_VAULT", str(vault.root))
+    with signed_in(vault) as client:
+        assert client.post("/curate/round", headers=SAME).status_code == 303
+        assert main(["curate", "show"]) == 0
+        out = capsys.readouterr().out
+        assert re.search(r"applied  by itself: \S+  add northwind  alias Nortwind \(asr\)\n", out)
+        assert re.search(r"applied  by itself: \S+  add ada-example  id chat U0ADA\n", out)
+        # Listed after the round: tier 1 applied both while no list held them.
+        config(vault, never_store={"keywords": ["Nortwind", "U0ADA"]})
+        page = client.get("/curate").text
+        assert "alias (on a never-store list) (asr)" in page and "id chat (on a never-store list)" in page
+        assert main(["curate", "show"]) == 0
+        out = capsys.readouterr().out
+        assert re.search(r"applied  by itself: \S+  add northwind  alias \(on a never-store list\) \(asr\)\n", out)
+        assert re.search(r"applied  by itself: \S+  add ada-example  id chat \(on a never-store list\)\n", out)
+        assert main(["curate", "show", "--json"]) == 0
+        shown = json.loads(capsys.readouterr().out)
+    for text in (out, json.dumps(shown)):
+        assert "nortwind" not in text.casefold() and "u0ada" not in text.casefold()
+    applied = {ln["entity"] + " " + ln["key"]: ln["change"] for ln in shown["applied"]}
+    assert applied["northwind alias:northwind:(on a never-store list)"]["alias"]["text"] == batch.HIDDEN
+    assert applied["ada-example id:ada-example:chat=(on a never-store list)"]["id"] == {
+        "key": "chat", "value": batch.HIDDEN,
+    }  # fmt: skip
+    # The rest shows as logged, in the shape it always had, and the log keeps what it wrote.
+    assert applied["ada-example id:ada-example:email=ada@example.com"]["id"]["value"] == "ada@example.com"
+    assert set(shown["applied"][0]) == set(Line.model_fields)
+    assert "alias:northwind:nortwind" in {ln.key for ln in read_all(vault.root).lines}
+
+
+def show(capsys: pytest.CaptureFixture[str]) -> tuple[str, dict[str, Any]]:
+    assert main(["curate", "show"]) == 0
+    out = capsys.readouterr().out
+    assert main(["curate", "show", "--json"]) == 0
+    return out, json.loads(capsys.readouterr().out)
+
+
+def test_show_hides_what_a_list_gains_on_a_card_after_the_round(
+    vault: Vault, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DOCKET_VAULT", str(vault.root))
+    with signed_in(vault) as client:
+        assert client.post("/curate/round", headers=SAME).status_code == 303
+        rita = next(c for c in batch.load(vault).cards if c.entity == "rita-sample")  # type: ignore[union-attr]
+        out, _ = show(capsys)
+        assert "id for Rita Sample (rita-sample): email rita@example.com" in out and "Here is the invoice." in out
+        # The address and a word of the snippet listed after the round: the page and show hide both.
+        config(vault, never_store={"keywords": ["rita@example.com", "invoice"]})
+        assert "rita@example.com" not in client.get(f"/curate?open={rita.id}").text
+        out, shown = show(capsys)
+        assert "id for Rita Sample (rita-sample): email (on a never-store list)" in out
+        for text in (out, json.dumps(shown)):
+            assert "rita@example.com" not in text and "invoice" not in text
+        card = next(c for c in shown["cards"] if c["card"]["id"] == rita.id)
+        assert card["card"]["fact"] == ["email", batch.HIDDEN] and card["snippets"] == []
+        assert card["card"]["key"] == "id:rita-sample:email=(on a never-store list)"
+        assert set(card) == {"card", "state", "snippets"} and set(card["card"]) == set(Card.model_fields)
+        # Her name too: each card's name, and its entity, whose slug spells the name: rita-sample-2 as well, the
+        # second Rita Sample's.
+        config(vault, never_store={"keywords": ["rita@example.com"], "people": ["Rita Sample"]})
+        second = next(c for c in batch.load(vault).cards if c.entity == "rita-sample-2")  # type: ignore[union-attr]
+        panels = [client.get(f"/curate?open={c.id}").text for c in (rita, second)]
+        out, shown = show(capsys)
+    hidden = re.escape(batch.HIDDEN)
+    for card in (rita, second):
+        assert re.search(rf"\n {card.n}  {card.id}  id for {hidden} \({hidden}\): email {hidden}  ", out)
+    cards = {c["card"]["id"]: c["card"] for c in shown["cards"]}
+    for card in (rita, second):
+        assert (cards[card.id]["name"], cards[card.id]["entity"], cards[card.id]["key"]) == (
+            batch.HIDDEN, batch.HIDDEN, "id:(on a never-store list):email=(on a never-store list)"
+        )  # fmt: skip
+    for text in (*panels, out, json.dumps(shown)):
+        assert "rita" not in text.casefold()
+    # Only shown: the round keeps its cards as they were mined.
+    assert batch.load(vault).cards[0] == rita  # type: ignore[union-attr]
+
+
+def test_the_log_hides_an_entity_whose_slug_spells_a_listed_name(
+    vault: Vault, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The second Rita Sample's chat id, and a message where the chat shows her as R. Sample: tier 1's shown name.
+    second = "entities/person/rita-sample-2.yaml"
+    (vault.root / second).write_text(ENTITIES[second] + "ids: {chat: U0R2}\n", encoding="utf-8", newline="\n")
+    vault.commit([second], "her chat id")
+    vault.write_run("chat", [_chat(4, "R. Sample <U0R2>", "Booked the van.")])
+    index.update(vault)
+    monkeypatch.setenv("DOCKET_VAULT", str(vault.root))
+    with signed_in(vault) as client:
+        assert client.post("/curate/round", headers=SAME).status_code == 303
+        out, _ = show(capsys)
+        assert re.search(r"applied  by itself: \S+  add rita-sample-2  alias R\. Sample\n", out)
+        assert "rita-sample-2" in client.get("/curate").text
+        # Her name, and the address both Rita cards of the round hold, so nothing of hers is left to show.
+        config(vault, never_store={"keywords": ["rita@example.com"], "people": ["Rita Sample"]})
+        page = client.get("/curate").text
+        out, shown = show(capsys)
+    hidden = re.escape(batch.HIDDEN)
+    assert re.search(rf"applied  by itself: \S+  add {hidden}  alias R\. Sample\n", out)
+    line = next(ln for ln in shown["applied"] if ln["key"].endswith(":r sample"))
+    assert (line["entity"], line["key"]) == (batch.HIDDEN, "alias:(on a never-store list):r sample")
+    for text in (page, out, json.dumps(shown)):
+        assert "rita" not in text.casefold()
+    # Only shown: the log keeps the entity it wrote.
+    assert "alias:rita-sample-2:r sample" in {ln.key for ln in read_all(vault.root).lines}
 
 
 def test_two_people_whose_names_only_start_alike_share_an_address(tmp_path: Path) -> None:

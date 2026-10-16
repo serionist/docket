@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 from starlette.datastructures import QueryParams
 
 from docket.curate import batch, schedule
-from docket.curate.batch import HIDDEN, Batch, Measure, Snippet, State, shown_key
+from docket.curate.batch import HIDDEN, Batch, Measure, Snippet, State, hides, id_hidden, shown_entity, shown_key
 from docket.curate.propose import UNSEEN, Card
 from docket.errors import DocketError
 from docket.index.build import open_index
@@ -30,8 +30,7 @@ from docket.vault import curatelog
 from docket.vault.config import NeverStore
 from docket.vault.curatelog import Line
 from docket.vault.entities import ENTITY_TYPES, entity_rel, load_entities
-from docket.vault.neverstore import fold as fold_listed
-from docket.vault.neverstore import listed, matches_text
+from docket.vault.neverstore import listed
 from docket.vault.vault import Vault
 
 PATH = "/curate"
@@ -186,16 +185,6 @@ def gather(vault: Vault, state: CurateState) -> Facts:
     )
 
 
-def hides(text: str, card: Card, lists: NeverStore) -> bool:
-    """Whether a snippet names a never-store value: by the keywords list's own reading of a text, or holding a name or
-    spelling of the card that either list holds, put there after the round started."""
-    if matches_text(text, lists):
-        return True
-    words = fold_listed(text)
-    values = (card.name, card.entity, *(s.text for s in card.spellings))
-    return any(fold_listed(v) in words for v in values if listed(v, lists) is not None)
-
-
 def _dropped(conn: sqlite3.Connection) -> tuple[tuple[str, str, str], ...]:
     """The forms matching left out as short or common, each entity's once (DR-0350): read only."""
     rows = conn.execute(
@@ -336,9 +325,8 @@ def shown(text: str, lists: NeverStore) -> str:
 
 
 def shown_id(card: Card, lists: NeverStore) -> str:
-    """The id a card writes, hidden with its name: a new card's id is its name's slug."""
-    hidden = listed(card.entity, lists) is not None or (card.kind == "new" and listed(card.name, lists) is not None)
-    return HIDDEN if hidden else card.entity
+    """The id a card writes, hidden as `show` hides it: an id is a name's slug."""
+    return HIDDEN if id_hidden(card, lists) else card.entity
 
 
 def kind_of(card: Card, lists: NeverStore) -> str:
@@ -487,7 +475,7 @@ def describe(line: Line, lists: NeverStore) -> str:
     if change.id is not None:
         return f"id {change.id.key} {shown(change.id.value, lists)}"
     related = change.related
-    return f"related {related.type} {related.target}" if related is not None else ""
+    return f"related {related.type} {shown_entity(related.target, lists)}" if related is not None else ""
 
 
 def log_row(line: Line, facts: Facts) -> LogRow:
@@ -495,7 +483,7 @@ def log_row(line: Line, facts: Facts) -> LogRow:
         id=line.id,
         at=line.at,
         op=line.op,
-        entity=line.entity or "-",
+        entity=shown_entity(line.entity, facts.lists) or "-",
         part=describe(line, facts.lists),
         by=line.by,
         via=line.via,

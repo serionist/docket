@@ -12,8 +12,10 @@ from docket_testkit import NORTHWIND_FILE, entity_vault, sh
 from docket import render, userconfig
 from docket.cli import main
 from docket.curate import batch as curate
+from docket.curate.propose import Card, CardSpelling
 from docket.vault import curatelog
-from docket.vault.curatelog import LOG_DIR, AliasFields, Change, IdFields, Line, NameFields, RelatedFields
+from docket.vault.config import NeverStore
+from docket.vault.curatelog import LOG_DIR, AliasFields, Change, EntityFields, IdFields, Line, NameFields, RelatedFields
 from docket.vault.entitystore import EntityStore, Written, load_changes
 from docket.vault.vault import Vault
 
@@ -178,6 +180,89 @@ def test_each_kind_of_op_says_what_it_changed() -> None:
         "reject -  new:-:nortwin  (user, page)",
     ]
     assert [x.split("-desk-1  ", 1)[1] for x in out] == wanted
+
+
+def test_show_hides_what_a_never_store_list_holds_in_each_kind_of_change() -> None:
+    lists = NeverStore(people=["Dora Minta"], keywords=["Kft", "northwind.example", "Dory", "Buyer", "secret"])
+    dora = EntityFields(
+        id="dora-minta", type="person", name={"en": "Dora Minta", "hu": "Minta Dora"},
+        aliases=(AliasFields(text="Dory"), AliasFields(text="Dee")), ids={"email": ("dee@example.org",)},
+        role="Buyer", note="Runs the secret pilot", related={"person": ("ben-sample", "dora-minta-2")},
+    )  # fmt: skip
+    lines = [
+        line(Change(alias=AliasFields(text="Northwind Kft", kind="asr")), key="alias:northwind:northwind kft"),
+        line(Change(name=NameFields(lang="hu", text="Northwind Kft")), key="name:northwind:hu=northwind kft"),
+        line(Change(id=IdFields(key="domain", value="northwind.example")), key="id:northwind:domain=northwind.example"),
+        line(
+            Change(related=RelatedFields(type="person", target="ben-sample")), key="related:northwind:person=ben-sample"
+        ),
+        line(Change(entity=dora), "create", key="new:-:dora minta", entity="dora-minta"),
+        line(None, "reject", key="new:-:dora minta"),
+        line(Change(alias=AliasFields(text="North Wind")), key="alias:northwind:north wind"),
+        # An id whose slug spells a listed name, as the line's entity and as a related link's other end.
+        line(Change(alias=AliasFields(text="Dee")), key="alias:dora-minta-2:dee", entity="dora-minta-2"),
+        line(
+            Change(related=RelatedFields(type="person", target="dora-minta-2")),
+            key="related:northwind:person=dora-minta-2",
+        ),
+    ]
+    hidden = [curate.hidden_line(ln, lists) for ln in lines]
+    view = curate.BatchView(round="r", started=datetime(2026, 10, 1, tzinfo=UTC), cards=[], left_out={}, applied=hidden)
+    shown = [ln.split("-desk-1  ", 1)[1] for ln in render.curate_round(view) if ln.startswith("applied")]
+    assert shown == [
+        "add northwind  alias (on a never-store list) (asr)",
+        "add northwind  name hu (on a never-store list)",
+        "add northwind  id domain (on a never-store list)",
+        "add northwind  related person ben-sample",
+        "create (on a never-store list)  person, (on a never-store list); (on a never-store list)",
+        "reject -  new:-:(on a never-store list)",
+        "add northwind  alias North Wind",
+        "add (on a never-store list)  alias Dee",
+        "add northwind  related person (on a never-store list)",
+    ]
+    assert [ln.key for ln in hidden] == [
+        "alias:northwind:(on a never-store list)", "name:northwind:hu=(on a never-store list)",
+        "id:northwind:domain=(on a never-store list)", "related:northwind:person=ben-sample",
+        "new:-:(on a never-store list)", "new:-:(on a never-store list)", "alias:northwind:north wind",
+        "alias:(on a never-store list):dee", "related:northwind:person=(on a never-store list)",
+    ]  # fmt: skip
+    created = hidden[4].change.entity  # type: ignore[union-attr]
+    assert created is not None and created.model_dump(mode="json") == {
+        **dora.model_dump(mode="json"),
+        "id": curate.HIDDEN,
+        "related": {"person": ["ben-sample", curate.HIDDEN]},
+        "name": {"en": curate.HIDDEN, "hu": curate.HIDDEN},
+        "aliases": [
+            {"text": curate.HIDDEN, "kind": "plain", "needs": []},
+            {"text": "Dee", "kind": "plain", "needs": []},
+        ],
+        "role": curate.HIDDEN,
+        "note": curate.HIDDEN,
+    }
+    # Only shown: the lines the log holds keep their values.
+    assert lines[0].change.alias.text == "Northwind Kft"  # type: ignore[union-attr]
+
+
+def test_show_hides_a_new_card_s_listed_name_with_the_id_made_from_it() -> None:
+    spelling = CardSpelling(text="Dora Minta", trust="label", add="name", alone=True, chunks=3)
+    heard = CardSpelling(text="Dora Mint", trust="asr", add="asr", alone=True, chunks=1)
+    evidence = [("r:calls:rec-1@00:10-00:40", "Dora Minta"), ("r:calls:rec-2", "Dora Mint")]
+    card = Card(
+        id="0a1b2c", n=1, kind="new", key="new:-:dora minta", entity="dora-minta", type="person", name="Dora Minta",
+        lang="en", spellings=[spelling, heard], chunks=4, containers=2, missed_chunks=1, missed_containers=1,
+        newest="2026-10-12T09:00:00Z", evidence=evidence,
+    )  # fmt: skip
+    shown = curate.hidden_card(card, NeverStore(people=["Dora Minta"]))
+    hidden = curate.HIDDEN
+    assert (shown.key, shown.entity, shown.name) == ("new:-:(on a never-store list)", hidden, hidden)
+    assert [s.text for s in shown.spellings] == [hidden, "Dora Mint"]
+    assert shown.evidence == [("r:calls:rec-1@00:10-00:40", hidden), ("r:calls:rec-2", "Dora Mint")]
+    cards = [curate.CardView(card=shown, state="open", snippets=[])]
+    started = datetime(2026, 10, 1, tzinfo=UTC)
+    view = curate.BatchView(round="r", started=started, cards=cards, left_out={}, applied=[])
+    first = render.curate_round(view)[1]
+    assert first.startswith(f" 1  0a1b2c  new person  {hidden} ({hidden})  missed in 1 chunk(s)")
+    assert curate.hidden_card(card, NeverStore()) == card
 
 
 def test_a_write_says_what_it_finished_and_took_in_first() -> None:
