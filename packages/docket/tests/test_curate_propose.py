@@ -12,12 +12,12 @@ from docket_testkit import note
 
 from docket import index, recall
 from docket.curate import propose
-from docket.curate.propose import Card, Mined, card_id, mine, slug
+from docket.curate.propose import Card, Mined, Proposal, card_id, mine, slug
 from docket.curate.spellings import DOCS, HEARD, LABEL, Seen
 from docket.index.build import db_path
 from docket.index.languages import language
 from docket.vault.config import NeverStore
-from docket.vault.curatelog import AliasFields, Change, EntityFields, Line, fold, folded
+from docket.vault.curatelog import AliasFields, Change, EntityFields, IdFields, Line, fold, folded
 from docket.vault.vault import Vault
 
 T0 = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
@@ -28,12 +28,34 @@ def vault(tmp_path: Path) -> Vault:
     return curate_vault(tmp_path)
 
 
-def mined(vault: Vault, lines: Iterable[Line] = ()) -> Mined:
+def mined(vault: Vault, lines: Iterable[Line] = (), proposals: Iterable[Proposal] = ()) -> Mined:
     conn = sqlite3.connect(db_path(vault))
     try:
-        return mine(conn, vault, fold(lines))
+        return mine(conn, vault, fold(lines), list(proposals))
     finally:
         conn.close()
+
+
+def test_tier1_s_facts_that_matched_two_entities_become_their_cards(vault: Vault) -> None:
+    entity(vault, NORTHWIND, "id: northwind\ntype: customer\nname: {en: Northwind}\n")
+    entity(vault, ANN, "id: ann-sample\ntype: person\nname: {en: Ann Sample}\n")
+    held = frozenset(range(1, 4))
+    heard = AliasFields(text="Northwnd", kind="asr")
+    found = mined(vault, proposals=[
+        Proposal("northwind", "Northwnd", "heard", held, alias=heard),
+        Proposal("northwind", "Nortwin", "heard", held, alias=AliasFields(text="Nortwin", kind="asr")),
+        Proposal("ann-sample", "Annie", "typed", held, alias=AliasFields(text="Annie", kind="plain")),
+        Proposal("ann-sample", "Ann Sample", "typed", held, id=IdFields(key="email", value="ann@example.com")),
+    ])  # fmt: skip
+    # The alias goes on the round's card for that entity, once; another entity's gets a card of its own.
+    northwind = next(c for c in found.cards if c.entity == "northwind")
+    assert spellings(northwind) == [("Nortwin", "heard", "asr"), ("Northwnd", "heard", "asr")]
+    ann = [c for c in found.cards if c.entity == "ann-sample"]
+    assert sorted((c.kind, c.key, c.fact) for c in ann) == [
+        ("alias", "alias:ann-sample:annie", None),
+        ("id", "id:ann-sample:email=ann@example.com", ("email", "ann@example.com")),
+    ]
+    assert all(c.name == "Ann Sample" and c.chunks == 3 for c in ann)
 
 
 def card(found: Mined, name: str) -> Card:

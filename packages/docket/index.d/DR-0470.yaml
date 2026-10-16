@@ -6,7 +6,7 @@ decisions:
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#68"]
-    description: Tier 1 runs when a round starts on the machine vault.yaml names as primary, before the miner, and writes its changes in one commit with their log lines; a fact the store refuses is skipped and listed, not a reason to drop the rest. The index is updated after its commit, so the miner sees what it added. Its changes are listed at the head of the round with an undo each. Another machine runs none, since two machines changing one entity file would conflict in git. It doesn't run while a log line fails to read (DR-0460).
+    description: "Tier 1 runs when a round starts on the machine vault.yaml names as primary, before the miner, and writes its changes in one commit with their log lines; a fact the store refuses is skipped and listed, not a reason to drop the rest. The index is updated after its commit, so the miner sees what it added. Its changes are listed at the head of the round with an undo each. Another machine runs none, since two machines changing one entity file would conflict in git. It doesn't run while a log line fails to read (DR-0460). A round starts when tier 1 does, so its lines are that round's; they carry no round, so an undo of one stoplists its key and it never comes back. A refused fact is listed with the round, and again at each round while the store refuses it, since it never reaches the log. The round says when tier 1 didn't run, and why: another machine, a log line that doesn't read, or no index yet."
     not_chosen:
       - "After each index update in the service: commits at odd times, on every machine."
       - "Lazily on the first search: a read would write."

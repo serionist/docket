@@ -268,6 +268,8 @@ class Panel:
     id: str
     n: int
     new: bool
+    # An id card is accepted or rejected as it is.
+    editable: bool
     kind: str
     title: str
     state: State
@@ -320,6 +322,8 @@ class View:
     log: list[LogRow] = field(default_factory=list[LogRow])
     stoplist: list[str] = field(default_factory=list[str])
     problems: tuple[str, ...] = ()
+    skipped: list[str] = field(default_factory=list[str])
+    tier1: str | None = None
     done: str | None = None
 
 
@@ -339,12 +343,16 @@ def shown_id(card: Card, lists: NeverStore) -> str:
 
 
 def kind_of(card: Card, lists: NeverStore) -> str:
-    return f"New {card.type}" if card.kind == "new" else f"Alias for {shown(card.name, lists)}"
+    if card.kind == "new":
+        return f"New {card.type}"
+    return f"{'Id' if card.kind == 'id' else 'Alias'} for {shown(card.name, lists)}"
 
 
 def title_of(card: Card, lists: NeverStore) -> str:
     if card.kind == "new":
         return shown(card.name, lists)
+    if card.fact is not None:
+        return f"{card.fact[0]} {shown(card.fact[1], lists)}"
     return ", ".join(shown(s.text, lists) for s in card.adds())
 
 
@@ -440,6 +448,7 @@ def panel(facts: Facts, state: CurateState, typed: QueryParams | None = None) ->
         id=card.id,
         n=card.n,
         new=card.kind == "new",
+        editable=card.kind != "id",
         kind=kind_of(card, facts.lists),
         title=title_of(card, facts.lists),
         state=opened.state,
@@ -456,7 +465,9 @@ def panel(facts: Facts, state: CurateState, typed: QueryParams | None = None) ->
         edit_fragment=editing.url(PANEL),
         back_url=shown.url(),
         back_fragment=shown.url(PANEL),
-        form=edit_form(card, facts.langs, typed, facts.lists) if state.edit and opened.state == "open" else None,
+        form=edit_form(card, facts.langs, typed, facts.lists)
+        if state.edit and opened.state == "open" and card.kind != "id"
+        else None,
     )
 
 
@@ -555,6 +566,8 @@ def build(facts: Facts, state: CurateState) -> View:
         view.cards = [row(c, facts.states[c.id], facts.lists, state.open) for c in b.cards]
         view.left_out = ", ".join(f"{n} {why}" for why, n in b.left_out.items() if n)
         view.measures = measures(b.before, b.after)
+        view.skipped = b.skipped
+        view.tier1 = b.tier1
     view.dropped = [f"{entity}: {term} is {WHY_DROPPED[how]}" for entity, term, how in facts.dropped]
     view.log = [log_row(ln, facts) for ln in reversed(facts.lines[-LOG_LINES:])]
     view.stoplist = sorted(facts.stoplist)

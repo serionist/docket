@@ -8,6 +8,10 @@ Unreleased in the same PR.
 
 ### Added
 
+- Tier 1 of curation: on the vault's primary machine, a round first applies by itself an address or a chat id
+  that mail or chat writes beside a known name, a name a system shows beside an id an entity lists, and a
+  spelling two engines agree on, each logged and undoable; a fact that fits two entities becomes a card. An
+  author written `Name <id>` now counts as a mention of the entity listing the id; the index rebuilds once.
 - The Curate page, `/curate` in the web app: start a round with a click, open each card beside the list with the
   calls and mails it comes from, and accept, edit or reject it; undo a change or lift a rejection from the log
   below. A decision on an entity file that changed since the page showed it writes nothing.

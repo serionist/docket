@@ -41,6 +41,7 @@ from docket.vault.curatelog import (
     By,
     Change,
     EntityFields,
+    Evidence,
     Folded,
     IdFields,
     IdKey,
@@ -94,6 +95,9 @@ class Planned:
     change: Change
     round: str | None = None
     card: str | None = None
+    # Tier 1's: the rule that found the fact, and where (DR-0469).
+    rule: str | None = None
+    evidence: Evidence | None = None
 
 
 @dataclass(frozen=True)
@@ -497,6 +501,8 @@ class EntityStore:
                     "change": p.change,
                     "round": p.round,
                     "card": p.card,
+                    "rule": p.rule,
+                    "evidence": p.evidence,
                 }
                 for p in kept
             ]
