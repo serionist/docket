@@ -1,13 +1,14 @@
 decisions:
   - id: DR-0519
-    title: A loosening's question shows the change without never-store values, is asked outside the vault lock, and writes nothing if vault.yaml changed meanwhile
+    title: A loosening's question shows the change without never-store values, is asked outside the vault lock, and writes nothing if vault.yaml or its last commit changed meanwhile
     status: proposed
     at: "2026-10-17"
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#134"]
-    description: The screen is vault.yaml's diff in Docket's form, before and after, with the never-store lists left out and a changed list said by its count, so no value reaches a terminal or its scrollback (DR-0505); then the command's own warnings, such as credentials off's; then Type <code> to make this change, or n to leave vault.yaml as it is. A file not in Docket's form gets its line printed and no code, as before. The question is asked outside the vault lock, as the release asks, so the service's ingest and captures never wait on a person; on the code the file is read again under the lock and written only when its sha256 is the one asked about, as a page's stale write is refused (DR-0507); otherwise nothing is written and the command says to run it again. edit runs once, so the change written is the change shown. The commit keeps its subject and gains confirmed at the console in its body, so git log tells a confirmed loosening from a hand edit taken in. A no, a wrong code or the end of input writes nothing and exits 1; docket source new then removes the folder it wrote.
+    description: The screen shows, each only when it loosens, the uncommitted edit's diff against HEAD's vault.yaml, taken in first, and then the command's own change, each as a diff of the settings in Docket's form with the never-store lists left out and a changed list said by its count, so no value reaches a terminal or its scrollback (DR-0505); then the command's own warnings, such as credentials off's; then Type <code> to make this change, or n to leave vault.yaml as it is. One code covers both parts. A file not in Docket's form gets its line printed and no code, as before. The question is asked outside the vault lock, as the release asks, so the service's ingest and captures never wait on a person; on the code the file and HEAD's vault.yaml are read again under the lock, and anything is written only when both are the ones asked about, the file by its sha256 as a page's stale write is refused (DR-0507); otherwise nothing is written and the command says to run it again. edit runs once, so the change written is the change shown. Each commit the owner confirmed, the take-in's and the change's, keeps its subject and gains confirmed at the console in its body. A no, a wrong code or the end of input writes and commits nothing and exits 1; docket source new then removes the folder it wrote.
     not_chosen:
       - "Asking under the vault lock: the service's writes wait on a person for as long as they take."
       - "The whole new file shown: a never-store value on the screen and in the scrollback."
-      - "No mark in the commit: git log can't tell a confirmed loosening from a hand edit taken in."
+      - "Two questions when the edit and the command both loosen: two codes for one command, and a no to the second leaves the first committed."
+      - "No mark in the commit: git log can't tell which of Docket's config commits the owner confirmed at the console."
