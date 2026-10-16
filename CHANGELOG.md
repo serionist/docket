@@ -196,3 +196,5 @@ Unreleased in the same PR.
   before the same promotion could land in either order, and the older one then counted as current.
 - A promotion past 16 MiB of a source's records writes them in several run files (`.2`, `.3` after the minute's
   name), in one commit, so no file reaches a host's file size limit. An older Docket reads them as any runs.
+- A models' worker that fails its check or is stopped has its last lines in the error and in
+  `docket models status --check` every time. Before, they could be missing when the error came before they were read.

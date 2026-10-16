@@ -44,6 +44,8 @@ def test_a_worker_says_hello_and_embeds(stopping: list[Worker]) -> None:
     assert w.query("query: paper price") == trigram_vector("query: paper price")
     assert w.batch(["passage: a", "passage: bb"]) == [trigram_vector("passage: a"), trigram_vector("passage: bb")]
     assert w.batch([]) == []
+    # Stopped first: a running worker's stderr reaches the reader in its own time.
+    w.stop()
     assert "fake worker starting" in w.stderr()
 
 
