@@ -196,13 +196,21 @@ def with_vectors(perf: Path, root: Path) -> Path:
     return v.root
 
 
+def warmed(v: Vault, models: PerfModels | None = None) -> Vault:
+    """The vault as a search finds an index it wrote a moment ago: the whole file read once, so the parallel run that
+    built it minutes before, and the memory it took since, leave nothing cold, and one search, since the first search
+    of a file opens it cold (and a virus scanner may read it whole). Neither is any search's time."""
+    with build.db_path(v).open("rb") as index_file:
+        while index_file.read(1 << 24):
+            pass
+    search(v, "warm", now=NOW, models=models)
+    return v
+
+
 @pytest.fixture(scope="module")
 def vault(tmp_path_factory: pytest.TempPathFactory) -> Vault:
     started = time.monotonic()
-    v = Vault.open(template_with(tmp_path_factory, make_perf_vault))
-    # The first search of a file opens it cold (and a virus scanner may read it whole): that is no search's time. The
-    # parallel run may have built it minutes before.
-    search(v, "warm", now=NOW)
+    v = warmed(Vault.open(template_with(tmp_path_factory, make_perf_vault)))
     print(f"\n{CHUNKS} chunks ready in {time.monotonic() - started:.1f} s")
     return v
 
@@ -210,8 +218,8 @@ def vault(tmp_path_factory: pytest.TempPathFactory) -> Vault:
 @pytest.fixture(scope="module")
 def vectors_vault(vault: Vault, tmp_path_factory: pytest.TempPathFactory) -> Vault:
     started = time.monotonic()
-    v = Vault.open(shared(lambda root: with_vectors(vault.root, root), "perf-vectors", tmp_path_factory))
-    search(v, "warm", now=NOW, models=PerfModels())
+    root = shared(lambda folder: with_vectors(vault.root, folder), "perf-vectors", tmp_path_factory)
+    v = warmed(Vault.open(root), PerfModels())
     print(f"\n{CHUNKS} vectors ready in {time.monotonic() - started:.1f} s")
     return v
 
