@@ -127,11 +127,12 @@ def router(service: Service) -> APIRouter:
             if isinstance(form, Response):
                 return form
             try:
-                # The index first; tier 1's commit on the writer, then the index again; the miner beside the
-                # writer; only the batch's write goes on it (DR-0468, DR-0470).
+                # The index first; tier 1's facts found beside the writer and committed on it, then the index
+                # again; the miner beside the writer; only the batch's write goes on it (DR-0468, DR-0470).
                 await service.updater.fresh()
                 begun = schedule.now_utc()
-                ran = await service.writer.run(lambda: tier1.run(service.vault(), via="page"))
+                found = await asyncio.to_thread(lambda: tier1.plan(service.vault()))
+                ran = await service.writer.run(lambda: tier1.apply(service.vault(), found, via="page"))
                 if ran.written is not None and ran.written.lines:
                     await service.updater.fresh()
                 made = await asyncio.to_thread(lambda: batch.build(service.vault(), ran, started=begun))

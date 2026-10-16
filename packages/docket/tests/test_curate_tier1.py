@@ -25,7 +25,7 @@ from docket.errors import DocketError
 from docket.index import build as index_build
 from docket.vault import curatelog
 from docket.vault.curatelog import Change, IdFields, Line, read_all
-from docket.vault.entitystore import EntityStore, Planned
+from docket.vault.entitystore import EntityStore, Planned, Reject
 from docket.vault.vault import Vault
 
 SAME = {"Origin": OURS, "Sec-Fetch-Site": "same-origin"}
@@ -249,7 +249,7 @@ def test_an_undone_or_hand_removed_fact_never_comes_back(vault: Vault) -> None:
 def test_two_engines_must_agree_where_the_recording_names_the_entity(vault: Vault) -> None:
     conn = index_build.open_index(vault)
     try:
-        found = [f for f in tier1.find(conn) if f.rule == "engines"]
+        found = [f for f in tier1.find(conn, vault) if f.rule == "engines"]
     finally:
         conn.close()
     assert [(f.entities, f.text) for f in found] == [(("northwind",), "Nortwind")]
@@ -263,7 +263,7 @@ def test_two_engines_must_agree_where_the_recording_names_the_entity(vault: Vaul
     index.rebuild(vault)
     conn = index_build.open_index(vault)
     try:
-        assert [f for f in tier1.find(conn) if f.rule == "engines"] == []
+        assert [f for f in tier1.find(conn, vault) if f.rule == "engines"] == []
     finally:
         conn.close()
 
@@ -307,3 +307,172 @@ def test_a_tier1_line_is_logged_with_its_rule(vault: Vault) -> None:
     tier1.run(vault)
     line = next(ln for ln in read_all(vault.root).lines if ln.rule == "chat id")
     assert isinstance(line, Line) and line.change is not None and line.change.id == IdFields(key="chat", value="U0ADA")
+
+
+# -- what tier 1 must never do by itself (#126's review) ---------------------------------------------------------------
+
+
+def small_vault(tmp_path: Path, entities: dict[str, str], **runs: list[Any]) -> Vault:
+    """A vault of a few entities and records, its index built."""
+    v = Vault.init(tmp_path / "small", make_config(), "test-box")
+    for rel, text in entities.items():
+        path = v.root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8", newline="\n")
+    v.commit(list(entities), "seed")
+    for source, records in runs.items():
+        v.write_run(source, records)
+    index.rebuild(v)
+    return v
+
+
+ADA_BEN = {
+    "entities/person/ada-example.yaml": "id: ada-example\ntype: person\nname: {en: Ada Example}\n",
+    "entities/person/ben-sample.yaml": "id: ben-sample\ntype: person\nname: {en: Ben Sample}\n",
+}
+SHARED = "notifications@github.example"
+
+
+def test_a_shared_sender_gives_no_one_its_address(tmp_path: Path) -> None:
+    v = small_vault(tmp_path, ADA_BEN, mail=[
+        _mail(1, f"Ada Example <{SHARED}>", "Merged the pull request."),
+        _mail(2, f"Ben Sample <{SHARED}>", "Commented on the issue."),
+    ])  # fmt: skip
+    ran = tier1.run(v)
+    assert ran.written is None and ran.proposals == ()
+    assert "ids" not in entity_file(v, "entities/person/ada-example.yaml")
+    assert "ids" not in entity_file(v, "entities/person/ben-sample.yaml")
+
+
+def test_a_sender_found_shared_later_gives_no_names_and_stays_shared(tmp_path: Path) -> None:
+    v = small_vault(tmp_path, ADA_BEN, mail=[_mail(1, f"Ada Example <{SHARED}>", "Merged the pull request.")])
+    first = tier1.run(v)
+    # With one name seen, the address is Ada's: the round lists it with its undo.
+    assert facts(first) == [("address", "ada-example", f"id:ada-example:email={SHARED}")]
+    v.write_run("mail", [
+        _mail(2, f"Ben Sample <{SHARED}>", "Commented on the issue."),
+        _mail(3, f"Carol Test <{SHARED}>", "Opened an issue."),
+    ])  # fmt: skip
+    index.update(v)
+    assert tier1.run(v).written is None
+    assert "aliases" not in entity_file(v, "entities/person/ada-example.yaml")
+    EntityStore(v).undo([line.id for line in first.written.lines])  # type: ignore[union-attr]
+    index.update(v)
+    assert tier1.run(v).written is None
+    assert "ids" not in entity_file(v, "entities/person/ben-sample.yaml")
+
+
+def test_a_shown_name_unlike_the_holder_s_is_no_alias(tmp_path: Path) -> None:
+    entities = {"entities/person/ada-example.yaml": f"id: ada-example\ntype: person\nname: {{en: Ada Example}}\n"
+                f"ids: {{email: {SHARED}}}\n"}  # fmt: skip
+    v = small_vault(tmp_path, entities, mail=[_mail(1, f"Carol Test <{SHARED}>", "Opened an issue.")])
+    assert tier1.run(v).written is None
+
+
+def chase_vault(tmp_path: Path, said: list[tuple[int, str]], entities: dict[str, str], **runs: list[Any]) -> Vault:
+    """One recording two engines transcribed alike, a second later each."""
+    later = [(at + 1, text) for at, text in said]
+    rec = "plaud:rec-p"
+    plaud = [_transcript_of(rec, "plaud", said), _transcript_of(rec, "whisper", later)]
+    return small_vault(tmp_path, entities, plaud=plaud, **runs)
+
+
+def _transcript_of(rec: str, engine: str, said: list[tuple[int, str]]) -> Any:
+    segments = [
+        {"start_ms": at * 1000, "end_ms": at * 1000 + 4000, "speaker": "Speaker 1", "text": text} for at, text in said
+    ]
+    under = {"source": "plaud", "container": rec, "thread": rec, "author": None, "ts": _when(20)}
+    text = "\n".join(f"Speaker 1: {t}" for _, t in said)
+    return make_record(rid=f"{rec}/{engine}", kind="transcript", engine=engine, segments=segments, text=text, **under)
+
+
+CHASE = {
+    "entities/person/chase-example.yaml": (
+        "id: chase-example\ntype: person\nname: {en: Chase Example}\naliases: [{text: Chase}]\n"
+    )
+}
+
+
+def engine_cards(ran: Tier1) -> list[tuple[str, str]]:
+    return [(p.entity, p.text) for p in ran.proposals if p.alias is not None and p.alias.kind == "asr"]
+
+
+def test_a_common_word_two_engines_capitalise_is_a_card_never_a_fact(tmp_path: Path) -> None:
+    said = [(0, "Chase will send the plan."), (10, "Phase two starts on Monday.")]
+    v = chase_vault(tmp_path, said, CHASE, mail=[_mail(1, "Zed Nobody <zed@example.com>", "The phase plan is here.")])
+    ran = tier1.run(v)
+    assert ran.written is None and engine_cards(ran) == [("chase-example", "Phase")]
+
+
+def test_a_case_form_two_engines_agree_on_is_a_card_never_a_fact(tmp_path: Path) -> None:
+    gabor = {"entities/person/gabor-example.yaml": (
+        "id: gabor-example\ntype: person\nname: {en: Gábor Example}\naliases: [{text: Gábor}]\n"
+    )}  # fmt: skip
+    v = chase_vault(tmp_path, [(0, "Gábor küldi a tervet."), (10, "Kérdezd meg Gábort holnap.")], gabor)
+    ran = tier1.run(v)
+    assert ran.written is None and engine_cards(ran) == [("gabor-example", "Gábort")]
+
+
+def test_a_case_form_matching_judges_common_is_a_card_never_a_fact(tmp_path: Path) -> None:
+    # Marinát, Marina's accusative, is everywhere: matching judges it common for her, and tier 1 makes it a card.
+    marina = {"entities/person/marina-sample.yaml": (
+        "id: marina-sample\ntype: person\nname: {en: Marina Sample}\naliases: [{text: Marina}]\n"
+    )}  # fmt: skip
+    mail = [_mail(n, "Zed Nobody <zed@example.com>", "Igen, Marinát kérdeztem meg.") for n in range(60)]
+    v = chase_vault(tmp_path, [(0, "Marina will send the plan."), (10, "Then ask Marinát.")], marina, mail=mail)
+    ran = tier1.run(v)
+    assert ran.written is None and engine_cards(ran) == [("marina-sample", "Marinát")]
+
+
+def test_another_entity_s_name_two_engines_agree_on_is_a_card_never_a_fact(tmp_path: Path) -> None:
+    people = {
+        "entities/person/laura-example.yaml": (
+            "id: laura-example\ntype: person\nname: {en: Laura Example}\naliases: [{text: Laura}]\n"
+        ),
+        "entities/person/lara-sample.yaml": "id: lara-sample\ntype: person\nname: {en: Lara Sample}\n",
+    }
+    v = chase_vault(tmp_path, [(0, "Laura sent the plan."), (10, "Then Lara will check it.")], people)
+    ran = tier1.run(v)
+    assert ran.written is None and engine_cards(ran) == [("laura-example", "Lara")]
+
+
+def test_a_one_word_display_name_is_a_card_never_a_fact(tmp_path: Path) -> None:
+    gabors = {
+        "entities/person/gabor-kovacs.yaml": (
+            "id: gabor-kovacs\ntype: person\nname: {hu: Kovács Gábor}\naliases: [{text: Gábor}]\n"
+        ),
+        "entities/person/gabor-szabo.yaml": "id: gabor-szabo\ntype: person\nname: {hu: Szabó Gábor}\n",
+    }
+    v = small_vault(tmp_path, gabors, chat=[make_record(1, author="Gábor <U0GSZ>", text="Szabó here.")])
+    ran = tier1.run(v)
+    assert ran.written is None
+    assert [(p.entity, p.id) for p in ran.proposals] == [("gabor-kovacs", IdFields(key="chat", value="U0GSZ"))]
+
+
+RITAS = {
+    "entities/person/rita-sample.yaml": "id: rita-sample\ntype: person\nname: {en: Rita Sample}\n",
+    "entities/person/rita-sample-2.yaml": "id: rita-sample-2\ntype: person\nname: {en: Rita Sample}\n",
+}
+
+
+def test_a_never_store_value_on_a_tier1_card_never_shows(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    v = small_vault(tmp_path, RITAS, mail=[_mail(1, "Rita Sample <rita@phoenix-clinic.example>", "Your appointment.")])
+    config(v, never_store={"keywords": ["phoenix clinic"]})
+    round_ = batch.start(v)
+    assert [c for c in round_.cards if c.kind == "id"] == []
+    assert round_.left_out["never-store"] == 2
+    monkeypatch.setenv("DOCKET_VAULT", str(v.root))
+    for args in (["curate", "show"], ["curate", "show", "--json"]):
+        assert main(args) == 0
+        assert "phoenix" not in capsys.readouterr().out
+    assert "phoenix" not in batch.batch_path(v).read_text(encoding="utf-8")
+
+
+def test_the_plan_writes_nothing_and_its_apply_skips_what_the_log_took_since(vault: Vault) -> None:
+    found = tier1.plan(vault)
+    assert read_all(vault.root).lines == () and len(found.planned) == len(APPLIED)
+    EntityStore(vault).reject([Reject("alias:northwind:nortwind", "Nortwind", "northwind", None, None)])
+    ran = tier1.apply(vault, found)
+    assert sorted(facts(ran)) == [f for f in APPLIED if f[0] != "engines"]

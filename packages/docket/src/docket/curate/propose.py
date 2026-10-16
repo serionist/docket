@@ -550,7 +550,7 @@ class _Miner:
             else:
                 continue
             cards += [c for c in made if c is not None]
-        cards = self.proposed(cards)
+        cards = self.proposed(cards, left)
         cards.sort(key=_rank, reverse=True)
         cards = [c.model_copy(update={"n": n}) for n, c in enumerate(cards[:MAX_CARDS], start=1)]
         return Mined(cards, left)
@@ -737,12 +737,17 @@ class _Miner:
 
     # -- tier 1's cards ---------------------------------------------------------------------------------------------
 
-    def proposed(self, cards: list[Card]) -> list[Card]:
+    def proposed(self, cards: list[Card], left: Counter[str]) -> list[Card]:
         """Tier 1's facts that matched two entities, a card for each entity: an alias goes on that entity's alias card
         when the round has one, so it keeps one card per entity; an id gets a card of its own. Tier 1 leaves out a key
-        the stoplist holds."""
+        the stoplist holds. One whose value a never-store list holds is left out, counted as tier 3 counts them."""
         out = list(cards)
+        lists = self.vault.config.never_store
         for p in self.proposals:
+            value = p.alias.text if p.alias is not None else cast(IdFields, p.id).value
+            if listed(value, lists) is not None:
+                left["never-store"] += 1
+                continue
             if p.alias is not None:
                 key = f"alias:{p.entity}:{folded(p.alias.text)}"
                 spelling = CardSpelling(
