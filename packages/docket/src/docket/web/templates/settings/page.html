@@ -13,6 +13,7 @@
 {% else %}
 <p class="lead">{{ view.lead }}</p>
 {% if view.done %}{{ notice('info', view.done) }}{% endif %}
+{% if warning %}{{ notice('warn', warning) }}{% endif %}
 {{ notice('info', view.form) }}
 {% if view.unfilled %}
 <p class="meta">Put these in by hand where a command holds their placeholder: {% for name, value in view.unfilled %}<code>&lt;{{ name }}&gt;</code> is <code dir="auto">{{ value }}</code>{{ '; ' if not loop.last }}{% endfor %}.</p>
@@ -40,8 +41,18 @@
         <ul class="change-list">
           {% for c in s.changes %}
           <li class="change{% if c.looser %} looser{% endif %}">
+            {% if c.act and view.docket_form %}
+            <form class="act-form" method="post" action="/settings/source">
+              <input type="hidden" name="source" value="{{ s.name }}">
+              <input type="hidden" name="act" value="{{ c.act }}">
+              <input type="hidden" name="shown" value="{{ view.shown_hash }}">
+              <button type="submit" class="button">{{ c.what }}{{ '…' if c.act == 'private' }}<span class="visually-hidden">: {{ s.name }}</span></button>
+              <span>{{ c.effect }}.</span>
+            </form>
+            {% else %}
             <p><span class="change-what">{{ c.what }}</span>{% if c.looser %} <span class="badge">lets more in</span>{% endif %}: {{ c.effect }}. In vault.yaml, under <code>{{ c.where }}</code>:</p>
             {{ paste(c.line, 'the line: ' ~ c.what ~ ', ' ~ s.name) }}
+            {% endif %}
           </li>
           {% endfor %}
         </ul>
@@ -115,8 +126,17 @@
         {% if r.pattern %}<span class="badge">your pattern</span>{% endif %}
       </div>
       <p class="meta">{% if r.pattern %}<code dir="ltr">{{ r.what }}</code>{% else %}Redacts {{ r.what }}.{% endif %}</p>
+      {% if r.can_turn_on and view.docket_form %}
+      <form class="act-form" method="post" action="/settings/redaction">
+        <input type="hidden" name="rule" value="{{ r.name }}">
+        <input type="hidden" name="shown" value="{{ view.shown_hash }}">
+        <button type="submit" class="button">Turn it on<span class="visually-hidden">: {{ r.name }}</span></button>
+        <span>{{ r.note }}.</span>
+      </form>
+      {% else %}
       <p><span class="change-what">{{ 'Turn it off' if r.on else 'Turn it on' }}</span>{% if r.looser %} <span class="badge">lets more in</span>{% endif %}: {{ r.note }}.</p>
       {{ paste(r.command, 'the command that turns ' ~ r.name ~ (' off' if r.on else ' on')) }}
+      {% endif %}
       {% if r.line %}<p class="meta">vault.yaml isn't as Docket writes it, so the command prints the line instead: {{ r.line }}.</p>{% endif %}
     </li>
     {% endfor %}

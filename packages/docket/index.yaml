@@ -30,7 +30,7 @@ reading:
   - { path: packages/docket/src/docket/documents/records.py, role: contract, note: "a folder source's records, a one-way door: the rid shape and its parts, titles, native's identity and people, gone versions and what anchors on them resolve against (DR-0482, DR-0483, DR-0487, DR-0491)" }
   - { path: packages/docket/src/docket/documents/scan.py, role: guide, note: "docket scan: the listing's skips, the cache and change detection, gone and returning versions, the guard, batches into the gate (DR-0486, DR-0487)" }
   - { path: packages/docket/src/docket/vault/settings.py, role: contract, note: "vault.yaml's one writer and the door: rewrite only in Docket's form, loosens() as the allowlist every page write passes, what pages may import, the lines to paste (DR-0506, DR-0507)" }
-  - { path: packages/docket/src/docket/web/settings.py, role: contract, note: "the Settings page: the sources, never-store lists, redaction and this machine's models; a never-store value added in two posts on the writer thread, its question naming what it drops; every other change named as its command or its line; never-store values only with show=lists (DR-0505 to DR-0509)" }
+  - { path: packages/docket/src/docket/web/settings.py, role: contract, note: "the Settings page: the sources, never-store lists, redaction and this machine's models; the changes that keep more out made with their buttons (a never-store value added after its question, a rule on, a source mixed or off, private after its question), each a form post on the writer thread through vault.yaml's writer; every other change named; never-store values only with show=lists (DR-0505 to DR-0509)" }
 decisions:
   - id: DR-0019
     title: The vault's layout and run-file names are fixed

@@ -36,6 +36,8 @@ from docket.vault.neverstore import ListName
 from docket.vault.vault import Vault
 
 Via = Literal["cli", "page"]
+# The built-in redaction switches, by their keys in vault.yaml's redaction block.
+BUILTIN_RULES = ("credentials", "phone")
 # Stricter to the right: work stores everything, mixed waits for a classification, private stores nothing.
 RANK = {"work": 0, "mixed": 1, "private": 2}
 LISTS: tuple[ListName, ...] = ("people", "containers", "keywords")
@@ -56,6 +58,12 @@ FOR_PAGES = frozenset(
         "Added",
         "StaleError",
         "edit_to_take_in",
+        "rule_on",
+        "stricter",
+        "turn_off",
+        "BUILTIN_RULES",
+        "LooseningError",
+        "Rewritten",
     }
 )
 # A line to paste never wraps: a long keyword stays one line.
@@ -207,6 +215,67 @@ def add_listed(vault: Vault, name: ListName, value: str, *, shown: str) -> Added
 
     written = rewrite(vault, edit, f"Config: never-store {name}, 1 added", via="page", shown=shown)
     return Added(written, already)
+
+
+def rule_on(vault: Vault, rule: str, *, shown: str) -> Rewritten:
+    """Turn a redaction rule on from a page: `credentials`, `phone`, or one of the user's patterns by its name. Only
+    ever on (DR-0506); a rule on already is no write. A name that is no rule, or that a built-in rule and a pattern or
+    two patterns share, is refused, as `docket redaction set` refuses it."""
+
+    def edit(config: VaultConfig) -> VaultConfig:
+        found = config.redaction
+        named = [p for p in found.patterns if p.name == rule]
+        if rule in BUILTIN_RULES and not named:
+            return config.model_copy(update={"redaction": found.model_copy(update={rule: True})})
+        if len(named) != 1 or rule in BUILTIN_RULES:
+            raise DocketError(
+                "no redaction rule by that name, or more than one: turn it on with docket redaction set, or in "
+                "vault.yaml by hand"
+            )
+        patterns = [p.model_copy(update={"enabled": True}) if p.name == rule else p for p in found.patterns]
+        return config.model_copy(update={"redaction": found.model_copy(update={"patterns": patterns})})
+
+    return rewrite(vault, edit, f"Config: redaction {rule} on", via="page", shown=shown)
+
+
+def stricter(vault: Vault, source: str, sensitivity: str, *, shown: str) -> Rewritten:
+    """Make a source stricter from a page: work to mixed, either to private (DR-0506). The same sensitivity is no
+    write, and a looser one is refused. A folder source is work only, so the schema refuses it before it is written."""
+    if sensitivity not in RANK:
+        raise DocketError(f"a source's sensitivity is work, mixed or private, not {sensitivity!r}")
+
+    def edit(config: VaultConfig) -> VaultConfig:
+        entry = _source(config, source)
+        if RANK[sensitivity] < RANK[entry.sensitivity]:
+            raise LooseningError(
+                f"{source} is {entry.sensitivity}; a page makes a source only stricter, so {sensitivity} is a line to "
+                "change in vault.yaml by hand"
+            )
+        return _with_source(config, source, entry.model_copy(update={"sensitivity": sensitivity}))
+
+    return rewrite(vault, edit, f"Config: source {source} {sensitivity}", via="page", shown=shown)
+
+
+def turn_off(vault: Vault, source: str, *, shown: str) -> Rewritten:
+    """Turn a source off from a page (DR-0506): its syncs and scans stop, and what waits from it stays. Off already is
+    no write; turning one on is a line to change by hand."""
+
+    def edit(config: VaultConfig) -> VaultConfig:
+        entry = _source(config, source)
+        return _with_source(config, source, entry.model_copy(update={"enabled": False}))
+
+    return rewrite(vault, edit, f"Config: source {source} off", via="page", shown=shown)
+
+
+def _source(config: VaultConfig, name: str) -> SourceConfig:
+    entry = config.sources.get(name)
+    if entry is None:
+        raise DocketError(f"no source {name} in vault.yaml")
+    return entry
+
+
+def _with_source(config: VaultConfig, name: str, entry: SourceConfig) -> VaultConfig:
+    return config.model_copy(update={"sources": {**config.sources, name: entry}})
 
 
 def _reads_back(text: str) -> None:

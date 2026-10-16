@@ -84,29 +84,30 @@ def test_the_page_names_each_source_with_its_settings_and_writes_nothing(client:
     assert "docs" in documents
     assert "archive/*" in documents
     assert "folder" in documents
-    # A read writes nothing; the page's only forms add a never-store value, each through its own question.
+    # A read writes nothing; the page's forms make only the changes on DR-0506's list.
     forms = parse(html).find_all("form")
-    assert [(f.attrs["method"], f.attrs["action"]) for f in forms] == [("post", "/settings/never-store")] * 3
+    posted = sorted({(f.attrs["method"], f.attrs["action"]) for f in forms})
+    assert posted == [("post", "/settings/never-store"), ("post", "/settings/redaction"), ("post", "/settings/source")]
+    acts = sorted(i.attrs["value"] for f in forms for i in f.find_all("input", name="act"))
+    assert set(acts) <= {"mixed", "private", "off"}
     assert (vault.root / "vault.yaml").read_bytes() == before
     assert sh(vault.root, "git", "rev-parse", "HEAD") == head
 
 
-def test_every_change_to_a_source_is_its_line_stricter_first(client: TestClient) -> None:
+def test_a_stricter_change_is_a_button_and_a_looser_one_its_line(client: TestClient) -> None:
     html = page(client)
     changes = parse(html).find("li", id="source-calls").find_all("li", class_="change")
-    named = [(c.find("span", class_="change-what").text(), "looser" in c.attrs["class"]) for c in changes]
-    assert named == [("Make it private", False), ("Turn it off", False), ("Make it work", True)]
-    assert [c.find("code", class_="paste-text").text() for c in changes] == [
-        "sensitivity: private",
-        "enabled: false",
-        "sensitivity: work",
-    ]
+    buttons = [(c.find("input", name="act").attrs["value"], c.find("button").text()) for c in changes[:2]]
+    assert buttons == [("private", "Make it private… : calls"), ("off", "Turn it off : calls")]
+    assert "looser" in changes[2].attrs["class"]
+    assert changes[2].find("span", class_="change-what").text() == "Make it work"
+    assert changes[2].find("code", class_="paste-text").text() == "sensitivity: work"
     assert "lets more in" in changes[2].text()
+    assert not changes[2].find_all("form")
     documents = parse(html).find("li", id="source-documents")
     # A folder source is work only: it can only be turned off.
-    assert [c.find("span", class_="change-what").text() for c in documents.find_all("li", class_="change")] == [
-        "Turn it off"
-    ]
+    acts = [i.attrs["value"] for i in documents.find_all("input", name="act")]
+    assert acts == ["off"]
     entry = raw(documents.find("pre", class_="entry"))
     assert yaml.safe_load(f"sources:\n{entry}")["sources"]["documents"]["folder"] == "docs"
 
@@ -140,8 +141,11 @@ def test_redaction_names_each_rule_with_its_command_and_what_it_does(client: Tes
     codes = [c.text() for c in parse(html).find_all("code", class_="paste-text")]
     root = str(vault.root)
     assert f'docket redaction set credentials off --vault "{root}"' in codes
-    assert f'docket redaction set phone on --vault "{root}"' in codes
     assert f'docket redaction set "ticket-id" off --vault "{root}"' in codes
+    # A rule that is off is turned on with a button; turning one off stays a command.
+    rules = [i.attrs["value"] for i in parse(html).find_all("input", name="rule")]
+    assert rules == ["phone"]
+    assert not any("set phone on" in c for c in codes)
     text = said(html)
     assert redaction.CREDENTIALS_OFF in text
     assert redaction.TURNED_ON in text

@@ -8,6 +8,9 @@ Unreleased in the same PR.
 
 ### Added
 
+- The Settings page turns a redaction rule on, and makes a source mixed or private or turns it off, each with a
+  button; making a source private asks once more first, naming what waits from it. Anything that lets more in stays
+  a command or a line to change by hand.
 - Never-store values added from the Settings page: type a name, a chat or a phrase, and Docket asks once more first,
   naming the records it drops from staging and how much of what is already stored holds it. The value is committed in
   `vault.yaml` and nowhere else: not the address bar, the log or the commit message.

@@ -424,9 +424,10 @@ def test_the_settings_page_in_a_browser(settings_service: tuple[int, str], tmp_p
         page.goto(f"{link.body['url']}&next=/settings")
         page.wait_for_url(f"{base}/settings")
         expect(page.locator(".lead")).to_contain_text("4 sources, 4 on; 4 never-store values")
-        # No value of a list in the page until asked for; the only forms add a never-store value.
+        # No value of a list in the page until asked for; its forms make only the changes pages may make.
         expect(page.locator("main")).not_to_contain_text("Dora #2")
-        expect(page.locator("form")).to_have_count(3)
+        expect(page.locator("form[action='/settings/never-store']")).to_have_count(3)
+        expect(page.locator("form[action='/settings/redaction']")).to_have_count(1)
 
         # A source's changes fold out without JavaScript's help, stricter first, each with its line.
         page.click("text=Change calls")
@@ -469,9 +470,23 @@ def test_the_settings_page_in_a_browser(settings_service: tuple[int, str], tmp_p
         plain.goto(f"{again.body['url']}&next=/settings")
         plain.wait_for_url(f"{base}/settings")
         _add(plain, base, "Ben Plain", shots / "settings-confirm-390.png")
+
+        # A source made private, through its own question, and a rule turned on, each a plain form post.
+        plain.click("#source-memo summary")
+        plain.click("#source-memo button:has-text('Make it private')")
+        expect(plain.locator("h1")).to_have_text("Make memo private?")
+        _fits(plain, ".confirm-form .button.primary")
+        plain.screenshot(path=str(shots / "settings-private-390.png"), full_page=True)
+        plain.click(".confirm-form .button.primary")
+        plain.wait_for_url(f"{base}/settings?done=memo-private")
+        expect(plain.locator("main")).to_contain_text("memo is private: nothing from it is stored")
+        plain.click("form:has(input[name='rule'][value='phone']) button")
+        plain.wait_for_url(f"{base}/settings?done=phone-on")
+        expect(plain.locator("main")).to_contain_text("Phone numbers are redacted from now on.")
         scriptless.close()
-    held = VaultConfig.load(tmp_path / "project" / "vault" / CONFIG_FILE).never_store.people
-    assert held[-2:] == ["Ada Sample", "Ben Plain"]
+    found = VaultConfig.load(tmp_path / "project" / "vault" / CONFIG_FILE)
+    assert found.never_store.people[-2:] == ["Ada Sample", "Ben Plain"]
+    assert (found.sources["memo"].sensitivity, found.redaction.phone) == ("private", True)
 
 
 def _add(page: Page, base: str, value: str, shot: Path) -> None:
