@@ -139,17 +139,52 @@ def test_a_time_on_a_recording_is_read_on_its_transcript(vault: Vault, locator: 
     assert (both.doc.id if both.doc else None, [ref.id for ref in both.legacy]) == (doc, [] if doc else [SYNC_ID])
 
 
-def test_a_recording_s_time_still_lists_the_lines_on_the_whole_recording(vault: Vault) -> None:
+@pytest.mark.parametrize("locator", [f"r:{PLAUD}@10:42", f"r:{POLISHED}@10:42", f"{SYNC}@10:42", f"plaud:{SYNC}@10:42"])
+def test_a_recording_s_time_lists_the_lines_on_the_whole_recording_on_every_read(vault: Vault, locator: str) -> None:
     with_plaud(vault, "transaction_polish")
     whole = "recording-note:2026-10-14-whole"
     about, both = f"- About the call. [r:{PLAUD}]", f"- Ten million. [r:{PLAUD}] [r:{POLISHED}@10:42]"
     recall.doc_put(vault, note(whole, covers=[PLAUD, POLISHED], lines=[about, both]))
-    cited = recall.read(vault, f"r:{PLAUD}@10:42").lines
-    assert [(c.doc, c.text) for c in cited] == [
+    found = recall.read(vault, locator)
+    assert [(c.doc, c.text) for c in found.lines] == [
         (MINUTES, "- Cleo agreed to ten million. @10:42"),
         (whole, both),
         (whole, about),
     ]
+    assert found.resolved == (None if locator.startswith(f"r:{POLISHED}") else f"r:{POLISHED}@10:42")
+
+
+@pytest.mark.parametrize("locator", [f"r:{PLAUD}", PLAUD, f"[r:{PLAUD}]"])
+def test_a_recording_read_whole_lists_the_lines_on_its_transcripts(vault: Vault, locator: str) -> None:
+    # A search hit on the recording, as the web panel opens it, shows the minutes anchored on its transcripts.
+    with_plaud(vault, "transaction", "transaction_polish")
+    whole, said = "recording-note:2026-10-14-whole", "recording-note:2026-10-14-said"
+    about, both = f"- About the call. [r:{PLAUD}]", f"- Ten million. [r:{PLAUD}] [r:{POLISHED}@10:42]"
+    recall.doc_put(vault, note(whole, covers=[PLAUD, POLISHED], lines=[about, both]))
+    morning = f"- Ben opened. [r:{PLAUD}/transaction@00:00]"
+    recall.doc_put(vault, note(said, covers=[f"{PLAUD}/transaction"], lines=[morning]))
+    found = recall.read(vault, locator, view="both")
+    assert ([s.rid for s in found.spans], found.resolved, found.problems) == ([PLAUD], None, [])
+    assert [(c.doc, c.text) for c in found.lines] == [
+        (whole, about),
+        (whole, both),
+        (said, morning),
+        (MINUTES, "- Cleo agreed to ten million. @10:42"),
+    ]
+    assert [ref.id for ref in found.legacy] == [SYNC_ID]
+
+
+def test_a_recording_s_other_records_and_paragraphs_stay_its_own(vault: Vault) -> None:
+    with_plaud(vault, "transaction_polish")
+    summary = f"{PLAUD}/summary"
+    recall.doc_put(vault, note("brief:2026-10-14-summary", covers=[summary], lines=[f"- Agreed. [r:{summary}]"]))
+    # Only a transcript under the recording is read with it, never its vendor summary.
+    assert [c.doc for c in recall.read(vault, f"r:{PLAUD}").lines] == [MINUTES]
+    # A transcript's paragraphs are its own, so a paragraph of the recording lists none of its lines.
+    first = f"- Who spoke. [r:{POLISHED}#1]"
+    recall.doc_put(vault, note("brief:2026-10-14-speakers", covers=[POLISHED], lines=[first]))
+    assert [c.text for c in recall.read(vault, f"r:{POLISHED}#1").lines] == [first]
+    assert recall.read(vault, f"r:{PLAUD}#1").lines == []
 
 
 def test_two_transcripts_of_a_recording_are_named_to_choose_from(vault: Vault) -> None:

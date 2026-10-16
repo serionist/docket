@@ -190,6 +190,15 @@ def test_a_transcript_hit_names_what_covers_its_recording(client: TestClient, tm
     assert f"Legacy notes that cover it: legacy-note:supplier-sync: {old}" in summary.text()
 
 
+def test_a_recording_hit_marks_the_lines_on_its_transcript(client: TestClient, tmp_path: Path) -> None:
+    vault = Vault.open(tmp_path / "vault")
+    vault.write_run("plaud", plaud_records("transaction_polish"))
+    recall.doc_put(vault, note("recording-note:2026-10-14-sync", covers=[POLISHED], lines=["- Ten million. @10:42"]))
+    summary = parse(panel(client, f"r:{PLAUD}")).find("section", class_="summary-column")
+    assert "recording-note:2026-10-14-sync, recording-note, rev 1" in summary.text()
+    assert [line.attrs["data-line"] for line in summary.find_all("div", class_="cited")] == ["14"]
+
+
 def test_the_whole_page_opens_with_the_panel(client: TestClient) -> None:
     page = client.get(f"/search?query=Nortwin&hit={quote(CALL)}")
     assert page.status_code == 200

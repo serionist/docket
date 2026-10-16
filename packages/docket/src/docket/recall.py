@@ -9,7 +9,7 @@ here acts on what it says.
 raw at that time in the recording it covered. A rid in the raw log stays a rid, and `r:` is always raw. A time on a
 record without segments of its own, such as a recording whose source keeps its transcript as a record of its own, is
 placed on the one transcript under it (DR-0370), and a transcript's read lists the lines and the legacy notes on the
-recording it is under too (DR-0391).
+recording it is under too (DR-0391), as a recording read whole does those on its transcripts (DR-0440).
 
 What a read asks about docs other than the one it shows (an old path's note, the docs superseding it, the docs covering
 a record) comes from the index when it is current for processed/, else from one parse of every doc for the whole call;
@@ -223,18 +223,12 @@ def _read(call: _Call, locator: str, view: View, around: int, rev: int | None) -
         result.spans = _raw_spans(call.raw, record, anchor, len(versions), around)
     if view != "raw":
         # A transcript is read as one with its recording: the recording a time was placed from (DR-0370), or the one
-        # it is under (DR-0391). The lines on either are listed, the transcript's first, and the notes covering either.
-        rids = list(dict.fromkeys([record.rid, asked, *call.raw.recordings(record)]))
-        seen: set[tuple[str, int]] = set()
-        notes: dict[str, ProcessedDoc] = {}
-        for rid in rids:
-            docs = call.covering(rid)
-            for cited in _citing(docs, call.superseded(), rid, anchor, around):
-                if (cited.doc, cited.n) not in seen:
-                    seen.add((cited.doc, cited.n))
-                    result.lines.append(cited)
-            notes.update((d.meta.id, d) for d in docs if d.meta.type == "legacy-note")
-        result.legacy = [LegacyRef(id=d.meta.id, old_paths=d.meta.old_paths) for d in notes.values()]
+        # it is under (DR-0391). A recording read whole is read with the transcripts under it (DR-0440); a paragraph
+        # of it isn't, since a transcript's paragraphs are its own.
+        rids = [record.rid, asked, *call.raw.recordings(record)]
+        if anchor.kind == "record":
+            rids += [t.rid for t in call.raw.transcripts(record.rid)]
+        result.lines, result.legacy = _on(call, rids, anchor, around)
     return result
 
 
@@ -242,7 +236,8 @@ def _read_path(
     call: _Call, locator: str, *, found: tuple[str, Anchor | None], view: View, around: int, rev: int | None
 ) -> ReadResult:
     """A doc by a path: one in the vault's processed/ folder, else a legacy note by its old path; with a time, the
-    raw at that time in the one transcript it covers, or that is under a recording it covers (DR-0370)."""
+    raw at that time in the one transcript it covers, or that is under a recording it covers (DR-0370), and the lines
+    on that transcript and its recording (DR-0440)."""
     path, at = found
     store = call.store
     processed = (store.root / "processed").resolve()
@@ -271,7 +266,8 @@ def _read_path(
     result.resolved = anchor.token[1:-1]
     versions = lookup.versions(rid)
     if view != "raw":
-        result.lines = _citing(call.covering(rid), call.superseded(), rid, anchor, around)
+        # As r:<transcript>@<time> reads it: the transcript's lines, then those on the recording it is under (DR-0440).
+        result.lines, _ = _on(call, [rid, *lookup.recordings(versions[-1])], anchor, around)
     found_span = span(anchor, versions[-1], len(versions), around=around)
     if found_span.problem is not None:
         result.problems.append(found_span.problem)
@@ -405,6 +401,22 @@ def _raw_spans(lookup: RawLookup, record: RawRecord, anchor: Anchor, versions: i
     if found.problem is not None:
         raise DocketError(found.problem)
     return [found]
+
+
+def _on(call: _Call, rids: list[str], at: Anchor, around: int) -> tuple[list[CitingLine], list[LegacyRef]]:
+    """The lines of current docs on these records near the position, each once, in the order of the rids; and the
+    legacy notes covering any of them."""
+    lines: list[CitingLine] = []
+    seen: set[tuple[str, int]] = set()
+    notes: dict[str, ProcessedDoc] = {}
+    for rid in dict.fromkeys(rids):
+        docs = call.covering(rid)
+        for cited in _citing(docs, call.superseded(), rid, at, around):
+            if (cited.doc, cited.n) not in seen:
+                seen.add((cited.doc, cited.n))
+                lines.append(cited)
+        notes.update((d.meta.id, d) for d in docs if d.meta.type == "legacy-note")
+    return lines, [LegacyRef(id=d.meta.id, old_paths=d.meta.old_paths) for d in notes.values()]
 
 
 def _citing(docs: list[ProcessedDoc], superseded: set[str], rid: str, at: Anchor, around: int) -> list[CitingLine]:
