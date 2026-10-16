@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0481
+    title: "A source with folder in vault.yaml is a folder source: a repo-relative or ~/ path, exclude patterns, no mapper, work only"
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#69"]
+    description: "sources.<name>.folder names the folder, relative to the consuming repo or under the home folder as ~/..., so it reads the same on every machine. An absolute path is refused, and the message gives the fix: the machine's own folder in the user's config (DR-0490). The folder may itself be a link or a junction, resolved before listing; a machine without it scans nothing and says so. exclude lists fnmatch patterns on the path inside the folder, case-insensitive. A folder source has no mapper, tools or media_hosts, and its sensitivity is work: mixed is refused, since every page would wait on the Staging page one by one, and private is refused with its fix, enabled: false. Both keys are optional, so schema_version stays 1, as for DR-0124's keys."
+    binds:
+      - "An older Docket refuses a vault.yaml that uses folder or exclude (DR-0021): every machine upgrades before the keys are written."
+      - vault.yaml never holds an absolute folder.
+    not_chosen:
+      - "An absolute path in vault.yaml: it is committed, names one machine's drive or user, and reads wrong on every other machine."
+      - "The folder only per machine, as DR-0248 keeps import folders: the issue asks vault.yaml to name it, and the repo-relative and ~ forms read the same on every machine."
+      - "A top-level documents key: a folder source is a source, with its sensitivity and its hold list."

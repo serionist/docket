@@ -24,6 +24,7 @@ reading:
   - { path: packages/docket/src/docket/models/worker.py, role: contract, note: "the models' worker and its JSON-lines protocol: what the core sends, what it answers, what it never logs (DR-0330)" }
   - { path: packages/docket/src/docket/vault/curatelog.py, role: contract, note: "the curate log, a one-way door: its file, its lines and their keys, how they fold into the stoplist (DR-0460, DR-0461)" }
   - { path: packages/docket/src/docket/vault/entitystore.py, role: contract, note: "entity writes: the changes file, the checks, apply and undo, finishing a stopped write (DR-0462 to DR-0464, DR-0476)" }
+  - { path: packages/docket/src/docket/documents/extract.py, role: contract, note: "the documents' reader in a child process: one file at a time, the time limit and memory cap, a fresh child every 100 files, what came of each file (DR-0485)" }
 decisions:
   - id: DR-0019
     title: The vault's layout and run-file names are fixed

@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0490
+    title: A machine may give a folder source's folder as an absolute path in the user's config, under folders
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#69"]
+    description: "The user's config.yaml, per user and never committed, gains folders: a map from a vault's resolved root to its sources' names, each with an absolute folder. On that machine the entry replaces vault.yaml's folder for that source, for a work folder on another drive. Ids don't change with it, since they come from the path inside the folder (DR-0482). A value that isn't an absolute path is refused, naming its key. The block is not a door before the first release, as the models block isn't (DR-0335)."
+    not_chosen:
+      - "Absolute paths in vault.yaml: committed, they name one machine's drive or user, and read wrong on every other machine."
+      - "The vault's private folder, as DR-0248 keeps import folders: the user's config is where a user already sets per-machine choices by hand."

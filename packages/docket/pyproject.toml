@@ -7,14 +7,19 @@ requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Soma Osvay" }]
 dependencies = [
+  # Documents' text (DR-0484): XML parts through defusedxml, workbooks through openpyxl, which uses defusedxml once
+  # it is installed, and pdfs through pypdf, its crypto extra for AES; all read in a child with limits (DR-0485).
+  "defusedxml>=0.7.1",
   "fastapi>=0.142.4",
   "filelock>=4.0.7",
   "jinja2>=3.1.6",
   "keyring>=25.7.0",
   # The SDK's API moved between 2.0 and 2.3; a new version comes in by its own reviewed bump.
   "mcp==2.3.0",
+  "openpyxl>=3.1.5",
   "platformdirs>=4.12.2",
   "pydantic>=2.13.5",
+  "pypdf[crypto]>=6.19.0",
   "PyYAML>=6.0.3",
   "snowballstemmer>=3.1.1",
   # The vector stage's distance (DR-0337), only where it ships wheels: none for Windows on Arm or musl, and no sdist.

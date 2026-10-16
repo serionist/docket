@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0486
+    title: A scan stats every file, hashes the ones that may have changed, and extracts only what the vault doesn't hold, on the primary machine
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#69"]
+    description: "Each machine keeps a cache in the vault's private folder, never committed and keyed by id: size, mtime_ns and the bytes' sha256, the identity hash raw holds (DR-0483), the never-store lists' hash, and the bytes' sha256 of a try that stopped or crashed. A file is done when its stat matches the cache and the vault's newest version of it still carries the cached identity hash. A file with no identity in raw is done while its stat matches: one the never-store lists kept out, while the cache's lists hash is current, and an md or txt file past a cap. Otherwise the bytes are hashed. Bytes the cache knows, whose identity the newest version still carries, only move the cache. Else for pdf, docx, xlsx and pptx the bytes' sha256 is compared with the newest version's identity, and for md and txt the text is read, redacted with the gate's current rules and hashed; a gone version carries no identity, so a file that comes back is never the same. What differs is extracted: the file record gets a new version, and a part only when its title or its text, each run through the gate's current redaction rules, differs from its newest version's in raw, so a renamed sheet takes its new name. No hash of a part's text is stored; a change to the redaction rules versions the parts it touches once, at the file's next extraction. The cache keeps the stat taken before the read, and drops the entry when the stat after the read differs, so the next scan looks again. What the vault holds is read from the source's run files, only the new ones after the first scan, and from staging. A scan runs only on the vault's primary machine. A folder that isn't there scans nothing, and a scan that would mark more than half the files it knew as gone, and at least 20, stages nothing until docket scan --accept-gone. One scan runs at a time, and the cache is saved after each batch."
+    binds: ["The cache names no file: it is keyed by id."]
+    not_chosen:
+      - "Hashing every file on each scan: a large folder is gigabytes to read."
+      - "The stat alone: a touch, a checkout or a version from another machine would be missed or make versions."
+      - "A part's extracted text against raw's: redaction makes them differ on every scan."
+      - "A hash of each part's extracted text in raw to compare against: it lets guesses be tested against what redaction hid."
+      - "Scans on any machine: two checkouts at different commits would turn each other's edits back."
