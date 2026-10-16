@@ -11,6 +11,7 @@
   <span class="locator">{{ l.entity }}</span>
   <span class="part" dir="auto">{{ l.part }}</span>
   <span class="meta">{{ l.by }}, {{ l.via }}{% if l.undone_by %}; undone by {{ l.undone_by }}{% endif %}</span>
+  {% if l.unfinished %}<span class="badge">not finished: the next write commits it</span>{% endif %}
   {% if l.undo %}<form method="post" action="/curate/undo"><input type="hidden" name="op" value="{{ l.id }}"><button type="submit" class="button">Undo<span class="visually-hidden"> {{ l.op }} {{ l.id }}</span></button></form>{% endif %}
 </li>
 {% endmacro %}

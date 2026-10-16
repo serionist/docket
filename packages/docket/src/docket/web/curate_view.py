@@ -30,6 +30,7 @@ from docket.vault import curatelog
 from docket.vault.config import NeverStore
 from docket.vault.curatelog import Line
 from docket.vault.entities import ENTITY_TYPES, entity_rel, load_entities
+from docket.vault.neverstore import fold as fold_listed
 from docket.vault.neverstore import listed, matches_text
 from docket.vault.vault import Vault
 
@@ -133,6 +134,8 @@ class Facts:
     langs: tuple[str, ...]
     opened: Opened | None
     dropped: tuple[tuple[str, str, str], ...]
+    # The log's lines a stopped write left: HEAD doesn't have them yet, and the next write commits them.
+    unfinished: frozenset[str] = frozenset()
 
 
 def file_hash(vault: Vault, card: Card) -> str:
@@ -159,7 +162,7 @@ def gather(vault: Vault, state: CurateState) -> Facts:
         with closing(open_index(vault)) as conn:
             card = found.card(state.open, False) if found is not None and state.open else None
             if card is not None:
-                cut = [s for s in batch.snippets(conn, card) if not matches_text(s.text, lists)]
+                cut = [s for s in batch.snippets(conn, card) if not hides(s.text, card, lists)]
                 opened = Opened(card, states[card.id], tuple(cut), file_hash(vault, card))
             dropped = _dropped(conn)
     except (DocketError, sqlite3.Error):
@@ -180,7 +183,18 @@ def gather(vault: Vault, state: CurateState) -> Facts:
         langs=resolve(vault.config.owner.languages).codes,
         opened=opened,
         dropped=dropped,
+        unfinished=frozenset(line.id for line in curatelog.unfinished(vault)),
     )
+
+
+def hides(text: str, card: Card, lists: NeverStore) -> bool:
+    """Whether a snippet names a never-store value: by the keywords list's own reading of a text, or holding a name or
+    spelling of the card that either list holds, put there after the round started."""
+    if matches_text(text, lists):
+        return True
+    words = fold_listed(text)
+    values = (card.name, card.entity, *(s.text for s in card.spellings))
+    return any(fold_listed(v) in words for v in values if listed(v, lists) is not None)
 
 
 def _dropped(conn: sqlite3.Connection) -> tuple[tuple[str, str, str], ...]:
@@ -284,6 +298,7 @@ class LogRow:
     via: str
     undo: bool
     undone_by: str | None
+    unfinished: bool = False
 
 
 @dataclass(frozen=True)
@@ -312,12 +327,25 @@ def _s(n: int) -> str:
     return "" if n == 1 else "s"
 
 
-def kind_of(card: Card) -> str:
-    return f"New {card.type}" if card.kind == "new" else f"Alias for {card.name}"
+def shown(text: str, lists: NeverStore) -> str:
+    """A name or a spelling as the page shows it: hidden when a never-store list holds it."""
+    return HIDDEN if listed(text, lists) is not None else text
 
 
-def title_of(card: Card) -> str:
-    return card.name if card.kind == "new" else ", ".join(s.text for s in card.adds())
+def shown_id(card: Card, lists: NeverStore) -> str:
+    """The id a card writes, hidden with its name: a new card's id is its name's slug."""
+    hidden = listed(card.entity, lists) is not None or (card.kind == "new" and listed(card.name, lists) is not None)
+    return HIDDEN if hidden else card.entity
+
+
+def kind_of(card: Card, lists: NeverStore) -> str:
+    return f"New {card.type}" if card.kind == "new" else f"Alias for {shown(card.name, lists)}"
+
+
+def title_of(card: Card, lists: NeverStore) -> str:
+    if card.kind == "new":
+        return shown(card.name, lists)
+    return ", ".join(shown(s.text, lists) for s in card.adds())
 
 
 def missed_of(card: Card) -> str:
@@ -332,7 +360,7 @@ def missed_of(card: Card) -> str:
 def _spellings(card: Card, lists: NeverStore) -> tuple[SpellingView, ...]:
     return tuple(
         SpellingView(
-            text=HIDDEN if listed(s.text, lists) else s.text,
+            text=shown(s.text, lists),
             trust=TRUST.get(s.trust, s.trust),
             add=ADDS[s.add],
             chunks=s.chunks,
@@ -347,8 +375,8 @@ def row(card: Card, state: State, lists: NeverStore, opened: str | None) -> Card
         id=card.id,
         n=card.n,
         state=state,
-        kind=kind_of(card),
-        title=HIDDEN if listed(title_of(card), lists) else title_of(card),
+        kind=kind_of(card, lists),
+        title=title_of(card, lists),
         spellings=_spellings(card, lists),
         missed=missed_of(card),
         url=open_.url(),
@@ -368,18 +396,19 @@ def snippet(s: Snippet) -> SnippetView:
     )
 
 
-def edit_form(card: Card, langs: tuple[str, ...], typed: QueryParams | None) -> EditForm:
-    """The form as the card proposes it, or with what the user typed."""
+def edit_form(card: Card, langs: tuple[str, ...], typed: QueryParams | None, lists: NeverStore) -> EditForm:
+    """The form as the card proposes it, or with what the user typed; a never-store value hidden either way. The form
+    posts its spellings by their place, so a hidden one is still ticked or not."""
     adds = [s for s in card.spellings if s.add in ("plain", "asr")]
 
     def given(name: str, proposed: str) -> str:
-        return (typed.get(name) or "") if typed is not None else proposed
+        return shown((typed.get(name) or "") if typed is not None else proposed, lists)
 
     kept = set(typed.getlist("keep")) if typed is not None else {str(i) for i in range(len(adds))}
     spellings = tuple(
         EditSpelling(
             i=i,
-            text=s.text,
+            text=shown(s.text, lists),
             trust=TRUST.get(s.trust, s.trust),
             checked=str(i) in kept,
             kind=given(f"kind.{i}", s.add),
@@ -391,7 +420,7 @@ def edit_form(card: Card, langs: tuple[str, ...], typed: QueryParams | None) -> 
         new=card.kind == "new",
         types=ENTITY_TYPES,
         type=given("type", card.type),
-        id=given("id", card.entity),
+        id=given("id", shown_id(card, lists)),
         names=names,
         spellings=spellings,
         role=given("role", ""),
@@ -411,11 +440,11 @@ def panel(facts: Facts, state: CurateState, typed: QueryParams | None = None) ->
         id=card.id,
         n=card.n,
         new=card.kind == "new",
-        kind=kind_of(card),
-        title=HIDDEN if listed(title_of(card), facts.lists) else title_of(card),
+        kind=kind_of(card, facts.lists),
+        title=title_of(card, facts.lists),
         state=opened.state,
         type=card.type,
-        entity=card.entity,
+        entity=shown_id(card, facts.lists),
         spellings=_spellings(card, facts.lists),
         missed=missed_of(card),
         newest=newest,
@@ -427,31 +456,24 @@ def panel(facts: Facts, state: CurateState, typed: QueryParams | None = None) ->
         edit_fragment=editing.url(PANEL),
         back_url=shown.url(),
         back_fragment=shown.url(PANEL),
-        form=edit_form(card, facts.langs, typed) if state.edit and opened.state == "open" else None,
+        form=edit_form(card, facts.langs, typed, facts.lists) if state.edit and opened.state == "open" else None,
     )
 
 
 def describe(line: Line, lists: NeverStore) -> str:
     """What one op changed, in a few words, a never-store value hidden."""
 
-    def shown(value: str) -> str:
-        return HIDDEN if listed(value, lists) else value
-
     change = line.change
     if change is None:
-        if line.op == "undo":
-            return f"undoes {line.of}"
-        kind, _, rest = line.key.partition(":")
-        entity, _, text = rest.partition(":")
-        return f"{kind}:{entity}:{shown(text)}"
+        return f"undoes {line.of}" if line.op == "undo" else stop_key(line.key, lists)
     if change.entity is not None:
-        return f"{change.entity.type}, {'; '.join(shown(n) for n in sorted(change.entity.name.values()))}"
+        return f"{change.entity.type}, {'; '.join(shown(n, lists) for n in sorted(change.entity.name.values()))}"
     if change.alias is not None:
-        return f"alias {shown(change.alias.text)}{' (asr)' if change.alias.kind == 'asr' else ''}"
+        return f"alias {shown(change.alias.text, lists)}{' (asr)' if change.alias.kind == 'asr' else ''}"
     if change.name is not None:
-        return f"name {change.name.lang} {shown(change.name.text)}"
+        return f"name {change.name.lang} {shown(change.name.text, lists)}"
     if change.id is not None:
-        return f"id {change.id.key} {shown(change.id.value)}"
+        return f"id {change.id.key} {shown(change.id.value, lists)}"
     related = change.related
     return f"related {related.type} {related.target}" if related is not None else ""
 
@@ -465,9 +487,17 @@ def log_row(line: Line, facts: Facts) -> LogRow:
         part=describe(line, facts.lists),
         by=line.by,
         via=line.via,
-        undo=line.op in ("create", "add", "reject") and line.id not in facts.undone,
+        # No Undo on a hidden key: its line would commit the value again, and the store refuses it (DR-0464).
+        undo=line.op in ("create", "add", "reject")
+        and line.id not in facts.undone
+        and not hidden(line.key, facts.lists),
         undone_by=facts.undone.get(line.id),
+        unfinished=line.id in facts.unfinished,
     )
+
+
+def hidden(key: str, lists: NeverStore) -> bool:
+    return listed(curatelog.key_text(key), lists) is not None
 
 
 def measures(before: Measure | None, after: Measure | None) -> Measures | None:
@@ -532,9 +562,9 @@ def build(facts: Facts, state: CurateState) -> View:
 
 
 def stop_key(key: str, lists: NeverStore) -> str:
-    kind, _, rest = key.partition(":")
-    entity, _, text = rest.partition(":")
-    return f"{kind}:{entity}:{HIDDEN}" if listed(text, lists) else key
+    """A key as the page shows it: the value it names hidden when a never-store list holds it."""
+    text = curatelog.key_text(key)
+    return key[: len(key) - len(text)] + HIDDEN if text and hidden(key, lists) else key
 
 
 def done_line(done: str | None) -> str | None:

@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 import yaml
-from curate_kit import ANN, NORTHWIND, curate_vault, entity
+from curate_kit import ANN, NORTHWIND, curate_vault, entity, more_recordings
 from docket_webkit import OURS, a11y_problems, html_problems, parse
 from staging_kit import signed_in
 from starlette.testclient import TestClient
@@ -28,6 +28,7 @@ from docket.vault import curatelog
 from docket.vault.curatelog import Change, EntityFields, IdFields, Line, NameFields, RelatedFields, read_all
 from docket.vault.entitystore import EntityStore, Planned
 from docket.vault.vault import Vault
+from docket.web import curate as curate_routes
 from docket.web import curate_view
 from docket.web.templating import PAGE_CSP
 
@@ -93,15 +94,25 @@ def log(vault: Vault) -> list[Line]:
     return list(read_all(vault.root).lines)
 
 
-def plant(vault: Vault, at: datetime, by: str, key: str, round_: str | None = None) -> None:
-    """A reject line as another writer logs it, committed: tier 1's, or one of an older round."""
+def never_store(vault: Vault, **lists: list[str]) -> None:
+    """Never-store lists set in vault.yaml, as the user sets them after a round started."""
+    config = vault.root / "vault.yaml"
+    data = yaml.safe_load(config.read_text(encoding="utf-8"))
+    data["never_store"] = lists
+    config.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+
+
+def plant(vault: Vault, at: datetime, by: str, key: str, round_: str | None = None, *, committed: bool = True) -> None:
+    """A reject line as another writer logs it, committed: tier 1's, or one of an older round; or left uncommitted, as
+    a write that stopped before its commit leaves it."""
     fields = {"schema_version": 1, "id": f"{at:%Y%m%dT%H%M%S}-test-box-1", "op": "reject", "at": at}
     line = Line.model_validate(fields | {"machine": "test-box", "by": by, "via": "cli", "key": key, "round": round_})
     path = vault.root / line.rel
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8", newline="\n") as file:
         file.write(line.text() + "\n")
-    vault.commit([line.rel], "a planted line")
+    if committed:
+        vault.commit([line.rel], "a planted line")
 
 
 # -- a round -----------------------------------------------------------------------------------------------------------
@@ -359,13 +370,50 @@ def test_never_store_values_never_show(client: TestClient, vault: Vault) -> None
     northwind = card(started(client, vault), "Northwind")
     fields = decide(page(client, f"/curate?open={northwind.id}"), "reject")
     assert client.post("/curate/decide", data=fields, headers=SAME).status_code == 303
-    config = vault.root / "vault.yaml"
-    data = yaml.safe_load(config.read_text(encoding="utf-8"))
-    data["never_store"] = {"keywords": ["Nortwin"]}
-    config.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    never_store(vault, keywords=["Nortwin"])
     html = page(client, f"/curate?open={northwind.id}")
     assert "Nortwin" not in html and "nortwin" not in html
     assert "new:-:northwind" in html and "(on a never-store list)" in html
+    # No Lift and no Undo on the hidden key: their lines would commit it again, and the store refuses both.
+    rows = parse(html).find_all("li", class_="stop-line")
+    assert [len(r.find_all("form")) for r in rows] == [1, 0]
+    reject = next(ln for ln in log(vault) if ln.key == "new:-:nortwin")
+    assert reject.id not in [i.attrs["value"] for i in parse(html).find_all("input", name="op")]
+    lift = client.post("/curate/lift", data={"key": curate_routes.key_id("new:-:nortwin")}, headers=SAME)
+    assert lift.status_code == 400 and "it stays on the stoplist" in said(lift.text)
+    undo = client.post("/curate/undo", data={"op": reject.id}, headers=SAME)
+    assert undo.status_code == 400 and "edit the entity file by hand" in said(undo.text)
+    assert "nortwin" not in said(lift.text).lower() + said(undo.text).lower()
+    assert [ln.op for ln in log(vault)] == ["reject", "reject"]
+
+
+@pytest.mark.parametrize("lists", [{"keywords": ["Nortwin"]}, {"people": ["Nortwin"]}])
+def test_a_spelling_listed_after_the_round_never_shows_on_its_card(
+    client: TestClient, vault: Vault, lists: dict[str, list[str]]
+) -> None:
+    northwind = card(started(client, vault), "Northwind")
+    never_store(vault, **lists)
+    for path in (f"/curate?open={northwind.id}", f"/curate?edit={northwind.id}", f"/curate/panel?edit={northwind.id}"):
+        html = page(client, path)
+        assert "nortwin" not in html.lower(), path
+        assert "(on a never-store list)" in html, path
+    # Its snippets all name it, so none is cut; the form still posts the hidden spelling by its place.
+    assert parse(page(client, f"/curate?open={northwind.id}")).find_all("figure", class_="snippet") == []
+    form = parse(page(client, f"/curate?edit={northwind.id}")).find("form", class_="edit-form")
+    assert [i.attrs["value"] for i in form.find_all("input", name="keep")] == ["0"]
+
+
+def test_a_name_listed_after_the_round_never_shows_on_its_card_or_form(client: TestClient, vault: Vault) -> None:
+    cleo = card(started(client, vault), "Cleo Test")
+    never_store(vault, people=["Cleo Test"])
+    for path in (f"/curate?open={cleo.id}", f"/curate?edit={cleo.id}"):
+        html = page(client, path)
+        panel = parse(html).find("section", class_="card-panel")
+        assert "Cleo Test" not in panel.text() and "Test Cleo" not in panel.text() and "cleo-test" not in html, path
+        assert panel.find("h2").text() == "4. New person: (on a never-store list)"
+    form = parse(page(client, f"/curate?edit={cleo.id}")).find("form", class_="edit-form")
+    assert form.find("input", name="id").attrs["value"] == "(on a never-store list)"
+    assert form.find("input", name="name.en").attrs["value"] == "(on a never-store list)"
 
 
 def test_the_forms_matching_leaves_out_are_listed(client: TestClient, vault: Vault) -> None:
@@ -374,12 +422,80 @@ def test_the_forms_matching_leaves_out_are_listed(client: TestClient, vault: Vau
     assert any(d.startswith("ann-sample: an is under three letters") for d in texts(html, "dropped"))
 
 
-def test_names_and_snippets_render_as_text(client: TestClient, vault: Vault) -> None:
+EVIL = "\"><img src=x onerror=alert(1)> 'onmouseover=alert(2) x=' <script>alert(3)</script>"
+
+
+def test_names_spellings_and_snippets_render_as_text(client: TestClient, vault: Vault) -> None:
+    more_recordings(vault, [f"Speaker said {EVIL} and met Nortwin today", "Nortwin again, with no markup."])
     found = started(client, vault)
-    planted = found.cards[0].model_copy(update={"name": "<script>alert(1)</script>"})
+    first = found.cards[0]
+    spellings = [s.model_copy(update={"text": EVIL}) if s.add != "name" else s for s in first.spellings]
+    planted = first.model_copy(update={"name": EVIL, "spellings": spellings})
     batch.save(vault, found.model_copy(update={"cards": [planted, *found.cards[1:]]}))
-    html = page(client, f"/curate?open={planted.id}")
-    assert "<script>alert(1)</script>" not in html and "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    for path in (f"/curate?open={planted.id}", f"/curate?edit={planted.id}", f"/curate/panel?edit={planted.id}"):
+        html = client.get(path).text
+        tree = parse(html)
+        assert EVIL not in html, path
+        assert tree.find_all("img") == [], path
+        assert not [k for el in tree.walk() for k in el.attrs if k.lower().startswith("on")], path
+    fields = decide(page(client, f"/curate?edit={planted.id}"), "edit") | {"type": "term", "id": "evil-one"}
+    answer = client.post("/curate/decide", data=fields | {"name.en": EVIL, "role": EVIL}, headers=SAME)
+    assert answer.status_code == 303
+    html = page(client)
+    assert EVIL not in html and parse(html).find_all("img") == []
+
+
+def test_a_card_decided_twice_or_from_a_second_tab_is_refused(client: TestClient, vault: Vault) -> None:
+    northwind = card(started(client, vault), "Northwind")
+    reject = decide(page(client, f"/curate?open={northwind.id}"), "reject")
+    accept = decide(page(client, f"/curate?open={northwind.id}"), "accept")
+    assert client.post("/curate/decide", data=reject, headers=SAME).status_code == 303
+    again = client.post("/curate/decide", data=reject, headers=SAME)
+    assert again.status_code == 400 and f"card {northwind.id} is rejected already" in said(again.text)
+    other = client.post("/curate/decide", data=accept, headers=SAME)
+    assert other.status_code == 400 and "rejected already" in said(other.text)
+    assert [ln.key for ln in log(vault)] == ["new:-:northwind", "new:-:nortwin"]
+
+
+def test_an_edit_the_store_refuses_keeps_what_was_typed(client: TestClient, vault: Vault) -> None:
+    entity(vault, NORTHWIND, "id: northwind\ntype: customer\nname: {en: Northwind}\n")
+    cleo = card(started(client, vault), "Cleo Test")
+    fields = decide(page(client, f"/curate?edit={cleo.id}"), "edit")
+    typed = fields | {"type": "person", "id": "northwind", "name.en": "Cleo Test", "role": "rights agent typed"}
+    answer = client.post("/curate/decide", data=typed | {"name.hu": "Test Cleo", "keep": ["0"]}, headers=SAME)
+    assert answer.status_code == 400
+    assert said(answer.text) == "an entity has that id already"
+    form = parse(answer.text).find("form", class_="edit-form")
+    assert form.find("input", name="role").attrs["value"] == "rights agent typed"
+    assert form.find("input", name="name.hu").attrs["value"] == "Test Cleo"
+    assert log(vault) == []
+
+
+def test_a_question_file_broken_after_the_round_never_fails_a_decision(
+    client: TestClient, vault: Vault, tmp_path: Path
+) -> None:
+    questions = tmp_path / "questions.yaml"
+    questions.write_text(
+        'schema_version: 1\nasked: "2026-10-14T10:00:00+02:00"\nquestions:\n'
+        '  - q: Nortwin pallets\n    want: ["r:plaud:rec-0000/transaction"]\n    kind: typo\n    lang: en\n',
+        encoding="utf-8",
+    )
+    userconfig.set_section("curate", {"questions": str(questions)})
+    found = started(client, vault)
+    questions.write_text("schema_version: 1\nquestions: [oops\n", encoding="utf-8")
+    for c in found.cards:
+        fields = decide(page(client, f"/curate?open={c.id}"), "reject")
+        assert client.post("/curate/decide", data=fields, headers=SAME).status_code == 303
+    after = batch.load(vault)
+    assert after is not None and after.after is None
+
+
+def test_a_line_a_stopped_write_left_is_marked_not_finished(client: TestClient, vault: Vault) -> None:
+    found = started(client, vault)
+    plant(vault, found.started + timedelta(seconds=30), "tier1", "new:-:salt road", committed=False)
+    html = page(client)
+    marked = [ln for ln in texts(html, "log-line") if "not finished: the next write commits it" in ln]
+    assert len(marked) == 2 and all("new:-:salt road" in ln for ln in marked)
 
 
 @pytest.mark.parametrize(

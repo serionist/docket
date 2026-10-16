@@ -301,6 +301,8 @@ class BatchView(BaseModel):
     cards: list[CardView]
     left_out: dict[str, int]
     applied: list[Line]
+    # The applied lines a stopped write left: HEAD doesn't have them yet, and the next write commits them.
+    unfinished: list[str] = []
     before: Measure | None = None
     after: Measure | None = None
 
@@ -333,6 +335,7 @@ def view(vault: Vault, batch: Batch) -> BatchView:
     lines = curatelog.read_all(vault.root).lines
     now = states(vault, batch, lines)
     applied = [ln for ln in lines if ln.at >= batch.started and ln.by == "tier1"]
+    unfinished = {ln.id for ln in curatelog.unfinished(vault)}
     with closing(open_index(vault)) as conn:
         cards = [CardView(card=c, state=now[c.id], snippets=snippets(conn, c)) for c in batch.cards]
     return BatchView(
@@ -341,6 +344,7 @@ def view(vault: Vault, batch: Batch) -> BatchView:
         cards=cards,
         left_out=batch.left_out,
         applied=applied,
+        unfinished=[ln.id for ln in applied if ln.id in unfinished],
         before=batch.before,
         after=batch.after,
     )

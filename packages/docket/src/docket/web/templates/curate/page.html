@@ -89,8 +89,8 @@
   {% if lifts %}
   <p class="hint">What curation won't offer again in that role. Lift a key to have it offered again.</p>
   <ul class="stop-lines">
-    {% for shown, kid in lifts %}
-    <li class="stop-line"><span class="locator" dir="auto">{{ shown }}</span><form method="post" action="/curate/lift"><input type="hidden" name="key" value="{{ kid }}"><button type="submit" class="button">Lift<span class="visually-hidden"> {{ shown }}</span></button></form></li>
+    {% for shown, kid, liftable in lifts %}
+    <li class="stop-line"><span class="locator" dir="auto">{{ shown }}</span>{% if liftable %}<form method="post" action="/curate/lift"><input type="hidden" name="key" value="{{ kid }}"><button type="submit" class="button">Lift<span class="visually-hidden"> {{ shown }}</span></button></form>{% endif %}</li>
     {% endfor %}
   </ul>
   {% else %}

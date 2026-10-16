@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+import yaml
 from curate_kit import curate_vault
 from docket_testkit import NORTHWIND_FILE, entity_vault, sh
 
 from docket import render, userconfig
 from docket.cli import main
 from docket.curate import batch as curate
+from docket.vault import curatelog
 from docket.vault.curatelog import LOG_DIR, AliasFields, Change, IdFields, Line, NameFields, RelatedFields
 from docket.vault.entitystore import EntityStore, Written, load_changes
 from docket.vault.vault import Vault
@@ -254,6 +256,49 @@ def test_an_undo_in_the_open_round_reopens_the_card(kit_vault: Vault, capsys: py
     capsys.readouterr()
     main(["curate", "show", "--json"])
     assert {c["state"] for c in json.loads(capsys.readouterr().out)["cards"]} == {"open"}
+
+
+def test_a_never_store_key_is_neither_lifted_nor_undone(kit_vault: Vault, capsys: pytest.CaptureFixture[str]) -> None:
+    main(["curate", "round"])
+    capsys.readouterr()
+    northwind = next(c for c in curate.load(kit_vault).cards if c.name == "Northwind")  # type: ignore[union-attr]
+    assert main(["curate", "reject", northwind.id]) == 0
+    rejected = [line.split()[0] for line in capsys.readouterr().out.splitlines() if "new:-:nortwin" in line]
+    config = kit_vault.root / "vault.yaml"
+    data = yaml.safe_load(config.read_text(encoding="utf-8"))
+    data["never_store"] = {"keywords": ["Nortwin"]}
+    config.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    before = len(curatelog.read_all(kit_vault.root).lines)
+    assert main(["curate", "lift", "new:-:nortwin"]) == 1
+    lifted = capsys.readouterr().out
+    assert "key 1: its text is on the never-store keywords list; it stays on the stoplist" in lifted
+    assert main(["curate", "undo", *rejected]) == 1
+    undone = capsys.readouterr().out
+    assert "its text is on the never-store keywords list; edit the entity file by hand" in undone
+    assert "nortwin" not in (lifted + undone).lower()
+    assert len(curatelog.read_all(kit_vault.root).lines) == before
+    assert main(["curate", "lift", "new:-:northwind"]) == 0
+
+
+def test_show_marks_an_applied_line_a_stopped_write_left(kit_vault: Vault, capsys: pytest.CaptureFixture[str]) -> None:
+    main(["curate", "round"])
+    capsys.readouterr()
+    begun = curate.load(kit_vault).started  # type: ignore[union-attr]
+    at = begun + timedelta(seconds=30)
+    line = Line.model_validate({
+        "schema_version": 1, "id": f"{at:%Y%m%dT%H%M%S}-test-box-1", "op": "reject", "at": at, "machine": "test-box",
+        "by": "tier1", "via": "cli", "key": "new:-:salt road",
+    })  # fmt: skip
+    path = kit_vault.root / line.rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(line.text() + "\n", encoding="utf-8")
+    assert main(["curate", "show"]) == 0
+    applied = [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("applied")]
+    assert applied == [
+        f"applied  by itself: {line.id}  reject -  new:-:salt road  not finished: the next write commits it"
+    ]
+    assert main(["curate", "show", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["unfinished"] == [line.id]
 
 
 def test_status_and_round_measure_your_questions(

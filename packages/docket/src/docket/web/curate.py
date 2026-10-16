@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 from typing import Any, Literal
 
 from fastapi import APIRouter, Request
@@ -26,7 +27,7 @@ from docket.errors import DocketError
 from docket.service.state import Service
 from docket.vault import curatelog
 from docket.vault.curatelog import AliasFields, Change, EntityFields
-from docket.vault.entitystore import EntityStore, Planned
+from docket.vault.entitystore import EntityStore, Planned, RefusedError
 from docket.vault.vault import Vault
 from docket.web import curate_view, templating
 from docket.web.curate_view import PANEL, CurateState, CurateStateError, Facts
@@ -43,7 +44,11 @@ def key_id(key: str) -> str:
 
 def _context(facts: Facts, state: CurateState, typed: QueryParams | None = None) -> dict[str, Any]:
     view = curate_view.build(facts, state)
-    lifts = [(curate_view.stop_key(k, facts.lists), key_id(k)) for k in sorted(facts.stoplist)]
+    # No Lift on a hidden key: its line would commit the value again, and the store refuses it (DR-0464).
+    lifts = [
+        (curate_view.stop_key(k, facts.lists), key_id(k), not curate_view.hidden(k, facts.lists))
+        for k in sorted(facts.stoplist)
+    ]
     panel = curate_view.panel(facts, state, typed)
     missing = state.open is not None and panel is None
     return {"view": view, "lifts": lifts, "panel": panel, "missing": missing, "state": state, "tz": facts.tz} | {
@@ -148,11 +153,11 @@ def router(service: Service) -> APIRouter:
                 changed = await service.writer.run(
                     lambda: _decide(service, act, round_=round_, card_id=card_id, shown=shown, form=form)
                 )
-            except CurateStateError as e:
-                # What the edit form holds doesn't make an entity: the form again, as typed, naming why.
-                return await whole(request, opened, status=400, typed=form if act == "edit" else None, problem=str(e))
             except DocketError as e:
-                return await whole(request, CurateState(open=card_id), status=400, problem=str(e))
+                # A refused edit: the form again, as typed, naming why in the page's words.
+                if act == "edit":
+                    return await whole(request, opened, status=400, typed=form, problem=_said(e))
+                return await whole(request, CurateState(open=card_id), status=400, problem=_said(e))
             if changed:
                 return await whole(request, CurateState(open=card_id), status=409, changed=CHANGED)
             service.updater.poke()
@@ -304,7 +309,11 @@ async def _after(service: Service, round_: str) -> None:
         await service.updater.fresh()
     except DocketError:
         return
-    measured = await asyncio.to_thread(batch.measure, vault)
+    try:
+        measured = await asyncio.to_thread(batch.measure, vault)
+    except DocketError:
+        # The decision is written: a question file that doesn't read waits for `docket curate status --eval`.
+        return
 
     def save() -> None:
         now = batch.load(vault)
@@ -312,6 +321,14 @@ async def _after(service: Service, round_: str) -> None:
             batch.save(vault, now.model_copy(update={"after": measured}))
 
     await service.writer.run(save)
+
+
+def _said(error: DocketError) -> str:
+    """A refusal in the page's words: the store names a change of a changes file by its place, which the page's one
+    change doesn't need."""
+    if isinstance(error, RefusedError):
+        return "; ".join(re.sub(r"^change \d+: ", "", problem) for problem in error.problems)
+    return str(error)
 
 
 def _panel_error(message: str, status: int) -> Response:

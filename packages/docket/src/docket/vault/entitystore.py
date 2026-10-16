@@ -513,7 +513,16 @@ class EntityStore:
         return self.apply([], rejects=rejects, via=via)
 
     def lift(self, keys: Sequence[str], *, via: Via = "cli") -> Written:
-        """Take keys off the stoplist, a line each, in one commit."""
+        """Take keys off the stoplist, a line each, in one commit; refused whole when a key's text is on a never-store
+        list, since the line would commit it again (DR-0464)."""
+        lists = self.vault.config.never_store
+        problems = [
+            f"key {n}: its text is on the never-store {on} list; it stays on the stoplist"
+            for n, key in enumerate(dict.fromkeys(keys), start=1)
+            if (on := listed(curatelog.key_text(key), lists)) is not None
+        ]
+        if problems:
+            raise RefusedError(problems)
         with self.vault.writing():
             finished = self._finish()
             lines = self._lines([{"op": "lift", "key": key} for key in dict.fromkeys(keys)], "user", via)
@@ -536,6 +545,9 @@ class EntityStore:
                     problems.append(f"{op_id}: an undo or a lift can't be undone")
                 elif op_id in log.undone_by:
                     problems.append(f"{op_id}: already undone by {log.undone_by[op_id]}")
+                elif (on := listed(curatelog.key_text(line.key), self.vault.config.never_store)) is not None:
+                    # An undo's line would commit the value again (DR-0464): the file is the user's to edit by hand.
+                    problems.append(f"{op_id}: its text is on the never-store {on} list; edit the entity file by hand")
                 else:
                     targets.append(line)
             files = _Files(self.root)

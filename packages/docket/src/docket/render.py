@@ -267,7 +267,11 @@ def curate_round(view: BatchView) -> list[str]:
     if view.left_out:
         counts = sorted(view.left_out.items(), key=lambda kv: (-kv[1], kv[0]))
         lines.append("left out " + ", ".join(f"{n} {why}" for why, n in counts))
-    lines += [f"applied  by itself: {line.id}  {line.op} {line.entity or '-'}  {_part(line)}" for line in view.applied]
+    lines += [
+        f"applied  by itself: {line.id}  {line.op} {line.entity or '-'}  {_part(line)}"
+        + ("  not finished: the next write commits it" if line.id in view.unfinished else "")
+        for line in view.applied
+    ]
     for shown in view.cards:
         c = shown.card
         what = f"new {c.type}  {c.name} ({c.entity})" if c.kind == "new" else f"alias for {c.name} ({c.entity})"
