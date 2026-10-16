@@ -349,9 +349,13 @@ def test_the_curate_page_in_a_browser(curate_service: tuple[int, str], tmp_path:
         page.click("text=Start a round")
         expect(page.locator(".notice")).to_contain_text("A new round: 6 cards.")
         expect(page.locator("li.card")).to_have_count(6)
+        # The keys are docket.js's, a deferred script: the new page's cards show before it has run, and a key pressed
+        # then is lost. It has run once the page has finished parsing.
+        page.wait_for_load_state("domcontentloaded")
 
         # j moves to the first card and Enter opens it beside the list, its snippets cut now.
         page.keyboard.press("j")
+        expect(page.locator("li.card a.hit-link").first).to_be_focused()
         page.keyboard.press("Enter")
         expect(page.locator("#panel-title")).to_have_text("1. New term: Northwind")
         expect(page.locator(".snippet mark").first).to_have_text("Nortwin")
