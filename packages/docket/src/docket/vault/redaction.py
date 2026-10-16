@@ -11,7 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from docket.errors import DocketError
-from docket.vault.config import CONFIG_FILE, Redaction, VaultConfig, write_config
+from docket.vault import settings
+from docket.vault.config import Redaction, VaultConfig
 from docket.vault.vault import Vault
 
 CREDENTIALS = "credentials"
@@ -94,34 +95,30 @@ def _target(settings: Redaction, rule: str, on: bool) -> bool:
 
 
 def set_rule(vault: Vault, rule: str, on: bool) -> Switched:
-    """Turn one rule on or off in vault.yaml and commit it, under the vault lock."""
-    path = vault.root / CONFIG_FILE
-    with vault.writing():
-        text = path.read_bytes().decode("utf-8")
-        config = VaultConfig.load(path)
-        settings = config.redaction
-        pattern = _target(settings, rule, on)
-        result = Switched(rule=rule, on=on)
-        current = next(p.enabled for p in settings.patterns if p.name == rule) if pattern else getattr(settings, rule)
+    """Turn one rule on or off in vault.yaml and commit it, under the vault lock, through vault.yaml's one writer."""
+    result = Switched(rule=rule, on=on)
+    pattern = False
+
+    def edit(config: VaultConfig) -> VaultConfig:
+        nonlocal pattern
+        now = config.redaction
+        pattern = _target(now, rule, on)
+        current = next(p.enabled for p in now.patterns if p.name == rule) if pattern else getattr(now, rule)
         if current == on:
-            return result
+            return config
         if not on and rule == CREDENTIALS:
             result.notes.append(CREDENTIALS_OFF)
         if on:
             result.notes.append(TURNED_ON)
-        if not config.written_by_docket(text):
-            result.by_hand = by_hand(rule, on, pattern)
-            return result
         if pattern:
-            patterns = [p.model_copy(update={"enabled": on}) if p.name == rule else p for p in settings.patterns]
-            updated = settings.model_copy(update={"patterns": patterns})
+            patterns = [p.model_copy(update={"enabled": on}) if p.name == rule else p for p in now.patterns]
+            updated = now.model_copy(update={"patterns": patterns})
         else:
-            updated = settings.model_copy(update={rule: on})
-        write_config(vault.home, path, config.model_copy(update={"redaction": updated}).dump())
-        try:
-            result.commit = vault.commit([CONFIG_FILE], f"Config: redaction {rule} {word(on)}")
-        except BaseException:
-            write_config(vault.home, path, text)
-            raise
-        result.changed = True
-        return result
+            updated = now.model_copy(update={rule: on})
+        return config.model_copy(update={"redaction": updated})
+
+    done = settings.rewrite(vault, edit, f"Config: redaction {rule} {word(on)}", via="cli")
+    if done.by_hand:
+        result.by_hand = by_hand(rule, on, pattern)
+    result.changed, result.commit = done.changed, done.commit
+    return result

@@ -612,7 +612,7 @@ change lands on whoever uses that vendor, while the core still checks every rid 
 | Staging | records waiting for the gate: classify, cut, drop, promote; held recordings listed with the command that releases each at the owner's console | 1 |
 | Curate | the weekly round of proposals: accept, edit, reject, undo; what tier 1 applied; the log and the stoplist | 1 |
 | Sync | runs, failures, cursors, rate limits, what needs a Claude session | 1 |
-| Settings | sources, never-store lists, models, the Claude API key, a spend cap, redaction rules | 1 |
+| Settings | sources, never-store lists, models, redaction rules; the Claude API key and a spend cap later | 1 |
 | Recording | the summary next to the transcript, click a line to read and play it; the two transcripts side by side | 2 |
 | Briefs | per person, project and topic; the decision log per stream | 2 |
 | Today, Queue, Ledger, Meetings | the day: meetings with briefs and points, triage, items with their raw source one click away | 3 |
@@ -647,6 +647,10 @@ How it is built (DR-0170 to DR-0176):
   click. Every write is a same-origin form post on the writer thread, and a decision is refused when the round isn't
   this machine's current one or the entity file changed since the card was shown (DR-0473). Its URL holds the open
   card, the edit form and what the last change did.
+- The Settings page shows each source, the never-store lists (their values only with `show=lists`), redaction and
+  this machine's models (DR-0505, DR-0510). Pages make only the `vault.yaml` changes that keep more out, through the
+  CLI's writer and its `loosens()` check; every other change is a loosening, named as its command or its line and
+  never made by a page (DR-0506). The Claude API key and a spend cap come with the features they set.
 
 ## 11. Claude first
 

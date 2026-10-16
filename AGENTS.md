@@ -128,6 +128,9 @@ agrees in the issue or, under an autonomy grant, with its decision recorded as p
   for `mcp__.*`, with its line prefixes (DR-0242);
 - the release's yes: only the owner releases a held recording, at their own console, by typing back a code, and no
   page, route or tool releases one (DR-0202, DR-0382). What a release lets in reaches git for good.
+- the gate's loosening: pages make only the `vault.yaml` changes on DR-0506's list (a never-store value added, a
+  redaction rule or pattern turned on, a source made stricter or turned off), held by `loosens()` and a scan; every
+  other change is named, never made by a page, route or tool. What a loosening lets in reaches git for good.
 
 Each lands with its decision entry, marked `cost: one-way`.
 

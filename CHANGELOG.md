@@ -8,6 +8,10 @@ Unreleased in the same PR.
 
 ### Added
 
+- The Settings page, `/settings` in the web app: each source's settings, the never-store lists (their values only
+  when you ask), redaction and this machine's models in one place, with every change named as the command to run or
+  the `vault.yaml` line to change. No page ever makes a change that lets more in: turning a rule off, taking a
+  never-store value off, or making a source looser stays at your console or in your editor.
 - Tier 1 of curation: on the vault's primary machine, a round first applies by itself an address or a chat id
   that mail or chat writes beside a known full name, a name a system shows beside an id an entity lists, and a
   spelling two engines agree on, each logged and undoable; anything less certain becomes a card. A shared sender

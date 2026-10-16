@@ -33,6 +33,9 @@ PAGES = [
     "/curate",
     "/curate?open=abcdef",
     "/curate?open=nope",
+    "/settings",
+    "/settings?show=lists",
+    "/settings?show=nope",
 ]
 FRAGMENTS = [
     "/search/results?query=pallet+labels",

@@ -29,6 +29,8 @@ reading:
   - { path: packages/docket/src/docket/web/curate.py, role: contract, note: "the Curate page's writes: a round, accept, edit, reject, undo and lift as form posts on the writer thread, each decision checked against the round and the entity file it was shown with, logged via page (DR-0473)" }
   - { path: packages/docket/src/docket/documents/records.py, role: contract, note: "a folder source's records, a one-way door: the rid shape and its parts, titles, native's identity and people, gone versions and what anchors on them resolve against (DR-0482, DR-0483, DR-0487, DR-0491)" }
   - { path: packages/docket/src/docket/documents/scan.py, role: guide, note: "docket scan: the listing's skips, the cache and change detection, gone and returning versions, the guard, batches into the gate (DR-0486, DR-0487)" }
+  - { path: packages/docket/src/docket/vault/settings.py, role: contract, note: "vault.yaml's one writer and the door: rewrite only in Docket's form, loosens() as the allowlist every page write passes, what pages may import, the lines to paste (DR-0506, DR-0507)" }
+  - { path: packages/docket/src/docket/web/settings.py, role: contract, note: "the Settings page: the sources, never-store lists, redaction and this machine's models; every change it doesn't make named as its command or its line; never-store values only with show=lists (DR-0505, DR-0506)" }
 decisions:
   - id: DR-0019
     title: The vault's layout and run-file names are fixed

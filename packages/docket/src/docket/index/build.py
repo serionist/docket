@@ -683,6 +683,26 @@ def open_index(vault: Vault, timeout: float = BUSY_SECONDS) -> sqlite3.Connectio
     return conn
 
 
+def vector_counts(vault: Vault) -> list[VectorCoverage]:
+    """Each model's vectors in the index, of how many chunks: the counts alone, for a page that shows them on every
+    load, without status()'s hash of every doc and entity file. Empty when there is no index this Docket can read."""
+    try:
+        conn = open_index(vault)
+    except DocketError:
+        return []
+    try:
+        return [
+            VectorCoverage(model=table.model, have=have, total=total)
+            for table in vectors.tables(conn)
+            for have, total in [vectors.coverage(conn, table)]
+        ]
+    except sqlite3.Error:
+        # A lock an update holds past the wait: the page leaves the vectors out rather than fail.
+        return []
+    finally:
+        conn.close()
+
+
 def status(vault: Vault) -> IndexStatus:
     check_sqlite()
     db = db_path(vault)

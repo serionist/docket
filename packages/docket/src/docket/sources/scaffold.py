@@ -16,13 +16,13 @@ from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Literal
 
-import yaml
 from pydantic import ValidationError
 
 from docket import userconfig
 from docket.errors import DocketError
 from docket.sources.runner import SKILLS, consuming_repo, skill_folder
-from docket.vault.config import CONFIG_FILE, SourceConfig, VaultConfig, write_config
+from docket.vault import settings
+from docket.vault.config import SourceConfig, VaultConfig
 from docket.vault.git import toplevel
 from docket.vault.records import source_name_problem
 from docket.vault.staging import retry
@@ -208,27 +208,19 @@ def _write_folder(folder: Path, files: dict[str, bytes]) -> None:
 
 
 def _register(vault: Vault, name: str, entry: SourceConfig) -> tuple[bool, str | None, str | None]:
-    """`sources.<name>` in vault.yaml, rewritten and committed only when the file is exactly what Docket would write
-    for it, now or in the form before the redaction switches were split; otherwise the entry, to paste."""
-    path = vault.root / CONFIG_FILE
-    with vault.writing():
-        text = path.read_bytes().decode("utf-8")
-        config = VaultConfig.load(path)
-        if not config.written_by_docket(text):
-            return False, block(name, entry), None
-        updated = config.model_copy(update={"sources": {**config.sources, name: entry}}).dump()
-        if updated == text:
-            return True, None, None
-        write_config(vault.home, path, updated)
-        try:
-            commit = vault.commit([CONFIG_FILE], f"Config: source {name}")
-        except BaseException:
-            write_config(vault.home, path, text)
-            raise
-        return True, None, commit
+    """`sources.<name>` in vault.yaml, through vault.yaml's one writer: rewritten and committed only when the file is
+    exactly what Docket would write for it, now or in the form before the redaction switches were split; otherwise the
+    entry, to paste."""
+
+    def edit(config: VaultConfig) -> VaultConfig:
+        return config.model_copy(update={"sources": {**config.sources, name: entry}})
+
+    done = settings.rewrite(vault, edit, f"Config: source {name}", via="cli")
+    if done.by_hand:
+        return False, block(name, entry), None
+    return True, None, done.commit
 
 
 def block(name: str, entry: SourceConfig) -> str:
     """The entry as the lines to paste under `sources:` in vault.yaml."""
-    body = yaml.safe_dump({name: entry.model_dump(mode="json")}, sort_keys=False, default_flow_style=False)
-    return "".join(f"  {line}\n" for line in body.splitlines())
+    return settings.source_block(name, entry)

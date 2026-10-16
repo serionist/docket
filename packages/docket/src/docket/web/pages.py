@@ -78,7 +78,14 @@ NAV: tuple[Group, ...] = (
                 "runs, failures, cursors, rate limits, what needs a Claude session",
                 built=True,
             ),
-            Page("settings", "Settings", "/settings", 1, "sources, never-store lists, models, redaction rules"),
+            Page(
+                "settings",
+                "Settings",
+                "/settings",
+                1,
+                "sources, never-store lists, models, redaction rules",
+                built=True,
+            ),
         ),
     ),
 )
@@ -116,10 +123,20 @@ CURATE_KEYS: Keys = (
 )
 
 # The keys each page answers, which its dialog lists, and the few its footer names, as (keys, a word).
-PAGE_KEYS: dict[str, Keys] = {"search": KEYS, "sync": SYNC_KEYS, "staging": STAGING_KEYS, "curate": CURATE_KEYS}
+# The Settings page has nothing to move through; no key writes.
+SETTINGS_KEYS: Keys = ((("?",), "these keys"),)
+
+PAGE_KEYS: dict[str, Keys] = {
+    "search": KEYS,
+    "sync": SYNC_KEYS,
+    "staging": STAGING_KEYS,
+    "curate": CURATE_KEYS,
+    "settings": SETTINGS_KEYS,
+}
 HINTS: dict[str, Keys] = {
     "search": ((("/",), "search"), (("j", "k"), "move"), (("Enter",), "open"), (("?",), "keys")),
     "sync": ((("?",), "keys"),),
     "staging": ((("j", "k"), "move"), (("Enter",), "open"), (("?",), "keys")),
     "curate": ((("j", "k"), "move"), (("Enter",), "open"), (("?",), "keys")),
+    "settings": ((("?",), "keys"),),
 }
