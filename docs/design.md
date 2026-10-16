@@ -255,7 +255,8 @@ flowchart TB
 **Stack:** Python 3.12 and uv; SQLite with FTS5 (and sqlite-vec for vectors); JSONL for the raw log; age for media
 encryption; Pydantic for schemas; the MCP Python SDK; FastAPI with server-rendered HTML and HTMX (no front-end build);
 faster-whisper; ONNX Runtime with tokenizers for the embedder, in an environment `docket models install` builds
-(DR-0331, DR-0332). MCP servers it launches are pinned to a version.
+(DR-0331, DR-0332); pypdf, openpyxl and Docket's own docx and pptx readers on defusedxml for documents' text, in a child
+process with limits (DR-0484, DR-0485). MCP servers it launches are pinned to a version.
 
 ## 5. The data layer
 
