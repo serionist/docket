@@ -2,22 +2,32 @@
 
 from __future__ import annotations
 
-import dataclasses
 import re
 from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 from docket_testkit import copy_vault, index_template, make_record
-from models_kit import FAKE, FAKE_RERANKER, fake_command, make_env, needs_vectors
+from models_kit import (
+    FAKE,
+    FAKE_RERANKER,
+    GPU_RERANKER,
+    choose,
+    choose_fake,
+    fake_command,
+    make_env,
+    needs_vectors,
+    rerank_worker,
+    timing,
+    with_reranker,
+)
 
-from docket import cli, userconfig
+from docket import cli
 from docket.cli import main
 from docket.errors import DocketError
 from docket.index.embedpass import PassReport
-from docket.models import catalogue, install, runtime
-from docket.models.catalogue import E5_SMALL, Reranker
+from docket.models import install, runtime
+from docket.models.catalogue import E5_SMALL
 from docket.models.client import Worker
 from docket.models.config import Choice
 from docket.service import client
@@ -27,12 +37,6 @@ from docket.vault.vault import Vault
 def run(capsys: pytest.CaptureFixture[str], *args: str) -> tuple[int, str]:
     code = main(["models", *args])
     return code, capsys.readouterr().out
-
-
-def choose(block: dict[str, Any]) -> None:
-    path = userconfig.config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump({"models": block}), encoding="utf-8")
 
 
 def test_status_says_models_are_off_and_how_to_turn_them_on(capsys: pytest.CaptureFixture[str]) -> None:
@@ -116,11 +120,6 @@ def vault(template: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Va
     v = copy_vault(template, tmp_path)
     v.write_run("chat", [make_record(rid=ZEBRA, container="chat:C0OPS", text="Quarterly zebra migration budget.")])
     return v
-
-
-def choose_fake(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(catalogue.EMBEDDERS, FAKE.name, FAKE)
-    choose({"device": "cpu", "embedder": FAKE.name})
 
 
 def at(vault: Vault, capsys: pytest.CaptureFixture[str], *args: str) -> tuple[int, str]:
@@ -290,33 +289,6 @@ def test_status_shows_the_vaults_vectors_and_the_services_worker(
 
 
 # -- the reranker (#88) ------------------------------------------------------------------------------------------------
-
-GPU_RERANKER = dataclasses.replace(FAKE_RERANKER, name="fake-gpu-reranker", device="cuda")
-
-
-def timing(reranker: Reranker, seconds: float | None = 0.42, why: str | None = None) -> dict[str, Any]:
-    return {
-        "name": reranker.name,
-        "revision": reranker.revision,
-        "pairs": reranker.pairs,
-        "seconds": seconds,
-        "why": why,
-    }
-
-
-def rerank_worker(monkeypatch: pytest.MonkeyPatch, **knobs: Any) -> None:
-    def worker(choice: Choice, device: str, rerank: dict[str, Any] | None = None) -> Worker:
-        return Worker(fake_command(**({"reranker": rerank, **knobs} if rerank is not None else {})))
-
-    monkeypatch.setattr(runtime, "worker_for", worker)
-
-
-def with_reranker(monkeypatch: pytest.MonkeyPatch, reranker: Reranker = FAKE_RERANKER, seconds: float = 0.42) -> None:
-    monkeypatch.setitem(catalogue.EMBEDDERS, FAKE.name, FAKE)
-    monkeypatch.setitem(catalogue.RERANKERS, reranker.name, reranker)
-    choose({"device": reranker.device, "embedder": FAKE.name, "reranker": reranker.name})
-    make_env(reranker.device, reranker=timing(reranker, seconds))
-    monkeypatch.setattr(runtime, "missing_files", lambda model: [])
 
 
 def test_status_and_its_check_show_the_reranker(

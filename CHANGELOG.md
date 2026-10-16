@@ -128,6 +128,9 @@ Unreleased in the same PR.
   On 50 MB of call recordings in one source, `verify` went from about 580 ms to 5 ms and a `doc_put` from about
   1.1 s to 0.3 s, the rest of it git. After a sync or a pull the index hasn't seen yet, they load the source as
   before.
+- `docket search` asks the running service when it serves the vault with the same model, so on a GPU machine its hits
+  are reranked as Claude's are, with no worker to start. With no service for the vault, `--no-update` or
+  `--no-models`, it searches by itself as before; the output reads the same either way.
 - Reading a record no longer loads its source's whole raw log when the search index is current for that source: it
   reads the record's own lines where the index says they are. On 50 MB of call recordings in one source, a read went
   from about 750 ms to under 10 ms, and so did the check whether a `plaud:<path>` is a record. The index rebuilds
