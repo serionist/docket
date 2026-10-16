@@ -111,5 +111,5 @@ def test_the_reranked_floors_are_a_file_of_their_own_under_the_same_rules(repo: 
     assert evalfloors.check(repo, None, rerank=True)[0] == ["eval exact-name recall: 0.90 is below its floor of 0.92"]
     numbers.write_text(json.dumps(FLOORS), encoding="utf-8")
     assert evalfloors.check(repo, None, rerank=True)[0] == []
-    # The repo's own file starts by printing a rise, until three CI runs agree (DR-0458).
-    assert not evalfloors.above_fails(Path(__file__).resolve().parents[3], evalfloors.FLOORS_RERANK)
+    # The repo's own file fails a rise too, since three CI runs agreed (DR-0458).
+    assert evalfloors.above_fails(Path(__file__).resolve().parents[3], evalfloors.FLOORS_RERANK)
