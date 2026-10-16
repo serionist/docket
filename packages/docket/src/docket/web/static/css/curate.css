@@ -1,0 +1,62 @@
+/* The Curate page: the round's cards beside the open one, what was applied, the log and the stoplist, in Staging's
+   look: its cards, its panel and its buttons. */
+@layer pages {
+  .curate { display: grid; gap: var(--space-4); }
+  .curate-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-2) var(--space-4); }
+  .curate-head h1 { font-size: var(--text-xl); font-weight: 650; }
+  .curate .minutes { color: var(--muted); font-size: var(--text-sm); }
+  .curate .lead { font-size: var(--text-lg); }
+  .curate .layout { margin-top: 0; }
+  .round-start { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); }
+  .round-start .hint { margin-top: 0; }
+
+  /* A card's state is its left border's colour and its word. */
+  .card.state-open { --state: var(--warn); }
+  .card.state-accepted, .card.state-done { --state: var(--ok); }
+  .card.state-rejected { --state: var(--line-strong); }
+  .spellings { display: flex; flex-wrap: wrap; gap: 2px var(--space-3); margin-top: 2px; font-size: var(--text-sm); }
+  .spelling, .spelling-list li { overflow-wrap: anywhere; min-width: 0; }
+  .spellings .trust, .spelling-list .meta { color: var(--muted); font-size: var(--text-xs); }
+
+  /* The open card. */
+  .card-panel h3 { margin: var(--space-3) 0 var(--space-1); font-size: var(--text); }
+  .spelling-list { display: grid; gap: 2px; }
+  .snippet { margin: var(--space-2) 0; padding: var(--space-2) var(--space-3); background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--line-strong); border-radius: var(--radius); }
+  .snippet blockquote { margin: 0; }
+  .snippet p { overflow-wrap: anywhere; }
+  .snippet figcaption { margin-top: 4px; font-size: var(--text-xs); overflow-wrap: anywhere; }
+  .edit-form { display: grid; gap: var(--space-3); margin-top: var(--space-3); }
+  .edit-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--space-2) var(--space-3); }
+  .edit-fields label { display: grid; gap: 2px; font-size: var(--text-sm); min-width: 0; }
+  .edit-fields input, .edit-fields select { min-width: 0; }
+  .edit-form fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+  .edit-form legend { font-size: var(--text-xs); color: var(--muted); margin-bottom: 4px; }
+  .edit-spelling { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); align-items: center; padding: 3px 0; }
+  .edit-spelling label { display: inline-flex; gap: var(--space-1); align-items: center; min-width: 0; overflow-wrap: anywhere; }
+
+  /* The log, the stoplist and what was applied: one line each, wrapping. */
+  .log-lines, .stop-lines, .dropped { display: grid; gap: 0; }
+  .log-line, .stop-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px var(--space-2);
+    padding: var(--space-1) 0;
+    border-bottom: 1px solid var(--line);
+    font-size: var(--text-sm);
+    min-width: 0;
+  }
+  .log-line .op { font-weight: 600; }
+  .log-line .part, .stop-line .locator { overflow-wrap: anywhere; min-width: 0; }
+  .log-line .meta { color: var(--muted); font-size: var(--text-xs); }
+  .log-line form, .stop-line form { margin-left: auto; }
+  .dropped li { font-size: var(--text-sm); overflow-wrap: anywhere; }
+  .measures { border-collapse: collapse; font-size: var(--text-sm); }
+  .measures th, .measures td { padding: 2px var(--space-3) 2px 0; text-align: left; }
+  .measures thead th { color: var(--muted); font-weight: 600; }
+
+  @media (max-width: 600px) {
+    .curate .actions .button, .curate .actions form, .round-start form, .round-start .button { width: 100%; }
+    .log-line form, .stop-line form { margin-left: 0; }
+  }
+}

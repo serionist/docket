@@ -26,6 +26,7 @@ reading:
   - { path: packages/docket/src/docket/vault/entitystore.py, role: contract, note: "entity writes: the changes file, the checks, apply and undo, finishing a stopped write (DR-0462 to DR-0464, DR-0476)" }
   - { path: packages/docket/src/docket/documents/extract.py, role: contract, note: "the documents' reader in a child process: one file at a time, the time limit and memory cap, a fresh child every 100 files, what came of each file (DR-0485)" }
   - { path: packages/docket/src/docket/curate/batch.py, role: contract, note: "a curate round: its batch in the vault's private folder, disposable and not a door; card states from the log; decisions by card id; the measures (DR-0468, DR-0474, DR-0475)" }
+  - { path: packages/docket/src/docket/web/curate.py, role: contract, note: "the Curate page's writes: a round, accept, edit, reject, undo and lift as form posts on the writer thread, each decision checked against the round and the entity file it was shown with, logged via page (DR-0473)" }
 decisions:
   - id: DR-0019
     title: The vault's layout and run-file names are fixed

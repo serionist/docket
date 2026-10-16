@@ -62,7 +62,14 @@ NAV: tuple[Group, ...] = (
                 "records waiting for the gate: classify, cut, drop, promote",
                 built=True,
             ),
-            Page("curate", "Curate", "/curate", 1, "the weekly batch of proposals"),
+            Page(
+                "curate",
+                "Curate",
+                "/curate",
+                1,
+                "the weekly round of proposals: accept, edit, reject, undo",
+                built=True,
+            ),
             Page(
                 "sync",
                 "Sync",
@@ -100,10 +107,19 @@ STAGING_KEYS: Keys = (
     (("?",), "these keys"),
 )
 
+# The Curate page's cards answer the same keys; no key decides a card.
+CURATE_KEYS: Keys = (
+    (("j", "k"), "next, previous card"),
+    (("Enter", "o"), "open the card beside the list"),
+    (("Escape",), "close the card"),
+    (("?",), "these keys"),
+)
+
 # The keys each page answers, which its dialog lists, and the few its footer names, as (keys, a word).
-PAGE_KEYS: dict[str, Keys] = {"search": KEYS, "sync": SYNC_KEYS, "staging": STAGING_KEYS}
+PAGE_KEYS: dict[str, Keys] = {"search": KEYS, "sync": SYNC_KEYS, "staging": STAGING_KEYS, "curate": CURATE_KEYS}
 HINTS: dict[str, Keys] = {
     "search": ((("/",), "search"), (("j", "k"), "move"), (("Enter",), "open"), (("?",), "keys")),
     "sync": ((("?",), "keys"),),
     "staging": ((("j", "k"), "move"), (("Enter",), "open"), (("?",), "keys")),
+    "curate": ((("j", "k"), "move"), (("Enter",), "open"), (("?",), "keys")),
 }

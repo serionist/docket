@@ -19,8 +19,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Request
-from starlette.datastructures import QueryParams
-from starlette.responses import PlainTextResponse, RedirectResponse, Response
+from starlette.responses import RedirectResponse, Response
 
 from docket.errors import DocketError
 from docket.service.state import Service
@@ -34,13 +33,7 @@ from docket.web import staging_view, templating
 from docket.web.shell import shell
 from docket.web.staging_view import PANEL, StagingState, StagingStateError
 
-FAILED = (
-    "Something failed in Docket. The service log says what, and never holds your words; docket service status names it."
-)
 CHANGED = "This record changed since you opened it: nothing was written. Here it is as it stands now."
-# A form's body: a few hundred numbers at most. Anything bigger isn't the page's.
-MAX_BODY = 64 * 1024
-FORM = "application/x-www-form-urlencoded"
 
 
 @dataclass(frozen=True)
@@ -160,12 +153,12 @@ def router(service: Service) -> APIRouter:
             headers = templating.history(request, state.url(), staging_view.canonical)
             return templating.page("staging/_panel.html", context, headers=headers, referrer=templating.POSTS_FORMS)
 
-        return await templating.safely(request, PANEL, answer, lambda: _panel_error(FAILED, 500))
+        return await templating.safely(request, PANEL, answer, lambda: _panel_error(templating.FAILED, 500))
 
     @web.post("/staging/classify", include_in_schema=False)
     async def staging_classify(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
         async def answer() -> Response:
-            form = await _form(request)
+            form = await templating.read_form(request)
             if isinstance(form, Response):
                 return form
             try:
@@ -202,7 +195,7 @@ def router(service: Service) -> APIRouter:
     @web.post("/staging/promote", include_in_schema=False)
     async def staging_promote(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
         async def answer() -> Response:
-            form = await _form(request)
+            form = await templating.read_form(request)
             if isinstance(form, Response):
                 return form
             try:
@@ -246,23 +239,6 @@ def _classify(service: Service, key: str, label: Label, state: StagingState, sho
             cuts = staging_view.chosen_cuts(staging_view.read_record(staged.record, redactor), state)
         gate.classify(key, label, cuts, by="user")
     return False
-
-
-async def _form(request: Request) -> QueryParams | Response:
-    """A form post's fields, read here with the standard library's rules: urlencoded, UTF-8, at most MAX_BODY. A form
-    with no fields may come with no body and no type."""
-    kind = request.headers.get("content-type", "").split(";")[0].strip().lower()
-    body = bytearray()
-    async for chunk in request.stream():
-        body += chunk
-        if len(body) > MAX_BODY:
-            return PlainTextResponse("a form post is at most 64 KB", status_code=413)
-    if body and kind != FORM:
-        return PlainTextResponse("a form post is application/x-www-form-urlencoded", status_code=415)
-    try:
-        return QueryParams(body.decode("utf-8"))
-    except UnicodeDecodeError:
-        return PlainTextResponse("a form post is UTF-8", status_code=400)
 
 
 def _panel_error(message: str, status: int) -> Response:

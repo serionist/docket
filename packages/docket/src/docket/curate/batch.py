@@ -27,7 +27,7 @@ from docket.curate.schedule import DUE, last_round, minutes, now_utc, round_id
 from docket.errors import DocketError
 from docket.index.build import open_index
 from docket.vault import curatelog
-from docket.vault.curatelog import AliasFields, Change, EntityFields, Line, folded
+from docket.vault.curatelog import AliasFields, Change, EntityFields, Line, Via, folded
 from docket.vault.entities import load_entities
 from docket.vault.entitystore import EntityStore, Planned, Reject, Written
 from docket.vault.home import make_private
@@ -89,19 +89,25 @@ def save(vault: Vault, batch: Batch) -> None:
 def start(vault: Vault) -> Batch:
     """Start a round: the index brought up to date, the miner over it, the question set measured, the batch kept."""
     index.update(vault)
+    batch = build(vault)
+    save(vault, batch)
+    return batch
+
+
+def build(vault: Vault) -> Batch:
+    """A new round from the index as it is: the miner over it and the question set measured, nothing written. The
+    service brings the index up to date first, runs this beside the writer, and only the save on it (DR-0468)."""
     log = curatelog.fold(curatelog.read_all(vault.root).lines)
     with closing(open_index(vault)) as conn:
         mined = mine(conn, vault, log)
     now = now_utc()
-    batch = Batch(
+    return Batch(
         round=round_id(now, vault.machine),
         started=now,
         cards=mined.cards,
         left_out=dict(mined.left_out),
         before=measure(vault),
     )
-    save(vault, batch)
-    return batch
 
 
 def measure(vault: Vault) -> Measure | None:
@@ -176,7 +182,13 @@ def _aliases(card: Card) -> tuple[AliasFields, ...]:
 
 
 def accept(
-    vault: Vault, batch: Batch, cards: Sequence[Card], *, entity_type: str | None = None, entity_id: str | None = None
+    vault: Vault,
+    batch: Batch,
+    cards: Sequence[Card],
+    *,
+    entity_type: str | None = None,
+    entity_id: str | None = None,
+    via: Via = "cli",
 ) -> Written:
     """Accept cards as they are: a new entity with the card's name and aliases, or an entity's new aliases; --type and
     --id change one new-entity card's guesses."""
@@ -198,7 +210,7 @@ def accept(
         except ValidationError as e:
             raise DocketError(f"--type or --id: {e.errors()[0]['msg'].removeprefix('Value error, ')}") from None
         planned.append(Planned(card.n, fields.id, Change(entity=fields), batch.round, card.id))
-    return EntityStore(vault).apply(planned)
+    return EntityStore(vault).apply(planned, via=via)
 
 
 def rejects(card: Card, round_: str) -> list[Reject]:
@@ -215,9 +227,9 @@ def rejects(card: Card, round_: str) -> list[Reject]:
     ]
 
 
-def reject(vault: Vault, batch: Batch, cards: Sequence[Card]) -> Written:
+def reject(vault: Vault, batch: Batch, cards: Sequence[Card], *, via: Via = "cli") -> Written:
     _open(vault, batch, cards)
-    return EntityStore(vault).reject([r for card in cards for r in rejects(card, batch.round)])
+    return EntityStore(vault).reject([r for card in cards for r in rejects(card, batch.round)], via=via)
 
 
 def settle(vault: Vault, batch: Batch | None, planned: Sequence[Planned]) -> tuple[list[Planned], list[Reject]]:
@@ -250,11 +262,16 @@ def _texts(change: Change) -> list[str]:
     return [part.text for part in (change.alias, change.name) if part is not None]
 
 
+def wants_after(vault: Vault, batch: Batch) -> bool:
+    """Whether a measured round has its last card decided and no measure after yet."""
+    if batch.before is None or batch.after is not None:
+        return False
+    return "open" not in states(vault, batch, curatelog.read_all(vault.root).lines).values()
+
+
 def after(vault: Vault, batch: Batch) -> Batch:
     """Once a measured round's last card is decided, the question set again, after the index caught up."""
-    if batch.before is None or batch.after is not None:
-        return batch
-    if "open" in states(vault, batch, curatelog.read_all(vault.root).lines).values():
+    if not wants_after(vault, batch):
         return batch
     index.update(vault)
     batch = batch.model_copy(update={"after": measure(vault)})

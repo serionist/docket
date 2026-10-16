@@ -18,8 +18,9 @@ from zoneinfo import ZoneInfo
 
 from jinja2 import Environment, PackageLoader, StrictUndefined
 from markupsafe import Markup, escape
+from starlette.datastructures import QueryParams
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, Response
+from starlette.responses import HTMLResponse, PlainTextResponse, Response
 
 from docket.index.query import SPLIT_FIRST, SPLIT_SECOND
 from docket.index.text import HYPHENS, has_letter
@@ -43,6 +44,7 @@ STYLESHEETS = (
     "css/search.css",
     "css/sync.css",
     "css/staging.css",
+    "css/curate.css",
 )
 # A page that posts a form says so: under the service's floor, no-referrer, a browser sends Origin: null on a
 # same-origin post (Fetch's rule for serializing a request's origin), and the Guard refuses that as cross-origin.
@@ -50,6 +52,12 @@ POSTS_FORMS = "same-origin"
 SCRIPTS = (assets.HTMX, "js/docket.js")
 # A word of a snippet is marked when it is a query word, or starts with one this long (an inflected form).
 MARK_PREFIX = 4
+FAILED = (
+    "Something failed in Docket. The service log says what, and never holds your words; docket service status names it."
+)
+# A form's body: a few hundred fields at most. Anything bigger isn't a page's.
+MAX_BODY = 64 * 1024
+FORM = "application/x-www-form-urlencoded"
 
 ICONS: dict[str, str] = json.loads(files("docket.web").joinpath("icons.json").read_text(encoding="utf-8"))
 
@@ -181,3 +189,20 @@ def page(
         status_code=status,
         headers={"Content-Security-Policy": PAGE_CSP, "Cache-Control": "no-store", **own, **(headers or {})},
     )
+
+
+async def read_form(request: Request) -> QueryParams | Response:
+    """A form post's fields, read here with the standard library's rules: urlencoded, UTF-8, at most MAX_BODY. A form
+    with no fields may come with no body and no type."""
+    kind = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > MAX_BODY:
+            return PlainTextResponse("a form post is at most 64 KB", status_code=413)
+    if body and kind != FORM:
+        return PlainTextResponse("a form post is application/x-www-form-urlencoded", status_code=415)
+    try:
+        return QueryParams(body.decode("utf-8"))
+    except UnicodeDecodeError:
+        return PlainTextResponse("a form post is UTF-8", status_code=400)

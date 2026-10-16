@@ -379,6 +379,8 @@ misses today (chunks holding a spelling that a search for the name doesn't find)
 - The round lives in `.git/docket/curate/batch.json` (a folder vault: the host's git dir), per machine, and can be
   deleted: decisions are in the curate log.
 - Set `curate.questions` in Docket's config to your question file, and a round measures it before and after.
+- The web app's Curate page (`docket open /curate`) does the same in the browser: a round, each card opened
+  beside the list with its snippets, accept, edit and reject, and undo and lift from the log.
 
 ## The service
 

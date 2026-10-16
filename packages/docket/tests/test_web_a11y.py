@@ -30,6 +30,9 @@ PAGES = [
     "/staging?source=calls&state=pending&k=100",
     "/staging?open=" + "0" * 32,
     "/staging?k=0",
+    "/curate",
+    "/curate?open=abcdef",
+    "/curate?open=nope",
 ]
 FRAGMENTS = [
     "/search/results?query=pallet+labels",
@@ -40,6 +43,9 @@ FRAGMENTS = [
     "/staging/panel",
     "/staging/panel?open=" + "0" * 32,
     "/staging/panel?open=nope",
+    "/curate/panel",
+    "/curate/panel?open=abcdef",
+    "/curate/panel?open=nope",
 ]
 
 
