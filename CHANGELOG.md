@@ -137,6 +137,10 @@ Unreleased in the same PR.
 
 ### Changed
 
+- A doc that says something on the never-store keywords list only inside what a redaction rule hides, such as an
+  address a pattern redacts, a phone number or a password, is refused now, as a record holding it is dropped. A doc
+  redacted before still goes in again. `docket doc redact` names such a stored doc and leaves it for you to edit,
+  where it redacted it before.
 - An edit of `vault.yaml` not committed yet is committed on its own, as `Config: vault.yaml as edited`, before
   `docket redaction set`, `docket source new` or the Settings page commits a change to it, so each commit says what
   it did. An edit that lets more in than the committed file (a rule turned off, a source made looser, a never-store

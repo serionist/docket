@@ -12,6 +12,7 @@ from docket_testkit import configure, copy_vault, git, note, sh, shared, templat
 from docket import index, recall, render
 from docket.cli import main
 from docket.vault import derived
+from docket.vault.config import RedactionPattern
 from docket.vault.docstore import DocStore, Redacting, RedactReport
 from docket.vault.vault import Vault
 
@@ -205,6 +206,36 @@ def test_turning_phone_on_then_a_pass_redacts_the_numbers_stored_before(
     assert redact(vault) == 0
     assert capsys.readouterr().out.startswith("redacted  1 doc: 1 phone")
     assert PHONE not in at_head(vault, "processed/brief/cleo-test.md")
+
+
+EMAIL = RedactionPattern(name="email", pattern=r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+
+
+@pytest.mark.parametrize(
+    ("said", "rule", "keyword"),
+    [
+        ("write to dora@acme-supply.example", {"patterns": [EMAIL]}, "acme supply"),
+        (f"call her on {PHONE}", {"phone": True}, "555 010 0188"),
+        (f"the password: dora-example-{SECRET}", {"credentials": True}, "dora example"),
+    ],
+    ids=["email", "phone", "credential"],
+)
+def test_a_keyword_inside_what_a_rule_now_redacts_leaves_the_doc_as_it_is(
+    vault: Vault, capsys: pytest.CaptureFixture[str], said: str, rule: dict[str, Any], keyword: str
+) -> None:
+    # Put while the rule was off and the list didn't hold the keyword; then both change.
+    configure(vault.root, credentials=False)
+    recall.doc_put(Vault.open(vault.root), note("brief:dora", lines=[f"- {said} @12:08"]))
+    configure(vault.root, keywords=[keyword], **rule)
+    rel = "processed/brief/dora.md"
+    committed = at_head(vault, rel)
+    assert redact(vault) == 1
+    out = capsys.readouterr().out
+    # Redacting would hide the keyword in the rule's marker; the doc says it as written, so it is the user's to edit.
+    line = next(n for n, text in enumerate(committed.split("\n"), start=1) if said in text)
+    assert f"{rel}: line {line} says something on the never-store keywords list" in out
+    assert keyword not in out.lower()
+    assert at_head(vault, rel) == committed
 
 
 def test_a_vault_in_a_folder_says_whose_history_holds_the_old_text() -> None:

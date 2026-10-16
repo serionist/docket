@@ -3,9 +3,10 @@
 Every doc Docket commits passes here first (DR-0195): a put, a take-in of a hand edit, the notes import and `docket
 doc redact`. A doc is redacted line by line (DR-0197): each content line's trailing anchors are left out and put back
 byte for byte, the text parts are redacted joined by line breaks, as a transcript's segments are, and a line a match
-runs into becomes its marker whole. The never-store keywords are then held to the text as it would be committed
-(DR-0196), the built-in rules' markers left out, and a match refuses the doc, naming lines and the list, never the
-keyword. The frontmatter is never redacted: its values are ids, locators and the writer, as a record's ids are.
+runs into becomes its marker whole. The never-store keywords are held to the text as written, as intake holds a
+record, and as it would be committed (DR-0523), the built-in rules' markers left out, and a match refuses the doc,
+naming lines and the list, never the keyword. The frontmatter is never redacted: its values are ids, locators and the
+writer, as a record's ids are.
 """
 
 from __future__ import annotations
@@ -116,6 +117,15 @@ def body_hits(doc_type: str, body: str, lists: NeverStore) -> list[tuple[int, st
     return sorted(hits.items())
 
 
+def keyword_lines(doc_type: str, written: str, committed: str, lists: NeverStore) -> list[tuple[int, str]]:
+    """The body lines that say something on the keywords list as written or as they would be committed (DR-0523):
+    intake screens a record before it redacts it, so a keyword inside what a rule redacts still refuses the doc. A
+    line named both ways tells what the text as written says, which the writer can act on."""
+    hits = dict(body_hits(doc_type, committed, lists))
+    hits.update(body_hits(doc_type, written, lists))
+    return sorted(hits.items())
+
+
 def meta_hits(doc: ProcessedDoc, head: list[str], lists: NeverStore) -> list[DocProblem]:
     """The frontmatter keys whose values say something on the keywords list: the id's slug, entities, the slugs in
     supersedes, and old_paths. `head` is the frontmatter's lines, for each key's line number."""
@@ -136,9 +146,9 @@ def meta_hits(doc: ProcessedDoc, head: list[str], lists: NeverStore) -> list[Doc
 
 
 def check(doc: ProcessedDoc, head: list[str], redactor: Redactor, lists: NeverStore) -> tuple[ProcessedDoc, Redacted]:
-    """A doc for a put: redacted, then screened as it would be committed. A match raises DocRefusedError with the
-    never-store problems alone, so nothing else about the doc, and never the keyword, goes back. `head` is the
-    frontmatter's lines in the text as given."""
+    """A doc for a put: redacted, then screened as written and as it would be committed. A match raises DocRefusedError
+    with the never-store problems alone, so nothing else about the doc, and never the keyword, goes back. `head` is
+    the frontmatter's lines in the text as given."""
     redacted = redact(doc.meta.type, doc.body, redactor)
     first = doc.head_lines + 1
     problems = meta_hits(doc, head, lists)
@@ -149,7 +159,8 @@ def check(doc: ProcessedDoc, head: list[str], redactor: Redactor, lists: NeverSt
         plural = "s" if len(rules) > 1 else ""
         message = f"by: holds what the {', '.join(rules)} rule{plural} would redact; say who wrote it, nothing more"
         problems.append(DocProblem(key_line(head, "by"), message))
-    problems += [DocProblem(first + i, message) for i, message in body_hits(doc.meta.type, redacted.body, lists)]
+    said = keyword_lines(doc.meta.type, doc.body, redacted.body, lists)
+    problems += [DocProblem(first + i, message) for i, message in said]
     if problems:
         raise DocRefusedError(problems)
     return replace(doc, body=redacted.body), redacted
@@ -226,11 +237,12 @@ def _rules_added(before: str, after: str) -> list[str]:
 
 def hand_edit(doc_type: str, text: str, last: str | None, redactor: Redactor, lists: NeverStore) -> HandEdit:
     """A hand edit to commit: its body redacted, its frontmatter left as written. What stops it: a body line on the
-    keywords list, and in the frontmatter, which is committed as it stands, a comment, a key this Docket doesn't
-    know, a screened key, or a line the edit changed from the last rev (every line when there is none) that says a
-    keyword, or holds what redaction would hide. Lines are read whole and in runs of neighbours, as a body is, so a
-    label is its key and a value on the next line still counts. No marker is ever written into YAML, so redaction there
-    refuses. The one rev line the take-in rewrites is left out; any other rev line is read like a changed one."""
+    keywords list, as written or redacted, and in the frontmatter, which is committed as it stands, a comment, a key
+    this Docket doesn't know, a screened key, or a line the edit changed from the last rev (every line when there is
+    none) that says a keyword, or holds what redaction would hide. Lines are read whole and in runs of neighbours, as a
+    body is, so a label is its key and a value on the next line still counts. No marker is ever written into YAML, so
+    redaction there refuses. The one rev line the take-in rewrites is left out; any other rev line is read like a
+    changed one."""
     head, body = _parts(text)
     before = set(_parts(last)[0]) if last is not None else set[str]()
     redacted = redact(doc_type, "\n".join(body), redactor)
@@ -256,5 +268,6 @@ def hand_edit(doc_type: str, text: str, last: str | None, redactor: Redactor, li
                 plural = "s" if len(rules) > 1 else ""
                 stops.setdefault(line.n, f"holds what the {', '.join(rules)} rule{plural} would redact")
     first = len(head) + 1
-    stops.update((first + i, SAYS) for i, _ in body_hits(doc_type, redacted.body, lists))
+    written = "\n".join(body)
+    stops.update((first + i, SAYS) for i, _ in keyword_lines(doc_type, written, redacted.body, lists))
     return HandEdit("\n".join([*head, redacted.body]), redacted, sorted(stops.items()))

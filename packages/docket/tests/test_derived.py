@@ -174,12 +174,40 @@ def test_a_keyword_in_a_legacy_note_s_old_path_refuses_it() -> None:
     assert "old_paths: says something" in problem
 
 
-def test_a_keyword_only_in_an_anchor_s_rid_in_by_or_in_a_redacted_secret_passes() -> None:
+def test_a_keyword_only_in_an_anchor_s_rid_or_in_by_passes() -> None:
     passes("- the call [r:calls:dora-example-call@00:12]", covers="[calls:dora-example-call]")
     passes("- fine @12:08", by="claude, the dora example run")
-    stored = passes(f"- the password: dora-example-{HIDDEN} @12:08")
-    assert "[redacted:password]" in stored.body
-    assert "dora" not in stored.body.lower()
+
+
+EMAIL = Redaction(patterns=[RedactionPattern(name="email", pattern=r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")])
+
+
+@pytest.mark.parametrize(
+    ("line", "settings", "keyword"),
+    [
+        ("- write to dora@acme-supply.example @12:08", EMAIL, "acme supply"),
+        (f"- call her on {PHONE} @12:08", Redaction(phone=True), "555 010 0188"),
+        (f"- the password: dora-example-{HIDDEN} @12:08", Redaction(), "dora example"),
+    ],
+    ids=["email", "phone", "credential"],
+)
+def test_a_keyword_inside_what_a_rule_redacts_refuses_the_doc_and_its_marker_passes_again(
+    line: str, settings: Redaction, keyword: str
+) -> None:
+    redactor, lists = Redactor.from_config(settings), NeverStore(keywords=[keyword])
+    stored = body(line, redactor=redactor).body
+    # The rule's marker swallows the keyword: as committed, the line says nothing on the list.
+    assert "[redacted:" in stored and not derived.body_hits("recording-note", stored, lists)
+    # As written it does, as intake reads a record, so the doc is refused, naming the line and never the keyword.
+    problems = refused(line, lists=lists, redactor=redactor)
+    assert problems == ["line 8: says something on the never-store keywords list; leave it out"]
+    assert all(keyword not in p.lower() for p in problems)
+    text = f"---\nid: brief:dora\ntype: brief\nby: claude\n---\n{line}\n"
+    assert derived.hand_edit("brief", text, text, redactor, lists).stops == [(6, derived.SAYS)]
+    # A doc already redacted, its marker from an earlier put or pass, goes in again as it is.
+    assert passes(stored, lists=lists, redactor=redactor).body == stored + "\n"
+    kept = f"---\nid: brief:dora\ntype: brief\nby: claude\n---\n{stored}\n"
+    assert derived.hand_edit("brief", kept, kept, redactor, lists).stops == []
 
 
 def test_a_built_in_marker_is_left_out_and_any_other_marker_is_screened() -> None:
