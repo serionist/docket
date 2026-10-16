@@ -274,9 +274,7 @@ def test_a_rerank_skips_without_asking_while_a_slow_query_holds_the_worker(stopp
     assert w.query("query: slow") == "the models' worker didn't answer in 0.1 s" and w.busy
     sent = w._ids  # pyright: ignore[reportPrivateUsage]
     before = next(sent)
-    assert w.rerank("q", ["a"], None) == client.Skip(
-        "the models' worker is busy: this search's query passed its time", budget=True
-    )
+    assert w.rerank("q", ["a"], None) == client.Skip("the models' worker is busy: a query passed its time", budget=True)
     assert next(sent) == before + 1, "no request went to the worker"
     # The slow query's answer comes, and the worker is free again.
     deadline = time.monotonic() + 10

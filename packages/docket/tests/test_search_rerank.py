@@ -7,7 +7,7 @@ import re
 import sqlite3
 import time
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -119,22 +119,6 @@ def test_a_boosted_chunk_leads_its_tier_whatever_its_score(vault: Vault) -> None
     assert rids[0] == ALL_LOW[0] and rids[1] == BOOSTED[0], rids
 
 
-@needs_vectors
-def test_the_reranker_sees_the_chunks_behind_todays_hits_first(vault: Vault) -> None:
-    today = search(vault, "zebra budget", k=2, now=NOW, models=fake_models()[0])
-    conn = sqlite3.connect(build.db_path(vault))
-    passages = {
-        locator: rerank_passage(title, text)
-        for locator, title, text in conn.execute("SELECT locator, title, text FROM chunks")
-    }
-    conn.close()
-    models, worker = fake_models(pairs=4)
-    search(vault, "zebra budget", k=2, now=NOW, models=models)
-    sent = worker.reranks[0][1]
-    behind = [passages[loc] for h in hits(today) for loc in (h.locator, *h.also)]
-    assert sent[: len(behind)] == behind and len(sent) == 4
-
-
 @pytest.mark.parametrize(
     ("setup", "state", "why"),
     [
@@ -195,8 +179,8 @@ def test_eval_reranks_with_no_budget(vault: Vault) -> None:
 # -- #100's case, with the reranker on (DR-0338) -------------------------------------------------------------------
 
 
-@pytest.fixture
-def herd(vault: Vault) -> Iterator[tuple[Vault, set[int]]]:
+def make_herd(vault: Vault, count: int) -> tuple[Vault, set[int]]:
+    """`count` messages holding every word of "zebra migration", each in a channel of its own: their ids."""
     records = [
         make_record(
             n,
@@ -205,7 +189,7 @@ def herd(vault: Vault) -> Iterator[tuple[Vault, set[int]]]:
             text=f"Herd count {n}: the zebra migration passed the river.",
             ts=datetime(2026, 10, 9, 9, n % 60, tzinfo=UTC),
         )
-        for n in range(71)
+        for n in range(count)
     ]
     vault.write_run("chat", records, datetime(2026, 10, 9, 10, 0, tzinfo=UTC))
     update(vault)
@@ -213,7 +197,12 @@ def herd(vault: Vault) -> Iterator[tuple[Vault, set[int]]]:
     conn = sqlite3.connect(build.db_path(vault))
     words = {int(r[0]) for r in conn.execute("SELECT id FROM chunks WHERE text LIKE '%zebra migration%'")}
     conn.close()
-    yield vault, words
+    return vault, words
+
+
+@pytest.fixture
+def herd(vault: Vault) -> Iterator[tuple[Vault, set[int]]]:
+    yield make_herd(vault, 71)
 
 
 def scan_with(monkeypatch: pytest.MonkeyPatch, words: set[int], placed: dict[int, int] | None = None) -> None:
@@ -313,3 +302,173 @@ def test_a_search_with_fewer_hits_than_k_sends_every_chunk_it_has(vault: Vault) 
     assert (
         len(worker.reranks[0][1]) == result.rerank.pairs == len(hits(result)) + sum(len(h.also) for h in hits(result))
     )
+
+
+# -- the top N (DR-0453) ---------------------------------------------------------------------------------------------
+
+THREADS = 25
+
+
+@pytest.fixture
+def threads(vault: Vault) -> Vault:
+    """Chat threads whose every message holds "zebra budget": each message is a chunk, and so is each thread's window
+    of the parent and its replies, which the search folds into one hit with them."""
+    records = []
+    for t in range(THREADS):
+        parent = f"chat:C0TH/{1791500000 + t * 100}.000100"
+        at = datetime(2026, 10, 8, 8, 0, tzinfo=UTC) + timedelta(minutes=10 * t)
+        text = f"Zebra budget thread {t}."
+        records.append(make_record(t * 10, rid=parent, container="chat:C0TH", thread=parent, text=text, ts=at))
+        records += [
+            make_record(
+                t * 10 + r,
+                rid=f"chat:C0TH/{1791500000 + t * 100 + r}.000100",
+                container="chat:C0TH",
+                thread=parent,
+                text=f"Zebra budget thread {t}, reply {r}.",
+                ts=at + timedelta(minutes=r),
+            )
+            for r in range(1, 5)
+        ]
+    vault.write_run("chat", records, datetime(2026, 10, 8, 14, 0, tzinfo=UTC))
+    update(vault)
+    fill(vault, fake_models()[0])
+    return vault
+
+
+def chunks_of(vault: Vault) -> tuple[dict[tuple[str, str], int], dict[int, str]]:
+    """Each chunk's id by its locator and kind (a thread's window and its parent message share a locator), and the
+    text a pair carries for each id."""
+    conn = sqlite3.connect(build.db_path(vault))
+    try:
+        rows = conn.execute("SELECT id, locator, kind, title, text FROM chunks").fetchall()
+    finally:
+        conn.close()
+    return {(loc, kind): int(i) for i, loc, kind, _, _ in rows}, {
+        int(i): rerank_passage(t, x) for i, _, _, t, x in rows
+    }
+
+
+def capture(monkeypatch: pytest.MonkeyPatch) -> list[tuple[list[int], list[int]]]:
+    """What the search hands the top N's rule, today's chunks, and the top N it gets back."""
+    seen: list[tuple[list[int], list[int]]] = []
+    real = rerank.candidates
+
+    def candidates(today: list[int], weight_one: list[int], pairs: int) -> list[int]:
+        top = real(today, weight_one, pairs)
+        seen.append((list(today), top))
+        return top
+
+    monkeypatch.setattr(rerank, "candidates", candidates)
+    return seen
+
+
+@needs_vectors
+def test_todays_hits_go_to_the_reranker_first_then_the_chunks_folded_into_them(
+    threads: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    today = hits(search(threads, "zebra budget", k=5, now=NOW, models=fake_models()[0]))
+    ids, text = chunks_of(threads)
+    folded = sum(len(h.also) for h in today)
+    assert folded, "the threads fold chunks into today's hits"
+    seen = capture(monkeypatch)
+    models, worker = fake_models(pairs=60)
+    search(threads, "zebra budget", k=5, now=NOW, models=models)
+    walked, top = seen[0]
+    # The chunks behind today's 5 hits outnumber k: the hits' own come first, in their order, then those folded.
+    hit_ids = [ids[h.locator, h.kind] for h in today]
+    assert walked[:5] == hit_ids and len(walked) == 5 + folded and not set(walked[5:]) & set(hit_ids)
+    assert worker.reranks[0][1] == [text[c] for c in top] and top[: len(walked)] == walked
+
+
+@needs_vectors
+def test_every_one_of_todays_hits_is_scored_when_they_sit_on_more_chunks_than_the_reranker_takes(
+    threads: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # As the MCP search tool asks, at k 20, on a CPU's 30 pairs.
+    today = hits(search(threads, "zebra budget", k=20, now=NOW, models=fake_models()[0]))
+    ids, _ = chunks_of(threads)
+    assert len(today) == 20 and len(today) + sum(len(h.also) for h in today) > 30
+    seen = capture(monkeypatch)
+    models, worker = fake_models(pairs=30)
+    search(threads, "zebra budget", k=20, now=NOW, models=models)
+    top = seen[0][1]
+    assert len(worker.reranks[0][1]) == 30 and all(ids[h.locator, h.kind] in top for h in today)
+
+
+def test_the_full_weight_order_moves_a_chunk_only_the_vectors_found_after_every_all_words_hit() -> None:
+    found_by = {1: "all", 2: "all", 3: "all", 10: "vector", 11: "vector"}
+    fused = query._Fused([], [1, 2, 3], [], [10, 11, 1], found_by, {})  # pyright: ignore[reportPrivateUsage]
+    # At full weight 10 outscores 2 and 3 in the fusion alone; DR-0338 moves it after 3, at either weight.
+    assert fused.at(1.0) == [1, 2, 3, 10, 11]
+    assert fused.at(0.5) == [1, 2, 3, 10, 11]
+
+
+@needs_vectors
+def test_a_hit_of_todays_top_k_outside_the_weight_one_top_n_is_still_scored(
+    herd: tuple[Vault, set[int]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault, words = herd
+    ids, _ = chunks_of(vault)
+    scan_with(monkeypatch, words)
+    order = [
+        ids[h.locator, h.kind] for h in hits(search(vault, "zebra migration", k=100, now=NOW, models=fake_models()[0]))
+    ]
+    # The all-words hits 43 to 65, fiftieth and on in the vector list: below today's top 10 at half weight, above
+    # its tenth at full weight.
+    scan_with(monkeypatch, words, {order[r - 1]: 50 + r - 43 for r in range(43, 66)})
+    today = [
+        ids[h.locator, h.kind] for h in hits(search(vault, "zebra migration", k=10, now=NOW, models=fake_models()[0]))
+    ]
+    seen = capture(monkeypatch)
+    weights: dict[float, list[int]] = {}
+    real_at = query._Fused.at  # pyright: ignore[reportPrivateUsage]
+
+    def at(self: Any, weight: float) -> list[int]:
+        weights[weight] = real_at(self, weight)
+        return weights[weight]
+
+    monkeypatch.setattr(query._Fused, "at", at)  # pyright: ignore[reportPrivateUsage]
+    models, _ = fake_models(pairs=12)
+    search(vault, "zebra migration", k=10, now=NOW, models=models)
+    outside = [c for c in today if c not in weights[1.0][:12]]
+    assert outside, "a hit of today's top 10 the full weight order leaves out of its top 12"
+    top = seen[0][1]
+    assert all(c in top for c in today)
+
+
+@needs_vectors
+def test_with_fewer_all_words_hits_than_n_a_vector_only_chunk_scored_highest_stays_below_them(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 20 all-words hits under the CPU's 30 pairs: chunks only the vectors found fill the rest of the top N.
+    small, words = make_herd(vault, 20)
+    scan_with(monkeypatch, words)
+    favour(monkeypatch, lambda text: "zebra migration" not in text)
+    models, worker = fake_models(pairs=30)
+    found = hits(search(small, "zebra migration", k=10, now=NOW, models=models))
+    assert any("zebra migration" not in t for t in worker.reranks[0][1]), "a vector-only chunk was in the top N"
+    assert [h.found_by for h in found] == ["all"] * 10
+
+
+@needs_vectors
+def test_the_final_order_keeps_a_reranked_chunk_only_the_vectors_found_below_every_all_words_hit(
+    herd: tuple[Vault, set[int]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A top N holding a chunk only the vectors found while all-words hits stay outside it, as one folded into a hit
+    # can: the tiers order the top N, and DR-0338's move on the whole order keeps that chunk below the rest (B1).
+    vault, words = herd
+    scan_with(monkeypatch, words)
+    real = rerank.candidates
+
+    def candidates(today: list[int], weight_one: list[int], pairs: int) -> list[int]:
+        top = real(today, weight_one, pairs)
+        alone = next(c for c in weight_one if c not in words)
+        return [*top[:5], alone]
+
+    monkeypatch.setattr(rerank, "candidates", candidates)
+    favour(monkeypatch, lambda text: "zebra migration" not in text)
+    found = hits(search(vault, "zebra migration", k=100, now=NOW, models=fake_models(pairs=30)[0]))
+    by_all = [h.rank for h in found if h.found_by == "all"]
+    by_vector = [h.rank for h in found if h.found_by == "vector"]
+    assert len(by_all) == 71 and by_vector and max(by_all) < min(by_vector)

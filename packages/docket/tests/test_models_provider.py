@@ -94,7 +94,7 @@ def test_a_skip_that_isnt_the_budgets_is_said_and_not_counted() -> None:
     models, worker = fake_models(pairs=30)
     worker.rerank_answer = Skip("the reranker refused a request: ValueError")
     assert models.rerank("q", ["a"], 0.75) == "the reranker refused a request: ValueError"
-    busy = "the models' worker is busy: this search's query passed its time"
+    busy = "the models' worker is busy: a query passed its time"
     worker.rerank_answer = Skip(busy, budget=True)
     assert models.rerank("q", ["a"], 0.75) == busy
     # With no budget, a wait that ran out says the worker's words.

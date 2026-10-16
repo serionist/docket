@@ -315,7 +315,7 @@ class Worker:
         if hello.reranker.off is not None:
             return Skip(hello.reranker.off)
         if self.busy:
-            return Skip("the models' worker is busy: this search's query passed its time", budget=True)
+            return Skip("the models' worker is busy: a query passed its time", budget=True)
         if not texts:
             return []
         wait = RERANK_UNBOUNDED if deadline is None else max(0.0, deadline - now()) + RERANK_GRACE

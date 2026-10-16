@@ -844,7 +844,12 @@ def _fuse(lists: Sequence[tuple[Sequence[int], float]], found_by: dict[int, str]
     for ids, weight in lists:
         for n, chunk in enumerate(ids, start=1):
             score[chunk] = score.get(chunk, 0.0) + weight / (RRF + n)
-    ranked = sorted(score, key=lambda c: (-score[c], c))
+    return _after_all_words(sorted(score, key=lambda c: (-score[c], c)), found_by)
+
+
+def _after_all_words(ranked: list[int], found_by: dict[int, str]) -> list[int]:
+    """An order with every chunk only the vectors found after the last all-words hit (DR-0338): those before it move to
+    just after it, in their order."""
     last_all = max((n for n, chunk in enumerate(ranked) if found_by[chunk] == "all"), default=0)
     early = [chunk for chunk in ranked[:last_all] if found_by[chunk] == "vector"]
     if early:
@@ -853,17 +858,20 @@ def _fuse(lists: Sequence[tuple[Sequence[int], float]], found_by: dict[int, str]
 
 
 def _walked(ranked: list[int], rows: dict[int, _Row], k: int) -> list[int]:
-    """The chunks behind the first k hits of an order, walked as the search collapses them: every chunk up to the one
-    that would be the next hit, so a chunk folded into a hit's `also` is among them."""
+    """The chunks behind the first k hits of an order, walked as the search collapses them: the k hits' own chunks
+    first, then the chunks folded into their `also`, so every hit is among the reranker's pairs whenever k is N or less
+    (DR-0453)."""
     kept: list[_Row] = []
-    for n, chunk in enumerate(ranked):
+    folded: list[int] = []
+    for chunk in ranked:
         row = rows[chunk]
         if any(h.grp == row.grp and _overlaps(h, row) for h in kept):
+            folded.append(chunk)
             continue
         if len(kept) == k:
-            return ranked[:n]
+            break
         kept.append(row)
-    return ranked
+    return [h.id for h in kept] + folded
 
 
 def _boosted(conn: sqlite3.Connection, chunks: list[int], boosts: Sequence[str]) -> set[int]:
@@ -926,7 +934,9 @@ def _rerank(
         return fused.today, run
     head = rerank.order(top, scores, fused.found_by, _boosted(s.conn, top, boosts))
     chosen = set(head)
-    return head + [c for c in fused.today if c not in chosen], run
+    # The tiers keep the all-words hits of the top N above the rest of it; the move keeps them above a chunk only the
+    # vectors found anywhere in the order, one folded into a hit included (DR-0338).
+    return _after_all_words(head + [c for c in fused.today if c not in chosen], fused.found_by), run
 
 
 def _iso(value: datetime) -> str:
