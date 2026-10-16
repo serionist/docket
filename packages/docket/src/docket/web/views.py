@@ -17,7 +17,7 @@ from markupsafe import Markup
 
 from docket.index import EntityLabel, SearchResult
 from docket.index.query import DocRef, Group, Hit, QueryReading, RerankRun, VectorsRun
-from docket.index.text import words
+from docket.plaintext import words
 from docket.vault.anchors import parse_locator
 from docket.vault.processed import DOC_TYPES
 from docket.web import templating

@@ -7,13 +7,13 @@ both a terminal and Claude Code's screen would act on them.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
 from zoneinfo import ZoneInfo
 
 from docket.curate.batch import BatchView, Measure, Status
 from docket.curate.propose import UNSEEN, CardSpelling
 from docket.index import SearchResult
+from docket.plaintext import printable
 from docket.questions import EvalReport, Score
 from docket.recall import ReadResult, VerifyResult
 from docket.vault.anchors import format_time
@@ -22,13 +22,6 @@ from docket.vault.docstore import PutResult, RedactReport
 from docket.vault.entitystore import Written
 from docket.vault.processed import DocProblem
 from docket.vault.spans import Span
-
-# C0 and C1 control characters and DEL, but newline and tab.
-CONTROL = re.compile("[\\x00-\\x08\\x0b-\\x1f\\x7f-\\x9f]")
-
-
-def printable(text: str) -> str:
-    return CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", text)
 
 
 def text(lines: Iterable[str]) -> str:

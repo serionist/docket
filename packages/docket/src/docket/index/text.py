@@ -11,14 +11,13 @@ from __future__ import annotations
 import importlib
 import re
 import threading
-import unicodedata
 from collections.abc import Iterable, Sequence
 from importlib import metadata
 from typing import Any, NamedTuple
 
 from docket.index.languages import Language, Languages
+from docket.plaintext import fold, nfc
 
-WORD = re.compile(r"[^\W_]+")
 # The words and, between them, what separates them: re.split keeps the captured words at the odd places.
 PIECES = re.compile(r"([^\W_]+)")
 # A hyphen, the Unicode hyphen and the non-breaking one join two words; a dash or two hyphens don't.
@@ -34,15 +33,6 @@ class Joined(NamedTuple):
     word: str
     start: int
     end: int
-
-
-def nfc(text: str) -> str:
-    return unicodedata.normalize("NFC", text)
-
-
-def words(text: str) -> list[str]:
-    """The words of a text, lowercased, accents kept: the stemmers need them."""
-    return [w.lower() for w in WORD.findall(nfc(text))]
 
 
 def has_letter(run: Iterable[str]) -> bool:
@@ -72,12 +62,6 @@ def words_and_compounds(text: str) -> tuple[list[str], list[Joined]]:
         joined += _joins(ws, start, k)
         start = k
     return ws, joined
-
-
-def fold(word: str) -> str:
-    """A word as FTS5 stores it: lowercased, diacritics removed."""
-    decomposed = unicodedata.normalize("NFD", word)
-    return "".join(ch for ch in decomposed if not unicodedata.combining(ch)).lower()
 
 
 def dedupe(items: Iterable[str]) -> list[str]:

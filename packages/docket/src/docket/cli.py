@@ -26,7 +26,7 @@ from docket.models.client import Worker
 from docket.models.config import Choice
 from docket.models.provider import Models, Off
 from docket.models.runtime import open_models
-from docket.render import printable
+from docket.plaintext import printable
 from docket.service import client
 from docket.service.platforms import Installer
 from docket.service.token import Tokens

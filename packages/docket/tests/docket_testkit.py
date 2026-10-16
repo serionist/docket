@@ -869,7 +869,8 @@ def query_words(
     import random
 
     from docket.index.terms import Word, phrase_of, tokens
-    from docket.index.text import fold, words_and_compounds
+    from docket.index.text import words_and_compounds
+    from docket.plaintext import fold
 
     def forms(w: str) -> list[tuple[str, str]]:
         stemmed = [(lang.column, f) for lang in analyzer.languages for f in analyzer.forms(w, lang)]
@@ -896,7 +897,8 @@ def stem_every_word(
 ) -> tuple[set[int], set[int], set[int]]:
     """Which words and phrases a text holds, and which words only through a split, found the slow way: every word of
     the text and every compound it joins folded and stemmed, and every split looked for."""
-    from docket.index.text import fold, words_and_compounds
+    from docket.index.text import words_and_compounds
+    from docket.plaintext import fold
 
     def terms_of(w: str) -> set[tuple[str, str]]:
         return {("folded", fold(w)), *((lang.column, analyzer.stem(w, lang)) for lang in analyzer.languages)}

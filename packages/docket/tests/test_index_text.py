@@ -9,7 +9,8 @@ import pytest
 
 from docket.index import matching, text
 from docket.index.languages import code_of, hungarian_cases, hungarian_dative, language, resolve
-from docket.index.text import Analyzer, Stemmer, any_of, fold, phrase, prefix, quote, words, words_and_compounds
+from docket.index.text import Analyzer, Stemmer, any_of, phrase, prefix, quote, words_and_compounds
+from docket.plaintext import fold, words
 
 
 def fts_words(value: str) -> list[str]:

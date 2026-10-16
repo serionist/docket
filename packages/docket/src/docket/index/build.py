@@ -43,9 +43,10 @@ from docket.index.chunks import (
 )
 from docket.index.languages import Languages, resolve
 from docket.index.schema import check_sqlite, create, stale
-from docket.index.text import Analyzer, fold, words
+from docket.index.text import Analyzer
 from docket.models import config as models_config
 from docket.models.provider import Off
+from docket.plaintext import fold, words
 from docket.vault import legacy
 from docket.vault.entities import entity_files, load_entities
 from docket.vault.processed import doc_path, parse_doc

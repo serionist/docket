@@ -29,7 +29,8 @@ from dataclasses import dataclass
 from typing import NamedTuple
 
 from docket.index.languages import Language
-from docket.index.text import Analyzer, any_of, fold, phrase, words
+from docket.index.text import Analyzer, any_of, phrase
+from docket.plaintext import fold, words
 from docket.vault.entities import Entities, Entity
 
 SHORT = 3

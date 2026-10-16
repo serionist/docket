@@ -46,8 +46,8 @@ from pydantic import (
 )
 
 from docket.errors import DocketError
-from docket.index.text import fold as fold_word
-from docket.index.text import words
+from docket.plaintext import fold as fold_word
+from docket.plaintext import words
 from docket.vault import machine as machines
 from docket.vault.entities import ENTITY_TYPES, ID_KEY, LANG, WORDY, Alias, Entity, entity_rel
 from docket.vault.processed import DEVICE_NAMES, SLUG, SLUG_MAX

@@ -47,7 +47,7 @@ The schema is `docs/docs-regime.yaml`, explained in `docs/docs-regime.md`.
 | Path | What |
 |------|------|
 | `packages/docket/` | the app: the vault, the service (web app, MCP endpoint, scheduler), the source contract, the `docket` command |
-| `plugin/` | the Claude Code plugin: the MCP entry, the session-start status hook, the capture hook, the skills (recall, setup and cuts now; sync, tasks and curate later), no scripts of its own (its hooks run `docket`); source skills live in the consuming project, scaffolded by `docket source new`; `.claude-plugin/marketplace.json` makes the repo its marketplace |
+| `plugin/` | the Claude Code plugin: the MCP entry, the session-start status hook, the capture hook, the skills (recall, setup, cuts and curate now; sync and tasks later), no scripts of its own (its hooks run `docket`); source skills live in the consuming project, scaffolded by `docket source new`; `.claude-plugin/marketplace.json` makes the repo its marketplace |
 | `examples/` | reference sources to copy into a project, tested in CI and never a dependency: Plaud under `sources/plaud` |
 | `tools/devkit/` | the development kit, never published: `gate`, `docs`, `devkit` |
 | `docs/` | the design, the regime, the glossary, plans and reviews |
@@ -120,9 +120,9 @@ agrees in the issue or, under an autonomy grant, with its decision recorded as p
 - the question file `docket eval` reads, which users keep outside the repo (DR-0290);
 - the MCP tools' names and parameters: `search`, `read`, `verify` and `doc_put` (DR-0150), `run_open` and `ingest`
   (DR-0241), and the plugin's server key `docket` that prefixes them (DR-0160);
-- the plugin's skill and hook names: `recall`, `setup`, `cuts` (DR-0207), the SessionStart hook running `docket
-  hook session-start` (DR-0161), and the PostToolUse hook running `docket hook post-tool-use` for `mcp__.*`, with
-  its line prefixes (DR-0242);
+- the plugin's skill and hook names: `recall`, `setup`, `cuts` (DR-0207), `curate` (DR-0472), the SessionStart
+  hook running `docket hook session-start` (DR-0161), and the PostToolUse hook running `docket hook post-tool-use`
+  for `mcp__.*`, with its line prefixes (DR-0242);
 - the release's yes: only the owner releases a held recording, at their own console, by typing back a code, and no
   page, route or tool releases one (DR-0202, DR-0382). What a release lets in reaches git for good.
 

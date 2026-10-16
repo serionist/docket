@@ -26,7 +26,7 @@ from typing import Any, TextIO, cast
 import yaml
 
 from docket.errors import DocketError
-from docket.render import printable
+from docket.plaintext import printable
 from docket.sources import runner
 from docket.sources.contract import Manifest
 from docket.sources.ingest import map_folder

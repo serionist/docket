@@ -10,7 +10,7 @@ from curate_kit import NORTHWIND, curate_vault, entity, rid
 
 from docket import userconfig
 from docket.curate import batch as curate
-from docket.curate import propose
+from docket.curate import propose, schedule
 from docket.curate.batch import Batch, Measure
 from docket.curate.propose import Card
 from docket.errors import DocketError
@@ -56,7 +56,7 @@ def questions_file(tmp_path: Path) -> Path:
 
 
 def test_a_round_keeps_its_cards_per_machine_and_reads_back(vault: Vault, started: Batch) -> None:
-    assert curate.started(started.round) == started.started
+    assert schedule.started(started.round) == started.started
     assert started.round.endswith("-test-box")
     assert [c.name for c in started.cards][:2] == ["Northwind", "Dóra"]
     assert started.left_out["common words"] > 0
@@ -71,7 +71,7 @@ def test_a_batch_that_is_gone_or_doesn_t_read_is_none(vault: Vault, started: Bat
     assert curate.load(vault) is None
     curate.batch_path(vault).unlink()
     assert curate.load(vault) is None
-    assert curate.started("not a round") is None
+    assert schedule.started("not a round") is None
 
 
 def test_cards_are_named_by_id_or_by_round_and_number(vault: Vault, started: Batch) -> None:
@@ -251,8 +251,8 @@ def line(n: int, minutes: float, round_: str | None, by: str = "user") -> Line:
 
 
 def test_review_minutes_are_the_gaps_through_a_round_each_capped(vault: Vault) -> None:
-    first = curate.round_id(T0, "test-box")
-    later = curate.round_id(T0 + timedelta(days=8), "laptop-1x")
+    first = schedule.round_id(T0, "test-box")
+    later = schedule.round_id(T0 + timedelta(days=8), "laptop-1x")
     lines = [
         line(1, 2, first),
         line(2, 3, first),
@@ -261,8 +261,8 @@ def test_review_minutes_are_the_gaps_through_a_round_each_capped(vault: Vault) -
         line(5, 4, None),
         line(6, 5, "not a round"),
     ]
-    assert curate.minutes(lines) == {"2026-W43": 1.0, "2026-W42": 8.0}
-    assert curate.last_round(lines, None) == T0 + timedelta(days=8)
+    assert schedule.minutes(lines) == {"2026-W43": 1.0, "2026-W42": 8.0}
+    assert schedule.last_round(lines) == T0 + timedelta(days=8)
 
 
 def test_status_says_whether_a_round_is_due(vault: Vault, tmp_path: Path) -> None:

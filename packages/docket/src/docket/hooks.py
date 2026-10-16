@@ -2,10 +2,10 @@
 holds no scripts.
 
 SessionStart says what state Docket is in: the service's line (the one `docket service status --quiet` prints), the
-vault's, and whether Claude Code connects to the port the service listens on. Claude gets every line; the user sees
-them only when one needs them. Counts and paths only, never a record's text or title. The vault is read without
-`Vault.open`, whose checks run git: a hook in every session of every project stays cheap. It never fails the session:
-whatever goes wrong becomes a line.
+vault's, whether Claude Code connects to the port the service listens on, and whether a curate round is due. Claude
+gets every line; the user sees them only when one needs them. Counts and paths only, never a record's text or title.
+The vault is read without `Vault.open`, whose checks run git: a hook in every session of every project stays cheap. It
+never fails the session: whatever goes wrong becomes a line.
 """
 
 from __future__ import annotations
@@ -16,10 +16,12 @@ from pathlib import Path
 from typing import Any, cast
 
 from docket import userconfig
+from docket.curate import schedule
 from docket.errors import DocketError
-from docket.render import printable
+from docket.plaintext import printable
 from docket.service import client
 from docket.service.install import ServiceStatus
+from docket.vault import curatelog
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.staging import STAGING
 from docket.vault.vault import Vault
@@ -107,8 +109,32 @@ def _vault() -> list[Line]:
         return [Line(f"vault: {e}", True)]
     waiting = _staged(root)
     if waiting:
-        return [Line(f"vault: {root}, {waiting} record(s) wait in staging; `docket staging list --vault {root}`", True)]
-    return [Line(f"vault: {root}, nothing waiting in staging", False)]
+        line = Line(f"vault: {root}, {waiting} record(s) wait in staging; `docket staging list --vault {root}`", True)
+    else:
+        line = Line(f"vault: {root}, nothing waiting in staging", False)
+    return [line, *_curate(root)]
+
+
+def _curate(root: Path) -> list[Line]:
+    """Whether a curate round is due, a week after the last any machine logged, with the newest week's review minutes:
+    for Claude only, to mention once. Nothing before any entity work, an entity file or a logged change (DR-0474)."""
+    try:
+        lines = curatelog.read_all(root).lines
+    except DocketError as e:
+        return [Line(f"curate: {e}", True)]
+    if not lines and not any((root / "entities").glob("*/*.yaml")):
+        return []
+    last = schedule.last_round(lines)
+    now = schedule.now_utc()
+    if last is not None and now - last < schedule.DUE:
+        return []
+    if last is None:
+        since = "none yet"
+    else:
+        since = f"the last started {(now - last).days} days ago"
+        week = next(iter(schedule.minutes(lines).items()), None)
+        since += f", {week[1]:.0f} min of review in {week[0]}" if week is not None else ""
+    return [Line(f"curate: a round is due ({since}); mention it once, and run /docket:curate only when asked", False)]
 
 
 def _staged(root: Path) -> int:

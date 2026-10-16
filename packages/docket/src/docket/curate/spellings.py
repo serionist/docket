@@ -23,7 +23,7 @@ import sqlite3
 from collections import Counter
 from dataclasses import dataclass, field
 
-from docket.index.text import fold
+from docket.plaintext import fold
 
 TRUSTS = ("label", "docs", "typed", "vendor", "heard")
 LABEL, DOCS, TYPED, VENDOR, HEARD = range(len(TRUSTS))
