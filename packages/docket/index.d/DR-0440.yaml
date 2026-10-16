@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0440
+    title: A recording read whole lists the lines on its transcripts, and an old path's time those on the recording
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#96"]
+    description: "Reading a recording whole (r:<rid>, the bare rid or [r:<rid>], with no time), as the web panel does for a search hit on it, lists the lines of current docs anchored on the transcripts under it after its own, once each, and names the legacy notes covering any of them. A transcript under it is the record DR-0370 places a time on: of its source, of kind transcript, with segments, naming it as thread or container. An old path with a time (DR-0131) lists the lines on the transcript the time was placed on and then those on the recording that transcript is under, as r:<transcript>@<time> does (DR-0391). A time on the recording is unchanged: it is placed on the transcript, whose read already lists the recording's lines. This is DR-0391's other direction, so a reader sees the lines on both records whichever of the two a locator names."
+    binds:
+      - What is under a recording comes from the raw log of its own source, never the index, as for DR-0370.
+      - The record read lists its own lines first, and a line anchored on both records is listed once.
+    not_chosen:
+      - "Every record under a recording read whole: a chat message would list every line on the replies under it, the reverse of what DR-0391 rules out."
+      - "The transcripts' lines on a paragraph of the recording too: a transcript's paragraphs are its own, so a paragraph anchor on it would match other text."

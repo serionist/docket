@@ -71,8 +71,9 @@ Unreleased in the same PR.
   when the source keeps that as a record of its own, as Plaud does. `r:<recording>@12:08` reads that transcript too.
   A note whose head names no recording matches one of those by its title and day as well: run the import again, and
   each note that gains its recording is written as a new rev, counted under `covers`. Reading the transcript, as the
-  Search panel does for a hit, names the legacy notes and doc lines on its recording, and a doc that puts a time on
-  the recording is refused with the transcript's anchor to write instead.
+  Search panel does for a hit, names the legacy notes and doc lines on its recording, and reading the recording, or an
+  old path with a time, lists the lines on both as well. A doc that puts a time on the recording is refused with the
+  transcript's anchor to write instead.
 - `docket ingest <source> <folder>`: imports payloads fetched earlier through the source's mapper, which lives in your
   project under `.claude/skills/sources/<source>/`; Docket runs it in its own process and checks every record.
 - Hold lists: `state/holds/<source>.txt` keeps records out of staging and raw until a hold is released, on every
