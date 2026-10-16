@@ -430,15 +430,21 @@ def test_the_tests_step_runs_the_timed_tests_alone_after_the_rest(
     ]
 
 
-def test_the_full_lane_adds_the_timed_tests_coverage_to_the_rest(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    calls = _fake_pytest(monkeypatch, codes=(1, 1))
-    out = gate.step_tests(gate.Ctx(root=tmp_path, lane="full", ci=False, base=None, pr=None))
-    rest, alone = calls
-    # The rest keeps its data and writes no report; the timed tests append to it and the report covers both.
-    assert "--cov" in rest and "--cov-report=" in rest and "--cov-append" not in rest
-    assert "--cov-append" in alone and any(a.startswith("--cov-report=json:") for a in alone)
-    # A failure in either run fails the step, with each failed run's tail.
-    assert out.status == "fail"
-    assert "a test broke" in out.detail and "a timed test broke" in out.detail
+def test_a_failure_in_either_run_shows_its_tail(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for codes, broke in (((1, 1), ["a test broke", "a timed test broke"]), ((0, 1), ["a timed test broke"])):
+        _fake_pytest(monkeypatch, codes=codes)
+        out = gate.step_tests(gate.Ctx(root=tmp_path, lane="os", ci=False, base=None, pr=None))
+        assert out.status == "fail"
+        assert [ln for ln in out.detail if "broke" in ln] == broke
+
+
+def test_under_coverage_the_timed_tests_stay_in_the_one_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _fake_pytest(monkeypatch, codes=(1, 0))
+    ctx = gate.Ctx(root=tmp_path, lane="full", ci=False, base=None, pr=None)
+    # Their limits are off under coverage, so nothing waits for the other steps either.
+    ctx.alone.clear()
+    out = gate.step_tests(ctx)
+    [run] = calls
+    assert "-m" not in run[3:] and run[run.index("-n") + 1] == "auto"
+    assert "--cov" in run and any(a.startswith("--cov-report=json:") for a in run) and "--cov-append" not in run
+    assert out.status == "fail" and "a test broke" in out.detail

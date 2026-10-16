@@ -7,9 +7,10 @@ Lanes:
          validated by Claude Code itself. CI runs it on Linux; finish-work runs it before a PR.
   os     types and tests, for the other operating systems CI runs.
 
-In a lane with tests, the tests start first and the other steps run beside them; each run prints its slowest tests. The
-timed tests (marked `perf`) run after the rest, alone and one at a time, once the other steps are done, and each run
-prints what they printed: their times.
+In a lane with tests, the tests start first and the other steps run beside them; each run prints its slowest tests. In a
+lane without coverage (os) the timed tests (marked `perf`) run after the rest, alone and one at a time, once the other
+steps are done, and the run prints what they printed: their times. Under coverage the index's time limits are off, so
+the full lane keeps them in its one run.
 
 `gate check-text <file>` checks a text that is about to be posted (an issue or PR body) for private names and tool
 attribution.
@@ -305,28 +306,24 @@ def step_tests(ctx: Ctx) -> Outcome:
     report.unlink(missing_ok=True)
     numbers = ctx.root / evalfloors.REPORT
     numbers.unlink(missing_ok=True)
-    cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+    pytest = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
     # One worker per core: most of the time goes to git subprocesses that would otherwise wait on each other.
-    rest = ["-n", "auto", "-m", f"not {PERF}", f"--durations={SLOWEST}"]
-    # One at a time; -raP is pytest's usual summary plus the passed tests' output, which holds their times.
-    alone = ["-m", PERF, "-raP"]
+    cmd = [*pytest, "-n", "auto", f"--durations={SLOWEST}"]
     env: dict[str, str] = {}
-    if ctx.lane == "full":
-        # The timed tests add their lines to the rest's data, and the floors read both (CV-0009).
-        rest += ["--cov", "--cov-report="]
-        alone += ["--cov", "--cov-append", f"--cov-report=json:{report.as_posix()}", "--cov-report=term:skip-covered"]
+    covered = ctx.lane == "full"
+    if covered:
+        cmd += ["--cov", f"--cov-report=json:{report.as_posix()}", "--cov-report=term:skip-covered"]
         # The question set's test writes its numbers there, for the eval floors (DR-0295).
         env[evalfloors.REPORT_ENV] = str(numbers)
-    code, lines = _run(ctx, [*cmd, *rest], env=env)
-    # The timed tests run after the rest and the lane's other steps, one at a time, so no other work shares the CPUs
-    # with what they time (DR-0430).
-    ctx.alone.wait()
-    timed_code, timed_lines = _run(ctx, [*cmd, *alone], env=env)
-    if code != 0 or timed_code != 0:
-        return Outcome.fail(*(lines[-80:] if code else []), *(timed_lines[-80:] if timed_code else []))
-    summary, alone_line = _summary(lines), f"timed alone: {_summary(timed_lines)}"
-    if ctx.lane != "full":
-        return Outcome.ok(summary, alone_line, *timed(timed_lines), *slowest(lines))
+    else:
+        # Without coverage the timed tests assert their limits, so they leave the parallel run and run alone after it;
+        # under coverage the index's limits are off and they stay in it (DR-0430).
+        cmd += ["-m", f"not {PERF}"]
+    code, lines = _run(ctx, cmd, env=env)
+    if not covered:
+        return _alone_after(ctx, code, lines, [*pytest, "-m", PERF, "-raP"], env)
+    if code != 0:
+        return Outcome.fail(*lines[-80:])
     measures = coverage.measure(json.loads(report.read_text(encoding="utf-8")))
     failures, rise = coverage.judge(measures, coverage.load_floors(ctx.root))
     eval_failures, eval_line = evalfloors.check(ctx.root, ctx.base)
@@ -334,7 +331,18 @@ def step_tests(ctx: Ctx) -> Outcome:
     if failures:
         return Outcome.fail(*failures, *rise)
     per = ", ".join(f"{m.module} {m.percent:.1f}%" for m in measures.values())
-    return Outcome.ok(summary, per, eval_line, *rise, alone_line, *timed(timed_lines), *slowest(lines))
+    return Outcome.ok(_summary(lines), per, eval_line, *rise, *slowest(lines))
+
+
+def _alone_after(ctx: Ctx, code: int, lines: list[str], cmd: list[str], env: dict[str, str]) -> Outcome:
+    """The timed tests after the rest's run, once the lane's other steps are done too, one at a time: no other work
+    shares the CPUs with what they time. -raP adds the passed tests' output, which holds their times, to the summary."""
+    ctx.alone.wait()
+    timed_code, timed_lines = _run(ctx, cmd, env=env)
+    if code != 0 or timed_code != 0:
+        return Outcome.fail(*(lines[-80:] if code else []), *(timed_lines[-80:] if timed_code else []))
+    alone = f"timed alone: {_summary(timed_lines)}"
+    return Outcome.ok(_summary(lines), alone, *timed(timed_lines), *slowest(lines))
 
 
 STEPS = [
@@ -347,7 +355,7 @@ STEPS = [
     Step("content", ("quick", "full"), "no private names (the deny list)", step_content),
     Step("secrets", ("quick", "full"), "gitleaks", step_secrets),
     Step("harness", ("quick", "full"), "AGENTS.md, skills, plugin manifests", step_harness),
-    Step("tests", ("full", "os"), "pytest, the timed tests alone after; coverage floors in the full lane", step_tests),
+    Step("tests", ("full", "os"), "pytest; coverage floors in the full lane, the timed tests alone in os", step_tests),
 ]
 
 
