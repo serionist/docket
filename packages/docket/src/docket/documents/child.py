@@ -56,17 +56,19 @@ else:  # pragma: no cover
         return None
 
 
-def keep_numpy_out(modules: dict[str, Any] | None = None) -> None:
-    """Make `import numpy` fail in this process. openpyxl imports numpy when it is installed, and numpy's BLAS reserves
-    memory for every core as it loads, past the cap on a machine with many; the child reads no number with it. Only the
-    child's own process calls this: in another, numpy's users would break."""
+def keep_out(modules: dict[str, Any] | None = None) -> None:
+    """Make `import numpy` and `import lxml` fail in this process, before openpyxl is imported. openpyxl imports numpy
+    when it is installed, and numpy's BLAS reserves memory for every core as it loads, past the cap on a machine with
+    many; with lxml it would parse through lxml, past the defusedxml parse `formats.harden_openpyxl` gives it. Only the
+    child's own process calls this: in another, their users would break."""
     target = cast(dict[str, Any], sys.modules) if modules is None else modules
     target["numpy"] = None
+    target["lxml"] = None
 
 
 def handle(request: dict[str, Any], limits: Limits = LIMITS) -> Iterator[dict[str, Any]]:
     """One file's answer lines."""
-    # Only now, once main has set the cap and kept numpy out: the readers bring openpyxl, which brings numpy if it can.
+    # Only now, once main has set the cap and kept numpy and lxml out: the readers bring openpyxl, which looks for both.
     from docket.documents import formats  # noqa: PLC0415
 
     path = Path(str(request["path"]))
@@ -121,5 +123,5 @@ def main(argv: list[str], stdin: BinaryIO, stdout: BinaryIO, stderr: TextIO) -> 
 
 
 if __name__ == "__main__":  # pragma: no cover - the child's process; main() is tested in-process
-    keep_numpy_out()
+    keep_out()
     sys.exit(main(sys.argv[1:], sys.stdin.buffer, sys.stdout.buffer, sys.stderr))

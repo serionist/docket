@@ -4,6 +4,7 @@ parsed with a DTD, and never named by an error's message. Every file is built he
 from __future__ import annotations
 
 import io
+import sys
 import time
 import tracemalloc
 import zipfile
@@ -232,9 +233,9 @@ def test_a_workbook_part_with_a_dtd_or_entities_is_never_parsed(prefix: str, tex
     assert (error.reason, error.detail) == ("xml", UNSAFE_XML)
 
 
-def test_a_dtd_is_refused_in_a_part_whatever_its_name_and_an_image_isn_t_xml() -> None:
-    data = replaced(docx(wp("x")), "word/media/notes.data", '<?xml version="1.0"?><!DOCTYPE x><x/>')
-    assert refused(data, "docx").detail == UNSAFE_XML
+def test_a_part_nobody_parses_is_never_judged() -> None:
+    data = replaced(docx(wp("Beside the notes")), "word/media/notes.data", '<?xml version="1.0"?><!DOCTYPE x><x/>')
+    assert extract(data, "docx").text == "Beside the notes"
     image = replaced(docx(wp("Beside a picture")), "word/media/image1.png", b"\x89PNG\r\n\x1a\n" + bytes(64))
     assert extract(image, "docx").text == "Beside a picture"
 
@@ -245,30 +246,82 @@ SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>'
 )
 TYPES = "http://schemas.openxmlformats.org/package/2006/content-types"
+STRINGS = "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"
+STRINGS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings"
+BARE_STRINGS = (
+    '<?xml version="1.0"?><!DOCTYPE sst><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+    'count="1" uniqueCount="1"><si><t>Northwind</t></si></sst>'
+)
 
 
-def test_an_image_s_dtd_never_keeps_the_file_out_by_its_name_or_its_content_type() -> None:
-    # The SVG 1.1 DOCTYPE that draw.io and matplotlib write; nothing parses an image.
-    named = replaced(docx(wp("Northwind plan")), "word/media/image1.svg", SVG)
-    assert extract(named, "docx").text == "Northwind plan"
-    types = (
-        f'<?xml version="1.0"?><Types xmlns="{TYPES}"><Default Extension="IMG" ContentType="image/svg+xml"/>'
-        '<Override PartName="/word/media/chart.bin" ContentType="image/svg+xml"/>'
-        '<Override PartName="/word/media/drawing.img" ContentType="application/xml"/></Types>'
+def test_an_svg_image_with_the_svg_1_1_doctype_never_keeps_a_docx_out() -> None:
+    # The DOCTYPE draw.io and matplotlib write; nothing parses an image, so nothing judges it.
+    data = replaced(docx(wp("Northwind plan")), "word/media/image1.svg", SVG)
+    assert extract(data, "docx").text == "Northwind plan"
+
+
+def _strings(book: Workbook) -> None:
+    sheet = book.active
+    assert sheet is not None
+    sheet["A1"] = "Northwind"
+
+
+def _members(data: bytes) -> dict[str, str | bytes]:
+    source = zipfile.ZipFile(io.BytesIO(data))
+    return {name: source.read(name) for name in source.namelist()}
+
+
+def _text(member: str | bytes) -> str:
+    return member if isinstance(member, str) else member.decode("utf-8")
+
+
+def with_strings(members: dict[str, str | bytes], part: str, xml: str) -> dict[str, str | bytes]:
+    """A workbook given a shared strings part at `part`: its override in the content types, and its relationship."""
+    out = dict(members)
+    out[part] = xml
+    types = _text(out["[Content_Types].xml"])
+    override = f'<Override PartName="/{part}" ContentType="{STRINGS}" />'
+    out["[Content_Types].xml"] = types.replace("</Types>", override + "</Types>")
+    rels = _text(out["xl/_rels/workbook.xml.rels"])
+    relationship = f'<Relationship Id="rIdS" Type="{STRINGS_REL}" Target="/{part}" />'
+    out["xl/_rels/workbook.xml.rels"] = rels.replace("</Relationships>", relationship + "</Relationships>")
+    return out
+
+
+def test_a_workbook_s_shared_strings_with_a_bare_dtd_are_refused_however_the_file_names_or_types_them() -> None:
+    members = _members(xlsx(_strings))
+    plain = with_strings(members, "xl/sharedStrings.xml", BARE_STRINGS)
+    # An image content type for every .xml part without its own override.
+    imaged = dict(plain)
+    imaged["[Content_Types].xml"] = _text(plain["[Content_Types].xml"]).replace(
+        'ContentType="application/xml"', 'ContentType="image/svg+xml"'
     )
-    typed = replaced(replaced(docx(wp("Northwind plan")), "[Content_Types].xml", types), "word/media/pic.img", SVG)
-    typed = replaced(typed, "word/media/chart.bin", SVG)
-    assert extract(typed, "docx").text == "Northwind plan"
-    # Its override says it isn't an image, whatever its extension's default says.
-    xml_part = replaced(typed, "word/media/drawing.img", SVG)
-    assert refused(xml_part, "docx").detail == UNSAFE_XML
+    assert imaged["[Content_Types].xml"] != plain["[Content_Types].xml"]
+    # The same part named .svg, its override and its relationship pointing at it.
+    named = with_strings(members, "xl/strings.svg", BARE_STRINGS)
+    for case in (plain, imaged, named):
+        error = refused(package(case), "xlsx")
+        assert (error.reason, error.detail) == ("xml", UNSAFE_XML)
+    # The same workbook without the DTD reads, so the refusal is the DTD's.
+    honest = with_strings(members, "xl/strings.svg", BARE_STRINGS.replace("<!DOCTYPE sst>", ""))
+    assert extract(package(honest), "xlsx").parts[0].text == "1: Northwind"
 
 
-def test_content_types_with_a_dtd_are_refused() -> None:
-    data = replaced(
-        docx(wp("x")), "[Content_Types].xml", f'<?xml version="1.0"?><!DOCTYPE Types><Types xmlns="{TYPES}"/>'
-    )
-    assert refused(data, "docx").detail == UNSAFE_XML
+def test_a_workbook_s_content_types_with_a_dtd_are_refused() -> None:
+    members = _members(xlsx(_strings))
+    members["[Content_Types].xml"] = '<?xml version="1.0"?><!DOCTYPE Types>' + _text(members["[Content_Types].xml"])
+    assert refused(package(members), "xlsx").detail == UNSAFE_XML
+
+
+def test_every_openpyxl_parse_function_refuses_a_dtd_once_a_workbook_is_read() -> None:
+    extract(xlsx(_strings), "xlsx")
+    loaded = [m for n, m in list(sys.modules.items()) if n == "openpyxl" or n.startswith("openpyxl.")]
+    bound = [(m.__name__, a) for m in loaded for a in ("fromstring", "iterparse") if a in vars(m)]
+    assert ("openpyxl.xml.functions", "fromstring") in bound
+    assert ("openpyxl.worksheet._reader", "iterparse") in bound
+    for name, attribute in bound:
+        safe = formats.SAFE_FROMSTRING if attribute == "fromstring" else formats.SAFE_ITERPARSE
+        assert getattr(sys.modules[name], attribute) is safe, (name, attribute)
 
 
 def test_malformed_xml_is_damaged() -> None:

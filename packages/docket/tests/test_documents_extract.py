@@ -9,11 +9,12 @@ import json
 import os
 import sys
 import threading
+import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from documents_kit import docx, pdf, wp
+from documents_kit import docx, pdf, replaced, wp
 
 from docket import childproc
 from docket.documents import child, extract, formats
@@ -318,11 +319,36 @@ def test_a_library_s_print_goes_to_stderr_not_into_the_protocol(
     assert [next(iter(a)) for a in answers] == ["ready", "done"]
 
 
-def test_the_child_keeps_numpy_out_of_its_own_process() -> None:
-    # openpyxl brings numpy when it can, and numpy's BLAS reserved more than a 512 MiB cap as it loaded.
+def test_the_child_keeps_numpy_and_lxml_out_of_its_own_process() -> None:
+    # openpyxl brings numpy when it can, and numpy's BLAS reserved more than a 512 MiB cap as it loaded; with lxml it
+    # would parse past defusedxml.
     modules: dict[str, object] = {}
-    child.keep_numpy_out(modules)
-    assert modules == {"numpy": None}
+    child.keep_out(modules)
+    assert modules == {"numpy": None, "lxml": None}
+
+
+def test_the_real_child_refuses_a_dtd_openpyxl_would_have_parsed(real: Extractor, tmp_path: Path) -> None:
+    from openpyxl import Workbook
+
+    book = Workbook()
+    sheet = book.active
+    assert sheet is not None
+    sheet["A1"] = "Northwind"
+    out = io.BytesIO()
+    book.save(out)
+    sst = (
+        '<?xml version="1.0"?><!DOCTYPE sst><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        "<si><t>x</t></si></sst>"
+    )
+    strings = "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"
+    # openpyxl writes inline strings: the part and its content type are added, as Excel would have them.
+    with_part = replaced(out.getvalue(), "xl/sharedStrings.xml", sst)
+    types = zipfile.ZipFile(io.BytesIO(with_part)).read("[Content_Types].xml").decode()
+    override = f'<Override PartName="/xl/sharedStrings.xml" ContentType="{strings}" /></Types>'
+    data = replaced(with_part, "[Content_Types].xml", types.replace("</Types>", override))
+    got = real.extract(touch(tmp_path, "strings.xlsx", data))
+    assert isinstance(got, NotRead)
+    assert (got.reason, got.detail) == ("xml", "its XML declares a DTD or entities")
 
 
 def test_running_out_of_memory_ends_the_child(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

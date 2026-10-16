@@ -1,5 +1,5 @@
 """Office Open XML packages (docx, pptx, xlsx) opened under the caps: every part's real size counted before any is
-read, every XML part refused with a DTD, and parts found through the package's relationships, never by fixed names
+read, every part we parse refused with a DTD, and parts found through the package's relationships, never by fixed names
 (DR-0484, DR-0485).
 
 A part's declared sizes can lie, and `zipfile` inflates a whole part before it cuts it to what it declared; bzip2 and
@@ -19,8 +19,7 @@ from dataclasses import dataclass
 from urllib.parse import unquote
 from xml.etree.ElementTree import Element, ParseError
 
-from defusedxml import DefusedXmlException
-from defusedxml.ElementTree import fromstring, iterparse
+from defusedxml.ElementTree import fromstring
 
 from docket.documents.limits import MIB, Limits, NotReadError, mib
 
@@ -33,7 +32,6 @@ CP = "{http://schemas.openxmlformats.org/package/2006/metadata/core-properties}"
 UNSAFE_XML = "its XML declares a DTD or entities"
 LOCAL_HEADER = b"PK\x03\x04"
 METHODS = {zipfile.ZIP_BZIP2: "bzip2", zipfile.ZIP_LZMA: "lzma"}
-CONTENT_TYPES = "[Content_Types].xml"
 
 
 def local(tag: str) -> str:
@@ -160,44 +158,6 @@ class Package:
         infos = self.zip.infolist()
         check(data, infos, limits)
         self.names = frozenset(info.filename for info in infos)
-        images = self._images(infos)
-        for info in infos:
-            if info.filename not in images:
-                self._no_dtd(info)
-
-    def _images(self, infos: list[zipfile.ZipInfo]) -> frozenset[str]:
-        """The parts that are images, by the package's content types or an .svg name: neither our readers nor openpyxl
-        parse one, and an SVG commonly carries the SVG 1.1 DOCTYPE."""
-        defaults: set[str] = set()
-        overrides: dict[str, str] = {}
-        if CONTENT_TYPES in self.names:
-            self._no_dtd(self.zip.getinfo(CONTENT_TYPES))
-            for entry in self.xml(CONTENT_TYPES):
-                kind = entry.get("ContentType", "")
-                if local(entry.tag) == "Default" and kind.startswith("image/"):
-                    defaults.add(entry.get("Extension", "").lower())
-                elif local(entry.tag) == "Override":
-                    overrides[entry.get("PartName", "").lstrip("/").lower()] = kind
-        images: set[str] = set()
-        for info in infos:
-            name = info.filename.lower()
-            kind = overrides.get(name)
-            image = kind.startswith("image/") if kind is not None else name.rpartition(".")[2] in defaults
-            if image or name.endswith(".svg"):
-                images.add(info.filename)
-        return frozenset(images)
-
-    def _no_dtd(self, info: zipfile.ZipInfo) -> None:
-        """Refuse a part with a DTD before anything parses it, whatever its name: openpyxl's own parse takes one. A DTD
-        comes before the root element, so a part is read only up to that; one that isn't XML stops at its first bytes
-        and is judged when it is read."""
-        try:
-            with self.zip.open(info) as f:
-                next(iter(iterparse(f, events=("start",), forbid_dtd=True)), None)
-        except DefusedXmlException:
-            raise NotReadError("xml", UNSAFE_XML) from None
-        except (ParseError, zipfile.BadZipFile, zlib.error, EOFError):
-            return
 
     def read(self, name: str) -> bytes:
         if name not in self.names:
@@ -208,7 +168,7 @@ class Package:
             raise damaged(e) from None
 
     def xml(self, name: str) -> Element:
-        # A part with a DTD was refused as the package opened; defusedxml refuses one here again all the same.
+        """A part parsed with no DTD allowed: defusedxml's refusal goes up, and `formats.extract` names it."""
         try:
             return fromstring(self.read(name), forbid_dtd=True)
         except ParseError as e:

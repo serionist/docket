@@ -18,20 +18,25 @@ from __future__ import annotations
 import contextlib
 import io
 import logging
+import sys
 import warnings
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta
+from functools import partial
 from importlib.metadata import version
 from typing import Literal
 from xml.etree.ElementTree import Element
 
+from defusedxml import DefusedXmlException
+from defusedxml.ElementTree import fromstring as defused_fromstring
+from defusedxml.ElementTree import iterparse as defused_iterparse
 from openpyxl import load_workbook
 from pypdf import PasswordType, PdfReader
 
 from docket.documents import text as texts
 from docket.documents.limits import LIMITS, Limits, NotReadError, mib, over
-from docket.documents.ooxml import Package, damaged, local, namespace
+from docket.documents.ooxml import UNSAFE_XML, Package, damaged, local, namespace
 
 Format = Literal["pdf", "docx", "xlsx", "pptx", "md", "txt"]
 FORMATS: dict[str, Format] = {
@@ -60,6 +65,9 @@ R_ID = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
 DOCX_ENGINE = "docket-docx 1"
 PPTX_ENGINE = "docket-pptx 1"
 TEXT_ENGINE = "docket-text 1"
+# Every parse openpyxl makes, through defusedxml with no DTD: openpyxl calls it with its defaults, which take one.
+SAFE_FROMSTRING = partial(defused_fromstring, forbid_dtd=True)
+SAFE_ITERPARSE = partial(defused_iterparse, forbid_dtd=True)
 
 
 @dataclass(frozen=True)
@@ -110,9 +118,32 @@ def extract(data: bytes, fmt: Format, limits: Limits = LIMITS) -> Extracted:
     except (NotReadError, MemoryError):
         raise
     except Exception as e:
+        # defusedxml's refusal, ours or openpyxl's, which wraps it in an error of its own.
+        if _refused_xml(e):
+            raise NotReadError("xml", UNSAFE_XML) from None
         raise damaged(e) from None
     _check_text(extracted, limits)
     return extracted
+
+
+def _refused_xml(error: BaseException) -> bool:
+    """Whether defusedxml's refusal is the error or what caused it, a few links down at most."""
+    chain = [error]
+    while len(chain) < 8 and (link := chain[-1].__cause__ or chain[-1].__context__) is not None:
+        chain.append(link)
+    return any(isinstance(e, DefusedXmlException) for e in chain)
+
+
+def harden_openpyxl() -> None:
+    """Point the parse functions every loaded openpyxl module bound at import at the safe ones, and those of
+    `openpyxl.xml.functions`, so a module imported later binds them too. `read_xlsx` runs it before openpyxl reads a
+    workbook, so every part openpyxl parses refuses a DTD, whatever its name or content type says."""
+    for name, module in list(sys.modules.items()):
+        if not (name == "openpyxl" or name.startswith("openpyxl.")):
+            continue
+        for attribute, safe in (("fromstring", SAFE_FROMSTRING), ("iterparse", SAFE_ITERPARSE)):
+            if attribute in vars(module):
+                setattr(module, attribute, safe)
 
 
 def _size(text: str) -> int:
@@ -386,6 +417,7 @@ def read_xlsx(data: bytes, limits: Limits) -> Extracted:
     with warnings.catch_warnings():
         # openpyxl warns about features it drops (data validation, conditional formats): the text is what's kept.
         warnings.simplefilter("ignore")
+        harden_openpyxl()
         book = load_workbook(io.BytesIO(data), read_only=True, data_only=True, keep_links=False)
         try:
             sheets = book.worksheets
