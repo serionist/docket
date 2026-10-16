@@ -271,6 +271,41 @@ def test_a_label_that_starts_with_a_person_s_name_is_theirs(vault: Vault) -> Non
     assert all("Gabor Example (Northwind)" not in [s.text for s in c.spellings] for c in mined(vault).cards)
 
 
+def typed_for_gabor(vault: Vault, label: str) -> Mined:
+    """Calls with Gabor under a label as the user typed it, and the minutes of each naming him in full."""
+    calls = [[(label, "Morning, shall we start?"), ("Speaker 2", "Yes, the drawings are done.")]] * 4
+    more_calls(vault, calls, noted=["Gabor Example has the drawings."] * 4)
+    gabor(vault)
+    return mined(vault)
+
+
+def test_an_initial_label_for_a_known_person_is_theirs(vault: Vault) -> None:
+    found = typed_for_gabor(vault, "Gabor E.")
+    assert [(c.kind, [s.text for s in c.adds()]) for c in found.cards if c.entity == "gabor-example"] == [
+        ("alias", ["Gabor E."])
+    ]
+    assert "Gabor E." not in names(found)
+
+
+def test_a_misspelt_label_for_a_known_person_is_theirs(vault: Vault) -> None:
+    found = typed_for_gabor(vault, "Gabor Exampel")
+    assert [(c.kind, [s.text for s in c.adds()]) for c in found.cards if c.entity == "gabor-example"] == [
+        ("alias", ["Gabor Exampel"])
+    ]
+    assert "Gabor Exampel" not in names(found)
+
+
+def test_what_a_typed_label_is_for_a_name_of_several_words() -> None:
+    name = ("gabor", "example")
+    for theirs in [("gabor", "e"), ("gabor", "exampel"), ("gabor", "exampl"), ("gabor", "example", "northwind")]:
+        assert propose._theirs(theirs, name), theirs
+    for other in [("gabor", "sample"), ("gabor",), ("gabi", "example"), ("gabor", "x")]:
+        assert not propose._theirs(other, name), other
+    # A word under five letters takes no typo: Kos is another family name than Kis.
+    assert not propose._theirs(("ann", "kos"), ("ann", "kis"))
+    assert propose._theirs(("ada", "exmaplary"), ("ada", "examplary"))
+
+
 def test_two_misspellings_of_one_entity_make_one_card(vault: Vault) -> None:
     more_recordings(vault, ["We sent Norwind the pallets."] * 2, noted=["Northwind waits."] * 2)
     entity(vault, NORTHWIND, "id: northwind\ntype: customer\nname: {en: Northwind}\n")

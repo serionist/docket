@@ -19,9 +19,10 @@ folded column, so a chat message written in lower case counts as its, and they g
 A group reaches an entity, where the entity is mentioned, by a word that is a case form of one of its names or aliases
 (not one matching judged a common word for it, and never a label or a written run's first word), by a heard word within
 the fuzzy distance of one, or by a word that starts one entity's name of several words; a one-word label reaches the
-one person whose name or alias it starts, and a label of several words the one person with one of whose names of several
-words it starts. A label of several words that doesn't start with one of an entity's names of several words is a name
-of its own, and keeps its group off that entity.
+one person whose name or alias it starts, and a label of several words the one person one of whose names of several
+words it is as typed: its first word, then each next word the name's, its initial or a typo of it, and any words after
+(`Gabor E.`, `Gabor Exampel`, `Gabor Example (Northwind)`). Any other label of several words is a name of its own beside
+that entity (`Gabor Sample`), and keeps its group off it.
 
 A group becomes its entity's alias card, one per entity, when accepting it would add a mention, its case forms adding
 nothing. When the entity's alias stoplist holds every spelling it would add, it goes on to the next entity it reaches,
@@ -75,6 +76,7 @@ REASONS = ("one-off words", "rare phrases", "common words", "short", "known", "n
 Add = Literal["name", "plain", "asr", "no"]
 Role = Literal["same", "order", "case", "asr", "part"]
 Way = Literal["case", "near", "first", "label"]
+Words = tuple[str, ...]
 
 
 class CardSpelling(BaseModel):
@@ -355,7 +357,7 @@ class _Reach:
     """What a spelling reaches by its text alone, before any meeting is checked, each as folded words to entities: the
     case forms of a single-word name or alias, all of them and those matching doesn't judge common for it; heard words
     within the fuzzy distance of one; the first word of a name of several words; a person's first word; and each
-    entity's names of several words, the people's by their words."""
+    entity's names of several words, the people's by their first word."""
 
     forms: dict[str, set[str]] = field(default_factory=dict[str, set[str]])
     cases: dict[str, set[str]] = field(default_factory=dict[str, set[str]])
@@ -363,7 +365,7 @@ class _Reach:
     first: dict[str, set[str]] = field(default_factory=dict[str, set[str]])
     people: dict[str, set[str]] = field(default_factory=dict[str, set[str]])
     names: dict[str, set[tuple[str, ...]]] = field(default_factory=dict[str, set[tuple[str, ...]]])
-    full: dict[tuple[str, ...], set[str]] = field(default_factory=dict[tuple[str, ...], set[str]])
+    persons: dict[str, set[tuple[Words, str]]] = field(default_factory=dict[str, set[tuple[Words, str]]])
     # The first words of written runs: as in the joins, a name of its own, never a case form.
     heads: set[str] = field(default_factory=set[str])
 
@@ -380,7 +382,7 @@ class _Reach:
                 out.first.setdefault(ws[0], set()).add(a.entity)
                 out.names.setdefault(a.entity, set()).add(tuple(ws))
                 if a.type == "person":
-                    out.full.setdefault(tuple(ws), set()).add(a.entity)
+                    out.persons.setdefault(ws[0], set()).add((tuple(ws), a.entity))
                 continue
             for form in {fold(c) for lang in langs for c in _cases(lang, a.text)}:
                 out.forms.setdefault(form, set()).add(a.entity)
@@ -393,7 +395,7 @@ class _Reach:
     def ways(self, s: Seen) -> list[tuple[str, Way]]:
         """The entities a spelling reaches and how: a case form unless it is a label or a written run's first word; a
         heard word within the distance; a word that starts one entity's name of several; a one-word label that starts
-        one person's name or alias, or a label of several words that starts with one person's name of several."""
+        one person's name or alias, or a label of several words that is one person's name of several (`_theirs`)."""
         out: list[tuple[str, Way]] = []
         word = s.words[0]
         if len(s.words) == 1:
@@ -408,16 +410,37 @@ class _Reach:
             people = (
                 self.people.get(word, set())
                 if len(s.words) == 1
-                else {e for n in range(2, len(s.words) + 1) for e in self.full.get(s.words[:n], set())}
+                else {e for name, e in self.persons.get(word, set()) if _theirs(s.words, name)}
             )
             if len(people) == 1:
                 out.append((next(iter(people)), "label"))
         return out
 
     def own(self, words: tuple[str, ...], entity: str) -> bool:
-        """Whether a label of several words is a name of its own beside an entity: it doesn't start with one of the
-        entity's names of several words (`Gabor Sample` beside Gabor Example; `Gabor Example (Northwind)` is his)."""
-        return len(words) > 1 and not any(words[: len(n)] == n for n in self.names.get(entity, ()))
+        """Whether a label of several words is a name of its own beside an entity: none of the entity's names of
+        several words is it (`Gabor Sample` beside Gabor Example)."""
+        return len(words) > 1 and not any(_theirs(words, name) for name in self.names.get(entity, ()))
+
+
+def _theirs(words: tuple[str, ...], name: tuple[str, ...]) -> bool:
+    """Whether a label's words are a name of several words as the user typed it: its first word, then each next word
+    the name's, its initial or a typo of it, and any words after (`Gabor E.`, `Gabor Exampel` and `Gabor Example
+    (Northwind)` for Gabor Example; never `Gabor Sample`)."""
+    return (
+        len(words) >= len(name)
+        and words[0] == name[0]
+        and all(_typed(word, of) for word, of in zip(words[1:], name[1:], strict=False))
+    )
+
+
+def _typed(word: str, of: str) -> bool:
+    """Whether a typed word is another, its initial, or a typo of it: within matching's fuzzy distance, two
+    neighbouring letters swapped counting as one edit, since typing swaps them (`exampel`)."""
+    if word == of or (len(word) == 1 and of.startswith(word)):
+        return True
+    limit = max_distance(of)
+    swapped = sorted({word[:i] + word[i + 1] + word[i] + word[i + 2 :] for i in range(len(word) - 1)})
+    return limit > 0 and (bool(within(of, limit, [word])) or of in swapped or bool(within(of, limit - 1, swapped)))
 
 
 # -- cards --------------------------------------------------------------------------------------------------------
