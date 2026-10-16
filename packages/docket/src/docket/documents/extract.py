@@ -48,6 +48,8 @@ STDERR_KEEP = 64 * 1024
 CHILD = ("-I", "-X", "utf8", "-m", "docket.documents.child")
 # The service runs under pythonw on Windows: a console child would flash a window for every start.
 NO_WINDOW: int = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+# Where the system enforces a memory cap the child sets on itself; macOS enforces none.
+CAPPED = sys.platform in ("linux", "win32")
 
 _PART = TypeAdapter(Part)
 _EXTRACTED = TypeAdapter(Extracted)
@@ -90,6 +92,8 @@ class _Child:
     proc: subprocess.Popen[bytes]
     answers: queue.Queue[dict[str, Any] | None]
     job: int | None = None
+    # The interpreter's own pid, as its hello gives it: on Windows a venv's launcher starts it as a process of its own.
+    pid: int | None = None
     files: int = 0
     threads: list[threading.Thread] = field(default_factory=list[threading.Thread])
 
@@ -211,7 +215,7 @@ class Extractor:
             start_new_session=GROUPS,
             creationflags=NO_WINDOW,
         )
-        # Before the child is sent anything: on Windows the job object holds its memory cap.
+        # Before the child is sent anything: on Windows a job that kills it, launcher and all, when its handle closes.
         try:
             job = _job(proc.pid, self.memory)
         except DocketError:
@@ -233,11 +237,17 @@ class Extractor:
             hello = child.answers.get(timeout=self.hello_seconds)
         except queue.Empty:
             hello = None
-        if hello != {"ready": True}:
+        if hello is None or hello.get("ready") is not True:
             self._end(kill=True)
             raise DocketError(
                 "the documents' reader didn't start; its errors are kept, never logged, since they can quote a file"
             )
+        if CAPPED and hello.get("memory") != self.memory:
+            # The child caps itself, so the cap holds on the interpreter whatever launched it; one without is stopped.
+            self._end(kill=True)
+            raise DocketError("the documents' reader started without its memory cap, so it was stopped")
+        pid = hello.get("pid")
+        child.pid = pid if isinstance(pid, int) else None
         return child
 
     def _end(self, *, kill: bool = False) -> None:
@@ -295,98 +305,30 @@ def _read(pipe: IO[bytes], answers: queue.Queue[dict[str, Any] | None]) -> None:
 # -- the memory cap on Windows: a job object --------------------------------------------------------------------------
 
 if sys.platform == "win32":  # pragma: no cover - Windows' own API; test_documents_extract runs it there
-    import ctypes
-    from ctypes import wintypes
-
-    JOB_OBJECT_LIMIT_PROCESS_MEMORY = 0x100
-    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
-    JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9
-    PROCESS_SET_QUOTA = 0x0100
-    PROCESS_TERMINATE = 0x0001
-
-    class _IoCounters(ctypes.Structure):
-        _fields_ = [
-            (name, ctypes.c_ulonglong)
-            for name in (
-                "ReadOperationCount",
-                "WriteOperationCount",
-                "OtherOperationCount",
-                "ReadTransferCount",
-                "WriteTransferCount",
-                "OtherTransferCount",
-            )
-        ]
-
-    class _BasicLimits(ctypes.Structure):
-        _fields_ = [
-            ("PerProcessUserTimeLimit", ctypes.c_int64),
-            ("PerJobUserTimeLimit", ctypes.c_int64),
-            ("LimitFlags", wintypes.DWORD),
-            ("MinimumWorkingSetSize", ctypes.c_size_t),
-            ("MaximumWorkingSetSize", ctypes.c_size_t),
-            ("ActiveProcessLimit", wintypes.DWORD),
-            ("Affinity", ctypes.c_size_t),
-            ("PriorityClass", wintypes.DWORD),
-            ("SchedulingClass", wintypes.DWORD),
-        ]
-
-    class _ExtendedLimits(ctypes.Structure):
-        _fields_ = [
-            ("BasicLimitInformation", _BasicLimits),
-            ("IoInfo", _IoCounters),
-            ("ProcessMemoryLimit", ctypes.c_size_t),
-            ("JobMemoryLimit", ctypes.c_size_t),
-            ("PeakProcessMemoryUsed", ctypes.c_size_t),
-            ("PeakJobMemoryUsed", ctypes.c_size_t),
-        ]
-
-    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    _kernel32.CreateJobObjectW.restype = wintypes.HANDLE
-    _kernel32.CreateJobObjectW.argtypes = (wintypes.LPVOID, wintypes.LPCWSTR)
-    _kernel32.SetInformationJobObject.restype = wintypes.BOOL
-    _kernel32.SetInformationJobObject.argtypes = (wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD)
-    _kernel32.OpenProcess.restype = wintypes.HANDLE
-    _kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
-    _kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
-    _kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
-    _kernel32.CloseHandle.restype = wintypes.BOOL
-    _kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    from docket.documents import winjob
 
     def _job(pid: int, memory: int) -> int | None:
-        """A job object that caps the child's committed memory and kills it when the job's handle closes, with the
-        child in it. A system that refuses one fails the start: the cap is not optional."""
-        job = _kernel32.CreateJobObjectW(None, None)
-        if not job:
-            raise DocketError(f"Windows refused a job object for the documents' reader ({ctypes.get_last_error()})")
-        info = _ExtendedLimits()
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_PROCESS_MEMORY | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-        info.ProcessMemoryLimit = memory
-        process = _kernel32.OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, False, pid)
+        """A job that kills the child when its handle closes, with the child in it, so a stop takes the interpreter a
+        venv's launcher started too; its memory cap holds only where it caught the interpreter, which caps itself."""
         try:
-            ok = (
-                _kernel32.SetInformationJobObject(
-                    job, JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS, ctypes.byref(info), ctypes.sizeof(info)
-                )
-                and process
-                and _kernel32.AssignProcessToJobObject(job, process)
-            )
-        finally:
-            if process:
-                _kernel32.CloseHandle(process)
-        if not ok:
-            error = ctypes.get_last_error()
-            _kernel32.CloseHandle(job)
-            raise DocketError(f"Windows refused the documents' reader its memory cap ({error})")
-        return int(job)
+            job = winjob.create(winjob.PROCESS_MEMORY | winjob.KILL_ON_CLOSE, memory)
+        except OSError as e:
+            raise DocketError(f"Windows refused the documents' reader a job object ({e.errno})") from None
+        try:
+            winjob.assign(job, pid)
+        except OSError as e:
+            winjob.close(job)
+            raise DocketError(f"Windows refused the documents' reader its job ({e.errno})") from None
+        return job
 
     def _close_job(job: int | None) -> None:
         if job:
-            _kernel32.CloseHandle(job)
+            winjob.close(job)
 
 else:  # pragma: no cover - one of the two runs on each system
 
     def _job(pid: int, memory: int) -> int | None:
-        """No job objects here: Linux's cap is the child's own, and macOS has none it enforces."""
+        """No job objects here: the child caps its own memory on Linux, and macOS has none it enforces."""
         return None
 
     def _close_job(job: int | None) -> None:

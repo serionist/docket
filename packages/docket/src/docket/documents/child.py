@@ -1,10 +1,12 @@
 """The extraction child's own process (DR-0485): `python -I -X utf8 -m docket.documents.child --memory <bytes>`.
 
-It sets its memory cap where the system lets a process set its own (Linux; Windows' is the parent's job object), says
-`ready`, then takes one JSON line per file on stdin and answers on stdout:
+It caps its own memory first, where the system enforces a cap (Linux's `RLIMIT_AS`, a job object of its own on
+Windows), and says `ready` with its own pid and the cap it got, so the parent can refuse a child that runs without one.
+A cap the system refuses ends it before `ready`. Then it takes one JSON line per file on stdin and answers on stdout:
 
 | Line | When |
 |---|---|
+| `{"ready": true, "pid": <n>, "memory": <bytes or null>}` | once, at the start |
 | `{"part": {...}}` | one per page, slide or sheet, in order |
 | `{"done": {...}}` | the file read whole: its bytes' sha256 and size, format, engine, text, people, note |
 | `{"not_read": {...}}` | past a cap, damaged or protected: a reason, Docket's own words, the sha256 and size |
@@ -20,31 +22,53 @@ import argparse
 import dataclasses
 import hashlib
 import json
+import os
 import stat
 import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, BinaryIO, TextIO, cast
 
-from docket.documents import formats
 from docket.documents.limits import LIMITS, Limits, NotReadError, mib
 
-if sys.platform == "linux":  # pragma: no cover - one of the two runs on each system; test_documents_extract runs both
+if sys.platform == "linux":  # pragma: no cover - one of the three runs on each system; test_documents_extract runs them
     import resource
 
-    def limit_memory(cap: int) -> None:
-        """The child's address space capped: Linux lets a process cap its own."""
+    def limit_memory(cap: int) -> int | None:
+        """The child's address space capped, as Linux lets a process cap its own; the cap it got."""
         resource.setrlimit(resource.RLIMIT_AS, (cap, cap))
+        return resource.getrlimit(resource.RLIMIT_AS)[0]
+
+elif sys.platform == "win32":  # pragma: no cover
+    from docket.documents import winjob
+
+    def limit_memory(cap: int) -> int | None:
+        """The interpreter in a job of its own that caps its committed memory, and the cap its innermost job holds.
+        The job's handle stays open for the process's life."""
+        job = winjob.create(winjob.PROCESS_MEMORY, cap)
+        winjob.assign(job)
+        return winjob.own_memory_limit()
 
 else:  # pragma: no cover
 
-    def limit_memory(cap: int) -> None:
-        """Nothing here: Windows' cap is the job object the parent puts the child in, and macOS enforces none, so it
-        has the time limit and the size caps only."""
+    def limit_memory(cap: int) -> int | None:
+        """No cap macOS enforces: the child has the time limit and the size caps only."""
+        return None
+
+
+def keep_numpy_out(modules: dict[str, Any] | None = None) -> None:
+    """Make `import numpy` fail in this process. openpyxl imports numpy when it is installed, and numpy's BLAS reserves
+    memory for every core as it loads, past the cap on a machine with many; the child reads no number with it. Only the
+    child's own process calls this: in another, numpy's users would break."""
+    target = cast(dict[str, Any], sys.modules) if modules is None else modules
+    target["numpy"] = None
 
 
 def handle(request: dict[str, Any], limits: Limits = LIMITS) -> Iterator[dict[str, Any]]:
     """One file's answer lines."""
+    # Only now, once main has set the cap and kept numpy out: the readers bring openpyxl, which brings numpy if it can.
+    from docket.documents import formats  # noqa: PLC0415
+
     path = Path(str(request["path"]))
     fmt = cast(formats.Format, request["format"])
     try:
@@ -82,11 +106,12 @@ def main(argv: list[str], stdin: BinaryIO, stdout: BinaryIO, stderr: TextIO) -> 
     parser = argparse.ArgumentParser(prog="docket.documents.child")
     parser.add_argument("--memory", type=int, required=True)
     args = parser.parse_args(argv)
-    limit_memory(args.memory)
+    # Before anything is read; a cap the system refuses raises here, and the child never says ready.
+    memory = limit_memory(args.memory)
     stdout_before = sys.stdout
     sys.stdout = stderr
     try:
-        _write(stdout, {"ready": True})
+        _write(stdout, {"ready": True, "pid": os.getpid(), "memory": memory})
         while line := stdin.readline():
             for answer in handle(json.loads(line)):
                 _write(stdout, answer)
@@ -96,4 +121,5 @@ def main(argv: list[str], stdin: BinaryIO, stdout: BinaryIO, stderr: TextIO) -> 
 
 
 if __name__ == "__main__":  # pragma: no cover - the child's process; main() is tested in-process
+    keep_numpy_out()
     sys.exit(main(sys.argv[1:], sys.stdin.buffer, sys.stdout.buffer, sys.stderr))

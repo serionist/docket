@@ -3,6 +3,8 @@ parsed with a DTD, and never named by an error's message. Every file is built he
 
 from __future__ import annotations
 
+import io
+import tracemalloc
 import zipfile
 
 import pytest
@@ -12,12 +14,14 @@ from documents_kit import (
     docx,
     encrypted,
     package,
+    patched,
     pdf,
     pptx,
     rels,
     replaced,
     sheet_xml,
     sp,
+    streamed,
     wp,
     wroot,
     xlsx,
@@ -98,6 +102,54 @@ def test_an_encrypted_zip_part_is_protected() -> None:
     assert refused(bytes(data), "docx").reason == "protected"
 
 
+@pytest.mark.parametrize(("method", "name"), [(zipfile.ZIP_BZIP2, "bzip2"), (zipfile.ZIP_LZMA, "lzma")])
+def test_a_part_packed_with_bzip2_or_lzma_is_refused_before_it_is_inflated(method: int, name: str) -> None:
+    # Both inflate a whole compressed chunk at once, so a few hundred bytes can become hundreds of MiB in one call.
+    data = package({"_rels/.rels": rels(("rId1", DOC_REL, "word/document.xml")), "word/document.xml": "<x/>"},
+                   compression=method)  # fmt: skip
+    error = refused(data, "docx")
+    assert (error.reason, error.detail) == (
+        "zip",
+        f"a part in its package packed with {name}, which Docket doesn't read",
+    )
+
+
+def test_a_part_that_lies_about_its_size_is_counted_by_what_it_holds() -> None:
+    members: dict[str, str | bytes] = {"_rels/.rels": rels(("rId1", DOC_REL, "word/document.xml"))}
+    data = patched(
+        streamed(members, "word/document.xml", 2, b"<" + b" " * (MIB - 1)), "word/document.xml", declared=1000
+    )
+    assert zipfile.ZipFile(io.BytesIO(data)).getinfo("word/document.xml").file_size == 1000
+    error = refused(data, "docx", Limits(member_bytes=MIB, ratio=10**9))
+    assert (error.reason, error.detail) == ("zip", "a part of 2 MB in its package, over the cap of 1 MB")
+
+
+def test_a_lying_zip_bomb_is_refused_without_inflating_it_whole() -> None:
+    # 80 MiB of spaces deflate to about 80 KB and declare 1,000 bytes; zipfile's own read would inflate all of it.
+    members: dict[str, str | bytes] = {"_rels/.rels": rels(("rId1", DOC_REL, "word/document.xml"))}
+    data = patched(streamed(members, "word/document.xml", 80, b" " * MIB), "word/document.xml", declared=1000)
+    tracemalloc.start()
+    try:
+        error = refused(data, "docx")
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert error.reason == "zip"
+    assert peak < 16 * MIB
+
+
+def test_a_part_without_its_header_or_cut_short_or_not_deflate_is_damaged() -> None:
+    data = docx(wp("Northwind"))
+    headless = data.replace(b"PK\x03\x04", b"PK\x00\x00", 1)
+    assert refused(headless, "docx").detail == "damaged (a part's header is missing)"
+    short = patched(data, "word/document.xml", compressed=10**6)
+    assert refused(short, "docx").detail == "damaged (a part is cut short)"
+    info = zipfile.ZipFile(io.BytesIO(data)).getinfo("word/document.xml")
+    begin = info.header_offset + 30 + len(info.filename) + len(info.extra)
+    garbled = data[:begin] + bytes([0xFF]) * info.compress_size + data[begin + info.compress_size :]
+    assert refused(garbled, "docx").detail == "damaged (error)"
+
+
 def test_a_part_whose_bytes_don_t_match_its_crc_is_damaged() -> None:
     members: dict[str, str | bytes] = {
         "_rels/.rels": rels(("rId1", DOC_REL, "word/document.xml")),
@@ -145,14 +197,28 @@ def test_a_docx_part_with_a_dtd_or_entities_is_never_parsed(prefix: str) -> None
     assert (error.reason, error.detail) == ("xml", UNSAFE_XML)
 
 
-def test_a_workbook_with_entities_is_never_parsed() -> None:
-    sheet = (
-        BILLION_LAUGHS
-        + sheet_xml('<row r="1"><c r="A1" t="inlineStr"><is><t>&lol3;</t></is></c></row>').split("?>", 1)[1]
-    )
+@pytest.mark.parametrize(
+    ("prefix", "text"),
+    [
+        (BILLION_LAUGHS, "&lol3;"),
+        (EXTERNAL, "&secret;"),
+        # A bare DTD: openpyxl's own parse would take it, so the package's check refuses it first.
+        ('<?xml version="1.0"?><!DOCTYPE worksheet>', "plain"),
+    ],
+    ids=["billion-laughs", "external-entity", "bare-dtd"],
+)
+def test_a_workbook_part_with_a_dtd_or_entities_is_never_parsed(prefix: str, text: str) -> None:
+    sheet = prefix + sheet_xml(f'<row r="1"><c r="A1" t="inlineStr"><is><t>{text}</t></is></c></row>').split("?>", 1)[1]
     data = replaced(xlsx(_sheet), "xl/worksheets/sheet1.xml", sheet)
     error = refused(data, "xlsx")
     assert (error.reason, error.detail) == ("xml", UNSAFE_XML)
+
+
+def test_a_dtd_is_refused_in_a_part_whatever_its_name_and_an_image_isn_t_xml() -> None:
+    data = replaced(docx(wp("x")), "word/media/notes.data", '<?xml version="1.0"?><!DOCTYPE x><x/>')
+    assert refused(data, "docx").detail == UNSAFE_XML
+    image = replaced(docx(wp("Beside a picture")), "word/media/image1.png", b"\x89PNG\r\n\x1a\n" + bytes(64))
+    assert extract(image, "docx").text == "Beside a picture"
 
 
 def test_malformed_xml_is_damaged() -> None:

@@ -1,11 +1,17 @@
-"""Office Open XML packages (docx, pptx, xlsx) opened under the caps: the zip's sizes checked before any part is read,
-every XML part parsed by defusedxml with no DTD, and parts found through the package's relationships, never by fixed
-names (DR-0484, DR-0485)."""
+"""Office Open XML packages (docx, pptx, xlsx) opened under the caps: every part's real size counted before any is
+read, every XML part refused with a DTD, and parts found through the package's relationships, never by fixed names
+(DR-0484, DR-0485).
+
+A part's declared sizes can lie, and `zipfile` inflates a whole part before it cuts it to what it declared; bzip2 and
+lzma inflate a whole chunk at once. So only stored and deflated parts are read, and each one's deflate stream is
+inflated once, a MiB at a time from its raw bytes, counting what it really holds against the caps.
+"""
 
 from __future__ import annotations
 
 import io
 import posixpath
+import struct
 import zipfile
 import zlib
 from dataclasses import dataclass
@@ -13,9 +19,9 @@ from urllib.parse import unquote
 from xml.etree.ElementTree import Element, ParseError
 
 from defusedxml import DefusedXmlException
-from defusedxml.ElementTree import fromstring
+from defusedxml.ElementTree import fromstring, iterparse
 
-from docket.documents.limits import Limits, NotReadError, mib
+from docket.documents.limits import MIB, Limits, NotReadError, mib
 
 # An OLE compound file: an Office file under a password or a sensitivity label, or one of the old binary formats.
 OLE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
@@ -24,6 +30,8 @@ REL = "{http://schemas.openxmlformats.org/package/2006/relationships}Relationshi
 DC = "{http://purl.org/dc/elements/1.1/}"
 CP = "{http://schemas.openxmlformats.org/package/2006/metadata/core-properties}"
 UNSAFE_XML = "its XML declares a DTD or entities"
+LOCAL_HEADER = b"PK\x03\x04"
+METHODS = {zipfile.ZIP_BZIP2: "bzip2", zipfile.ZIP_LZMA: "lzma"}
 
 
 def local(tag: str) -> str:
@@ -47,24 +55,58 @@ class Rel:
     target: str
 
 
-def check(infos: list[zipfile.ZipInfo], limits: Limits) -> None:
-    """The package's declared sizes, before any part is read; `zipfile` then reads no more than a part declares."""
+def check(data: bytes, infos: list[zipfile.ZipInfo], limits: Limits) -> None:
+    """The package's parts counted before any is read: how many, how they are packed, and what each really holds, not
+    what it declares."""
     if len(infos) > limits.zip_members:
         raise NotReadError("zip", f"{len(infos):,} parts in its package, over the cap of {limits.zip_members:,}")
+    if any(info.flag_bits & 0x1 for info in infos):
+        raise NotReadError("protected", "protected, or in an old binary format")
     total = 0
     for info in infos:
-        if info.file_size > limits.member_bytes:
+        if info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+            method = METHODS.get(info.compress_type, f"method {info.compress_type}")
+            raise NotReadError("zip", f"a part in its package packed with {method}, which Docket doesn't read")
+        size = max(info.file_size, real_size(data, info, limits.member_bytes))
+        if size > limits.member_bytes:
             raise NotReadError(
-                "zip", f"a part of {mib(info.file_size)} in its package, over the cap of {mib(limits.member_bytes)}"
+                "zip", f"a part of {mib(size)} in its package, over the cap of {mib(limits.member_bytes)}"
             )
-        if info.file_size > limits.ratio_from and info.file_size > limits.ratio * max(info.compress_size, 1):
-            ratio = info.file_size // max(info.compress_size, 1)
+        if size > limits.ratio_from and size > limits.ratio * max(info.compress_size, 1):
+            ratio = size // max(info.compress_size, 1)
             raise NotReadError(
                 "zip", f"a part compressed {ratio:,} to 1 in its package, over the cap of {limits.ratio:,} to 1"
             )
-        total += info.file_size
+        total += size
     if total > limits.package_bytes:
         raise NotReadError("zip", f"{mib(total)} of parts in its package, over the cap of {mib(limits.package_bytes)}")
+
+
+def real_size(data: bytes, info: zipfile.ZipInfo, cap: int) -> int:
+    """What a part really holds, from its raw bytes after its local header: a stored part's length, or its deflate
+    stream inflated a MiB at a time, counting stopped once past `cap`."""
+    start = info.header_offset
+    if data[start : start + 4] != LOCAL_HEADER:
+        raise NotReadError("damaged", "damaged (a part's header is missing)")
+    name_length, extra_length = struct.unpack_from("<HH", data, start + 26)
+    begin = start + 30 + name_length + extra_length
+    raw = data[begin : begin + info.compress_size]
+    if len(raw) < info.compress_size:
+        raise NotReadError("damaged", "damaged (a part is cut short)")
+    if info.compress_type == zipfile.ZIP_STORED:
+        return len(raw)
+    inflater = zlib.decompressobj(-zlib.MAX_WBITS)
+    count = 0
+    pending = raw
+    try:
+        while pending and not inflater.eof:
+            count += len(inflater.decompress(pending, MIB))
+            if count > cap:
+                return count
+            pending = inflater.unconsumed_tail
+        return count + len(inflater.flush())
+    except zlib.error as e:
+        raise damaged(e) from None
 
 
 def rels_name(part: str) -> str:
@@ -92,10 +134,22 @@ class Package:
         except (zipfile.BadZipFile, zlib.error, EOFError, ValueError) as e:
             raise damaged(e) from None
         infos = self.zip.infolist()
-        check(infos, limits)
-        if any(info.flag_bits & 0x1 for info in infos):
-            raise NotReadError("protected", "protected, or in an old binary format")
+        check(data, infos, limits)
         self.names = frozenset(info.filename for info in infos)
+        for info in infos:
+            self._no_dtd(info)
+
+    def _no_dtd(self, info: zipfile.ZipInfo) -> None:
+        """Refuse a part with a DTD before anything parses it, whatever its name: openpyxl's own parse takes one. A DTD
+        comes before the root element, so a part is read only up to that; one that isn't XML, an image, stops at its
+        first bytes and is judged when it is read."""
+        try:
+            with self.zip.open(info) as f:
+                next(iter(iterparse(f, events=("start",), forbid_dtd=True)), None)
+        except DefusedXmlException:
+            raise NotReadError("xml", UNSAFE_XML) from None
+        except (ParseError, zipfile.BadZipFile, zlib.error, EOFError):
+            return
 
     def read(self, name: str) -> bytes:
         if name not in self.names:
@@ -106,10 +160,9 @@ class Package:
             raise damaged(e) from None
 
     def xml(self, name: str) -> Element:
+        # A part with a DTD was refused as the package opened; defusedxml refuses one here again all the same.
         try:
             return fromstring(self.read(name), forbid_dtd=True)
-        except DefusedXmlException:
-            raise NotReadError("xml", UNSAFE_XML) from None
         except ParseError as e:
             raise damaged(e) from None
 

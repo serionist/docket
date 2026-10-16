@@ -4,6 +4,7 @@ the file's stem asks. Started as `python documents_fake_child.py [--mode <mode>]
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -70,11 +71,11 @@ def main() -> None:
     if mode == "other":
         say(json.dumps({"ready": False}))
         time.sleep(60)
-    if mode == "capped":
-        from docket.documents.child import limit_memory
+    # The real child's own cap, as the real child sets it before its hello; "uncapped" says ready without one.
+    from docket.documents.child import limit_memory
 
-        limit_memory(memory)
-    say(json.dumps({"ready": True}))
+    got = None if mode == "uncapped" else limit_memory(memory)
+    say(json.dumps({"ready": True, "pid": os.getpid(), "memory": got}))
     for raw in sys.stdin:
         answer(Path(json.loads(raw)["path"]).stem)
     if mode == "stubborn":

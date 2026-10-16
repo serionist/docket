@@ -4,6 +4,7 @@ by hand and encrypted through pypdf. Every word in them is invented; nothing bin
 from __future__ import annotations
 
 import io
+import struct
 import zipfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -38,6 +39,39 @@ def replaced(data: bytes, name: str, content: str | bytes) -> bytes:
     members: dict[str, str | bytes] = {n: source.read(n) for n in source.namelist()}
     members[name] = content
     return package(members)
+
+
+def streamed(members: dict[str, str | bytes], big: str, chunks: int, chunk: bytes) -> bytes:
+    """A package whose member `big` is `chunk` written `chunks` times, deflated as it is written, so a member of tens of
+    MiB never sits whole in memory; the others as `package` writes them."""
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, data in members.items():
+            z.writestr(name, data.encode("utf-8") if isinstance(data, str) else data)
+        info = zipfile.ZipInfo(big)
+        info.compress_type = zipfile.ZIP_DEFLATED
+        with z.open(info, "w") as f:
+            for _ in range(chunks):
+                f.write(chunk)
+    return out.getvalue()
+
+
+def patched(data: bytes, name: str, *, declared: int | None = None, compressed: int | None = None) -> bytes:
+    """A package whose member `name` lies about its sizes, in its local header and in the central directory alike."""
+    out = bytearray(data)
+    # (signature, offset of the name length, offset of the name, offset of compress_size, offset of file_size)
+    for sig, name_len_at, name_at, compressed_at, declared_at in ((b"PK\x03\x04", 26, 30, 18, 22),
+                                                                  (b"PK\x01\x02", 28, 46, 20, 24)):  # fmt: skip
+        at = out.find(sig)
+        while at >= 0:
+            length = struct.unpack_from("<H", out, at + name_len_at)[0]
+            if bytes(out[at + name_at : at + name_at + length]) == name.encode():
+                if declared is not None:
+                    struct.pack_into("<I", out, at + declared_at, declared)
+                if compressed is not None:
+                    struct.pack_into("<I", out, at + compressed_at, compressed)
+            at = out.find(sig, at + 4)
+    return bytes(out)
 
 
 def rels(*entries: tuple[str, str, str]) -> str:

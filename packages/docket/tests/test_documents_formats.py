@@ -157,6 +157,27 @@ def test_a_long_docx_paragraph_is_cut_at_sentence_ends() -> None:
     assert got.text == f"{sentence}\n\n{sentence}"
 
 
+def test_a_table_in_a_table_s_cell_is_read_once_as_that_cell_s_text() -> None:
+    inner = "<w:tbl>" + wrow("Q1", "1,200") + wrow("Q2", "1,450") + "</w:tbl>"
+    outer = "<w:tbl><w:tr><w:tc>" + wp("Budget") + "</w:tc><w:tc>" + inner + wp("") + "</w:tc></w:tr></w:tbl>"
+    assert extract(docx(wp("Intro") + outer), "docx").text == "Intro\n\nBudget | Q1 | 1,200 Q2 | 1,450"
+
+
+def test_rows_and_cells_inside_content_controls_are_the_table_s_own() -> None:
+    cell = "<w:sdt><w:sdtContent><w:tc>" + wp("Harbour") + "</w:tc></w:sdtContent></w:sdt>"
+    row = "<w:sdt><w:sdtContent><w:tr><w:tc>" + wp("Site") + "</w:tc>" + cell + "</w:tr></w:sdtContent></w:sdt>"
+    wrapped = "<w:tbl><w:customXml>" + wrow("Date", "1 Oct") + "</w:customXml>" + row + "</w:tbl>"
+    assert extract(docx(wrapped), "docx").text == "Date | 1 Oct\n\nSite | Harbour"
+
+
+def test_deeply_nested_tables_stay_linear() -> None:
+    body = wp("x")
+    for _ in range(40):
+        body = "<w:tbl><w:tr><w:tc>" + body + "</w:tc></w:tr></w:tbl>" + wp("")
+    # Read whole at every level, 40 levels would be 2**40 copies of x.
+    assert extract(docx(body), "docx").text == "x"
+
+
 # -- pptx -------------------------------------------------------------------------------------------------------------
 
 
@@ -286,3 +307,16 @@ def test_a_pdf_is_a_part_per_page_and_a_page_without_text_says_so() -> None:
 
 def test_a_pdf_locked_by_an_owner_password_only_is_read() -> None:
     assert extract(encrypted(pdf([["Open to read"]]), ""), "pdf").parts[0].text == "Open to read"
+
+
+@pytest.mark.parametrize("count", [b"1", b"5"])
+def test_an_encrypted_pdf_s_pages_are_counted_by_its_page_tree_not_its_count(count: bytes) -> None:
+    # pypdf counts an encrypted file by its /Count, which says what it likes: 1 hid two pages, 5 broke the read.
+    data = encrypted(pdf([["page one"], ["page two"], ["page three"]]), "")
+    assert data.count(b"/Count 3") == 1
+    got = extract(data.replace(b"/Count 3", b"/Count " + count), "pdf")
+    assert [p.text for p in got.parts] == ["page one", "page two", "page three"]
+
+
+def test_a_pdf_without_pages_has_no_parts() -> None:
+    assert extract(pdf([]), "pdf").parts == []

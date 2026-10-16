@@ -15,6 +15,7 @@ and txt, which are only decoded.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import logging
 import warnings
@@ -25,13 +26,12 @@ from importlib.metadata import version
 from typing import Literal
 from xml.etree.ElementTree import Element
 
-from defusedxml import DefusedXmlException
 from openpyxl import load_workbook
 from pypdf import PasswordType, PdfReader
 
 from docket.documents import text as texts
 from docket.documents.limits import LIMITS, Limits, NotReadError, mib, over
-from docket.documents.ooxml import UNSAFE_XML, Package, damaged, local, namespace
+from docket.documents.ooxml import Package, damaged, local, namespace
 
 Format = Literal["pdf", "docx", "xlsx", "pptx", "md", "txt"]
 FORMATS: dict[str, Format] = {
@@ -110,20 +110,9 @@ def extract(data: bytes, fmt: Format, limits: Limits = LIMITS) -> Extracted:
     except (NotReadError, MemoryError):
         raise
     except Exception as e:
-        # openpyxl parses through defusedxml, and wraps its refusal in an error of its own.
-        if _refused_xml(e):
-            raise NotReadError("xml", UNSAFE_XML) from None
         raise damaged(e) from None
     _check_text(extracted, limits)
     return extracted
-
-
-def _refused_xml(error: BaseException) -> bool:
-    """Whether defusedxml's refusal is the error or what caused it, a few links down at most."""
-    chain = [error]
-    while len(chain) < 8 and (link := chain[-1].__cause__ or chain[-1].__context__) is not None:
-        chain.append(link)
-    return any(isinstance(e, DefusedXmlException) for e in chain)
 
 
 def _size(text: str) -> int:
@@ -156,6 +145,19 @@ def _w(element: Element, name: str) -> bool:
     return local(element.tag) == name and namespace(element.tag) in W
 
 
+# A content control or custom XML can wrap a table's rows or a row's cells; nothing else stands between them.
+_WRAPPERS = frozenset({"sdt", "sdtContent", "customXml"})
+
+
+def _own(parent: Element, name: str) -> Iterator[Element]:
+    """A table's rows or a row's cells: its children of that name, and those under its wrappers, never deeper."""
+    for child in parent:
+        if _w(child, name):
+            yield child
+        elif namespace(child.tag) in W and local(child.tag) in _WRAPPERS:
+            yield from _own(child, name)
+
+
 class _Docx:
     """A WordprocessingML part's text: paragraphs and table rows in order, text boxes after the paragraph that holds
     them, tracked insertions in and deletions out, a field's result and never its code."""
@@ -177,9 +179,11 @@ class _Docx:
         return out
 
     def rows(self, table: Element) -> list[str]:
+        """A table's own rows, one line each: a table in a cell is read once, as that cell's text, so nesting never
+        repeats it."""
         out: list[str] = []
-        for row in (r for r in table.iter() if _w(r, "tr")):
-            cells = [texts.one_line(" ".join(self.blocks(cell))) for cell in row if _w(cell, "tc")]
+        for row in _own(table, "tr"):
+            cells = [texts.one_line(" ".join(self.blocks(cell))) for cell in _own(row, "tc")]
             out.append(" | ".join(cells))
         return out
 
@@ -435,11 +439,14 @@ def read_pdf(data: bytes, limits: Limits) -> Extracted:
         reader = PdfReader(io.BytesIO(data), strict=False)
         if reader.is_encrypted and reader.decrypt("") == PasswordType.NOT_DECRYPTED:
             raise NotReadError("encrypted", "encrypted with a password")
-        count = len(reader.pages)
-        if count > limits.pages:
-            raise over("pages", count, limits.pages)
+        # The page tree as walked, never its own /Count: pypdf counts an encrypted file by /Count, which can lie.
+        with contextlib.suppress(IndexError):
+            reader.get_page(0)
+        pages = list(reader.flattened_pages or [])
+        if len(pages) > limits.pages:
+            raise over("pages", len(pages), limits.pages)
         parts: list[Part] = []
-        for n, page in enumerate(reader.pages, start=1):
+        for n, page in enumerate(pages, start=1):
             paragraphs = texts.paragraphs(texts.blocks_of(page.extract_text() or ""))
             parts.append(Part("page", n, f"page {n}", texts.join(paragraphs) or NO_TEXT))
     return Extracted("pdf", f"pypdf {version('pypdf')}", parts=parts)

@@ -6,7 +6,9 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import sys
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -189,15 +191,39 @@ def test_the_child_gets_only_what_python_needs_to_start(monkeypatch: pytest.Monk
 
 
 @pytest.mark.skipif(sys.platform == "darwin", reason="macOS enforces no memory cap; the time limit holds there")
-def test_a_child_past_its_memory_cap_is_a_crash(tmp_path: Path) -> None:
-    # On Linux the child caps itself; on Windows the job object the parent puts it in does.
-    mode = "capped" if sys.platform == "linux" else "normal"
-    with Extractor(fake(mode), memory=512 * MIB) as extractor:
-        assert extractor.extract(touch(tmp_path, "alloc.txt")) == Failed("crashed")
-        assert "MemoryError" in extractor.stderr()
+def test_a_child_past_its_memory_cap_is_a_crash_while_the_parent_is_busy(tmp_path: Path) -> None:
+    # Busy threads in the parent, as a service has: they delayed a job the parent assigned past the moment a venv's
+    # launcher started the interpreter, which then ran uncapped. The child now caps itself, before its hello.
+    stopping = threading.Event()
+
+    def spin() -> None:
+        while not stopping.is_set():
+            pass
+
+    busy = [threading.Thread(target=spin, daemon=True) for _ in range(3)]
+    for thread in busy:
+        thread.start()
+    try:
+        for _ in range(3):
+            with Extractor(fake(), memory=512 * MIB, files_per_child=1) as extractor:
+                assert extractor.extract(touch(tmp_path, "alloc.txt")) == Failed("crashed")
+                assert "MemoryError" in extractor.stderr()
+    finally:
+        stopping.set()
+        for thread in busy:
+            thread.join()
 
 
-def test_on_windows_the_child_is_in_its_job_before_the_first_file(tmp_path: Path) -> None:
+def test_a_child_without_its_memory_cap_is_stopped_where_the_system_enforces_one(tmp_path: Path) -> None:
+    with Extractor(fake("uncapped")) as extractor:
+        if extract.CAPPED:
+            with pytest.raises(DocketError, match="started without its memory cap"):
+                extractor.extract(touch(tmp_path, "a.txt"))
+        else:
+            assert isinstance(extractor.extract(touch(tmp_path, "a.txt")), Done)
+
+
+def test_on_windows_the_interpreter_itself_is_in_a_capped_job(tmp_path: Path) -> None:
     # A check pyright reads too, so the Windows-only calls below aren't type-checked on other systems.
     if sys.platform != "win32":
         pytest.skip("a job object is Windows' own")
@@ -207,16 +233,19 @@ def test_on_windows_the_child_is_in_its_job_before_the_first_file(tmp_path: Path
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel32.OpenProcess.restype = wintypes.HANDLE
     kernel32.IsProcessInJob.argtypes = (wintypes.HANDLE, wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL))
-    with Extractor(fake()) as extractor:
-        assert isinstance(extractor.extract(touch(tmp_path, "a.txt")), Done)
-        running = extractor._child  # pyright: ignore[reportPrivateUsage]
-        assert running is not None
-        assert running.job is not None
-        handle = kernel32.OpenProcess(0x1000, False, running.proc.pid)
-        inside = wintypes.BOOL()
-        assert kernel32.IsProcessInJob(handle, wintypes.HANDLE(running.job), ctypes.byref(inside))
-        kernel32.CloseHandle(handle)
-        assert inside.value
+    for command in (fake(), None):
+        with Extractor(command) as extractor:
+            assert isinstance(extractor.extract(touch(tmp_path, "a.txt")), Done)
+            running = extractor._child  # pyright: ignore[reportPrivateUsage]
+            assert running is not None
+            # The pid the interpreter gave in its hello, not the launcher's; the start already checked the cap it
+            # reported from its own innermost job.
+            assert running.pid is not None
+            handle = kernel32.OpenProcess(0x1000, False, running.pid)
+            inside = wintypes.BOOL()
+            assert kernel32.IsProcessInJob(handle, None, ctypes.byref(inside))
+            kernel32.CloseHandle(handle)
+            assert inside.value
 
 
 # -- the child's own side, in-process ---------------------------------------------------------------------------------
@@ -237,7 +266,7 @@ def test_the_child_answers_a_line_per_part_then_the_file_s_facts(
     data = pdf([["one"], ["two"]])
     path = touch(tmp_path, "a.pdf", data)
     answers = run_child([{"path": str(path), "format": "pdf"}], monkeypatch)
-    assert answers[0] == {"ready": True}
+    assert answers[0] == {"ready": True, "pid": os.getpid(), "memory": None}
     assert [a["part"]["text"] for a in answers[1:3]] == ["one", "two"]  # type: ignore[index]
     done = answers[3]["done"]
     assert isinstance(done, dict)
@@ -287,6 +316,13 @@ def test_a_library_s_print_goes_to_stderr_not_into_the_protocol(
     monkeypatch.setattr(formats, "extract", chatty)
     answers = run_child([{"path": str(touch(tmp_path, "d.txt", b"hi")), "format": "txt"}], monkeypatch)
     assert [next(iter(a)) for a in answers] == ["ready", "done"]
+
+
+def test_the_child_keeps_numpy_out_of_its_own_process() -> None:
+    # openpyxl brings numpy when it can, and numpy's BLAS reserved more than a 512 MiB cap as it loaded.
+    modules: dict[str, object] = {}
+    child.keep_numpy_out(modules)
+    assert modules == {"numpy": None}
 
 
 def test_running_out_of_memory_ends_the_child(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
