@@ -329,6 +329,7 @@ class BatchView(BaseModel):
     started: datetime
     cards: list[CardView]
     left_out: dict[str, int]
+    # What tier 1 applied since the round started, as logged but for each value a never-store list holds now (DR-0501).
     applied: list[Line]
     skipped: list[str] = []
     tier1: str | None = None
@@ -369,7 +370,7 @@ def view(vault: Vault, batch: Batch) -> BatchView:
     now = states(vault, batch, lines)
     by_tier1 = [ln for ln in lines if ln.at >= batch.started and ln.by == "tier1"]
     lists = vault.config.never_store
-    applied = [ln for ln in by_tier1 if ln.op != "undo"]
+    applied = [hidden_line(ln, lists) for ln in by_tier1 if ln.op != "undo"]
     unfinished = {ln.id for ln in curatelog.unfinished(vault)}
     with closing(open_index(vault)) as conn:
         cards = [CardView(card=c, state=now[c.id], snippets=snippets(conn, c)) for c in batch.cards]
@@ -394,6 +395,40 @@ def shown_key(key: str, lists: NeverStore) -> str:
     """A key as the CLI and the page show it: the value it names hidden when a never-store list holds it."""
     text = curatelog.key_text(key)
     return key[: len(key) - len(text)] + HIDDEN if text and listed(text, lists) is not None else key
+
+
+def hidden_line(line: Line, lists: NeverStore) -> Line:
+    """A logged line as `show` and its JSON give it: each value a never-store list holds now hidden, in its key and in
+    its change, as the Curate page hides them; the rest as logged. A list can gain a value after tier 1 applied it. The
+    copy is for showing only, never written, so it skips the checks HIDDEN would fail."""
+
+    def shown(text: str) -> str:
+        return HIDDEN if listed(text, lists) is not None else text
+
+    update: dict[str, object] = {"key": shown_key(line.key, lists)}
+    change = line.change
+    if change is None:
+        return line.model_copy(update=update)
+    part: dict[str, object] = {}
+    if change.alias is not None:
+        part["alias"] = change.alias.model_copy(update={"text": shown(change.alias.text)})
+    if change.name is not None:
+        part["name"] = change.name.model_copy(update={"text": shown(change.name.text)})
+    if change.id is not None:
+        part["id"] = change.id.model_copy(update={"value": shown(change.id.value)})
+    if change.entity is not None:
+        e = change.entity
+        part["entity"] = e.model_copy(
+            update={
+                "name": {lang: shown(text) for lang, text in e.name.items()},
+                "aliases": tuple(a.model_copy(update={"text": shown(a.text)}) for a in e.aliases),
+                "ids": {key: tuple(shown(v) for v in values) for key, values in e.ids.items()},
+                "role": shown(e.role) if e.role else e.role,
+                "note": shown(e.note) if e.note else e.note,
+            }
+        )
+    update["change"] = change.model_copy(update=part)
+    return line.model_copy(update=update)
 
 
 # -- the measures -------------------------------------------------------------------------------------------------

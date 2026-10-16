@@ -416,6 +416,39 @@ def test_the_round_lists_what_tier1_took_back_a_never_store_value_hidden(
         assert len(taken) == 1 and taken[0].endswith("email=(on a never-store list)")
 
 
+def test_show_hides_a_value_tier1_applied_once_a_list_holds_it(
+    vault: Vault, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DOCKET_VAULT", str(vault.root))
+    with signed_in(vault) as client:
+        assert client.post("/curate/round", headers=SAME).status_code == 303
+        assert main(["curate", "show"]) == 0
+        out = capsys.readouterr().out
+        assert re.search(r"applied  by itself: \S+  add northwind  alias Nortwind \(asr\)\n", out)
+        assert re.search(r"applied  by itself: \S+  add ada-example  id chat U0ADA\n", out)
+        # Listed after the round: tier 1 applied both while no list held them.
+        config(vault, never_store={"keywords": ["Nortwind", "U0ADA"]})
+        page = client.get("/curate").text
+        assert "alias (on a never-store list) (asr)" in page and "id chat (on a never-store list)" in page
+        assert main(["curate", "show"]) == 0
+        out = capsys.readouterr().out
+        assert re.search(r"applied  by itself: \S+  add northwind  alias \(on a never-store list\) \(asr\)\n", out)
+        assert re.search(r"applied  by itself: \S+  add ada-example  id chat \(on a never-store list\)\n", out)
+        assert main(["curate", "show", "--json"]) == 0
+        shown = json.loads(capsys.readouterr().out)
+    for text in (out, json.dumps(shown)):
+        assert "nortwind" not in text.casefold() and "u0ada" not in text.casefold()
+    applied = {ln["entity"] + " " + ln["key"]: ln["change"] for ln in shown["applied"]}
+    assert applied["northwind alias:northwind:(on a never-store list)"]["alias"]["text"] == batch.HIDDEN
+    assert applied["ada-example id:ada-example:chat=(on a never-store list)"]["id"] == {
+        "key": "chat", "value": batch.HIDDEN,
+    }  # fmt: skip
+    # The rest shows as logged, in the shape it always had, and the log keeps what it wrote.
+    assert applied["ada-example id:ada-example:email=ada@example.com"]["id"]["value"] == "ada@example.com"
+    assert set(shown["applied"][0]) == set(Line.model_fields)
+    assert "alias:northwind:nortwind" in {ln.key for ln in read_all(vault.root).lines}
+
+
 def test_two_people_whose_names_only_start_alike_share_an_address(tmp_path: Path) -> None:
     anna = {"entities/person/anna-example.yaml": "id: anna-example\ntype: person\nname: {en: Anna Example}\n"}
     v = small_vault(tmp_path, anna, mail=[

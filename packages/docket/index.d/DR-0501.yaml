@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0501
+    title: curate show and its JSON hide a never-store value in each line tier 1 applied, as the Curate page does, and keep the line's fields
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#130"]
+    description: "A never-store list can gain a value after tier 1 applied it, which tier 1 never does while a list holds it (DR-0469). docket curate show and its --json give each applied line with what a list holds now replaced by (on a never-store list), as the Curate page shows it: the value in its key, and in its change an alias's or a name's text, an id's value, or a created entity's names, aliases, ids, role and note. The copy is only shown; the log keeps what it wrote. Taken-back lines already hid their key's value. The JSON's applied stays a list of log lines with the same fields, so the curate skill reads it as before."
+    not_chosen:
+      - "Applied lines as text, as taken_back is: the JSON's applied would change shape under a reader of its fields."
+      - "Leave out a line whose value a list holds: the round would no longer say tier 1 changed that entity; the page shows the line with the value hidden."
