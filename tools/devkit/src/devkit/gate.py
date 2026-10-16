@@ -5,13 +5,15 @@ Lanes:
          the harness (AGENTS.md, skills, plugin manifests). The pre-push hook runs it.
   full   quick, then the tests with coverage and its floors, the secret scan over the whole history, and the plugin
          validated by Claude Code itself. CI runs it on Linux; finish-work runs it before a PR.
-  os     types and tests, for the other operating systems CI runs.
+  os     types and tests, for the other operating systems CI runs; `--shard K/N` runs share K of N of the test files,
+         so one system's tests can run on several runners.
 
 In a lane with tests, the tests start first and the other steps run beside them; each run prints its slowest tests. In a
 lane without coverage (os) the timed tests (marked `perf`) run after the rest, alone and one at a time, once the other
 steps are done, and the run prints what they printed: their times. The two runs share one templates folder, so the
 timed run reuses the vaults the parallel run built, and the timed run has a temp folder of its own. Under coverage the
-index's time limits are off, so the full lane keeps them in its one run.
+index's time limits are off, so the full lane keeps them in its one run. On GitHub Actions a tests step past 11 minutes
+prints a warning the PR shows.
 
 `gate check-text <file>` checks a text that is about to be posted (an issue or PR body) for private names and tool
 attribution.
@@ -74,6 +76,8 @@ class Ctx:
     pr: commits.PullRequest | None
     # Set once the lane's other steps are done; the timed tests wait for it. Set from the start for a step run alone.
     alone: threading.Event = field(default_factory=lambda: _set(threading.Event()))
+    # K/N: the tests step runs share K of N of the test files (DR-0495); None runs them all.
+    shard: str | None = None
 
 
 def _set(event: threading.Event) -> threading.Event:
@@ -282,6 +286,22 @@ def slowest(lines: list[str]) -> list[str]:
     return [f"slowest: {ln.strip()}" for ln in lines if _DURATION.match(ln.strip())]
 
 
+# A CI job spends about a minute around its tests step, so Tests (Windows) passes 12 minutes about when the step
+# passes this (#128).
+TESTS_WARN_MINUTES = 11
+
+
+def slow_tests_warning(step: str, took: float) -> str | None:
+    """On GitHub Actions, a warning the PR shows when the tests step took long enough to put its job past 12 minutes,
+    so the suite can't grow slower unseen; the step's time and its slowest tests are in the log beside it."""
+    if step != "tests" or os.environ.get("GITHUB_ACTIONS") != "true" or took <= TESTS_WARN_MINUTES * 60:
+        return None
+    return (
+        f"::warning title=Slow tests::the tests step took {took / 60:.1f} minutes, past {TESTS_WARN_MINUTES}: "
+        "its job is past 12 about then; the step's slowest tests are in its log"
+    )
+
+
 # The marker of a test that asserts an elapsed time (DR-0430).
 PERF = "perf"
 # Where the app's test kit builds its shared templates, named for both runs of a lane without coverage (DR-0492).
@@ -317,10 +337,13 @@ def step_tests(ctx: Ctx) -> Outcome:
     numbers = ctx.root / evalfloors.REPORT
     numbers.unlink(missing_ok=True)
     pytest = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+    covered = ctx.lane == "full"
+    if ctx.shard is not None and not covered:
+        # Both runs keep the same share of the test files, so the timed run finds what its share's parallel run built.
+        pytest += ["-p", "devkit.shard", f"--shard={ctx.shard}"]
     # One worker per core: most of the time goes to git subprocesses that would otherwise wait on each other.
     cmd = [*pytest, "-n", "auto", f"--durations={SLOWEST}"]
     env: dict[str, str] = {}
-    covered = ctx.lane == "full"
     if covered:
         cmd += ["--cov", f"--cov-report=json:{report.as_posix()}", "--cov-report=term:skip-covered"]
         # The question set's test writes its numbers there, for the eval floors (DR-0295).
@@ -417,7 +440,16 @@ STEPS = [
 ]
 
 
-def run(lane: str, only: Sequence[str] | None = None) -> int:
+def run(lane: str, only: Sequence[str] | None = None, shard: str | None = None) -> int:
+    if shard is not None:
+        from devkit.shard import parse  # noqa: PLC0415 - the plugin imports pytest, which only a sharded run needs
+
+        if lane != "os":
+            raise KitError("--shard splits the os lane's tests; the full lane runs every test, for its coverage floors")
+        try:
+            parse(shard)
+        except ValueError as e:
+            raise KitError(str(e)) from e
     root = repo_root()
     pr = commits.pull_request()
     base = pr.base_sha if pr and pr.base_sha else default_base(root)
@@ -426,7 +458,7 @@ def run(lane: str, only: Sequence[str] | None = None) -> int:
     # The PR's title and body are checked only by the PR text workflow, which runs again on every edit; the gate's
     # own run reads them from the push event, so a fixed title would stay red there until the next push.
     pr_text = pr if os.environ.get("DOCKET_PR_TEXT") == "1" else None
-    ctx = Ctx(root=root, lane=lane, ci=os.environ.get("CI") == "true", base=base, pr=pr_text)
+    ctx = Ctx(root=root, lane=lane, ci=os.environ.get("CI") == "true", base=base, pr=pr_text, shard=shard)
     steps = [s for s in STEPS if lane in s.lanes and (not only or s.name in only)]
     unknown = sorted(set(only or []) - {s.name for s in STEPS})
     if unknown:
@@ -453,6 +485,9 @@ def run(lane: str, only: Sequence[str] | None = None) -> int:
                 rest = out.detail if out.status == "fail" else out.detail[1:]
                 for line in rest:
                     print(f"       {line}", flush=True)
+                warning = slow_tests_warning(step.name, took)
+                if warning:
+                    print(warning, flush=True)
                 if out.status == "fail":
                     failed.append(step.name)
         finally:
@@ -493,6 +528,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("lane", nargs="?", default="quick", choices=[*LANES, "list", "check-text"])
     p.add_argument("file", nargs="?", help="check-text: the text file to check")
     p.add_argument("--only", help="comma-separated steps of the lane to run")
+    p.add_argument("--shard", metavar="K/N", help="os lane: run share K of N of the test files (DR-0495)")
     args = p.parse_args(argv)
     try:
         if args.lane == "list":
@@ -503,7 +539,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not args.file:
                 raise KitError("check-text needs the file to check")
             return check_text(Path(args.file))
-        return run(args.lane, args.only.split(",") if args.only else None)
+        return run(args.lane, args.only.split(",") if args.only else None, args.shard)
     except KitError as e:
         print(f"gate: {e}", file=sys.stderr)
         return 2

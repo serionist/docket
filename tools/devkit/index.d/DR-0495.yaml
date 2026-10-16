@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0495
+    title: CI runs Windows' tests in two halves on two runners, and Tests (Windows) passes when both do
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#128"]
+    description: "CI runs Windows' tests in two halves, Tests (Windows, 1 of 2) and (2 of 2), each on a runner of its own, and a job named Tests (Windows), the check the merge rule asks for, passes only when both halves pass. `gate os --shard K/N` loads devkit's shard plugin into both pytest runs of the tests step: it keeps every Nth test file in path order from the Kth, before any other filter, so a file stays whole in one half and the timed run of a half keeps the files its parallel run had, and its timed tests' vaults (DR-0492). The first half runs the types too; the second runs the tests alone (--only tests). Watched on CI's Windows runner (#128), the four vCPUs were 96 to 99% busy for the whole parallel run, six workers instead of four took as long (658 to 692 s against 674 and 675 s), a git call cost about 40 ms whatever the settings (38 to 44 ms for rev-parse, ls-files, diff, status and log, 40 ms for git --version alone), and most of a test file's time was its git calls (81% of test_docstore's, profiled on a desktop). On slow runners the tests step took 763 s, so the suite needs fewer CPU seconds per runner, not more workers: templates and fixtures cut a few percent. Alternating files in path order split the measured times 1,319 s to 1,254 s. macOS keeps one job; the full lane on Linux keeps its one covered run, which --shard refuses."
+    binds:
+      - A half keeps its test files whole, and both pytest runs of a half keep the same files.
+      - The check named Tests (Windows) fails when either half fails or doesn't run.
+    not_chosen:
+      - "More xdist workers on the one runner: its CPUs are already busy, and six took as long as four."
+      - "Renaming the check to the two halves: the merge rule asks for Tests (Windows) by name, and a half left out of it would merge unchecked until the maintainer changed the rule."
+      - "Fewer git calls in the vault's code: most of the suite's time, and a user's, but a change to the core, for an issue of its own."
+      - "A split by measured times kept in a file: a better balance, but one more file to keep current as tests come and go; alternating gave 51% to 49%."
