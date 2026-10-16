@@ -14,19 +14,16 @@ makes a release a deliberate act, which the cuts skill forbids Claude.
 
 from __future__ import annotations
 
-import os
-import secrets
-import sys
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TextIO, cast
+from typing import Any, cast
 
 import yaml
 
+from docket import console
 from docket.errors import DocketError
-from docket.plaintext import printable
 from docket.sources import runner
 from docket.sources.contract import Manifest
 from docket.sources.ingest import map_folder
@@ -41,9 +38,6 @@ from docket.vault.releaselog import Kept, LoggedCut, Release
 from docket.vault.segments import segments
 from docket.vault.vault import Vault
 
-# Four letters with no look-alikes (no I or O), drawn fresh for each recording.
-CODE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"
-CODE_LENGTH = 4
 EDGE = 2
 PROPOSAL_KEYS = frozenset({"id", "cuts", "keep", "note", "held"})
 
@@ -95,66 +89,16 @@ class _Checked:
 
 # -- the console --------------------------------------------------------------------------------------------------
 
+# The question and its checks are docket.console's (DR-0518). These two names stay, each only a call through, for the
+# reference source's tests a project copied, which stand in for the owner under them.
+
 
 def _console_problem() -> str | None:
-    """Why this process can't ask the owner, or None. Claude Code's shell sets CLAUDECODE; a pipe, a redirect or a
-    service has no console on stdin or stdout."""
-    if os.environ.get("CLAUDECODE"):
-        return (
-            "this shell is Claude Code's (CLAUDECODE is set): a release is yours to confirm, so run the command in "
-            "your own terminal"
-        )
-    if not (_is_console(sys.stdin) and _is_console(sys.stdout)):
-        return (
-            "a release asks you at a console: run it in your own terminal with nothing piped in or out (in Git Bash's "
-            "own window, through winpty)"
-        )
-    return None
-
-
-def _is_console(stream: TextIO | None) -> bool:
-    try:
-        fd = stream.fileno() if stream is not None else -1
-    except (AttributeError, OSError, ValueError):
-        return False
-    return fd >= 0 and _console_fd(fd)
-
-
-if sys.platform == "win32":  # pragma: no cover - one of the two runs on each system; test_release runs both
-    import ctypes
-    import msvcrt
-    from ctypes import wintypes
-
-    def _console_fd(fd: int) -> bool:
-        """A real console: GetConsoleMode succeeds on its handle. isatty alone is true for a redirect from NUL."""
-        try:
-            handle = msvcrt.get_osfhandle(fd)
-        except OSError:
-            return False
-        mode = wintypes.DWORD()
-        return bool(ctypes.windll.kernel32.GetConsoleMode(wintypes.HANDLE(handle), ctypes.byref(mode)))
-
-else:  # pragma: no cover
-
-    def _console_fd(fd: int) -> bool:
-        return os.isatty(fd)
-
-
-def _code() -> str:
-    return "".join(secrets.choice(CODE_LETTERS) for _ in range(CODE_LENGTH))
+    return console.problem(console.RELEASE)
 
 
 def _ask(prompt: str) -> str:
-    """The owner's answer, read at the console; the end of input stops the release."""
-    try:
-        return input(prompt)
-    except EOFError:
-        return "q"
-
-
-def _say(line: str = "") -> None:
-    sys.stdout.write(printable(line) + "\n")
-    sys.stdout.flush()
+    return console.ask(prompt)
 
 
 # -- reading a held recording ----------------------------------------------------------------------------------------
@@ -380,7 +324,7 @@ def release(vault: Vault, source: str, folder: Path, proposals: Sequence[Proposa
             checked = _check(gate, proposal, records[native], in_raw)
             if isinstance(checked, str):
                 report.held.append((native, checked))
-                _say(f"{native}  ({place})  stays held: {checked}")
+                console.say(f"{native}  ({place})  stays held: {checked}")
                 continue
             if not _release_one(vault, source, checked, place, report):
                 return report
@@ -389,17 +333,7 @@ def release(vault: Vault, source: str, folder: Path, proposals: Sequence[Proposa
 
 def _question(lines: list[str], what: str, native: str) -> str:
     """Show the screen and ask: "yes" for the code typed back, "no", or "stop"."""
-    for line in lines:
-        _say(line)
-    code = _code()
-    answer = _ask(f"Type {code} to {what} {native}, n to keep it held, q to stop: ").strip()
-    if answer.lower() == "q":
-        return "stop"
-    if answer.upper() == code:
-        return "yes"
-    if answer.lower() != "n":
-        _say(f"that isn't the code; {native} stays held")
-    return "no"
+    return console.typed_back(lines, f"{what} {native}", "keep it held", f"{native} stays held", asker=_ask)
 
 
 def _release_one(vault: Vault, source: str, checked: _Checked, place: str, report: ReleaseReport) -> bool:

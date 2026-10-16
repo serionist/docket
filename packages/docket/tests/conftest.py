@@ -3,14 +3,15 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import keyring
 import pytest
-from docket_testkit import TEST_GITCONFIG, make_config, make_record, use_factory
+from docket_testkit import TEST_GITCONFIG, AtConsole, make_config, make_record, use_factory
 from keyring.backends.fail import Keyring as FailKeyring
 
+from docket import console
 from docket.vault.config import VaultConfig
 from docket.vault.records import RawRecord
 
@@ -72,6 +73,20 @@ def isolated(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.Monke
     monkeypatch.delenv("CLAUDECODE", raising=False)
     for name in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture
+def owner(monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[..., AtConsole]]:
+    """The owner at their own console, for a release or a vault.yaml change that isn't only stricter: no refusal, and
+    each question answered from the script given."""
+
+    def at_console(*answers: str | Callable[[], str]) -> AtConsole:
+        person = AtConsole(*answers)
+        monkeypatch.setattr(console, "problem", lambda act: None)
+        monkeypatch.setattr(console, "ask", person)
+        return person
+
+    yield at_console
 
 
 @pytest.fixture

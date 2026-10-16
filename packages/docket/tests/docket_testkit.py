@@ -57,6 +57,26 @@ CALL_SEGMENTS: list[dict[str, Any]] = [
 MAIL_TEXT = "Hello Ben,\r\n\r\nThe offer stands at 10 million.\r\nUntil Friday.\r\n \N{NO-BREAK SPACE}\r\nCleo\r\n"
 
 
+class AtConsole:
+    """The owner at the console: answers each question from a script, typing back the code when the script says
+    "code"; every prompt is kept. The `owner` fixture puts one in docket.console's place."""
+
+    def __init__(self, *answers: str | Callable[[], str]) -> None:
+        self.answers = list(answers)
+        self.prompts: list[str] = []
+
+    def __call__(self, prompt: str) -> str:
+        self.prompts.append(prompt)
+        answer = self.answers.pop(0) if self.answers else "q"
+        if callable(answer):
+            answer = answer()
+        if answer == "code":
+            found = re.search(r"Type ([A-Z]{4}) to", prompt)
+            assert found is not None, prompt
+            return found.group(1).lower()
+        return answer
+
+
 def sh(cwd: Path, *args: str, check: bool = True) -> str:
     proc = subprocess.run(list(args), cwd=cwd, capture_output=True, text=True, encoding="utf-8", check=False)
     if check and proc.returncode != 0:
