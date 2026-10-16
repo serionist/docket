@@ -299,6 +299,13 @@ def test_an_index_busy_past_its_timeout_stops_the_pass_and_says_so(
     assert fill(vault, fake_models()[0]).why == busy
     monkeypatch.setattr(embedpass, "_missing", locked)
     assert fill(vault, fake_models()[0]).why == busy
+    # So busy that even the look for the table fails: busy, since a rebuild's table is there or gone at once.
+    monkeypatch.setattr(vectors, "holds", locked)
+    conn = sqlite3.connect(build.db_path(vault))
+    try:
+        assert embedpass._stopped(conn, table_of(FAKE)) == busy  # pyright: ignore[reportPrivateUsage]
+    finally:
+        conn.close()
 
 
 def test_a_table_a_rebuild_took_away_stops_the_pass(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
