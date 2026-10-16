@@ -33,6 +33,7 @@ from docket.models.config import DEVICES, Choice, Device, Installed
 from docket.models.provider import CHAR_CAP, cost
 from docket.models.runtime import worker_for
 from docket.models.worker import CUDA
+from docket.service import client
 from docket.vault.vault import remove_tree
 
 HUB = "https://huggingface.co"
@@ -124,13 +125,22 @@ def build_env(device: Device, uv: str, run: Run) -> None:
     """A fresh virtualenv on Docket's own Python, with the device's hashed requirements and nothing else."""
     env = config.env_dir(device)
     env.parent.mkdir(parents=True, exist_ok=True)
-    _uv([uv, "venv", "--clear", "--python", sys.executable, str(env)], "making the models' environment", run)
-    with resources.as_file(resources.files("docket.models").joinpath(f"requirements-{device}.txt")) as wanted:
-        _uv(
-            [uv, "pip", "install", "--python", str(config.env_python(env)), "--require-hashes", "-r", str(wanted)],
-            "installing the models' packages",
-            run,
-        )
+    try:
+        _uv([uv, "venv", "--clear", "--python", sys.executable, str(env)], "making the models' environment", run)
+        with resources.as_file(resources.files("docket.models").joinpath(f"requirements-{device}.txt")) as wanted:
+            _uv(
+                [uv, "pip", "install", "--python", str(config.env_python(env)), "--require-hashes", "-r", str(wanted)],
+                "installing the models' packages",
+                run,
+            )
+    except DocketError as e:
+        if client.recorded() is None:
+            raise
+        # On Windows a running service's worker holds the environment's files, as after a remove it stopped.
+        raise DocketError(
+            f"{e}\nthe service's worker may hold the environment's files: docket service stop, then docket models "
+            "install"
+        ) from None
 
 
 def _sha256(path: Path) -> str:

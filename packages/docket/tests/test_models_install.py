@@ -24,6 +24,7 @@ from docket.models.catalogue import Embedder, ModelFile
 from docket.models.client import Worker
 from docket.models.config import Choice
 from docket.models.provider import Off
+from docket.service import client
 from docket.vault.vault import remove_tree
 
 ONE = b"the model's bytes " * 50
@@ -261,6 +262,23 @@ def test_a_failing_uv_step_says_which_and_shows_its_last_lines(hub: type[Hub], m
     with pytest.raises(DocketError, match=r"installing the models' packages failed \(uv exit 2\):\nerror: no matching"):
         install.install("cpu", embedder_name="fake", say=lambda _: None, which=lambda n: n, run=Uv("pip"))
     assert isinstance(config.installed("cpu"), str) and config.read() != Choice("cpu", small())
+
+
+def test_a_build_that_fails_with_a_service_recorded_says_to_stop_it(
+    hub: type[Hub], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Such as an install right after a remove the service's worker stopped: on Windows uv can't clear the folder."""
+    monkeypatch.setitem(catalogue.EMBEDDERS, "fake", small())
+    with pytest.raises(DocketError) as alone:
+        install.install("cpu", embedder_name="fake", say=lambda _: None, which=lambda n: n, run=Uv("venv"))
+    assert "docket service stop" not in str(alone.value)
+    monkeypatch.setattr(client, "recorded", lambda: {"pid": 4242, "port": 8799})
+    with pytest.raises(DocketError) as held:
+        install.install("cpu", embedder_name="fake", say=lambda _: None, which=lambda n: n, run=Uv("venv"))
+    assert str(held.value) == (
+        "making the models' environment failed (uv exit 2):\nerror: no matching distribution\nhint: check the index\n"
+        "the service's worker may hold the environment's files: docket service stop, then docket models install"
+    )
 
 
 def test_an_environment_whose_marker_holds_but_whose_check_fails_is_built_again(
