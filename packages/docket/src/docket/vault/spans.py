@@ -2,14 +2,17 @@
 
 doc_put and verify share this, so what put accepted, verify can show, and the index (#7) fills its doc_anchors table
 from the same answers. Records are looked up by reading only the rid's source folder, once per lookup: rids start with
-their source, and run files are written once.
+their source, and run files are written once. Given the places a current index keeps (DR-0446), a lookup reads only the
+lines it needs instead, and today's code decides on them (DR-0447).
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Iterable
 from datetime import datetime
 from pathlib import Path
+from typing import NamedTuple, Protocol
 
 from pydantic import BaseModel, Field
 
@@ -54,12 +57,55 @@ def is_transcript(record: RawRecord) -> bool:
     return record.kind == "transcript" and bool(segments(record))
 
 
-class RawLookup:
-    """Records by rid, read from their source's run files the first time that source is asked for."""
+class Place(NamedTuple):
+    """Where a version of a record is in the raw log, as a current index keeps it (DR-0445)."""
 
-    def __init__(self, root: Path) -> None:
+    path: str
+    line: int
+    offset: int
+    v: str
+
+
+class Places(Protocol):
+    """What a lookup asks a current index about a source's raw: where its records' lines are (DR-0446, DR-0447)."""
+
+    def raw_current(self, source: str) -> bool: ...
+
+    def places(self, rid: str, source: str) -> list[Place]: ...
+
+    def has(self, rid: str, source: str) -> bool: ...
+
+    def under(self, rid: str, source: str, kind: str | None) -> list[str]: ...
+
+    def group(self, field: str, value: str, source: str) -> list[tuple[str, str]]: ...
+
+
+class _MovedError(Exception):
+    """A line isn't what the index says is there: its file changed since the check."""
+
+
+def _window(group: list[RawRecord], record: RawRecord, n: int) -> list[RawRecord]:
+    group = sorted(group, key=lambda r: (r.ts, r.rid))
+    i = next(i for i, r in enumerate(group) if r.rid == record.rid)
+    return group[max(0, i - n) : i + n + 1]
+
+
+def _under(latest: Iterable[RawRecord], rid: str, kind: str | None) -> list[RawRecord]:
+    return sorted((r for r in latest if rid in over(r) and (kind is None or r.kind == kind)), key=lambda r: r.rid)
+
+
+class RawLookup:
+    """Records by rid, read from their source's run files the first time that source is asked for; or, when `places`
+    gives an index current for the source, only the lines asked for, at their places (DR-0446). A line that isn't
+    what the index says sends its source back to the whole load for the rest of the lookup."""
+
+    def __init__(self, root: Path, places: Callable[[], Places | None] | None = None) -> None:
+        self.root = root
         self.raw_dir = root / "raw"
         self._sources: dict[str, dict[str, list[RawRecord]]] = {}
+        self._places = places
+        self._placed: dict[str, Places | None] = {}
+        self._read: dict[str, list[RawRecord]] = {}
 
     def _source(self, source: str) -> dict[str, list[RawRecord]]:
         if source in self._sources:
@@ -76,26 +122,85 @@ class RawLookup:
         self._sources[source] = by_rid
         return by_rid
 
+    def _index(self, source: str) -> Places | None:
+        """The index to read a source's lines by, when it is current for the source; asked once per source."""
+        if source not in self._placed:
+            index = self._places() if self._places is not None else None
+            self._placed[source] = index if index is not None and index.raw_current(source) else None
+        return self._placed[source]
+
+    def _line(self, place: Place, rid: str) -> RawRecord:
+        """The record at a place, decoded and parsed as the load route does: strict UTF-8, then JSON from text."""
+        try:
+            with (self.root / place.path).open("rb") as f:
+                f.seek(place.offset)
+                data = f.readline()
+            record = RawRecord.model_validate(json.loads(data.decode("utf-8")))
+        except (OSError, ValueError) as e:
+            raise _MovedError from e
+        if record.rid != rid or record.v != place.v:
+            raise _MovedError
+        return record
+
+    def _placed_versions(self, index: Places, rid: str, source: str) -> list[RawRecord]:
+        if rid not in self._read:
+            self._read[rid] = [self._line(place, rid) for place in index.places(rid, source)]
+        return self._read[rid]
+
+    def _latest_placed(self, index: Places, rid: str, source: str) -> RawRecord:
+        versions = self._placed_versions(index, rid, source)
+        if not versions:
+            raise _MovedError
+        return versions[-1]
+
     def versions(self, rid: str) -> list[RawRecord]:
         """Every stored version of a record, in run order."""
         m = RID.match(rid)
-        return list(self._source(m.group(1)).get(rid, [])) if m else []
+        if m is None:
+            return []
+        source = m.group(1)
+        index = self._index(source)
+        if index is not None:
+            try:
+                return list(self._placed_versions(index, rid, source))
+            except _MovedError:
+                self._placed[source] = None
+        return list(self._source(source).get(rid, []))
 
     def latest(self, rid: str) -> RawRecord | None:
         versions = self.versions(rid)
         return versions[-1] if versions else None
 
-    def under(self, rid: str) -> list[RawRecord]:
-        """The other records of rid's source whose thread or container is rid, each at its latest version, by rid: a
-        recording's transcripts and notes, which name the recording as their thread (DR-0117)."""
+    def has(self, rid: str) -> bool:
+        """Whether the raw log holds a record by this rid: a row of a current index, else the loaded source."""
         m = RID.match(rid)
-        by_rid = self._source(m.group(1)) if m else {}
-        latest = (v[-1] for other, v in by_rid.items() if other != rid)
-        return sorted((r for r in latest if rid in over(r)), key=lambda r: r.rid)
+        if m is None:
+            return False
+        source = m.group(1)
+        index = self._index(source)
+        return index.has(rid, source) if index is not None else rid in self._source(source)
+
+    def under(self, rid: str, kind: str | None = None) -> list[RawRecord]:
+        """The other records of rid's source whose thread or container is rid, of a kind when one is given, each at
+        its latest version, by rid: a recording's transcripts and notes, which name the recording as their thread
+        (DR-0117)."""
+        m = RID.match(rid)
+        if m is None:
+            return []
+        source = m.group(1)
+        index = self._index(source)
+        if index is not None:
+            try:
+                latest = [self._latest_placed(index, other, source) for other in index.under(rid, source, kind)]
+            except _MovedError:
+                self._placed[source] = None
+            else:
+                return _under(latest, rid, kind)
+        return _under((v[-1] for other, v in self._source(source).items() if other != rid), rid, kind)
 
     def transcripts(self, rid: str) -> list[RawRecord]:
         """The transcripts under rid, by rid: where a time on a record without segments of its own lands (DR-0370)."""
-        return [r for r in self.under(rid) if is_transcript(r)]
+        return [r for r in self.under(rid, "transcript") if is_transcript(r)]
 
     def timed(self, rids: list[str]) -> list[str]:
         """Where a time on these records can be placed (DR-0370): those with segments of their own; when none has any,
@@ -111,8 +216,7 @@ class RawLookup:
         record that isn't a transcript is under none."""
         if not is_transcript(record):
             return []
-        by_rid = self._source(record.source)
-        return [rid for rid in over(record) if rid in by_rid]
+        return [rid for rid in over(record) if self.has(rid)]
 
     def neighbours(self, record: RawRecord, n: int) -> list[RawRecord]:
         """The record and up to n messages either side in its thread (its container when it has none), in time
@@ -120,10 +224,34 @@ class RawLookup:
         field, value = ("thread", record.thread) if record.thread else ("container", record.container)
         if value is None or n <= 0:
             return [record]
+        index = self._index(record.source)
+        if index is not None:
+            try:
+                return _window(self._placed_group(index, record, field, value, n), record, n)
+            except _MovedError:
+                self._placed[record.source] = None
         group = [v[-1] for v in self._source(record.source).values() if getattr(v[-1], field) == value]
-        group.sort(key=lambda r: (r.ts, r.rid))
-        i = next(i for i, r in enumerate(group) if r.rid == record.rid)
-        return group[max(0, i - n) : i + n + 1]
+        return _window(group, record, n)
+
+    def _placed_group(self, index: Places, record: RawRecord, field: str, value: str, n: int) -> list[RawRecord]:
+        """The records the window around a record can hold: the index orders the group by time to the millisecond, so
+        the window is taken from the record's own millisecond, n rows either side, and each end widened to its whole
+        millisecond; the exact sort then decides within it (DR-0447)."""
+        rows = index.group(field, value, record.source)
+        at = next((i for i, (rid, _) in enumerate(rows) if rid == record.rid), None)
+        if at is None:
+            raise _MovedError
+        lo = hi = at
+        while lo > 0 and rows[lo - 1][1] == rows[at][1]:
+            lo -= 1
+        while hi < len(rows) - 1 and rows[hi + 1][1] == rows[at][1]:
+            hi += 1
+        lo, hi = max(0, lo - n), min(len(rows) - 1, hi + n)
+        while lo > 0 and rows[lo - 1][1] == rows[lo][1]:
+            lo -= 1
+        while hi < len(rows) - 1 and rows[hi + 1][1] == rows[hi][1]:
+            hi += 1
+        return [self._latest_placed(index, rid, record.source) for rid, _ in rows[lo : hi + 1]]
 
 
 def problem(anchor: Anchor, record: RawRecord, lookup: RawLookup | None = None) -> str | None:

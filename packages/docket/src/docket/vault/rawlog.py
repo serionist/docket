@@ -21,6 +21,9 @@ from docket.vault.records import RawRecord, version
 
 RUN_FILE = re.compile(r"^(\d{4}-\d{2}-\d{2})T(\d{4})-([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)(?:\.(\d+))?\.jsonl$")
 
+# A run's place in run order: date, time, machine, counter, source.
+RunOrder = tuple[str, str, str, int, str]
+
 
 @dataclass(frozen=True)
 class RunFile:
@@ -36,7 +39,7 @@ class RunFile:
         return self.path.name[: -len(".jsonl")]
 
     @property
-    def order(self) -> tuple[str, str, str, int, str]:
+    def order(self) -> RunOrder:
         return (self.date, self.time, self.machine, self.counter, self.source)
 
 
@@ -56,6 +59,28 @@ def parse_run_file(raw_dir: Path, path: Path) -> RunFile | None:
     if not m or len(rel) != 4:
         return None
     return RunFile(path, rel[0], m.group(1), m.group(2), m.group(3), int(m.group(4) or 1))
+
+
+def run_stamps(root: Path, source: str) -> dict[str, tuple[int, int]]:
+    """Each run file of a source, by its path from the vault's root, with its size and modification time: the files
+    `parse_run_file` takes under raw/<source>/, listed with os.scandir, which on Windows gives both without opening
+    each file (DR-0446)."""
+    stamps: dict[str, tuple[int, int]] = {}
+    try:
+        years = list(os.scandir(root / "raw" / source))
+    except (FileNotFoundError, NotADirectoryError):
+        return stamps
+    for year in years:
+        if not year.is_dir():
+            continue
+        for month in os.scandir(year.path):
+            if not month.is_dir():
+                continue
+            for entry in os.scandir(month.path):
+                if RUN_FILE.match(entry.name):
+                    st = entry.stat()
+                    stamps[f"raw/{source}/{year.name}/{month.name}/{entry.name}"] = (st.st_size, st.st_mtime_ns)
+    return stamps
 
 
 class RawLog:

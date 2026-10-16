@@ -13,7 +13,8 @@ recording it is under too (DR-0391), as a recording read whole does those on its
 
 What a read asks about docs other than the one it shows (an old path's note, the docs superseding it, the docs covering
 a record) comes from the index when it is current for processed/, else from one parse of every doc for the whole call;
-either way the same code decides (DR-0321, DR-0322). A read loads each source's raw once.
+either way the same code decides (DR-0321, DR-0322). A read takes a record's lines at their places when the index is
+current for the record's source, else loads that source's raw once (DR-0446, DR-0447).
 """
 
 from __future__ import annotations
@@ -26,12 +27,12 @@ from pydantic import BaseModel, Field
 
 from docket.errors import DocketError
 from docket.index import lookup
-from docket.index.lookup import DocIndex
+from docket.index.lookup import ReadIndex
 from docket.vault import legacy
 from docket.vault.anchors import Anchor, AnchorError, format_anchor, parse_locator, split_path_locator, trailing_anchors
 from docket.vault.docstore import DocStore, PutResult
 from docket.vault.processed import DOC_TYPES, ProcessedDoc, parse_doc
-from docket.vault.records import RID, RawRecord
+from docket.vault.records import RawRecord
 from docket.vault.segments import segments
 from docket.vault.spans import WINDOW, RawLookup, Span, span
 from docket.vault.vault import Vault
@@ -132,24 +133,28 @@ def read(vault: Vault, locator: str, view: str = "summary", around: int = 0, rev
 
 
 class _Call:
-    """What one read shares: the store, one `RawLookup`, so each source's raw loads once, and the answers about docs
-    other than the one it shows. Those come from the index when it is current for processed/, opened at the first
-    question (DR-0321), else from one parse of every doc; the index only narrows, and the same code decides
-    (DR-0322)."""
+    """What one read shares: the store, the index opened at its first question, one `RawLookup` that reads a source
+    at its places when the index is current for it (DR-0446) and else loads it once, and the answers about docs other
+    than the one it shows. Those come from the index when it is current for processed/ (DR-0321), else from one parse
+    of every doc; the index only narrows, and the same code decides (DR-0322, DR-0447)."""
 
     def __init__(self, vault: Vault) -> None:
         self.store = DocStore(vault)
-        self.raw = RawLookup(vault.root)
         self._opened = False
-        self._index: DocIndex | None = None
+        self._index: ReadIndex | None = None
+        self.raw = RawLookup(vault.root, self._open)
         self._every: list[ProcessedDoc] | None = None
         self._supersedes: list[tuple[str, list[str]]] | None = None
 
-    def _ask(self) -> DocIndex | None:
+    def _open(self) -> ReadIndex | None:
         if not self._opened:
             self._opened = True
-            self._index = lookup.open_current(self.store.vault)
+            self._index = lookup.open_read(self.store.vault)
         return self._index
+
+    def _ask(self) -> ReadIndex | None:
+        index = self._open()
+        return index if index is not None and index.docs_current() else None
 
     def _all(self) -> list[ProcessedDoc]:
         if self._every is None:
@@ -194,7 +199,7 @@ def _read(call: _Call, locator: str, view: View, around: int, rev: int | None) -
     value = locator.strip()
     try:
         path = None if value.startswith(("[", "r:")) else split_path_locator(value)
-        if path is not None and not (RID.match(value) and call.raw.versions(value)):
+        if path is not None and not call.raw.has(value):
             return _read_path(call, locator, found=path, view=view, around=around, rev=rev)
         loc = parse_locator(locator, DOC_TYPES)
     except AnchorError as e:

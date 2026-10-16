@@ -95,6 +95,11 @@ Unreleased in the same PR.
 
 ### Changed
 
+- Reading a record no longer loads its source's whole raw log when the search index is current for that source: it
+  reads the record's own lines where the index says they are. On 50 MB of call recordings in one source, a read went
+  from about 750 ms to under 10 ms, and so did the check whether a `plaud:<path>` is a record. The index rebuilds
+  once, at the first search or service start after the update; until then, and after a sync or a pull the index
+  hasn't seen yet, a read loads the source whole as before.
 - Reading an old note path, a doc or a record no longer parses every doc in the vault when the search index is current,
   and loads a source's raw once: `docket doc read notes/x.md@12:08` on a vault of 200 legacy notes went from 0.8 to
   0.5 s, and from 1.3 to 0.5 s with 800 docs. The index rebuilds once, at the first search or service start after

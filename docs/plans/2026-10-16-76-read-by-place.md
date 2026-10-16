@@ -201,6 +201,31 @@ them; invented names only.
 | `ts` in the index is to the millisecond, the sort to the microsecond | resolved: the window takes whole milliseconds and today's sort decides |
 | The 50 MB fixture slows the gate | accepted: about 14 s, only in the timed run alone after the rest (DR-0430); 5 MB under coverage |
 
+## Taken while building
+
+| Taken | Why | Entry |
+|---|---|---|
+| no index on `records (source, path)`: a record in another source's folder is found by the problem the build reports for it, by the start of its message, for both sources | the index would see a stray copy only while it is its rid's latest version | DR-0446 |
+| `ReadIndex` and `open_read` replace `DocIndex` and `open_current`: one connection per read, asked about docs and about raw apart | the two checks share the read transaction, so neither sees an update the other doesn't | DR-0446 |
+| `open_read` reads once right after `BEGIN` | an update that takes the index between the open and the first question sends the read elsewhere at once, not at a later question | DR-0321 |
+| `RawLookup.under` takes a kind on both routes, and `transcripts` asks for `transcript` | a chat thread read whole would otherwise read every reply by place to find no transcript | DR-0447 |
+| `has` answers from the rows on the place route, without reading a line | the rid check then reads no file at all | DR-0447 |
+| the load-once test runs four ways, docs and raw each current or not | it counted a source's load, which a current index no longer makes | - |
+| `traced()` moved into `docket_testkit.py`, for both timed modules | one definition of when times are asserted | - |
+
+Measured on the built code, best of seven, on one invented vault of 50.1 MB in one source (354 recordings, 177 run
+files), `main` and this branch run in turn in one session on the maintainer's desktop (Windows 11), twice each:
+
+| Read | `main` | This branch |
+|---|---|---|
+| `read r:<transcript>` | 752-764 ms | 6.2-7.5 ms |
+| `read r:<recording>` | 713-755 ms | 6.0-7.7 ms |
+| `read plaud:<old path>` | 689-761 ms | 4.6-5.4 ms |
+| the rid check alone | 698-773 ms | 3.6-4.2 ms |
+
+`test_recall_perf.py` on the same desktop, the load route forced in the same build: 5.7, 8.1, 10.1 and 6.5 ms by place
+against 749, 908, 1,060 and 809 ms loaded; the 50 MB fixture took 13 s to write and 5 s to index.
+
 ## Plan review
 
 Round 1, 16 Oct 2026, the lead: approved with five minors, no blocker or major; all fixed in this version.
