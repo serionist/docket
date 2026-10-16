@@ -4,7 +4,8 @@ version = "0.0.0"
 description = "Docket's development kit: the gate, the docs tool and the git hooks. Never published."
 requires-python = ">=3.12"
 license = "Apache-2.0"
-dependencies = ["PyYAML>=6.0.3"]
+# packaging reads markers and wheel tags for the models' pins check; pytest brings it already.
+dependencies = ["PyYAML>=6.0.3", "packaging>=26.3"]
 
 [project.scripts]
 gate = "devkit.gate:main"
