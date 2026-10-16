@@ -18,11 +18,15 @@ folded column, so a chat message written in lower case counts as its, and they g
 
 A group reaches an entity, where the entity is mentioned, by a word that is a case form of one of its names or aliases
 (not one matching judged a common word for it, and never a label or a written run's first word), by a heard word within
-the fuzzy distance of one, or by a word that starts one entity's name of several words; and a label reaches the one
-person whose name its first word starts. It becomes that entity's alias card, one per entity, when accepting it would
-add a mention, its case forms adding nothing; when the entity's alias stoplist holds every spelling it would add, it
-goes on to the next entity it reaches, or a new card. The rest become new-entity cards, named by the run a single word
-joined or else the most trusted spelling.
+the fuzzy distance of one, or by a word that starts one entity's name of several words; a one-word label reaches the
+one person whose name or alias it starts, and a label of several words the one person with one of whose names of several
+words it starts. A label of several words that doesn't start with one of an entity's names of several words is a name
+of its own, and keeps its group off that entity.
+
+A group becomes its entity's alias card, one per entity, when accepting it would add a mention, its case forms adding
+nothing. When the entity's alias stoplist holds every spelling it would add, it goes on to the next entity it reaches,
+or a new card; when it adds nothing, a group with a one-word label goes on as a new card, since the user typed that
+name. The rest become new-entity cards, named by the run a single word joined or else the most trusted spelling.
 """
 
 from __future__ import annotations
@@ -350,13 +354,16 @@ def _group(g: _Groups, langs: list[Language]) -> None:
 class _Reach:
     """What a spelling reaches by its text alone, before any meeting is checked, each as folded words to entities: the
     case forms of a single-word name or alias, all of them and those matching doesn't judge common for it; heard words
-    within the fuzzy distance of one; the first word of a name of several words; a person's first word."""
+    within the fuzzy distance of one; the first word of a name of several words; a person's first word; and each
+    entity's names of several words, the people's by their words."""
 
     forms: dict[str, set[str]] = field(default_factory=dict[str, set[str]])
     cases: dict[str, set[str]] = field(default_factory=dict[str, set[str]])
     near: dict[str, set[str]] = field(default_factory=dict[str, set[str]])
     first: dict[str, set[str]] = field(default_factory=dict[str, set[str]])
     people: dict[str, set[str]] = field(default_factory=dict[str, set[str]])
+    names: dict[str, set[tuple[str, ...]]] = field(default_factory=dict[str, set[tuple[str, ...]]])
+    full: dict[tuple[str, ...], set[str]] = field(default_factory=dict[tuple[str, ...], set[str]])
     # The first words of written runs: as in the joins, a name of its own, never a case form.
     heads: set[str] = field(default_factory=set[str])
 
@@ -371,6 +378,9 @@ class _Reach:
                 out.people.setdefault(ws[0], set()).add(a.entity)
             if len(ws) > 1:
                 out.first.setdefault(ws[0], set()).add(a.entity)
+                out.names.setdefault(a.entity, set()).add(tuple(ws))
+                if a.type == "person":
+                    out.full.setdefault(tuple(ws), set()).add(a.entity)
                 continue
             for form in {fold(c) for lang in langs for c in _cases(lang, a.text)}:
                 out.forms.setdefault(form, set()).add(a.entity)
@@ -382,8 +392,8 @@ class _Reach:
 
     def ways(self, s: Seen) -> list[tuple[str, Way]]:
         """The entities a spelling reaches and how: a case form unless it is a label or a written run's first word; a
-        heard word within the distance; a word that starts one entity's name of several; a label that starts one
-        person's."""
+        heard word within the distance; a word that starts one entity's name of several; a one-word label that starts
+        one person's name or alias, or a label of several words that starts with one person's name of several."""
         out: list[tuple[str, Way]] = []
         word = s.words[0]
         if len(s.words) == 1:
@@ -394,10 +404,20 @@ class _Reach:
             firsts = self.first.get(word, set())
             if len(firsts) == 1:
                 out.append((next(iter(firsts)), "first"))
-        people = self.people.get(word, set())
-        if s.label and len(people) == 1:
-            out.append((next(iter(people)), "label"))
+        if s.label:
+            people = (
+                self.people.get(word, set())
+                if len(s.words) == 1
+                else {e for n in range(2, len(s.words) + 1) for e in self.full.get(s.words[:n], set())}
+            )
+            if len(people) == 1:
+                out.append((next(iter(people)), "label"))
         return out
+
+    def own(self, words: tuple[str, ...], entity: str) -> bool:
+        """Whether a label of several words is a name of its own beside an entity: it doesn't start with one of the
+        entity's names of several words (`Gabor Sample` beside Gabor Example; `Gabor Example (Northwind)` is his)."""
+        return len(words) > 1 and not any(words[: len(n)] == n for n in self.names.get(entity, ()))
 
 
 # -- cards --------------------------------------------------------------------------------------------------------
@@ -471,20 +491,24 @@ class _Miner:
         authors = _authors(self.conn)
         chosen = [(members, self.choose(g, members)) for members in g.groups()]
         # One card per entity: the groups that reach it make one.
-        merged: dict[str, list[int]] = {}
+        merged: dict[str, list[list[int]]] = {}
         for members, entity in chosen:
             if entity is not None:
-                merged.setdefault(entity, []).extend(members)
+                merged.setdefault(entity, []).append(members)
         cards: list[Card] = []
         for members, entity in chosen:
             if entity is None:
-                card = self.new_card(g, members, stop, authors, left)
+                made = [self.new_card(g, members, stop, authors, left)]
             elif entity in merged:
-                card = self.alias_card(g, merged.pop(entity), entity)
+                groups = merged.pop(entity)
+                card = self.alias_card(g, [i for m in groups for i in m], entity)
+                # A one-word label is the user's own typing: one that adds nothing to the person its first name reaches
+                # is someone else there, so it goes on as a name.
+                typed = [m for m in groups if any(g.spellings[i].label and len(g.spellings[i].words) == 1 for i in m)]
+                made = [card] if card is not None else [self.new_card(g, m, stop, authors, left) for m in typed]
             else:
                 continue
-            if card is not None:
-                cards.append(card)
+            cards += [c for c in made if c is not None]
         cards.sort(key=_rank, reverse=True)
         cards = [c.model_copy(update={"n": n}) for n, c in enumerate(cards[:MAX_CARDS], start=1)]
         return Mined(cards, left)
@@ -510,7 +534,7 @@ class _Miner:
     def reached(self, g: _Groups, members: list[int]) -> list[str]:
         """The entities a group reaches, best first: by a case form or a heard word near a name or alias, where the
         entity is mentioned, the one met most first; then by a word that starts one entity's name of several words,
-        where it is mentioned, or a label whose first word is one person's."""
+        where it is mentioned, or a label that starts one person's name."""
         met: dict[str, int] = {}
         after: list[str] = []
         for i in members:
@@ -527,9 +551,18 @@ class _Miner:
         return list(dict.fromkeys([*best, *after]))
 
     def choose(self, g: _Groups, members: list[int]) -> str | None:
-        """The first entity the group reaches whose alias stoplist doesn't hold every spelling it would add: a rejected
-        alias stays a candidate elsewhere, for another entity or as a new name (DR-0461)."""
-        return next((e for e in self.reached(g, members) if not self.refused(g, members, e)), None)
+        """The first entity the group reaches whose alias stoplist doesn't hold every spelling it would add, so a
+        rejected alias stays a candidate elsewhere (DR-0461), and beside which no label of several words in the group
+        is a name of its own, so a namesake's first name doesn't make his name another's alias."""
+        labels = [g.spellings[i].words for i in members if g.spellings[i].label]
+        return next(
+            (
+                e
+                for e in self.reached(g, members)
+                if not self.refused(g, members, e) and not any(self.reach.own(words, e) for words in labels)
+            ),
+            None,
+        )
 
     def refused(self, g: _Groups, members: list[int], entity: str) -> bool:
         adds = [g.spellings[i].text for i in members if self.offered(g, i, entity) != "no"]

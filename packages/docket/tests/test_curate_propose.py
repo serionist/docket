@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from curate_kit import ANN, NORTHWIND, curate_vault, entity, more_recordings, rid
+from curate_kit import ANN, NORTHWIND, curate_vault, entity, more_calls, more_recordings, rid
 from docket_testkit import note
 
 from docket import index, recall
@@ -206,15 +206,69 @@ def test_a_written_name_near_an_entity_s_is_a_name_of_its_own(vault: Vault) -> N
 
 
 def test_an_alias_card_leaves_out_a_spelling_rejected_for_it_and_offers_the_rest(vault: Vault) -> None:
+    heard = ["We sent Otilia the proofs. We called Otilia Sampel back."] * 2 + ["We called Otilia Sampel back."]
+    more_recordings(vault, heard, noted=["Ottilia sent the proofs."] * 3)
+    text = "id: ottilia-sample\ntype: person\nname: {en: Ottilia Sample}\naliases:\n  - {text: Ottilia}\n"
+    entity(vault, "entities/person/ottilia-sample.yaml", text)
+    whole = next(c for c in mined(vault).cards if c.entity == "ottilia-sample")
+    assert [s.text for s in whole.adds()] == ["Otilia", "Otilia Sampel"]
+    found = mined(vault, [line("reject", 1, "alias:ottilia-sample:otilia")])
+    rest = next(c for c in found.cards if c.entity == "ottilia-sample")
+    assert ([s.text for s in rest.adds()], rest.key) == (["Otilia Sampel"], "alias:ottilia-sample:otilia sampel")
+
+
+GABOR = "entities/person/gabor-example.yaml"
+
+
+def gabor(vault: Vault) -> None:
+    entity(vault, GABOR, "id: gabor-example\ntype: person\nname: {en: Gabor Example}\n")
+
+
+def test_a_label_with_another_family_name_is_a_name_of_its_own(vault: Vault) -> None:
+    entity(vault, "entities/person/rita-example.yaml", "id: rita-example\ntype: person\nname: {en: Rita Example}\n")
+    found = mined(vault)
+    assert all(c.entity != "rita-example" for c in found.cards)
+    assert card(found, "Rita Sample").kind == "new"
+
+
+def test_a_namesake_in_one_to_ones_is_offered_as_a_name(vault: Vault) -> None:
+    more_calls(vault, [[("Gabor Example", "Morning, shall we start?"), ("Gabor Sample", "Yes, the drawings.")]] * 4)
+    gabor(vault)
+    found = mined(vault)
+    assert all(c.entity != "gabor-example" for c in found.cards)
+    assert (card(found, "Gabor Sample").kind, card(found, "Gabor Sample").type) == ("new", "person")
+
+
+def test_a_namesake_s_label_joined_by_its_first_name_stays_a_name_of_its_own(vault: Vault) -> None:
     for n in (0, 1):
         covers, lines = [f"{rid(n)}/transaction"], ["- Cleo Sample checked the proofs. @00:00"]
         recall.doc_put(vault, note(f"minutes:2026-10-0{5 + n}-cleo-{n}", covers=covers, lines=lines))
     entity(vault, "entities/person/cleo-sample.yaml", "id: cleo-sample\ntype: person\nname: {en: Cleo Sample}\n")
-    whole = next(c for c in mined(vault).cards if c.entity == "cleo-sample")
-    assert [s.text for s in whole.adds()] == ["Cleo Test", "Cleo"]
-    found = mined(vault, [line("reject", 1, "alias:cleo-sample:cleo test")])
-    rest = next(c for c in found.cards if c.entity == "cleo-sample")
-    assert ([s.text for s in rest.adds()], rest.key) == (["Cleo"], "alias:cleo-sample:cleo")
+    found = mined(vault)
+    assert all(c.entity != "cleo-sample" for c in found.cards)
+    assert [s.text for s in card(found, "Cleo Test").adds()] == ["Cleo", "Test Cleo"]
+
+
+def test_a_one_word_label_reaches_the_one_person_it_starts(vault: Vault) -> None:
+    more_calls(vault, [[("Gabor", "Morning, shall we start?"), ("Speaker 2", "Yes, the drawings are done.")]] * 2)
+    gabor(vault)
+    found = [c for c in mined(vault).cards if c.entity == "gabor-example"]
+    assert [(c.kind, [s.text for s in c.adds()]) for c in found] == [("alias", ["Gabor"])]
+
+
+def test_a_one_word_label_that_adds_nothing_to_its_person_is_offered_as_a_name(vault: Vault) -> None:
+    more_calls(vault, [[("Gabor Example", "Morning, shall we start?"), ("Gabor", "Yes, the drawings are done.")]] * 2)
+    gabor(vault)
+    found = mined(vault)
+    assert all(c.entity != "gabor-example" for c in found.cards)
+    assert card(found, "Gabor").kind == "new"
+
+
+def test_a_label_that_starts_with_a_person_s_name_is_theirs(vault: Vault) -> None:
+    more_calls(vault, [[("Gabor Example (Northwind)", "Morning, shall we start?"), ("Speaker 2", "Yes, done.")]] * 2)
+    gabor(vault)
+    # His: no new card. The chunks already mention him, since the label's text holds his name, so no alias card either.
+    assert all("Gabor Example (Northwind)" not in [s.text for s in c.spellings] for c in mined(vault).cards)
 
 
 def test_two_misspellings_of_one_entity_make_one_card(vault: Vault) -> None:

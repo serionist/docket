@@ -153,6 +153,17 @@ def test_a_lifted_rejection_opens_its_card_again(vault: Vault, started: Batch) -
     assert states(vault, again)["Northwind"] == "accepted"
 
 
+def test_lifting_a_rejected_card_s_name_opens_it_again(vault: Vault, started: Batch) -> None:
+    northwind = by_name(started, "Northwind")
+    curate.reject(vault, started, [northwind])
+    EntityStore(vault).lift(["new:-:northwind"])
+    again = curate.start(vault)
+    back = by_name(again, "Northwind")
+    assert (back.id, [s.text for s in back.spellings]) == (northwind.id, ["Northwind"])
+    assert states(vault, again)["Northwind"] == "open"
+    assert [ln.op for ln in curate.accept(vault, again, [back]).lines] == ["create"]
+
+
 def test_later_rounds_reach_past_what_earlier_ones_rejected(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(propose, "TOP", 3)
     shown: list[str] = []

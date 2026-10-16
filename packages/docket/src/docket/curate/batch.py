@@ -136,9 +136,9 @@ def measure(vault: Vault) -> Measure | None:
 
 
 def states(vault: Vault, batch: Batch, lines: Sequence[Line]) -> dict[str, State]:
-    """Each card's state: accepted by a line naming it and not undone, rejected by one whose key the stoplist still
-    holds (a lift opens the card again), done when the files hold its change already (a hand edit, another machine's),
-    open otherwise."""
+    """Each card's state: accepted by a line naming it and not undone, rejected by one while the stoplist holds the
+    card's own key (lifting it opens the card again), done when the files hold its change already (a hand edit, another
+    machine's), open otherwise."""
     log = curatelog.fold(lines)
     held: dict[str, set[str]] = {}
     for e in load_entities(vault.root).entities:
@@ -147,7 +147,7 @@ def states(vault: Vault, batch: Batch, lines: Sequence[Line]) -> dict[str, State
     out: dict[str, State] = {}
     for card in batch.cards:
         named = [line for line in lines if line.card == card.id and line.id not in log.undone_by]
-        ops = {line.op for line in named if line.op != "reject" or line.key in log.stoplist}
+        ops = {line.op for line in named if line.op != "reject" or card.key in log.stoplist}
         ops &= {"create", "add", "reject"}
         if ops - {"reject"}:
             out[card.id] = "accepted"

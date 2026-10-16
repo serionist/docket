@@ -123,14 +123,22 @@ def curate_vault(tmp_path: Path) -> Vault:
 def more_recordings(vault: Vault, heard: Sequence[str], noted: Sequence[str] = ()) -> None:
     """More recordings, `plaud:rec-x000` on, each a transcript of one turn by `Speaker 1`, and a note covering each of
     the first ones, its one line from `noted`; the index brought up to date."""
+    more_calls(vault, [[("Speaker 1", text)] for text in heard], noted)
+
+
+def more_calls(vault: Vault, calls: Sequence[Sequence[tuple[str, str]]], noted: Sequence[str] = ()) -> None:
+    """More recordings, `plaud:rec-x000` on, each a transcript of its turns as (speaker, text), and a note covering each
+    of the first ones, its one line from `noted`; the index brought up to date."""
     records: list[RawRecord] = []
-    for n, text in enumerate(heard):
+    for n, turns in enumerate(calls):
         key = f"plaud:rec-x{n:03d}"
         under = {"source": "plaud", "container": key, "thread": key, "author": None, "ts": _when(20 + n)}
-        said = [{"start_ms": 0, "end_ms": 9_000, "speaker": "Speaker 1", "text": text}]
-        records.append(
-            make_record(rid=f"{key}/transaction", kind="transcript", segments=said, text=f"Speaker 1: {text}", **under)
-        )
+        said = [
+            {"start_ms": i * 10_000, "end_ms": i * 10_000 + 9_000, "speaker": who, "text": text}
+            for i, (who, text) in enumerate(turns)
+        ]
+        text = "\n".join(f"{who}: {words}" for who, words in turns)
+        records.append(make_record(rid=f"{key}/transaction", kind="transcript", segments=said, text=text, **under))
     vault.write_run("plaud", records)
     for n, text in enumerate(noted):
         covers, lines = [f"plaud:rec-x{n:03d}/transaction"], [f"- {text} @00:00"]
