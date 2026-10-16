@@ -1,6 +1,6 @@
 {
-  "$comment": "Recall at 10 and MRR per kind on the invented question set with the embedder and the CPU reranker on its 30 pairs, no time budget, as the models CI job measures them, rounded down to two decimals (DR-0458). Held by `gate models`; a number above its floor prints the floor to raise until three CI runs give the same numbers, then fails too.",
-  "$above": "print",
+  "$comment": "Recall at 10 and MRR per kind on the invented question set with the embedder and the CPU reranker on its 30 pairs, no time budget, as the models CI job measures them, rounded down to two decimals (DR-0458). Held by `gate models`; a number above its floor fails too, since three CI runs gave the same numbers on AMD and Intel runners (#117 twice, then main at c0fcb60).",
+  "$above": "fail",
   "exact-name": {"recall": 1.0, "mrr": 0.75},
   "paraphrase": {"recall": 0.61, "mrr": 0.32},
   "inflection": {"recall": 1.0, "mrr": 0.96},
