@@ -477,17 +477,22 @@ def test_show_hides_what_a_list_gains_on_a_card_after_the_round(
         assert card["card"]["fact"] == ["email", batch.HIDDEN] and card["snippets"] == []
         assert card["card"]["key"] == "id:rita-sample:email=(on a never-store list)"
         assert set(card) == {"card", "state", "snippets"} and set(card["card"]) == set(Card.model_fields)
-        # Her name too: the card's name, and its entity, whose slug it is, as the page hides them.
+        # Her name too: each card's name, and its entity, whose slug spells the name: rita-sample-2 as well, the
+        # second Rita Sample's.
         config(vault, never_store={"keywords": ["rita@example.com"], "people": ["Rita Sample"]})
-        assert "Rita Sample" not in client.get(f"/curate?open={rita.id}").text
+        second = next(c for c in batch.load(vault).cards if c.entity == "rita-sample-2")  # type: ignore[union-attr]
+        panels = [client.get(f"/curate?open={c.id}").text for c in (rita, second)]
         out, shown = show(capsys)
     hidden = re.escape(batch.HIDDEN)
-    assert re.search(rf"\n 1  {rita.id}  id for {hidden} \({hidden}\): email {hidden}  ", out)
-    card = next(c for c in shown["cards"] if c["card"]["id"] == rita.id)["card"]
-    assert (card["name"], card["entity"], card["key"]) == (
-        batch.HIDDEN, batch.HIDDEN, "id:(on a never-store list):email=(on a never-store list)"
-    )  # fmt: skip
-    assert "Rita Sample" not in json.dumps(card) and "Rita Sample" not in out
+    for card in (rita, second):
+        assert re.search(rf"\n {card.n}  {card.id}  id for {hidden} \({hidden}\): email {hidden}  ", out)
+    cards = {c["card"]["id"]: c["card"] for c in shown["cards"]}
+    for card in (rita, second):
+        assert (cards[card.id]["name"], cards[card.id]["entity"], cards[card.id]["key"]) == (
+            batch.HIDDEN, batch.HIDDEN, "id:(on a never-store list):email=(on a never-store list)"
+        )  # fmt: skip
+    for text in (*panels, out, json.dumps(shown)):
+        assert "rita" not in text.casefold()
     # Only shown: the round keeps its cards as they were mined.
     assert batch.load(vault).cards[0] == rita  # type: ignore[union-attr]
 

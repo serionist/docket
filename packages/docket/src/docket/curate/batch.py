@@ -44,6 +44,8 @@ SNIPPETS = 3
 ID_LENGTH = 6
 WIDTH = 80
 HIDDEN = "(on a never-store list)"
+# The number a slug takes when another entity already has its name: rita-sample-2.
+SLUG_NUMBER = re.compile(r"-[0-9]+$")
 
 State = Literal["open", "accepted", "rejected", "done"]
 
@@ -406,27 +408,41 @@ def shown_key(key: str, lists: NeverStore) -> str:
     return key[: len(key) - len(text)] + HIDDEN if text and listed(text, lists) is not None else key
 
 
+def spelled(entity: str) -> str:
+    """The name an entity's id spells: its slug with a trailing -<n> taken off and its hyphens read as spaces, so
+    rita-sample-2, the second Rita Sample, spells Rita Sample."""
+    return SLUG_NUMBER.sub("", entity).replace("-", " ")
+
+
+def id_hidden(card: Card, lists: NeverStore) -> bool:
+    """Whether the page and `show` hide a card's entity id: a never-store list holds it as written or the name it
+    spells, or it is a new card's id, made from a name a list holds."""
+    if any(listed(v, lists) is not None for v in (card.entity, spelled(card.entity))):
+        return True
+    return card.kind == "new" and listed(card.name, lists) is not None
+
+
 def hides(text: str, card: Card, lists: NeverStore) -> bool:
     """Whether a snippet names a never-store value, so neither the page nor `show` shows it: by the keywords list's
     own reading of a text, or holding a name or spelling of the card that either list holds, put there after the round
-    started."""
+    started; its entity id counts as the name it spells too."""
     if matches_text(text, lists):
         return True
     words = fold_listed(text)
-    values = (card.name, card.entity, *(s.text for s in card.spellings))
+    values = (card.name, card.entity, spelled(card.entity), *(s.text for s in card.spellings))
     return any(fold_listed(v) in words for v in values if listed(v, lists) is not None)
 
 
 def hidden_card(card: Card, lists: NeverStore) -> Card:
     """A card as `show` and its JSON give it: each value a never-store list gained after the round hidden, as the
-    Curate page hides it (its name, its fact's value, its spellings, and its entity with a new card's name, whose slug
-    it is), and in the fields only the JSON shows (its key, the entity in it too when that is hidden, and the spelling
-    beside each locator). Every field stays."""
+    Curate page hides it (its name, its fact's value, its spellings, and its entity id as `id_hidden` says), and in
+    the fields only the JSON shows (its key, the entity in it too when that is hidden, and the spelling beside each
+    locator). Every field stays."""
 
     def shown(text: str) -> str:
         return HIDDEN if listed(text, lists) is not None else text
 
-    named = listed(card.entity, lists) is not None or (card.kind == "new" and listed(card.name, lists) is not None)
+    named = id_hidden(card, lists)
     key = shown_key(card.key, lists)
     kind, _, rest = key.partition(":")
     owner, _, value = rest.partition(":")

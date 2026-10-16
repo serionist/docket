@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 from starlette.datastructures import QueryParams
 
 from docket.curate import batch, schedule
-from docket.curate.batch import HIDDEN, Batch, Measure, Snippet, State, hides, shown_key
+from docket.curate.batch import HIDDEN, Batch, Measure, Snippet, State, hides, id_hidden, shown_key
 from docket.curate.propose import UNSEEN, Card
 from docket.errors import DocketError
 from docket.index.build import open_index
@@ -325,9 +325,8 @@ def shown(text: str, lists: NeverStore) -> str:
 
 
 def shown_id(card: Card, lists: NeverStore) -> str:
-    """The id a card writes, hidden with its name: a new card's id is its name's slug."""
-    hidden = listed(card.entity, lists) is not None or (card.kind == "new" and listed(card.name, lists) is not None)
-    return HIDDEN if hidden else card.entity
+    """The id a card writes, hidden as `show` hides it: an id is a name's slug."""
+    return HIDDEN if id_hidden(card, lists) else card.entity
 
 
 def kind_of(card: Card, lists: NeverStore) -> str:
