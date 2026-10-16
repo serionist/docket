@@ -32,6 +32,9 @@ from typing import IO, Any, Literal, cast
 from pydantic import TypeAdapter, ValidationError
 
 from docket.childproc import GROUPS, child_env, stop
+
+# On every system, though only Windows uses it: its own body is Windows' alone.
+from docket.documents import winjob
 from docket.documents.formats import Extracted, Part, format_of
 from docket.documents.limits import MIB
 from docket.errors import DocketError
@@ -305,7 +308,6 @@ def _read(pipe: IO[bytes], answers: queue.Queue[dict[str, Any] | None]) -> None:
 # -- the memory cap on Windows: a job object --------------------------------------------------------------------------
 
 if sys.platform == "win32":  # pragma: no cover - Windows' own API; test_documents_extract runs it there
-    from docket.documents import winjob
 
     def _job(pid: int, memory: int) -> int | None:
         """A job that kills the child when its handle closes, with the child in it, so a stop takes the interpreter a
