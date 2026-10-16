@@ -1,0 +1,20 @@
+decisions:
+  - id: DR-0517
+    title: The CLI makes a vault.yaml change that loosens only after the owner types back a code at their own console
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#134"]
+    description: "settings.rewrite, vault.yaml's one writer, holds every change the CLI makes to loosens() (DR-0506), between the file as it stands, hand edits included, and the file after. A change that loosens is made only after the owner's yes at a console, asked as a release asks (DR-0202, DR-0518): refused when CLAUDECODE is set or without a console on stdin and stdout, before anything is written and whatever the file's form; then the change shown and a four-letter code, drawn fresh, typed back (DR-0519). Today that is docket redaction set <rule> off, for credentials, phone or a pattern; docket source new adding a source, or changing an entry already in vault.yaml whose folder is gone (a looser sensitivity, other tools, the mapper); and docket source new --folder adding a folder source or changing its folder. A command added later that writes through rewrite asks by default, since loosens() is an allowlist. A stricter change asks nothing. docket init, which writes a new vault's first vault.yaml with nothing stored and no gate yet, and docket vault convert, which moves where the vault lives rather than what it lets in and asks its own question, write vault.yaml outside rewrite and are not asked. No command takes a never-store value off (DR-0508): that is a hand edit (DR-0520)."
+    binds:
+      - via is cli or page and nothing else, and rewrite has no parameter that answers the question; a test pins its parameters.
+      - Outside vault/settings.py only Vault.init and convert write vault.yaml; test_settings_scan.py holds it over the whole package.
+      - The setup skill gives the owner each docket source new to run in their own terminal; no skill runs a loosening command, edits vault.yaml to loosen, wraps a command in a console of its own or clears CLAUDECODE.
+      - A one-way door on AGENTS.md's list, in the gate's loosening line beside the release's yes.
+    not_chosen:
+      - "A list of the loosening commands, each with its own check: a command added later would loosen unasked."
+      - "The check in cli.py around each command: a second list, and a Python caller of set_rule would skip it."
+      - "Sources added turned off and turned on at the console: a new command and DR-0506's list moved, to save one command per source at setup."
+      - "Asking in init and convert too: init has no gate yet to loosen, and convert lets no record in."
+      - "A y/N question: a pipe or a pseudo-terminal answers it unread (DR-0202)."
