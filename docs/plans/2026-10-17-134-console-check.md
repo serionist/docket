@@ -8,26 +8,28 @@ approved_at:
 
 # Ask at the owner's console before the CLI loosens the gate
 
-A CLI change to `vault.yaml` that `loosens()` flags, or an uncommitted edit of it that loosens and that a CLI write
-would take in, is made only after the owner types back a code at their own console. The release's check does the
-asking, moved to one module both use, and `settings.rewrite` is the one place that asks; a stricter change asks
-nothing, as today.
+A loosening of `vault.yaml` applies only once committed, and the CLI commits one only after the owner types back a
+code at their own console. The gate obeys HEAD's `vault.yaml` plus the stricter part of an uncommitted edit; the
+release's check, moved to one module, asks in `settings.rewrite` for a command's loosening change and for an
+uncommitted loosening edit it would take in. A stricter change asks nothing, and applies at once, as today.
 
 ## Goal
 
 | Part | The issue's "done when" | This plan |
 |---|---|---|
-| Which | the loosening commands listed | every change `rewrite` makes for the CLI that `loosens(before, after)` flags: today `docket redaction set <rule> off`, `docket source new` adding a source or changing its entry, and `docket source new --folder` adding one or changing its folder; a command added later is asked by default. Also an uncommitted edit that loosens, which #141 refuses to take in: a CLI write at a console asks instead |
+| Which | the loosening commands listed | every change `rewrite` makes for the CLI that `loosens(before, after)` flags: today `docket redaction set <rule> off`, `docket source new` adding a source or changing its entry, and `docket source new --folder` adding one or changing its folder; a command added later is asked by default. Also an uncommitted edit that loosens, which #141 refuses to take in: a CLI write at a console asks instead. And a hand edit that loosens no longer applies before it is committed |
 | Console | each asks as a release does: refused under `CLAUDECODE`, a pipe or a redirect, the code typed back | the release's check, code and question, moved to `docket/console.py` and called by both |
 | Scripts | a documented way for the owner's scripts, if one is needed, that an agent can't reach | nothing to build: whatever a script running as the owner holds, an agent running as the owner reads too; the README says there is no way around the question |
 | Tests | each command refuses under `CLAUDECODE=1` and from a pipe, and goes ahead at a console | per command: `CLAUDECODE=1`, a real pipe into a child process, the owner fixture typing the code back; a real terminal on Linux and macOS |
 
-- In scope: `docket/console.py`; the question in `rewrite`, for the command's change and for the take-in of an
-  uncommitted edit; the three commands' output; the setup skill handing its loosening commands to the owner; the
-  door line, the glossary, the README; the tests.
+- In scope: the settings in force and their cache; `docket/console.py`; the question in `rewrite`, for the command's
+  change and for the take-in of an uncommitted edit; the three commands' output; the notice in `docket vault status`
+  and the Settings page; the setup skill handing its loosening commands to the owner one at a time; the door line,
+  the glossary, the README; the tests.
 - Out of scope:
   - the issue's Scripts row: nothing to build (Scripts, below);
-  - a never-store value taken off: nothing to build, since no command does it (DR-0508); it is a hand edit;
+  - a never-store value taken off: nothing to build, since no command does it (DR-0508); it is a hand edit, which
+    the settings in force cover;
   - `docket init`: it writes a new vault's first `vault.yaml`, with nothing stored and no gate yet to loosen;
   - `docket vault convert`: it moves where the vault lives, not what it lets in, and asks its own question;
   - `docket staging classify`: it answers the gate's own question for one record and changes no setting;
@@ -35,6 +37,54 @@ nothing, as today.
   - an OS prompt (Windows Hello, Touch ID, polkit), for the release and the loosening together: an issue of its own.
 
 ## Design
+
+### The settings in force
+
+An uncommitted edit keeps more out at once and lets more in only once committed (DR-0521). Without this, an edit
+alone loosens: Claude under auto mode deletes a person from `never_store.people`, runs `docket ingest`, and the
+recordings reach raw, before any commit or question.
+
+| Part | What |
+|---|---|
+| the rule | `effective(committed, file)`: HEAD's settings with the file's stricter part put in, field by field on DR-0506's list. A never-store list is HEAD's values plus those the file added; credentials and phone are on if either has them on; a pattern is on when the file turned it on and changed nothing else of it; a source's sensitivity is the stricter of the two, and it is off if either has it off. Everything else is HEAD's |
+| one rule | `loosens(before, after)` becomes `effective(before, after) != after`. The put-back helpers become the per-field rules both use, so there is no second list, and `test_vault_settings.py`'s loosens table passes unchanged |
+| when a loosening applies | once committed: by the owner's own `git commit`, by a CLI write at the console taking it in, or by a CLI command's own change at the console |
+| not about the gate | `primary_machine`, the owner's time zone and languages, a source's tools, mapper or folder count as loosening under the allowlist, so they too apply once committed. Accepted: one rule, and the notice says so |
+| the notice | `docket vault status` and the Settings page: "vault.yaml has an edit that isn't committed and lets more in; it applies once you commit it". No value is named |
+| HEAD unreadable | HEAD with no `vault.yaml`, or one that doesn't parse, stops Docket as a broken `vault.yaml` does today, with #141's message to commit it yourself. Init commits the file, and a folder vault's open already wants it tracked, so normal use never gets there |
+
+Who reads which:
+
+| Reader | Reads |
+|---|---|
+| `Gate._config()`, every call: stage, promote, the sweep, a release's staging | the settings in force |
+| `Vault.open`, so `vault.config`: ingest and the runner's mapper, `docket scan`, `doc_put` and `docket doc redact`, `docket import notes`, the service's sync, curate's never-store hiding, `docket redaction` (with the notice), search's time zone | the settings in force, one loader for both |
+| `rewrite` | the file: it changes the file, and weighs the take-in against HEAD and the change against the file |
+| the Settings page | the file as written, with the notice at the top when it holds an edit that loosens |
+| the session-start hook | the file, only to say whether it loads, as today |
+| `docket vault convert` | the file: it rewrites `storage` and commits it after its own question |
+
+- `Vault.open` finds the git dir from the file's `storage`, as today. An uncommitted change of `storage` stops
+  Docket with the uncommitted-edit message, since the git dir to read HEAD from depends on it; only convert moves
+  it, and convert commits.
+- `effective()` and the per-field rules live in a module of their own with no `Vault`, which `vault.py`, `gate.py`
+  and `settings.py` import; `settings` keeps `loosens` for pages.
+
+### No git call per gate run
+
+The service opens the vault on every call, and #132 is removing git calls, so the committed settings are cached.
+
+- The key is HEAD's commit id, read from files: `HEAD`, then its ref under `refs/` or in `packed-refs`, through
+  `commondir` in a linked worktree. While HEAD stays, no git call.
+- Docket's own commits never take `vault.yaml` unless they name it (`--only`). The call that already reads a new
+  commit's id reads its parent too: when the parent is the cached commit, the key moves forward with no call, and a
+  commit naming `vault.yaml` stores its new text. Ingest after ingest makes no extra call.
+- A miss (the owner's commit, a pull, another machine's merge) costs one `git show HEAD:./vault.yaml`, then it is
+  cached. A repo on reftable, whose refs aren't files, reads HEAD with `git rev-parse HEAD`: correct, slower.
+- The cache is a file in the vault's private folder, under the git dir and never committed, written through a temp
+  file and a rename. It is disposable like the run history: one that doesn't read is a miss. Its text is HEAD's,
+  already in git.
+- When the working file equals HEAD's text, the settings in force are the file's, with no comparison.
 
 ### Which changes ask
 
@@ -51,8 +101,6 @@ being the file as it stands, or for the uncommitted edit it would take in first,
 | any of them, a stricter one too, while `vault.yaml` holds an uncommitted edit that loosens against HEAD's | the take-in of that edit (A hand edit, below) | yes |
 | a command added later that writes through `rewrite` | whatever `loosens()` says | by default |
 
-- No second list: `loosens()` is DR-0506's allowlist, so a key added later counts as a loosening for the CLI too
-  until a decision moves it onto the list.
 - A stricter change with nothing loosening to take in asks nothing: the setup skill still turns phone redaction on,
   and the Settings page tightens as before.
 
@@ -65,14 +113,20 @@ loosen.
 |---|---|
 | refuse | something loosens and `console.problem()` finds `CLAUDECODE` set, or no console on stdin and stdout: refused before anything is written or committed, whatever the file's form; the message says which, the edit or the change |
 | by hand | a file not in Docket's form gets its line printed, as today, and no code: nothing is written or taken in |
-| show | for each part that loosens, the uncommitted edit against HEAD's file first, then the command's change: a diff of the settings in Docket's form, the never-store lists left out and a changed list said by its count; then the command's own warnings, such as credentials off's |
+| show | for each part that loosens, the uncommitted edit against HEAD first, then the command's change: each change on a line of its own by its full path, such as `sources.calls.sensitivity: mixed -> work` or `redaction.phone: true -> false`, a source added with its keys under it; each never-store list as `never_store.people: 1 taken off, 1 added`, never a value, so a swap reads as one off and one added; then the command's warnings |
 | ask | `Type KXQM to make this change, or n to leave vault.yaml as it is:`, one code drawn fresh for both parts |
-| write | under the vault lock, only when the file's sha256 and HEAD's `vault.yaml` are the ones asked about; else nothing, and "vault.yaml changed while you were asked; run the command again" |
+| write | under the vault lock, only when the file's sha256 and HEAD's `vault.yaml` text are the ones asked about; else nothing, and "vault.yaml changed while you were asked; run the command again" |
 | commit | as today, `Config: vault.yaml as edited` for the edit and `Config: redaction phone off` for the change, each part the owner confirmed with `confirmed at the console` in its body |
 
+- The re-check compares HEAD's `vault.yaml`, not HEAD's commit id: Docket's own ingest commits while the owner reads,
+  and a commit of another file must not stop the question. The cache answers it with no call when HEAD moved only by
+  Docket's commits.
+- The warnings reach the screen through a named parameter, `rewrite(..., warnings=...)`: a list the command knows
+  from its own arguments, such as `set_rule`'s credentials-off note. `edit` keeps its one job, and the signature test
+  pins the parameter.
 - Asked outside the vault lock, as the release asks: the service's ingest and captures never wait on a person.
 - `edit` runs once, so the change written is the change shown.
-- The re-check uses `file_hash` and `StaleError` from #141, which refuse a page's stale write (DR-0507).
+- The arrow is ASCII, so the screen reads the same on any console's code page.
 - A HEAD with no `vault.yaml`, or one that doesn't parse, keeps #141's refusal at a console too: there is nothing to
   show the edit against.
 - A no, a wrong code or the end of input writes and commits nothing and exits 1, as a hand-edited file does today;
@@ -101,8 +155,10 @@ loosen.
 | Windows | Windows Terminal, PowerShell, cmd, VS Code's terminal: `GetConsoleMode` works on both handles | a pipe, `< NUL`, `> file`, Git Bash's mintty without `winpty`, the service under `pythonw` |
 | macOS, Linux | a terminal, or `ssh -t`: both ends a tty | a pipe, a redirect, `ssh host cmd`, cron, launchd, systemd |
 
-The refusal says where to run it, as the release's does: your own terminal with nothing piped in or out, in Git
-Bash's own window through `winpty`.
+- The refusal says where to run it, as the release's does: your own terminal with nothing piped in or out, in Git
+  Bash's own window through `winpty`.
+- The cache's key is read from files the same way on all three; paths are joined with `pathlib`, and a ref file's
+  line ending is stripped.
 
 ### Scripts
 
@@ -110,31 +166,34 @@ Nothing to build: none is needed, and none could be out of an agent's reach.
 
 - A script of the owner's runs as the owner: a key in the keychain, a file or a variable it reads, an agent running
   as the owner reads too, so a path for scripts would be the agent's path.
-- Loosening is a setup-time change, rare enough for the console or a hand edit.
+- Loosening is a setup-time change, rare enough for the console, or a hand edit and the owner's own commit.
 - The human-only factor is an OS prompt, which DR-0382 and DR-0506 already defer to an issue of its own.
 
 ### A hand edit of vault.yaml
 
-It stays possible, and it is the owner's own console edit; only Docket's commit of it is weighed.
+It stays possible, and it is the owner's own console edit; what it loosens applies once committed.
 
-- The gate obeys the file as it stands and never refuses one because it loosens. The owner's own `git commit` of it
-  is theirs.
+- The stricter part of an uncommitted edit applies at once; the looser part waits (The settings in force).
+- The owner's own `git commit` of the edit is theirs, and applies it.
 - Before a write, #141's take-in weighs an uncommitted edit by `loosens(HEAD's config, the file's config)`. One that
   doesn't loosen is taken in unasked, `Config: vault.yaml as edited`, as #141 has it.
 - One that loosens is asked about before a CLI write, a stricter one too, with the command's change in the same
-  question (The question, above); on the yes it is taken in with `confirmed at the console`. A page keeps refusing it.
-- Claude's edit of the file passes Claude Code's permission prompt with its diff, and under auto mode too the next
-  Docket write in Claude's shell is refused, never committed silently. The skills forbid a loosening edit and give the
-  owner the line instead, as the Settings page does.
+  question; on the yes it is taken in with `confirmed at the console`. A page keeps refusing it.
+- Claude's edit of the file passes Claude Code's permission prompt with its diff. Under auto mode too, it applies
+  nothing that loosens, and the next Docket write in Claude's shell is refused, never committed silently. The skills
+  forbid a loosening edit and give the owner the line instead, as the Settings page does.
 
-### The skills
+### The skills and the page
 
-- setup: the sources the user picks become one block of `docket source new` commands for the owner's own terminal,
-  each showing what it adds and asking for its code; Claude still runs `docket init`, and turns a redaction rule on.
-  "Either can change later" says turning one off asks at the owner's console.
-- setup and cuts: never run a loosening command, edit `vault.yaml` to loosen, wrap a command in a console of your
-  own or clear `CLAUDECODE`; auto mode changes nothing. A refusal naming an uncommitted edit goes to the owner as it
-  stands.
+- setup: the sources the user picks are given to the owner one `docket source new` command at a time, each run in
+  their own terminal before the next: a pasted block would feed its second line into the first one's question in
+  conhost. Each shows what it adds and asks for its code. Claude still runs `docket init`, and turns a redaction
+  rule on. "Either can change later" says turning one off asks at the owner's console.
+- setup and cuts: never run a loosening command, edit `vault.yaml` to loosen, commit `vault.yaml`, wrap a command in
+  a console of your own or clear `CLAUDECODE`; auto mode changes nothing. A refusal naming an uncommitted edit goes to
+  the owner as it stands.
+- The Settings page: each loosening command says to run it in your own terminal, as the Staging page says for a
+  release, and the notice sits at the top while the file holds an edit that loosens.
 
 ### Decided
 
@@ -144,101 +203,141 @@ Taken under the autonomy grant, each proposed for the maintainer's review.
 |---|---|---|
 | ask in `rewrite` for every CLI change `loosens()` flags | a list of commands, or a check per command in `cli.py`: a later command loosens unasked, and a Python caller of `set_rule` skips it | DR-0517 |
 | a CLI write at a console asks about an uncommitted edit that loosens, where #141 refuses; a page keeps refusing | #141's refusal at a console too: the owner who made the edit commits it by hand to go on, when the same question would do | DR-0517 |
-| adding a source asks, and setup hands the command over | sources added turned off, turned on at the console: a new command and DR-0506's list moved, to save one command per source | DR-0517 |
+| adding a source asks, and setup hands the commands over one at a time | sources added turned off, turned on at the console: a new command and DR-0506's list moved; a block of commands: conhost feeds line 2 into line 1's question | DR-0517 |
 | init and convert left outside | asking there too: init has no gate yet, and convert lets no record in | DR-0517 |
 | one console module for the release and the loosening | a copy in `settings.py`: two checks to keep in step, on three systems | DR-0518 |
 | one question and one code for the edit and the change | two questions: two codes for one command, and a no to the second leaves the first committed | DR-0519 |
-| the diff without never-store values, asked outside the lock, the file and HEAD checked again | asking under the lock: the service waits on a person; the whole file shown: a value in the scrollback | DR-0519 |
+| each change by its full path, each list as taken off and added | a unified diff of the file: a swap hides as two moved lines, and its context lines carry values; a bare count: a swap reads as no change | DR-0519 |
+| the file and HEAD's `vault.yaml` checked again, asked outside the lock | HEAD's commit id: Docket's own ingest commits while the owner reads; asking under the lock: the service waits on a person | DR-0519 |
+| the warnings as a named parameter | `edit` returning its notes: its type changes for every caller, for one command's note | DR-0519 |
 | `confirmed at the console` in each confirmed commit's body | no mark: git log can't tell which config commits the owner confirmed | DR-0519 |
 | no way around the question, for scripts either | a token or a variable for scripts: Claude reads what a script reads | DR-0520 |
-| a hand edit stays the owner's; only Docket's commit of it is weighed | asking about every hand edit: one that keeps more out needs no yes; refusing a loosened file at the gate: every write stops | DR-0520 |
-
-The block's last id stays free for what the build decides.
+| the gate obeys HEAD plus the stricter part of an uncommitted edit, through one loader for every job that decides what gets in | the file as it stands: an edit lets records into raw before anyone confirms it; refusing every write while the file loosens: every sync stops on a stray edit; a second list of fields that apply at once: a later key would apply uncommitted | DR-0521 |
+| the committed settings cached by HEAD's commit id, read from files, moved forward by Docket's own commits | a git call per read: the service opens the vault on every call | DR-0521 |
 
 ## Doors and data
 
 | Door | What this plan does |
 |---|---|
-| the gate's loosening (DR-0506) | amended in the PR whose title names it: the CLI makes a loosening, or takes in an edit that loosens, only at the owner's console with a code typed back (DR-0517, `cost: one-way`); AGENTS.md's line says so |
-| the take-in (DR-0507, #141) | its refusal of an uncommitted loosening edit stays for pages, and for the CLI without a console; at a console the CLI asks instead. DR-0507's take-in line gains that, with `docs set` in this PR |
+| the gate's loosening (DR-0506) | amended in the PR whose title names it: a loosening applies only once committed (DR-0521), and the CLI makes one, or takes in an edit that makes one, only at the owner's console with a code typed back (DR-0517); both `cost: one-way`; AGENTS.md's line says so |
+| what the gate obeys (DR-0025) | every call reads the settings in force, not the file as it stands; DR-0025 gains that line with `docs set` |
+| the take-in (DR-0507, #141) | its refusal of an uncommitted loosening edit stays for pages, and for the CLI without a console; at a console the CLI asks instead. DR-0507's take-in line gains that, with `docs set` |
 | the release's yes (DR-0202, DR-0382) | its check moves to `docket/console.py`, unchanged: the same refusals, prompt, code and answers; `release()`'s signature and the scans stay |
 | `vault.yaml` (DR-0021) and its keys | unchanged: no key added, the same Docket form |
+| where Docket's own files live (DR-0141) | unchanged: the cache is a disposable file in the private folder, like the run history, not a door |
 | the plugin's skill names | unchanged; the text of setup and cuts changes |
 
-- Users' data: nothing new on disk, nothing migrates. A confirmed commit carries one more body line.
+- Users' data: nothing migrates. A vault whose file holds an uncommitted loosening edit when this ships stops
+  applying that edit until it is committed; `CHANGELOG.md` says so under Changed, with the notice's words.
+- A confirmed commit carries one more body line.
 - An owner's script that ran `docket redaction set <rule> off` or `docket source new` now gets the console refusal;
-  `CHANGELOG.md` says so under Changed.
+  `CHANGELOG.md` says so too.
 
 ## Steps
 
-One PR, built on #141 (#73's PR 2: `file_hash`, `StaleError`, the take-in and its refusal of an edit that loosens),
-started after #141 merges. Its title, "Ask at the owner's console before the CLI loosens the gate", names the door.
+One PR, on main after #141 (1da3e24). Its title, "Ask at the owner's console before the CLI loosens the gate", names
+the door. Each step leaves the suite green.
 
 1. `docket/console.py` from `release.py`'s console part; `release.py` calls it. The `Owner` class and the `owner`
    fixture move from `test_release.py` to `conftest.py`, patching `docket.console`. Tests: `test_console.py` (the
-   release's three console cases, moved); `test_release.py` otherwise unchanged and passing.
-2. `rewrite`: the refusal, the screen in two parts, the question, the file and HEAD checked again, the body lines;
-   the take-in asking where #141 refuses, for `via="cli"` only; `Rewritten.declined`; `set_rule`'s warnings reach the
-   screen. Test: `test_vault_settings.py`.
-3. The three commands' output for a refusal and a no; `docket source new` removing its folder. Tests:
+   release's three console cases, moved); `test_release.py` otherwise unchanged.
+2. `effective()` and the per-field rules in their own module; `loosens()` defined by it. Tests:
+   `test_vault_settings.py`, the loosens table unchanged and an effective table.
+3. The settings in force: the loader and its cache, `Vault.open` and `Gate._config()` on it, the carry-forward in
+   `Git.commit`, the notice in `docket vault status`. The test helpers that loosen by writing `vault.yaml` commit it,
+   as the kit's `configure` does: `test_gate.py`'s `rewrite` helper, so
+   `test_phone_turned_off_makes_a_record_sent_again_a_new_version_holding_the_number` and its neighbours bite as
+   before. Tests: `test_settings_in_force.py`, `test_gate.py`, `test_cli.py`.
+4. `rewrite`: the refusal, the screen, the question, the re-check, the body lines, `warnings`; the take-in asking
+   where #141 refuses, for `via="cli"` only; `Rewritten.declined`. In the same step, every test that loosens through
+   the CLI answers through `owner`: `test_cli.py`, `test_cli_redaction.py`, `test_cli_scan.py`, `test_source_new.py`.
+   Test: `test_vault_settings.py`.
+5. The three commands' output for a refusal and a no; `docket source new` removing its folder. Tests:
    `test_cli_redaction.py`, `test_source_new.py`, `test_cli_scan.py`.
-4. `test_cli.py` and the other cases that add a source only to set up answer through `owner`. Test: the suite, with
-   `CLAUDECODE` cleared, as `conftest.py` does.
-5. The scans; the child-process and terminal cases. Tests: `test_settings_scan.py`, `test_console.py`.
-6. The skills, the door, DR-0507's line, the glossary, the README, the design, the changelog, the Plaud example's
-   `SKILL.md`. Test: `test_plugin_files.py`.
+6. The scans; the child-process and terminal cases. Tests: `test_settings_scan.py`, `test_console.py`.
+7. The skills, the Settings page's notice and wording, the door, DR-0025's and DR-0507's lines, the glossary, the
+   README, the design, the changelog, the Plaud example's `SKILL.md`. Tests: `test_plugin_files.py`,
+   `test_web_settings.py`.
 
 ## Tests
 
-On temp vaults from the test kit, with invented sources and patterns (`calls`, `memo`, `ticket-id`); temp config,
-state and models folders, the failing keyring, `DOCKET_VAULT` unset, no service.
+On temp vaults from the test kit, with invented sources, people and patterns (`calls`, `memo`, `ticket-id`, Dora
+Example); temp config, state and models folders, the failing keyring, `DOCKET_VAULT` unset, no service.
 
 | File | What it proves |
 |---|---|
 | `test_console.py` | the null device, a pipe and no stream are no console; both ends a console and no `CLAUDECODE` asks; the end of input stops; codes are four fresh letters. Each of the three commands run as `python -m docket` with a `y` piped in: exit 2, the console refusal, `vault.yaml` and HEAD unchanged. On Linux and macOS, `redaction set phone off` in a pseudo-terminal from `pty.openpty`: the code read off the screen and typed back, the change committed |
-| `test_vault_settings.py`, the change | a CLI change that loosens: refused under `CLAUDECODE=1` and without a console, the file's bytes and HEAD unchanged; a no, a wrong code and the end of input write nothing; the code writes and commits with `confirmed at the console`; a file changed while asked writes nothing; a stricter change asks nothing; a hand-edited file at a console gets its line and no code, and under `CLAUDECODE` the refusal; given a never-store value, the screen never holds it; `rewrite`'s parameters pinned |
-| `test_vault_settings.py`, the take-in | an uncommitted edit that loosens, before `redaction set phone on`: under `CLAUDECODE=1` refused, nothing committed; at a console one question showing the edit, the code gives two commits, the take-in's with `confirmed at the console`, the change's without; a no commits nothing. An edit that takes a never-store value off: its list counted, the value never on the screen. The edit and `phone off` both loosening: one code, two commits, each with the line. A HEAD commit made while asked writes nothing. A HEAD with no `vault.yaml`, or one that doesn't parse, refused at a console too. An edit that doesn't loosen taken in unasked, as #141 has it |
+| `test_vault_settings.py`, the rule | the loosens table unchanged; `effective` per field: a tightening takes the file's, a loosening keeps HEAD's; a list swap keeps both values; a reordered list is the file's; a later top-level key and one inside a source stay HEAD's |
+| `test_settings_in_force.py` | Dora Example deleted from `never_store.people`, uncommitted: an ingest naming her is still dropped, and after `git commit` stored. Credentials off, uncommitted: still redacted. A never-store keyword added or a source made private, uncommitted: applies at once. A source added, uncommitted: ingest refused as unknown. `primary_machine` changed, uncommitted: HEAD's. HEAD without `vault.yaml`, or one that doesn't parse: stops with the message. The cache: no git call over ten gate runs while HEAD stays; a Docket commit moves the key with no call; an owner's commit of another file costs one call and keeps the settings; a linked worktree and `packed-refs` read; a cache file that doesn't read is a miss |
+| `test_vault_settings.py`, the change | a CLI change that loosens: refused under `CLAUDECODE=1` and without a console, the file's bytes and HEAD unchanged; a no, a wrong code and the end of input write nothing; the code writes and commits with `confirmed at the console`; a file changed while asked writes nothing; a stricter change asks nothing; a hand-edited file at a console gets its line and no code, and under `CLAUDECODE` the refusal; `rewrite`'s parameters pinned, `warnings` among them |
+| `test_vault_settings.py`, the take-in | an uncommitted edit that loosens, before `redaction set phone on`: under `CLAUDECODE=1` refused, nothing committed; at a console one question, the code gives two commits, the take-in's with `confirmed at the console`, the change's without; a no commits nothing. A never-store swap shows `1 taken off, 1 added`, neither value on the screen. A sensitivity loosened shows `sources.calls.sensitivity: mixed -> work`. The edit and `phone off` both loosening: one code, two commits, each with the line. A commit of `vault.yaml` while asked writes nothing; a commit of another file while asked doesn't stop it. A HEAD with no `vault.yaml`, or one that doesn't parse, refused at a console too. An edit that doesn't loosen taken in unasked, as #141 has it |
+| `test_cli.py` | `docket vault status` says the notice while the file holds an uncommitted loosening edit, with no value, and nothing once it is committed |
+| `test_web_settings.py` | the notice at the top; each loosening command says your own terminal |
 | `test_web_settings_add.py` | #141's page refusal of an uncommitted loosening edit, unchanged |
 | `test_cli_redaction.py` | credentials, phone and a pattern turned off: refused under `CLAUDECODE=1`, saying where to run it; at the console the credentials warning comes before the code; turned on stays unasked |
 | `test_source_new.py`, `test_cli_scan.py` | `source new` and `source new --folder`, a new source and a changed entry: refused under `CLAUDECODE=1` with no folder left and `vault.yaml` unchanged; a no removes the folder; the code adds and commits; the same entry again asks nothing |
-| `test_settings_scan.py` | only `release.py` and `settings.py` import `docket.console`; the direct-write row runs over the whole package, with `Vault.init` and convert the only writers of `vault.yaml` outside `rewrite` |
+| `test_settings_scan.py` | only `release.py` and `settings.py` import `docket.console`; the direct-write row runs over the whole package, with `Vault.init` and convert the only writers of `vault.yaml` outside `rewrite`; only the loader calls `effective` for `Vault` and the gate |
 | `test_release.py` | its cases unchanged, through the shared fixture |
-| `test_plugin_files.py` | setup hands `docket source new` over, its flags real; setup and cuts say never to run a loosening command or clear `CLAUDECODE` |
+| `test_plugin_files.py` | setup gives `docket source new` one at a time, its flags real; setup and cuts say never to run a loosening command, commit `vault.yaml` or clear `CLAUDECODE` |
 
 - Coverage stays at the `docket` floor of 100 %; `_console_fd`'s two branches keep their `pragma`, one per system.
 - The terminal case runs only where `pty` exists, read with a deadline; Windows proves its side through
   `GetConsoleMode` on the null device and a pipe, as the release's tests do.
+- The git-call counts patch `Git.run` to count its calls, as `test_folder.py` patches it to fail one.
 
 ## Docs
 
-- DR-0517 to DR-0520, added with this plan in `packages/docket/index.d/`.
-- DR-0507's take-in line, with `docs set`: a CLI write at the owner's console asks instead of refusing (DR-0517).
-- `AGENTS.md`, the gate's loosening door: every other change is named, never made by a page, route or tool, and the
-  CLI makes it, or takes in an edit that makes it, only at the owner's console with a code typed back (DR-0517).
-- Glossary, loosening: made at the owner's console with a code typed back, or by hand, never by a page.
+- DR-0517 to DR-0521 in `packages/docket/index.d/`, added with this plan.
+- DR-0025, with `docs set`: every call reads the settings in force (DR-0521). DR-0507's take-in line: a CLI write at
+  the owner's console asks instead of refusing (DR-0517).
+- `AGENTS.md`, the gate's loosening door: every other change is named, never made by a page, route or tool; a
+  loosening applies only once committed (DR-0521), and the CLI makes it, or takes in an edit that makes it, only at
+  the owner's console with a code typed back (DR-0517).
+- Glossary: loosening, made at the owner's console with a code typed back, or by hand and applied once committed;
+  a new term, the settings in force.
 - `packages/docket/index.yaml`'s reading list gains `docket/console.py` (contract: the console's yes, for the release
-  and the loosening).
+  and the loosening) and the settings-in-force module (contract: the rule, the loader, the cache).
 - `packages/docket/README.md`: the `docket redaction set` and `docket source new` rows say a loosening asks at your
-  console; two lines on scripts and hand edits, the uncommitted edit among them.
-- `docs/design.md`, the Settings bullet: the CLI's loosening asks at the console.
+  console; a short part on hand edits (what applies at once, what waits for the commit, the notice) and on scripts.
+- `docs/design.md`: the gate reads the settings in force; the Settings bullet says the CLI's loosening asks at the
+  console.
 - `CHANGELOG.md` under Changed.
+- `packages/docket/src/docket/web/templates/settings/page.html`: the notice, and "in your own terminal" for each
+  loosening command.
 - `plugin/skills/setup/SKILL.md`, `plugin/skills/cuts/SKILL.md`, `examples/sources/plaud/SKILL.md`.
 
 ## Risks
 
 | Risk | Status |
 |---|---|
+| an uncommitted edit lets records into raw before anyone confirms it (Claude under auto mode deletes a never-store person, then ingests) | resolved: the gate and every job that decides what gets in read the settings in force |
 | setup in Claude Code needs the owner at a terminal for each source | accepted: the point of the issue; one command and one code per source, once |
-| Claude edits `vault.yaml` to loosen under auto mode, with no prompt | resolved with #141: no Docket write commits it unasked; in Claude's shell the next CLI write is refused, and at the owner's console it is shown and asked. The owner's own `git commit` stays theirs |
+| Claude edits `vault.yaml` to loosen under auto mode, with no prompt | resolved: the edit applies nothing that loosens, no Docket write commits it unasked, and in Claude's shell the next CLI write is refused |
+| in a folder vault, Claude's own commits in the host repo (`git commit -a`, a commit of the whole tree) can commit an edited `vault.yaml` with no question | accepted: a separate act, visible in git history with its diff, not a stray edit; the skills say never to commit `vault.yaml` |
+| settings that aren't about the gate wait for their commit too: the owner's time zone, languages, `primary_machine`, a source's tools or folder | accepted: one rule; the notice says the edit applies once committed |
+| an owner used to an edit applying at once, such as taking a never-store value off to let a record in, sees nothing change | accepted: the notice in `docket vault status` and the Settings page, the README and the changelog |
 | an uncommitted loosening edit blocks Claude's stricter writes too, such as setup turning phone redaction on | accepted: the refusal names the edit, and the owner answers it once at a console, or commits or undoes it |
+| the cache answers for an old HEAD | resolved: keyed by HEAD's commit id from files, moved forward only from the cached parent by a commit that didn't name `vault.yaml` |
+| a repo on reftable, or a ref layout the reader doesn't know | accepted: one `git rev-parse HEAD` per read there, correct and slower |
 | any process running as the user passes on purpose: a pseudo-terminal of its own, `CLAUDECODE` cleared | accepted, as for the release (DR-0202): a deliberate act the skills forbid |
 | another agent's shell doesn't set `CLAUDECODE` | accepted: most run commands on pipes, which the check refuses; one that drives a terminal passes, as with the release |
 | an owner's script that loosened now fails | accepted: the refusal says why and where; `CHANGELOG.md` names it |
-| `vault.yaml` or its last commit changes while the owner reads the screen | resolved: both checked again under the lock |
-| a never-store value on the screen or in the scrollback | resolved: the diffs leave the lists out |
+| `vault.yaml` or HEAD's `vault.yaml` changes while the owner reads the screen | resolved: both checked again under the lock |
+| a never-store value on the screen or in the scrollback | resolved: lists show counts taken off and added |
+| tests that loosen by an uncommitted edit stop biting | resolved: their helpers commit the edit, step 3 |
 | the terminal case is slow or flaky | resolved: one case with a deadline, never on Windows |
-| #141 and this change both edit `rewrite` | resolved: this one starts after #141 merges |
 
 ## Plan review
 
-Not reviewed yet: `review-plan` writes it.
+Round 1, the coordinator's reviewer at `d82a639`: changes needed, one major and six minors, all folded in this
+revision. The reviewer re-checks P1.
+
+| Id | Severity | Finding | Status |
+|---|---|---|---|
+| P1 | major | the gate reads the working `vault.yaml`, so an uncommitted edit that loosens applies at the next ingest; the question only guards the commit | fixed: the settings in force, HEAD plus the stricter part of the edit, for the gate and every job that decides what gets in, cached with no git call per run (DR-0521) |
+| P2 | minor | the screen's diff and bare counts can hide a swap | fixed: each change by its full path, each list as taken off and added; the swap tested |
+| P3 | minor | the re-check should compare HEAD's `vault.yaml`, not its commit id | fixed: HEAD's text compared; a commit of `vault.yaml` and one of another file, both tested |
+| P4 | minor | how `set_rule`'s warnings reach the screen wasn't said | fixed: a named parameter, `warnings`, pinned in the signature test |
+| P5 | minor | a pasted block of commands feeds line 2 into line 1's question in conhost | fixed: setup gives them one at a time |
+| P6 | minor | the Settings page's loosening commands should say "in your own terminal" | fixed: the page and its template in Docs |
+| P7 | minor | the switch to the `owner` fixture came after the question, leaving the suite red between steps | fixed: in step 4, with the question |

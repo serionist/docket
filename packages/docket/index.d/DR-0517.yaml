@@ -11,7 +11,8 @@ decisions:
       - via is cli or page and nothing else, and rewrite has no parameter that answers the question; a test pins its parameters.
       - Outside vault/settings.py only Vault.init and convert write vault.yaml; test_settings_scan.py holds it over the whole package.
       - A page's write keeps refusing an uncommitted edit that loosens; DR-0507's take-in line gains that a CLI write at the owner's console asks instead.
-      - The setup skill gives the owner each docket source new to run in their own terminal; no skill runs a loosening command, edits vault.yaml to loosen, wraps a command in a console of its own or clears CLAUDECODE.
+      - "The setup skill gives the owner one docket source new at a time, each run in their own terminal before the next: a pasted block feeds its second line into the first one's question in conhost. No skill runs a loosening command, edits or commits vault.yaml to loosen, wraps a command in a console of its own or clears CLAUDECODE."
+      - The Settings page says to run each loosening command in your own terminal, as the Staging page says for a release.
       - A one-way door on AGENTS.md's list, in the gate's loosening line beside the release's yes.
     not_chosen:
       - "A list of the loosening commands, each with its own check: a command added later would loosen unasked."
