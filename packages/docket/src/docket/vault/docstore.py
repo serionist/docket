@@ -5,10 +5,11 @@ import commits many docs at once, one line each). The `rev:` line in a doc is a 
 that keeps it never makes a second rev with the same number, and a doc deleted by hand goes on from its last rev
 (DR-0112).
 
-A put checks what the raw log decides without the lock (raw records are written once), then, inside
-`Vault.writing()`, what the stored docs decide: a hand edit is taken in as the next rev first, then the rev the put
-carries, `supersedes`, and whether anything changed. A failed write or commit leaves the file and git's index as they
-were.
+A put checks what the raw log decides without the lock (raw records are written once), through the lookup its caller
+opens for that check alone: at the records' places in a current index (DR-0515), closed before the lock is taken
+(DR-0516). Then, inside `Vault.writing()`, what the stored docs decide: a hand edit is taken in as the next rev first,
+then the rev the put carries, `supersedes`, and whether anything changed. A failed write or commit leaves the file and
+git's index as they were.
 """
 
 from __future__ import annotations
@@ -17,6 +18,8 @@ import logging
 import os
 import re
 import time
+from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel, Field
@@ -49,6 +52,9 @@ REPLACE_TRIES = 5
 REPLACE_WAIT_SECONDS = 0.2
 _MIDLINE = re.compile(r"(?:^|[ \t])(?:@\d|\[r:)")
 _POSITION_TAIL = re.compile(r"[@#][\d:-]+$")
+
+# What a put reads the raw log through for its anchor checks: a lookup open for the check alone (DR-0516).
+RawOpener = Callable[[], AbstractContextManager[RawLookup]]
 
 
 class PutResult(BaseModel):
@@ -194,9 +200,10 @@ class DocStore:
 
     # -- putting -----------------------------------------------------------------------------------------------------
 
-    def put(self, text: str) -> PutResult:
+    def put(self, text: str, raw: RawOpener | None = None) -> PutResult:
         """Store a doc: refused with every problem when its frontmatter is wrong, an anchor doesn't resolve, or it was
-        changed since the rev it carries; a no-op when nothing changed; else written as the next rev and committed."""
+        changed since the rev it carries; a no-op when nothing changed; else written as the next rev and committed.
+        `raw` opens what the anchors are checked through; without it the covered sources load whole."""
         head = normalize_newlines(text.removeprefix("\ufeff")).split("\n")
         doc = parse_doc(text)
         if not _reads_back(doc):
@@ -204,18 +211,22 @@ class DocStore:
             raise DocRefusedError([DocProblem(None, message)])
         doc, redacted = derived.check(doc, head[1 : doc.head_lines - 1], self.redactor, self.lists)
         notes: list[str] = []
-        problems = self._against_raw(doc, head, notes)
+        # Closed before the lock: the write never holds the index or waits behind its update (DR-0516).
+        with raw() if raw is not None else nullcontext(RawLookup(self.root)) as lookup:
+            problems = self._against_raw(doc, head, lookup, notes)
         if problems:
             raise DocRefusedError(problems)
         with self.vault.writing():
             result = self._put_locked(doc, head, redacted)
         return result.model_copy(update={"notes": notes})
 
-    def _against_raw(self, doc: ProcessedDoc, head: list[str], notes: list[str] | None = None) -> list[DocProblem]:
-        """What the raw log decides: every covered rid is in it, and every content line's anchors resolve. Into
-        `notes`, each covered folder record read from an earlier version than its newest (DR-0491)."""
+    def _against_raw(
+        self, doc: ProcessedDoc, head: list[str], lookup: RawLookup, notes: list[str] | None = None
+    ) -> list[DocProblem]:
+        """What the raw log decides: every covered rid is in it, and every content line's anchors resolve, all through
+        one lookup, so a source loads once at most. Into `notes`, each covered folder record read from an earlier
+        version than its newest (DR-0491)."""
         meta = doc.meta
-        lookup = RawLookup(self.root)
         problems: list[DocProblem] = []
         records: dict[str, RawRecord] = {}
         for rid in meta.covers:
@@ -278,7 +289,7 @@ class DocStore:
                 if not _reads_back(doc):
                     raise DocRefusedError([DocProblem(None, "the frontmatter can't be written back")])
                 doc, redacted = derived.check(doc, head[1 : doc.head_lines - 1], self.redactor, self.lists)
-                problems = self._against_raw(doc, head)
+                problems = self._against_raw(doc, head, RawLookup(self.root))
             except DocRefusedError as e:
                 out[i] = e
                 continue

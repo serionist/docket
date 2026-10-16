@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0516
+    title: A put holds the index only while it checks its anchors, never under the vault's lock
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#111"]
+    description: "A put's anchor checks stay where they were, before the put takes the vault's lock (raw records are written once). recall.doc_put opens the index for that check alone, at its first question about raw, in one read transaction, and closes it before Vault.writing(): the write, its git calls and its commit never hold the index, so an update's commit never waits on git, and the put never updates the index or waits for an update to finish. Like read, the open waits at most open_read's 50 ms for an update that is committing, then the source loads whole. The snapshot it reads is checked against the run files on disk at the check (DR-0446), so it is never older than what a load at that moment reads: a run promoted before the check and not indexed yet sends its source to the load route, and one promoted after the check is missed by both routes alike, as it was by the load before."
+    binds:
+      - The index a put reads is closed before Vault.writing(); nothing under the vault's lock opens it.
+    not_chosen:
+      - "The anchor checks moved under the lock: it would close the window between a check and its write on both routes, but a source not current would hold the lock through its whole load, about 15 ms per MB, and the write itself is unchanged by this issue."
+      - "The index held through the write: an update's commit would wait on the put's git calls and commit."
+      - "No wait at all at the open: a put landing on an update's commit would load its source whole, about 750 ms at 50 MB, instead of waiting up to 50 ms."

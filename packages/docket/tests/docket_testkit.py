@@ -339,46 +339,54 @@ def copy_vault(template: Path, tmp_path: Path) -> Vault:
 
 
 READ_ROUTES = ["parse", "index"]
+# The calls a route takes: each asks the raw log through the index when it is current (DR-0446, DR-0515).
+ROUTED = ("read", "verify", "doc_put")
 
 
 def read_route(route: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every `recall.read` in a test through one route (DR-0321, DR-0446): `parse`, with no index, parses every doc and
-    loads each source whole; `index` brings the index up to date before each read, and parsing every doc or loading a
-    source whole while the read runs fails the test, so the index answers all that read asks and every record comes
-    from its place. A test run both ways shows the two give the same result."""
+    """Every `recall.read`, `recall.verify` and `recall.doc_put` in a test through one route (DR-0321, DR-0446,
+    DR-0515): `parse`, with no index, parses every doc and loads each source whole; `index` brings the index up to date
+    before each call, and parsing every doc or loading a source whole while the call runs fails the test, so the index
+    answers all that read asks and every record comes from its place. A test run both ways shows the two give the same
+    result."""
     from docket import index, recall
     from docket.index.build import db_path
     from docket.vault.docstore import DocStore
     from docket.vault.spans import RawLookup
 
-    real = recall.read
     load = RawLookup._source  # pyright: ignore[reportPrivateUsage]
-    reading: list[bool] = []
+    reading: list[str] = []
 
-    def parsing(vault: Vault, *args: Any, **kwargs: Any) -> Any:
-        assert not db_path(vault).exists()
-        return real(vault, *args, **kwargs)
-
-    def through_index(vault: Vault, *args: Any, **kwargs: Any) -> Any:
-        index.update(vault)
-        reading.append(True)
-        try:
+    def parsing(name: str, real: Callable[..., Any]) -> Callable[..., Any]:
+        def call(vault: Vault, *args: Any, **kwargs: Any) -> Any:
+            assert not db_path(vault).exists(), f"{name} on the parse route found an index"
             return real(vault, *args, **kwargs)
-        finally:
-            reading.pop()
+
+        return call
+
+    def through_index(name: str, real: Callable[..., Any]) -> Callable[..., Any]:
+        def call(vault: Vault, *args: Any, **kwargs: Any) -> Any:
+            index.update(vault)
+            reading.append(name)
+            try:
+                return real(vault, *args, **kwargs)
+            finally:
+                reading.pop()
+
+        return call
 
     def every_doc(self: DocStore) -> list[Any]:
         raise AssertionError(f"read parsed every doc in {self.root}, though the index is current")
 
     def whole_source(self: RawLookup, source: str) -> dict[str, list[RawRecord]]:
         if reading:
-            raise AssertionError(f"read loaded {source}'s raw whole, though the index is current")
+            raise AssertionError(f"{reading[-1]} loaded {source}'s raw whole, though the index is current")
         return load(self, source)
 
-    if route == "parse":
-        monkeypatch.setattr(recall, "read", parsing)
-    else:
-        monkeypatch.setattr(recall, "read", through_index)
+    for name in ROUTED:
+        real = getattr(recall, name)
+        monkeypatch.setattr(recall, name, parsing(name, real) if route == "parse" else through_index(name, real))
+    if route != "parse":
         monkeypatch.setattr(DocStore, "all", every_doc)
         monkeypatch.setattr(RawLookup, "_source", whole_source)
 

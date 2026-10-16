@@ -4,21 +4,37 @@ import logging
 import shutil
 import subprocess
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import MAIL, REC, THREAD, at, copy_vault, make_record, note, sh, shared, template_vault
+from docket_testkit import (
+    MAIL,
+    READ_ROUTES,
+    REC,
+    THREAD,
+    at,
+    copy_vault,
+    make_record,
+    note,
+    read_route,
+    sh,
+    shared,
+    template_vault,
+)
 
-from docket import recall
+from docket import index, recall
 from docket.errors import DocketError
+from docket.index import lookup
+from docket.index.lookup import ReadIndex
 from docket.vault import processed
 from docket.vault.anchors import format_anchor
 from docket.vault.config import VaultConfig
 from docket.vault.docstore import DocStore
 from docket.vault.processed import DocRefusedError, double_quoted
+from docket.vault.spans import RawLookup
 from docket.vault.vault import Vault
 
 NOTE_ID = "recording-note:2026-10-14-supplier-call"
@@ -33,6 +49,14 @@ def template(tmp_path_factory: pytest.TempPathFactory) -> Path:
 @pytest.fixture
 def vault(template: Path, tmp_path: Path) -> Vault:
     return copy_vault(template, tmp_path)
+
+
+@pytest.fixture(params=READ_ROUTES)
+def routed(vault: Vault, request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> Vault:
+    """The vault with every doc_put through one route: its anchors checked at their records' places in a current
+    index, or against the sources loaded whole, with the same result (DR-0515)."""
+    read_route(request.param, monkeypatch)
+    return vault
 
 
 def refused(vault: Vault, text: str) -> list[str]:
@@ -60,7 +84,8 @@ def fail_commits(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(vault.git, "run", run)
 
 
-def test_a_doc_is_written_at_rev_1_and_committed(vault: Vault) -> None:
+def test_a_doc_is_written_at_rev_1_and_committed(routed: Vault) -> None:
+    vault = routed
     result = recall.doc_put(
         vault, note(lines=["- Ben put it at 10 million. @12:08", "- Cleo wants it in writing. @14:30-14:52"])
     )
@@ -90,13 +115,15 @@ def test_a_doc_is_written_at_rev_1_and_committed(vault: Vault) -> None:
         (note(lines=["- not a time [r:calls:rec-0042@1:60]"]), "if @1:60 is meant as a position, it isn't one"),
     ],
 )
-def test_a_doc_is_refused_with_the_reason(vault: Vault, text: str, says: str) -> None:
+def test_a_doc_is_refused_with_the_reason(routed: Vault, text: str, says: str) -> None:
+    vault = routed
     problems = refused(vault, text)
     assert any(says in p for p in problems), problems
     assert not (vault.root / NOTE_PATH).exists()
 
 
-def test_every_problem_is_reported_at_once_with_its_line(vault: Vault) -> None:
+def test_every_problem_is_reported_at_once_with_its_line(routed: Vault) -> None:
+    vault = routed
     text = note(covers=[REC, "calls:nope"], lines=["- fine [r:calls:rec-0042@12:08]", "- no anchor", "- bad @1:60"])
     problems = refused(vault, text)
     assert len(problems) == 3
@@ -314,7 +341,8 @@ def test_a_doc_deleted_by_hand_goes_on_from_its_last_rev(vault: Vault) -> None:
     assert DocStore(vault).exists(NOTE_ID)
 
 
-def test_a_legacy_note_needs_no_anchors(vault: Vault) -> None:
+def test_a_legacy_note_needs_no_anchors(routed: Vault) -> None:
+    vault = routed
     legacy = "---\nid: legacy-note:old-plans\ntype: legacy-note\nby: import\n---\n\nPlans from before Docket.\n"
     assert recall.doc_put(vault, legacy).path == "processed/legacy-note/old-plans.md"
 
@@ -391,7 +419,8 @@ def test_a_vault_with_no_processed_folder_has_no_docs(vault: Vault) -> None:
     assert DocStore(vault).all() == []
 
 
-def test_a_thread_summary_across_records(vault: Vault) -> None:
+def test_a_thread_summary_across_records(routed: Vault) -> None:
+    vault = routed
     summary = note(
         "thread-summary:2026-10-14-offer",
         covers=[*THREAD, MAIL],
@@ -401,6 +430,52 @@ def test_a_thread_summary_across_records(vault: Vault) -> None:
         ],
     )
     assert recall.doc_put(vault, summary).rev == 1
+
+
+# -- the index a put checks its anchors through (DR-0515, DR-0516) ----------------------------------------------------
+
+
+def test_a_put_closes_the_index_before_it_takes_the_vault_s_lock(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
+    index.update(vault)
+    seen: list[str] = []
+    opened, closed, writing = lookup.open_read, ReadIndex.close, Vault.writing
+
+    def open_read(v: Vault) -> ReadIndex | None:
+        found = opened(v)
+        seen.append("no index" if found is None else "open")
+        return found
+
+    def close(self: ReadIndex) -> None:
+        seen.append("close")
+        closed(self)
+
+    @contextmanager
+    def locked(self: Vault) -> Generator[None]:
+        seen.append("lock")
+        with writing(self):
+            yield
+
+    monkeypatch.setattr(lookup, "open_read", open_read)
+    monkeypatch.setattr(ReadIndex, "close", close)
+    monkeypatch.setattr(Vault, "writing", locked)
+    assert recall.doc_put(vault, note()).rev == 1
+    assert seen == ["open", "close", "lock"]
+
+
+def test_a_put_and_a_verify_after_a_run_the_index_lacks_check_against_that_run(vault: Vault) -> None:
+    recall.doc_put(vault, note())
+    index.update(vault)
+    call = RawLookup(vault.root).latest(REC)
+    assert call is not None and call.segments
+    # The call again, cut to its first minute: what was said at 12:08 isn't in its latest version any more.
+    cut = call.model_copy(update={"segments": [s for s in call.segments if s.end_ms <= 60_000]})
+    vault.write_run("calls", [cut], run_at=at(13))
+    problems = refused(vault, note(rev="1", lines=["- Ben put it at 10 million. @12:08"]))
+    assert len(problems) == 1 and "@12:08: 12:08 is outside calls:rec-0042, which runs from 00:00" in problems[0]
+    checked = recall.verify(vault, NOTE_ID)
+    assert [s.problem for line in checked.lines for s in line.spans] == [problems[0].partition("@12:08: ")[2]]
+    # Neither brought the index up to date: the run is still new to it.
+    assert index.status(vault).new_runs == 1
 
 
 # -- two machines -----------------------------------------------------------------------------------------------------
@@ -659,8 +734,8 @@ def test_a_never_store_doc_is_refused_and_writes_nothing(vault: Vault) -> None:
     assert "dora" not in log_p(vault).lower().replace("dora example", "")
 
 
-def test_an_anchor_problem_quotes_the_redacted_line(vault: Vault) -> None:
-    vault = with_settings(vault)
+def test_an_anchor_problem_quotes_the_redacted_line(routed: Vault) -> None:
+    vault = with_settings(routed)
     problems = refused(vault, note(lines=[f"- Cleo on {PHONE}, no anchor"]))
     assert problems == [
         'line 11 ("- Cleo on [redacted:phone], no anchor"): no anchors at the end of the line: @mm:ss or [r:<rid>]'
