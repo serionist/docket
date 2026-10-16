@@ -22,6 +22,7 @@ from starlette.testclient import TestClient
 from docket import index
 from docket.cli import main
 from docket.curate import batch, tier1
+from docket.curate.propose import Card
 from docket.curate.tier1 import Tier1
 from docket.errors import DocketError
 from docket.index import build as index_build
@@ -447,6 +448,48 @@ def test_show_hides_a_value_tier1_applied_once_a_list_holds_it(
     assert applied["ada-example id:ada-example:email=ada@example.com"]["id"]["value"] == "ada@example.com"
     assert set(shown["applied"][0]) == set(Line.model_fields)
     assert "alias:northwind:nortwind" in {ln.key for ln in read_all(vault.root).lines}
+
+
+def show(capsys: pytest.CaptureFixture[str]) -> tuple[str, dict[str, Any]]:
+    assert main(["curate", "show"]) == 0
+    out = capsys.readouterr().out
+    assert main(["curate", "show", "--json"]) == 0
+    return out, json.loads(capsys.readouterr().out)
+
+
+def test_show_hides_what_a_list_gains_on_a_card_after_the_round(
+    vault: Vault, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DOCKET_VAULT", str(vault.root))
+    with signed_in(vault) as client:
+        assert client.post("/curate/round", headers=SAME).status_code == 303
+        rita = next(c for c in batch.load(vault).cards if c.entity == "rita-sample")  # type: ignore[union-attr]
+        out, _ = show(capsys)
+        assert "id for Rita Sample (rita-sample): email rita@example.com" in out and "Here is the invoice." in out
+        # The address and a word of the snippet listed after the round: the page and show hide both.
+        config(vault, never_store={"keywords": ["rita@example.com", "invoice"]})
+        assert "rita@example.com" not in client.get(f"/curate?open={rita.id}").text
+        out, shown = show(capsys)
+        assert "id for Rita Sample (rita-sample): email (on a never-store list)" in out
+        for text in (out, json.dumps(shown)):
+            assert "rita@example.com" not in text and "invoice" not in text
+        card = next(c for c in shown["cards"] if c["card"]["id"] == rita.id)
+        assert card["card"]["fact"] == ["email", batch.HIDDEN] and card["snippets"] == []
+        assert card["card"]["key"] == "id:rita-sample:email=(on a never-store list)"
+        assert set(card) == {"card", "state", "snippets"} and set(card["card"]) == set(Card.model_fields)
+        # Her name too: the card's name, and its entity, whose slug it is, as the page hides them.
+        config(vault, never_store={"keywords": ["rita@example.com"], "people": ["Rita Sample"]})
+        assert "Rita Sample" not in client.get(f"/curate?open={rita.id}").text
+        out, shown = show(capsys)
+    hidden = re.escape(batch.HIDDEN)
+    assert re.search(rf"\n 1  {rita.id}  id for {hidden} \({hidden}\): email {hidden}  ", out)
+    card = next(c for c in shown["cards"] if c["card"]["id"] == rita.id)["card"]
+    assert (card["name"], card["entity"], card["key"]) == (
+        batch.HIDDEN, batch.HIDDEN, "id:(on a never-store list):email=(on a never-store list)"
+    )  # fmt: skip
+    assert "Rita Sample" not in json.dumps(card) and "Rita Sample" not in out
+    # Only shown: the round keeps its cards as they were mined.
+    assert batch.load(vault).cards[0] == rita  # type: ignore[union-attr]
 
 
 def test_two_people_whose_names_only_start_alike_share_an_address(tmp_path: Path) -> None:

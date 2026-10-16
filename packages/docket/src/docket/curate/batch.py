@@ -34,7 +34,8 @@ from docket.vault.curatelog import AliasFields, Change, EntityFields, IdFields, 
 from docket.vault.entities import load_entities
 from docket.vault.entitystore import EntityStore, Planned, Reject, Written
 from docket.vault.home import make_private
-from docket.vault.neverstore import listed
+from docket.vault.neverstore import fold as fold_listed
+from docket.vault.neverstore import listed, matches_text
 from docket.vault.staging import write_replacing
 from docket.vault.vault import Vault
 
@@ -319,6 +320,7 @@ class Snippet(BaseModel):
 
 
 class CardView(BaseModel):
+    # The card with each value a never-store list holds now hidden, and only the snippets that name none (DR-0501).
     card: Card
     state: State
     snippets: list[Snippet]
@@ -373,7 +375,14 @@ def view(vault: Vault, batch: Batch) -> BatchView:
     applied = [hidden_line(ln, lists) for ln in by_tier1 if ln.op != "undo"]
     unfinished = {ln.id for ln in curatelog.unfinished(vault)}
     with closing(open_index(vault)) as conn:
-        cards = [CardView(card=c, state=now[c.id], snippets=snippets(conn, c)) for c in batch.cards]
+        cards = [
+            CardView(
+                card=hidden_card(c, lists),
+                state=now[c.id],
+                snippets=[s for s in snippets(conn, c) if not hides(s.text, c, lists)],
+            )
+            for c in batch.cards
+        ]
     return BatchView(
         round=batch.round,
         started=batch.started,
@@ -395,6 +404,44 @@ def shown_key(key: str, lists: NeverStore) -> str:
     """A key as the CLI and the page show it: the value it names hidden when a never-store list holds it."""
     text = curatelog.key_text(key)
     return key[: len(key) - len(text)] + HIDDEN if text and listed(text, lists) is not None else key
+
+
+def hides(text: str, card: Card, lists: NeverStore) -> bool:
+    """Whether a snippet names a never-store value, so neither the page nor `show` shows it: by the keywords list's
+    own reading of a text, or holding a name or spelling of the card that either list holds, put there after the round
+    started."""
+    if matches_text(text, lists):
+        return True
+    words = fold_listed(text)
+    values = (card.name, card.entity, *(s.text for s in card.spellings))
+    return any(fold_listed(v) in words for v in values if listed(v, lists) is not None)
+
+
+def hidden_card(card: Card, lists: NeverStore) -> Card:
+    """A card as `show` and its JSON give it: each value a never-store list gained after the round hidden, as the
+    Curate page hides it (its name, its fact's value, its spellings, and its entity with a new card's name, whose slug
+    it is), and in the fields only the JSON shows (its key, the entity in it too when that is hidden, and the spelling
+    beside each locator). Every field stays."""
+
+    def shown(text: str) -> str:
+        return HIDDEN if listed(text, lists) is not None else text
+
+    named = listed(card.entity, lists) is not None or (card.kind == "new" and listed(card.name, lists) is not None)
+    key = shown_key(card.key, lists)
+    kind, _, rest = key.partition(":")
+    owner, _, value = rest.partition(":")
+    if named and owner == card.entity:
+        key = f"{kind}:{HIDDEN}:{value}"
+    return card.model_copy(
+        update={
+            "key": key,
+            "entity": HIDDEN if named else card.entity,
+            "name": shown(card.name),
+            "spellings": [s.model_copy(update={"text": shown(s.text)}) for s in card.spellings],
+            "evidence": [(locator, shown(spelling)) for locator, spelling in card.evidence],
+            "fact": (card.fact[0], shown(card.fact[1])) if card.fact is not None else None,
+        }
+    )
 
 
 def hidden_line(line: Line, lists: NeverStore) -> Line:

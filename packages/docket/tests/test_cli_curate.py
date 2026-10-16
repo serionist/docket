@@ -12,6 +12,7 @@ from docket_testkit import NORTHWIND_FILE, entity_vault, sh
 from docket import render, userconfig
 from docket.cli import main
 from docket.curate import batch as curate
+from docket.curate.propose import Card, CardSpelling
 from docket.vault import curatelog
 from docket.vault.config import NeverStore
 from docket.vault.curatelog import LOG_DIR, AliasFields, Change, EntityFields, IdFields, Line, NameFields, RelatedFields
@@ -229,6 +230,28 @@ def test_show_hides_what_a_never_store_list_holds_in_each_kind_of_change() -> No
     }
     # Only shown: the lines the log holds keep their values.
     assert lines[0].change.alias.text == "Northwind Kft"  # type: ignore[union-attr]
+
+
+def test_show_hides_a_new_card_s_listed_name_with_the_id_made_from_it() -> None:
+    spelling = CardSpelling(text="Dora Minta", trust="label", add="name", alone=True, chunks=3)
+    heard = CardSpelling(text="Dora Mint", trust="asr", add="asr", alone=True, chunks=1)
+    evidence = [("r:calls:rec-1@00:10-00:40", "Dora Minta"), ("r:calls:rec-2", "Dora Mint")]
+    card = Card(
+        id="0a1b2c", n=1, kind="new", key="new:-:dora minta", entity="dora-minta", type="person", name="Dora Minta",
+        lang="en", spellings=[spelling, heard], chunks=4, containers=2, missed_chunks=1, missed_containers=1,
+        newest="2026-10-12T09:00:00Z", evidence=evidence,
+    )  # fmt: skip
+    shown = curate.hidden_card(card, NeverStore(people=["Dora Minta"]))
+    hidden = curate.HIDDEN
+    assert (shown.key, shown.entity, shown.name) == ("new:-:(on a never-store list)", hidden, hidden)
+    assert [s.text for s in shown.spellings] == [hidden, "Dora Mint"]
+    assert shown.evidence == [("r:calls:rec-1@00:10-00:40", hidden), ("r:calls:rec-2", "Dora Mint")]
+    cards = [curate.CardView(card=shown, state="open", snippets=[])]
+    started = datetime(2026, 10, 1, tzinfo=UTC)
+    view = curate.BatchView(round="r", started=started, cards=cards, left_out={}, applied=[])
+    first = render.curate_round(view)[1]
+    assert first.startswith(f" 1  0a1b2c  new person  {hidden} ({hidden})  missed in 1 chunk(s)")
+    assert curate.hidden_card(card, NeverStore()) == card
 
 
 def test_a_write_says_what_it_finished_and_took_in_first() -> None:

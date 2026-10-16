@@ -17,7 +17,8 @@ Unreleased in the same PR.
   spelling two engines agree on, each logged and undoable; anything less certain becomes a card. A shared sender
   such as a notification address gives nothing, and what it gave while it looked like one person's is taken back.
   An author written `Name <id>` now counts as a mention of the entity listing the id; the index rebuilds once.
-  `docket curate show` and its `--json` hide a value tier 1 applied once a never-store list holds it, as the page does.
+  `docket curate show` and its `--json` hide what a never-store list gains after a round, in what tier 1 applied and
+  on the cards, as the page does.
 - The Curate page, `/curate` in the web app: start a round with a click, open each card beside the list with the
   calls and mails it comes from, and accept, edit or reject it; undo a change or lift a rejection from the log
   below. A decision on an entity file that changed since the page showed it writes nothing.
