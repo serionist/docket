@@ -1,13 +1,32 @@
 from __future__ import annotations
 
+import os
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from docket_testkit import MAIL, REC, SIDE, THREAD, VENDOR, make_record, write_raw
+from docket_testkit import (
+    MAIL,
+    PLAUD,
+    REC,
+    SIDE,
+    THREAD,
+    VENDOR,
+    copy_vault,
+    digest,
+    index_template,
+    make_record,
+    plaud_records,
+    shared,
+    write_raw,
+)
 
+from docket import index
+from docket.index.lookup import ReadIndex, open_read
 from docket.vault.anchors import Anchor, parse_anchor
-from docket.vault.records import RawRecord
-from docket.vault.spans import RawLookup, problem, span
+from docket.vault.records import RawRecord, version
+from docket.vault.spans import Place, RawLookup, problem, span
+from docket.vault.vault import Vault
 
 
 @pytest.fixture(scope="module")
@@ -143,3 +162,250 @@ def test_an_anchor_that_doesnt_resolve_comes_back_with_its_problem(lookup: RawLo
     got = span(parse_anchor("@2:00:00"), record(lookup, REC), 1)
     assert got.problem is not None
     assert got.segments == []
+
+
+# -- by place (DR-0446, DR-0447) --------------------------------------------------------------------------------------
+
+ORDERED = "chat:C0ORD/1791600000.000100"
+TWICE = "chat:C0ORD/1791600001.000100"
+# Four versions of one message in one minute: by RunFile.order desk, desk.2, desk.10, desk-2; by the path's text the
+# other way round, since - sorts before . and 1 before 2 before j.
+ORDER_RUNS = [
+    "2026-10-14T1000-desk.jsonl",
+    "2026-10-14T1000-desk.2.jsonl",
+    "2026-10-14T1000-desk.10.jsonl",
+    "2026-10-14T1000-desk-2.jsonl",
+]
+WINDOW_THREAD = "chat:C0WIN/1791500000.000100"
+WINDOW = [f"chat:C0WIN/{1791500000 + n}.000100" for n in range(1, 7)]
+
+
+def window_records() -> list[RawRecord]:
+    """A thread of six where messages 3 and 4 share a millisecond and, by microsecond, 4 comes first: the index orders
+    them 3, 4 and the exact sort 4, 3."""
+    base = datetime(2026, 10, 14, 9, 0, tzinfo=UTC)
+    offsets = [
+        timedelta(seconds=1),
+        timedelta(seconds=2),
+        timedelta(seconds=3, microseconds=500_900),
+        timedelta(seconds=3, microseconds=500_100),
+        timedelta(seconds=4),
+        timedelta(seconds=5),
+    ]
+    return [
+        make_record(rid=rid, container="chat:C0WIN", thread=WINDOW_THREAD, ts=base + at, text=f"window {n}")
+        for n, (rid, at) in enumerate(zip(WINDOW, offsets, strict=True), start=1)
+    ]
+
+
+def put_run(root: Path, source: str, name: str, records: list[RawRecord], newline: bytes = b"\n") -> Path:
+    path = root / "raw" / source / "2026" / "10" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    stem = name.removesuffix(".jsonl")
+    lines = [r.model_copy(update={"v": version(r), "run": stem}).to_json().encode("utf-8") for r in records]
+    path.write_bytes(b"".join(line + newline for line in lines))
+    return path
+
+
+def add_places_runs(vault: Vault) -> None:
+    """A recording kept as Plaud keeps one, a message in four runs whose order the path's text reverses, one version in
+    two machines' runs, and the thread with two messages in one millisecond, committed."""
+    put_run(vault.root, "plaud", "2026-10-14T0900-test-box.jsonl", plaud_records("transaction", "polish"))
+    for n, name in enumerate(ORDER_RUNS, start=1):
+        same = [make_record(rid=TWICE, container="chat:C0ORD", text="the same everywhere")] if n in (1, 4) else []
+        put_run(vault.root, "chat", name, [make_record(rid=ORDERED, container="chat:C0ORD", text=f"v{n}"), *same])
+    put_run(vault.root, "chat", "2026-10-14T1100-test-box.jsonl", window_records())
+    vault.commit([], "Raw: by place")
+
+
+@pytest.fixture(scope="module")
+def places_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The index fixture's template, copied, with the runs above: built once per session."""
+    base = index_template(tmp_path_factory)
+
+    def build(folder: Path) -> Path:
+        vault = copy_vault(base, folder)
+        add_places_runs(vault)
+        return vault.root
+
+    return shared(build, "places-" + digest(str(base)), tmp_path_factory)
+
+
+@pytest.fixture
+def indexed(places_template: Path, tmp_path: Path) -> Vault:
+    vault = copy_vault(places_template, tmp_path)
+    index.update(vault)
+    return vault
+
+
+def two_routes(vault: Vault) -> tuple[RawLookup, RawLookup, ReadIndex]:
+    """A lookup by place and one that loads, on the same vault."""
+    found = open_read(vault)
+    assert found is not None
+    return RawLookup(vault.root, lambda: found), RawLookup(vault.root), found
+
+
+def loaded(lookup: RawLookup) -> set[str]:
+    return set(lookup._sources)  # pyright: ignore[reportPrivateUsage]
+
+
+def answers(lookup: RawLookup, rid: str) -> list[object]:
+    """Everything a read asks the raw about a rid, as data."""
+    versions = lookup.versions(rid)
+    latest = versions[-1] if versions else None
+    out: list[object] = [
+        [v.model_dump() for v in versions],
+        lookup.has(rid),
+        [r.rid for r in lookup.under(rid)],
+        [r.rid for r in lookup.transcripts(rid)],
+        lookup.timed([rid]),
+    ]
+    if latest is not None:
+        out.append(lookup.recordings(latest))
+        out += [[r.rid for r in lookup.neighbours(latest, n)] for n in range(4)]
+    return out
+
+
+def every_rid(vault: Vault) -> list[str]:
+    return sorted({r.rid for _, _, r in vault.rawlog.iter_records()})
+
+
+def test_by_place_every_question_has_the_loaded_answer_and_nothing_is_loaded(indexed: Vault) -> None:
+    placed, whole, found = two_routes(indexed)
+    try:
+        rids = [*every_rid(indexed), "chat:nothing-here", "nosuch:source", "not a rid", f"{PLAUD}/missing"]
+        for rid in rids:
+            assert answers(placed, rid) == answers(whole, rid), rid
+        assert loaded(placed) == set()
+        assert loaded(whole) >= {"cal", "calls", "chat", "mail", "plaud"}
+    finally:
+        found.close()
+
+
+def test_versions_follow_run_order_never_the_path_s_text(indexed: Vault) -> None:
+    placed, whole, found = two_routes(indexed)
+    try:
+        for lookup in (placed, whole):
+            assert [v.text for v in lookup.versions(ORDERED)] == ["v1", "v2", "v3", "v4"]
+            assert [v.run for v in lookup.versions(TWICE)] == ["2026-10-14T1000-desk", "2026-10-14T1000-desk-2"]
+        assert loaded(placed) == set()
+    finally:
+        found.close()
+
+
+@pytest.mark.parametrize("n", range(1, len(WINDOW) + 1))
+def test_a_window_takes_whole_milliseconds_and_the_exact_order(indexed: Vault, n: int) -> None:
+    placed, whole, found = two_routes(indexed)
+    try:
+        for rid in WINDOW:
+            message = placed.latest(rid)
+            assert message is not None
+            got = [r.rid for r in placed.neighbours(message, n)]
+            assert got == [r.rid for r in whole.neighbours(message, n)], (rid, n)
+        assert loaded(placed) == set()
+    finally:
+        found.close()
+    exact = [WINDOW[0], WINDOW[1], WINDOW[3], WINDOW[2], WINDOW[4], WINDOW[5]]
+    lookup = RawLookup(indexed.root)
+    for i, rid in enumerate(exact):
+        message = lookup.latest(rid)
+        assert message is not None
+        assert [r.rid for r in lookup.neighbours(message, n)] == exact[max(0, i - n) : i + n + 1]
+
+
+def test_a_line_that_moved_sends_its_source_to_the_load_with_the_same_answer(indexed: Vault) -> None:
+    path = indexed.root / "raw" / "chat" / "2026" / "10" / "2026-10-14T1100-test-box.jsonl"
+    stat = path.stat()
+    # Another rid of the same length at the same place, and the file's size and time as the index read them.
+    path.write_bytes(
+        path.read_bytes().replace(WINDOW[0].encode(), WINDOW[0].replace("1791500001", "1791500009").encode())
+    )
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    placed, whole, found = two_routes(indexed)
+    try:
+        assert placed.versions(WINDOW[0]) == whole.versions(WINDOW[0]) == []
+        assert loaded(placed) == {"chat"}
+        assert placed.versions(PLAUD) == whole.versions(PLAUD)
+        assert "plaud" not in loaded(placed)
+    finally:
+        found.close()
+
+
+def test_a_run_gone_after_the_check_sends_its_source_to_the_load(indexed: Vault) -> None:
+    placed, whole, found = two_routes(indexed)
+    try:
+        assert placed.has(ORDERED)
+        (indexed.root / "raw" / "chat" / "2026" / "10" / ORDER_RUNS[3]).unlink()
+        assert [v.text for v in placed.versions(ORDERED)] == [v.text for v in whole.versions(ORDERED)]
+        assert [v.text for v in placed.versions(ORDERED)] == ["v1", "v2", "v3"]
+        assert loaded(placed) == {"chat"}
+    finally:
+        found.close()
+
+
+def test_a_place_on_a_line_the_load_refuses_never_answers(indexed: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Decoded as strict UTF-8 and parsed as text: json.loads on the bytes would drop a BOM and pass a surrogate."""
+    record = make_record(rid="chat:C0BAD/1791700000.000100", container="chat:C0BAD", text="X")
+    line = record.model_copy(update={"v": version(record)}).to_json().encode("utf-8")
+    cases = {
+        "2026-10-14T1200-test-box.jsonl": b"\xef\xbb\xbf" + line + b"\n",
+        "2026-10-14T1300-test-box.jsonl": line.replace(b'"X"', b'"\xed\xa0\x80"') + b"\n",
+    }
+    for name, data in cases.items():
+        path = indexed.root / "raw" / "chat" / "2026" / "10" / name
+        path.write_bytes(data)
+        place = Place(f"raw/chat/2026/10/{name}", 1, 0, version(record))
+        found = open_read(indexed)
+        assert found is not None
+        try:
+            # As if the index held that line, so the place is read: it must fail as the load does.
+            monkeypatch.setattr(found, "raw_current", lambda source: True)
+            monkeypatch.setattr(found, "places", lambda rid, source, place=place: [place])
+            placed, whole = RawLookup(indexed.root, lambda found=found: found), RawLookup(indexed.root)
+            with pytest.raises(ValueError) as by_place:
+                placed.versions(record.rid)
+            with pytest.raises(ValueError) as by_load:
+                whole.versions(record.rid)
+            assert type(by_place.value) is type(by_load.value)
+        finally:
+            found.close()
+        path.unlink()
+
+
+def test_a_crlf_run_reads_the_same_by_place(indexed: Vault) -> None:
+    crlf = [
+        make_record(rid=f"chat:C0CRLF/{1791800000 + n}.000100", container="chat:C0CRLF", text=f"crlf {n}")
+        for n in (1, 2)
+    ]
+    put_run(indexed.root, "chat", "2026-10-14T1400-test-box.jsonl", crlf, newline=b"\r\n")
+    index.update(indexed)
+    placed, whole, found = two_routes(indexed)
+    try:
+        for record in crlf:
+            assert answers(placed, record.rid) == answers(whole, record.rid)
+        assert loaded(placed) == set()
+    finally:
+        found.close()
+
+
+def test_rows_that_disagree_with_the_runs_send_the_source_to_the_load(
+    indexed: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    placed, whole, found = two_routes(indexed)
+    try:
+        monkeypatch.setattr(found, "places", lambda rid, source: [])
+        assert [r.rid for r in placed.transcripts(PLAUD)] == [r.rid for r in whole.transcripts(PLAUD)]
+        assert loaded(placed) == {"plaud"}
+        monkeypatch.setattr(found, "group", lambda field, value, source: [])
+        message = whole.latest(WINDOW[2])
+        assert message is not None
+        assert placed.neighbours(message, 1) == whole.neighbours(message, 1)
+        assert loaded(placed) == {"plaud", "chat"}
+    finally:
+        found.close()
+
+
+def test_without_an_index_a_lookup_loads(indexed: Vault) -> None:
+    lookup = RawLookup(indexed.root, lambda: None)
+    assert lookup.has(PLAUD)
+    assert loaded(lookup) == {"plaud"}

@@ -19,7 +19,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 from zoneinfo import ZoneInfo
 
 from filelock import FileLock
@@ -147,14 +147,38 @@ def _known_fields(data: dict[Any, Any]) -> tuple[dict[str, object], list[str]]:
     return fields, sorted(set(unknown))
 
 
-def read_run(root: Path, run: RunFile) -> tuple[list[tuple[int, RawRecord]], list[tuple[str, str]]]:
-    """A run file's records with their lines, read leniently: a line that doesn't load is a problem, and a field this
-    Docket doesn't know is left out and reported."""
+def foreign_prefix(source: str) -> str:
+    """The start of the problem reported for a record of this source found in another source's folder: read looks for
+    it, and loads both sources whole (DR-0446)."""
+    return f"a record of {source} in "
+
+
+class RunLine(NamedTuple):
+    """A record as a run file holds it: its line, and the byte its line starts at (DR-0445)."""
+
+    line: int
+    offset: int
+    record: RawRecord
+
+
+def read_run(root: Path, run: RunFile) -> tuple[list[RunLine], list[tuple[str, str]]]:
+    """A run file's records with their lines and offsets, read leniently: a line that doesn't load is a problem, and
+    a field this Docket doesn't know is left out and reported. The file is read as bytes and split at each newline
+    byte, which UTF-8 never puts inside a character, so the lines are those text mode gives. A line that isn't UTF-8
+    (indexed with its bad bytes replaced) and a record in another source's folder are indexed and reported, so read
+    loads their sources whole (DR-0446)."""
     rel = _rel(root, run.path)
-    records: list[tuple[int, RawRecord]] = []
+    records: list[RunLine] = []
     problems: list[tuple[str, str]] = []
-    with run.path.open(encoding="utf-8", errors="replace", newline="\n") as f:
-        for n, line in enumerate(f, start=1):
+    offset = 0
+    with run.path.open("rb") as f:
+        for n, raw in enumerate(f, start=1):
+            start, offset = offset, offset + len(raw)
+            try:
+                line = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                line = raw.decode("utf-8", errors="replace")
+                problems.append((f"{rel}:{n}", "not UTF-8: indexed with its bad bytes replaced"))
             if not line.strip():
                 continue
             place = f"{rel}:{n}"
@@ -170,11 +194,15 @@ def read_run(root: Path, run: RunFile) -> tuple[list[tuple[int, RawRecord]], lis
             if unknown:
                 problems.append((place, f"fields this Docket doesn't know, left out: {', '.join(unknown)}"))
             try:
-                records.append((n, RawRecord.model_validate(fields)))
+                record = RawRecord.model_validate(fields)
             except ValidationError as e:
                 err = e.errors()[0]
                 where = ".".join(str(p) for p in err["loc"]) or "record"
                 problems.append((place, f"not a raw record: {where}: {err['msg']}"))
+                continue
+            if record.source != run.source:
+                problems.append((place, f"{foreign_prefix(record.source)}{run.source}'s folder"))
+            records.append(RunLine(n, start, record))
     return records, problems
 
 
@@ -252,11 +280,11 @@ class Indexer:
                 self.conn.executemany(
                     "INSERT OR IGNORE INTO problems (kind, place, message) VALUES ('raw', ?, ?)", problems
                 )
-                for line, record in records:
+                for line, offset, record in records:
                     seen.add(record.rid)
                     self.conn.execute(
-                        "INSERT OR IGNORE INTO record_versions (rid, v, path, line) VALUES (?, ?, ?, ?)",
-                        (record.rid, record.v, rel, line),
+                        "INSERT OR IGNORE INTO record_versions (rid, v, path, line, offset) VALUES (?, ?, ?, ?, ?)",
+                        (record.rid, record.v, rel, line, offset),
                     )
                     latest[record.rid] = ((run.order, line), rel, record)
             changed: list[tuple[str, int, RawRecord]] = []

@@ -9,7 +9,7 @@ import pytest
 from docket.errors import DocketError
 from docket.index import schema
 from docket.index.languages import resolve
-from docket.index.lookup import DocIndex
+from docket.index.lookup import ReadIndex
 from docket.vault import legacy
 from docket.vault.legacy import OldPath, find, index_row, normalize
 from docket.vault.processed import parse_doc
@@ -132,7 +132,7 @@ def test_the_index_narrows_to_the_same_answer(entries: list[OldPath], locator: s
     try:
         schema.create(conn, resolve(["en"]))
         conn.executemany("INSERT INTO old_paths (doc, path, folded, name) VALUES (?, ?, ?, ?)", map(index_row, entries))
-        index = DocIndex(conn, Path("vault"))
+        index = ReadIndex(conn, Path("vault"))
         assert answer(lambda: index.old_paths(locator), locator) == answer(lambda: entries, locator)
     finally:
         conn.close()
@@ -162,7 +162,7 @@ def test_the_index_hands_find_only_what_could_match() -> None:
     try:
         schema.create(conn, resolve(["en"]))
         conn.executemany("INSERT INTO old_paths (doc, path, folded, name) VALUES (?, ?, ?, ?)", map(index_row, ENTRIES))
-        index = DocIndex(conn, Path("vault"))
+        index = ReadIndex(conn, Path("vault"))
         assert index.old_paths("calls:NOTES/Calls/2026-09-10-supplier-call.md") == [ENTRIES[0]]
         assert index.old_paths("2026-09-10-supplier-call.md") == ENTRIES[:2]
         assert index.old_paths("vendor/tool/README.md") == [ENTRIES[4]]

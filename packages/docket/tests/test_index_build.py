@@ -14,6 +14,7 @@ from docket_testkit import CALL, INDEX_FIXTURE, PARENT, copy_vault, index_templa
 
 from docket.errors import DocketError
 from docket.index import build, locate, matching, rebuild, status
+from docket.vault.records import RawRecord
 from docket.vault.vault import Vault
 
 
@@ -111,6 +112,39 @@ def test_raw_lines_are_read_leniently(vault: Vault) -> None:
     assert f"{place}:5: fields this Docket doesn't know, left out: mood" in report.problems
     texts = {r[0] for r in rows(vault, "SELECT text FROM chunks WHERE kind = 'message'")}
     assert {"still indexed", "from a newer docket"} <= texts
+
+
+def test_each_version_s_offset_reads_back_its_line(vault: Vault) -> None:
+    crlf = [make_record(94, text="a line with CRLF after it"), make_record(95, text="ő and ű, then CRLF")]
+    path = vault.root / "raw" / "chat" / "2026" / "10" / "2026-10-14T1200-test-box.jsonl"
+    path.write_bytes(b"".join(r.to_json().encode("utf-8") + b"\r\n" for r in crlf) + b"\r\n")
+    rebuild(vault)
+    found = rows(vault, "SELECT rid, v, path, line, offset FROM record_versions")
+    assert len(found) == 24
+    for rid, v, rel, line, offset in found:
+        with (vault.root / str(rel)).open("rb") as f:
+            f.seek(int(str(offset)))
+            record = RawRecord.model_validate(json.loads(f.readline().decode("utf-8")))
+        assert (record.rid, record.v) == (rid, v), (rel, line)
+    assert rows(vault, "SELECT line, offset FROM record_versions WHERE path LIKE '%T1200%' ORDER BY line") == [
+        (1, 0),
+        (2, len(crlf[0].to_json().encode("utf-8")) + 2),
+    ]
+
+
+def test_a_line_that_isn_t_utf8_and_a_record_in_another_source_s_folder_are_indexed_and_reported(
+    vault: Vault,
+) -> None:
+    menu = make_record(96, text="café menu").to_json().encode("utf-8").replace("é".encode(), b"\xe9")
+    stray = make_record(rid="calls:stray", source="calls", kind="recording", container=None, text="A stray call.")
+    path = vault.root / "raw" / "chat" / "2026" / "10" / "2026-10-14T1200-test-box.jsonl"
+    path.write_bytes(menu + b"\n" + stray.to_json().encode("utf-8") + b"\n")
+    report = rebuild(vault)
+    place = "raw/chat/2026/10/2026-10-14T1200-test-box.jsonl"
+    assert f"{place}:1: not UTF-8: indexed with its bad bytes replaced" in report.problems
+    assert f"{place}:2: a record of calls in chat's folder" in report.problems
+    texts = {r[0] for r in rows(vault, "SELECT text FROM chunks")}
+    assert {"caf\N{REPLACEMENT CHARACTER} menu", "A stray call."} <= texts
 
 
 def test_an_unknown_field_inside_an_attachment_is_left_out_and_the_record_indexed(vault: Vault) -> None:

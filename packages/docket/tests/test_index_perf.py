@@ -15,14 +15,21 @@ import itertools
 import random
 import shutil
 import sqlite3
-import sys
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
 import pytest
-from docket_testkit import copy_vault, fts_and_check, index_config, query_words, stem_every_word, template_with
+from docket_testkit import (
+    copy_vault,
+    fts_and_check,
+    index_config,
+    query_words,
+    stem_every_word,
+    template_with,
+    traced,
+)
 from models_kit import CANT_SEARCH, FAKE
 
 from docket.index import build, matching, search, vectors
@@ -59,16 +66,6 @@ SYLLABLES = [
     "ka", "ta", "mi", "né", "ro", "szé", "lo", "ber", "ga", "tó", "ül", "ve", "ri", "sa", "po", "lin", "dor", "fe",
     "kő", "mun", "var", "ten", "ish", "ack", "ple", "ond",
 ]  # fmt: skip
-
-
-def traced() -> bool:
-    if sys.gettrace() is not None:
-        return True
-    try:
-        import coverage
-    except ImportError:  # pragma: no cover - coverage comes with the dev tools
-        return False
-    return coverage.Coverage.current() is not None
 
 
 def vocabulary(rng: random.Random, size: int) -> list[str]:

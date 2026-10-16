@@ -5,13 +5,15 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import random
 import re
 import shutil
 import sqlite3
 import subprocess
+import sys
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
@@ -331,14 +333,18 @@ READ_ROUTES = ["parse", "index"]
 
 
 def read_route(route: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every `recall.read` in a test through one route (DR-0321): `parse`, with no index, parses every doc; `index`
-    brings the index up to date before each read, and parsing every doc fails the test, so the index answers all that
-    read asks. A test run both ways shows the two give the same result."""
+    """Every `recall.read` in a test through one route (DR-0321, DR-0446): `parse`, with no index, parses every doc and
+    loads each source whole; `index` brings the index up to date before each read, and parsing every doc or loading a
+    source whole while the read runs fails the test, so the index answers all that read asks and every record comes
+    from its place. A test run both ways shows the two give the same result."""
     from docket import index, recall
     from docket.index.build import db_path
     from docket.vault.docstore import DocStore
+    from docket.vault.spans import RawLookup
 
     real = recall.read
+    load = RawLookup._source  # pyright: ignore[reportPrivateUsage]
+    reading: list[bool] = []
 
     def parsing(vault: Vault, *args: Any, **kwargs: Any) -> Any:
         assert not db_path(vault).exists()
@@ -346,16 +352,26 @@ def read_route(route: str, monkeypatch: pytest.MonkeyPatch) -> None:
 
     def through_index(vault: Vault, *args: Any, **kwargs: Any) -> Any:
         index.update(vault)
-        return real(vault, *args, **kwargs)
+        reading.append(True)
+        try:
+            return real(vault, *args, **kwargs)
+        finally:
+            reading.pop()
 
     def every_doc(self: DocStore) -> list[Any]:
         raise AssertionError(f"read parsed every doc in {self.root}, though the index is current")
+
+    def whole_source(self: RawLookup, source: str) -> dict[str, list[RawRecord]]:
+        if reading:
+            raise AssertionError(f"read loaded {source}'s raw whole, though the index is current")
+        return load(self, source)
 
     if route == "parse":
         monkeypatch.setattr(recall, "read", parsing)
     else:
         monkeypatch.setattr(recall, "read", through_index)
         monkeypatch.setattr(DocStore, "all", every_doc)
+        monkeypatch.setattr(RawLookup, "_source", whole_source)
 
 
 def template_project(factory: pytest.TempPathFactory, mappers: dict[str, str]) -> Path:
@@ -955,3 +971,86 @@ def imported_template(factory: pytest.TempPathFactory, vault_template: Path, rep
         return base
 
     return shared(build, "imported-" + digest(str(vault_template), str(repo_template)), factory)
+
+
+# -- a big source, for timing reads (#76) -----------------------------------------------------------------------------
+
+BIG_OLD = "notes/calls/2026-05-10-supplier-call.md"
+BIG_NOTE = "legacy-note:2026-05-10-supplier-call"
+BIG_SEGMENTS = 600
+BIG_WORDS = [
+    "price", "offer", "friday", "supplier", "consultant", "quarter", "million",
+    "signed", "budget", "review", "plan", "team", "call", "week",
+]  # fmt: skip
+
+
+def traced() -> bool:
+    """Whether a tracer such as coverage runs, so elapsed times say nothing about the code."""
+    if sys.gettrace() is not None:
+        return True
+    try:
+        import coverage
+    except ImportError:  # pragma: no cover - coverage comes with the dev tools
+        return False
+    return coverage.Coverage.current() is not None
+
+
+def _big_recording(n: int, when: datetime, rng: random.Random) -> list[RawRecord]:
+    rid = f"plaud:of_{n:032x}"
+    said: list[dict[str, Any]] = []
+    start = 0
+    for _ in range(BIG_SEGMENTS):
+        length = rng.randint(2_000, 9_000)
+        text = " ".join(rng.choice(BIG_WORDS) for _ in range(rng.randint(6, 16)))
+        speaker = rng.choice(["Ben Sample", "Cleo Test", "Ada Example"])
+        said.append({"start_ms": start, "end_ms": start + length, "speaker": speaker, "text": text})
+        start += length
+    under = {"source": "plaud", "container": rid, "thread": rid, "ts": when, "fetched": when, "via": "test"}
+    return [
+        RawRecord.model_validate(
+            {**under, "rid": rid, "kind": "recording", "title": f"Call {n}", "container": None, "thread": None}
+        ),
+        RawRecord.model_validate(
+            {
+                **under,
+                "rid": f"{rid}/transaction",
+                "kind": "transcript",
+                "segments": said,
+                "text": "\n".join(f"{s['speaker']}: {s['text']}" for s in said),
+            }
+        ),
+        RawRecord.model_validate(
+            {**under, "rid": f"{rid}/summary", "kind": "vendor-summary", "text": "## Summary\n\nPrice agreed."}
+        ),
+    ]
+
+
+def big_raw(root: Path, megabytes: float) -> tuple[Vault, str]:
+    """A vault with about this many megabytes of invented Plaud raw in one source: recordings of 600 segments, each
+    with its transcript and summary, two to a run, a run every 13 hours, written straight to raw/ and committed once;
+    and a legacy note whose old path is BIG_OLD, on the middle recording, which is returned."""
+    vault = Vault.init(root / "vault", index_config(), "test-box")
+    rng = random.Random(76)  # noqa: S311 - seeded test text, not secrets
+    first = datetime(2026, 1, 1, 9, 0, tzinfo=UTC)
+    size, n = 0, 0
+    recordings: list[str] = []
+    while size < megabytes * 1_000_000:
+        when = first + timedelta(hours=13 * (n // 2))
+        records = [*_big_recording(n, when, rng), *_big_recording(n + 1, when, rng)]
+        recordings += [r.rid for r in records if r.kind == "recording"]
+        stem = f"{when:%Y-%m-%dT%H%M}-test-box"
+        path = vault.root / "raw" / "plaud" / f"{when:%Y}" / f"{when:%m}" / f"{stem}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = "".join(r.model_copy(update={"v": version(r), "run": stem}).to_json() + "\n" for r in records)
+        path.write_text(data, encoding="utf-8", newline="\n")
+        size += len(data.encode("utf-8"))
+        n += 2
+    vault.commit([], "Raw: plaud")
+    middle = recordings[len(recordings) // 2]
+    from docket.vault.docstore import DocStore
+
+    DocStore(vault).put(
+        f"---\nid: {BIG_NOTE}\ntype: legacy-note\ncovers:\n  - {middle}\nold_paths:\n  - {BIG_OLD}\n"
+        "by: claude-test, import 2026-10-16T10:00\n---\n\n# Supplier call\n\nThe price was agreed.\n"
+    )
+    return vault, middle

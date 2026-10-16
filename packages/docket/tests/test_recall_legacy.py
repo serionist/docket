@@ -343,13 +343,15 @@ def test_a_note_edited_after_the_update_takes_the_parse_route(plain: Vault) -> N
     assert found.resolved == CALL_ID
 
 
-@pytest.mark.parametrize(("current", "parses"), [(True, 0), (False, 1)])
+@pytest.mark.parametrize(("docs", "raw"), [(True, True), (False, True), (True, False), (False, False)])
 def test_a_read_parses_every_doc_once_at_most_and_loads_a_source_once(
-    plain: Vault, monkeypatch: pytest.MonkeyPatch, current: bool, parses: int
+    plain: Vault, monkeypatch: pytest.MonkeyPatch, docs: bool, raw: bool
 ) -> None:
     index.update(plain)
-    if not current:
+    if not docs:
         (plain.root / doc_path("legacy-note:hand-written")).write_text("# By hand\n", encoding="utf-8")
+    if not raw:
+        plain.write_run("calls", [make_record(rid="calls:rec-new", source="calls", container=None)])
     calls: list[str] = []
     every, load = DocStore.all, RawLookup._source  # pyright: ignore[reportPrivateUsage]
 
@@ -366,4 +368,4 @@ def test_a_read_parses_every_doc_once_at_most_and_loads_a_source_once(
     monkeypatch.setattr(RawLookup, "_source", counted_load)
     both = recall.read(plain, f"calls:{CALL}@12:08", view="both")
     assert both.resolved == "r:calls:rec-0042@12:08"
-    assert sorted(calls) == sorted(["calls", *["all"] * parses])
+    assert sorted(calls) == sorted([*([] if raw else ["calls"]), *([] if docs else ["all"])])

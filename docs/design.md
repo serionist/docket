@@ -337,6 +337,9 @@ vault/
 - `rid` is also the ledger's locator, so every ledger source resolves to a record. Older locators (a legacy note's
   path) resolve through the note's `old_paths`, which the index loads into its `old_paths` table (DR-0320); `read`
   asks the index when it is current and parses the docs otherwise (DR-0321).
+- `read` takes a record's lines at their places when the index is current for the record's source: its run files as
+  indexed, by name, size and modification time, and no problem among them; otherwise it loads the source's raw whole
+  (DR-0446). The index only narrows what a read looks at, and the lines read decide (DR-0447).
 
 ### 5.3 Processed docs
 
@@ -366,7 +369,7 @@ the earlier ones (DR-0112).
 | Table | What |
 |---|---|
 | `meta`, `run_files`, `problems` | what the index was built with (schema, languages, stemmer), the run files it read, what didn't load |
-| `records`, `record_versions`, `crosswalk` | every raw record's current version with its file and line in the raw log, and every version; old and new ids of one thing |
+| `records`, `record_versions`, `crosswalk` | every raw record's current version with its file and line in the raw log, and every version with its byte offset there (DR-0445); old and new ids of one thing |
 | `segments` | transcript utterances: rid, engine, start and end ms, speaker, person, text |
 | `chunks`, `chunks_fts`, `chunk_vec_<model>` | the searchable units; FTS5 over the text as written and a stemmed column per language (DR-0114); a vector table per model, keyed by the hash of each chunk's input and kept in step with the chunks by every update and rebuild (DR-0336) |
 | `docs`, `doc_covers`, `doc_anchors`, `old_paths`, `derived_from` | processed docs, the records each covers, each line's anchors, legacy notes' old paths, and what each item and brief line was built from |

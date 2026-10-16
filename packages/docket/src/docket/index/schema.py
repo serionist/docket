@@ -20,7 +20,9 @@ from docket.index.text import snowball_version
 # (DR-0350).
 # 6: a case form counts beside a stem form it is cut to, with or without accents, while any is kept, and not when it is
 # a common word, so alias_terms and mentions change (DR-0350).
-SCHEMA_VERSION = 6
+# 7: each record version's byte offset in its run file (DR-0445); a line that isn't UTF-8 and a record in another
+# source's folder are problems (DR-0446).
+SCHEMA_VERSION = 7
 TOKENIZER = "unicode61 remove_diacritics 2"
 # remove_diacritics 2 came in SQLite 3.27.
 MIN_SQLITE = (3, 27, 0)
@@ -34,8 +36,10 @@ CREATE TABLE records (
   fidelity TEXT NOT NULL, grp TEXT NOT NULL, path TEXT NOT NULL, line INTEGER NOT NULL
 ) WITHOUT ROWID;
 CREATE INDEX records_thread ON records (thread);
+CREATE INDEX records_container ON records (container);
 CREATE TABLE record_versions (
-  rid TEXT NOT NULL, v TEXT NOT NULL, path TEXT NOT NULL, line INTEGER NOT NULL, PRIMARY KEY (rid, path, line)
+  rid TEXT NOT NULL, v TEXT NOT NULL, path TEXT NOT NULL, line INTEGER NOT NULL, offset INTEGER NOT NULL,
+  PRIMARY KEY (rid, path, line)
 ) WITHOUT ROWID;
 CREATE TABLE segments (
   rid TEXT NOT NULL, ordinal INTEGER NOT NULL, engine TEXT, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL,

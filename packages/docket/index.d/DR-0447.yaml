@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0447
+    title: With a current source, the index narrows the records a read looks at, and today's code decides
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#76"]
+    description: "A rid exists when it has a record_versions row in its source's folder. A record's versions are its rows there, in run order and line, each read at its place. The transcripts under a record (DR-0370, DR-0440) are the records rows of its source naming it as thread or container, of kind transcript, other than itself, each read at its latest place and kept by over() and is_transcript(). A transcript's recordings (DR-0391) are over() of the record read, each a rid that exists. A message's neighbours are the records rows of its source with its thread, else its container, in (ts, rid) order to the millisecond: its own millisecond and n rows either side, each end widened to its whole millisecond, then read and sorted by (ts, rid) as before. This refines the bind DR-0370, DR-0391 and DR-0440 share, that what is under a record comes from the raw log of its own source and never the index: the records still come from the raw log, read where a current index says they are, and what that bind guards against, a transcript stored since the last update, sends the source to the load route (DR-0446)."
+    binds:
+      - What a read shows of a record is decided on its lines read from the raw log; whether a rid exists is its row in a current source.
+    not_chosen:
+      - "Superseding DR-0370, DR-0391 and DR-0440: what they decide stands, and only how the raw is read changes."
+      - "Answers from the index's own columns (records, segments): a second reading of a record to keep in step with RawRecord."
