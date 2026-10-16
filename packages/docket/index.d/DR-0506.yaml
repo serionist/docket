@@ -11,6 +11,8 @@ decisions:
       - vault/settings.py's loosens(before, after) is the list as an allowlist, and every write with via page passes it inside the writer.
       - "A test scans the whole package: write_config is called only in vault/settings.py; the writer's general entry only there, in set_rule and in _register; set_rule, new_source and new_folder_source only by cli.py; docket.web and docket.service import from vault.settings only the stricter operations and the read-only helpers."
       - A one-way door on AGENTS.md's list, beside the release's yes.
+      - The same scan finds, in docket.web and docket.service, no settings object dumped whole (.dump()) and no file written by code that names CONFIG_FILE or vault.yaml.
+      - loosens() copies before's value back only into the fields on the list and compares whole models, so a key a later schema adds, anywhere, is a change until a decision moves it onto the list.
     not_chosen:
       - "A looser change behind a typed confirmation: Claude in Chrome or Playwright types it in normal use."
       - "Every change in the page: the browser is the one path Claude Code's prompts don't see."

@@ -223,3 +223,19 @@ def test_the_vectors_are_counted_where_an_index_reads_and_left_out_where_none_do
     monkeypatch.setattr(vectors, "tables", lambda _conn: [vectors.VecTable("e5", "e5-small", "r1", 64, "query: ")])
     monkeypatch.setattr(vectors, "coverage", locked)
     assert vector_counts(vault) == []
+
+
+def test_a_vault_yaml_that_doesnt_parse_names_the_place_never_the_line(client: TestClient, vault: Vault) -> None:
+    # A hand edit: a handle added as it is written in chat, which YAML refuses as a plain value.
+    path = vault.root / "vault.yaml"
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    at = next(i for i, line in enumerate(lines) if line.strip() == "- Cleo Test")
+    indent = lines[at][: len(lines[at]) - len(lines[at].lstrip())]
+    lines.insert(at + 1, f"{indent}- @dora.secret\n")
+    path.write_text("".join(lines), encoding="utf-8", newline="\n")
+    where = f"found character '@' that cannot start any token at line {at + 2}, column {len(indent) + 3}"
+    for route in ("/settings", "/settings?show=lists", "/staging", "/curate"):
+        answer = client.get(route)
+        assert answer.status_code == 400, route
+        assert "dora.secret" not in answer.text, route
+        assert where in said(answer.text), route

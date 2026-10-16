@@ -127,6 +127,8 @@ Unreleased in the same PR.
 
 ### Changed
 
+- A `vault.yaml` that doesn't read as YAML is named by its line and column and what was wrong there, no longer with
+  the line's text, so a never-store value on it never shows in a page, a terminal or a log.
 - Verifying a doc and writing one no longer load the raw log of each source it covers when the search index is
   current for that source: their anchors are checked against the records' own lines where the index says they are.
   On 50 MB of call recordings in one source, `verify` went from about 580 ms to 5 ms and a `doc_put` from about

@@ -278,7 +278,8 @@ class VaultConfig(_Model):
         try:
             data: Any = yaml.load(path.read_text(encoding="utf-8"), Loader=UniqueKeyLoader)  # noqa: S506 - a SafeLoader
         except yaml.YAMLError as e:
-            raise DocketError(f"{path}: not valid YAML: {e}") from e
+            # Not `from e`: PyYAML's message quotes the line it stopped at, which can be a never-store value.
+            raise DocketError(f"{path}: not valid YAML: {yaml_problem(e)}") from None
         try:
             return VaultConfig.model_validate(data or {})
         except ValidationError as e:
@@ -295,6 +296,16 @@ class VaultConfig(_Model):
             return True
         legacy = self.redaction.legacy()
         return legacy is not None and text == _dump({**self.model_dump(mode="json"), "redaction": legacy})
+
+
+def yaml_problem(error: yaml.YAMLError) -> str:
+    """What PyYAML found and where, by line and column, without the snippet of the file its message quotes: a page,
+    a log or a terminal that shows the error must never show a never-store value the line holds."""
+    if isinstance(error, yaml.MarkedYAMLError):
+        what = error.problem or error.context or "it doesn't read"
+        mark = error.problem_mark or error.context_mark
+        return f"{what} at line {mark.line + 1}, column {mark.column + 1}" if mark is not None else what
+    return "it holds a character YAML doesn't allow, such as a control character"
 
 
 def _dump(data: dict[str, Any]) -> str:

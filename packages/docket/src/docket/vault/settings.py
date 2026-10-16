@@ -104,7 +104,11 @@ def loosens(before: VaultConfig, after: VaultConfig) -> bool:
     never-store list, credentials or phone turned on, a pattern turned on with nothing else of it changed, a source made
     stricter, a source turned off. Everything else loosens: a value taken off, a rule turned off, a pattern added or
     changed, a source added, removed, made looser or turned on, its tools, mapper, hosts, folder or exclude, the owner,
-    the storage, the primary machine, and any key added later."""
+    the storage, the primary machine, and any key added later.
+
+    An allowlist at every level: each helper copies `before`'s value back into `after` only for a field a page may
+    change and only where the change is one it may make, and the whole models are then compared, so a field this code
+    doesn't name, at the top or inside a list, a rule or a pattern, counts as it stands."""
     allowed = after.model_copy(
         update={
             "never_store": _lists_back(before.never_store, after.never_store),
@@ -116,40 +120,45 @@ def loosens(before: VaultConfig, after: VaultConfig) -> bool:
 
 
 def _lists_back(before: NeverStore, after: NeverStore) -> NeverStore:
-    """`before` when `after` only adds values to the lists, so the comparison sees no change; `after` otherwise."""
-    grown = all(Counter(getattr(before, name)) <= Counter(getattr(after, name)) for name in LISTS)
-    return before if grown else after
+    """`after` with each list that only grew put back as it was."""
+    grown = {
+        name: getattr(before, name) for name in LISTS if Counter(getattr(before, name)) <= Counter(getattr(after, name))
+    }
+    return after.model_copy(update=grown)
 
 
 def _redaction_back(before: Redaction, after: Redaction) -> Redaction:
-    """`before` when `after` only turns rules or patterns on; `after` otherwise."""
-    if after.credentials < before.credentials or after.phone < before.phone:
-        return after
-    if len(after.patterns) != len(before.patterns):
-        return after
-    for old, new in zip(before.patterns, after.patterns, strict=True):
-        if (new.name, new.pattern) != (old.name, old.pattern) or new.enabled < old.enabled:
-            return after
-    return before
+    """`after` with credentials and phone put back where they weren't turned off, and each pattern's `enabled` put back
+    where it wasn't turned off, the patterns matched by position; their names, expressions and anything else stay as
+    `after` has them, so the comparison sees a change to them."""
+    update: dict[str, object] = {}
+    if after.credentials >= before.credentials:
+        update["credentials"] = before.credentials
+    if after.phone >= before.phone:
+        update["phone"] = before.phone
+    if len(after.patterns) == len(before.patterns):
+        update["patterns"] = [
+            new.model_copy(update={"enabled": old.enabled}) if new.enabled >= old.enabled else new
+            for old, new in zip(before.patterns, after.patterns, strict=True)
+        ]
+    return after.model_copy(update=update)
 
 
 def _sources_back(before: Mapping[str, SourceConfig], after: Mapping[str, SourceConfig]) -> dict[str, SourceConfig]:
-    """`before` when `after` has the same sources and only makes some stricter or turns them off; `after` otherwise."""
+    """`after`'s sources with each one's sensitivity put back where it was made stricter or kept, and `enabled` where
+    it was turned off or kept; every other key stays as `after` has it. A source added or removed stays a difference."""
     if list(before) != list(after):
         return dict(after)
-    for name, old in before.items():
-        new = after[name]
-        stricter = RANK[new.sensitivity] >= RANK[old.sensitivity]
-        off = new.enabled <= old.enabled
-        back = new.model_copy(
-            update={
-                "sensitivity": old.sensitivity if stricter else new.sensitivity,
-                "enabled": old.enabled if off else new.enabled,
-            }
-        )
-        if back != old:
-            return dict(after)
-    return dict(before)
+    out: dict[str, SourceConfig] = {}
+    for name, new in after.items():
+        old = before[name]
+        update: dict[str, object] = {}
+        if RANK[new.sensitivity] >= RANK[old.sensitivity]:
+            update["sensitivity"] = old.sensitivity
+        if new.enabled <= old.enabled:
+            update["enabled"] = old.enabled
+        out[name] = new.model_copy(update=update)
+    return out
 
 
 # -- the lines to paste -----------------------------------------------------------------------------------------------

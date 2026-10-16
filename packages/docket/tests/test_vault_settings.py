@@ -9,10 +9,11 @@ from pathlib import Path
 import pytest
 import yaml
 from docket_testkit import empty_vault, make_config, sh
+from pydantic import Field
 
 from docket.errors import DocketError
 from docket.vault import settings
-from docket.vault.config import NeverStore, Owner, Redaction, RedactionPattern, SourceConfig, VaultConfig
+from docket.vault.config import CONFIG_FILE, NeverStore, Owner, Redaction, RedactionPattern, SourceConfig, VaultConfig
 from docket.vault.settings import LooseningError, Rewritten, loosens
 from docket.vault.vault import Vault
 
@@ -143,6 +144,62 @@ def test_turning_a_rule_on_from_off_passes_and_back_doesn_t() -> None:
     assert loosens(rules(phone=True)(BASE), BASE)
 
 
+# A later schema, played by subclasses carrying one more field each: the door names none of them, so a change to any
+# is a loosening until a decision moves it onto the list (DR-0506).
+
+
+class LaterRedaction(Redaction):
+    email: bool = True
+
+
+class LaterPattern(RedactionPattern):
+    ignore_case: bool = True
+
+
+class LaterNeverStore(NeverStore):
+    domains: list[str] = Field(default_factory=list[str])
+
+
+class LaterSource(SourceConfig):
+    attachments: bool = False
+
+
+class Later(VaultConfig):
+    retention_days: int = 0
+
+
+TICKET = LaterPattern(name="ticket", pattern="TCK", enabled=False)
+LATER = Later(
+    owner=BASE.owner,
+    primary_machine="test-box",
+    sources={"memo": LaterSource(), "calls": LaterSource(sensitivity="mixed")},
+    never_store=LaterNeverStore(people=["Cleo Test"], domains=["example.invalid"]),
+    redaction=LaterRedaction(patterns=[TICKET]),
+)
+LATER_CASES: list[tuple[str, Change, bool]] = [
+    ("a later top-level key", top(retention_days=30), True),
+    ("a later source key", source("memo", attachments=True), True),
+    ("a later rule turned off", rules(email=False), True),
+    ("a later list emptied", lists(domains=[]), True),
+    ("a later pattern key changed", patterns(TICKET.model_copy(update={"ignore_case": False})), True),
+    (
+        "a later pattern key changed as it is turned on",
+        patterns(TICKET.model_copy(update={"ignore_case": False, "enabled": True})),
+        True,
+    ),
+    ("a person added, the later keys kept", lists(people=["Cleo Test", "Dora #2"]), False),
+    ("the pattern turned on, its later key kept", patterns(TICKET.model_copy(update={"enabled": True})), False),
+    ("a source made private, its later key kept", source("calls", sensitivity="private"), False),
+]
+
+
+@pytest.mark.parametrize(("what", "change", "loosening"), LATER_CASES, ids=[c[0] for c in LATER_CASES])
+def test_a_key_the_door_doesn_t_name_is_a_loosening_at_every_level(what: str, change: Change, loosening: bool) -> None:
+    after = change(LATER)
+    assert after != LATER, what
+    assert loosens(LATER, after) is loosening, what
+
+
 # -- the writer ------------------------------------------------------------------------------------------------------
 
 
@@ -232,3 +289,16 @@ def test_a_source_s_block_and_a_pattern_s_read_back_under_their_keys() -> None:
     assert SourceConfig.model_validate(pasted["sources"]["documents"]) == entry
     block = settings.pattern_block("ticket-id", r"TCK-\d{6}: #")
     assert yaml.safe_load("patterns:\n" + block) == {"patterns": [{"name": "ticket-id", "pattern": r"TCK-\d{6}: #"}]}
+
+
+def test_a_vault_yaml_that_doesnt_read_names_the_place_never_the_text(tmp_path: Path) -> None:
+    path = tmp_path / CONFIG_FILE
+    path.write_text("never_store:\n  people:\n  - @dora.secret\n", encoding="utf-8")
+    with pytest.raises(DocketError, match=r"at line 3, column 5$") as found:
+        VaultConfig.load(path)
+    assert "dora" not in str(found.value)
+    assert found.value.__cause__ is None
+    path.write_text('never_store:\n  people:\n  - "dora\x01secret"\n', encoding="utf-8")
+    with pytest.raises(DocketError, match="a character YAML doesn't allow") as found:
+        VaultConfig.load(path)
+    assert "dora" not in str(found.value)

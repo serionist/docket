@@ -151,6 +151,23 @@ def test_a_value_a_shell_would_act_on_stays_its_placeholder() -> None:
     assert ("vault", str(Path("/work/$HOME/vault"))) in found.unfilled
 
 
+SHELL_NAMES = ['a"; rm -rf ~; "', "$(id)", "`id`", "x\u201c; calc; \u201d", "--vault", "a\\", "%PATH%", "!!", "a'b"]
+
+
+def test_no_pattern_name_a_shell_would_act_on_reaches_a_command() -> None:
+    """The reviewer's probe: each name a shell reads more into stays its placeholder in the command, listed beside."""
+    config = make_config()
+    config.redaction = Redaction(patterns=[RedactionPattern(name=n, pattern="x") for n in SHELL_NAMES])
+    found = view(config)
+    commands = [r.command for r in found.rules if r.pattern]
+    for command in commands:
+        for bad in ("rm -rf", "$(id)", "`id`", "calc", "%PATH%", "!!", "a'b", "a\\"):
+            assert bad not in command, command
+    assert {value for name, value in found.unfilled if name == "pattern"} == set(SHELL_NAMES) - {"--vault"}
+    # A name that only looks like a flag is safe inside its quotes.
+    assert 'docket redaction set "--vault" off' in " ".join(commands)
+
+
 def test_the_lead_counts_in_words() -> None:
     config = make_config()
     config.sources = {"memo": SourceConfig()}
