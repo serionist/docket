@@ -6,7 +6,7 @@ import pytest
 from docket_testkit import make_record
 
 from docket.vault.config import NeverStore
-from docket.vault.neverstore import DECODE_ROUNDS, decoded_forms, fold, match, matches_text, strings
+from docket.vault.neverstore import DECODE_ROUNDS, decoded_forms, fold, listed, match, matches_text, strings
 from docket.vault.records import Attachment
 
 
@@ -231,3 +231,14 @@ def test_decoding_keeps_every_rounds_form_and_stops() -> None:
     assert decoded_forms("plain text") == []
     assert decoded_forms("Dora%2520Example")[:2] == ["Dora%20Example", "Dora Example"]
     assert len(decoded_forms("x" + "%25" * 9 + "20y")) <= DECODE_ROUNDS + DECODE_ROUNDS + 1
+
+
+def test_an_entity_s_value_is_held_to_the_people_list_in_both_name_orders_and_to_the_keywords() -> None:
+    lists = NeverStore(people=["Minta Dóra", "rita@example.com"], keywords=["harbour secret"])
+    assert listed("Dóra Minta", lists) == "people"
+    assert listed("minta dora", lists) == "people"
+    assert listed("Rita <rita@example.com>", lists) == "people"
+    assert listed("about the Harbour Secret", lists) == "keywords"
+    assert listed("Dóra Minta Nagy", lists) is None
+    assert listed("Dóra", lists) is None
+    assert listed("Dóra Minta", NeverStore()) is None

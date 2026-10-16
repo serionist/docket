@@ -275,7 +275,8 @@ vault/
                                  audio and attachments, encrypted per file                 -> LFS
   processed/<type>/<...>.md      notes, digests, briefs, minutes                            -> plain git
   entities/<type>/<slug>.yaml    the keyword layer                                          -> plain git
-  entities/_proposals-<machine>.jsonl                                                       -> plain git
+  entities/_log/<yyyy-mm>-<machine>.jsonl
+                                 each change to entities, each rejection and undo           -> plain git
   ledger/ops/<yyyy-mm>-<machine>.jsonl                                                      -> plain git
   state/cursors-<machine>.yaml   each machine's mark, lookback, retry and waiting per source -> plain git
   state/holds/<source>.txt       ids a source must not stage yet, merged by union           -> plain git
@@ -468,6 +469,11 @@ role: the customer's site lead
 3. Tier 2, a weekly batch of at most about 15, ranked by how much the gap hurts search, each with a count, snippets
    and locators. Reviewed on the Curate page or in a `/curate` round; a rejection goes on a stoplist.
 4. Tier 3, never shown: one-off capitalized words, rare n-grams.
+
+Every change Docket makes to an entity, by tier 1 or the user, and every rejection, is a line of the curate log,
+`entities/_log/`, committed with the change; `docket curate undo` reverses one, and the stoplist is folded from the
+log. Docket rewrites an entity file whole in one form, and never one that holds a comment or reads with a problem
+(DR-0460 to DR-0463). Seeding takes a changes file: `docket curate add`.
 
 The dashboard shows review minutes per week, a number to keep down.
 

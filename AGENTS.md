@@ -114,7 +114,8 @@ agrees in the issue or, under an autonomy grant, with its decision recorded as p
   anchor grammar (DR-0198), a transcript's segments as a record field (DR-0111), doc revisions as the commits that
   wrote them (DR-0112), entity files (DR-0113), a transcript's text rendered by the core (DR-0120), hold lists
   (DR-0121), release logs (DR-0200), a cut record's fidelity (DR-0126), a legacy note's old paths and import hash
-  (DR-0130), old paths as locators (DR-0131), each machine's cursor file (DR-0245);
+  (DR-0130), old paths as locators (DR-0131), each machine's cursor file (DR-0245), the curate log's path, lines and
+  keys (DR-0460, DR-0461);
 - a source's mapper interface (DR-0119), and the names and keys of a source in `vault.yaml` (DR-0124, DR-0125);
 - the question file `docket eval` reads, which users keep outside the repo (DR-0290);
 - the MCP tools' names and parameters: `search`, `read`, `verify` and `doc_put` (DR-0150), `run_open` and `ingest`

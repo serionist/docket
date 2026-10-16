@@ -18,13 +18,17 @@
 Read with YAML's base loader, so every value is text (`no` and `2026` stay names), and leniently: an unknown key or type
 is a problem and the rest of the file loads; a file that can't be read as an entity is a problem and is skipped. Users'
 vaults hold hundreds of these files, so the format is a one-way door (DR-0113).
+
+Docket writes a file whole in one canonical form (`render`), and only a file that reads without a problem or a
+comment, since the rewrite would lose what the loader didn't read (DR-0463).
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal, cast
 
 import yaml
@@ -249,18 +253,30 @@ class _Reader:
 
 
 def load_file(root: Path, path: Path) -> tuple[Entity | None, list[EntityProblem]]:
-    rel = path.relative_to(root).as_posix()
+    def text() -> str:
+        try:
+            return path.read_bytes().decode("utf-8")
+        except UnicodeDecodeError:
+            raise _SkipError("isn't UTF-8") from None
+
+    return _load(path.relative_to(root).as_posix(), text)
+
+
+def load_text(rel: str, text: str) -> tuple[Entity | None, list[EntityProblem]]:
+    """An entity file's text, read as the file at `rel` (entities/<type>/<id>.yaml) would be."""
+    return _load(rel, lambda: text)
+
+
+def _load(rel: str, read: Callable[[], str]) -> tuple[Entity | None, list[EntityProblem]]:
     reader = _Reader(rel)
-    parts = path.relative_to(root / "entities").parts
+    path = PurePosixPath(rel)
+    parts = path.parts[1:]
     try:
         if path.suffix != ".yaml":
             raise _SkipError("an entity file ends in .yaml")
         if len(parts) != 2:
             raise _SkipError("an entity file goes in entities/<type>/<id>.yaml")
-        try:
-            text = path.read_bytes().decode("utf-8")
-        except UnicodeDecodeError:
-            raise _SkipError("isn't UTF-8") from None
+        text = read()
         loader = _Loader(normalize_newlines(text.removeprefix("﻿")))
         try:
             data: Any = loader.get_single_data()
@@ -302,3 +318,80 @@ def load_entities(root: Path) -> Entities:
                 problems.append(EntityProblem(entity.path, f"{what}: no entity has the id {other!r}"))
     entities.sort(key=lambda e: e.id)
     return Entities(entities, problems, [p.relative_to(root).as_posix() for p in files])
+
+
+# Wide enough that no name, alias or note is ever folded onto a second line.
+WIDTH = 1_000_000
+
+
+def entity_rel(entity_type: str, entity_id: str) -> str:
+    return f"entities/{entity_type}/{entity_id}.yaml"
+
+
+class _Flow(dict[str, Any]):
+    """A mapping written on one line."""
+
+
+class _Dumper(yaml.SafeDumper):
+    """YAML's safe dumper: a value YAML would read as something other than text (`no`, `2026`) is quoted, and a list's
+    items are indented under their key, as the design's examples write them."""
+
+    def increase_indent(self, flow: bool = False, indentless: bool = False) -> None:
+        super().increase_indent(flow, False)
+
+
+def _flow(dumper: yaml.SafeDumper, data: _Flow) -> yaml.Node:
+    return dumper.represent_mapping("tag:yaml.org,2002:map", list(data.items()), flow_style=True)
+
+
+_Dumper.add_representer(_Flow, _flow)
+
+
+def _alias(alias: Alias) -> _Flow:
+    item = _Flow(text=alias.text)
+    if alias.kind == "asr":
+        item["kind"] = "asr"
+    if alias.needs:
+        item["needs"] = list(alias.needs)
+    return item
+
+
+def render(entity: Entity) -> str:
+    """An entity in the one form Docket writes (DR-0463): DR-0113's keys in order, name, related and ids as maps on one
+    line, each alias a map on its own line; an id with one value as text, related ids always as a list; status only
+    when archived, and no schema line (absent is 1)."""
+    data: dict[str, Any] = {"id": entity.id, "type": entity.type, "name": _Flow(sorted(entity.names.items()))}
+    if entity.aliases:
+        data["aliases"] = [_alias(a) for a in entity.aliases]
+    if entity.related:
+        data["related"] = _Flow({k: list(v) for k, v in entity.related.items()})
+    if entity.ids:
+        data["ids"] = _Flow({k: v[0] if len(v) == 1 else list(v) for k, v in entity.ids.items()})
+    if entity.status != "active":
+        data["status"] = entity.status
+    if entity.role is not None:
+        data["role"] = entity.role
+    if entity.note is not None:
+        data["note"] = entity.note
+    return yaml.dump(data, Dumper=_Dumper, sort_keys=False, allow_unicode=True, default_flow_style=False, width=WIDTH)
+
+
+def comment_line(text: str) -> int | None:
+    """The first line holding a comment in an entity file that reads, or None. A `#` is a comment where it starts a
+    line or follows a space or tab outside every value, as YAML reads it."""
+    text = normalize_newlines(text.removeprefix("﻿"))
+    scanner = yaml.BaseLoader(text)
+    values: list[tuple[int, int]] = []
+    try:
+        while scanner.check_token():
+            # The stubs leave get_token untyped; the scanner returns a token.
+            token = cast(yaml.Token, scanner.get_token())  # pyright: ignore[reportUnknownMemberType]
+            if isinstance(token, yaml.ScalarToken):
+                values.append((token.start_mark.index, token.end_mark.index))
+    finally:
+        scanner.dispose()
+    for m in re.finditer("#", text):
+        i = m.start()
+        if (i == 0 or text[i - 1] in " \t\n") and not any(start <= i < end for start, end in values):
+            return text.count("\n", 0, i) + 1
+    return None

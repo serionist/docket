@@ -2,9 +2,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from docket_testkit import INDEX_FIXTURE
 
-from docket.vault.entities import Alias, entity_files, load_entities, load_file
+from docket.vault.entities import (
+    Alias,
+    Entity,
+    comment_line,
+    entity_files,
+    load_entities,
+    load_file,
+    load_text,
+    render,
+)
 
 
 def write(root: Path, rel: str, text: str | bytes) -> Path:
@@ -187,3 +197,64 @@ def test_load_file_reports_a_single_file(tmp_path: Path) -> None:
     entity, problems = load_file(tmp_path, path)
     assert entity is not None and entity.path == "entities/person/solo.yaml" and problems == []
     assert str(load_entities(tmp_path).entities[0].names) == "{'en': 'Solo'}"
+
+
+def test_render_writes_one_form_that_reads_back_as_the_entity(tmp_path: Path) -> None:
+    for path in (INDEX_FIXTURE / "entities").rglob("*.yaml"):
+        rel = path.relative_to(INDEX_FIXTURE).as_posix()
+        entity, problems = load_text(rel, path.read_text(encoding="utf-8"))
+        assert problems == [] and entity is not None
+        assert load_text(rel, render(entity)) == (entity, [])
+    northwind = load_text(
+        "entities/customer/northwind.yaml",
+        (INDEX_FIXTURE / "entities/customer/northwind.yaml").read_text(encoding="utf-8"),
+    )[0]
+    assert northwind is not None
+    assert render(northwind) == (
+        "id: northwind\n"
+        "type: customer\n"
+        "name: {en: Northwind, hu: Northwind}\n"
+        "aliases:\n"
+        "  - {text: Northwind Traders}\n"
+        "  - {text: Nortwin, kind: asr}\n"
+        "  - {text: North Wind, kind: asr}\n"
+        "  - {text: Norton, kind: asr, needs: [ben-sample, harbour-site]}\n"
+        "related: {site: [harbour-site], person: [ben-sample]}\n"
+        "ids: {email_domain: northwind.example}\n"
+    )
+
+
+def test_render_quotes_what_yaml_would_read_otherwise() -> None:
+    odd = Entity(
+        id="no",
+        type="term",
+        path="entities/term/no.yaml",
+        names={"en": "no", "hu": "2026"},
+        aliases=(Alias("a: b, c"), Alias("yes", "asr", ("no",)), Alias("Dóra [x] {y} #z \"q\" 'r'")),
+        related={"person": ("no",)},
+        ids={"code": ("no", "yes"), "one": ("#x",)},
+        status="archived",
+        role="line one\nline two",
+        note="x",
+    )
+    text = render(odd)
+    assert "id: 'no'\n" in text
+    assert "status: archived\n" in text
+    assert load_text(odd.path, text) == (odd, [])
+    assert comment_line(text) is None
+
+
+@pytest.mark.parametrize(
+    ("text", "line"),
+    [
+        ("# who they are\nid: x\n", 1),
+        ("id: x  # the slug\n", 1),
+        ("id: x\naliases:\n  - {text: A}   # misheard\n", 3),
+        ("\N{BYTE ORDER MARK}id: x\r\n# after a CRLF\r\n", 2),
+        ("id: x\nname: {en: 'C # team'}\n", None),
+        ('id: x\nname: {en: "C # team"}\n', None),
+        ("id: a#b\n", None),
+    ],
+)
+def test_a_comment_is_found_outside_every_value(text: str, line: int | None) -> None:
+    assert comment_line(text) == line
