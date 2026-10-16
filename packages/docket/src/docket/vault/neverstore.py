@@ -189,3 +189,27 @@ def match(record: RawRecord, lists: NeverStore) -> ListName | None:
         if _says([*texts, *strings(record.native)], lists.keywords):
             return "keywords"
     return None
+
+
+def names_person(name: str, lists: NeverStore) -> bool:
+    """Whether a string a record names someone by (an author, a recipient, a speaker) names someone on the people
+    list, by the rule `match` holds a record to."""
+    people = set[str]().union(*(_forms(p) for p in lists.people)) if lists.people else set[str]()
+    return bool(_forms(name) & people)
+
+
+def in_container(where: str, lists: NeverStore) -> bool:
+    """Whether a record's container or thread is on the containers list, with its `<source>:` prefix or without, by
+    the rule `match` holds a record to."""
+    containers = {fold(c.strip()) for c in lists.containers if c.strip()}
+    return fold(where) in containers or fold(where.split(":", 1)[-1]) in containers
+
+
+def holds(lists: NeverStore, name: ListName, value: str) -> bool:
+    """Whether a list already has a value as the matcher reads it, so adding it again changes nothing the gate does: a
+    person or a container folded, a keyword by its words."""
+    if name == "keywords":
+        wanted = _words(value)
+        return any(_words(k) == wanted for k in lists.keywords)
+    held: list[str] = getattr(lists, name)
+    return fold(value.strip()) in {fold(v.strip()) for v in held}

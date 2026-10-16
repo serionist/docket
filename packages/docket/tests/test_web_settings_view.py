@@ -10,13 +10,23 @@ import yaml
 from docket_testkit import make_config
 
 from docket.index.build import VectorCoverage
+from docket.index.query import Reach
 from docket.models.catalogue import E5_SMALL
 from docket.models.config import Choice
 from docket.models.provider import Off
 from docket.models.report import Environment, Report
 from docket.vault import redaction
 from docket.vault.config import NeverStore, Redaction, RedactionPattern, SourceConfig, VaultConfig
-from docket.web.settings_view import Facts, SettingsState, SettingsStateError, SettingsView, SourceFacts, build
+from docket.web.settings_view import (
+    Facts,
+    SettingsState,
+    SettingsStateError,
+    SettingsView,
+    SourceFacts,
+    build,
+    build_confirm,
+    done_line,
+)
 
 OFF = Report(Off(), "off (docket models install turns them on)")
 ROOT = Path("/work/vault")
@@ -200,3 +210,51 @@ def test_the_models_part_shows_the_report_the_vectors_and_the_service() -> None:
     assert found.errors == ["OSError: gone"]
     counted = view(config, models=on, vectors=[VectorCoverage(model="e5-small", have=4213, total=4213)]).models
     assert ("Vectors", "e5-small: 4,213 of 4,213 chunks") in counted.rows
+
+
+def test_done_holds_a_list_and_a_count_and_never_reaches_a_link() -> None:
+    state = SettingsState.read({"done": "listed-keywords-1", "show": "lists"})
+    assert state.url() == "/settings?show=lists"
+    assert state.url(done=True) == "/settings?show=lists&done=listed-keywords-1"
+    for bad in ("listed-keywords-2", "listed-Dora-1", "phone-on"):
+        with pytest.raises(SettingsStateError, match="done says what the last change did"):
+            SettingsState.read({"done": bad})
+    config = make_config()
+    assert done_line("listed-people-1", config) == (
+        "Added one value to people, and committed vault.yaml: what waits in staging that it names is dropped, and "
+        "docket sync takes it to your other machines."
+    )
+    folder = make_config("folder")
+    assert "your own push takes it" in (done_line("listed-people-1", folder) or "")
+    assert done_line("listed-containers-0", config) == "The containers list held that already, so nothing changed."
+    assert done_line(None, config) is None
+    assert view(config, state=state).done == done_line("listed-keywords-1", config)
+
+
+def test_the_confirm_view_names_what_a_value_drops_and_what_holds_it() -> None:
+    counted = build_confirm(
+        "keywords", "Project: Phoenix", staged=2, stored=Reach(3, 40, 400), why=None, shown="h", docket_form=True
+    )
+    assert counted.lines == [
+        "It drops 2 records waiting in staging now.",
+        "Already stored, at least 3 records and 40 of 400 chunks (10.0%) hold it. They stay in raw: forgetting them "
+        "comes later, with docket forget.",
+        "Docs that say it stay as they are; a later doc that says it is refused.",
+        "From the next sync, a record it names is dropped before it is stored, with no trace.",
+    ]
+    assert counted.broad is not None and counted.broad.startswith("That is 10% of everything indexed")
+    assert yaml.safe_load(counted.line) == ["Project: Phoenix"]
+    narrow = build_confirm(
+        "people", "Dora Example", staged=0, stored=Reach(1, 1, 400), why=None, shown="h", docket_form=True
+    )
+    assert narrow.broad is None
+    assert narrow.lines[0] == "Nothing waiting in staging names it now."
+    unknown = build_confirm(
+        "containers", "chat:family", staged=1, stored=None, why="there is no index yet", shown="h", docket_form=False
+    )
+    assert unknown.lines[:2] == [
+        "It drops 1 record waiting in staging now.",
+        "What is already stored can't be counted: there is no index yet.",
+    ]
+    empty = build_confirm("people", "Cleo Test", staged=0, stored=Reach(0, 0, 0), why=None, shown="h", docket_form=True)
+    assert empty.lines[1] == "Nothing already stored holds it, of 0 chunks."

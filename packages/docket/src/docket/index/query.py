@@ -61,6 +61,8 @@ from docket.index.timewords import Range, read_time
 from docket.models.catalogue import input_hash, rerank_passage
 from docket.models.provider import RERANK_SECONDS, Off
 from docket.plaintext import WORD, fold, words
+from docket.vault import neverstore
+from docket.vault.config import NeverStore
 from docket.vault.vault import Vault
 
 CANDIDATES = 200
@@ -708,6 +710,53 @@ class NameQuery:
     def expression(self, text: str) -> str:
         groups = self._search.word_groups(words(text), {})[0]
         return " AND ".join(f"({expr})" for _, expr in groups)
+
+
+@dataclass(frozen=True)
+class Reach:
+    """What a never-store value would have kept out of what is already stored, at least: the records, the chunks, and
+    the index's chunks in all, for the share."""
+
+    records: int
+    chunks: int
+    total: int
+
+
+def reach(vault: Vault, name: str, value: str) -> Reach:
+    """What is already stored that a value on a never-store list would have kept out (DR-0509), counted from the index
+    and held to the gate's own rule, so the count never says more than is there: a person by records' authors and
+    segments' speakers; a container by records' container and thread; a keyword by the chunks search's all-words stage
+    picks, each chunk's title and text then held to the keyword rule, and a value with no words by every chunk. The
+    index holds no recipients or payloads, so the count is a floor. Refused, as the index is, when there is none it can
+    read; nothing here logs the value."""
+    lists = NeverStore.model_validate({name: [value]})
+    conn = open_index(vault)
+    try:
+        total = int(conn.execute("SELECT count(*) FROM chunks").fetchone()[0])
+        if name == "keywords":
+            expr = NameQuery(conn, vault).expression(value)
+            sql = "SELECT c.rid, c.title, c.text FROM chunks c"
+            if expr:
+                sql += " JOIN chunks_fts ON chunks_fts.rowid = c.id WHERE chunks_fts MATCH ?"
+            rows: list[tuple[str | None, str | None, str]] = conn.execute(sql, (expr,) if expr else ()).fetchall()
+            said = [rid for rid, title, text in rows if neverstore.matches_text(f"{title or ''}\n{text}", lists)]
+            return Reach(len({r for r in said if r}), len(said), total)
+        rids: set[str] = set()
+        if name == "people":
+            for rid, author in conn.execute("SELECT rid, author FROM records WHERE author IS NOT NULL"):
+                if neverstore.names_person(author, lists):
+                    rids.add(rid)
+            for rid, speaker in conn.execute("SELECT DISTINCT rid, speaker FROM segments WHERE speaker IS NOT NULL"):
+                if neverstore.names_person(speaker, lists):
+                    rids.add(rid)
+        else:
+            for rid, container, thread in conn.execute("SELECT rid, container, thread FROM records"):
+                if any(where and neverstore.in_container(where, lists) for where in (container, thread)):
+                    rids.add(rid)
+        chunks = sum(1 for (rid,) in conn.execute("SELECT rid FROM chunks WHERE rid IS NOT NULL") if rid in rids)
+        return Reach(len(rids), chunks, total)
+    finally:
+        conn.close()
 
 
 def _summary(conn: sqlite3.Connection, rids: Sequence[str], key: str) -> DocRef | None:

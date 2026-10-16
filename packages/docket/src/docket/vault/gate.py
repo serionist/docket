@@ -315,6 +315,20 @@ class Gate:
         except OSError as e:
             raise DocketError(f"{path}: can't read it: {e}") from e
 
+    def would_drop(self, config: VaultConfig) -> Counter[str]:
+        """What the sweep would drop from staging under these settings, by why, writing nothing: a page names it before
+        a change it asks once more about (DR-0509). The same two rules the sweep applies first, in its order."""
+        dropped = Counter[str]()
+        with self.vault.lock:
+            for entry in self.staging.scan().entries:
+                record = entry.staged.record
+                source = config.sources.get(record.source)
+                if source is not None and source.sensitivity == "private":
+                    dropped["private"] += 1
+                elif neverstore.match(record, config.never_store):
+                    dropped["never-store"] += 1
+        return dropped
+
     def _sweep(self, config: VaultConfig) -> Counter[str]:
         """Apply the current vault.yaml to what waits: drop what it now forbids, delete what was decided by hand, and
         send back to pending what nobody classified and can no longer go through on its source's word. The hold lists

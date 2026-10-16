@@ -14,6 +14,7 @@ from pydantic import Field
 from docket.errors import DocketError
 from docket.vault import settings
 from docket.vault.config import CONFIG_FILE, NeverStore, Owner, Redaction, RedactionPattern, SourceConfig, VaultConfig
+from docket.vault.neverstore import ListName
 from docket.vault.settings import LooseningError, Rewritten, loosens
 from docket.vault.vault import Vault
 
@@ -302,3 +303,96 @@ def test_a_vault_yaml_that_doesnt_read_names_the_place_never_the_text(tmp_path: 
     with pytest.raises(DocketError, match="a character YAML doesn't allow") as found:
         VaultConfig.load(path)
     assert "dora" not in str(found.value)
+
+
+# -- the page's add, the hash and the take-in -------------------------------------------------------------------------
+
+
+def shown(vault: Vault) -> str:
+    return settings.file_hash((vault.root / CONFIG_FILE).read_bytes())
+
+
+def subjects(vault: Vault) -> list[str]:
+    return sh(vault.root, "git", "log", "--format=%s").splitlines()
+
+
+def test_a_value_is_added_committed_by_its_list_and_count_and_never_named(tmp_path: Path) -> None:
+    vault = make_vault(tmp_path)
+    added = settings.add_listed(vault, "people", "  Dora #2  ", shown=shown(vault))
+    assert added.written.changed and not added.already
+    assert VaultConfig.load(vault.root / CONFIG_FILE).never_store.people == ["Dora #2"]
+    assert last_message(vault) == "Config: never-store people, 1 added\n\nvia page"
+    assert "Dora" not in sh(vault.root, "git", "log", "--format=%B")
+
+
+def test_a_value_the_list_holds_as_the_matcher_reads_it_writes_nothing(tmp_path: Path) -> None:
+    vault = make_vault(tmp_path)
+    settings.add_listed(vault, "keywords", "Project: Phoenix", shown=shown(vault))
+    settings.add_listed(vault, "people", "Dora Example", shown=shown(vault))
+    head = sh(vault.root, "git", "rev-parse", "HEAD")
+    # A second post of the same form, with the hash it carried before the first one wrote: no write, no refusal.
+    sent: list[tuple[ListName, str]] = [
+        ("keywords", "project phoenix"),
+        ("people", "DORA EXAMPLE"),
+        ("people", "Dora Example"),
+    ]
+    for name, value in sent:
+        again = settings.add_listed(vault, name, value, shown="the hash before")
+        assert again.already and again.written == Rewritten(), value
+    assert sh(vault.root, "git", "rev-parse", "HEAD") == head
+
+
+def test_a_file_changed_since_the_page_showed_it_is_refused(tmp_path: Path) -> None:
+    vault = make_vault(tmp_path)
+    before = text(vault)
+    with pytest.raises(settings.StaleError, match="changed since the page showed it"):
+        settings.add_listed(vault, "people", "Dora Example", shown="0" * 64)
+    assert text(vault) == before
+
+
+def test_a_hand_edited_file_is_never_rewritten_by_an_add(tmp_path: Path) -> None:
+    vault = make_vault(tmp_path)
+    mine = text(vault).replace("never_store:\n", "never_store:   # mine\n", 1)
+    (vault.root / CONFIG_FILE).write_text(mine, encoding="utf-8", newline="\n")
+    added = settings.add_listed(vault, "people", "Dora Example", shown=shown(vault))
+    assert added.written == Rewritten(by_hand=True)
+    assert text(vault) == mine
+
+
+@pytest.mark.parametrize(
+    ("value", "said"),
+    [
+        ("   ", "never empty"),
+        ("x" * 201, "at most 200 characters"),
+        ("Dora\x00Example", "no control characters"),
+        ("Dora\nExample", "no control characters"),
+        ("Dora\u2028Example", "no control characters"),
+    ],
+)
+def test_a_value_a_list_can_t_hold_is_refused_naming_the_rule_never_the_value(
+    tmp_path: Path, value: str, said: str
+) -> None:
+    vault = make_vault(tmp_path)
+    with pytest.raises(DocketError, match=said) as found:
+        settings.add_listed(vault, "people", value, shown=shown(vault))
+    assert "Dora" not in str(found.value)
+    assert "x" * 201 not in str(found.value)
+
+
+def test_only_the_three_lists_take_a_value(tmp_path: Path) -> None:
+    vault = make_vault(tmp_path)
+    with pytest.raises(DocketError, match="people, containers or keywords"):
+        settings.add_listed(vault, "domains", "example.invalid", shown=shown(vault))  # pyright: ignore[reportArgumentType]
+
+
+def test_an_edit_not_committed_yet_is_committed_on_its_own_first(tmp_path: Path) -> None:
+    vault = make_vault(tmp_path)
+    edited = VaultConfig.load(vault.root / CONFIG_FILE).model_copy(update={"primary_machine": "other-box"})
+    (vault.root / CONFIG_FILE).write_text(edited.dump(), encoding="utf-8", newline="\n")
+    added = settings.add_listed(vault, "people", "Dora Example", shown=shown(vault))
+    assert added.written.taken_in is not None
+    assert subjects(vault)[:2] == ["Config: never-store people, 1 added", settings.TAKEN_IN]
+    assert sh(vault.root, "git", "status", "--porcelain").strip() == ""
+    # With nothing uncommitted, there is nothing to take in.
+    again = settings.add_listed(vault, "people", "Cleo Test", shown=shown(vault))
+    assert again.written.taken_in is None

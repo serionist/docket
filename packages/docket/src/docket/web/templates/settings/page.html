@@ -12,6 +12,7 @@
 {{ notice('error', problem) }}
 {% else %}
 <p class="lead">{{ view.lead }}</p>
+{% if view.done %}{{ notice('info', view.done) }}{% endif %}
 {{ notice('info', view.form) }}
 {% if view.unfilled %}
 <p class="meta">Put these in by hand where a command holds their placeholder: {% for name, value in view.unfilled %}<code>&lt;{{ name }}&gt;</code> is <code dir="auto">{{ value }}</code>{{ '; ' if not loop.last }}{% endfor %}.</p>
@@ -82,8 +83,19 @@
       {% endif %}
       <details class="changes">
         <summary>Add to {{ l.name }}</summary>
+        {% if view.docket_form %}
+        <form class="add-form" method="post" action="/settings/never-store">
+          <input type="hidden" name="list" value="{{ l.name }}">
+          <input type="hidden" name="shown" value="{{ view.shown_hash }}">
+          <label for="add-{{ l.name }}">{{ l.ask }}</label>
+          <input id="add-{{ l.name }}" name="value" type="text" maxlength="200" required autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off">
+          <button type="submit" class="button">Add to {{ l.name }}</button>
+        </form>
+        <p>Docket asks once more first, naming what it would drop.</p>
+        {% else %}
         <p>Add a line under <code>never_store:</code> <code>{{ l.name }}:</code> in vault.yaml, quoted as Docket writes it, such as:</p>
         {{ paste(l.example, 'an example line for ' ~ l.name) }}
+        {% endif %}
       </details>
     </li>
     {% endfor %}

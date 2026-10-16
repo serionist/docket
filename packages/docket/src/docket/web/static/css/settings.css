@@ -49,7 +49,23 @@
   .values .value { font-weight: 560; overflow-wrap: anywhere; }
   .values .line { color: var(--muted); overflow-wrap: anywhere; }
 
+  .add-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-1) var(--space-2); align-items: end; }
+  .add-form label { grid-column: 1 / -1; color: var(--muted); }
+  .add-form input[type="text"] {
+    min-width: 0;
+    padding: 4px 8px;
+    background: var(--surface);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+  }
+  .changes .add-form + p { margin-top: var(--space-1); color: var(--muted); }
+
+  .confirm .confirm-value { font-weight: 650; overflow-wrap: anywhere; }
+  .confirm-lines { display: grid; gap: var(--space-1); padding-left: var(--space-4); list-style: disc; }
+  .confirm-form { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+
   @media (max-width: 600px) {
+    .add-form { grid-template-columns: minmax(0, 1fr); }
     .settings-cards { grid-template-columns: minmax(0, 1fr); }
     .setting-facts div, .setting-facts.models div { grid-template-columns: minmax(0, 1fr); gap: 0; }
   }

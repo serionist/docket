@@ -1,13 +1,16 @@
 """The Settings page's parts (DR-0505, DR-0506, DR-0510 to DR-0512): what vault.yaml says about the sources, the
 never-store lists and redaction, what this machine's models are, and for every change its command or its line.
 
-`SettingsState` is the URL. `build` takes the facts the route gathered and does no I/O, so every rule here is tested on
-invented settings. The never-store values are in the view only when the URL asks for them (`show=lists`), so a page
-read for anything else holds none. Every line to paste comes from `vault.settings`, quoted as vault.yaml holds it.
+`SettingsState` is the URL. `build` and `build_confirm` take the facts the route gathered and do no I/O, so every rule
+here is tested on invented settings. The never-store values are in the view only when the URL asks for them
+(`show=lists`), so a page read for anything else holds none; a value typed to add travels only in a post's body and
+its confirm view, never in a URL (DR-0508). Every line to paste comes from `vault.settings`, quoted as vault.yaml holds
+it.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,6 +19,7 @@ from starlette.datastructures import QueryParams
 
 from docket.errors import DocketError
 from docket.index.build import VectorCoverage
+from docket.index.query import Reach
 from docket.models.report import Report
 from docket.vault import redaction
 from docket.vault.config import SourceConfig, VaultConfig
@@ -23,13 +27,24 @@ from docket.vault.settings import LISTS, RANK, item_line, key_line, pattern_bloc
 from docket.web.commands import filled
 
 PATH = "/settings"
+ADD = "/settings/never-store"
 SHOWS = ("lists",)
+# What the last post did, by kind and count only: never a value (DR-0512).
+DONE = re.compile(r"^listed-(people|containers|keywords)-([01])$")
+# Past this share of the index's chunks, a keyword's confirm view warns that it takes work too.
+BROAD = 0.05
 
 # What each never-store list keeps out (DR-0026), one line each.
 MATCHES = {
     "people": "keeps out a record whose author, a recipient, a speaker or its payload names them, an address alone too",
     "containers": "keeps out a record in this chat, channel or thread, named with its source's prefix or without",
     "keywords": "keeps out a record that says it as whole words, in its text, title, names or payload, and any doc",
+}
+# What each list's add field asks for.
+ASKS = {
+    "people": "A name, as a mail, a chat or a recording writes it",
+    "containers": "A chat, channel or thread, such as chat:family",
+    "keywords": "A word or a phrase",
 }
 # Invented values for the line each list's add shows.
 EXAMPLES = {"people": "Dora Example", "containers": "chat:family", "keywords": "Project Phoenix"}
@@ -55,16 +70,23 @@ class SettingsState:
     """The Settings page's URL (DR-0512): `show=lists` puts the never-store values in the page."""
 
     show: str | None = None
+    # What the last post did, as DONE has it; never in a link the page makes.
+    done: str | None = None
 
     @staticmethod
     def read(params: QueryParams | Mapping[str, str]) -> SettingsState:
         show = (params.get("show") or "").strip() or None
         if show is not None and show not in SHOWS:
             raise SettingsStateError(f"show is lists, which shows the never-store values, not {show!r}")
-        return SettingsState(show=show)
+        done = (params.get("done") or "").strip() or None
+        if done is not None and not DONE.match(done):
+            raise SettingsStateError(f"done says what the last change did, such as listed-people-1, not {done!r}")
+        return SettingsState(show=show, done=done)
 
-    def url(self) -> str:
-        return f"{PATH}?show={self.show}" if self.show else PATH
+    def url(self, *, done: bool = False) -> str:
+        pairs = [("show", self.show), ("done", self.done if done else None)]
+        query = "&".join(f"{k}={v}" for k, v in pairs if v)
+        return f"{PATH}?{query}" if query else PATH
 
     @property
     def values(self) -> bool:
@@ -99,6 +121,8 @@ class Facts:
     service: list[str] = field(default_factory=list[str])
     service_errors: list[str] = field(default_factory=list[str])
     vectors: list[VectorCoverage] = field(default_factory=list[VectorCoverage])
+    # vault.yaml's hash as read, which the page's forms carry back (DR-0507).
+    shown: str = ""
 
 
 # -- what the page shows ----------------------------------------------------------------------------------------------
@@ -140,6 +164,7 @@ class NeverList:
     matches: str
     example: str
     values: list[Listed]
+    ask: str
 
 
 @dataclass(frozen=True)
@@ -190,6 +215,8 @@ class SettingsView:
     models: ModelsView
     folders_problem: str | None
     unfilled: list[tuple[str, str]]
+    shown_hash: str = ""
+    done: str | None = None
 
 
 def build(facts: Facts, state: SettingsState) -> SettingsView:
@@ -209,8 +236,9 @@ def build(facts: Facts, state: SettingsState) -> SettingsView:
     )
     if facts.docket_form:
         form = (
-            "vault.yaml is as Docket writes it: each change below is a command to run, or a line to change by hand. "
-            "vault.yaml is committed, so a change reaches your other machines with the vault."
+            "vault.yaml is as Docket writes it: a never-store value is added here, and every other change below is a "
+            "command to run or a line to change by hand. vault.yaml is committed, so a change reaches your other "
+            "machines with the vault."
         )
     else:
         form = (
@@ -233,6 +261,23 @@ def build(facts: Facts, state: SettingsState) -> SettingsView:
         models=models,
         folders_problem=facts.folders_problem,
         unfilled=sorted(set(unfilled)),
+        shown_hash=facts.shown,
+        done=done_line(state.done, config),
+    )
+
+
+def done_line(done: str | None, config: VaultConfig) -> str | None:
+    """What the last post did, in words: from `done`, which holds a list and a count, never a value."""
+    found = DONE.match(done or "")
+    if found is None:
+        return None
+    name, count = found.group(1), found.group(2)
+    if count == "0":
+        return f"The {name} list held that already, so nothing changed."
+    travels = "your own push" if config.storage == "folder" else "docket sync"
+    return (
+        f"Added one value to {name}, and committed vault.yaml: what waits in staging that it names is dropped, and "
+        f"{travels} takes it to your other machines."
     )
 
 
@@ -286,7 +331,7 @@ def _source(facts: SourceFacts) -> SourceView:
 
 def _list(name: str, values: list[str], shown: bool) -> NeverList:
     listed = [Listed(v, item_line(v)) for v in values] if shown else []
-    return NeverList(name, len(values), MATCHES[name], item_line(EXAMPLES[name]), listed)
+    return NeverList(name, len(values), MATCHES[name], item_line(EXAMPLES[name]), listed, ASKS[name])
 
 
 def _rules(config: VaultConfig, vault: str, docket_form: bool, unfilled: list[tuple[str, str]]) -> list[Rule]:
@@ -336,4 +381,77 @@ def _models(facts: Facts) -> ModelsView:
         commands=commands,
         config_path=str(facts.config_path),
         off_line=key_line("provider", "none"),
+    )
+
+
+# -- the confirm view -------------------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ConfirmView:
+    """An add's own question (DR-0509): the value, what it drops now and what already stored holds it, what it commits,
+    and the form that adds it, or the line to paste when vault.yaml isn't Docket's own."""
+
+    name: str
+    value: str
+    lines: list[str]
+    broad: str | None
+    commits: str
+    docket_form: bool
+    shown: str
+    line: str
+    stale: bool
+
+
+def build_confirm(
+    name: str,
+    value: str,
+    *,
+    staged: int,
+    stored: Reach | None,
+    why: str | None,
+    shown: str,
+    docket_form: bool,
+    stale: bool = False,
+) -> ConfirmView:
+    """The confirm view for a value about to go on a list: the counts in words, the share of the index a keyword takes,
+    and that the value is committed as typed."""
+    lines = [
+        f"It drops {_n(staged, 'record')} waiting in staging now."
+        if staged
+        else "Nothing waiting in staging names it now."
+    ]
+    broad = None
+    if stored is None:
+        lines.append(f"What is already stored can't be counted: {why}.")
+    elif stored.chunks or stored.records:
+        share = stored.chunks / stored.total if stored.total else 0.0
+        lines.append(
+            f"Already stored, at least {_n(stored.records, 'record')} and {stored.chunks:,} of {stored.total:,} chunks "
+            f"({share:.1%}) hold it. They stay in raw: forgetting them comes later, with docket forget."
+        )
+        if share >= BROAD:
+            broad = (
+                f"That is {share:.0%} of everything indexed: a value this common keeps out work as well. Check it is "
+                "the one you mean."
+            )
+    else:
+        lines.append(f"Nothing already stored holds it, of {stored.total:,} chunks.")
+    if name == "keywords":
+        lines.append("Docs that say it stay as they are; a later doc that says it is refused.")
+    lines.append("From the next sync, a record it names is dropped before it is stored, with no trace.")
+    commits = (
+        "It is committed in vault.yaml as you typed it: it is in your repo's history, and goes wherever the vault is "
+        "pushed. The commit message names the list, never the value."
+    )
+    return ConfirmView(
+        name=name,
+        value=value,
+        lines=lines,
+        broad=broad,
+        commits=commits,
+        docket_form=docket_form,
+        shown=shown,
+        line=item_line(value),
+        stale=stale,
     )
