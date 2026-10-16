@@ -214,7 +214,7 @@ jobs:
           enable-cache: true
       - name: Install
         run: uv sync --locked
-      - name: Search, Sync, the panel, the keys and a lapsed session, in Chrome
+      - name: Search, Sync, Staging, Curate, the keys and a lapsed session, in Chrome
         env:
           DOCKET_TEST_BROWSER: chrome
           DOCKET_TEST_SCREENSHOTS: ${{ runner.temp }}/screenshots

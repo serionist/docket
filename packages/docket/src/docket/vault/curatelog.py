@@ -294,6 +294,13 @@ class Line(BaseModel):
 # -- keys -------------------------------------------------------------------------------------------------------
 
 
+def key_text(key: str) -> str:
+    """The value a key names: an alias's or a new name's text, or what follows `=` in a name, id or related key."""
+    kind, _, rest = key.partition(":")
+    _, _, text = rest.partition(":")
+    return text.split("=", 1)[1] if kind in ("name", "id", "related") and "=" in text else text
+
+
 def key_of(entity: str, change: Change) -> str:
     """The key a create or an add is logged under (DR-0461): a create's names its first name, by language code."""
     if change.entity is not None:

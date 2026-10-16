@@ -1,0 +1,17 @@
+{# The Curate page's own pieces. Every value is escaped: names, spellings and snippets are data. #}
+
+{% macro hidden(pairs) %}
+{% for name, value in pairs %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+{% endmacro %}
+
+{% macro log_line(l, tz) %}
+<li class="log-line">
+  <time datetime="{{ l.at.isoformat() }}">{{ l.at|at(tz) }}</time>
+  <span class="op">{{ l.op }}</span>
+  <span class="locator">{{ l.entity }}</span>
+  <span class="part" dir="auto">{{ l.part }}</span>
+  <span class="meta">{{ l.by }}, {{ l.via }}{% if l.undone_by %}; undone by {{ l.undone_by }}{% endif %}</span>
+  {% if l.unfinished %}<span class="badge">not finished: the next write commits it</span>{% endif %}
+  {% if l.undo %}<form method="post" action="/curate/undo"><input type="hidden" name="op" value="{{ l.id }}"><button type="submit" class="button">Undo<span class="visually-hidden"> {{ l.op }} {{ l.id }}</span></button></form>{% endif %}
+</li>
+{% endmacro %}

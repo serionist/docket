@@ -8,6 +8,9 @@ Unreleased in the same PR.
 
 ### Added
 
+- The Curate page, `/curate` in the web app: start a round with a click, open each card beside the list with the
+  calls and mails it comes from, and accept, edit or reject it; undo a change or lift a rejection from the log
+  below. A decision on an entity file that changed since the page showed it writes nothing.
 - `/docket:curate` in the plugin: Claude runs a curate round with you, the cards in one table with its call and
   why, and decides each card only on your answer; it seeds entities from a people directory or glossary you point
   at on your yes. The session-start status tells Claude when a round is due, a week after the last.

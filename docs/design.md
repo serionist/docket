@@ -597,7 +597,7 @@ change lands on whoever uses that vendor, while the core still checks every rid 
 |---|---|---|
 | Search | the same search Claude uses, with facets by entity, source, person and time | 0 |
 | Staging | records waiting for the gate: classify, cut, drop, promote; held recordings listed with the command that releases each at the owner's console | 1 |
-| Curate | the weekly batch of proposals | 1 |
+| Curate | the weekly round of proposals: accept, edit, reject, undo; what tier 1 applied; the log and the stoplist | 1 |
 | Sync | runs, failures, cursors, rate limits, what needs a Claude session | 1 |
 | Settings | sources, never-store lists, models, the Claude API key, a spend cap, redaction rules | 1 |
 | Recording | the summary next to the transcript, click a line to read and play it; the two transcripts side by side | 2 |
@@ -628,6 +628,12 @@ How it is built (DR-0170 to DR-0176):
   the writer thread, as same-origin form posts the Guard checks, and refuses a classification the record changed under
   (DR-0381). Held recordings are listed with the commands that release them at the owner's console; no page releases
   (DR-0382). Its URL holds the list's filters, the open record and what is checked on it (DR-0384).
+- The Curate page shows this machine's round: its cards, the open one beside the list with its snippets cut when
+  opened, and its edit form in place; what tier 1 applied by itself; the review minutes, the question set before and
+  after, the forms matching left out, the log with Undo and the stoplist with Lift. A round starts only on the user's
+  click. Every write is a same-origin form post on the writer thread, and a decision is refused when the round isn't
+  this machine's current one or the entity file changed since the card was shown (DR-0473). Its URL holds the open
+  card, the edit form and what the last change did.
 
 ## 11. Claude first
 
