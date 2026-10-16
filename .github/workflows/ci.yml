@@ -85,6 +85,14 @@ jobs:
         run: |
           "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
           "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+      # The runner's Storage Service off: toward the end of the parallel run it took a whole vCPU of four for about a
+      # minute, beside the timed tests on some runs (DR-0494).
+      - name: No Storage Service beside the timed tests
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Set-Service StorSvc -StartupType Disabled
+          Stop-Service StorSvc -Force
       - name: Types and tests
         run: uv run gate os
 

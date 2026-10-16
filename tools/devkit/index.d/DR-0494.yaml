@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0494
+    title: Tests (Windows) disables the runner's Storage Service before the tests
+    status: proposed
+    at: "2026-10-16"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#116"]
+    description: "Before gate os the Windows tests job disables the runner's Storage Service (StorSvc) and stops it. Watched every five seconds on CI's Windows runner, an svchost took a whole vCPU of the four (4.5 to 6.6 s of CPU per 5 s) for 45 to 70 s toward the end of the parallel run or at the start of the timed run, on each of the five runs where the service could run; both times the svchost's services were listed, it was StorSvc's. On two runs it overlapped the timed run's first 45 s, which hold test_index_lookup's limit, the query shapes and the mention pass (#116). Stopped alone it came back, since a trigger starts it; disabled, it stayed off and nothing took its place. Defender's real-time protection is already off on the runner, with C: and D: excluded, and no python, git or uv process outlives the parallel run, so this was the one thing seen running beside the timed tests. The tests never use the Storage Service, and macOS and the other jobs are untouched. The limits don't change."
+    binds:
+      - A service of the runner seen taking CPU beside the timed tests is switched off in the CI job; a timed test's limit is never loosened for it (DR-0430).
+    not_chosen:
+      - "The gate waiting until the machine goes quiet before the timed run: it would need a measure of quiet for each system and a timeout, to work around one service on one runner."
+      - "Stop-Service alone: a trigger started it again within minutes."
