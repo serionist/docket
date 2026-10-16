@@ -21,6 +21,9 @@ terms:
   - term: capture hook
     definition: "The plugin's PostToolUse hook, docket hook post-tool-use: it ties a sync run to the Claude Code session that opened it and posts the session's results of the source's listed tools to the service, as given. With no run open it reads one small file and returns."
     see: [packages/docket/src/docket/capture.py]
+  - term: card
+    definition: "One proposal of a curate round: a new entity with its spellings, or new aliases for one, with what search misses without it and snippets cut when it is shown. Named by its id, its key's hash."
+    see: [packages/docket/src/docket/curate/propose.py]
   - term: chunk
     definition: "The unit search finds: a stretch of a transcript, a message, a thread window, part of a record, or a section of a processed doc, with the locator read takes."
     see: [packages/docket/src/docket/index/chunks.py]
@@ -109,6 +112,9 @@ terms:
   - term: retry set
     definition: The ids a sync run skipped with a reason (later, too-large, gone, rate-limited), fetched by id on later runs. An id held back for the budget waits as long as it takes; any other leaves after 30 days.
     see: [packages/docket/src/docket/vault/cursors.py]
+  - term: round
+    definition: "A curate round: at most 15 cards mined from one machine's index, decided by accept, reject or an edit; kept per machine in the vault's private folder, its decisions in the curate log."
+    see: [packages/docket/src/docket/curate/batch.py]
   - term: run history
     definition: "One line of ids, counts and times per sync run that ended, whole or dropped, in sync/runs.jsonl in the vault's private folder: per machine, never committed, read only by the Sync page, and safe to delete."
     see: [packages/docket/src/docket/service/history.py]

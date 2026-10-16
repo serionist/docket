@@ -28,10 +28,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Self, cast
+from typing import Annotated, Any, Self, cast
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator
 from pydantic_core import ErrorDetails
 
 from docket.errors import DocketError
@@ -86,12 +86,26 @@ class _UnwritableError(Exception):
 
 @dataclass(frozen=True)
 class Planned:
-    """One part of a change to write: its position in what was asked (a changes file's change 3), its entity, and
-    the part."""
+    """One part of a change to write: its position in what was asked (a changes file's change 3), its entity, the
+    part, and the round and card it settles, if any."""
 
     n: int
     entity: str
     change: Change
+    round: str | None = None
+    card: str | None = None
+
+
+@dataclass(frozen=True)
+class Reject:
+    """A key a rejection puts on the stoplist, with the text it names (held to the never-store lists: a listed one
+    writes no line), and the entity, round and card it belongs to, if any."""
+
+    key: str
+    value: str
+    entity: str | None = None
+    round: str | None = None
+    card: str | None = None
 
 
 @dataclass(frozen=True)
@@ -131,6 +145,7 @@ class ChangeItem(_Model):
     create: EntityFields | None = None
     entity: Slug | None = None
     add: AddFields | None = None
+    card: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{6}$")] | None = None
 
     @model_validator(mode="after")
     def _shape(self) -> Self:
@@ -193,14 +208,19 @@ def load_changes(path: Path) -> list[Planned]:
     planned: list[Planned] = []
     for n, item in enumerate(parsed.changes, start=1):
         if item.create is not None:
-            planned.append(Planned(n, item.create.id, Change(entity=item.create)))
+            planned.append(Planned(n, item.create.id, Change(entity=item.create), card=item.card))
             continue
         add, entity = cast(AddFields, item.add), cast(str, item.entity)
-        planned += [Planned(n, entity, Change(alias=a)) for a in add.aliases]
-        planned += [Planned(n, entity, Change(name=NameFields(lang=k, text=v))) for k, v in add.names.items()]
-        planned += [Planned(n, entity, Change(id=IdFields(key=k, value=v))) for k, vs in add.ids.items() for v in vs]
+        card = item.card
+        planned += [Planned(n, entity, Change(alias=a), card=card) for a in add.aliases]
         planned += [
-            Planned(n, entity, Change(related=RelatedFields(type=k, target=t)))
+            Planned(n, entity, Change(name=NameFields(lang=k, text=v)), card=card) for k, v in add.names.items()
+        ]
+        planned += [
+            Planned(n, entity, Change(id=IdFields(key=k, value=v)), card=card) for k, vs in add.ids.items() for v in vs
+        ]
+        planned += [
+            Planned(n, entity, Change(related=RelatedFields(type=k, target=t)), card=card)
             for k, ts in add.related.items()
             for t in ts
         ]
@@ -434,8 +454,8 @@ def _named(files: _Files, line: Line, log: Folded) -> set[str]:
 
 def _message(lines: Sequence[Line]) -> str:
     first = lines[0]
-    subject = f"Entity: {first.entity} {first.op}" if len(lines) == 1 else f"Entities: {len(lines)} changes"
-    return subject + "\n\n" + "\n".join(f"Curate: {line.id} {line.op} {line.entity}" for line in lines)
+    subject = f"Entity: {first.entity or '-'} {first.op}" if len(lines) == 1 else f"Entities: {len(lines)} changes"
+    return subject + "\n\n" + "\n".join(f"Curate: {line.id} {line.op} {line.entity or '-'}" for line in lines)
 
 
 class EntityStore:
@@ -443,11 +463,15 @@ class EntityStore:
         self.vault = vault
         self.root = vault.root
 
-    def apply(self, planned: Sequence[Planned], *, by: By = "user", via: Via = "cli") -> Written:
-        """Write a changes file's parts: all, each with its log line, in one commit, or none."""
+    def apply(
+        self, planned: Sequence[Planned], *, rejects: Sequence[Reject] = (), by: By = "user", via: Via = "cli"
+    ) -> Written:
+        """Write a changes file's parts: all, each with its log line, in one commit, or none; and the keys an edit
+        unticked, as rejections in the same commit."""
         problems = screen(self.vault, planned)
         if problems:
             raise RefusedError(problems)
+        rejected = [r for r in rejects if listed(r.value, self.vault.config.never_store) is None]
         with self.vault.writing():
             finished = self._finish()
             files = _Files(self.root)
@@ -462,27 +486,43 @@ class EntityStore:
             if problems:
                 raise RefusedError(list(dict.fromkeys(problems)))
             already = len(planned) - len(kept)
-            if not kept:
+            if not kept and not rejected:
                 return Written(finished=finished, already=already)
             taken = self._take_in(files)
-            lines = self._lines(
-                [
-                    {
-                        "op": "create" if p.change.entity is not None else "add",
-                        "key": key_of(p.entity, p.change),
-                        "entity": p.entity,
-                        "change": p.change,
-                    }
-                    for p in kept
-                ],
-                by,
-                via,
-            )
+            parts: list[dict[str, Any]] = [
+                {
+                    "op": "create" if p.change.entity is not None else "add",
+                    "key": key_of(p.entity, p.change),
+                    "entity": p.entity,
+                    "change": p.change,
+                    "round": p.round,
+                    "card": p.card,
+                }
+                for p in kept
+            ]
+            parts += [
+                {"op": "reject", "key": r.key, "entity": r.entity, "round": r.round, "card": r.card} for r in rejected
+            ]
+            lines = self._lines(parts, by, via)
             commit = self._write(lines, files.outputs(), _message(lines))
             return Written(lines, commit, finished, taken, already)
 
-    def undo(self, op_ids: Sequence[str], *, via: Via = "cli") -> Written:
-        """Undo logged ops by their ids, the latest first, in one commit; refused whole when one can't be undone."""
+    def reject(self, rejects: Sequence[Reject], *, via: Via = "cli") -> Written:
+        """Put keys on the stoplist, a line each, in one commit; a key whose text a never-store list names writes no
+        line, since the line would commit the name (DR-0464)."""
+        return self.apply([], rejects=rejects, via=via)
+
+    def lift(self, keys: Sequence[str], *, via: Via = "cli") -> Written:
+        """Take keys off the stoplist, a line each, in one commit."""
+        with self.vault.writing():
+            finished = self._finish()
+            lines = self._lines([{"op": "lift", "key": key} for key in dict.fromkeys(keys)], "user", via)
+            return Written(lines, self._write(lines, {}, _message(lines)), finished)
+
+    def undo(self, op_ids: Sequence[str], *, via: Via = "cli", round_id: str | None = None) -> Written:
+        """Undo logged ops by their ids, the latest first, in one commit; refused whole when one can't be undone. The
+        round open on this machine goes on each line: an undo of a decision of that round reopens its card and
+        stoplists nothing (DR-0462)."""
         with self.vault.writing():
             finished = self._finish()
             log = curatelog.fold(curatelog.read_all(self.root).lines)
@@ -512,7 +552,9 @@ class EntityStore:
                 return Written(finished=finished)
             taken = self._take_in(files)
             lines = self._lines(
-                [{"op": "undo", "key": t.key, "entity": t.entity, "of": t.id} for t in targets], "user", via
+                [{"op": "undo", "key": t.key, "entity": t.entity, "of": t.id, "round": round_id} for t in targets],
+                "user",
+                via,
             )
             commit = self._write(lines, files.outputs(), _message(lines))
             return Written(lines, commit, finished, taken, only_logged=tuple(only))

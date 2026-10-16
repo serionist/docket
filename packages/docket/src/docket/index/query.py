@@ -681,6 +681,18 @@ class _Search:
         )
 
 
+class NameQuery:
+    """What a search for a name finds: its every word in all its forms, as search's all-words stage builds them. The
+    curate miner counts the chunks this misses (DR-0467)."""
+
+    def __init__(self, conn: sqlite3.Connection, vault: Vault) -> None:
+        self._search = _Search(conn, vault, languages_of(vault))
+
+    def expression(self, text: str) -> str:
+        groups = self._search.word_groups(words(text), {})[0]
+        return " AND ".join(f"({expr})" for _, expr in groups)
+
+
 def _summary(conn: sqlite3.Connection, rids: Sequence[str], key: str) -> DocRef | None:
     """A group's current summary: a minutes, recording note or thread summary covering one of its records or a record
     of its thread, minutes first."""
