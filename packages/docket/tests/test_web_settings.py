@@ -4,6 +4,7 @@ as its command or its line, and nothing written."""
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -15,10 +16,13 @@ from settings_kit import edit_config, settings_template, settings_vault
 from staging_kit import signed_in
 from starlette.testclient import TestClient
 
-from docket import userconfig
+from docket import index, userconfig
+from docket.index import vectors
+from docket.index.build import vector_counts
 from docket.vault import redaction
 from docket.vault.config import NeverStore, Redaction, RedactionPattern
 from docket.vault.vault import Vault
+from docket.web import settings_view
 from docket.web.templating import PAGE_CSP
 
 
@@ -191,3 +195,31 @@ def test_a_bad_show_and_a_vault_that_doesnt_load_are_the_page_s_own_errors(clien
     (vault.root / "vault.yaml").write_text("owner: [\n", encoding="utf-8")
     broken = page(client, status=400)
     assert "not valid YAML" in broken
+
+
+def test_a_failure_answers_the_error_page_naming_no_value(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken(*_args: object) -> object:
+        raise RuntimeError("Dora #2")
+
+    monkeypatch.setattr(settings_view, "build", broken)
+    answer = client.get("/settings?show=lists")
+    assert answer.status_code == 500
+    assert "Something failed in Docket" in said(answer.text)
+    assert "Dora #2" not in answer.text
+
+
+def test_the_vectors_are_counted_where_an_index_reads_and_left_out_where_none_does(
+    template: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = settings_vault(template, tmp_path)
+    assert vector_counts(vault) == []
+    index.rebuild(vault)
+    # An index with no model's table yet.
+    assert vector_counts(vault) == []
+
+    def locked(*_args: object) -> tuple[int, int]:
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(vectors, "tables", lambda _conn: [vectors.VecTable("e5", "e5-small", "r1", 64, "query: ")])
+    monkeypatch.setattr(vectors, "coverage", locked)
+    assert vector_counts(vault) == []
