@@ -319,15 +319,15 @@ def test_check_names_an_ignore_rule_that_hides_the_vault(tmp_path: Path) -> None
     top = vault.home.top
     (top / ".gitignore").write_text("*.jsonl\n!/notes/vault/ledger/**\n", encoding="utf-8")
     problems = [str(p) for p in vault.check()]
-    # The same rule hides the release log's sample too, so it is named once, with the count.
+    # The same rule hides the release log's and the curate log's samples too, so it is named once, with the count.
     assert problems == [
-        "raw/s/2026/01/2026-01-01T0000-m.jsonl: an ignore rule hides it and 1 more of the vault's paths from git "
+        "raw/s/2026/01/2026-01-01T0000-m.jsonl: an ignore rule hides it and 2 more of the vault's paths from git "
         "(.gitignore:1: *.jsonl)"
     ]
     (top / ".gitignore").write_text("/notes/vault/\n", encoding="utf-8")
     problems = [str(p) for p in vault.check()]
     assert len(problems) == 1
-    assert "and 9 more of the vault's paths" in problems[0]
+    assert "and 10 more of the vault's paths" in problems[0]
     assert problems[0].endswith("took this line out of the repo's .gitignore: commit that edit")
 
 
