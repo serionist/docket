@@ -147,10 +147,10 @@ def test_verify_prints_each_line_its_problems_and_its_raw(
 
 
 def test_verify_shows_a_span_that_doesnt_resolve(vault: Vault, capsys: pytest.CaptureFixture[str]) -> None:
-    path = vault.root / "processed" / "brief" / "gone.md"
+    path = vault.root / "processed" / "digest" / "gone.md"
     path.parent.mkdir(parents=True)
-    path.write_text(note("brief:gone", covers=["calls:gone"], lines=["- gone [r:calls:gone@1:00]"]), encoding="utf-8")
-    assert main(["doc", "verify", "brief:gone"]) == 0
+    path.write_text(note("digest:gone", covers=["calls:gone"], lines=["- gone [r:calls:gone@1:00]"]), encoding="utf-8")
+    assert main(["doc", "verify", "digest:gone"]) == 0
     assert capsys.readouterr().out.splitlines()[-2:] == [
         "        [r:calls:gone@1:00]",
         "          ! calls:gone isn't in the raw log",
@@ -194,7 +194,7 @@ def test_stale_lists_the_lines_citing_a_line_that_changed(
     ten, friday = "- Ben: 10 million. @12:08", "- Cleo. @14:30-14:52"
     main(["doc", "put", put_file(tmp_path, note(lines=[ten, friday]))])
     cites = [f"- The consultant. [d:{NOTE_ID}@1#14]", f"- By Friday. [d:{NOTE_ID}@1#15]"]
-    main(["doc", "put", put_file(tmp_path, note("brief:northwind", covers=[], lines=cites), "brief.md")])
+    main(["doc", "put", put_file(tmp_path, note("digest:northwind", covers=[], lines=cites), "digest.md")])
     capsys.readouterr()
     assert main(["doc", "stale"]) == 0
     assert capsys.readouterr().out.splitlines() == [
@@ -205,7 +205,7 @@ def test_stale_lists_the_lines_citing_a_line_that_changed(
     assert main(["doc", "stale"]) == 0
     out = capsys.readouterr().out.splitlines()
     assert out[0] == "1 line(s) cite a line that changed:"
-    assert out[1].startswith("  brief:northwind line 13: - The consultant. [d:")
+    assert out[1].startswith("  digest:northwind line 13: - The consultant. [d:")
     assert out[2] == (
         f"    cites line 14 of {NOTE_ID} rev 1, which reads otherwise in rev 2; check it, then cite it again or drop it"
     )
@@ -218,10 +218,10 @@ def test_verify_index_status_and_stale_print_refs_counts_and_damage(
     ten, friday = "- Ben: 10 million. @12:08", "- Cleo. @14:30-14:52"
     main(["doc", "put", put_file(tmp_path, note(lines=[ten, friday]))])
     cites = [f"- The consultant. [d:{NOTE_ID}@1#14]", f"- By Friday. [d:{NOTE_ID}@1#15]"]
-    main(["doc", "put", put_file(tmp_path, note("brief:northwind", covers=[], lines=cites), "brief.md")])
+    main(["doc", "put", put_file(tmp_path, note("digest:northwind", covers=[], lines=cites), "digest.md")])
     main(["doc", "put", put_file(tmp_path, note(lines=["- Ben: 12 million. @12:08", friday], rev="1"))])
     capsys.readouterr()
-    assert main(["doc", "verify", "brief:northwind"]) == 0
+    assert main(["doc", "verify", "digest:northwind"]) == 0
     out = capsys.readouterr().out.splitlines()
     assert f"        [d:{NOTE_ID}@1#14=" in out[2] and out[2].endswith(
         f"! line 14 of {NOTE_ID} rev 1 reads otherwise in rev 2"

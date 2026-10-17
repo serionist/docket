@@ -241,7 +241,7 @@ def test_the_service_as_a_process_answers_mcp_with_the_token_and_refuses_a_forge
             http = httpx2.AsyncClient(headers={"Authorization": f"Bearer {token}"}, trust_env=False)
             async with http, Client(streamable_http_client(f"http://127.0.0.1:{port}/mcp", http_client=http)) as mcp:
                 tools = {tool.name for tool in (await mcp.list_tools()).tools}
-                assert tools == {"search", "read", "verify", "doc_put", "run_open", "ingest", "media_put"}
+                assert tools == {"search", "read", "verify", "briefs", "doc_put", "run_open", "ingest", "media_put"}
                 result = await mcp.call_tool("search", {"query": "fleet dashboard battery"})
                 assert not result.is_error
                 first = result.content[0]

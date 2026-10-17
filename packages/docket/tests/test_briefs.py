@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from docket_testkit import git, index_template, make_record
 
-from docket import briefs, recall
+from docket import briefs, recall, render
 from docket.cli import main
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.docstore import DocStore, PutResult
@@ -122,6 +122,10 @@ def test_a_brief_citing_note_lines_only_is_stored_with_empty_covers(vault: Vault
             brief("ben-sample", "Ben", changed=[CITED]).replace("## Decisions", "## What changed"),
             "a brief's sections are",
         ),
+        (
+            brief("ben-sample", "Ben", changed=[CITED]) + "\n## Decisions\n",
+            "each of a brief's three sections stands once",
+        ),
         (brief("ben-sample", "Ben", changed=[CITED]).replace("# Ben\n", ""), "a brief starts with a # <title> heading"),
         (brief("ben-sample", "Ben", changed=["- No anchor at all.", CITED]), "no anchors at the end of the line"),
     ],
@@ -132,7 +136,7 @@ def test_a_brief_out_of_form_is_refused(vault: Vault, text: str, says: str) -> N
 
 
 def test_a_section_after_the_three_is_kept_with_a_warning(vault: Vault) -> None:
-    text = put_text = brief("ben-sample", "Ben Sample", changed=[f"- Above the budget. {cite(vault, TEN)}"])
+    text = brief("ben-sample", "Ben Sample", changed=[f"- Above the budget. {cite(vault, TEN)}"])
     put_text = text + "\n## Open items\n\n- Send the offer. " + cite(vault, FRIDAY) + "\n"
     result = recall.doc_put(vault, put_text)
     assert result.changed
@@ -285,3 +289,41 @@ def test_docket_brief_stale_prints_each_brief(vault: Vault, capsys: pytest.Captu
     ]
     assert main(["brief", "stale", "--entity", "northwind", "--vault", str(vault.root)]) == 0
     assert capsys.readouterr().out.splitlines() == ["nothing stale: every brief is current", "no brief  northwind"]
+
+
+def test_the_report_says_why_what_is_flagged_who_holds_an_orphan_s_name_and_what_is_hidden() -> None:
+    found = briefs.BriefsReport(
+        briefs=[
+            briefs.BriefState(
+                id="brief:ben-sample", entity="ben-sample", name="Ben Sample", type="person", rev=2,
+                flagged=1, state="stale", why=briefs.HISTORY_NOT_HERE,
+            ),
+            briefs.BriefState(
+                id="brief:ben", entity="ben", name="Ben", type="", rev=1, orphaned="ben-sample", state="orphaned"
+            ),
+        ],
+        hidden=2,
+    )  # fmt: skip
+    assert render.briefs(found) == [
+        "stale     brief:ben-sample  Ben Sample (person), rev 2",
+        "          its history isn't here",
+        "          1 line(s) cite lines that changed",
+        "orphaned  brief:ben  Ben, rev 1",
+        "          its entity is gone; ben-sample holds its name now",
+        "hidden    2 brief(s) whose entity a never-store list holds",
+    ]
+
+
+def test_a_heading_in_a_code_block_isn_t_a_section(vault: Vault) -> None:
+    fenced = ["```", "## Talks", "```", f"- Above the budget. {cite(vault, TEN)}"]
+    assert recall.doc_put(vault, brief("ben-sample", "Ben Sample", changed=fenced)).changed
+
+
+def test_a_batch_holds_a_brief_to_its_form(vault: Vault) -> None:
+    good = brief("ben-sample", "Ben Sample", changed=[f"- Above the budget. {cite(vault, TEN)}"])
+    bad = good.replace("id: brief:ben-sample", "id: brief:northwind").replace("[ben-sample]", "[northwind]")
+    bad = bad.replace("## Decisions", "## Talks")
+    ok, refused_one = DocStore(vault).put_many([good, bad], "Two briefs")
+    assert isinstance(ok, PutResult)
+    assert isinstance(refused_one, DocRefusedError)
+    assert any("a brief's sections are" in str(p) for p in refused_one.problems)

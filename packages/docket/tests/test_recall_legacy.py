@@ -208,12 +208,12 @@ def test_a_recording_read_whole_lists_the_lines_on_its_transcripts(plaud: Callab
 def test_a_recording_s_other_records_and_paragraphs_stay_its_own(plaud: Callable[..., Vault]) -> None:
     vault = plaud("transaction_polish")
     summary = f"{PLAUD}/summary"
-    recall.doc_put(vault, note("brief:2026-10-14-summary", covers=[summary], lines=[f"- Agreed. [r:{summary}]"]))
+    recall.doc_put(vault, note("digest:2026-10-14-summary", covers=[summary], lines=[f"- Agreed. [r:{summary}]"]))
     # Only a transcript under the recording is read with it, never its vendor summary.
     assert [c.doc for c in recall.read(vault, f"r:{PLAUD}").lines] == [MINUTES]
     # A transcript's paragraphs are its own, so a paragraph of the recording lists none of its lines.
     first = f"- Who spoke. [r:{POLISHED}#1]"
-    recall.doc_put(vault, note("brief:2026-10-14-speakers", covers=[POLISHED], lines=[first]))
+    recall.doc_put(vault, note("digest:2026-10-14-speakers", covers=[POLISHED], lines=[first]))
     assert [c.text for c in recall.read(vault, f"r:{POLISHED}#1").lines] == [first]
     assert recall.read(vault, f"r:{PLAUD}#1").lines == []
 
@@ -352,7 +352,7 @@ def test_verify_takes_a_doc_inside_processed_only(vault: Vault) -> None:
     with pytest.raises(DocketError, match="isn't a doc in this vault's processed/ folder"):
         recall.verify(vault, "raw/notes.md")
     with pytest.raises(DocketError, match="no doc at"):
-        recall.verify(vault, "processed/brief/nobody.md")
+        recall.verify(vault, "processed/digest/nobody.md")
 
 
 def test_two_notes_claiming_one_old_path_are_both_named(vault: Vault) -> None:
