@@ -409,11 +409,13 @@ def test_the_cut_log_reads_only_what_it_writes(tmp_path: Path) -> None:
     with pytest.raises(DocketError, match="can't read it"):
         cutlog.read(vault.root, "plaud")
     path.write_bytes(b"")
-    before = cutlog.append(vault.home, vault.root, "plaud", [(rid_hash(CALL), [])], "test-box")
+    before = cutlog.append(vault.home, vault.root, "plaud", [(rid_hash(CALL), "f" * 64, [])], "test-box")
     assert before == b""
     text = path.read_text(encoding="utf-8").rstrip("\n")
     path.write_text(text, encoding="utf-8")
-    cutlog.append(vault.home, vault.root, "plaud", [(rid_hash(CALL), [layout.Span(start=0, end=1)])], "test-box")
+    cutlog.append(
+        vault.home, vault.root, "plaud", [(rid_hash(CALL), "f" * 64, [layout.Span(start=0, end=1)])], "test-box"
+    )
     assert [len(line.cuts) for line in cutlog.read(vault.root, "plaud")] == [0, 1]
     cutlog.put_back(vault.root, "plaud", b"")
     assert path.read_bytes() == b""
@@ -421,6 +423,11 @@ def test_the_cut_log_reads_only_what_it_writes(tmp_path: Path) -> None:
     assert not path.exists()
     with pytest.raises(ValueError, match="32 hex"):
         cutlog.Line(rid="plaud:rec-a", at=AT, machine="m")
+    with pytest.raises(ValueError, match="names its file's key"):
+        cutlog.Line(rid="a" * 32, at=AT, machine="m")
+    with pytest.raises(ValueError, match="names no key"):
+        cutlog.Line(schema_version=1, rid="a" * 32, key="f" * 64, at=AT, machine="m")
+    assert cutlog.Line(schema_version=1, rid="a" * 32, at=AT, machine="m").key is None
     with pytest.raises(ValueError, match="time zone"):
         cutlog.Line(rid="a" * 32, at=datetime(2026, 10, 1), machine="m")
     with pytest.raises(DocketError, match="isn't a source name"):

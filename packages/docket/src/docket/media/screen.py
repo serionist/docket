@@ -12,11 +12,12 @@ recording, and what was said, and cut, is in the transcript under it. Thread and
 | its source and text | the source isn't in force, is off or private; a record of it matches a never-store value |
 | the owner's decisions | withheld; classified private, or decided before kinds were kept; cut by characters |
 | holds and releases | a hold covers its record; a release leaves a record of it out |
-| one file per rid | media for the rid is already in `media/` |
+| one file per rid | media for the rid is already in `media/`, cut by every range it needs |
 
 A release's cuts and a transcript cut by time no longer refuse: they are the ranges the audio is cut by. Staged media
-must have been cut by every range its family needs now, else it goes, and is put again. The reasons go to the owner at
-a put; the gate only counts them.
+must have been cut by every range its family needs now, else it goes, and is put again. A stored file whose line in
+the cut log doesn't hold every range its family needs now is put again beside it (DR-0562). The reasons go to the
+owner at a put; the gate only counts them.
 """
 
 from __future__ import annotations
@@ -25,11 +26,9 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from docket.errors import DocketError
-from docket.media import layout
+from docket.media import cutlog, layout
 from docket.media import ranges as cut_ranges
 from docket.media.ranges import Needed, Range
-from docket.vault import cuts as cutting
 from docket.vault import neverstore
 from docket.vault.config import VaultConfig
 from docket.vault.holds import Holds
@@ -53,6 +52,9 @@ class Screen:
     releases: Releases
     left_out: Callable[[RawRecord], bool]
     _nested: dict[str, list[str]] = field(default_factory=dict[str, list[str]])
+    _logged: dict[str, dict[tuple[str, str], tuple[Range, ...]]] = field(
+        default_factory=dict[str, dict[tuple[str, str], tuple[Range, ...]]]
+    )
 
     def why(self, rid: str, *, committing: bool = False, applied: Sequence[Range] | None = None) -> str | None:
         """Why media for a rid can't be staged or stored now, or None when every check passes. `committing` is for a
@@ -96,34 +98,25 @@ class Screen:
             return f"{rid} is on hold: its media waits until the hold is released"
         if any(self.left_out(record) for record in records):
             return f"a release leaves a record of {rid} out"
-        made = self._made(rid, staged, raw)
-        if isinstance(made, str):
-            return made
+        made = cut_ranges.made(staged, raw)
+        if made == "characters":
+            return f"{rid} or a record under it was cut by characters, so there is no time to cut its audio at"
+        if made == "unfit":
+            return f"{rid}'s staged cuts don't fit its transcript, so there is no time to cut its audio at yet"
         release = self.releases.covering(latest)
         needed = cut_ranges.needed(made, [(c.start, c.end) for c in release.cuts] if release is not None else [])
-        if not committing and layout.stored_files(self.root, rid):
+        stored = layout.stored_files(self.root, rid)
+        if not committing and stored and cut_ranges.covers(self.cut_by(rid, stored[0]), needed.ranges):
             return f"media for {rid} is stored already"
         return needed
 
-    def _made(self, rid: str, staged: list[Entry], raw: list[RawRecord]) -> list[RawRecord] | str:
-        """The family's records with their staged cuts made, as promotion will make them; or why there is no time to
-        cut the audio at."""
-        characters = f"{rid} or a record under it was cut by characters, so there is no time to cut its audio at"
-        made: list[RawRecord] = []
-        for entry in staged:
-            record = entry.staged.record
-            if cut_ranges.by_characters(record) or any(c.unit == "char" for c in entry.staged.cuts):
-                return characters
-            if entry.staged.cuts:
-                try:
-                    record = cutting.apply(record, list(entry.staged.cuts))
-                except DocketError:
-                    # A cut promotion would hold, so its times aren't settled yet.
-                    return f"{rid}'s staged cuts don't fit its transcript, so there is no time to cut its audio at yet"
-            made.append(record)
-        if any(cut_ranges.by_characters(record) for record in raw):
-            return characters
-        return [*made, *raw]
+    def cut_by(self, rid: str, path: Path) -> tuple[Range, ...]:
+        """What the rid's stored file was cut by: the cut log's line for its key (DR-0562); none for a file stored as it
+        was put, one whose key no line names, or one that isn't here to read."""
+        source = layout.source_of(rid)
+        if source not in self._logged:
+            self._logged[source] = cutlog.logged(self.root, source)
+        return cutlog.cut_by(self._logged[source], rid_hash(rid), path)
 
     def _family_in_raw(self, rid: str) -> list[str]:
         if rid not in self._nested:

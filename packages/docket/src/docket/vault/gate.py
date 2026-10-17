@@ -43,7 +43,7 @@ from docket.vault.host import Lfs, lfs_state
 from docket.vault.records import RawRecord, version
 from docket.vault.redact import Redactor, markers
 from docket.vault.spans import RawLookup
-from docket.vault.staging import Classifier, Decided, Entry, Scan, Staged, Staging, State, key_of, rid_hash
+from docket.vault.staging import Classifier, Decided, Entry, Scan, Staged, Staging, State, key_of, retry, rid_hash
 from docket.vault.vault import Vault
 
 if TYPE_CHECKING:  # the ranges module reaches the vault package, which imports the gate
@@ -63,6 +63,19 @@ MIN_KEY_PREFIX = 6
 DUE = 20
 DUE_LOOK = 200
 TICK = timedelta(microseconds=1)
+
+
+@dataclass(frozen=True)
+class _Storing:
+    """A file a media commit takes: where it goes; where it goes back to when the commit doesn't land; its sidecar; the
+    stored files it replaces, vault-relative and out of the tree until the commit; and their keys, deleted only once
+    the replacement is committed (#169's rule: never the key of a file HEAD holds without its replacement)."""
+
+    target: Path
+    back: Path | None
+    sidecar: Path
+    replaces: tuple[str, ...] = ()
+    old_keys: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -342,9 +355,9 @@ class Gate:
                 return screen.plan(rid)
 
     def media_due(self, source: str, *, limit: int = DUE, look: int = DUE_LOOK) -> list[str]:
-        """The source's recordings, staged or in raw and newest first, that have no media and must be cut, with every
-        check passing: what the next run's media step puts again, cut (DR-0561). Native ids, at most `limit`, from the
-        newest `look` recordings."""
+        """The source's recordings, staged or in raw and newest first, that must be cut and have no media, or a stored
+        file cut by less than they need now, with every check passing: what the next run's media step puts again, cut
+        (DR-0561, DR-0562). Native ids, at most `limit`, from the newest `look` recordings."""
         with self.vault.lock:
             config = self._config()
             self._sweep(config)
@@ -360,7 +373,8 @@ class Gate:
                 ]
                 due: list[str] = []
                 for rid in list(dict.fromkeys([*staged, *screen.raw.of_kind(source, "recording")]))[:look]:
-                    if media_layout.staged_files(root, rid) or media_layout.stored_files(root, rid):
+                    # A stored file passes only while it needs a new cut: the screen says it is stored already else.
+                    if media_layout.staged_files(root, rid):
                         continue
                     found = screen.plan(rid)
                     if not isinstance(found, str) and found.ranges:
@@ -434,55 +448,82 @@ class Gate:
             moved = groups[source]
             # What each file was cut by, committed with it (DR-0562).
             before = cutlog.append(
-                self.vault.home, self.vault.root, source, [_cuts_of(t, s) for t, _, s in moved], self.vault.machine
+                self.vault.home,
+                self.vault.root,
+                source,
+                [_cuts_of(s.target, s.sidecar) for s in moved],
+                self.vault.machine,
             )
+            targets = media_staged.rel(self.vault.root, (s.target for s in moved))
+            gone = [r for s in moved for r in s.replaces if r not in targets]
+            head = self._head()
             try:
                 commit = self.vault.commit(
-                    [*media_staged.rel(self.vault.root, (target for target, _, _ in moved)), cutlog.rel(source)],
+                    [*targets, *gone, cutlog.rel(source)],
                     f"Media: {source}, {len(moved)} file(s) from {self.vault.machine}",
                 )
             except BaseException:
-                if self._move_back(moved):
+                if self._move_back(moved, head):
                     cutlog.put_back(self.vault.root, source, before)
                 raise
-            for _, _, sidecar in moved:
-                sidecar.unlink(missing_ok=True)
+            for storing in moved:
+                storing.sidecar.unlink(missing_ok=True)
+                if commit is not None:
+                    # The replacement is committed: the file it replaced opens nowhere here from now on (DR-0562).
+                    new = media_staged.key_of(storing.target)
+                    for key in storing.old_keys:
+                        if key != new:
+                            self.keys.delete(key)
             result.media.append(MediaRun(source, len(moved), commit))
         result.media_dropped = self._media_dropped
 
-    def _move_back(self, moved: list[tuple[Path, Path | None, Path]]) -> bool:
-        """After a media commit that raised: back to staging each file moved for it that HEAD doesn't hold. One that
-        landed and then raised (Ctrl+C after git finished) leaves its files where HEAD has them, and their sidecars
-        go at the next promotion. When git can't say, every file stays, and the next promotion commits it from
-        media/ as a crash's leftover. Whether the commit is known not to have landed."""
-        root = self.vault.root
+    def _head(self) -> str | DocketError | None:
         try:
-            loose = set(self.vault.git.not_in_head(media_layout.STORED))
-        except DocketError:
+            return self.vault.git.head_id()
+        except DocketError as e:
+            return e
+
+    def _move_back(self, moved: list[_Storing], head: str | DocketError | None) -> bool:
+        """After a media commit that raised: when HEAD is where it was, the commit didn't land, so each file moved for
+        it goes back to staging and each file it replaced comes back from HEAD. One that landed and then raised
+        (Ctrl+C after git finished) leaves everything where HEAD has it, and its sidecars go at the next promotion;
+        the keys of the files it replaced stay. When git can't say, every file stays, and the next promotion commits
+        it from media/ as a crash's leftover. Whether the commit is known not to have landed."""
+        now = self._head()
+        if isinstance(head, DocketError) or isinstance(now, DocketError) or now != head:
             return False
-        landed = False
-        for target, back, _ in moved:
-            if target.relative_to(root).as_posix() not in loose:
-                landed = True
-            elif back is not None:
-                media_staged.move(target, back)
-        return not landed
+        for storing in moved:
+            if storing.back is not None:
+                media_staged.move(storing.target, storing.back)
+        replaced = [r for storing in moved for r in storing.replaces]
+        if replaced:
+            self.vault.git.run("checkout", "-q", "HEAD", "--", *replaced, check=False)
+        return True
 
     def _media_groups(
         self, swept: media_staged.Swept, screen: Screen, result: PromoteResult
-    ) -> dict[str, list[tuple[Path, Path | None, Path]]]:
-        """The files to commit, per source: each with where it goes back to on a failed commit, and its sidecar."""
+    ) -> dict[str, list[_Storing]]:
+        """The files to commit, per source: each with where it goes back to on a failed commit, its sidecar, and the
+        stored files it replaces."""
         root = self.vault.root
-        # A file a crash left in media/ uncommitted always has its sidecar in staging still: git is asked only then.
+        # A file a crash left in media/ uncommitted always has its sidecar in staging still: git is asked only then. A
+        # replacement a crash left is a tracked file changed in place, or a new one beside a stored file gone from the
+        # tree.
         untracked = self.vault.git.not_in_head(media_layout.STORED) if swept.leftover else []
+        changed = self.vault.git.changed_against_head(media_layout.STORED) if swept.leftover else []
+        loose = sorted({*untracked, *(p for p in changed if (root / p).exists())})
+        removed = [p for p in changed if not (root / p).exists()]
         lfs: Lfs | None = None
-        # A sidecar left beside a file a commit already took, by a crash before its deletion: only the sidecar goes.
+        # A sidecar left beside a file a commit already took, by a crash before its deletion: only the sidecar goes,
+        # with the keys of the files it replaced once HEAD holds its file (#169's rule; DR-0562).
         for sidecar, rid in swept.leftover:
-            if not set(media_staged.rel(root, media_layout.stored_files(root, rid))) & set(untracked):
+            stored = media_layout.stored_files(root, rid)
+            if not set(media_staged.rel(root, stored)) & set(loose):
+                self._forget_replaced(sidecar, stored)
                 sidecar.unlink(missing_ok=True)
-        # Per source: each file to commit, where it goes back to on a failed commit, and its sidecar.
-        groups: dict[str, list[tuple[Path, Path | None, Path]]] = {}
-        for name in untracked:
+        # Per source: each file to commit, where it goes back to on a failed commit, its sidecar and what it replaces.
+        groups: dict[str, list[_Storing]] = {}
+        for name in loose:
             path = root / name
             parts = Path(name).parts
             source = parts[1] if len(parts) > 2 else ""
@@ -497,7 +538,9 @@ class Gate:
                 media_staged.delete(root, self.keys, rid, self.vault.git.in_head)
                 self._media_dropped += 1
                 continue
-            groups.setdefault(source, []).append((path, None, sidecar))
+            stem = f"{path.name.split('.', 1)[0]}."
+            gone = tuple(p for p in removed if Path(p).name.startswith(stem))
+            groups.setdefault(source, []).append(_Storing(path, None, sidecar, gone, tuple(found.replaces_keys)))
         for item in swept.waiting:
             versions = screen.raw.versions(item.sidecar.rid)
             if not versions:
@@ -512,11 +555,37 @@ class Gate:
                 result.media_held.append(problem)
                 continue
             target = media_layout.stored_path(root, item.sidecar.rid, versions[-1].ts, item.sidecar.ext)
+            # A stored file here passed the screen only by needing a new cut: the replacement takes its place. Its key
+            # is read now and deleted once the replacement is committed; until then HEAD still holds the file.
+            old = media_layout.stored_files(root, item.sidecar.rid)
+            old_keys = tuple(k for k in (media_staged.key_of(p) for p in old) if k is not None)
+            if old_keys:
+                # Before the swap: whichever promotion sees the replacement committed deletes them, even after a crash.
+                media_staged.write_sidecar(
+                    self.vault.home,
+                    item.sidecar_path,
+                    item.sidecar.model_copy(update={"replaces_keys": list(old_keys)}),
+                )
+            for path in old:
+                if path != target:
+                    retry(lambda path=path: path.unlink(missing_ok=True))
             media_staged.move(item.path, target)
             groups.setdefault(media_layout.source_of(item.sidecar.rid), []).append(
-                (target, item.path, item.sidecar_path)
+                _Storing(target, item.path, item.sidecar_path, tuple(media_staged.rel(root, old)), old_keys)
             )
         return groups
+
+    def _forget_replaced(self, sidecar: Path, stored: list[Path]) -> None:
+        """The keys a committed replacement's sidecar names, deleted once the stored file is that replacement: what a
+        swap that landed and then raised left to do."""
+        found = media_staged.read_sidecar(sidecar)
+        if found is None or not found.replaces_keys or len(stored) != 1:
+            return
+        if media_staged.key_of(stored[0]) != found.key:
+            return
+        for key in found.replaces_keys:
+            if key != found.key:
+                self.keys.delete(key)
 
     def _promote_source(self, name: str, items: list[tuple[Entry, RawRecord]]) -> SourceRun:
         run = self.vault.rawlog.write_run(name, [final for _, final in items])
@@ -722,10 +791,12 @@ def _cut_rids(scan: Scan) -> set[str]:
     return {e.staged.record.rid for e in scan.entries if e.staged.cuts}
 
 
-def _cuts_of(target: Path, sidecar: Path) -> tuple[str, list[media_layout.Span]]:
-    """A stored file's rid hash, from its name, and the ranges its sidecar says it was cut by."""
+def _cuts_of(target: Path, sidecar: Path) -> tuple[str, str, list[media_layout.Span]]:
+    """A stored file's rid hash, from its name; its key id, from its header; and the ranges its sidecar says it was cut
+    by (DR-0562)."""
     found = media_staged.read_sidecar(sidecar)
-    return target.name.split(".", 1)[0], list(found.cuts) if found is not None else []
+    key = media_staged.key_of(target) or (found.key if found is not None else "")
+    return target.name.split(".", 1)[0], key, list(found.cuts) if found is not None else []
 
 
 def _resolve(ref: str, entries: list[Entry]) -> Entry:

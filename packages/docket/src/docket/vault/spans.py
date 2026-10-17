@@ -216,6 +216,10 @@ class RawLookup:
             return index.nested(rid, source)
         return sorted(other for other in self._source(source) if other == rid or other.startswith(f"{rid}/"))
 
+    def rids(self, source: str) -> list[str]:
+        """Every rid of a source the raw log holds, from the loaded source: for a count over a few stored files."""
+        return sorted(self._source(source))
+
     def of_kind(self, source: str, kind: str) -> list[str]:
         """A source's rids whose latest version is of this kind, newest first: its recordings, for the ones whose
         audio can be put again cut (DR-0561). From a current index's rows, else from the loaded source."""

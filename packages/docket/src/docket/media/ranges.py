@@ -14,9 +14,18 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal
 
+from docket.errors import DocketError
+from docket.vault import cuts as cutting
 from docket.vault.cuts import CUT_MARKER
 from docket.vault.records import RawRecord
+
+if TYPE_CHECKING:  # the staging module reaches the vault package, which imports the gate
+    from docket.vault.staging import Entry
+
+# Why a family has no time to cut its audio at: a record cut by characters, or staged cuts that don't fit yet.
+NoTime = Literal["characters", "unfit"]
 
 Range = tuple[int, int]
 
@@ -66,6 +75,26 @@ def needed(records: Iterable[RawRecord], release: Iterable[Range]) -> Needed:
         first_ms=min((s.start_ms for s in timed), default=None),
         last_ms=max((s.end_ms for s in timed), default=None),
     )
+
+
+def made(staged: Sequence[Entry], raw: Sequence[RawRecord]) -> list[RawRecord] | NoTime:
+    """A family's records with their staged cuts made, as promotion will make them, and its versions in raw; or why
+    there is no time to cut its audio at."""
+    out: list[RawRecord] = []
+    for entry in staged:
+        record = entry.staged.record
+        if by_characters(record) or any(c.unit == "char" for c in entry.staged.cuts):
+            return "characters"
+        if entry.staged.cuts:
+            try:
+                record = cutting.apply(record, list(entry.staged.cuts))
+            except DocketError:
+                # A cut promotion would hold, so its times aren't settled yet.
+                return "unfit"
+        out.append(record)
+    if any(by_characters(record) for record in raw):
+        return "characters"
+    return [*out, *raw]
 
 
 def by_hand(record: RawRecord, release: Sequence[Range]) -> list[Range]:

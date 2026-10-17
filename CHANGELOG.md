@@ -33,6 +33,11 @@ Unreleased in the same PR.
   them after each curate write and on `docket render`, and never commits them. A file edited by hand, or a hand-kept
   one already at the path, is left as it is and reported; a repo anyone can read gets no file; a name a never-store list
   holds is left out. Update every machine before you add the key: an older Docket refuses a `vault.yaml` that has it.
+- Stored audio that gains a cut later, from another release line or a transcript cut by hand, isn't played until
+  the run puts it again, cut; the new file takes the old one's place in one commit, and the old file's key is
+  deleted on this machine once the new one is committed. A stored recording put on hold isn't played either, nor
+  one a record of which was cut by characters: no cut of the audio can match it, and the Recording page and
+  `docket media status` say so.
 - Cut recordings get their audio: a recording released with cuts, or whose transcript you cut by time, has the same
   stretches made silent before its audio is encrypted, so every transcript time still points at the right moment,
   and is stored as WebM Opus. Audio refused before is named in the run's `media` line and put again, cut. A put
