@@ -22,7 +22,9 @@ from docket.vault.vault import Vault
 
 def screen(vault: Vault, config: VaultConfig, *, left_out: bool = False) -> Screen:
     gate = Gate(vault)
-    found = gate._screen(config)  # pyright: ignore[reportPrivateUsage]
+    # No index in these vaults: the lookup loads the source, so the screen outlives the block.
+    with gate._screen(config) as found:  # pyright: ignore[reportPrivateUsage]
+        pass
     if left_out:
         found.left_out = lambda record: True
     return found
@@ -77,7 +79,7 @@ def test_staged_media_s_drop_keeps_every_key_when_a_stored_file_can_t_be_read(tm
     stored.parent.mkdir(parents=True)
     stored.write_bytes(crypto.LFS_POINTER + b"\n")
     file.unlink()
-    media_staged.delete(vault.root, keys, CALL)
+    media_staged.delete(vault.root, keys, CALL, vault.git.in_head)
     assert keys.has(key), "a stored file this machine can't read might be the one the key opens"
 
 

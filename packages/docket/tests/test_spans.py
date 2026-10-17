@@ -259,6 +259,7 @@ def answers(lookup: RawLookup, rid: str) -> list[object]:
         [r.rid for r in lookup.under(rid)],
         [r.rid for r in lookup.transcripts(rid)],
         lookup.timed([rid]),
+        lookup.nested(rid),
     ]
     if latest is not None:
         out.append(lookup.recordings(latest))
@@ -278,6 +279,23 @@ def test_by_place_every_question_has_the_loaded_answer_and_nothing_is_loaded(ind
             assert answers(placed, rid) == answers(whole, rid), rid
         assert loaded(placed) == set()
         assert loaded(whole) >= {"cal", "calls", "chat", "mail", "plaud"}
+    finally:
+        found.close()
+
+
+def test_nested_rids_are_the_rid_and_those_under_it_exactly(indexed: Vault) -> None:
+    near = ["plaud:near", "plaud:near/one", "plaud:near/one/two", "plaud:near0", "plaud:near-x", "plaud:NEAR/x"]
+    records = [make_record(n, rid=rid, source="plaud", container=None, text=rid) for n, rid in enumerate(near)]
+    put_run(indexed.root, "plaud", "2026-10-15T0900-test-box.jsonl", records)
+    indexed.commit([], "Raw: near")
+    index.update(indexed)
+    placed, whole, found = two_routes(indexed)
+    try:
+        for lookup in (placed, whole):
+            assert lookup.nested("plaud:near") == ["plaud:near", "plaud:near/one", "plaud:near/one/two"]
+            assert lookup.nested("plaud:near/one") == ["plaud:near/one", "plaud:near/one/two"]
+            assert lookup.nested("plaud:nearly") == []
+        assert loaded(placed) == set()
     finally:
         found.close()
 

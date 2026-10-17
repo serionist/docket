@@ -13,13 +13,15 @@ git; nothing removes one.
 from __future__ import annotations
 
 import contextlib
+import fnmatch
+import glob
 import json
 import os
 import secrets
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from pydantic import ValidationError
 
@@ -33,6 +35,9 @@ WITHHELD = "_withheld.jsonl"
 TEMP = "media-"
 # A temp file of a put untouched this long was left by a put that died: the download stops after 60 s without a byte.
 STALE_SECONDS = 3600
+# What HEAD holds under a path, vault-relative, or None when git can't say: `Git.in_head`. A clean-up asks it only
+# when it has something to delete.
+Head = Callable[[str], Sequence[str] | None]
 
 
 @dataclass(frozen=True)
@@ -126,11 +131,19 @@ def key_of(path: Path) -> str | None:
         return None
 
 
-def _stored_keys(root: Path, rid: str) -> frozenset[str] | None:
-    """The keys of the rid's stored media, which no staging clean-up may delete; None when one of them doesn't read,
-    so nothing that could be its key is deleted."""
+def _stored_keys(root: Path, source: str, stem: str, head: Head) -> frozenset[str] | None:
+    """The keys of the media stored for a rid hash, which no staging clean-up may delete: the files in `media/` and
+    the ones HEAD holds, so a key outlives its file's working copy. None when one of them doesn't read here (an LFS
+    pointer, a working copy gone) or HEAD can't be listed, so nothing that could be its key is deleted."""
+    held = head(f"{layout.STORED}/{source}")
+    if held is None:
+        return None
+    folder = root / layout.STORED / source
+    name = f"{glob.escape(stem)}.*{layout.SUFFIX}"
+    paths: set[Path] = set(folder.glob(f"*/*/{name}")) if folder.is_dir() else set()
+    paths |= {root / rel for rel in held if fnmatch.fnmatchcase(PurePosixPath(rel).name, name)}
     found: set[str] = set()
-    for path in layout.stored_files(root, rid):
+    for path in sorted(paths):
         key = key_of(path)
         if key is None:
             return None
@@ -143,7 +156,7 @@ def _forget_key(keys: KeyStore, key: str | None, keep: frozenset[str] | None) ->
         keys.delete(key)
 
 
-def _forget_file(path: Path, keys: KeyStore, keep: frozenset[str] | None = frozenset()) -> None:
+def _forget_file(path: Path, keys: KeyStore, keep: frozenset[str] | None) -> None:
     """A media file, then its key read from its header."""
     key = key_of(path)
     retry(lambda: path.unlink(missing_ok=True))
@@ -156,15 +169,22 @@ def _forget_sidecar(path: Path, keys: KeyStore, keep: frozenset[str] | None) -> 
     _forget_key(keys, sidecar.key if sidecar is not None else None, keep)
 
 
-def delete(root: Path, keys: KeyStore, rid: str) -> int:
+def forget_loose(root: Path, keys: KeyStore, path: Path, rid: str, head: Head) -> None:
+    """A file in `media/` HEAD doesn't hold, then its key, unless a file stored for the rid holds that key too."""
+    key = key_of(path)
+    retry(lambda: path.unlink(missing_ok=True))
+    _forget_key(keys, key, _stored_keys(root, layout.source_of(rid), rid_hash(rid), head))
+
+
+def delete(root: Path, keys: KeyStore, rid: str, head: Head) -> int:
     """Delete a rid's staged media: its files, then its sidecar, each with its key, never a key of its stored media.
     Returns how many files went."""
     files = layout.staged_files(root, rid)
     sidecar = layout.sidecar_path(root, rid)
     if not files and not sidecar.exists():
-        # The common case, for every record a sync drops: nothing staged, so nothing to read in media/.
+        # The common case, for every record a sync drops: nothing staged, so nothing to ask git or read in media/.
         return 0
-    keep = _stored_keys(root, rid)
+    keep = _stored_keys(root, layout.source_of(rid), rid_hash(rid), head)
     for path in files:
         _forget_file(path, keys, keep)
     if sidecar.exists():
@@ -172,18 +192,18 @@ def delete(root: Path, keys: KeyStore, rid: str) -> int:
     return len(files)
 
 
-def drop(root: Path, keys: KeyStore, rid: str) -> int:
+def drop(root: Path, keys: KeyStore, rid: str, head: Head) -> int:
     """Before a version of `rid` is dropped: delete the staged media on its rid and on each rid it nests under."""
-    return sum(delete(root, keys, owner) for owner in layout.owners(rid))
+    return sum(delete(root, keys, owner, head) for owner in layout.owners(rid))
 
 
 # -- the pass over staging/_media/ -----------------------------------------------------------------------------------
 
 
-def sweep(root: Path, home: Home, keys: KeyStore) -> Swept:
+def sweep(root: Path, home: Home, keys: KeyStore, head: Head) -> Swept:
     """Every waiting media file with its sidecar. A file with no sidecar that matches it is deleted with its key; a
     sidecar with no file is deleted with its key, unless its rid has stored media, whose promotion it may still serve;
-    one that doesn't read is deleted alone. Temp files a killed put left go too."""
+    one that doesn't read is deleted alone. Never a key of stored media. Temp files a killed put left go too."""
     clear_temps(home)
     base = root / STAGING / layout.STAGED
     waiting: list[Waiting] = []
@@ -203,7 +223,7 @@ def sweep(root: Path, home: Home, keys: KeyStore) -> Swept:
                 or layout.ext_of(path) != sidecar.ext
                 or stem in matched
             ):
-                _forget_file(path, keys)
+                _forget_file(path, keys, _stored_keys(root, folder.name, stem, head))
                 orphans += 1
                 continue
             matched.add(stem)
@@ -214,7 +234,7 @@ def sweep(root: Path, home: Home, keys: KeyStore) -> Swept:
             if sidecar is not None and layout.stored_files(root, sidecar.rid):
                 leftover.append((path, sidecar.rid))
                 continue
-            _forget_sidecar(path, keys, frozenset() if sidecar is not None else None)
+            _forget_sidecar(path, keys, _stored_keys(root, folder.name, stem, head) if sidecar is not None else None)
             orphans += 1
     return Swept(waiting, orphans, leftover)
 

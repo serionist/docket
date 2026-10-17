@@ -222,6 +222,12 @@ class Git:
         """Files under a path that are staged but not in HEAD: what a crash between add and commit leaves."""
         return self._vault_names(self.out("diff", "--cached", "--name-only", "--diff-filter=A", "-z", "--", under))
 
+    def in_head(self, under: str) -> list[str] | None:
+        """The files HEAD holds under a path, made relative to the vault; None when git can't say (no HEAD, a broken
+        repo), so a caller keeping what HEAD may hold keeps everything."""
+        proc = self.run("ls-tree", "-r", "-z", "--name-only", "--full-name", "HEAD", "--", under, check=False)
+        return self._vault_names(proc.stdout) if proc.returncode == 0 else None
+
     def not_in_head(self, under: str) -> list[str]:
         """What `untracked(under, ignored_too=True)` and `staged_new(under)` list together, in one status call
         (DR-0529): `??` and `!!` are the files git doesn't track, hidden or not, and `A` in the first column a file

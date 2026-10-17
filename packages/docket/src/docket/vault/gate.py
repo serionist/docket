@@ -22,7 +22,8 @@ from __future__ import annotations
 import json
 import logging
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Generator, Iterable, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -41,7 +42,7 @@ from docket.vault.host import Lfs, lfs_state
 from docket.vault.records import RawRecord, version
 from docket.vault.redact import Redactor, markers
 from docket.vault.spans import RawLookup
-from docket.vault.staging import Classifier, Decided, Entry, Scan, Staged, Staging, State, key_of, retry, rid_hash
+from docket.vault.staging import Classifier, Decided, Entry, Scan, Staged, Staging, State, key_of, rid_hash
 from docket.vault.vault import Vault
 
 log = logging.getLogger(__name__)
@@ -321,57 +322,102 @@ class Gate:
         with self.vault.lock:
             config = self._config()
             self._sweep(config)
-            return self._screen(config).why(rid)
+            with self._screen(config) as screen:
+                return screen.why(rid)
 
     # -- inside the gate -------------------------------------------------------------------------------------------
 
     def _drop_media(self, rid: str, *, withhold: bool) -> None:
         """Before a version of `rid` goes: the staged media on it and on each rid it nests under, then, for a drop
         for a never-store value or as private, the withheld marks (DR-0547)."""
-        self._media_dropped += media_staged.drop(self.vault.root, self.keys, rid)
+        self._media_dropped += media_staged.drop(self.vault.root, self.keys, rid, self.vault.git.in_head)
         if withhold:
             media_staged.withhold(self.vault.root, rid)
 
-    def _screen(self, config: VaultConfig) -> Screen:
-        """Media's checks over what staging, raw and the logs hold now; the holds and releases the sweep just read."""
-        return Screen(
-            root=self.vault.root,
-            config=config,
-            staged=self.staging.scan().entries,
-            raw=RawLookup(self.vault.root),
-            decided=self.staging.decided(),
-            withheld=media_staged.read_withheld(self.vault.root),
-            holds=self._holds,
-            releases=self._releases,
-            left_out=self._left_out,
-        )
+    @contextmanager
+    def _screen(self, config: VaultConfig) -> Generator[Screen]:
+        """Media's checks over what staging, raw and the logs hold now; the holds and releases the sweep just read.
+        Raw is read at its places while the index is current for the source (DR-0446), so a gate call while media
+        waits doesn't load the source whole. The index is held only while the checks run, never through a git call or
+        a write (DR-0547)."""
+        from docket.index import lookup  # noqa: PLC0415 - the index's modules import the vault's, not the other way
+
+        index = lookup.open_read(self.vault)
+        try:
+            yield Screen(
+                root=self.vault.root,
+                config=config,
+                staged=self.staging.scan().entries,
+                raw=RawLookup(self.vault.root, lambda: index),
+                decided=self.staging.decided(),
+                withheld=media_staged.read_withheld(self.vault.root),
+                holds=self._holds,
+                releases=self._releases,
+                left_out=self._left_out,
+            )
+        finally:
+            if index is not None:
+                index.close()
 
     def _media_sweep(self, config: VaultConfig) -> media_staged.Swept:
         """Clear media's orphans and delete what fails its checks; the media that waits, every check passing."""
-        swept = media_staged.sweep(self.vault.root, self.vault.home, self.keys)
+        swept = media_staged.sweep(self.vault.root, self.vault.home, self.keys, self.vault.git.in_head)
         self._media_dropped += swept.orphans
         if not swept.waiting:
             return swept
-        screen = self._screen(config)
-        kept: list[media_staged.Waiting] = []
-        for waiting in swept.waiting:
-            if screen.why(waiting.sidecar.rid) is None:
-                kept.append(waiting)
-            else:
-                self._media_dropped += media_staged.delete(self.vault.root, self.keys, waiting.sidecar.rid)
+        with self._screen(config) as screen:
+            failing = {w.sidecar.rid for w in swept.waiting if screen.why(w.sidecar.rid) is not None}
+        for rid in sorted(failing):
+            self._media_dropped += media_staged.delete(self.vault.root, self.keys, rid, self.vault.git.in_head)
+        kept = [w for w in swept.waiting if w.sidecar.rid not in failing]
         return media_staged.Swept(kept, swept.orphans, swept.leftover)
 
     def _promote_media(self, config: VaultConfig, result: PromoteResult) -> None:
         """Store the media whose record is in raw now and whose checks pass, one commit per source after the runs'.
         Files a crash left in media/ uncommitted go first, checked through their sidecars. A commit that fails moves
-        its files back to staging."""
-        root = self.vault.root
+        back to staging the files HEAD doesn't hold."""
         swept = self._media_sweep(config)
         result.media_dropped = self._media_dropped
         if not swept.waiting and not swept.leftover:
             # Nothing waits: no git call, so a promotion of records alone costs what it did.
             return
-        screen = self._screen(config)
+        # The screen's index is closed before the commits, which nothing reading it may hold up.
+        with self._screen(config) as screen:
+            groups = self._media_groups(swept, screen, result)
+        for source in sorted(groups):
+            moved = groups[source]
+            try:
+                commit = self.vault.commit(
+                    media_staged.rel(self.vault.root, (target for target, _, _ in moved)),
+                    f"Media: {source}, {len(moved)} file(s) from {self.vault.machine}",
+                )
+            except BaseException:
+                self._move_back(moved)
+                raise
+            for _, _, sidecar in moved:
+                sidecar.unlink(missing_ok=True)
+            result.media.append(MediaRun(source, len(moved), commit))
+        result.media_dropped = self._media_dropped
+
+    def _move_back(self, moved: list[tuple[Path, Path | None, Path]]) -> None:
+        """After a media commit that raised: back to staging each file moved for it that HEAD doesn't hold. One that
+        landed and then raised (Ctrl+C after git finished) leaves its files where HEAD has them, and their sidecars
+        go at the next promotion. When git can't say, every file stays, and the next promotion commits it from
+        media/ as a crash's leftover."""
+        root = self.vault.root
+        try:
+            loose = set(self.vault.git.not_in_head(media_layout.STORED))
+        except DocketError:
+            return
+        for target, back, _ in moved:
+            if back is not None and target.relative_to(root).as_posix() in loose:
+                media_staged.move(target, back)
+
+    def _media_groups(
+        self, swept: media_staged.Swept, screen: Screen, result: PromoteResult
+    ) -> dict[str, list[tuple[Path, Path | None, Path]]]:
+        """The files to commit, per source: each with where it goes back to on a failed commit, and its sidecar."""
+        root = self.vault.root
         # A file a crash left in media/ uncommitted always has its sidecar in staging still: git is asked only then.
         untracked = self.vault.git.not_in_head(media_layout.STORED) if swept.leftover else []
         lfs: Lfs | None = None
@@ -391,11 +437,8 @@ class Gate:
                 result.media_held.append(f"{name} has no sidecar in staging, so it isn't committed")
                 continue
             if screen.why(rid, committing=True) is not None:
-                key = media_staged.key_of(path)
-                retry(lambda path=path: path.unlink(missing_ok=True))
-                if key is not None:
-                    self.keys.delete(key)
-                media_staged.delete(root, self.keys, rid)
+                media_staged.forget_loose(root, self.keys, path, rid, self.vault.git.in_head)
+                media_staged.delete(root, self.keys, rid, self.vault.git.in_head)
                 self._media_dropped += 1
                 continue
             groups.setdefault(source, []).append((path, None, sidecar))
@@ -417,22 +460,7 @@ class Gate:
             groups.setdefault(media_layout.source_of(item.sidecar.rid), []).append(
                 (target, item.path, item.sidecar_path)
             )
-        for source in sorted(groups):
-            moved = groups[source]
-            try:
-                commit = self.vault.commit(
-                    media_staged.rel(root, (target for target, _, _ in moved)),
-                    f"Media: {source}, {len(moved)} file(s) from {self.vault.machine}",
-                )
-            except BaseException:
-                for target, back, _ in moved:
-                    if back is not None:
-                        media_staged.move(target, back)
-                raise
-            for _, _, sidecar in moved:
-                sidecar.unlink(missing_ok=True)
-            result.media.append(MediaRun(source, len(moved), commit))
-        result.media_dropped = self._media_dropped
+        return groups
 
     def _promote_source(self, name: str, items: list[tuple[Entry, RawRecord]]) -> SourceRun:
         run = self.vault.rawlog.write_run(name, [final for _, final in items])

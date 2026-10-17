@@ -13,7 +13,9 @@ import pytest
 from docket_testkit import git, make_record
 from media_kit import CALL, POLISHED, audio, call, in_raw, media_vault
 
+from docket import index
 from docket.errors import DocketError
+from docket.index import build
 from docket.media import crypto, layout, reader
 from docket.media import put as media
 from docket.media import staged as media_staged
@@ -23,18 +25,22 @@ from docket.vault import holds, releaselog
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.cuts import Cut
 from docket.vault.gate import Gate
+from docket.vault.git import Git
 from docket.vault.host import Lfs
 from docket.vault.records import RawRecord
 from docket.vault.releaselog import Kept, LoggedCut, Release
+from docket.vault.spans import RawLookup
 from docket.vault.staging import Staging, rid_hash
 from docket.vault.vault import Vault
 
 
-def put(vault: Vault, rid: str = CALL, head: bytes = b"ID3\x04") -> None:
+def put(vault: Vault, rid: str = CALL, head: bytes = b"ID3\x04") -> bytes:
     drop = media.drop_folder()
     drop.mkdir(parents=True, exist_ok=True)
-    (drop / "take").write_bytes(audio(3000, head=head))
+    data = audio(3000, head=head)
+    (drop / "take").write_bytes(data)
     media.put(vault, rid, path=str(drop / "take"))
+    return data
 
 
 def never_store(vault: Vault, keyword: str) -> None:
@@ -155,8 +161,8 @@ def test_a_release_that_leaves_the_record_out_takes_its_media(tmp_path: Path) ->
     gate = Gate(vault)
     with gate.vault.lock:
         gate._sweep(gate._config())  # pyright: ignore[reportPrivateUsage]
-        screen = gate._screen(gate._config())  # pyright: ignore[reportPrivateUsage]
-    assert screen.why(CALL) is not None
+        with gate._screen(gate._config()) as screen:  # pyright: ignore[reportPrivateUsage]
+            assert screen.why(CALL) is not None
     # At intake: a version the release leaves out goes, and media put on its rid before goes with it.
     vault2 = media_vault(tmp_path / "second")
     put(vault2)
@@ -290,6 +296,122 @@ def test_a_failed_media_commit_moves_the_files_back(tmp_path: Path, monkeypatch:
     assert Gate(vault).promote().media
 
 
+def test_a_media_commit_that_lands_and_then_raises_keeps_its_file_and_its_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = media_vault(tmp_path)
+    in_raw(vault)
+    data = put(vault)
+    real = Vault.commit
+
+    def lands_then_raises(self: Vault, paths: list[str], message: str) -> str | None:
+        done = real(self, paths, message)
+        if message.startswith("Media:"):
+            raise KeyboardInterrupt  # Ctrl+C after git finished
+        return done
+
+    monkeypatch.setattr(Vault, "commit", lands_then_raises)
+    with pytest.raises(KeyboardInterrupt):
+        Gate(vault).promote()
+    # Not undo(): that would take the state dir the file key store's seal is in, too.
+    monkeypatch.setattr(Vault, "commit", real)
+    [file] = layout.stored_files(vault.root, CALL)
+    assert file.relative_to(vault.root).as_posix() in git(vault.root, "ls-tree", "-r", "--name-only", "HEAD", "media")
+    assert not layout.staged_files(vault.root, CALL), "HEAD holds it, so it stays in media/"
+    assert KeyStore(vault.home).count() == 1
+    assert reader.read(vault, CALL).data == data
+    # The next promotion takes the sidecar left behind and commits nothing.
+    assert not Gate(vault).promote().media
+    assert not layout.sidecar_path(vault.root, CALL).exists()
+    assert KeyStore(vault.home).count() == 1
+    assert reader.read(vault, CALL).data == data
+
+
+def test_a_failed_media_commit_git_can_t_explain_leaves_its_files_for_the_next(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = media_vault(tmp_path)
+    in_raw(vault)
+    put(vault)
+    real = Vault.commit
+
+    def fails(self: Vault, paths: list[str], message: str) -> str | None:
+        if message.startswith("Media:"):
+            raise DocketError("git refused")
+        return real(self, paths, message)
+
+    asked = Git.not_in_head
+
+    def broken(self: Git, under: str) -> list[str]:
+        if under == layout.STORED:
+            raise DocketError("git status: broken")
+        return asked(self, under)
+
+    monkeypatch.setattr(Vault, "commit", fails)
+    monkeypatch.setattr(Git, "not_in_head", broken)
+    with pytest.raises(DocketError, match="git refused"):
+        Gate(vault).promote()
+    assert layout.stored_files(vault.root, CALL) and not layout.staged_files(vault.root, CALL)
+    monkeypatch.setattr(Vault, "commit", real)
+    monkeypatch.setattr(Git, "not_in_head", asked)
+    assert [m.stored for m in Gate(vault).promote().media] == [1]
+    assert reader.state_of(vault, CALL) == "ok"
+
+
+def test_a_key_whose_file_head_holds_outlives_every_clean_up(tmp_path: Path) -> None:
+    vault = media_vault(tmp_path)
+    in_raw(vault)
+    data = put(vault)
+    sidecar = layout.sidecar_path(vault.root, CALL)
+    kept = sidecar.read_bytes()
+    Gate(vault).promote()
+    [file] = layout.stored_files(vault.root, CALL)
+    rel = file.relative_to(vault.root).as_posix()
+    # Its working copy back in staging beside its sidecar, as a failed commit moved it before HEAD was asked.
+    media_staged.move(file, layout.staged_file(vault.root, CALL, "mp3"))
+    sidecar.write_bytes(kept)
+    never_store(vault, "crane")
+    Gate(vault).list()
+    assert not layout.staged_files(vault.root, CALL)
+    assert KeyStore(vault.home).count() == 1, "HEAD holds a file the key opens"
+    git(vault.root, "checkout", "HEAD", "--", rel)
+    assert reader.read(vault, CALL).data == data
+
+
+def test_a_clean_up_keeps_every_key_when_git_can_t_list_head(tmp_path: Path) -> None:
+    vault = media_vault(tmp_path)
+    put(vault)
+    keys = KeyStore(vault.home)
+    assert media_staged.delete(vault.root, keys, CALL, lambda under: None) == 1
+    assert keys.count() == 1
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    git(empty, "init", "-q")
+    assert Git(empty).in_head("media") is None
+
+
+def test_a_gate_call_while_media_waits_reads_raw_at_its_places(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    vault = media_vault(tmp_path)
+    in_raw(vault)
+    put(vault)
+    index.update(vault)
+    loads: list[str] = []
+    real = RawLookup._source  # pyright: ignore[reportPrivateUsage]
+
+    def counted(self: RawLookup, source: str) -> object:
+        loads.append(source)
+        return real(self, source)
+
+    monkeypatch.setattr(RawLookup, "_source", counted)
+    assert Gate(vault).media_check(CALL) is None
+    Gate(vault).list()
+    assert loads == []
+    # Without the index the source loads, with the same answer.
+    build.db_path(vault).unlink()
+    assert Gate(vault).media_check(CALL) is None
+    assert set(loads) == {"plaud"}
+
+
 def test_a_crash_between_the_move_and_the_commit_is_finished_next_time(tmp_path: Path) -> None:
     vault = media_vault(tmp_path)
     in_raw(vault)
@@ -343,7 +465,7 @@ def test_a_sidecar_left_after_its_commit_goes_and_the_key_stays(tmp_path: Path) 
     Gate(vault).list()
     assert sidecar.exists(), "kept while its file is in media/"
     # A drop of the rid's staged media never takes a stored file's key.
-    media_staged.delete(vault.root, KeyStore(vault.home), CALL)
+    media_staged.delete(vault.root, KeyStore(vault.home), CALL, vault.git.in_head)
     assert KeyStore(vault.home).count() == 1
     sidecar.write_bytes(kept)
     Gate(vault).promote()

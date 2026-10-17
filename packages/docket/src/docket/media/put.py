@@ -133,7 +133,7 @@ def finish(vault: Vault, fetched: Fetched, keys: KeyStore) -> Stored:
     try:
         with vault.lock:
             _refuse(Gate(vault).media_check(rid))
-            media_staged.delete(vault.root, keys, rid)
+            media_staged.delete(vault.root, keys, rid, vault.git.in_head)
             target = layout.staged_file(vault.root, rid, fetched.ext)
             keys.add(fetched.key, fetched.secret, target.relative_to(vault.root).as_posix())
             sidecar = layout.Sidecar(
