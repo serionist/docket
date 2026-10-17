@@ -105,8 +105,8 @@ def test_the_commits_step_reads_the_pr(repo: Path, tmp_path: Path, monkeypatch: 
 def test_coverage_floors() -> None:
     report = {
         "files": {
-            "packages/app/src/app/a.py": {"summary": {"covered_lines": 9, "num_statements": 10}},
-            "tools/kit/src/kit/b.py": {"summary": {"covered_lines": 5, "num_statements": 10}},
+            "packages/app/src/app/a.py": {"summary": {"covered_lines": 9, "num_statements": 10}, "missing_lines": [3]},
+            "tools/kit/src/kit/b.py": {"summary": {"covered_lines": 5, "num_statements": 10}, "missing_lines": [4, 7]},
             "tests/test_x.py": {"summary": {"covered_lines": 1, "num_statements": 1}},
         }
     }
@@ -115,6 +115,9 @@ def test_coverage_floors() -> None:
     failures, rise = coverage.judge(measures, {"app": 80, "kit": 60, "gone": 10})
     assert failures == ["kit: 50.0% is below its floor of 60%", "gone: has a floor but nothing was measured"]
     assert rise == ["app: 90.0%, floor 80%: raise it to 90"]
+    # A module under its floor names the lines no test ran.
+    floors = {"app": 80, "kit": 60}
+    assert coverage.missing(report, coverage.below(measures, floors)) == ["  tools/kit/src/kit/b.py: line 4, 7"]
 
 
 def test_check_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
