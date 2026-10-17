@@ -1,9 +1,9 @@
 ---
 title: Make fewer git calls on each vault write
 issue: "#132"
-status: draft
-approved_by:
-approved_at:
+status: approved
+approved_by: claude, the lead (autonomy grant)
+approved_at: "2026-10-17"
 ---
 
 # Make fewer git calls on each vault write
@@ -154,9 +154,18 @@ at every check: at `writing()`'s entry and in every commit. `ls-files -u` moves 
 and no longer runs at `writing()`'s entry. A commit that adds nothing, such as promote's first, asks it not at all.
 
 Why next to the add: `git add` marks an unmerged path resolved and stages its conflict markers, and `git commit
---only` then succeeds. On git 2.47 a `git stash pop` conflict on a vault file, followed by Docket's add and commit,
-put the markers into HEAD and left `ls-files -u` empty. A check earlier in the lock hold can't see a conflict that
-appears after it, so the question sits where the conflict would be taken in.
+--only` re-reads the paths it names and resolves an unmerged one too. On git 2.47 a `git stash pop` conflict on a
+vault file, followed by Docket's add and commit, put the markers into HEAD and left `ls-files -u` empty. A check
+earlier in the lock hold can't see a conflict that appears after it, so the question sits as close to the commit as it
+can.
+
+A conflict that lands after the check and before the commit, such as a stash pop after Docket's add, is still
+committed: the window is three git starts (`add`, the staged check, the identity), where it is about six on main. The
+lead accepted that window rather than a second `ls-files -u` before each commit (Risks).
+
+The check stays vault-wide, a plain `ls-files -u` from the vault's folder as today, not limited to the commit's paths:
+`ls-files` takes no `--pathspec-from-file`, and a backlog of run files on the command line could pass Windows'
+32,767-character limit.
 
 ### Each question once (DR-0529, DR-0530)
 
@@ -203,7 +212,8 @@ way.
 | Test | What it proves |
 |---|---|
 | `test_git_calls.py`, new | per path (doc put, promote, curate add, release, import notes, `vault.yaml` write) on a temp vault, the exact list of git commands, so a call added later fails with its name; doc put and promote on a folder vault too |
-| the mid-hold conflict | a `git stash pop` conflict on a vault file that appears inside `writing()`, after its entry: the commit refuses, HEAD stays, the markers aren't committed |
+| the mid-hold conflict | a `git stash pop` conflict on a vault file that appears inside `writing()`, after its entry and before the commit's check: the commit refuses, HEAD stays, the markers aren't committed |
+| a conflict after the add | a `git stash pop` conflict that lands after Docket's `add` and before its commit is committed, as on main: the test pins today's behaviour, so a later change to it is deliberate |
 | `test_gitfiles.py`, new | `head` and `head_id` equal `git rev-parse` on a fresh repo, a branch with no commit, a detached HEAD, a ref only in `packed-refs`, a git dir with `commondir`, a folder vault's host; a malformed ref file and an unreadable `packed-refs` answer unknown, and the caller's git call runs |
 | reftable | one vault made with `init.defaultRefFormat=reftable`: the reader answers unknown and the fallback calls run, so its call list has today's calls; skipped where the git lacks reftable |
 | the run-file check | status and the two calls give the same list: an untracked run file, one a `.gitignore` hides, one staged by an add whose commit never came, a staged rename, none; on a repo vault and a folder vault |
@@ -228,6 +238,7 @@ and wall time.
 | status and the two calls differ under some config (`status.showUntrackedFiles`, the untracked cache, case on Windows) | the flags given override the config; equivalence tests on all three systems |
 | the folder log lists a doc's commits differently from a per-file log | without a merge, the commits that touched the file are in both; with one, `rev-list --merges` sends `put_many` back to one log per doc; tested both ways |
 | a user's git starts within one write | marker files and the branch are read at every check, and `ls-files -u` sits right before each add |
+| a conflict lands between the check and the commit (a stash pop after Docket's add) | committed with its markers, as on main, in a window of three git starts against six; accepted by the lead. Not taken: a second `ls-files -u` before each commit (one more call per commit, and the window only moves), or a private index built from Docket's own bytes (a second staging of every commit). Pinned by a test |
 | #134 changes `Vault` and the git layer too | the shared reader is one module; either rebases onto the other |
 | #152 changes `home.py` | the reader uses `is_git_dir` and #152's plain-checkout rule; whichever lands second rebases |
 | savings smaller elsewhere | a git call costs about 5 ms on macOS and Linux, so the share saved is the same and the seconds fewer |
@@ -236,5 +247,6 @@ and wall time.
 
 | Round | Verdict | Findings |
 |---|---|---|
+| 2, the G1 re-check at ad92fab | resolved, one minor | G1a: `commit --only` resolves an unmerged path it names too, so a conflict between the check and the commit is still committed; the reason is corrected, the lead accepted the window (a Risks row, with the options not taken), the check stays vault-wide, and a second test pins a pop after the add. Approved by the lead after it |
 | additions after round 1 | from the coordinator | #152's discover: the count notes folder vaults' opens, and the reader takes its plain-checkout rule and `is_git_dir`. The console flag: measured under pythonw and python, then moved to its own PR ("Part of #132") with its own decision entry; DR-0530 stays the identity alone |
 | 1, at 90d0dac | changes needed | G1 (major): one `ls-files -u` per hold let a mid-hold conflict be committed; it now sits before each add. G2: the batched log takes `-z`, `--no-renames` and vault-relative names, tested under a non-ASCII path. G3: a merge in the folders' history sends `put_many` back to one log per doc, decided by one `rev-list --merges`. G4: the tests pin the files ref format, one reftable case tests the fallback, and Git 3.0's default is a risk. The reader answers "no commit yet" only from a cleanly read `packed-refs`, and status parsing reads a staged rename's second field |
