@@ -3,15 +3,17 @@ the bundle's format pinned by its version, the counters of keys no export holds,
 
 from __future__ import annotations
 
+import errno
 import getpass
 import json
+import os
 import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import AtConsole
+from docket_testkit import AtConsole, git
 from media_kit import CALL, audio, in_raw, media_vault
 
 from docket import console, hooks
@@ -268,3 +270,100 @@ def test_a_list_of_exported_ids_that_doesn_t_read_holds_none_of_them(tmp_path: P
     keys = KeyStore(vault.home)
     (keys.folder / "exported.json").write_text(body, encoding="utf-8")
     assert keys.exported() == held
+
+
+def test_an_export_inside_a_git_work_tree_is_refused(
+    tmp_path: Path, owner: Callable[..., AtConsole], fixed: str
+) -> None:
+    vault = media_vault(tmp_path)
+    stored(vault)
+    owner()
+    repo = tmp_path / "repo"
+    (repo / "keys").mkdir(parents=True)
+    git(repo, "init", "-q")
+    for target in (repo / "keys" / "docket-keys.age", vault.root / "docket-keys.age"):
+        with pytest.raises(
+            DocketError, match="inside a git work tree, where a commit could take it; export to a folder"
+        ):
+            backup.export(vault, target)
+        assert not target.exists()
+
+
+def test_a_write_that_fails_partway_leaves_nothing_under_the_name(
+    tmp_path: Path, owner: Callable[..., AtConsole], fixed: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = media_vault(tmp_path)
+    stored(vault)
+    folder = tmp_path / "usb"
+    target = folder / "docket-keys.age"
+
+    def full(fd: int) -> None:
+        raise OSError(errno.ENOSPC, "no space left on the device")
+
+    monkeypatch.setattr(os, "fsync", full)
+    owner()
+    with pytest.raises(DocketError, match=r"can't write .*no space left on the device; nothing was exported"):
+        backup.export(vault, target)
+    assert list(folder.iterdir()) == []
+    assert KeyStore(vault.home).unbacked() == 1
+
+
+def test_a_drive_without_hard_links_takes_the_name_first(
+    tmp_path: Path, owner: Callable[..., AtConsole], fixed: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = media_vault(tmp_path)
+    stored(vault)
+    target = tmp_path / "usb" / "docket-keys.age"
+
+    def no_links(source: object, link: object) -> None:
+        raise OSError(errno.EPERM, "hard links aren't supported here")
+
+    monkeypatch.setattr(os, "link", no_links)
+    owner("WXYZ")
+    assert backup.export(vault, target).kept
+    assert [p.name for p in target.parent.iterdir()] == ["docket-keys.age"]
+    assert json.loads(crypto.open_with_passphrase(target.read_bytes(), fixed))["schema_version"] == 1
+
+    def stuck(source: object, to: object) -> None:
+        raise OSError(errno.EIO, "the stick went away")
+
+    monkeypatch.setattr(os, "replace", stuck)
+    again = tmp_path / "usb2" / "docket-keys.age"
+    with pytest.raises(OSError, match="the stick went away"):
+        backup._write_new(again, b"sealed")  # pyright: ignore[reportPrivateUsage]
+    assert list(again.parent.iterdir()) == []
+
+
+def test_a_name_taken_after_the_check_is_never_written_over(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target = tmp_path / "usb" / "docket-keys.age"
+    target.parent.mkdir()
+    target.write_bytes(b"mine")
+    with pytest.raises(DocketError, match="is there already"):
+        backup._write_new(target, b"sealed")  # pyright: ignore[reportPrivateUsage]
+
+    def no_links(source: object, link: object) -> None:
+        raise OSError(errno.EPERM, "hard links aren't supported here")
+
+    monkeypatch.setattr(os, "link", no_links)
+    with pytest.raises(DocketError, match="is there already"):
+        backup._write_new(target, b"sealed")  # pyright: ignore[reportPrivateUsage]
+    assert target.read_bytes() == b"mine"
+    assert [p.name for p in target.parent.iterdir()] == ["docket-keys.age"]
+
+
+@pytest.mark.parametrize(
+    "typed", ["abcd efgh jklm npqr stuv wxyz", "ABCDEFGHJKLMNPQRSTUVWXYZ", " Abcd-Efgh-Jklm-Npqr-Stuv-Wxyz\t"]
+)
+def test_the_passphrase_opens_the_file_however_it_is_typed(
+    tmp_path: Path, owner: Callable[..., AtConsole], fixed: str, monkeypatch: pytest.MonkeyPatch, typed: str
+) -> None:
+    first = media_vault(tmp_path / "a")
+    stored(first)
+    target = tmp_path / "keys.age"
+    owner("WXYZ")
+    backup.export(first, target)
+    second = media_vault(tmp_path / "b")
+    monkeypatch.setattr(console, "ask_hidden", lambda prompt: typed)
+    owner()
+    assert backup.import_keys(second, target) == backup.Imported(added=1, had=0)
+    assert backup.passphrase_of(typed) == fixed

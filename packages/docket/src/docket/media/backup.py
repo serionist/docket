@@ -14,6 +14,7 @@ The file's format is a door, pinned by its `schema_version`: a later Docket read
 
 from __future__ import annotations
 
+import os
 import secrets
 from dataclasses import dataclass
 from datetime import datetime
@@ -26,6 +27,7 @@ from docket import console
 from docket.errors import DocketError
 from docket.media import crypto
 from docket.media.keystore import KeyStore
+from docket.vault.git import toplevel
 from docket.vault.vault import Vault
 
 BUNDLE_VERSION = 1
@@ -77,15 +79,61 @@ def _at_console(act: str) -> None:
         raise DocketError(problem)
 
 
+def _taken(target: Path) -> DocketError:
+    return DocketError(f"{target} is there already; name a new file, so no export is ever written over")
+
+
+def _write_new(target: Path, data: bytes) -> None:
+    """`data` at `target`, a name nothing holds: written to a temp file beside it and synced first, then put in place
+    without overwriting, by a hard link, or on a drive with none (FAT on a USB stick) by taking the name first and
+    replacing it. A failure anywhere leaves nothing under the target's name."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.parent / f".{target.name}.{secrets.token_hex(4)}.tmp"
+    held = False
+    try:
+        with tmp.open("xb") as out:
+            out.write(data)
+            out.flush()
+            os.fsync(out.fileno())
+        try:
+            os.link(tmp, target)
+        except FileExistsError:
+            raise _taken(target) from None
+        except OSError:
+            try:
+                with target.open("xb"):
+                    held = True
+            except FileExistsError:
+                raise _taken(target) from None
+            tmp.replace(target)
+            held = False
+    except BaseException:
+        if held:
+            target.unlink(missing_ok=True)
+        raise
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def passphrase_of(typed: str) -> str:
+    """A passphrase as Docket draws it, from however it was typed: its letters only, in groups of four."""
+    letters = "".join(c for c in typed.upper() if c.isascii() and c.isalpha())
+    return "-".join(letters[i : i + GROUP] for i in range(0, len(letters), GROUP))
+
+
 def export(vault: Vault, target: Path, keys: KeyStore | None = None) -> Exported:
-    """Write every key of this clone to `target`, sealed with a passphrase shown once. The owner types its last group
-    back, so a passphrase nobody kept never leaves a file behind that nothing opens."""
+    """Write every key of this clone to `target`, sealed with a passphrase shown once the file is synced. The owner
+    types its last group back, so a passphrase nobody kept never leaves a file behind that nothing opens."""
     _at_console(EXPORT)
+    if toplevel(target.resolve().parent) is not None:
+        raise DocketError(
+            f"{target} is inside a git work tree, where a commit could take it; export to a folder outside any repo"
+        )
     store = keys or KeyStore(vault.home)
     if store.info() is None or not store.ids():
         raise DocketError("this clone holds no media keys yet, so there is nothing to export")
     if target.exists():
-        raise DocketError(f"{target} is there already; name a new file, so no export is ever written over")
+        raise _taken(target)
     found: list[BundleKey] = []
     for key_id in store.ids():
         key = store.get(key_id)
@@ -97,9 +145,10 @@ def export(vault: Vault, target: Path, keys: KeyStore | None = None) -> Exported
         found.append(BundleKey(id=key_id, identity=key.identity, path=key.path, at=key.at))
     passphrase = draw()
     sealed = crypto.seal_with_passphrase(Bundle(keys=found).model_dump_json(), passphrase)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    with target.open("xb") as out:
-        out.write(sealed)
+    try:
+        _write_new(target, sealed)
+    except OSError as e:
+        raise DocketError(f"can't write {target}: {e.strerror or type(e).__name__}; nothing was exported") from None
     console.say(f"Wrote {len(found)} media key(s) to {target}.")
     console.say(f"Its passphrase, shown this once: {passphrase}")
     console.say("Keep the two apart: the file in one place, the passphrase in another.")
@@ -129,7 +178,7 @@ def import_keys(vault: Vault, source: Path, keys: KeyStore | None = None) -> Imp
         data = source.read_bytes()
     except OSError as e:
         raise DocketError(f"can't read {source}: {e.strerror or type(e).__name__}") from None
-    passphrase = console.ask_hidden("Its passphrase: ").strip().upper()
+    passphrase = passphrase_of(console.ask_hidden("Its passphrase: "))
     try:
         bundle = read_bundle(crypto.open_with_passphrase(data, passphrase))
     except DocketError as e:

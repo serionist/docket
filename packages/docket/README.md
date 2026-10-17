@@ -298,7 +298,9 @@ The newest export holds every key, so it is the backup. Keep the file and the pa
 | a synced folder | the file, on each machine you use; nothing opens it without the passphrase |
 
 `docket media status`, `docket vault status` and the session start count the keys no export holds yet: export again
-after new media is stored.
+after new media is stored. The count trusts that every export you made is still where you put it; Docket can't see a
+lost stick. Export to a folder outside any repo: one inside a git work tree is refused, since a commit could take it.
+The passphrase opens the file however you type it, with or without the dashes.
 
 ## Processed docs
 
