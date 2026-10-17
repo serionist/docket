@@ -19,7 +19,7 @@ vault's settings in force at the moment it is sent.
 |---|---|
 | Opt-in | `api_provider: voyage` in `vault.yaml`, absent by default, a one-way door. It is a key added later to #134's settings in force, so it needs no special case: turning it on or off asks at the owner's console and applies once committed, and no page sets it |
 | Key | in the system keychain through keyring, set at the owner's console; no file fallback, never in the vault or the user config |
-| Gate | only chunks from the index, which never reads `staging/`; each screened again with the settings in force before it leaves; the query too |
+| Gate | only chunks from the index, which never reads `staging/`; each screened again with the settings in force before it leaves: its sources still there and not private, the never-store lists, redaction; the query too |
 | Provider | an in-process runner behind #67's `Runner`, chosen per machine as `provider: api` in the models block |
 | Docs | the README's "What leaves this machine" section |
 
@@ -64,19 +64,26 @@ Its gaps go in Risks: no language list names Hungarian, and the docs read name n
 | Lock | Where | Set by | Off |
 |---|---|---|---|
 | the vault allows it | `api_provider: voyage` in `vault.yaml`, as in force (#134) | `docket models allow voyage` at the owner's console, or the owner's own commit of a hand edit | `docket models allow none`, the same way |
-| this machine chose it | `provider: api` in the user config's models block (DR-0335) | `docket models install --api` | `docket models remove`, at once |
+| this machine chose it | `provider: api` in the user config's models block (DR-0335) | `docket models install --api`, at the owner's console | `docket models remove`, at once |
 | the key | the keychain, entry `docket` / `voyage-api-key` | `docket models key voyage`, a hidden prompt at the console | `docket models key voyage --forget`, at once |
 
 - Every send checks all three. Any one missing makes the models `Off` with why: for example, "this vault doesn't
   allow sending its text to voyage; `docket models allow voyage`, at your console". Search goes on by keyword.
 - Removing the machine's choice or the key stops sending at once, with no question, since neither touches the gate.
   The vault's key follows the gate's rule for a key added later.
+- Each lock is turned on only at the owner's console, through #134's `console.problem()`, refused under `CLAUDECODE`
+  and from a pipe: `models allow` through `rewrite`, `models install --api` and `models key` in themselves. So Claude
+  turns none of them on, and an agent's own `git commit` of a hand edit, the gap #134 accepts, can put
+  `api_provider` in force but still finds no machine choice and no key.
+- In a vault used from several machines, each machine's choice and key are that machine's instant offs; the vault's
+  key, once committed, stops them all.
 
 ### The vault.yaml key, under loosens() as a key added later
 
-- `VaultConfig.api_provider: Literal["voyage"] | None = None`. `dump()` writes it only when set, so every vault that
-  never opts in keeps its `vault.yaml` byte for byte, stays in Docket's form (`written_by_docket`), and opens on a
-  machine not upgraded yet.
+- `VaultConfig.api_provider: Literal["voyage"] | None = None`. `dump()` writes it only when set, as `SourceConfig`'s
+  serializer drops `folder`; not with `exclude_none`, which would drop `mapper: null` too. So every vault that never
+  opts in keeps its `vault.yaml` byte for byte, stays in Docket's form (`written_by_docket`), and opens on a machine
+  not upgraded yet.
 - A vault that opted in carries the key, and an older Docket refuses it as an unknown key (DR-0021). That fails safe:
   an older machine never sends what it doesn't know it may.
 - No line in `loosens()` or `effective()`. #134's `effective(committed, file)` starts from HEAD's settings and puts in
@@ -97,6 +104,8 @@ Its gaps go in Risks: no language list names Hungarian, and the docs read name n
   `docket models status` says so.
 - `docket models key voyage` reads the key with `getpass` only at a console, through #134's `console.problem()`:
   refused under `CLAUDECODE` and from a pipe, so a key never passes through Claude's transcript or a shell history.
+- The keychain keeps the key out of transcripts, files and the vault. It doesn't hide it from a process running as
+  the user, which can ask the keychain as Docket does; the README says so.
 - The key is read when the runner starts and again after a 401. It is never logged, never in an error, never in
   `models status`.
 
@@ -108,7 +117,7 @@ is #67's, unchanged: the budget, the pause and the counts.
 
 | Part | What |
 |---|---|
-| `send(url, body, timeout)` | the one network path: `urllib.request` over HTTPS to `https://api.voyageai.com/v1/`, `Authorization: Bearer`, the OS trust store; proxies from the environment honoured, unlike the loopback client |
+| `send(url, body, timeout)` | the one network path: `urllib.request` over HTTPS to `https://api.voyageai.com/v1/`, `Authorization: Bearer`, the OS trust store; proxies from the environment honoured, unlike the loopback client. Its opener has no redirect handler, so a 3xx is an error naming its status; a `Skip` reason or a log line carries the status and fixed words, never a response body or the request |
 | `query(text)` | `/embeddings`, `input_type: query`, 2 s as the worker's `QUERY_SECONDS`; past it, None, and search skips its vector stage |
 | `batch(texts)` | `/embeddings`, `input_type: document`, up to 128 inputs or 200,000 characters a request, inside Voyage's 1,000 texts and 320k tokens; 60 s |
 | `rerank(query, texts, deadline)` | `/rerank` with the HTTP timeout at the deadline; past it, `Skip(budget=True)`; any error, `Skip(why)` |
@@ -127,20 +136,37 @@ The screen is the vault's settings in force (#134), at the moment of sending:
 
 - **Chunks come only from the index.** The index reads `raw/`, `processed/` and `entities/`, never `staging/` (DR-0115
   and `index/build.py`), so nothing staged is ever a chunk.
+- **Sources in force.** A chunk is held back unless every record it comes from belongs to a source that is in the
+  settings in force and isn't `private`. Raw is written once, so a source the owner made private after a bad recording
+  slipped in as work still has that recording in the index. A removed source's records are held back too, since their
+  sensitivity is unknown now. A source that is there but off is a pause, not a judgement, so its records may go. A
+  doc's chunk is held to the sources of the records its doc covers.
 - **Never-store, on the records.** A chunk is held back when any record it comes from matches the never-store lists as
   intake reads a record (`neverstore.match`), or its text says a listed keyword. A doc's chunk is checked on its text
   and the records its doc covers. The records are read through the raw lookup by place (#76).
-- **Redaction.** A chunk is held back when the redactor of the settings in force would change its input. A rule turned
-  on after the text was stored keeps it here rather than sending it unredacted. The input itself is never rewritten,
-  so its hash and its vector stay stable (DR-0336).
-- **The query.** It is held back when it says a listed keyword or the redactor would change it. Search then runs with
-  no vector stage and no rerank, and says why, never naming what matched.
+- **Redaction.** A chunk is held back when the redactor of the settings in force would change its input, its title
+  alone or its text alone, as intake redacts each field on its own: an anchored pattern (`^ACCT-\d+`) meets a text
+  that starts with it, but not the joined input, where the title comes first. A rule turned on after the text was
+  stored keeps it here rather than sending it unredacted. The input itself is never rewritten, so its hash and its
+  vector stay stable (DR-0336).
+- **The query.** It is held back when it holds a value from any never-store list, or the redactor would change it:
+  - `listed()` on the whole query, for the people and keywords lists, and on each word and each pair of neighbouring
+    words, for the people list;
+  - `in_container()` on each word, for the containers list.
+
+  Search then has no vector stage and no rerank through the API, and says why, never naming what matched.
+- **The fingerprint.** The sha256 of the never-store lists, the redaction settings, and each source's presence,
+  sensitivity and `enabled` in force. The vector table's meta row keeps the one its vectors were screened under.
 - **Rerank candidates.** Fifty record reads don't fit in 0.75 s, so the pass's screen stands in for them:
   - a chunk gets an API vector only when the pass passed it;
-  - the vector table's meta row keeps the fingerprint (sha256) of the never-store lists and redaction settings it was
-    screened under;
-  - a rerank sends only candidates with a vector, and only while the fingerprint is the current one. Otherwise the
-    rerank is skipped for that search, with the reason, as a budget overrun is.
+  - a rerank sends only candidates with a vector, and only while the table's fingerprint is the current one; otherwise
+    the whole rerank is skipped for that search, with the reason, as a budget overrun is;
+  - candidates not sent (no vector yet, such as a record ingested a minute ago, or held back) keep their fused
+    positions, and the sent ones are reranked among the positions they held, in DR-0452's two tiers, so a new record
+    never sinks for want of a vector.
+- **The pass, request by request.** Before each request the pass reads the fingerprint of the settings in force. When
+  it has moved since the batch was screened, the pass screens the batch again before sending, and starts the full screen
+  below.
 - **When the settings change.** The fingerprint moves. The next pass screens every chunk again without sending
   anything: it drops the vector of each chunk now held back, then stores the new fingerprint.
 - **Held-back chunks** are skipped for the rest of a pass, so it never loops on them. They are counted in
@@ -195,8 +221,8 @@ Recorded as `proposed` for the maintainer's review.
 |---|---|---|
 | Voyage AI: voyage-4 at 512 dimensions and rerank-2.5-lite, through an in-process `Runner` over HTTPS; `provider: api` in the models block; restates DR-0335 with api allowed and supersedes DR-0340 in step 1 | Cohere: zero retention only for approved enterprise customers, 30 days of logs; Jina: under Elastic's terms now, prices unpublished; Vertex: cloud IAM, not a key; a worker process: nothing to isolate | DR-0536 |
 | `api_provider: voyage` in `vault.yaml`, written only when set, a one-way door; no line in `loosens()` or `effective()`: a key added later | a list of providers: one at a time is enough; a row in `effective()` for an instant off: the machine's choice and the key are instant offs; in the user config: the vault's text is the vault's to give (DR-0335) | DR-0537 |
-| the screen: chunks from the index only, held back on the records' never-store match and on a change the redactor would make, under the settings in force; the query screened; reranks send only chunks passed under the current settings' fingerprint | redacting at send: the input and its hash would depend on the settings, and the vector with them; trusting what was stored: a value added to a never-store list later would still be sent | DR-0538 |
-| the key in the keychain only, set at the console; usage counted per machine, a monthly token cap of 50M; the pass backs off, searches never retry | a file fallback, as the service token has: a billing credential in a file any process of the user reads; no cap: a loop could spend without a stop | DR-0539 |
+| the screen: chunks from the index only, held back unless every record's source is still there and not private, on the records' never-store match, and on a change the redactor would make to the input, the title or the text, under the settings in force; the query held to every never-store list; reranks send only chunks passed under the current fingerprint, the rest keeping their places | redacting at send: the input and its hash would depend on the settings, and the vector with them; trusting what was stored: a value added to a never-store list later would still be sent | DR-0538 |
+| the key in the keychain only, set at the console; usage counted per machine, a monthly token cap of 50M; the pass backs off, searches never retry | a file fallback, as the service token has: the key in a file that tools and transcripts reach by its path, where the keychain keeps it out of those, though not from a process running as the user; no cap: a loop could spend without a stop | DR-0539 |
 
 ## Doors and data
 
@@ -219,7 +245,7 @@ Recorded as `proposed` for the maintainer's review.
 
    Tests: the models block reads api, and refuses an unknown provider, as today.
 2. The vault key: `VaultConfig.api_provider`, written only when set, and `docket models allow`. Tests:
-   - a vault without it dumps byte for byte as today;
+   - a vault without it dumps byte for byte as today, a source with no mapper among its sources;
    - `allow voyage` asks at the console, and is refused under `CLAUDECODE` and from a pipe;
    - an uncommitted edit adding it is not in force;
    - no page writer sets it.
@@ -230,7 +256,8 @@ Recorded as `proposed` for the maintainer's review.
 5. The screen: the pass's records check and redaction check, held-back chunks, the fingerprint, the query screen, and
    the rerank's fingerprint rule. Tests: the staging and never-store test below.
 6. `open_models(vault)` and the three locks, in the service's keeper, `docket search`, `docket eval` and
-   `docket index update`. Tests: each missing lock is `Off` with its reason.
+   `docket index update`; `docket models install --api` asks at the console. Tests: each missing lock is `Off` with
+   its reason; `install --api` and `key` are refused under `CLAUDECODE` and from a pipe.
 7. The docs below, then `finish-work`: `uv run gate full`, a draft PR, `review-code` until clean.
 
 ## Tests
@@ -241,15 +268,21 @@ and `DOCKET_VAULT` unset; invented records only, and no network.
 | Test | Asserts |
 |---|---|
 | `test_models_api.py`: `test_nothing_staged_or_never_store_reaches_the_provider` | a record staged and not promoted holds `zebrastaged`; a record in raw holds `zebrakept`, then `zebrakept` joins `never_store.keywords` and is committed; a record from `U0NEVER` is in raw, then `U0NEVER` joins the people list; a record holds a value a pattern turned on later would redact. After an index update, a full pass, and searches with rerank for `pallet`, `zebrakept` and `zebrastaged`: no request `FakeVoyage` saw holds any of those texts or that record; the `zebrakept` query sent nothing; `models status` counts three held back |
+| `test_models_api.py`: `test_a_source_made_private_or_removed_keeps_its_records_here` | a record in raw whose source is then made `private`, and one whose source is then removed, each committed: nothing of either reaches `FakeVoyage`, in the pass or in a rerank; a source turned off but kept lets its records go; each change moves the fingerprint |
+| `test_models_api.py`: `test_a_query_holding_a_never_store_value_stays_here` | queries naming a listed person (both word orders), a listed container and a listed keyword send nothing, and the search says why without the value |
+| `test_models_api.py`: `test_an_anchored_pattern_holds_back_a_chunk_by_its_text_alone` | `^ACCT-\d+` turned on after a chunk whose text starts `ACCT-1234` under the title `Budget call` was indexed: the chunk is held back, though the joined input doesn't match |
+| `test_models_api.py`: `test_candidates_not_sent_keep_their_places` | a chunk ingested after the last pass, in the top 50 with no vector: it keeps its fused position, and only the sent candidates move among their own positions |
+| `test_models_api.py`: `test_the_pass_screens_a_batch_again_when_the_settings_move` | a keyword added between two requests of one pass: the second request carries none of the chunks it holds back |
+| `test_models_api.py`: `test_a_redirect_or_an_error_says_only_its_status` | a 302 is an error, not followed; a 500's body and the request's text appear in no `Skip`, log line or `models status` |
 | `test_models_api.py`: `test_a_changed_never_store_list_screens_again_before_any_rerank` | after a value is added, reranks are skipped with the reason until the pass screens again; the held chunk's vector is gone; the next rerank sends only passing chunks |
 | `test_models_api.py`: `test_each_lock_missing_turns_the_provider_off_with_why` | no vault key, no machine choice, no key: each `Off`, with its own reason, and no request |
 | `test_models_api.py`: `test_a_slow_or_failing_rerank_keeps_the_fused_order` | late past the deadline: counted, three pause it; 429, 500, 401: `Skip` with the reason, no retry inside a search |
 | `test_models_api.py`: `test_the_pass_backs_off_and_stops_at_the_cap` | 429 then success; six 500s end the pass; usage past `api_monthly_tokens` stops sending, and status says so |
 | `test_models_api.py`: `test_the_trust_store_holds_certificates` | `send`'s SSL context has CA certificates, on each system |
-| `test_vault_settings.py`: `test_api_provider_is_written_only_when_set` | the fixture's `vault.yaml` dumps byte for byte without it; with it, it reads back; a provider it doesn't know is refused |
+| `test_vault_settings.py`: `test_api_provider_is_written_only_when_set` | the fixture's `vault.yaml`, a source with no mapper among its sources (so `mapper: null` stays), dumps byte for byte without it; with it, it reads back; a provider it doesn't know is refused |
 | `test_cli_models.py`: `test_allowing_the_provider_asks_at_the_console` | the question shows `api_provider: none -> voyage`; refused under `CLAUDECODE=1` and a pipe; the owner fixture's code commits it; `allow none` asks too |
 | #134's `effective()` tests, one case more | `effective()` keeps HEAD's `api_provider` against a file that adds or drops it |
-| `test_models_key.py` | the keychain round trip through `MemoryKeyring`, refused with the failing backend and at no console, the key in no output |
+| `test_models_key.py` | the keychain round trip through `MemoryKeyring`, refused with the failing backend and at no console, the key in no output; `docket models install --api` refused under `CLAUDECODE=1` and from a pipe |
 
 - The test in the first row fails without the screen. A variant run on a patch that sends straight from the index
   shows `zebrakept` in a request: its red run.
@@ -261,7 +294,9 @@ and `DOCKET_VAULT` unset; invented records only, and no network.
 - The README:
   - a "What leaves this machine" section: the three locks, the table of what is sent and when, the screen, Voyage's
     zero-day retention setting, costs and the cap;
-  - the models commands: `allow`, `key`, `install --api`.
+  - the models commands: `allow`, `key`, `install --api`, each at the owner's console;
+  - that the keychain keeps the key out of transcripts and files, not from a process running as the user;
+  - that on a vault used from several machines, each machine's choice and key are its own instant offs.
 - `docs/design.md`: the models paragraph names the API provider and the screen.
 - AGENTS.md's one-way doors gain `api_provider` (DR-0537).
 - The setup skill offers the provider only as the owner's own commands, run at their console.
@@ -278,10 +313,26 @@ and `DOCKET_VAULT` unset; invented records only, and no network.
 | A machine with no payment method on Voyage gets far lower limits than Tier 1 | accepted: the pass backs off and resumes; the README says the free tokens need a payment method on file |
 | 512 dimensions lose some quality against 1024 | accepted: keeps the index and the scan near today's; the same eval run measures it |
 | Turning the vault key off by a hand edit waits for the commit | accepted: the machine's choice and the key are instant offs |
+| #134's accepted gap, an agent's own `git commit` of a hand edit, can put `api_provider` in force | accepted: sending still needs this machine's choice and key, each set only at the owner's console (V7) |
+| A source a chunk can't be traced to (a doc covering no record, a legacy note) is screened on its text alone | accepted: such a doc was screened at its put, and its text by the never-store keywords and the redactor here |
 | The record read in the screen slows the pass on a vault of 100,000 chunks | open: measured in the build against the pass on the perf vault; the reads come by place (#76) |
 | Voyage is part of MongoDB now, and its endpoint may move (`ai.mongodb.com`) | accepted: the base URL is one constant |
 | #134 hasn't merged | open: this is built after it; if its `effective()` changes shape, the key still falls under "a key added later" |
 
 ## Plan review
 
-Not reviewed yet.
+Round 1, 17 Oct 2026, a read-only review for the lead at 9598eb8: changes needed, one major and six minors. All seven
+are folded in above; the reviewer checks V1 again.
+
+| Finding | What | Fixed |
+|---|---|---|
+| V1, major | the screen ignored the sources in force: a source made private keeps its raw records in the index, and they were sent, and a sensitivity change didn't move the fingerprint | a chunk goes only when every record's source is in force and not private; a removed source's records stay; an off source's may go; each source's presence, sensitivity and `enabled` are in the fingerprint; a test for a source made private and one removed |
+| V2, minor | the query was held to keywords only | held to every never-store list through `listed()` and `in_container()`, with a test |
+| V3, minor | an anchored pattern misses a text that starts with it once the title is joined before it | the title alone and the text alone go through the redactor too, with a test |
+| V4, minor | a redirect could be followed, and a reason could carry a body | no redirect handler; reasons and logs carry the status and fixed words only, with a test |
+| V5, minor | a candidate with no vector yet would sink | unsent candidates keep their fused positions; the sent ones move among their own, with a test |
+| V6, minor | the pass could send a batch screened before the settings moved | the fingerprint is read before each request, and the batch screened again, with a test |
+| V7, minor | the machine's choice and the key weren't held to the console | `install --api` and `key` ask at the console; the Risks name #134's gap; the README and DR-0539 say what the keychain does and doesn't hide |
+
+Also from the review's notes: "written only when set" follows `folder`'s serializer, not `exclude_none`; the
+byte-for-byte fixture has a source with no mapper; the README names the instant offs per machine.
