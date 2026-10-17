@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from docket_testkit import empty_vault
 
 from docket import userconfig
 from docket.errors import DocketError
@@ -401,7 +402,7 @@ def answering(monkeypatch: pytest.MonkeyPatch, body: Callable[[], dict[str, Any]
 
 
 def a_vault(tmp_path: Path, config: VaultConfig) -> Path:
-    return Vault.init(tmp_path / "vault", config, "test-box").root
+    return empty_vault(tmp_path, config).root
 
 
 def test_install_records_the_settings_writes_the_environment_and_waits(

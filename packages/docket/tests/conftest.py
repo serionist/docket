@@ -46,7 +46,7 @@ def pytest_unconfigure(config: pytest.Config) -> None:
 
 @pytest.fixture(scope="session", autouse=True)
 def kit_templates(tmp_path_factory: pytest.TempPathFactory) -> None:
-    """The kit's builders find the session's shared templates through this factory (DR-0220)."""
+    """The kit's builders find the session's shared templates through this factory (DR-0531)."""
     use_factory(tmp_path_factory)
 
 

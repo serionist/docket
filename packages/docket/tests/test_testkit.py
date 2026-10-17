@@ -1,5 +1,5 @@
 """The test kit's shared templates: built once per session for every worker, cleared after a failed build, never
-written by a test, and copied so that a copy behaves as a fresh build would (DR-0220, DR-0221)."""
+written by a test, and copied so that a copy behaves as a fresh build would (DR-0531, DR-0221)."""
 
 from __future__ import annotations
 

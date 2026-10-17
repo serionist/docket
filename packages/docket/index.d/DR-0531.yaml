@@ -1,0 +1,18 @@
+decisions:
+  - id: DR-0531
+    title: The tests copy each vault from a template built once per run, refresh a copy's index only where git would hash it again, and take a plain vault from a template too
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#43", "#149"]
+    supersedes: [DR-0220]
+    description: "docket_testkit builds its templates (the fixture vault, the index fixture, a consuming project, the notes repo, an imported vault, a plain vault per config, a folder vault in its host, a host with its origin, convert's nested vault) once per pytest session: the first xdist worker to ask builds it under a file lock in the session's shared temp folder and under the tests' isolation, clearing whatever a failed build left, and writes a done marker last; the others wait and reuse it. A template is keyed by its builder's module and qualified name and its arguments, the folder named by the whole key's digest. Its index is refreshed once, a second after its last write. A test gets a copy (copytree, which keeps the files' times; each remote set to the copy's own path with git remote set-url) and never writes into a template: once all workers have finished, the controller walks every path under each template against the manifest taken when it was built, and an added, removed or changed path or link fails the run; caches a reader leaves (__pycache__, SQLite's -wal and -shm) don't count. A copied repo's index is refreshed on Linux and macOS, where the copy's inodes differ and git would hash every file again at its first status; on Windows git compares sizes and modification times, which the copy keeps, and creation times are off for templates (DR-0221), so the index is fresh as copied and no refresh runs. A test that needs a new, empty vault of its own takes empty_vault, a copy of the plain vault for its config, rather than Vault.init; tests about init itself, and about what init makes in a particular place (home, convert, a host's hooks), still call Vault.init. Before the templates, each worker built a module's template again: 99 builds of 29 templates, 28% of a run's worker time. Before this, every copy ran git update-index on Windows too (626 calls in a run), and 26 tests ran a full init of a plain vault each."
+    binds:
+      - A test writes only its copy; a write into a template fails the run.
+      - A test on another branch that uses the kit's builders gets copies unedited.
+    not_chosen:
+      - "Module-scoped templates per worker: each worker builds them again."
+      - "--dist loadfile: one module per worker, and the largest modules become the tail."
+      - "Templates kept on disk between runs: a change to the vault code would be tested against a vault the old code built."
+      - "A refresh only in the tests that compare git's index bytes: on Linux and macOS every copy's first status would hash each file again, git-lfs's filter included."

@@ -1,4 +1,4 @@
-"""The check that no test wrote into a shared template (DR-0220). It lives here, not in the tests' own conftest.py,
+"""The check that no test wrote into a shared template (DR-0531). It lives here, not in the tests' own conftest.py,
 because under xdist the controller never collects the tests and never loads that one; this one it loads, since it sits
 above every test of the packages."""
 

@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 import yaml
-from docket_testkit import copied, make_config, make_record
+from docket_testkit import copied, empty_vault, make_config, make_record
 from docket_webkit import OURS, parse
 from staging_kit import signed_in
 from starlette.testclient import TestClient
@@ -317,7 +317,7 @@ def test_a_tier1_line_is_logged_with_its_rule(vault: Vault) -> None:
 
 def small_vault(tmp_path: Path, entities: dict[str, str], **runs: list[Any]) -> Vault:
     """A vault of a few entities and records, its index built."""
-    v = Vault.init(tmp_path / "small", make_config(), "test-box")
+    v = empty_vault(tmp_path, make_config(), "small")
     for rel, text in entities.items():
         path = v.root / rel
         path.parent.mkdir(parents=True, exist_ok=True)

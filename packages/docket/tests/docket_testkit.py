@@ -218,7 +218,7 @@ def digest(*parts: str) -> str:
 
 def _template(build: Callable[[Path], Path], key: str, factory: pytest.TempPathFactory | None) -> tuple[Path, str]:
     """The folder a template was built in and the path in it `build` returned: built by the first worker to ask, under
-    a lock, the tests' isolation and a git home of its own; the others wait and reuse it (DR-0220)."""
+    a lock, the tests' isolation and a git home of its own; the others wait and reuse it (DR-0531)."""
     # A readable tail, short enough for Windows' path limit, and the whole key's digest, so two keys never share one.
     name = re.sub(r"[^A-Za-z0-9_.-]", "-", key)[-32:].lstrip(".-") + "-" + digest(key)
     templates = templates_folder(factory or _FACTORY[0])
@@ -275,11 +275,13 @@ def settle(folder: Path) -> None:
 
 
 def _fit(template: Path, repo: Path, copy: Path) -> None:
-    """A copied repo made to look as a fresh build would: its index refreshed, so a test that compares the index's
-    bytes sees git's first status leave them alone (a copy's inodes differ on Linux and macOS; on Windows nothing
-    changes), and each remote that led into the template pointed at the same place in the copy. The remote with git's
-    own command: a Windows path in .git/config has its backslashes doubled, which a text replace would miss."""
-    sh(repo, "git", "update-index", "-q", "--refresh", check=False)
+    """A copied repo made to look as a fresh build would: on Linux and macOS its index refreshed, since a copy's inodes
+    differ there, so a test that compares the index's bytes sees git's first status leave them alone; on Windows git
+    compares sizes and modification times only, which the copy keeps, so the index is fresh as copied (DR-0531). And
+    each remote that led into the template pointed at the same place in the copy. The remote with git's own command: a
+    Windows path in .git/config has its backslashes doubled, which a text replace would miss."""
+    if sys.platform != "win32":
+        sh(repo, "git", "update-index", "-q", "--refresh", check=False)
     if "[remote " not in (repo / ".git" / "config").read_text(encoding="utf-8"):
         return
     urls = sh(repo, "git", "config", "--get-regexp", "^remote[.].*[.]url$", check=False)
