@@ -21,7 +21,7 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 | `docket doc redact` | redact the docs already stored with the settings as they are now, as their next revs in one commit; once after upgrading, and again after turning a rule on or adding a pattern or a keyword; `--dry-run` first; a doc it can't redact is named and left, with exit 1 |
 | `docket doc read <locator>` | a doc, or a record and the doc lines that point at it; `--view raw` or `both` for the raw, `--around` for minutes, paragraphs or messages either side, `--rev` for an earlier revision |
 | `docket doc verify <doc>` | each line of a doc next to the raw its anchors point at; `--line` for chosen lines |
-| `docket search <query>` | hits grouped by recording or thread, each with its locator and the group's summary; `--since`, `--until`, `--source`, `--person`, `--entity`, `-k`; it updates the index first unless `--no-update`, then asks the running service when it serves the vault, and searches by itself otherwise |
+| `docket search <query>` | hits grouped by recording or thread, each with its locator and the group's summary; `--since`, `--until`, `--source`, `--person`, `--entity`, `-k`; it asks the running service when it serves the vault, whose search brings the index up to date, and otherwise updates the index itself unless `--no-update` and searches by itself |
 | `docket index rebuild` | build this machine's index from the vault, from scratch |
 | `docket index update` | index what changed since; it rebuilds when it has to |
 | `docket index status` | whether the index is there and current, its languages, counts, what is new, and its problems |

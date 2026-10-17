@@ -1,4 +1,4 @@
-"""`docket search` through the running service (#110, DR-0500): the real service on a free port in a thread, the
+"""`docket search` through the running service (#110, #151, DR-0533): the real service on a free port in a thread, the
 command's output the same whether the service answered or the command searched by itself, and the command on its own
 whenever the service can't answer for it."""
 
@@ -16,13 +16,14 @@ import uvicorn
 from docket_testkit import copy_vault, index_template
 from models_kit import GPU_RERANKER, choose_fake, fake_command, make_env, needs_vectors, rerank_worker, with_reranker
 
-from docket import cli
+from docket import cli, index
 from docket.cli import main
 from docket.errors import DocketError
 from docket.models import runtime
 from docket.models.client import Worker
 from docket.service import client, server
 from docket.service.token import Tokens
+from docket.service.writer import BUILDING
 from docket.vault.vault import Vault
 
 # What a search can print: a rebuild line aside, groups and summaries, an alias, time words and a name nobody has, a
@@ -204,14 +205,10 @@ class Fake:
         (client.Answer(200, {"state": "down", "model": "fake"}), None, ["/api/models"]),
         (client.Answer(401, {}), None, ["/api/models"]),
         (client.Answer(200, OFF), None, ["/api/models", "/api/search"]),
-        (
-            client.Answer(200, OFF),
-            client.Answer(400, {"error": "the index is being built; try again in a minute"}),
-            ["/api/models", "/api/search"],
-        ),
+        (client.Answer(200, OFF), client.Answer(400, {"error": "k is from 1 to 100"}), ["/api/models", "/api/search"]),
         (client.Answer(200, OFF), client.Answer(200, {"groups": "not a list"}), ["/api/models", "/api/search"]),
     ],
-    ids=["another embedder", "worker down", "refused", "no answer in time", "index building", "not a result"],
+    ids=["another embedder", "worker down", "refused", "no answer in time", "a refusal", "not a result"],
 )
 def test_any_answer_but_a_result_leaves_the_search_to_the_command(
     vault: Vault,
@@ -226,6 +223,17 @@ def test_any_answer_but_a_result_leaves_the_search_to_the_command(
     expected = run(vault, capsys, "search", "Nortwin")
     fake = Fake(monkeypatch, vault, models, search)
     assert run(vault, capsys, "search", "Nortwin") == expected and fake.asked == asked
+
+
+def test_a_service_still_building_the_index_is_said_before_the_command_searches_by_itself(
+    vault: Vault, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run(vault, capsys, "index", "update")
+    code, out, err = run(vault, capsys, "search", "Nortwin")
+    # Past its wait the service answers that it is building; the command's own update then waits for that build.
+    Fake(monkeypatch, vault, client.Answer(200, OFF), client.Answer(400, {"error": BUILDING}))
+    said = "(the service is building the index; searching when it's done)\n"
+    assert run(vault, capsys, "search", "Nortwin") == (code, said + out, err)
 
 
 def test_the_search_goes_to_the_service_with_every_flag_as_given(
@@ -251,6 +259,31 @@ def test_the_search_goes_to_the_service_with_every_flag_as_given(
             cli.SERVICE_SEARCH_SECONDS,
         ),
     ]
+
+
+def test_the_command_updates_the_index_only_when_it_searches_by_itself(
+    vault: Vault, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run(vault, capsys, "index", "update")
+    expected = run(vault, capsys, "search", "Nortwin")
+    found = index.search(Vault.open(vault.root), "Nortwin").model_dump(mode="json")
+    updates: list[Path] = []
+    real = index.update
+
+    def update(v: Vault) -> index.BuildReport:
+        updates.append(v.root)
+        return real(v)
+
+    monkeypatch.setattr(index, "update", update)
+    fake = Fake(monkeypatch, vault, client.Answer(200, OFF), client.Answer(200, found))
+    # The service brings the index up to date before it searches: an update of the command's own repeats it (#151).
+    assert run(vault, capsys, "search", "Nortwin") == expected
+    assert updates == [] and fake.asked == ["/api/models", "/api/search"]
+    fake.search = None
+    assert run(vault, capsys, "search", "Nortwin") == expected
+    assert run(vault, capsys, "search", "Nortwin", "--no-models") == expected
+    assert run(vault, capsys, "search", "Nortwin", "--no-update") == expected
+    assert updates == [vault.root] * 2
 
 
 @needs_vectors

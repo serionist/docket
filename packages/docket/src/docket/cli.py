@@ -33,7 +33,7 @@ from docket.plaintext import printable
 from docket.service import client
 from docket.service.platforms import Installer
 from docket.service.token import Tokens
-from docket.service.writer import UPDATE_WAIT_SECONDS
+from docket.service.writer import BUILDING, UPDATE_WAIT_SECONDS
 from docket.sources import release, scaffold
 from docket.sources.contract import Manifest
 from docket.sources.ingest import IngestReport, ingest_run
@@ -1107,19 +1107,20 @@ def search_command(
 ) -> None:
     """Search everything kept: hits grouped by recording or thread, each with its locator for docket doc read."""
     v = find_vault(vault)
-    if not no_update:
-        report = index.update(v)
-        if report.rebuilt:
-            say(f"(the index was rebuilt: {report.reason})")
-            for problem in report.problems:
-                if problem.startswith("vault.yaml"):
-                    say(f"! {problem}")
     text, people, entities, sources = " ".join(query), person or [], entity or [], source or []
     start, end = index.parse_when(since, "--since"), index.parse_when(until, "--until")
-    # The service's search brings the index up to date and uses its models, so --no-update and --no-models stay here.
+    # The service's search brings the index up to date and uses its models, so --no-update and --no-models stay here,
+    # and the command updates the index itself only when it searches by itself.
     asked = {"query": text, "people": people, "entities": entities, "sources": sources, "since": since, "until": until}
     result = None if no_update or no_models else _service_search(v, {**asked, "k": k})
     if result is None:
+        if not no_update:
+            report = index.update(v)
+            if report.rebuilt:
+                say(f"(the index was rebuilt: {report.reason})")
+                for problem in report.problems:
+                    if problem.startswith("vault.yaml"):
+                        say(f"! {problem}")
         with _query_models(no_models) as models:
             result = index.search(
                 v, text, people=people, entities=entities, sources=sources, since=start, until=end, k=k, models=models
@@ -1129,8 +1130,9 @@ def search_command(
 
 def _service_search(vault: Vault, asked: dict[str, Any]) -> index.SearchResult | None:
     """The running service's answer, when it serves this vault, answers with this machine's token and searches with
-    the embedder this command would (DR-0500): it keeps its worker and its reranker loaded. None for anything else, a
-    refusal included, and the command searches by itself as before, so an error reads as it always did."""
+    the embedder this command would (DR-0533): it keeps its worker and its reranker loaded. None for anything else, a
+    refusal included, and the command searches by itself as before, so an error reads as it always did. A service
+    still building the index after its wait is said, since the command's own update then waits for that build."""
     token = _service_token(vault)
     if token is None:
         return None
@@ -1141,6 +1143,8 @@ def _service_search(vault: Vault, asked: dict[str, Any]) -> index.SearchResult |
     given = {key: value for key, value in asked.items() if value is not None}
     path = f"/api/search?{urlencode(given, doseq=True)}"
     answer = client.call("GET", path, token=token, at=at, timeout=SERVICE_SEARCH_SECONDS)
+    if answer is not None and answer.body.get("error") == BUILDING:
+        say("(the service is building the index; searching when it's done)")
     if answer is None or answer.status != 200:
         return None
     try:

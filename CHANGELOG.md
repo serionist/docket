@@ -137,6 +137,10 @@ Unreleased in the same PR.
 
 ### Changed
 
+- A search through the service on a vault that is a folder of your repo answers as fast as one in the command: it
+  asked git where your repo is four times for each search, up to a second on Windows, and now asks once while the
+  service runs. `docket search` no longer updates the index itself when the service answers, since the service's
+  search does; when the service is still building the index, it says so and searches once the build is done.
 - A redaction rule turned on, or a pattern added, no longer cuts another rule's match short: every rule reads the
   same text, so a pattern that holds a phone number or a password, such as a dial-in with its PIN or a database
   address, is redacted whole, and matches that overlap become one marker. A record whose redacted form changes is
