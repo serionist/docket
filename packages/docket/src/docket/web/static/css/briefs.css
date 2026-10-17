@@ -79,8 +79,54 @@
   .cited-line { display: grid; gap: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--line); }
   .cited-line .span-head { margin-bottom: 0; }
 
+  /* The Decisions part: what waits for the user's click, beside what it contradicts; then what is decided. */
+  .decisions { display: grid; gap: var(--space-2); }
+  .decisions > h2 {
+    font-size: var(--text-xs);
+    font-weight: 650;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .decisions h3 { font-size: var(--text-lg); font-weight: 650; margin-top: var(--space-2); }
+  .decision {
+    display: grid;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--line-strong);
+    border-radius: var(--radius);
+  }
+  .decision[data-standing="proposed"] { border-left-color: var(--warn); }
+  .decision[data-standing="current"] { border-left-color: var(--ok); }
+  .decision-head { display: flex; flex-wrap: wrap; gap: 4px var(--space-2); align-items: baseline; }
+  .decision-head h4 { font-size: var(--text); font-weight: 650; overflow-wrap: anywhere; }
+  .decision .meta { font-size: var(--text-sm); }
+  .decision-lines { display: grid; gap: 2px; padding-left: 1.2em; list-style: disc; }
+  .decision-line .cites { display: inline-flex; flex-wrap: wrap; gap: 2px var(--space-2); margin-left: var(--space-1); }
+  .decision-line.hidden-line .body { color: var(--muted); font-style: italic; }
+  .decision-picks { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); margin-top: var(--space-1); }
+  .badge.state.superseded, .badge.state.rejected { color: var(--muted); border-color: var(--line-strong); }
+  .badge.state.proposed { color: var(--warn); border-color: var(--warn); }
+  .waiting { display: grid; gap: var(--space-2); }
+  .waiting.paired { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+  .against { display: grid; gap: var(--space-1); }
+  details.folded > summary { cursor: pointer; font-size: var(--text-sm); color: var(--muted); }
+  details.folded[open] { display: grid; gap: var(--space-1); }
+  .waiting-list ul { display: flex; flex-wrap: wrap; gap: 4px var(--space-3); }
+  .waiting-list h2 {
+    font-size: var(--text-xs);
+    font-weight: 650;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+
   @media (max-width: 900px) {
     .briefs-columns { grid-template-columns: minmax(0, 1fr); }
     .brief-column { position: static; max-height: none; }
+    .waiting.paired { grid-template-columns: minmax(0, 1fr); }
   }
 }

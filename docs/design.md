@@ -691,7 +691,10 @@ How it is built (DR-0170 to DR-0175, DR-0546):
 - The Briefs page lists the briefs by entity type with their state, rev, age, flagged lines and new records, and
   opens one beside the raw its chosen line cites, the doc lines it cites followed one level (DR-0557). Its URL
   holds `brief`, `line` and `type`. A brief a never-store list now holds answers hidden, and a line a list now
-  names opens nothing (DR-0558).
+  names opens nothing (DR-0558). A project's, topic's or stream's page shows its decisions: what waits beside
+  what it contradicts, then what is decided, superseded ones folded. Its buttons post to `/briefs/decision`,
+  the only writer of a decision's status, on the writer thread and checked against the rev the page showed
+  (DR-0564, DR-0566).
 
 ## 11. Claude first
 

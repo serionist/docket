@@ -29,6 +29,7 @@ from docket.documents import records as documents
 from docket.errors import DocketError
 from docket.vault import brief_form, decision_form, derived
 from docket.vault.anchors import format_ref, normalize_newlines, trailing_anchors
+from docket.vault.entities import load_entities
 from docket.vault.git import DOC_LINE
 from docket.vault.home import make_private
 from docket.vault.processed import (
@@ -182,6 +183,48 @@ class DocStore:
                 _BLOBS[sha] = self.vault.git.out("cat-file", "blob", sha)
             out[rel] = _BLOBS[sha]
         return out
+
+    def decide(self, doc_id: str, shown: int, pick: str, subject: str | None = None) -> PutResult:
+        """The user's click on the Briefs page (DR-0564, DR-0566), and the only writer of a decision's status: the
+        candidate's next rev, confirmed or rejected as `pick` says, written and committed under the vault's lock.
+        Refused when it isn't a proposed decision, its file says otherwise than its last commit, or a never-store list
+        holds its subject; `MovedError` when its rev isn't the one the page showed, or a decision it replaces or
+        contradicts isn't confirmed and current any more (D3)."""
+        moved = decision_form.MovedError
+        if id_problem(doc_id) is not None or not doc_id.startswith("decision:"):
+            raise DocketError(f"decision is a decision's id, such as decision:2026-10-13-first, not {doc_id!r}")
+        with self.vault.writing():
+            text = self.committed_text(doc_id)
+            doc = decision_form.committed_doc(text)
+            if doc is None or doc.meta.type != "decision":
+                raise DocketError(f"no decision {doc_id}")
+            if subject is not None and doc.meta.subject != subject:
+                raise DocketError(f"{doc_id} isn't a decision on {subject}, the page it was clicked on")
+            why = decision_form.pick_problem(doc, pick)
+            if why is not None:
+                raise DocketError(why)
+            if doc.meta.status != "proposed":
+                raise moved(f"{doc_id} is {doc.meta.status} already")
+            if doc.meta.rev != shown:
+                raise moved("the decision changed since the page showed it; here it is as it stands")
+            path = self.file(doc_id)
+            rel = self.path(doc_id).as_posix()
+            if not path.is_file() or decision_form.edited(self.read_file(path), text):
+                raise DocketError(f"{rel} was edited by hand; put it with the decision skill, or check it out again")
+            entity = next((e for e in load_entities(self.root).entities if e.id == doc.meta.subject), None)
+            if entity is None or brief_form.held(entity, self.lists):
+                raise DocketError("the decision's subject is gone, or a never-store list holds it")
+            standing = decision_form.standings(self.decisions())
+            for key, targets in (("replaces", doc.meta.replaces), ("contradicts", doc.meta.contradicts)):
+                if any(t not in standing or not standing[t].current for t in targets):
+                    raise moved(f"the decision it {key} was replaced meanwhile; the candidate needs a new rev")
+            new = decision_form.status_rev(doc, pick, f"{self.vault.config.owner.name}, Briefs page")
+            rev = doc.meta.rev + 1
+            status = "confirmed" if pick in decision_form.CONFIRMING else "rejected"
+            message = f"Decision: {doc_id} {status} on the Briefs page\n\nDoc: {doc_id} rev {rev}"
+            commit = self._write_all_and_commit([(rel, new)], message)
+        (self._known or {}).pop(doc_id, None)
+        return PutResult(id=doc_id, rev=rev, path=rel, changed=True, commit=commit)
 
     def decisions(self) -> list[ProcessedDoc]:
         """Every decision, as every read takes it."""
