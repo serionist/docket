@@ -140,6 +140,7 @@ def test_at_a_real_terminal_the_code_typed_back_makes_the_change(tmp_path: Path)
 
     root = _project(tmp_path)
     main_fd, child_fd = pty.openpty()
+    # All three on the terminal, as in one: input() writes its prompt to stderr when no readline is loaded.
     proc = _docket(
         "redaction",
         "set",
@@ -149,7 +150,7 @@ def test_at_a_real_terminal_the_code_typed_back_makes_the_change(tmp_path: Path)
         str(root),
         stdin=child_fd,
         stdout=child_fd,
-        stderr=subprocess.PIPE,
+        stderr=child_fd,
     )
     os.close(child_fd)
     seen = b""
@@ -162,8 +163,9 @@ def test_at_a_real_terminal_the_code_typed_back_makes_the_change(tmp_path: Path)
         os.write(main_fd, found.group(1) + b"\n")
         assert proc.wait(timeout=60) == 0
     finally:
-        os.close(main_fd)
         if proc.poll() is None:
             proc.kill()
+        proc.wait()
+        os.close(main_fd)
     assert not VaultConfig.load(root / CONFIG_FILE).redaction.phone
     assert "confirmed at the console" in sh(root, "git", "log", "-1", "--format=%B")
