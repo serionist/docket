@@ -19,6 +19,7 @@ from urllib.parse import quote
 
 import pytest
 import uvicorn
+from briefs_kit import NORTHWIND, briefs_template
 from curate_kit import curate_vault
 from docket_testkit import index_template
 from playwright.sync_api import Page, expect, sync_playwright
@@ -93,6 +94,18 @@ def recording_project(tmp_path_factory: pytest.TempPathFactory) -> Path:
 def recording_service(recording_project: Path, tmp_path: Path) -> Iterator[tuple[int, str]]:
     """The real service over the invented recording vault: calls kept as Plaud keeps them, a note on one."""
     shutil.copytree(recording_project, tmp_path / "vault")
+    yield from _serve(tmp_path / "vault")
+
+
+@pytest.fixture(scope="module")
+def briefs_project(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return briefs_template(tmp_path_factory)
+
+
+@pytest.fixture
+def briefs_service(briefs_project: Path, tmp_path: Path) -> Iterator[tuple[int, str]]:
+    """The real service over the invented briefs vault: four briefs, stale, current and orphaned."""
+    shutil.copytree(briefs_project, tmp_path / "vault")
     yield from _serve(tmp_path / "vault")
 
 
@@ -599,6 +612,77 @@ def test_the_recording_page_in_a_browser(recording_service: tuple[int, str], tmp
         expect(plain.locator("li.segment.mark")).to_have_text([re.compile("01:20")])
         expect(plain.locator(".summary-column .line.cited")).to_have_count(1)
         plain.screenshot(path=str(shots / "recording-no-script.png"), full_page=True)
+        scriptless.close()
+
+
+def test_the_briefs_page_in_a_browser(briefs_service: tuple[int, str], tmp_path: Path) -> None:
+    port, token = briefs_service
+    shots = Path(os.environ.get("DOCKET_TEST_SCREENSHOTS") or tmp_path)
+    shots.mkdir(parents=True, exist_ok=True)
+    link = client.call("POST", "/api/session", token=token, at=port)
+    assert link is not None
+    errors: list[str] = []
+    base = f"http://127.0.0.1:{port}"
+    northwind = f"{base}/briefs?brief={NORTHWIND}"
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel=None if BROWSER == "chromium" else BROWSER)
+        page = browser.new_page(viewport={"width": 1440, "height": 900})
+        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.on("requestfailed", lambda r: errors.append(f"request failed: {r.method} {r.url} ({r.failure})"))
+        page.on(
+            "response", lambda r: errors.append(f"{r.status} {r.request.method} {r.url}") if r.status >= 400 else None
+        )
+        page.goto(f"{link.body['url']}&next=/briefs")
+        page.wait_for_url(f"{base}/briefs")
+
+        # The briefs by entity type, then one opened, then one of its lines beside its raw.
+        expect(page.locator(".brief-group h2")).to_have_text(["person", "customer", "site", "orphaned"])
+        page.screenshot(path=str(shots / "briefs.png"), full_page=True)
+        page.click("a.brief-name:has-text('Northwind')")
+        page.wait_for_url(northwind)
+        expect(page.locator("h1")).to_have_text("Northwind")
+        page.click("a.line-link:has-text('supplier call')")
+        page.wait_for_url(re.compile(r"&line=\d+#raw$"))
+        expect(page.locator("#raw article.span")).to_contain_text("offer in writing")
+        expect(page.locator(".line.cited")).to_contain_text("supplier call")
+        # A flagged line says what changed under it, and the line it was built from as it reads now.
+        page.click("a.line-link:has-text('above the budget')")
+        expect(page.locator("#raw .cited-line")).to_contain_text("reads otherwise")
+        page.screenshot(path=str(shots / "briefs-open.png"), full_page=True)
+
+        # At phone width the columns stack, a line's link lands on its raw, and nothing scrolls sideways.
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.goto(northwind)
+        page.click("a.line-link:has-text('supplier call')")
+        page.wait_for_url(re.compile(r"&line=\d+#raw$"))
+        expect(page.locator("#raw")).to_be_in_viewport()
+        _fits(page, ".briefs-locator", ".brief-column", "#raw")
+        page.screenshot(path=str(shots / "briefs-390.png"))
+        page.set_viewport_size({"width": 1440, "height": 900})
+        page.click('[data-action="theme"]')
+        page.click('[data-action="theme"]')
+        page.reload()
+        assert page.evaluate("document.documentElement.dataset.theme") == "dark"
+        page.screenshot(path=str(shots / "briefs-dark.png"), full_page=True)
+        assert not errors, errors
+        browser.close()
+
+        # Without JavaScript the page and its links work the same.
+        again = client.call("POST", "/api/session", token=token, at=port)
+        assert again is not None
+        scriptless = p.chromium.launch(channel=None if BROWSER == "chromium" else BROWSER)
+        bare = scriptless.new_context(java_script_enabled=False, viewport={"width": 1280, "height": 900})
+        plain = bare.new_page()
+        plain.goto(f"{again.body['url']}&next=/briefs")
+        plain.wait_for_url(f"{base}/briefs")
+        plain.click("a.type-chip:has-text('customer')")
+        plain.wait_for_url(f"{base}/briefs?type=customer")
+        plain.click("a.brief-name")
+        plain.wait_for_url(f"{northwind}&type=customer")
+        plain.click("a.line-link:has-text('by mail')")
+        expect(plain.locator("#raw article.span")).to_contain_text("The consultant's offer")
+        plain.screenshot(path=str(shots / "briefs-no-script.png"), full_page=True)
         scriptless.close()
 
 

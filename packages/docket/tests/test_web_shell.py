@@ -76,18 +76,17 @@ def test_the_navigation_has_a_slot_for_every_page_and_links_the_built_ones(clien
     # No number beside a slot, which would read as a count: one muted "later" per group with a page to come, the phase
     # in the tooltip and the screen-reader text.
     waiting = sum(1 for g in pages.NAV if not all(p.built for p in g.pages))
-    assert [li.text() for li in nav.find_all("li", class_="nav-later")] == ["later"] * waiting == ["later"] * 2
+    assert [li.text() for li in nav.find_all("li", class_="nav-later")] == ["later"] * waiting == ["later"]
     assert all(li.attrs["aria-hidden"] == "true" for li in nav.find_all("li", class_="nav-later"))
     assert not any(ch.isdigit() for s in slots for ch in "".join(c for c in s.children if isinstance(c, str)))
-    briefs = next(s for s in slots if s.text().startswith("Briefs"))
-    assert "arrives in phase 2" in briefs.text()
-    assert (
-        briefs.attrs["title"]
-        == "Briefs: per person, project and topic; the decision log per stream; arrives in phase 2"
-    )
-    # Built pages come first in their group, so its one "later" label precedes only what is to come.
-    finding = nav.find_all("ul", class_="nav-group")[1]
-    assert [c.text() for c in finding.find_all("li")][:3] == ["Search", "Recording", "later"]
+    today = next(s for s in slots if s.text().startswith("Today"))
+    assert "arrives in phase 3" in today.text()
+    assert today.attrs["title"] == "Today: the day: meetings with their briefs and points; arrives in phase 3"
+    # Built pages come first in their group, so its one "later" label precedes only what is to come; a group whose
+    # pages are all built has none.
+    day, finding = nav.find_all("ul", class_="nav-group")[:2]
+    assert day.find("li").text() == "later"
+    assert [c.text() for c in finding.find_all("li")] == ["Search", "Recording", "Briefs"]
 
 
 @pytest.mark.parametrize(
@@ -106,6 +105,7 @@ def test_the_navigation_has_a_slot_for_every_page_and_links_the_built_ones(clien
         "/settings",
         "/recording",
         "/recording?rid=calls:rec-0100",
+        "/briefs",
     ],
 )
 def test_every_page_and_fragment_carries_the_page_csp_and_no_store(client: TestClient, path: str) -> None:

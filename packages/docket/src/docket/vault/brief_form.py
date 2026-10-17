@@ -14,6 +14,7 @@ never-store checks before its take-in, its form aside. Problems name the line, n
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from pathlib import Path
 
 from docket.vault.anchors import trailing_anchors
@@ -128,24 +129,40 @@ def _extra(doc: ProcessedDoc) -> list[str]:
     return titles[len(SECTIONS) :] if titles[: len(SECTIONS)] == list(SECTIONS) else []
 
 
-def _screen(doc: ProcessedDoc, entities: list[Entity], lists: NeverStore) -> list[DocProblem]:
-    """Every line, the title among them, and every ref's doc id, held to the people list in all its shapes, with the
-    names, aliases and contact ids of each entity the people list names by any of them, or a list holds by a name or an
-    alias."""
+def hidden_lines(lines: Iterable[tuple[int, str]], root: Path, lists: NeverStore) -> set[int]:
+    """The lines a page shows as hidden now (DR-0558): one that says a keyword, names a listed person by the screen
+    doc_put holds a brief to, or cites a doc whose id names one. A list that gained a value after the brief was put
+    hides its lines from then on."""
+    phrases = _phrases(load_entities(root).entities, lists)
+    return {n for n, line in lines if matches_text(line, lists) or _names(line, phrases, lists) is not None}
+
+
+def _phrases(entities: list[Entity], lists: NeverStore) -> NeverStore:
+    """The people list in all its shapes, with the names, aliases and contact ids of each entity the people list names
+    by any of them, or a list holds by a name or an alias, read as keywords."""
     known = [
         value
         for e in entities
         if person_listed(e, lists) or any(listed(v, lists) is not None for v in (*e.names.values(), *_aliases(e)))
         for value in (*e.names.values(), *_aliases(e), *(v for vs in e.ids.values() for v in vs))
     ]
-    phrases = NeverStore(keywords=person_phrases(lists, known))
+    return NeverStore(keywords=person_phrases(lists, known))
+
+
+def _names(line: str, phrases: NeverStore, lists: NeverStore) -> str | None:
+    """What a line names, as a problem's message: a listed person in its text, or a ref to a doc whose id names one."""
     if not phrases.keywords:
-        return []
-    problems: list[DocProblem] = []
-    for n, line in doc.lines():
-        trailing = trailing_anchors(line)
-        if matches_text(trailing.text, phrases):
-            problems.append(DocProblem(n, NAMES_SOMEONE, ""))
-        elif any(matches_text(r.doc, phrases) or slug_listed(entity_of(r.doc), lists) for r in trailing.refs):
-            problems.append(DocProblem(n, f"a ref here cites a doc whose id {NAMES_SOMEONE}", ""))
-    return problems
+        return None
+    trailing = trailing_anchors(line)
+    if matches_text(trailing.text, phrases):
+        return NAMES_SOMEONE
+    if any(matches_text(r.doc, phrases) or slug_listed(entity_of(r.doc), lists) for r in trailing.refs):
+        return f"a ref here cites a doc whose id {NAMES_SOMEONE}"
+    return None
+
+
+def _screen(doc: ProcessedDoc, entities: list[Entity], lists: NeverStore) -> list[DocProblem]:
+    """Every line, the title among them, and every ref's doc id, held to the people list in all its shapes."""
+    phrases = _phrases(entities, lists)
+    found = ((n, _names(line, phrases, lists)) for n, line in doc.lines())
+    return [DocProblem(n, message, "") for n, message in found if message is not None]

@@ -12,7 +12,10 @@ Unreleased in the same PR.
   conversations and the decisions, every line cited. The plugin's `brief` skill writes one when you ask; `docket brief
   stale` and the `briefs` tool say which are stale: records about the entity its last rev hadn't seen, a line citing a
   line that changed, or its entity gone. A brief is never written for an entity a never-store list holds, and never
-  names a listed person. The Briefs page follows.
+  names a listed person.
+- The Briefs page, `/briefs` in the web app: the briefs by entity type with what makes each stale, and a brief
+  beside the raw its lines cite, the lines it was built from one click away. A brief or a line a never-store list
+  now holds shows only that it is hidden.
 - Voyage AI's API for search by meaning and the reranker, for a machine with no GPU and no time for CPU embedding:
   `docket models install --api`, then `docket models key voyage` and, in each vault, `docket models allow voyage`,
   all in your own terminal. It sends a vault's text off the machine only when the vault allows it in `vault.yaml`,
