@@ -223,8 +223,7 @@ class DocStore:
             status = "confirmed" if pick in decision_form.CONFIRMING else "rejected"
             message = f"Decision: {doc_id} {status} on the Briefs page\n\nDoc: {doc_id} rev {rev}"
             commit = self._write_all_and_commit([(rel, new)], message)
-        if self._known is not None:
-            self._known.pop(doc_id, None)
+        (self._known or {}).pop(doc_id, None)
         return PutResult(id=doc_id, rev=rev, path=rel, changed=True, commit=commit)
 
     def decisions(self) -> list[ProcessedDoc]:

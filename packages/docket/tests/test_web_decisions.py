@@ -168,6 +168,7 @@ def test_another_entity_s_brief_has_no_decisions_part(client: TestClient) -> Non
 
 def test_an_entity_with_neither_is_still_not_found(client: TestClient) -> None:
     page(client, "/briefs?brief=brief:harbour-pilot", status=404)
+    assert "done is what a click did" in said(client.get(f"{PAGE}&done=decided"))
 
 
 # -- the click --------------------------------------------------------------------------------------------------------
@@ -346,6 +347,8 @@ def test_the_part_says_what_a_list_hides_and_when_there_is_nothing() -> None:
         "F",
     )
     assert found.hidden_note == "1 decision hidden: a never-store list holds what it names."
+    unread = one.model_copy(update={"id": "decision:2026-10-01-unread"})
+    assert part(decisions.DecisionsReport(decisions=[unread]), {}, "F").waiting[0].lines == []
     [card] = found.waiting
     assert [(line.n, line.hidden) for line in card.lines] == [(13, False), (15, True)]
     assert card.lines[0].anchors[0].url.startswith("/recording?rid=calls:rec-0101")
