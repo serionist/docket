@@ -137,6 +137,13 @@ Unreleased in the same PR.
 
 ### Changed
 
+- A redaction rule turned on, or a pattern added, no longer cuts another rule's match short: every rule reads the
+  same text, so a pattern that holds a phone number or a password, such as a dial-in with its PIN or a database
+  address, is redacted whole, and matches that overlap become one marker. A record whose redacted form changes is
+  stored once more when its source sends it again. What a cut-short match already stored stays: for each of your own
+  patterns, search the vault for the marker of the rule that cut it where the rest would follow, such as
+  `[redacted:password]@`, `[redacted:phone] PIN` or `[redacted:tck]-`, and edit a doc that holds one; raw keeps what
+  it stored.
 - A doc that says something on the never-store keywords list only inside what a redaction rule hides, such as an
   address a pattern redacts, a phone number or a password, is refused now, as a record holding it is dropped. A doc
   redacted before still goes in again. `docket doc redact` names such a stored doc and leaves it for you to edit,

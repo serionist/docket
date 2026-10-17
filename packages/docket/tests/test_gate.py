@@ -350,6 +350,21 @@ def test_phone_on_redacts_both_and_credentials_off_keeps_a_password(gate: Gate, 
     assert (second.text, second.native) == (f"password: {SECRET}, call [redacted:phone]", {"password": SECRET})
 
 
+def test_a_record_needing_a_second_pass_is_staged_once(gate: Gate, vault: Vault) -> None:
+    # `code` matches only after X's marker. Before #147 intake found it on no pass and promotion, redacting again, did,
+    # so raw held a version intake never computed and every sync staged the record again (DR-0525).
+    patterns = [RedactionPattern(name="code", pattern=r"\bcode\b"), RedactionPattern(name="x", pattern="X")]
+    rewrite(vault, lambda c: c.redaction.patterns.extend(patterns))
+    record = note(1, text="see Xcode now")
+    syncs = []
+    for _ in range(3):
+        staged = gate.stage([record])
+        promoted = gate.promote()
+        syncs.append((staged.ready, staged.skipped, sum(r.written for r in promoted.runs)))
+    assert syncs == [(1, 0, 1), (0, 1, 0), (0, 1, 0)]
+    assert [r.text for r in in_raw(vault)] == ["see [redacted:x][redacted:code] now"]
+
+
 def test_phone_turned_off_makes_a_record_sent_again_a_new_version_holding_the_number(gate: Gate, vault: Vault) -> None:
     rewrite(vault, phone(True))
     record = make_record(1, text=f"call {PHONE}")
