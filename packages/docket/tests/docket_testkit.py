@@ -12,7 +12,8 @@ import sqlite3
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
@@ -61,6 +62,47 @@ def sh(cwd: Path, *args: str, check: bool = True) -> str:
     if check and proc.returncode != 0:
         raise AssertionError(f"{args}: {proc.stderr or proc.stdout}")
     return proc.stdout
+
+
+def git_command(args: list[str]) -> str:
+    """A git call as a call list shows it: what follows the -c settings in front, with a commit's message left out."""
+    rest = [str(a) for a in args[1:]]
+    while rest[:1] == ["-c"]:
+        del rest[:2]
+    if "-m" in rest:
+        del rest[rest.index("-m") + 1]
+    return " ".join(rest)
+
+
+# What every commit of Docket's asks git, as `git_calls` lists it: run files git holds but HEAD doesn't, unmerged paths,
+# then the add, the staged check, git's identity (once per opened vault) and the commit. The new commit's id is read
+# from the branch's ref file (DR-0528 to DR-0530).
+COMMIT_CALLS = [
+    "status --porcelain=v1 -z --untracked-files=all --ignored=traditional -- raw",
+    "ls-files -u",
+    "add --pathspec-from-file=- --pathspec-file-nul",
+    "diff --cached --name-only -z -- .",
+    "config --get-regexp ^user[.](name|email)$",
+    "commit -q --only --pathspec-from-file=- --pathspec-file-nul -m",
+]
+
+
+@contextmanager
+def git_calls(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[str]]:
+    """The git commands the block starts, in order, as `git_command` shows them (#132)."""
+    calls: list[str] = []
+    real = subprocess.run
+
+    def recording(args: Any, *rest: Any, **kwargs: Any) -> Any:
+        if isinstance(args, list) and args and Path(str(args[0])).stem == "git":
+            calls.append(git_command(args))
+        return real(args, *rest, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", recording)
+    try:
+        yield calls
+    finally:
+        monkeypatch.setattr(subprocess, "run", real)
 
 
 def make_config(storage: Literal["repo", "folder"] = "repo", **owner: Any) -> VaultConfig:

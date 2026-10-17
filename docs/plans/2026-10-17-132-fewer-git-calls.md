@@ -34,7 +34,7 @@ asked and how long it took. Three runs each, medians; a git call costs 16 to 20 
 | Path | Command traced | Calls | Asked twice | Git time | Wall time | Calls after |
 |---|---|---|---|---|---|---|
 | doc put | `docket doc put` (the service's `doc_put` makes the same 12) | 12 | 2 | 271 ms | 339 ms | 7 |
-| promote | `docket staging promote`, one source | 13 | 4 | 282 ms | 351 ms | 7 |
+| promote | `docket staging promote`, one source | 13 | 4 | 282 ms | 351 ms | 8 |
 | curate add | `docket curate add`, a create and an alias | 17 | 3 | 347 ms | 423 ms | 8 |
 | release | one recording: four lock holds, two commits | 39 | 22 | 760 ms | 1,104 ms | 21 |
 | import notes | `docket import notes`, 11 notes | 28 | 2 | 584 ms | 768 ms | 13 |
@@ -53,7 +53,7 @@ Expected, at the 17 ms a call costs here:
 | Path | Calls removed | Time saved | Wall time after |
 |---|---|---|---|
 | doc put | 5 | about 85 ms | about 255 ms |
-| promote | 6 | about 100 ms | about 250 ms |
+| promote | 5 | about 85 ms | about 265 ms |
 | curate add | 9 | about 155 ms | about 270 ms |
 | release | 18 | about 305 ms | about 800 ms |
 | import notes, 11 notes | 15 | about 255 ms | about 510 ms |
@@ -119,8 +119,8 @@ A module, `vault/gitfiles.py`, reads what git keeps as plain files:
 - Unknown, and the caller makes today's git call: any read error, a git dir whose refs aren't files (reftable:
   `refs/heads/.invalid` in `HEAD`, or `extensions.refStorage` set), or a file that doesn't read as git writes it (an
   id not 40 or 64 hex).
-- Used by: the recovery check's branch test, `changed_against_head`'s HEAD test (`git.py` and `host.py`), and
-  `Git.commit`'s new id.
+- Used by: the recovery check's branch test, `changed_against_head`'s HEAD test, and `Git.commit`'s new id. `host.py`'s
+  HEAD test runs when a folder vault is set up or converted, not on a write, and stays.
 - Shared with #134, without either waiting: #134's committed-settings cache keys on HEAD's id read from these same
   files. Whichever merges first adds `gitfiles.py`; the other rebases onto it. #132 changes nothing in settings, and
   #134 can keep its own reader until then.
@@ -151,7 +151,8 @@ each git process gets a console of its own. Timed on this desktop, 90 calls each
 
 The marker files (a rebase, merge, cherry-pick or revert in progress) and the branch test are file reads, so they run
 at every check: at `writing()`'s entry and in every commit. `ls-files -u` moves to right before each commit's `add`
-and no longer runs at `writing()`'s entry. A commit that adds nothing, such as promote's first, asks it not at all.
+and no longer runs at `writing()`'s entry. Every commit asks it, one that stages nothing too, such as promote's
+first, so a write during a conflict refuses as it does on main.
 
 Why next to the add: `git add` marks an unmerged path resolved and stages its conflict markers, and `git commit
 --only` re-reads the paths it names and resolves an unmerged one too. On git 2.47 a `git stash pop` conflict on a
@@ -162,6 +163,10 @@ can.
 A conflict that lands after the check and before the commit, such as a stash pop after Docket's add, is still
 committed: the window is three git starts (`add`, the staged check, the identity), where it is about six on main. The
 lead accepted that window rather than a second `ls-files -u` before each commit (Risks).
+
+A refusal there leaves the index as git left it. On main a conflict that appeared mid-hold was refused by the commit's
+check, and the write's cleanup then ran `git reset` on the doc and cleared the user's conflict. The refusal is now an
+`UnmergedError`, and the doc store's and entity store's cleanups put their files back without the reset.
 
 The check stays vault-wide, a plain `ls-files -u` from the vault's folder as today, not limited to the commit's paths:
 `ls-files` takes no `--pathspec-from-file`, and a backlog of run files on the command line could pass Windows'
@@ -182,7 +187,7 @@ checks around the run file it writes both stay.
 
 ### What stays
 
-- `ls-files -u` once per commit that adds: the index holds the answer, and reading git's index format (four versions,
+- `ls-files -u` once per commit: the index holds the answer, and reading git's index format (four versions,
   split and sparse indexes) would be a second implementation to keep right.
 - The staged check after `add`: it decides "nothing new" exactly. A status before the add can't tell a file equal to
   HEAD from one whose staged copy differs; git would then refuse an empty commit where Docket now returns nothing.
@@ -211,8 +216,8 @@ way.
 
 | Test | What it proves |
 |---|---|
-| `test_git_calls.py`, new | per path (doc put, promote, curate add, release, import notes, `vault.yaml` write) on a temp vault, the exact list of git commands, so a call added later fails with its name; doc put and promote on a folder vault too |
-| the mid-hold conflict | a `git stash pop` conflict on a vault file that appears inside `writing()`, after its entry and before the commit's check: the commit refuses, HEAD stays, the markers aren't committed |
+| `test_git_calls.py`, new | per path (doc put, promote, curate add, import notes, `vault.yaml` write) on a temp vault, the exact list of git commands, so a call added later fails with its name; doc put and promote on a folder vault too. A release's list is in `test_release.py`, beside its owner at the console |
+| the mid-hold conflict | a `git stash pop` conflict on a vault file that appears inside `writing()`, after its entry and before the commit's check: the commit refuses, HEAD stays, the markers aren't committed, and the conflict stays unmerged (on main the cleanup's reset cleared it) |
 | a conflict after the add | a `git stash pop` conflict that lands after Docket's `add` and before its commit is committed, as on main: the test pins today's behaviour, so a later change to it is deliberate |
 | `test_gitfiles.py`, new | `head` and `head_id` equal `git rev-parse` on a fresh repo, a branch with no commit, a detached HEAD, a ref only in `packed-refs`, a git dir with `commondir`, a folder vault's host; a malformed ref file and an unreadable `packed-refs` answer unknown, and the caller's git call runs |
 | reftable | one vault made with `init.defaultRefFormat=reftable`: the reader answers unknown and the fallback calls run, so its call list has today's calls; skipped where the git lacks reftable |
