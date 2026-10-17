@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!-- Docket's one polkit action (DR-0573). Install it once, as root:
+       sudo install -m 0644 io.github.serionist.docket.policy /usr/share/polkit-1/actions/
+     auth_self asks you every time; never auth_self_keep, which would pass again for five minutes. -->
+<policyconfig>
+  <vendor>Docket</vendor>
+  <vendor_url>https://github.com/serionist/docket</vendor_url>
+  <action id="io.github.serionist.docket.confirm">
+    <description>Confirm a step Docket asks you about</description>
+    <message>Confirm the step Docket shows in your terminal</message>
+    <defaults>
+      <allow_any>auth_self</allow_any>
+      <allow_inactive>auth_self</allow_inactive>
+      <allow_active>auth_self</allow_active>
+    </defaults>
+  </action>
+</policyconfig>

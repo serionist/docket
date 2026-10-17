@@ -169,7 +169,13 @@ def rewrite(
         # A conflict refuses before the owner is asked, not after they typed the code (DR-0528).
         vault.refuse_unmerged()
     screen = _screen(held, before, after if change_loosens else None, warnings)
-    answer = console.typed_back(screen, "make this change", "leave vault.yaml as it is", "vault.yaml stays as it is")
+    answer = console.confirm(
+        screen,
+        "make this change",
+        "leave vault.yaml as it is",
+        "vault.yaml stays as it is",
+        act="make a vault.yaml change that isn't only stricter",
+    )
     if answer != "yes":
         return Rewritten(declined=True)
     with vault.writing():

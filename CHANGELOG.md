@@ -8,6 +8,12 @@ Unreleased in the same PR.
 
 ### Added
 
+- The OS prompt: where your machine has one set up, a release, a change that loosens `vault.yaml`, `docket media
+  confirm-cuts` and `docket media keys export` ask Windows Hello, Touch ID or your Mac's password, or polkit, after
+  you press Enter at the console; the code typed back is asked only where there is none. `docket vault status` says
+  which this machine asks, and why. On Linux, install Docket's polkit action once with the line it prints. A
+  console-code marker, which only an admin or root can make, sends a machine back to the code; the README gives the
+  lines.
 - Decisions on the Briefs page: a project's, topic's or stream's decisions newest first, what waits for you
   beside any decision it contradicts, and the buttons that confirm or reject it. Your click is the only way a
   decision becomes confirmed or rejected; a page left open while something changed writes nothing and shows
@@ -191,6 +197,10 @@ Unreleased in the same PR.
 
 ### Changed
 
+- `docket media keys export` asks for your yes before it writes the file, as every key leaves the clone.
+- On Windows, a machine with a TPM or a fingerprint or face reader where Windows Hello isn't set up for you now
+  refuses a release or a loosening: set Hello up, or make the console-code marker. Update every machine before you
+  rely on the prompt.
 - A line of a brief, a decision or a correction can cite the doc line it was built from, `[d:<doc id>@<rev>#<n>]`,
   as `verify` gives it, and is flagged when that line changes: `docket doc read` says so beside the line, `docket doc
   stale` lists every flagged line, and the session start counts them. Update every machine before docs cite lines,

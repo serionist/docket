@@ -8,12 +8,14 @@ import re
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from docket_testkit import consuming_project, git, sh
+from docket_testkit import FakePrompt, consuming_project, git, sh
 
-from docket import console
+from docket import console, osprompt
+from docket.errors import DocketError
 from docket.sources import release as releasing
 from docket.vault.config import CONFIG_FILE, VaultConfig
 
@@ -80,6 +82,66 @@ def test_the_release_keeps_its_two_names_for_a_copied_reference_test(monkeypatch
     assert releasing._ask("?") == "read ?"  # pyright: ignore[reportPrivateUsage]
 
 
+# -- the OS prompt (DR-0572) ----------------------------------------------------------------------------------------
+
+
+def test_with_a_prompt_set_up_enter_and_its_yes_are_the_only_yes(
+    os_prompt: Callable[..., FakePrompt], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    hello = os_prompt(osprompt.Verified())
+    asked: list[str] = []
+    monkeypatch.setattr(console, "ask", lambda prompt: asked.append(prompt) or "")
+    assert console.confirm(["the screen"], "make this change", "leave it", "it stays", act="do a thing") == "yes"
+    assert asked == ["Press Enter to make this change with Fake Hello, n to leave it, q to stop: "]
+    assert hello.acts == ["do a thing"]
+    assert capsys.readouterr().out == "the screen\n"
+
+
+def test_a_prompt_that_doesnt_confirm_is_a_no_and_never_asks_the_code(
+    os_prompt: Callable[..., FakePrompt], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    os_prompt(osprompt.Refused("cancelled"))
+    asked: list[str] = []
+    monkeypatch.setattr(console, "ask", lambda prompt: asked.append(prompt) or "")
+    assert console.confirm([], "make this change", "leave it", "it stays", act="do a thing") == "no"
+    assert len(asked) == 1
+    assert "Type" not in asked[0]
+    assert "Fake Hello didn't confirm it (cancelled); it stays" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(("typed", "answer", "said"), [("n", "no", False), ("q", "stop", False), ("y", "no", True)])
+def test_anything_but_enter_asks_no_prompt(
+    typed: str, answer: str, said: bool, os_prompt: Callable[..., FakePrompt], capsys: pytest.CaptureFixture[str]
+) -> None:
+    hello = os_prompt(osprompt.Verified())
+    assert console.confirm([], "make this change", "leave it", "it stays", act="do a thing", asker=lambda p: typed) == (
+        answer
+    )
+    assert hello.acts == []
+    assert ("that isn't Enter; it stays" in capsys.readouterr().out) == said
+
+
+def test_without_a_prompt_the_screen_says_why_and_the_code_is_asked(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(console, "ask", lambda prompt: "q")
+    assert console.confirm(["the screen"], "make this change", "leave it", "it stays", act="do a thing") == "stop"
+    assert capsys.readouterr().out == "the screen\nthe console code: no OS prompt in tests\n"
+
+
+def test_a_machine_that_cant_ask_refuses_before_the_screen(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(osprompt, "find", lambda: osprompt.Refusal("set up Windows Hello"))
+    with pytest.raises(DocketError, match="nothing was asked: set up Windows Hello"):
+        console.confirm(["the screen"], "make this change", "leave it", "it stays", act="do a thing")
+    assert capsys.readouterr().out == ""
+
+
+def test_which_yes_is_the_prompts_own_status() -> None:
+    assert console.which_yes() == ["the console code: no OS prompt in tests"]
+
+
 # -- a real pipe, a real terminal ------------------------------------------------------------------------------------
 
 
@@ -94,9 +156,17 @@ def _project(tmp_path: Path) -> Path:
     return found.root
 
 
+# The child stands in for a machine without an OS prompt, as the tests' fixture does in this process: no test reaches
+# the system's prompt, and the code is what the terminal test types back.
+CHILD = (
+    "import sys; from docket import osprompt; osprompt.find = lambda: osprompt.NoPrompt('a test'); "
+    "from docket.cli import main; sys.exit(main(sys.argv[1:]))"
+)
+
+
 def _docket(*args: str, **kwargs: object) -> subprocess.Popen[bytes]:
     env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
-    return subprocess.Popen([sys.executable, "-m", "docket", *args], env=env, **kwargs)  # type: ignore[call-overload]
+    return subprocess.Popen([sys.executable, "-c", CHILD, *args], env=env, **kwargs)  # type: ignore[call-overload]
 
 
 @pytest.mark.parametrize(

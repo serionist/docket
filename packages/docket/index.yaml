@@ -31,8 +31,10 @@ reading:
   - { path: packages/docket/src/docket/documents/scan.py, role: guide, note: "docket scan: the listing's skips, the cache and change detection, gone and returning versions, the guard, batches into the gate (DR-0486, DR-0487)" }
   - { path: packages/docket/src/docket/vault/settings.py, role: contract, note: "vault.yaml one writer and the door: rewrite only in Docket form, a page write held to loosens(), the CLI asking at the console before a loosening or a loosening edit it takes in, what pages may import, the lines to paste (DR-0506, DR-0507, DR-0517, DR-0519)" }
   - { path: packages/docket/src/docket/web/settings.py, role: contract, note: "the Settings page: the sources, never-store lists, redaction and this machine's models; the changes that keep more out made with their buttons (a never-store value added after its question, a rule on, a source mixed or off, private after its question), each a form post on the writer thread through vault.yaml's writer; every other change named; never-store values only with show=lists (DR-0505 to DR-0509)" }
-  - { path: packages/docket/src/docket/console.py, role: contract, note: "the owner yes at their own console, for a release and a vault.yaml change that is not only stricter: the refusals, the code, the question, nothing that answers it (DR-0202, DR-0518)" }
+  - { path: packages/docket/src/docket/console.py, role: contract, note: "the owner yes at their own console, for a release, a vault.yaml change that is not only stricter, confirm-cuts and the key export: the refusals, the OS prompt or the code, the question, nothing that answers it (DR-0202, DR-0518, DR-0572)" }
   - { path: packages/docket/src/docket/vault/inforce.py, role: contract, note: "the settings in force: HEAD vault.yaml plus what an uncommitted edit only tightens, field by field; loosens() as the same rule; the loader and its cache by HEAD commit id (DR-0521)" }
+  - { path: packages/docket/src/docket/osprompt/__init__.py, role: contract, note: "the OS prompt: what this machine asks (a prompt, the code, or a refusal), the marker first; once a prompt is set up its no is never the code; only docket.console imports it (DR-0572 to DR-0574)" }
+  - { path: packages/docket/src/docket/osprompt/marker.py, role: contract, note: "the console-code marker: its path per system and when it counts, judged by whether the owner could replace an entry, with the token checked first (DR-0574)" }
 decisions:
   - id: DR-0019
     title: The vault's layout and run-file names are fixed
@@ -921,6 +923,7 @@ decisions:
       - Inside the package only cli.py calls release(); a test scans for it.
       - "Not a wall against a process running as the user: it makes a release a deliberate act, which the cuts skill forbids Claude."
       - "No page or route releases a hold either: the Staging page names the command (DR-0382)."
+      - "Amended knowingly by #143 (DR-0572): the yes is the OS prompt where the machine has one set up, and the code typed back only where it has none."
     not_chosen:
       - "--yes, or --by user as on classify: Claude passes a flag as easily as the owner."
       - "A y to a y/N question: a pipe or a pseudo-terminal answers it unread."
