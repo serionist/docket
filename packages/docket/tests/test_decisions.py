@@ -366,6 +366,11 @@ def test_a_statement_rejected_once_isn_t_proposed_again(vault: Vault) -> None:
             ),
             "is in both replaces and contradicts",
         ),
+        (lambda t: t.replace("subject: fleet-management", "subject: Fleet Management"), "isn't a slug"),
+        (
+            lambda t: t.replace("subject: fleet-management", "subject: fleet-management\nreplaces: [decision:Bad Id]"),
+            "the slug 'Bad Id'",
+        ),
     ],
 )
 def test_a_decision_out_of_form_is_refused(vault: Vault, change, says: str) -> None:
@@ -521,3 +526,20 @@ def test_the_index_rebuilds_a_decision_from_its_last_commit(vault: Vault) -> Non
     decide(vault, FIRST, "confirmed")
     index_update(vault)
     assert hits(vault, "charging queue comes first") == ["the charging queue comes first"]
+
+
+def test_the_report_says_flagged_lines_and_an_edit_on_disk() -> None:
+    found = decisions.DecisionsReport(
+        decisions=[
+            decisions.DecisionState(
+                id=FIRST, subject="fleet-management", title="t", status="rejected", current=False, rev=2, by="x",
+                flagged=1, note=EDITED,
+            )
+        ]
+    )  # fmt: skip
+    assert render.decisions(found) == [
+        f"rejected   {FIRST}  t",
+        "           on fleet-management, rev 2",
+        "           1 line(s) cite lines that changed",
+        f"           {EDITED}",
+    ]
