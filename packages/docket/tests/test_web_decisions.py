@@ -354,9 +354,9 @@ def test_the_part_says_what_a_list_hides_and_when_there_is_nothing() -> None:
     assert card.lines[0].anchors[0].url.startswith("/recording?rid=calls:rec-0101")
 
 
-def test_daily_and_pilot_are_where_the_kit_put_them(tmp_path: Path, template: Path) -> None:
-    del tmp_path
-    report = decisions.report(Vault.open(template))
+def test_daily_and_pilot_are_where_the_kit_put_them(client: TestClient, tmp_path: Path) -> None:
+    del client
+    report = decisions.report(vault_of(tmp_path))
     assert {d.id: (d.status, d.current) for d in report.decisions} == {
         PILOT: ("confirmed", False),
         DASHBOARD: ("confirmed", True),
