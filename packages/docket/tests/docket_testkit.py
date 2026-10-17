@@ -656,6 +656,11 @@ def fixture_records(source: str) -> list[RawRecord]:
     return [RawRecord.model_validate(json.loads(line)) for line in lines if line.strip()]
 
 
+def files_in(vault: Vault, folder: str) -> list[str]:
+    """A folder's files as vault paths: `Vault.commit` takes files, and a folder given whole commits nothing."""
+    return sorted(p.relative_to(vault.root).as_posix() for p in (vault.root / folder).rglob("*") if p.is_file())
+
+
 def build_index_vault(root: Path) -> Vault:
     """The index fixture as a vault: its records written through write_run, its entity files copied in, its docs put
     through doc_put in file-name order. Built under the caller's git settings."""
@@ -665,7 +670,7 @@ def build_index_vault(root: Path) -> Vault:
     for source in ("cal", "calls", "chat", "mail"):
         vault.write_run(source, fixture_records(source), datetime(2026, 10, 14, 7, 0, tzinfo=UTC))
     shutil.copytree(INDEX_FIXTURE / "entities", vault.root / "entities", dirs_exist_ok=True)
-    vault.commit(["entities"], "Entities")
+    vault.commit(files_in(vault, "entities"), "Entities")
     for path in sorted((INDEX_FIXTURE / "docs").glob("*.md")):
         recall.doc_put(vault, path.read_text(encoding="utf-8"))
     return vault
@@ -847,7 +852,7 @@ def build_name_vault(root: Path) -> Vault:
     (person / "rita-sample.yaml").write_text(
         "id: rita-sample\ntype: person\nname: {en: Rita Sample}\naliases:\n  - {text: Rita}\n", encoding="utf-8"
     )
-    vault.commit(["entities"], "Entities")
+    vault.commit(["entities/person/rita-sample.yaml"], "Entities")
     stored = DocStore(vault).put_many(name_docs(), "Name vault docs")
     assert all(isinstance(r, PutResult) for r in stored), stored
     return vault

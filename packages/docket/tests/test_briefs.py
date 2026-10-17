@@ -257,8 +257,6 @@ def test_one_brief_s_missing_commit_leaves_the_others_as_they_are(
 
 
 def test_a_merge_in_the_briefs_history_reads_each_brief_s_own_log(vault: Vault) -> None:
-    # The fixture leaves its entity files staged, not committed; a branch switch and a merge want them in a commit.
-    git(vault.root, "commit", "-qm", "Entities", "--", "entities")
     put_ben(vault)
     git(vault.root, "checkout", "-q", "-b", "side")
     recall.doc_put(vault, brief("northwind", "Northwind", changed=[f"- Above the budget. {cite(vault, TEN)}"]))
