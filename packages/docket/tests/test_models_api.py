@@ -379,6 +379,8 @@ def test_a_redirect_or_an_error_says_only_its_status(monkeypatch: pytest.MonkeyP
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_POST(self) -> None:
             hits.append(self.path)
+            # The request read whole first: a socket closed on unread bytes is reset on Windows, mid-answer.
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
             if self.path.endswith("/redirect"):
                 self.send_response(302)
                 self.send_header("Location", "/v1/elsewhere")
@@ -417,7 +419,9 @@ def test_a_redirect_or_an_error_says_only_its_status(monkeypatch: pytest.MonkeyP
                 REAL_SEND(path, {}, FAKE_KEY, 5.0)
         with pytest.raises(voyage.ApiError) as short:
             REAL_SEND("/short", {}, FAKE_KEY, 5.0)
-        assert short.value.why == "Voyage couldn't be reached" and not short.value.timeout
+        # Whatever the system makes of it (IncompleteRead, or a reset on Windows), the user hears the same, and
+        # nothing of the answer or the address.
+        assert str(short.value) == "Voyage couldn't be reached" and not short.value.timeout
         with pytest.raises(voyage.ApiError) as late:
             REAL_SEND("/slow", {}, FAKE_KEY, 0.2)
         assert late.value.timeout and late.value.why == "Voyage didn't answer in time"
@@ -568,7 +572,9 @@ def test_a_search_reads_the_settings_once_and_never_inside_the_rerank(
     monkeypatch.setattr(Vault, "open", classmethod(counting_open))
     monkeypatch.setattr(inforce, "load", counting_load)
     monkeypatch.setattr(Models, "rerank", rerank)
-    result = index.search(vault, "pallet delivery", models=models)
-    assert result.models.state == "on" and result.rerank.state == "on"
+    # No budget: the counts are what this pins, not a machine's speed. The vector stage may be skipped where SQLite
+    # loads no extensions (GitHub's macOS Python); the rerank runs either way.
+    result = index.search(vault, "pallet delivery", models=models, rerank_budget=None)
+    assert result.rerank.state == "on", result.rerank
     assert opened.count("open") <= 1 and opened.count("load") == 1
     assert in_rerank == []
