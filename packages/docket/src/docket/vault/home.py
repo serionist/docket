@@ -112,30 +112,87 @@ def _own_repo(root: Path) -> Home:
     return Home(root, "repo", root, "", git_dir, git_dir / "docket")
 
 
+@dataclass(frozen=True)
+class Found:
+    """Where git finds the repo around a folder: its top, the folder's path in it, its git dir and common dir."""
+
+    top: Path
+    prefix: str
+    git_dir: Path
+    common: Path
+
+
+# The variables that tell git where a repo is instead of letting it look: with one set, git is asked every time.
+_GIT_PLACES = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_COMMON_DIR",
+    "GIT_CEILING_DIRECTORIES",
+    "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+)
+# What git answered per folder, in this process, for a plain checkout (DR-0532).
+_FOUND: dict[Path, Found] = {}
+
+
+def discover(root: Path) -> Found | None:
+    """Where git finds the repo around a folder, or None outside one. Git is asked once per folder and process; after
+    that its answer stands while a few file checks say git would give it again: the git dir is still a repository and
+    no folder between this one and the top holds a .git git would stop at (DR-0532). A folder vault opens on every
+    call of the service, and each `git rev-parse` costs a process start."""
+    if not any(os.environ.get(name) for name in _GIT_PLACES):
+        found = _FOUND.get(root)
+        if found is not None and _stands(root, found):
+            return found
+    answer = rev_parse(
+        root, "--show-toplevel", "--show-prefix", "--absolute-git-dir", "--path-format=absolute", "--git-common-dir"
+    )
+    if answer is None:
+        _FOUND.pop(root, None)
+        return None
+    top, prefix, git_dir, common = answer
+    found = Found(Path(top).resolve(), prefix, Path(git_dir).resolve(), Path(common).resolve())
+    # Only a plain checkout is kept, whose .git is the repository: a linked worktree's or a submodule's .git file
+    # points elsewhere, and the checks above couldn't vouch for it.
+    if found.git_dir == found.common == found.top / ".git" and is_git_dir(found.git_dir):
+        _FOUND[root] = found
+    else:
+        _FOUND.pop(root, None)
+    return found
+
+
+def _stands(root: Path, found: Found) -> bool:
+    """Whether git would find the same repo from the folder: its git dir still a repository, and no .git that git
+    takes (a file, or a folder that passes `is_git_dir`) in the folder or any folder up to the top."""
+    if not is_git_dir(found.git_dir):
+        return False
+    folder = root
+    while folder != found.top:
+        dot = folder / ".git"
+        if dot.is_file() or is_git_dir(dot) or folder.parent == folder:
+            return False
+        folder = folder.parent
+    return True
+
+
 def _folder(root: Path) -> Home:
     if (root / ".git").exists():
         raise DocketError(
             f"{root}/vault.yaml says storage: folder, but {root} has a .git of its own; a folder vault is part of the "
             "repo around it"
         )
-    answer = rev_parse(
-        root, "--show-toplevel", "--show-prefix", "--absolute-git-dir", "--path-format=absolute", "--git-common-dir"
-    )
-    if answer is None:
+    found = discover(root)
+    if found is None:
         raise DocketError(f"{root}/vault.yaml says storage: folder, but {root} isn't inside a git repo")
     # The prefix is never empty: the top of a repo has a .git, which a folder vault refuses above.
-    top, prefix, git_dir, common = answer
-    top_path = Path(top).resolve()
-    common_dir = Path(common).resolve()
-    git_path = Path(git_dir).resolve()
-    if common_dir != git_path:
-        main = common_dir.parent / prefix.rstrip("/")
+    if found.common != found.git_dir:
+        main = found.common.parent / found.prefix.rstrip("/")
         raise DocketError(
             f"{root} is in a linked worktree; Docket writes the vault in the main checkout: {main} (pass --vault)"
         )
-    if (top_path / "vault.yaml").is_file():
-        raise DocketError(f"{root} is inside another vault, {top_path}; a vault can't hold another")
-    return Home(root, "folder", top_path, prefix, git_path, git_path.joinpath("docket", *prefix.rstrip("/").split("/")))
+    if (found.top / "vault.yaml").is_file():
+        raise DocketError(f"{root} is inside another vault, {found.top}; a vault can't hold another")
+    private = found.git_dir.joinpath("docket", *found.prefix.rstrip("/").split("/"))
+    return Home(root, "folder", found.top, found.prefix, found.git_dir, private)
 
 
 def stopped_convert(root: Path) -> Path | None:
@@ -144,8 +201,8 @@ def stopped_convert(root: Path) -> Path | None:
     root = root.resolve()
     if is_git_dir(root / ".git"):
         return None
-    answer = rev_parse(root, "--absolute-git-dir", "--show-prefix")
-    if answer is None or not answer[1]:
+    found = discover(root)
+    if found is None or not found.prefix:
         return None
-    state = Path(answer[0]).joinpath("docket", *answer[1].rstrip("/").split("/"), CONVERT_FILE)
+    state = found.git_dir.joinpath("docket", *found.prefix.rstrip("/").split("/"), CONVERT_FILE)
     return state if state.is_file() else None

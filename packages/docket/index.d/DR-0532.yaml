@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0532
+    title: A folder vault's open asks git where its repo is once per folder and process, then checks the answer with stats
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#151"]
+    description: "Opening a folder vault asks git where the repo around it is (its top, the vault's path in it, the git dir and the common dir), once per folder and process. After that, each open checks the answer with a few stats instead: the git dir still passes git's own repository test (is_git_dir), and no folder from the vault up to the top holds a .git that git would stop at, a file or a folder that passes the same test. When a check fails git is asked again, so a host whose .git went missing, or a repo made between the vault and its host, is seen at the next open, as before. Only a plain checkout's answer is kept, whose .git is the repository; a linked worktree's or a submodule's .git file points elsewhere, and git is asked every time for it, and whenever GIT_DIR, GIT_WORK_TREE, GIT_COMMON_DIR, GIT_CEILING_DIRECTORIES or GIT_DISCOVERY_ACROSS_FILESYSTEM is set. The service opens the vault on every call, twice for a search, and each git rev-parse is a process start: on Windows 18 to 220 ms each, 4 per search."
+    binds: ["An open gets the same home git would give, or asks git again."]
+    not_chosen:
+      - "Finding the repo without git, by walking up for .git: git's own rules (its variables, gitfiles, ceilings, safe.directory) would have to be copied, and a copy that drifts commits into the wrong repo."
+      - "The service keeping one opened Vault: vault.yaml must apply at once, and a Vault's raw log cache is not shared between the threads that read and write."
+      - "Keeping the answer for good: a host that lost its .git, or a repo made above the vault, would go unseen (DR-0271)."

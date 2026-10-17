@@ -14,7 +14,7 @@ from docket_testkit import empty_vault, folder_vault, git, host_repo, make_confi
 
 from docket.errors import DocketError
 from docket.sources import local
-from docket.vault import cursors, machine
+from docket.vault import cursors, home, machine
 from docket.vault.config import CONFIG_FILE, VaultConfig, write_config
 from docket.vault.convert import State, Where
 from docket.vault.docstore import DocStore
@@ -152,6 +152,71 @@ def test_a_folder_vault_s_tracked_check_runs_once_per_process(tmp_path: Path, mo
     for _ in range(3):
         Vault.open(vault.root)
     assert calls == [("ls-files", "--error-unmatch", "--", CONFIG_FILE)]
+
+
+def asked_git(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
+    """The folders `git rev-parse` runs in from now on, with nothing kept from before, as a new process starts."""
+    asked: list[Path] = []
+    real = home.rev_parse
+
+    def spy(cwd: Path, *flags: str) -> list[str] | None:
+        asked.append(cwd)
+        return real(cwd, *flags)
+
+    monkeypatch.setattr(home, "rev_parse", spy)
+    monkeypatch.setattr(home, "_FOUND", dict[Path, home.Found]())
+    return asked
+
+
+def test_git_is_asked_where_a_folder_vault_is_once_per_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    vault = folder_vault(tmp_path)
+    asked = asked_git(monkeypatch)
+    for _ in range(3):
+        assert Vault.open(vault.root).home == vault.home
+    # Once for the stopped-convert check and the home together, then never: a service opens the vault on every call.
+    assert asked == [vault.root]
+
+
+def test_a_repo_made_between_a_folder_vault_and_its_host_is_seen_at_the_next_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = folder_vault(tmp_path)
+    asked = asked_git(monkeypatch)
+    Vault.open(vault.root)
+    notes = tmp_path / "host" / "notes"
+    git(notes, "init", "-q", "-b", "main")
+    # Git now stops at notes/.git, which doesn't track the vault: the kept answer is dropped and git asked again.
+    with pytest.raises(DocketError, match=r"doesn't track its vault\.yaml"):
+        Vault.open(vault.root)
+    found = home.discover(vault.root)
+    assert found is not None
+    assert found.top == notes.resolve()
+    remove_tree(notes / ".git")
+    # A .git file, as a submodule or a linked worktree has, stops git as well.
+    (notes / ".git").write_text("gitdir: ../elsewhere\n", encoding="utf-8")
+    assert home.discover(vault.root) is None
+    (notes / ".git").unlink()
+    assert Vault.open(vault.root).home == vault.home
+    assert len(asked) == 4
+
+
+def test_git_is_asked_every_time_when_a_variable_says_where_the_repo_is(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = folder_vault(tmp_path)
+    asked = asked_git(monkeypatch)
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path / "elsewhere"))
+    for _ in range(2):
+        Vault.open(vault.root)
+    assert asked == [vault.root] * 4
+    # Nor is a linked worktree's answer kept: its .git file points elsewhere.
+    monkeypatch.delenv("GIT_CEILING_DIRECTORIES")
+    git(tmp_path / "host", "commit", "-qm", "the user's staged work")
+    git(tmp_path / "host", "worktree", "add", "-q", str(tmp_path / "wt"), "-b", "side")
+    asked.clear()
+    for _ in range(2):
+        assert home.discover(tmp_path / "wt" / "notes" / "vault") is not None
+    assert len(asked) == 2
 
 
 def test_a_git_dir_holding_only_docket_s_folders_is_no_git_dir(tmp_path: Path) -> None:

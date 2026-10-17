@@ -1,0 +1,13 @@
+decisions:
+  - id: DR-0533
+    title: docket search asks the running service first and updates the index itself only when it searches by itself
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#151", "#110"]
+    supersedes: [DR-0500]
+    description: "docket search asks the running service first, when service.json names the same vault, this machine's token reads, and /api/models says the service's worker is up with the embedder the command would use, or both have models off. It sends /api/search the flags as given and prints the answer with the same renderer, so the output is the same either way for the same index; the service keeps its worker and reranker loaded, so on a GPU machine the hits are reranked and the \"not reranked\" line goes. The service's search brings the index up to date first, with an update that started after the call, so the command doesn't update it again. Anything else (no service, another vault, no token, another embedder or a worker that is down, any answer but a result within 40 s: the service's 30 s wait for its own update, and 10 s) and the command updates the index itself, says when it rebuilt, and searches by itself, saying nothing of the service; a refusal comes from the command's own search, in its own words. --no-update and --no-models search by themselves, since the service's search updates the index first and uses its models. Restates DR-0500, whose command updated the index before asking, so a search through the service ran two updates."
+    not_chosen:
+      - "The command's update first, as DR-0500 had it: every search through the service ran two updates, and the command's opened the vault once more."
+      - "Asking the service whether the index is current first: a third request for what the search's own update answers."
