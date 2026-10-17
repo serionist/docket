@@ -54,7 +54,7 @@ rendered:
 | Hand edit | the file is rewritten only when its first line is Docket's and the rest still hashes to it. Otherwise (a hand edit, or a hand-kept file already at that path) it is left as it is and reported: move the edit into the entities, then delete the file |
 | Public repo | before writing, each remote of the consuming repo is checked as setup checks a host's (`host.remote_visibility`); one anyone can read stops the file, reported. One that can't be checked anonymously doesn't stop it: the owner named the path in a committed `vault.yaml` or at the console |
 | Never committed | the file is outside the vault, and Docket's commits hold only the vault's paths |
-| When | `docket render`, and after each curate write that committed something (apply, reject, lift, undo, a tier 1 round), once its lock is let go, so a remote's check never holds the vault. A render that fails is reported and never fails the curate write |
+| When | `docket render`, and after each curate write that committed something (apply, reject, lift, undo, a tier 1 round), once the store's write has let go of its lock. A Curate page decision holds the vault's lock around its own check and write, so its render runs under that lock; the remote check runs only when a file would change. A render that fails is reported and never fails the curate write |
 
 Not taken:
 - **A record of what Docket last wrote in its private folder**, to tell a hand edit apart: another machine pulling the
@@ -104,7 +104,7 @@ All on the test kit's vaults, with invented people.
 | Risk | Answer |
 |---|---|
 | the default columns aren't what the maintainer keeps today | accepted: they are a start, and changing them changes only the renderer; the PR asks for the columns |
-| a remote's check needs the network, up to its time limit | it runs only when a file would change, after the vault's lock is let go |
+| a remote's check needs the network, up to its time limit | it runs only when a file would change; after a CLI write the vault's lock is let go first, while a page decision still holds it |
 | a hand-kept file at the path blocks the render | by design: the report says to compare and delete it, or to point `path` elsewhere for the week of comparing |
 | an older Docket can't read a `vault.yaml` with the key | the same as every optional key so far; the CHANGELOG says to update every machine first |
 

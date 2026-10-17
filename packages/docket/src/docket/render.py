@@ -262,6 +262,7 @@ def curate_written(written: Written) -> list[str]:
     if written.already:
         lines.append(f"already there: {written.already}")
     lines.append(f"committed {written.commit[:12]}" if written.commit else "nothing to write")
+    lines += list(written.rendered)
     return lines
 
 

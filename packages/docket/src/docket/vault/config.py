@@ -191,6 +191,32 @@ def folder_problem(value: str) -> str | None:
     return None
 
 
+def rendered_path_problem(value: str) -> str | None:
+    """Why a rendered file's path can't be written in vault.yaml, or None: relative to the consuming repo, written with
+    /, with no .., naming a .md file (DR-0552)."""
+    if "\\" in value or PurePosixPath(value).is_absolute() or PureWindowsPath(value).anchor:
+        return f"{value!r}: a rendered file's path is relative to the consuming repo, written with /: docs/people.md"
+    if ".." in PurePosixPath(value).parts or not value.endswith(".md") or value.endswith("/.md"):
+        return f"{value!r}: a rendered file stays inside the repo, with no .., and is a .md file"
+    return None
+
+
+class RenderedFile(_Model):
+    """A file in the consuming repo Docket writes from the entities and never commits (DR-0552): the people directory
+    or the glossary."""
+
+    kind: Literal["people", "glossary"]
+    path: str
+
+    @field_validator("path")
+    @classmethod
+    def _path(cls, value: str) -> str:
+        problem = rendered_path_problem(value)
+        if problem is not None:
+            raise ValueError(problem)
+        return value
+
+
 class NeverStore(_Model):
     people: list[str] = Field(default_factory=list[str])
     containers: list[str] = Field(default_factory=list[str])
@@ -258,6 +284,18 @@ class VaultConfig(_Model):
     # key added later to the settings in force: it applies once committed, and turning it either way asks at the
     # owner's console (DR-0517, DR-0521).
     api_provider: Literal["voyage"] | None = None
+    # Files Docket writes in the consuming repo from the entities (DR-0552); none when absent. A key added later too,
+    # written only when set (`_written`).
+    rendered: list[RenderedFile] = Field(default_factory=list[RenderedFile])
+
+    @field_validator("rendered")
+    @classmethod
+    def _rendered(cls, value: list[RenderedFile]) -> list[RenderedFile]:
+        paths = [f.path for f in value]
+        twice = sorted({path for path in paths if paths.count(path) > 1})
+        if twice:
+            raise ValueError(f"{twice[0]} is rendered twice; give each file one kind")
+        return value
 
     @field_validator("sources")
     @classmethod
@@ -299,11 +337,14 @@ class VaultConfig(_Model):
         return _dump(self._written())
 
     def _written(self) -> dict[str, Any]:
-        """The settings as Docket writes them: `api_provider` only when set, as a source's `folder` is, so a vault that
-        never opts in keeps its vault.yaml byte for byte and opens on a Docket that doesn't know the key (DR-0537)."""
+        """The settings as Docket writes them: `api_provider` and `rendered` only when set, as a source's `folder` is, so
+        a vault that uses neither keeps its vault.yaml byte for byte and opens on a Docket that doesn't know the keys
+        (DR-0537, DR-0552)."""
         data = self.model_dump(mode="json")
         if data.get("api_provider") is None:
             data.pop("api_provider", None)
+        if not data.get("rendered"):
+            data.pop("rendered", None)
         return data
 
     def written_by_docket(self, text: str) -> bool:

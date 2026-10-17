@@ -26,6 +26,8 @@ _PLAIN = str.maketrans({chr(c): "'" for c in (0x2018, 0x2019, 0x02BC)} | {chr(c)
 _NOT_A_WORD = re.compile(r"[\W_]+")
 _PERCENT_U = re.compile(r"%u([0-9a-fA-F]{4})")
 _BACKSLASH_U = re.compile(r"\\u([0-9a-fA-F]{4})")
+# A second entity of one name ends its id in -<n>: rita-sample-2.
+_SLUG_NUMBER = re.compile(r"-[0-9]+$")
 # Decoding stops when a round changes nothing; a link wrapped more often than this is beyond any mail client seen.
 DECODE_ROUNDS = 4
 
@@ -168,6 +170,17 @@ def listed(value: str, lists: NeverStore) -> ListName | None:
     if (_forms(value) | set(_orders(value))) & people:
         return "people"
     return "keywords" if _says([value, *_orders(value)[1:]], lists.keywords) else None
+
+
+def spelled(entity: str) -> str:
+    """The name an entity's id spells: its slug with a trailing -<n> taken off and its hyphens read as spaces, so
+    rita-sample-2, the second Rita Sample, spells Rita Sample."""
+    return _SLUG_NUMBER.sub("", entity).replace("-", " ")
+
+
+def slug_listed(entity: str, lists: NeverStore) -> bool:
+    """Whether a never-store list holds an entity id as written or the name it spells."""
+    return any(listed(v, lists) is not None for v in (entity, spelled(entity)))
 
 
 def match(record: RawRecord, lists: NeverStore) -> ListName | None:

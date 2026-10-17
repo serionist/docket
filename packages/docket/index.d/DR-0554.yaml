@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0554
+    title: A rendered file is written only over Docket's own unedited text, never into a public repo, and never committed
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#163"]
+    description: "A file is rewritten only when its first line is Docket's and the rest still hashes to it, or it is absent; otherwise (a hand edit, or a hand-kept file at the path) it is left and reported, and the owner moves its content into the entities and deletes it. When a file would change, the consuming repo's remotes are checked once for the call as setup checks a host's: one anyone can read stops the file; one that can't be checked anonymously doesn't, since the owner named the path in a committed vault.yaml or at the console. The file is written through a temp file and a rename and never committed: Docket's commits hold only the vault's paths. It renders on docket render, which exits 1 when a file was left or refused, and after every curate write that committed something (apply, reject, lift, undo, a tier 1 round), once the store has let go of its lock; a Curate page decision holds the vault's lock around its own write, so its render runs under it. A render that fails is said in the write's result and never fails the write."
+    not_chosen:
+      - "Merging a hand edit: the entities are the source, and a merge would decide between the two for the owner."
+      - "Asking at every render whether a remote that can't be checked is private: a curate write after every card would ask again."
