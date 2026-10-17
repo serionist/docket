@@ -17,7 +17,7 @@ from pathlib import Path
 from docket.vault.anchors import trailing_anchors
 from docket.vault.config import NeverStore
 from docket.vault.entities import Entity, load_entities
-from docket.vault.neverstore import listed, matches_text, person_phrases
+from docket.vault.neverstore import listed, matches_text, person_phrases, slug_listed
 from docket.vault.processed import DocProblem, ProcessedDoc, line_roles
 
 SECTIONS = ("What changed", "Last conversations", "Decisions")
@@ -51,8 +51,6 @@ def check(doc: ProcessedDoc, root: Path, lists: NeverStore) -> tuple[list[DocPro
 
 
 def _held(entity: Entity, lists: NeverStore) -> bool:
-    from docket.curate.batch import slug_listed  # noqa: PLC0415 - the curate layer imports the store
-
     return slug_listed(entity.id, lists) or any(listed(n, lists) is not None for n in entity.names.values())
 
 
@@ -91,8 +89,6 @@ def _extra(doc: ProcessedDoc) -> list[str]:
 
 def _screen(doc: ProcessedDoc, entities: list[Entity], lists: NeverStore) -> list[DocProblem]:
     """Every line, the title among them, and every ref's doc id, held to the people list in all its shapes."""
-    from docket.curate.batch import slug_listed  # noqa: PLC0415 - the curate layer imports the store
-
     known = [
         value
         for e in entities

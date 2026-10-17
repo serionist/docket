@@ -24,7 +24,7 @@ from docket.vault.config import NeverStore
 from docket.vault.docstore import DocStore
 from docket.vault.entities import Entity, load_entities
 from docket.vault.git import Git
-from docket.vault.neverstore import fold, listed
+from docket.vault.neverstore import fold, listed, slug_listed, spelled
 from docket.vault.processed import ProcessedDoc
 from docket.vault.vault import Vault
 
@@ -112,8 +112,6 @@ def report(
 
 def _held(entity: Entity | None, entity_id: str, title: str | None, lists: NeverStore) -> bool:
     """A brief a never-store list holds by its entity: its id or a name, or for a gone entity its title."""
-    from docket.curate.batch import slug_listed  # noqa: PLC0415 - kept off the vault layer's imports
-
     if slug_listed(entity_id, lists):
         return True
     names = list(entity.names.values()) if entity is not None else ([title] if title else [])
@@ -131,8 +129,6 @@ def _name(entity: Entity, languages: list[str]) -> str:
 
 def _survivor(doc: ProcessedDoc, entity_id: str, known: list[Entity]) -> str | None:
     """The one entity that holds a gone entity's name now, among its names or aliases, or None."""
-    from docket.curate.batch import spelled  # noqa: PLC0415 - kept off the vault layer's imports
-
     gone = {fold(n) for n in (_title(doc), spelled(entity_id)) if n}
     holding = [
         e.id
