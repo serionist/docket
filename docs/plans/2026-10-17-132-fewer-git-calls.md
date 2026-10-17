@@ -17,8 +17,8 @@ calls to 7, a release from 39 to 21, an import of 200 notes from 217 to 13.
 - In scope: the calls every commit makes (`Vault.commit`, `Git.commit`, the recovery check), the run files a commit
   sweeps in, curate's take-in, `put_many`'s doc histories, release's repeated HEAD questions, and a reader of `.git`
   files that #134 can share.
-- Also in scope: on Windows, git started without a console window of its own when Docket has no console, as the
-  service under pythonw has none (No console per git call).
+- Landed separately, in its own PR ("Part of #132", after #152): on Windows, git started without a console window of
+  its own when Docket has no console (No console per git call, below). This plan builds on it and doesn't redo it.
 - Out of scope: a folder vault's open, which #152 caches (two `git rev-parse` per open on main, none after the first
   per folder and process), the consuming repo's lookup for a mapper, `git lfs install` at init, the test kit's own git
   (#149). The staged check after `add` and one `ls-files -u` per commit stay (Design). Each write keeps its commits:
@@ -125,7 +125,10 @@ A module, `vault/gitfiles.py`, reads what git keeps as plain files:
   files. Whichever merges first adds `gitfiles.py`; the other rebases onto it. #132 changes nothing in settings, and
   #134 can keep its own reader until then.
 
-### No console per git call (DR-0530)
+### No console per git call (landed separately)
+
+Built in its own PR, "Part of #132", after #152 merges (both touch `home.py`), with a decision entry of its own. Kept
+here as the measurement it rests on; this plan's steps don't include it.
 
 The service runs under pythonw on Windows, with no console, and the vault's git runner passes no creation flags, so
 each git process gets a console of its own. Timed on this desktop, 90 calls each (`git --version`, `rev-parse HEAD`,
@@ -193,9 +196,7 @@ way.
 5. The run-file check as one status call, held to the two calls' answers.
 6. curate's entity paths once; `put_many`'s histories in one log unless a merge touched the folders; HEAD's
    `.gitattributes` once per HEAD.
-7. The console flag in one helper every git launch uses, and its test; the per-call time under pythonw before and
-   after.
-8. A call-count test per path; the trace before and after on Windows; the suite's git time with the counting plugin.
+7. A call-count test per path; the trace before and after on Windows; the suite's git time with the counting plugin.
 
 ## Tests
 
@@ -207,7 +208,6 @@ way.
 | reftable | one vault made with `init.defaultRefFormat=reftable`: the reader answers unknown and the fallback calls run, so its call list has today's calls; skipped where the git lacks reftable |
 | the run-file check | status and the two calls give the same list: an untracked run file, one a `.gitignore` hides, one staged by an add whose commit never came, a staged rename, none; on a repo vault and a folder vault |
 | the batched histories | the same revs as one log per file: a hand commit that touched a doc without a `Doc:` line, a commit whose message names a doc it didn't touch, a doc deleted and put again; a folder vault under a non-ASCII path; and a merge in the doc folder's history, where one log per doc runs and the revs match |
-| the console flag | on Windows, a git call passes `CREATE_NO_WINDOW` when `GetConsoleWindow` answers none and no flag when it answers a console; one git process under pythonw is timed with and without it; elsewhere no flag |
 | every vault test | unchanged, as the issue asks: commits, messages and trees as before |
 
 Measured in the PR: each path before and after with the same trace (three runs, Windows), and the suite's git time
@@ -230,12 +230,11 @@ and wall time.
 | a user's git starts within one write | marker files and the branch are read at every check, and `ls-files -u` sits right before each add |
 | #134 changes `Vault` and the git layer too | the shared reader is one module; either rebases onto the other |
 | #152 changes `home.py` | the reader uses `is_git_dir` and #152's plain-checkout rule; whichever lands second rebases |
-| `GetConsoleWindow` answers wrong for some host (a console without a window) | the worst case is today's path: no flag with a console, or the flag where git would have inherited one, 12 ms a call |
 | savings smaller elsewhere | a git call costs about 5 ms on macOS and Linux, so the share saved is the same and the seconds fewer |
 
 ## Plan review
 
 | Round | Verdict | Findings |
 |---|---|---|
-| additions after round 1 | from the coordinator | #152's discover: the count notes folder vaults' opens, and the reader takes its plain-checkout rule and `is_git_dir`. The console flag: git started without a console of its own when Docket has none, measured under pythonw and python |
+| additions after round 1 | from the coordinator | #152's discover: the count notes folder vaults' opens, and the reader takes its plain-checkout rule and `is_git_dir`. The console flag: measured under pythonw and python, then moved to its own PR ("Part of #132") with its own decision entry; DR-0530 stays the identity alone |
 | 1, at 90d0dac | changes needed | G1 (major): one `ls-files -u` per hold let a mid-hold conflict be committed; it now sits before each add. G2: the batched log takes `-z`, `--no-renames` and vault-relative names, tested under a non-ASCII path. G3: a merge in the folders' history sends `put_many` back to one log per doc, decided by one `rev-list --merges`. G4: the tests pin the files ref format, one reftable case tests the fallback, and Git 3.0's default is a risk. The reader answers "no commit yet" only from a cleanly read `packed-refs`, and status parsing reads a staged rename's second field |
