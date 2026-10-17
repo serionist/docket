@@ -1,5 +1,5 @@
-"""The four calls the MCP tools and the REST API share, so one place decides how each runs: what goes through the
-writer, what waits for the index, and the compact text that goes with each result.
+"""The calls the MCP tools and the REST API share, so one place decides how each runs: what goes through the writer,
+what waits for the index, and the compact text that goes with each result.
 
 Text from docs and records comes back as data; nothing here acts on what it says.
 """
@@ -11,8 +11,12 @@ from collections.abc import Sequence
 from typing import Literal
 from zoneinfo import ZoneInfo
 
+from pydantic import BaseModel
+
 from docket import index, recall, render
 from docket.index import SearchResult
+from docket.media import put as media
+from docket.media.keystore import KeyStore
 from docket.recall import ReadResult, VerifyResult
 from docket.service.state import Service
 from docket.vault.docstore import PutResult
@@ -77,3 +81,24 @@ async def doc_put(service: Service, text: str) -> tuple[PutResult, str]:
     result = await service.writer.run(lambda: recall.doc_put(service.vault(), text))
     service.updater.poke()
     return result, render.text(render.put(result))
+
+
+class MediaPut(BaseModel):
+    """What `media_put` staged: the rid, the type its first bytes say, and its size in bytes."""
+
+    rid: str
+    ext: str
+    bytes: int
+
+
+async def media_put(service: Service, rid: str, *, path: str | None, url: str | None) -> tuple[MediaPut, str]:
+    """The checks and the staging on the writer, one at a time with every other write; the download beside it, so a
+    slow host never holds the queue (DR-0547)."""
+    keys = KeyStore(service.vault().home)
+    await service.writer.run(lambda: media.check(service.vault(), rid, keys))
+    fetched = await asyncio.to_thread(lambda: media.fetch(service.vault(), rid, path=path, url=url))
+    try:
+        stored = await service.writer.run(lambda: media.finish(service.vault(), fetched, keys))
+    finally:
+        fetched.tmp.unlink(missing_ok=True)
+    return MediaPut(rid=stored.rid, ext=stored.ext, bytes=stored.bytes), stored.line

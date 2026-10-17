@@ -117,12 +117,13 @@ agrees in the issue or, under an autonomy grant, with its decision recorded as p
   rendered by the core (DR-0120), hold lists (DR-0121), release logs (DR-0200), a cut record's fidelity (DR-0126), a
   legacy note's old paths and import hash (DR-0130), old paths as locators (DR-0131), each machine's cursor file
   (DR-0245), the curate log's path, lines and keys (DR-0460, DR-0461), a folder source's rids, `<source>:<12 hex>`
-  with `/page<n>`, `/slide<n>` and `/sheet<n>` under them (DR-0482);
+  with `/page<n>`, `/slide<n>` and `/sheet<n>` under them (DR-0482), media's paths, staged and stored, and
+  its sidecar and withheld marks (DR-0547);
 - a source's mapper interface (DR-0119), and the names and keys of a source in `vault.yaml` (DR-0124, DR-0125),
-  `folder` and `exclude` among them (DR-0481);
+  `folder` and `exclude` (DR-0481) and `media_folders` (DR-0548) among them;
 - the question file `docket eval` reads, which users keep outside the repo (DR-0290);
 - the MCP tools' names and parameters: `search`, `read`, `verify` and `doc_put` (DR-0150), `run_open` and `ingest`
-  (DR-0241), and the plugin's server key `docket` that prefixes them (DR-0160);
+  (DR-0241), `media_put` (DR-0547), and the plugin's server key `docket` that prefixes them (DR-0160);
 - the plugin's skill and hook names: `recall`, `setup`, `cuts` (DR-0207), `curate` (DR-0472), the SessionStart
   hook running `docket hook session-start` (DR-0161), and the PostToolUse hook running `docket hook post-tool-use`
   for `mcp__.*`, with its line prefixes (DR-0242);

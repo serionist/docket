@@ -200,6 +200,14 @@ class RawLookup:
                 return _under(latest, rid, kind)
         return _under((v[-1] for other, v in self._source(source).items() if other != rid), rid, kind)
 
+    def nested(self, rid: str) -> list[str]:
+        """The rid and the rids nested under `<rid>/` that the raw log holds, by rid: a media file's records
+        (DR-0547). Read from the loaded source, since the index's rows don't say what nests."""
+        m = RID.match(rid)
+        if m is None:
+            return []
+        return sorted(other for other in self._source(m.group(1)) if other == rid or other.startswith(f"{rid}/"))
+
     def transcripts(self, rid: str) -> list[RawRecord]:
         """The transcripts under rid, by rid: where a time on a record without segments of its own lands (DR-0370)."""
         return [r for r in self.under(rid, "transcript") if is_transcript(r)]

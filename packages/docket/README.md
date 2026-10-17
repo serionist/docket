@@ -68,7 +68,7 @@ once you commit it, and `docket vault status` says when one waits (DR-0521).
 |---|---|
 | `sources.<name>.sensitivity` | `work` goes through, `mixed` waits in staging to be classified, `private` is dropped |
 | `sources.<name>.mapper` | the source's mapper, relative to the repo that holds the vault: `.claude/skills/sources/<name>/mapper.py` |
-| `sources.<name>.tools`, `media_hosts` | the tools the capture hook posts for the source, and the hosts `media_put` may fetch from; the service reads them |
+| `sources.<name>.tools`, `media_hosts`, `media_folders` | the tools the capture hook posts for the source, and where `media_put` may take its media from: hosts over https, folders under `~/` or in the repo |
 | `never_store.people` | drops a record whose author, any recipient, or any id in its source's payload equals an entry: an exact address (`kid@example.invalid`, also inside `Kid <kid@example.invalid>`) or the source's user id (`U0KID`); case doesn't matter |
 | `never_store.containers` | drops a record from a channel, chat or folder: its id, with or without the source's prefix (`slack:C0FAMILY` or `C0FAMILY`) |
 | `never_store.keywords` | drops a record that says the words anywhere, title, text, attachment names or payload, as whole words: case, accents and curly apostrophes don't matter (`kovacs` matches `Kovács`, not `kovacsfalva`), and any punctuation may join the words; a keyword of two or more words also matches them joined by a case change or by nothing (`dora example` matches `dora-example`, `dora_example`, `DoraExample` and `doraexample`), while a one-word keyword never matches inside a word (`Max` leaves `maxRetries` alone); a name behind an encoding matches too: percent-encoded, once or wrapped again as a Safe Link does (`Dora%2520Example`), behind HTML entities, in Latin-1, or as `%u` and `\u` escapes |
@@ -257,6 +257,31 @@ A held recording goes in only with the cuts you confirm (DR-0200 to DR-0206).
 - A merge can bring a hold back: `hold list` and every ingest say so, and the next import with a hold file, or
   `docket hold release <source> <id> --from <folder>` (one code, no cuts asked), takes it off; what that stages waits
   as pending. `hold show` refuses such an id: its cuts are on record.
+
+## Media
+
+`docket media put <rid> <path-or-url>`, or the `media_put` tool, keeps a record's audio or file beside it
+(DR-0547 to DR-0551). It is encrypted as it is read, with a key made for that file alone, and waits in staging until
+its record is in raw; the next `docket staging promote` stores it in `media/` in LFS.
+
+| From | Taken when |
+|---|---|
+| a path | it is under one of the source's `media_folders`, or Docket's drop folder (`docket media drop` prints it), whose files are deleted once stored |
+| a URL | https, to a host in the source's `media_hosts`, every address it resolves to public; at most 3 redirects, each checked again |
+
+- A file is 512 MiB at most; `media.max_bytes` in Docket's `config.yaml` sets this machine's cap.
+- `docket media host add <source> <host>` and `docket media folder add` let more in, so they ask at your console;
+  `remove` writes at once.
+- Media follows its record: a version of it dropped (private, never-store, left out by a release) takes the media with
+  it, and a held recording, one released or cut with cuts, or one whose transcript named a never-store value never
+  gets media until Docket can cut audio (#157).
+- A put needs this machine to have synced the source once: what the gate dropped is remembered per clone.
+
+Keys never enter git. Each clone keeps its own, sealed in its git dir's Docket folder, with the seal in the system
+keychain. Where no keychain answers (a server, CI), `docket media keys init --store file` keeps the seal in a file
+only you can read, outside any repo. `docket media status` counts the keys and the media waiting, stored, without a
+key here or not downloaded. Lose a clone's keys and its media is gone for good; carrying keys to a second machine, and
+the backup, come next.
 
 ## Processed docs
 

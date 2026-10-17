@@ -1,4 +1,5 @@
-"""The MCP server and its tools: `search`, `read`, `verify` and `doc_put` (phase 0), `run_open` and `ingest` (phase 1).
+"""The MCP server and its tools: `search`, `read`, `verify` and `doc_put` (phase 0), `run_open` and `ingest` (phase 1),
+`media_put` (phase 2).
 
 Their names and parameters are a one-way door (DR-0018): parameters only gain optional ones whose default keeps
 today's behaviour, enums only gain values, results only gain fields; nothing is renamed, retyped or removed. A golden
@@ -51,6 +52,7 @@ name is a key under sources in vault.yaml. Close the run with `ingest`.
 READ_ONLY = ToolAnnotations(read_only_hint=True, open_world_hint=False)
 WRITES = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
 RUNS = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False)
+FETCHES = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True)
 
 View = Literal["summary", "raw", "both"]
 
@@ -193,6 +195,24 @@ def create_mcp(service: Service) -> MCPServer:
             sync.ingest(service, run, captures=captures, final=final, skipped=skipped, folder=folder)
         )
         return result(closed, text)
+
+    @server.tool(
+        name="media_put",
+        annotations=FETCHES,
+        description=(
+            "Store a record's audio or file, by a local path or an https URL: the record staged or in raw, the file "
+            "fetched within limits (a path from the source's media folders or Docket's drop folder, a URL from its "
+            "media hosts), encrypted with a key of its own, and kept beside its record until the record is in raw. "
+            "Refused for a held recording, one released or cut with cuts, or a record the gate keeps out."
+        ),
+    )
+    async def media_put(  # pyright: ignore[reportUnusedFunction]
+        rid: Annotated[str, Field(description="The record the media belongs to, such as plaud:<id>.")],
+        path: Annotated[str | None, Field(description="A local file; give this or url.")] = None,
+        url: Annotated[str | None, Field(description="An https URL the source's tool gave; give this or path.")] = None,
+    ) -> Annotated[CallToolResult, calls.MediaPut]:
+        stored, text = await _guarded(calls.media_put(service, rid, path=path, url=url))
+        return result(stored, text)
 
     return server
 

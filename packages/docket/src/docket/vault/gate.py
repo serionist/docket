@@ -10,6 +10,10 @@ It reads the release logs with them (DR-0201): a record under a released id goes
 intake and again at promotion, and one without segments only when the release keeps it; the rest is left out and only
 counted. A hold beats a release.
 
+Media waits beside its record (DR-0547): every drop of a version deletes the staged media on its rid and on each rid it
+nests under first, and a drop for a never-store value or as private marks those rids withheld. Every sweep and every
+promotion runs media's four checks again and deletes what fails; promotion stores what passes once its record is in raw.
+
 Nothing here names a dropped record: not a log line, not an error, not a file. Only counts leave the gate.
 """
 
@@ -25,13 +29,19 @@ from pathlib import Path
 from typing import Any, Literal
 
 from docket.errors import DocketError
+from docket.media import layout as media_layout
+from docket.media import staged as media_staged
+from docket.media.keystore import KeyStore
+from docket.media.screen import Screen
 from docket.vault import cuts as cutting
 from docket.vault import holds, inforce, neverstore, releaselog
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.cuts import CUT_MARKER, Cut
+from docket.vault.host import lfs_state
 from docket.vault.records import RawRecord, version
 from docket.vault.redact import Redactor, markers
-from docket.vault.staging import Classifier, Decided, Entry, Scan, Staged, Staging, State, key_of, rid_hash
+from docket.vault.spans import RawLookup
+from docket.vault.staging import Classifier, Decided, Entry, Scan, Staged, Staging, State, key_of, retry, rid_hash
 from docket.vault.vault import Vault
 
 log = logging.getLogger(__name__)
@@ -47,6 +57,15 @@ MIN_KEY_PREFIX = 6
 TICK = timedelta(microseconds=1)
 
 
+@dataclass(frozen=True)
+class MediaRun:
+    """One source's media stored by a promotion: how many files, and the commit."""
+
+    source: str
+    stored: int
+    commit: str | None
+
+
 @dataclass
 class StageResult:
     ready: int = 0
@@ -55,6 +74,8 @@ class StageResult:
     on_hold: int = 0
     dropped: Counter[str] = field(default_factory=Counter[str])
     redactions: Counter[str] = field(default_factory=Counter[str])
+    # Media files deleted: with a dropped version of their record, or failing their checks at the sweep.
+    media_dropped: int = 0
 
 
 @dataclass(frozen=True)
@@ -82,6 +103,9 @@ class PromoteResult:
     held: list[Held] = field(default_factory=list[Held])
     dropped: Counter[str] = field(default_factory=Counter[str])
     on_hold: int = 0
+    media: list[MediaRun] = field(default_factory=list["MediaRun"])
+    media_dropped: int = 0
+    media_held: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)
@@ -90,6 +114,8 @@ class Listing:
     unreadable: list[tuple[Path, str]]
     # Each entry's reason, by its key.
     why: dict[str, Why] = field(default_factory=dict[str, Why])
+    # Media files waiting beside their records.
+    media: int = 0
 
     def counts(self) -> Counter[str]:
         return Counter(e.staged.state for e in self.entries)
@@ -114,6 +140,8 @@ class Gate:
         self._releases = releaselog.Releases()
         # Whether the last read found an edit of vault.yaml not in force, for the messages that send the user there.
         self._waiting = False
+        self.keys = KeyStore(vault.home)
+        self._media_dropped = 0
 
     def stage(self, records: Iterable[RawRecord]) -> StageResult:
         """Take records from a connector: drop, skip or stage each one."""
@@ -131,6 +159,7 @@ class Gate:
                     raise DocketError(
                         f"source {record.source!r} is disabled in vault.yaml{inforce.note(self._waiting)}"
                     )
+            self._media_dropped = 0
             result = StageResult(dropped=self._sweep(config))
             scan = self.staging.scan()
             staged_keys = {e.key for e in scan.entries}
@@ -142,9 +171,11 @@ class Gate:
             for record in batch:
                 sensitivity = config.sources[record.source].sensitivity
                 if sensitivity == "private":
+                    self._drop_media(record.rid, withhold=False)
                     result.dropped["private"] += 1
                     continue
                 if neverstore.match(record, config.never_store):
+                    self._drop_media(record.rid, withhold=True)
                     result.dropped["never-store"] += 1
                     continue
                 if self._holds.covers(record):
@@ -157,11 +188,13 @@ class Gate:
                         taken = cutting.apply(record, release.cuts)
                     except DocketError:
                         # A version the release's times don't fit (it ends before a cut starts): never half cut.
+                        self._drop_media(record.rid, withhold=False)
                         result.dropped["left-out"] += 1
                         continue
                 redacted, counts = redactor.record(taken)
                 redacted = redacted.model_copy(update={"v": version(redacted), "run": ""})
                 if release is not None and not redacted.segments and not release.keeps(redacted):
+                    self._drop_media(record.rid, withhold=False)
                     result.dropped["left-out"] += 1
                     continue
                 key = key_of(redacted.rid, redacted.v)
@@ -175,6 +208,7 @@ class Gate:
                 result.pending += pending
                 result.ready += not pending
                 result.redactions += counts
+            result.media_dropped = self._media_dropped
             log.info(
                 "gate: %d ready, %d pending, %d skipped, %d dropped, %d on hold",
                 result.ready,
@@ -222,6 +256,7 @@ class Gate:
                         f"{rid} is already in {path}, a run file git hasn't committed yet: delete that file (all of "
                         "it is still staged and goes again at the next promotion), then classify it again"
                     )
+                self._drop_media(rid, withhold=True)
                 self.staging.remember([(rid, entry.key)])
                 self.staging.delete(entry.path)
                 log.info("gate: one record classified private and dropped")
@@ -244,6 +279,7 @@ class Gate:
             # to (a rebase in progress, a detached HEAD) stops the promotion here, with no new run file on disk.
             self.vault.commit([], f"Raw: an interrupted run from {self.vault.machine}")
             config = self._config()
+            self._media_dropped = 0
             result = PromoteResult(dropped=self._sweep(config))
             redactor = Redactor.from_config(config.redaction)
             groups: dict[str, list[tuple[Entry, RawRecord]]] = {}
@@ -269,16 +305,128 @@ class Gate:
                 groups.setdefault(name, []).append((entry, final))
             for name in sorted(groups):
                 result.runs.append(self._promote_source(name, groups[name]))
+            self._promote_media(config, result)
             log.info(
-                "gate: promoted %d record(s), held %d, dropped %d, on hold %d",
+                "gate: promoted %d record(s) and %d media file(s), held %d, dropped %d, on hold %d",
                 sum(r.written for r in result.runs),
+                sum(m.stored for m in result.media),
                 len(result.held),
                 result.dropped.total(),
                 result.on_hold,
             )
             return result
 
+    def media_check(self, rid: str) -> str | None:
+        """Why media for a rid can't be staged now, or None: the four checks after a sweep, under the lock."""
+        with self.vault.lock:
+            config = self._config()
+            self._sweep(config)
+            return self._screen(config).why(rid)
+
     # -- inside the gate -------------------------------------------------------------------------------------------
+
+    def _drop_media(self, rid: str, *, withhold: bool) -> None:
+        """Before a version of `rid` goes: the staged media on it and on each rid it nests under, then, for a drop
+        for a never-store value or as private, the withheld marks (DR-0547)."""
+        self._media_dropped += media_staged.drop(self.vault.root, self.keys, rid)
+        if withhold:
+            media_staged.withhold(self.vault.root, rid)
+
+    def _screen(self, config: VaultConfig) -> Screen:
+        """Media's checks over what staging, raw and the logs hold now; the holds and releases the sweep just read."""
+        return Screen(
+            root=self.vault.root,
+            config=config,
+            staged=self.staging.scan().entries,
+            raw=RawLookup(self.vault.root),
+            decided=self.staging.decided(),
+            withheld=media_staged.read_withheld(self.vault.root),
+            holds=self._holds,
+            releases=self._releases,
+            left_out=self._left_out,
+        )
+
+    def _media_sweep(self, config: VaultConfig) -> media_staged.Swept:
+        """Clear media's orphans and delete what fails its checks; the media that waits, every check passing."""
+        swept = media_staged.sweep(self.vault.root, self.vault.home, self.keys)
+        self._media_dropped += swept.orphans
+        if not swept.waiting:
+            return swept
+        screen = self._screen(config)
+        kept: list[media_staged.Waiting] = []
+        for waiting in swept.waiting:
+            if screen.why(waiting.sidecar.rid) is None:
+                kept.append(waiting)
+            else:
+                self._media_dropped += media_staged.delete(self.vault.root, self.keys, waiting.sidecar.rid)
+        return media_staged.Swept(kept, swept.orphans, swept.leftover)
+
+    def _promote_media(self, config: VaultConfig, result: PromoteResult) -> None:
+        """Store the media whose record is in raw now and whose checks pass, one commit per source after the runs'.
+        Files a crash left in media/ uncommitted go first, checked through their sidecars. A commit that fails moves
+        its files back to staging."""
+        root = self.vault.root
+        swept = self._media_sweep(config)
+        screen = self._screen(config)
+        lfs = lfs_state(self.vault.home.top)
+        problem = None if lfs.installed and lfs.filter_set else f"git-lfs {lfs.summary()}"
+        untracked = self.vault.git.not_in_head(media_layout.STORED)
+        # A sidecar left beside a file a commit already took, by a crash before its deletion: only the sidecar goes.
+        for sidecar, rid in swept.leftover:
+            if not set(media_staged.rel(root, media_layout.stored_files(root, rid))) & set(untracked):
+                sidecar.unlink(missing_ok=True)
+        # Per source: each file to commit, where it goes back to on a failed commit, and its sidecar.
+        groups: dict[str, list[tuple[Path, Path | None, Path]]] = {}
+        for name in untracked:
+            path = root / name
+            parts = Path(name).parts
+            source = parts[1] if len(parts) > 2 else ""
+            sidecar = media_layout.staged_dir(root, source) / f"{path.name.split('.', 1)[0]}.json"
+            rid = media_staged.rid_of(sidecar) if source else None
+            if rid is None:
+                result.media_held.append(f"{name} has no sidecar in staging, so it isn't committed")
+                continue
+            if screen.why(rid, committing=True) is not None:
+                key = media_staged.key_of(path)
+                retry(lambda path=path: path.unlink(missing_ok=True))
+                if key is not None:
+                    self.keys.delete(key)
+                media_staged.delete(root, self.keys, rid)
+                self._media_dropped += 1
+                continue
+            groups.setdefault(source, []).append((path, None, sidecar))
+        for item in swept.waiting:
+            versions = screen.raw.versions(item.sidecar.rid)
+            if not versions:
+                continue
+            if problem is not None:
+                if item.sidecar.problem != problem:
+                    media_staged.write_sidecar(
+                        self.vault.home, item.sidecar_path, item.sidecar.model_copy(update={"problem": problem})
+                    )
+                result.media_held.append(problem)
+                continue
+            target = media_layout.stored_path(root, item.sidecar.rid, versions[-1].ts, item.sidecar.ext)
+            media_staged.move(item.path, target)
+            groups.setdefault(media_layout.source_of(item.sidecar.rid), []).append(
+                (target, item.path, item.sidecar_path)
+            )
+        for source in sorted(groups):
+            moved = groups[source]
+            try:
+                commit = self.vault.commit(
+                    media_staged.rel(root, (target for target, _, _ in moved)),
+                    f"Media: {source}, {len(moved)} file(s) from {self.vault.machine}",
+                )
+            except BaseException:
+                for target, back, _ in moved:
+                    if back is not None:
+                        media_staged.move(target, back)
+                raise
+            for _, _, sidecar in moved:
+                sidecar.unlink(missing_ok=True)
+            result.media.append(MediaRun(source, len(moved), commit))
+        result.media_dropped = self._media_dropped
 
     def _promote_source(self, name: str, items: list[tuple[Entry, RawRecord]]) -> SourceRun:
         run = self.vault.rawlog.write_run(name, [final for _, final in items])
@@ -350,17 +498,22 @@ class Gate:
         for entry in scan.entries:
             staged = entry.staged
             source = config.sources.get(staged.record.source)
+            rid = staged.record.rid
             if source is not None and source.sensitivity == "private":
+                self._drop_media(rid, withhold=False)
                 self.staging.delete(entry.path)
                 dropped["private"] += 1
             elif neverstore.match(staged.record, config.never_store):
+                self._drop_media(rid, withhold=True)
                 self.staging.delete(entry.path)
                 dropped["never-store"] += 1
             elif entry.key in decided.keys:
                 # Classified private, or promoted with cuts, before a crash let its file be deleted.
+                self._drop_media(rid, withhold=False)
                 self.staging.delete(entry.path)
             elif not self._holds.covers(staged.record) and self._left_out(staged.record):
                 # Staged before its release arrived (on another clone, under its hold), and the release leaves it out.
+                self._drop_media(rid, withhold=False)
                 self.staging.delete(entry.path)
                 dropped["left-out"] += 1
             elif (
@@ -372,6 +525,7 @@ class Gate:
                 )
             ):
                 self.staging.write(staged.model_copy(update={"state": "pending"}))
+        self._media_sweep(config)
         if dropped:
             log.info("gate: swept %d record(s) out of staging", dropped.total())
         return dropped
@@ -457,7 +611,8 @@ class Gate:
             ),
             key=lambda e: (e.staged.record.ts, e.key),
         )
-        return Listing(entries, scan.unreadable, {e.key: why[e.key] for e in entries})
+        media = media_staged.count_waiting(self.vault.root)
+        return Listing(entries, scan.unreadable, {e.key: why[e.key] for e in entries}, media)
 
     def _why(self, staged: Staged, decided: Decided, cut_in_staging: set[str]) -> Why:
         """Why a staged record waits, from the facts the sweep just read."""

@@ -20,6 +20,12 @@ Unreleased in the same PR.
   them after each curate write and on `docket render`, and never commits them. A file edited by hand, or a hand-kept
   one already at the path, is left as it is and reported; a repo anyone can read gets no file; a name a never-store list
   holds is left out. Update every machine before you add the key: an older Docket refuses a `vault.yaml` that has it.
+- Media: `docket media put` and the `media_put` tool keep a record's audio or file, encrypted with a key of its own
+  as it is read, beside its record until the record is in raw, then in `media/` in LFS. A path comes from a folder you
+  name or Docket's drop folder, a URL only over https from a host you name; adding either asks at your console. A
+  held recording, one cut or released with cuts, or one the gate dropped for a never-store value gets no media yet.
+  Keys stay on this machine, in the system keychain or, by your choice, a private file; the Recording page says when
+  the audio waits, isn't downloaded, or has no key here.
 - The Recording page, `/recording` in the web app: a recording's summary beside its transcript, each anchor a link
   that marks the lines it points at, with the recording and the line in the address. Search's transcript hits open
   there. No audio is stored yet, and the page says so.

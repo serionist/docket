@@ -50,10 +50,13 @@ def test_a_source_s_mapper_tools_and_media_hosts_round_trip(tmp_path: Path) -> N
         mapper=".claude/skills/sources/plaud/mapper.py",
         tools=["list_files", "get_transcript"],
         media_hosts=["media.example.invalid"],
+        media_folders=["~/Downloads/Calls"],
     )
     path = tmp_path / "vault.yaml"
     path.write_text(config.dump(), encoding="utf-8")
     assert VaultConfig.load(path) == config
+    # Written only when set, so a vault.yaml without media folders reads as before on an older Docket.
+    assert "media_folders" not in make_config().dump()
 
 
 def test_a_file_written_before_the_source_keys_reads_unchanged(tmp_path: Path) -> None:
@@ -80,6 +83,8 @@ def test_a_file_written_before_the_source_keys_reads_unchanged(tmp_path: Path) -
         ("media_hosts", ["https://media.example.invalid"], "no scheme, port or path"),
         ("media_hosts", ["media.example.invalid:443"], "no scheme, port or path"),
         ("media_hosts", ["Media.Example.invalid"], "lowercase"),
+        ("media_folders", ["C:/Users/x"], "an absolute path"),
+        ("media_folders", ["~/a/../../b"], r"with no \.\."),
     ],
 )
 def test_bad_source_keys_are_refused(field: str, value: object, message: str) -> None:

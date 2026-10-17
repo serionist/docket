@@ -11,8 +11,10 @@ import pytest
 from docket_testkit import configure, index_template
 from mcp import Client
 from mcp.types import CallToolResult, TextContent
+from media_kit import CALL, audio, media_vault
 from starlette.testclient import TestClient
 
+from docket.media.put import drop_folder
 from docket.service.app import create_app
 from docket.service.state import Service, Settings
 from docket.service.tools import create_mcp
@@ -97,6 +99,7 @@ def test_the_tools_names_parameters_and_annotations_match_the_golden_file(servic
         "doc_put": True,
         "run_open": True,
         "ingest": True,
+        "media_put": True,
     }
 
 
@@ -231,3 +234,23 @@ def test_a_never_store_doc_is_a_tool_error_naming_lines_only(service: Service) -
         "line 11: says something on the never-store keywords list; leave it out\nrefused: 1 problem(s)\n"
     )
     assert "zebrafinch" not in text_of(result)
+
+
+def test_media_put_stages_a_record_s_file_and_refuses_what_the_gate_keeps_out(tmp_path: Path) -> None:
+    vault = media_vault(tmp_path)
+    drop = drop_folder()
+    drop.mkdir(parents=True)
+    (drop / "take").write_bytes(audio(4000))
+    found = Service(Settings(port=PORT, vault=vault.root, token=lambda: TOKEN))
+    try:
+        stored = call(found, "media_put", {"rid": CALL, "path": str(drop / "take")})
+        assert not stored.is_error, text_of(stored)
+        assert stored.structured_content == {"rid": CALL, "ext": "mp3", "bytes": 4000}
+        assert "staged mp3 media for plaud:rec-a" in text_of(stored)
+        refused = call(found, "media_put", {"rid": "plaud:rec-zzz", "url": "https://media.example/a"})
+        assert refused.is_error
+        assert "no record plaud:rec-zzz is staged or in raw" in text_of(refused)
+        unlisted = call(found, "media_put", {"rid": CALL, "url": "https://elsewhere.example/a"})
+        assert unlisted.is_error and "isn't one of the source's media hosts" in text_of(unlisted)
+    finally:
+        found.writer.close()
