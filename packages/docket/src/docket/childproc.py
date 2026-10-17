@@ -44,7 +44,9 @@ if sys.platform == "win32":  # pragma: no cover - one of the two runs on each sy
     import ctypes
 
     def _has_console() -> bool:
-        return bool(ctypes.windll.kernel32.GetConsoleWindow())
+        # Attached to any console, a hidden one or a pseudoconsole included (Claude Code's shell has one with no
+        # window); GetConsoleWindow is 0 there too, and the flag would make each call slower, not faster.
+        return bool(ctypes.windll.kernel32.GetConsoleCP())
 
 else:  # pragma: no cover
 

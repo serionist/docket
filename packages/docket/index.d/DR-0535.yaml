@@ -6,7 +6,7 @@ decisions:
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#132"]
-    description: "Every git call Docket makes passes the creation flags childproc.console_flags() gives: CREATE_NO_WINDOW when this process has no console, as the service has under pythonw, and none when it has one, as a command or a test has. Windows gives a console program a console of its own when the process starting it has none; measured on Windows 11 for #132, a git call under pythonw took 157 to 170 ms without the flag and 32 ms with it, and with a console 17 to 18 ms without it and 29 to 31 ms with it. Whether there is a console is asked once per process (GetConsoleWindow); on other systems the flags are none."
+    description: "Every git call Docket makes passes the creation flags childproc.console_flags() gives: CREATE_NO_WINDOW when this process has no console, as the service has under pythonw, and none when it has one, as a command or a test has. Windows gives a console program a console of its own when the process starting it has none; measured on Windows 11 for #132, a git call under pythonw took 157 to 170 ms without the flag and 32 ms with it, and with a console 17 to 18 ms without it and 29 to 31 ms with it. Whether there is a console is asked once per process with GetConsoleCP, which is 0 only with no console attached; GetConsoleWindow is 0 for a hidden console or a pseudoconsole too, as in Claude Code's shell, where the flag made a git call 180 ms against 110 ms without it. On other systems the flags are none."
     binds:
       - Every git launch in the package passes console_flags(); a scan in test_childproc fails on one that doesn't.
     not_chosen:
