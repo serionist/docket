@@ -14,6 +14,9 @@ import subprocess
 import sys
 from collections.abc import Callable
 
+# On every system, though only Windows uses it: its own body is Windows' alone.
+from docket import winjob
+
 # What Python needs to start on each system, and nothing the service holds in its own environment.
 KEEP_ENV = ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR", "HOME", "USERPROFILE", "LANG", "LC_ALL")
 GROUPS = hasattr(os, "killpg")
@@ -77,7 +80,6 @@ if sys.platform == "linux":  # pragma: no cover - one of the three runs on each 
         return resource.getrlimit(resource.RLIMIT_AS)[0]
 
 elif sys.platform == "win32":  # pragma: no cover
-    from docket import winjob
 
     def limit_memory(cap: int) -> int | None:
         """The interpreter in a job of its own that caps its committed memory, and the cap its innermost job holds.
