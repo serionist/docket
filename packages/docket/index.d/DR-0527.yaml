@@ -6,7 +6,7 @@ decisions:
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#147"]
-    description: "A record whose redacted form changes under DR-0525 (two enabled rules' matches overlap, a match an earlier rule's marker cut off from what it looks at, or one only a second redaction found) lands as a new version when its source sends it again, as a rule turned on does (DR-0191): mixed and cut ones wait in staging again, and older versions keep what they stored. A doc is redacted the new way on its next put, the notes import and docket doc redact, and a document at the next docket scan. What a split already stored can't be joined again, since its first part is a marker: [redacted:tck]-123456 keeps -123456. No schema version and no migration; the CHANGELOG says how to find such fragments."
+    description: "A record whose redacted form changes under DR-0525 (two enabled rules' matches overlap, or a match depends on another rule's marker) lands as a new version when its source sends it again, as a rule turned on does (DR-0191): mixed and cut ones wait in staging again, and older versions keep what they stored. A doc is redacted the new way on its next put, the notes import and docket doc redact, and a document at the next docket scan. What a split already stored can't be joined again, since its first part is a marker: [redacted:tck]-123456 keeps -123456. No schema version and no migration; the CHANGELOG says how to find such fragments, and a doc that holds one is fixed by editing it."
     not_chosen:
       - "Rewriting old versions in raw: raw is written once."
       - "A command that finds the fragments: a search for the marker followed by text finds them, and only vaults with overlapping rules have any."
