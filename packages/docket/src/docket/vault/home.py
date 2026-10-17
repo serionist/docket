@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from docket.childproc import console_flags
 from docket.errors import DocketError
 
 Storage = Literal["repo", "folder"]
@@ -90,6 +91,7 @@ def rev_parse(cwd: Path, *flags: str) -> list[str] | None:
         encoding="utf-8",
         check=False,
         env={**os.environ},
+        creationflags=console_flags(),
     )
     if proc.returncode != 0:
         return None

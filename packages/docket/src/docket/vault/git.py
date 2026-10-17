@@ -16,6 +16,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from docket.childproc import console_flags
 from docket.errors import DocketError
 from docket.vault.home import Home, make_private
 
@@ -86,6 +87,7 @@ class Git:
                 check=False,
                 env={**os.environ, **extra},
                 input=stdin,
+                creationflags=console_flags(),
             )
             held = proc.returncode != 0 and "index.lock" in proc.stderr and "File exists" in proc.stderr
             if not held or time.monotonic() >= deadline:
@@ -253,5 +255,6 @@ def toplevel(path: Path) -> Path | None:
         text=True,
         encoding="utf-8",
         check=False,
+        creationflags=console_flags(),
     )
     return Path(proc.stdout.strip()).resolve() if proc.returncode == 0 else None

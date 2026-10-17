@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0535
+    title: A console program Docket starts in a process without a console gets CREATE_NO_WINDOW, and none otherwise
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#132"]
+    description: "Every git call Docket makes passes the creation flags childproc.console_flags() gives: CREATE_NO_WINDOW when this process has no console, as the service has under pythonw, and none when it has one, as a command or a test has. Windows gives a console program a console of its own when the process starting it has none; measured on Windows 11 for #132, a git call under pythonw took 157 to 170 ms without the flag and 32 ms with it, and with a console 17 to 18 ms without it and 29 to 31 ms with it. Whether there is a console is asked once per process (GetConsoleWindow); on other systems the flags are none."
+    binds:
+      - Every git launch in the package passes console_flags(); a scan in test_childproc fails on one that doesn't.
+    not_chosen:
+      - "Passing CREATE_NO_WINDOW on every call, as the models' and documents' workers do: it adds about 12 ms to each git call in a process with a console, thousands in a test run and several in each command."
+      - "DETACHED_PROCESS: it gives the child no console at all, and git's own helpers (credential prompts, pagers) expect one where there is a person to answer."
