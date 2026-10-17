@@ -15,7 +15,7 @@ from starlette.responses import RedirectResponse, Response
 
 from docket.service.sessions import open_command
 from docket.service.state import Service
-from docket.web import assets, curate, recording, search, settings, staging, sync, templating
+from docket.web import assets, briefs, curate, recording, search, settings, staging, sync, templating
 
 # Paths whose 404 stays JSON: the clients of these read JSON, never a page.
 MACHINE_PATHS = ("/api", "/mcp")
@@ -40,6 +40,7 @@ def install(app: FastAPI, service: Service) -> None:
     app.include_router(curate.router(service))
     app.include_router(settings.router(service))
     app.include_router(recording.router(service))
+    app.include_router(briefs.router(service))
 
     @app.api_route("/static/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
     def static(request: Request, path: str) -> Response:  # pyright: ignore[reportUnusedFunction]

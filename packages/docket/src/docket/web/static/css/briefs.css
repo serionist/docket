@@ -1,0 +1,86 @@
+/* The Briefs page: the briefs by entity type, then an open brief beside the raw its open line cites. */
+@layer pages {
+  .briefs { display: grid; gap: var(--space-3); max-width: 1400px; }
+  .briefs-head { display: grid; gap: 2px; }
+  .briefs-head h1 { font-size: var(--text-xl); font-weight: 650; overflow-wrap: anywhere; }
+  .briefs-head .eyebrow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--space-2); font-size: var(--text-sm); }
+  .briefs-head .kind {
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+    font-size: var(--text-xs);
+    font-weight: 650;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--k-doc);
+  }
+  .briefs-locator { display: flex; flex-wrap: wrap; gap: 4px var(--space-3); align-items: baseline; }
+  .type-chip { padding: 2px 10px; font-size: var(--text-xs); background: var(--surface); }
+  .type-chip.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; border-color: var(--accent); }
+
+  /* The list: a group per entity type, a row per brief. */
+  .brief-group > h2 {
+    font-size: var(--text-xs);
+    font-weight: 650;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .brief-rows { display: grid; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); }
+  .brief-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px var(--space-3);
+    align-items: baseline;
+    padding: var(--space-2) var(--space-3);
+    border-left: 3px solid transparent;
+  }
+  .brief-row + .brief-row { border-top: 1px solid var(--line); }
+  .brief-row[data-state="stale"], .brief-row[data-state="orphaned"] { border-left-color: var(--warn); }
+  .brief-name { font-weight: 600; overflow-wrap: anywhere; }
+  .brief-row .meta, .brief-row .fact { font-size: var(--text-sm); }
+  .brief-row .fact { color: var(--ink); }
+  .badge.state.stale, .badge.state.orphaned, .badge.flag { color: var(--warn); border-color: var(--warn); }
+  .badge.state.current { color: var(--ok); border-color: var(--ok); }
+  .new-records { display: flex; flex-wrap: wrap; gap: 4px var(--space-3); margin-top: calc(-1 * var(--space-2)); }
+
+  /* An open brief: its lines first, then the raw of the open line. */
+  .briefs-columns {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    gap: var(--space-4);
+    align-items: start;
+  }
+  .briefs-columns > .column {
+    padding: var(--space-3) var(--space-4) var(--space-4);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+  }
+  .briefs-columns .column > h2 {
+    font-size: var(--text-xs);
+    font-weight: 650;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: var(--space-2);
+  }
+  .brief-column { position: sticky; top: 64px; max-height: calc(100dvh - 120px); overflow-y: auto; }
+  .brief-column .line.flagged { border-left-color: var(--warn); }
+  .brief-column .line.hidden-line .body { color: var(--muted); font-style: italic; }
+  .brief-column .cites { grid-column: 2; display: flex; flex-wrap: wrap; gap: 2px var(--space-2); }
+  .brief-column .anchor { overflow-wrap: anywhere; }
+  .line-link { color: inherit; }
+  .line-link[aria-current] { font-weight: 600; }
+  .raw-column { scroll-margin-top: 80px; display: grid; gap: var(--space-2); }
+  .raw-line { padding: var(--space-2) var(--space-3); background: var(--cited); border-radius: var(--radius); overflow-wrap: anywhere; }
+  .raw-link { font-size: var(--text-sm); margin-top: calc(-1 * var(--space-1)); }
+  .cited-line { display: grid; gap: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--line); }
+  .cited-line .span-head { margin-bottom: 0; }
+
+  @media (max-width: 900px) {
+    .briefs-columns { grid-template-columns: minmax(0, 1fr); }
+    .brief-column { position: static; max-height: none; }
+  }
+}

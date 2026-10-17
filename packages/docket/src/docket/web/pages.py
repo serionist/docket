@@ -56,7 +56,14 @@ NAV: tuple[Group, ...] = (
                 "the summary next to the transcript, both transcripts",
                 built=True,
             ),
-            Page("briefs", "Briefs", "/briefs", 2, "per person, project and topic; the decision log per stream"),
+            Page(
+                "briefs",
+                "Briefs",
+                "/briefs",
+                2,
+                "per person, project and topic, beside the raw they cite; the decision log per stream later",
+                built=True,
+            ),
         ),
     ),
     Group(
@@ -135,6 +142,8 @@ CURATE_KEYS: Keys = (
 SETTINGS_KEYS: Keys = ((("?",), "these keys"),)
 # The Recording page's lines are plain links, which Tab reaches; no key of its own yet.
 RECORDING_KEYS: Keys = ((("?",), "these keys"),)
+# The Briefs page's briefs and lines are plain links too.
+BRIEFS_KEYS: Keys = ((("?",), "these keys"),)
 
 PAGE_KEYS: dict[str, Keys] = {
     "search": KEYS,
@@ -143,6 +152,7 @@ PAGE_KEYS: dict[str, Keys] = {
     "curate": CURATE_KEYS,
     "settings": SETTINGS_KEYS,
     "recording": RECORDING_KEYS,
+    "briefs": BRIEFS_KEYS,
 }
 HINTS: dict[str, Keys] = {
     "search": ((("/",), "search"), (("j", "k"), "move"), (("Enter",), "open"), (("?",), "keys")),
@@ -151,4 +161,5 @@ HINTS: dict[str, Keys] = {
     "curate": ((("j", "k"), "move"), (("Enter",), "open"), (("?",), "keys")),
     "settings": ((("?",), "keys"),),
     "recording": ((("?",), "keys"),),
+    "briefs": ((("?",), "keys"),),
 }

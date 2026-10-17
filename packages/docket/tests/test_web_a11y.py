@@ -44,6 +44,10 @@ PAGES = [
     "/recording?rid=calls:rec-9999",
     f"/recording?rid={quote('mail:<offer-1@northwind.example>')}",
     "/recording?rid=not+a+rid",
+    "/briefs",
+    "/briefs?type=person",
+    "/briefs?brief=brief:ben-sample",
+    "/briefs?brief=nope",
 ]
 FRAGMENTS = [
     "/search/results?query=pallet+labels",

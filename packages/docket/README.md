@@ -618,8 +618,8 @@ What the service refuses, and what it doesn't:
 
 ## The web app
 
-`docket open` signs your browser in to the service's own pages. In this version that is Search, Recording, Sync,
-Staging, Curate and Settings; the navigation shows the pages still to come, with the phase each arrives in.
+`docket open` signs your browser in to the service's own pages. In this version that is Search, Recording, Briefs,
+Sync, Staging, Curate and Settings; the navigation shows the pages still to come, with the phase each arrives in.
 
 - Search runs the search Claude runs: the same words, names, time words and dates. Sources and a month narrow it;
   people and entities favour the hits that mention them, as Claude's boosts do. Facet counts are within the top 200.
@@ -649,6 +649,23 @@ Staging, Curate and Settings; the navigation shows the pages still to come, with
   (`02:30` or `02:30-03:20`). A link that sets `at` lands on the first line it marks, without JavaScript.
 - Search's transcript hits, and its panel on a recording, link here at the hit's time.
 - A held recording shows only that it is held, with a link to the holds on the Staging page.
+- Keys: `?`.
+
+### The Briefs page
+
+`/briefs` lists the briefs, and opens one beside the raw its lines cite (DR-0557). It only reads: the `brief` skill
+writes briefs when you ask Claude.
+
+| Part | Shows |
+|---|---|
+| The list | the briefs by entity type: each one's state (stale, current or orphaned), rev, how long since, flagged lines and new records; an orphan with the entity that holds its name now |
+| A brief | its lines, a flagged one marked, each line that cites something a link; its anchors open the Recording page at their time, or the Search page |
+| A line | the raw it cites, and the doc lines it was built from as they read now, with their own raw |
+
+- Its URL holds `brief` (`brief:<entity id>`), `line` and `type` (an entity type, or `orphaned`). A link that sets
+  `line` lands on its raw, without JavaScript.
+- A brief whose entity a never-store list now holds shows only that it is hidden, and is counted on the list; a
+  line a list now names shows only that it is hidden, and opens nothing.
 - Keys: `?`.
 
 ### The Sync page

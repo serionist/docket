@@ -639,7 +639,7 @@ change lands on whoever uses that vendor, while the core still checks every rid 
 | Sync | runs, failures, cursors, rate limits, what needs a Claude session | 1 |
 | Settings | sources, never-store lists, models, redaction rules; the Claude API key and a spend cap later | 1 |
 | Recording | the summary next to the transcript, click a line to read and play it; the two transcripts side by side | 2 |
-| Briefs | per person, project and topic; the decision log per stream | 2 |
+| Briefs | per person, project and topic, each beside the raw its lines cite; the decision log per stream later | 2 |
 | Today, Queue, Ledger, Meetings | the day: meetings with briefs and points, triage, items with their raw source one click away | 3 |
 | Outbox | drafts waiting for a click | 3 |
 
@@ -686,6 +686,10 @@ How it is built (DR-0170 to DR-0175, DR-0546):
   points at (DR-0545). Its URL holds `rid`, `doc` and `at`; its links are plain links that land on the marked line,
   so it works without JavaScript, and Search's transcript hits link to it (DR-0544). With no audio it says why; the
   player and the second transcript's column come with media (#42) and Whisper (#158).
+- The Briefs page lists the briefs by entity type with their state, rev, age, flagged lines and new records, and
+  opens one beside the raw its chosen line cites, the doc lines it cites followed one level (DR-0557). Its URL
+  holds `brief`, `line` and `type`. A brief a never-store list now holds answers hidden, and a line a list now
+  names opens nothing (DR-0558).
 
 ## 11. Claude first
 
