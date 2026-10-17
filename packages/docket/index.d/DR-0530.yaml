@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0530
+    title: Git's identity is asked once per opened vault, not kept across commands or service calls
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#132"]
+    description: "Whether git has an identity (user.name and user.email, from any of its config levels), which decides whether Docket passes its fallback identity, is asked once per opened vault: a Vault lives for one command, or for one call of the service, which opens the vault on every call. A release, which commits twice, asks once. The answer isn't kept beyond that object: a long-running process opens the vault again for each call, so a config file changed in place between two calls (the system's, an included one) still decides the next commit's author as git would."
+    not_chosen:
+      - "Keeping the answer for the process, keyed by the config files Docket can name: it would save one call per commit (1,370 in the suite) but miss the system config and included files changed in place, so the fallback author could stand in for the one git now has."
+      - "Committing first and passing the fallback only on failure: git guesses an identity from the host name where none is configured, so the author would change."

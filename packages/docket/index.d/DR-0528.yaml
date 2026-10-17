@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0528
+    title: A write reads HEAD's branch and commit id from the git dir's files, and asks the recovery check's git question once per lock hold
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#132"]
+    description: "A write reads from the git dir's files what they hold, with no git call: whether HEAD is on a branch (its HEAD file names a ref, or holds a commit id when detached), and HEAD's commit id (the ref's file under refs/, else its line in packed-refs, through commondir when the git dir has one; none when the branch has no commit yet). The recovery check's branch test, a HEAD-exists test before a diff against HEAD, and the new commit's id after Git.commit use it. A git dir whose refs aren't files (reftable), or a file that doesn't read as git writes it, makes the git call as before. The recovery check asks git its one question, the unmerged paths, when the vault lock is taken; a commit or a writing() nested in the same hold asks again only the marker files (a rebase, merge, cherry-pick or revert in progress) and the branch, which are file reads. Under Docket's lock nothing of Docket's runs, and a user's git that starts a merge or leaves a conflict within one write leaves a marker file the check reads every time, or unmerged paths git refuses to commit. The reader is one module the vault's git layer and #134's committed-settings cache can share; neither waits for the other."
+    binds:
+      - Every commit, its message and what it holds stay as they were; only questions git needn't answer go.
+    not_chosen:
+      - "Reading git's index for the unmerged paths: a second reader of a format with four versions, split and sparse indexes, for one call per write."
+      - "The recovery check skipped whole in a nested commit: the marker files and the branch cost no call and catch a user's git that starts within the write."

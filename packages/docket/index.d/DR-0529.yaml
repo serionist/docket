@@ -1,0 +1,13 @@
+decisions:
+  - id: DR-0529
+    title: A write asks git each question once while its answer can't have changed
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#132"]
+    description: "A write asks git each question once while the answer can't have changed. The run files a commit sweeps in (untracked, ignored too, or staged by an add whose commit never came) come from one git status call over raw/ (porcelain v1, every untracked file, ignored ones listed, no optional locks), its names made vault-relative, in place of ls-files and diff --cached. curate's write asks the tree under entities/ once, for the take-in and for the log lines a stopped write left, and asks again only after a commit of its own. put_many reads every doc's revs from one git log over the batch's doc folders, with each commit's names, under the lock: a commit counts for a doc when it touched the doc's file and its message has the doc's Doc: line, as one log per file counts it. HEAD's .gitattributes is read once per HEAD commit within a lock hold. A question about the working tree or the index is asked again after any write of Docket's own, and every commit, its message and what it holds stay as before."
+    not_chosen:
+      - "A status before the add in place of the staged check after it: it can't tell a file equal to HEAD from one whose staged copy differs, and git would refuse an empty commit where Docket now commits nothing."
+      - "One log per doc, as before: an import of 200 notes made 200 calls, about 3.6 s on Windows."
+      - "Keeping working-tree answers for the whole write: promote asks for uncommitted run files before and after it writes one, and the answers differ."
