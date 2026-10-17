@@ -33,6 +33,7 @@ from docket.vault import processed
 from docket.vault.anchors import format_anchor
 from docket.vault.config import VaultConfig
 from docket.vault.docstore import DocStore
+from docket.vault.git import Git
 from docket.vault.processed import DocRefusedError, double_quoted
 from docket.vault.spans import RawLookup
 from docket.vault.vault import Vault
@@ -613,6 +614,61 @@ def test_a_put_during_a_stash_pop_conflict_is_refused_and_commits_nothing(vault:
     assert sh(vault.root, "git", "ls-files", "-u")
     with pytest.raises(DocketError, match="has a conflict"):
         vault.commit([], "anything")
+
+
+def stash_a_conflict(vault: Vault) -> None:
+    """A hand edit of the doc stashed, then a put that changes the same line: popping the stash conflicts."""
+    recall.doc_put(vault, note())
+    hand_edit(vault, "10 million forints", "ten million forints, said Ada")
+    sh(vault.root, "git", "-c", "user.name=Ada", "-c", "user.email=ada@example.invalid", "stash", "-q")
+    recall.doc_put(vault, note(rev="1", lines=["- Ben put the consultant at 12 million forints. @12:08"]))
+
+
+def test_a_stash_pop_conflict_inside_the_lock_hold_is_refused_before_the_add(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The pop lands after writing() began and before the commit asks for unmerged paths (#132, DR-0528).
+    stash_a_conflict(vault)
+    real = DocStore.history
+    popped: list[str] = []
+
+    def pop_then_read(store: DocStore, doc_id: str) -> Any:
+        if not popped:
+            popped.append(sh(vault.root, "git", "stash", "pop", check=False))
+        return real(store, doc_id)
+
+    monkeypatch.setattr(DocStore, "history", pop_then_read)
+    before = head(vault)
+    with pytest.raises(DocketError, match=f"{NOTE_PATH} in .* has a conflict; resolve it before Docket writes"):
+        recall.doc_put(vault, note(rev="2", lines=["- Ben put the consultant at 12 million. @12:08"]))
+    assert popped
+    assert head(vault) == before
+    # The user's conflict stays as git left it: unmerged, the markers in the file and not in HEAD.
+    assert sh(vault.root, "git", "ls-files", "-u")
+    assert "<<<<<<<" in (vault.root / NOTE_PATH).read_text(encoding="utf-8")
+    assert "<<<<<<<" not in sh(vault.root, "git", "show", f"HEAD:{NOTE_PATH}")
+
+
+def test_a_stash_pop_conflict_after_the_add_is_committed_as_on_main(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The window the lead accepted (DR-0528): a conflict that lands between Docket's add and its commit, on a path the
+    # commit names, is committed with its markers, as before #132. Pinned so a change to it is deliberate.
+    stash_a_conflict(vault)
+    real = Git.run
+
+    def pop_after_add(git: Git, *args: str, **kwargs: Any) -> Any:
+        proc = real(git, *args, **kwargs)
+        if args[:1] == ("add",):
+            sh(vault.root, "git", "stash", "pop", check=False)
+        return proc
+
+    monkeypatch.setattr(Git, "run", pop_after_add)
+    commit = vault.commit([NOTE_PATH], f"Doc: {NOTE_ID} rev 3")
+    assert commit is not None
+    assert commit == head(vault)
+    assert "<<<<<<<" in sh(vault.root, "git", "show", f"HEAD:{NOTE_PATH}")
+    assert not sh(vault.root, "git", "ls-files", "-u")
 
 
 def legacy(slug: str, body: str = "Old note.", rev: str | None = None) -> str:

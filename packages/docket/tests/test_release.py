@@ -10,6 +10,7 @@ import io
 import json
 import os
 import re
+import subprocess
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,7 +18,7 @@ from typing import Any
 
 import pytest
 import typer
-from docket_testkit import copy_project, sh, template_project
+from docket_testkit import COMMIT_CALLS, copy_project, git_calls, sh, template_project
 
 from docket.cli import app, main
 from docket.errors import DocketError
@@ -251,6 +252,59 @@ def test_a_confirmed_release_commits_the_log_then_the_hold_and_stages_the_record
     ]
     assert [s.text for s in inside] == [CUT_MARKER]
     assert "rec:rec-cut-01/summary" not in stored
+
+
+def test_a_release_makes_these_git_calls(
+    vault: Vault, folder: Path, owner: Callable[..., Owner], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every git call of one release, in order (#132): a call added later fails here with its name."""
+    ingest(vault, folder)
+    opened = Vault.open(vault.root)
+    owner("code")
+    with git_calls(monkeypatch) as calls:
+        assert releasing.release(opened, "rec", folder, [cut_01()]).released == ["rec-cut-01"]
+    hold, log = "-- state/holds/rec.txt", "-- state/releases/rec.jsonl"
+    assert calls == [
+        # A conflict refuses before the screen; then the hold file kept as committed, the mapper found in the project,
+        # the log's first commit.
+        "ls-files -u",
+        f"ls-files -z --others {hold}",
+        f"diff --name-only -z HEAD {hold}",
+        "show HEAD:./.gitattributes",
+        "rev-parse --show-toplevel",
+        f"ls-files -z --others {log}",
+        *COMMIT_CALLS,
+        # The hold's removal, after a commit moved HEAD: asked again, git's identity aside.
+        f"ls-files -z --others {log}",
+        f"diff --name-only -z HEAD {log}",
+        f"ls-files -z --others {hold}",
+        f"diff --name-only -z HEAD {hold}",
+        "show HEAD:./.gitattributes",
+        *[c for c in COMMIT_CALLS if not c.startswith("config")],
+    ]
+
+
+def test_a_release_during_a_conflict_refuses_before_any_question(
+    vault: Vault, folder: Path, owner: Callable[..., Owner]
+) -> None:
+    # An unmerged path, as a stash pop that conflicts leaves one: stages 1 to 3 and no *_HEAD file. The release's
+    # commits would refuse it only after the owner typed the code and its log line was on disk (#132, DR-0528).
+    ingest(vault, folder)
+    rel = "conflict.txt"
+    blob = sh(vault.root, "git", "hash-object", "-w", "--", "vault.yaml").strip()
+    # Paths from the top of the vault's repo, sent as bytes: text mode on Windows would end each line with a CR.
+    info = "".join(f"100644 {blob} {n}\t{vault.home.prefix}{rel}\n" for n in (1, 2, 3))
+    proc = subprocess.run(
+        ["git", "update-index", "--index-info"], cwd=vault.home.top, input=info.encode("utf-8"), check=False
+    )
+    assert proc.returncode == 0
+    assert sh(vault.root, "git", "ls-files", "-u")
+    before = snapshot(vault), releaselog.read(vault.root, "rec")
+    person = owner("code")
+    with pytest.raises(DocketError, match=f"{rel} in .* has a conflict; resolve it before Docket writes"):
+        releasing.release(Vault.open(vault.root), "rec", folder, [cut_01()])
+    assert person.prompts == []
+    assert (snapshot(vault), releaselog.read(vault.root, "rec")) == before
 
 
 @pytest.mark.parametrize("answer", ["y", "yes", "n", "ABC", "q"])

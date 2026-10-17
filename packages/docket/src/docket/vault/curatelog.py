@@ -28,7 +28,7 @@ later one writes schema_version 2, which this Docket skips with a problem.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -396,12 +396,16 @@ def text_of(path: Path, rel: str) -> str:
         raise DocketError(f"{rel} isn't UTF-8; fix or delete it, then write again") from None
 
 
-def unfinished(vault: Vault, *, strict: bool = False) -> list[Line]:
+def unfinished(vault: Vault, *, strict: bool = False, edited: Collection[str] | None = None) -> list[Line]:
     """The lines the working tree's log files hold and HEAD doesn't: what a write that stopped before its commit
     left, in the order they happened. A file that isn't UTF-8 is skipped, as `read_all` skips it with a problem, or
-    with `strict`, for a write, refused."""
+    with `strict`, for a write, refused. `edited` is what differs from HEAD under entities/, when the caller asked
+    already: the log's files are among them (DR-0529)."""
     git = vault.git
-    rels = {*git.changed_against_head(LOG_DIR), *git.untracked(LOG_DIR, ignored_too=True)}
+    if edited is not None:
+        rels = {rel for rel in edited if rel.startswith(f"{LOG_DIR}/")}
+    else:
+        rels = {*git.changed_against_head(LOG_DIR), *git.untracked(LOG_DIR, ignored_too=True)}
     out: list[Line] = []
     for rel in sorted(r for r in rels if (vault.root / r).is_file()):
         try:
@@ -410,7 +414,7 @@ def unfinished(vault: Vault, *, strict: bool = False) -> list[Line]:
             if strict:
                 raise
             continue
-        committed = set(git.run("show", f"HEAD:./{rel}", check=False).stdout.splitlines())
+        committed = set(git.show_at_head(rel).splitlines())
         out += parse("\n".join(line for line in text.splitlines() if line not in committed), rel)[0]
     return list(_ordered(out))
 

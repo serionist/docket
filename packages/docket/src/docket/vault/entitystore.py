@@ -70,7 +70,7 @@ from docket.vault.entities import (
 from docket.vault.neverstore import listed
 from docket.vault.redact import Redactor
 from docket.vault.staging import write_replacing
-from docket.vault.vault import Vault
+from docket.vault.vault import UnmergedError, Vault
 
 
 class RefusedError(DocketError):
@@ -477,7 +477,11 @@ class EntityStore:
             raise RefusedError(problems)
         rejected = [r for r in rejects if listed(r.value, self.vault.config.never_store) is None]
         with self.vault.writing():
-            finished = self._finish()
+            edited = self._edited()
+            finished = self._finish(edited)
+            if finished:
+                # Its commit moved HEAD: what differs from it is asked again.
+                edited = self._edited()
             files = _Files(self.root)
             kept: list[Planned] = []
             for item in planned:
@@ -492,7 +496,7 @@ class EntityStore:
             already = len(planned) - len(kept)
             if not kept and not rejected:
                 return Written(finished=finished, already=already)
-            taken = self._take_in(files)
+            taken = self._take_in(files, edited)
             parts: list[dict[str, Any]] = [
                 {
                     "op": "create" if p.change.entity is not None else "add",
@@ -530,7 +534,7 @@ class EntityStore:
         if problems:
             raise RefusedError(problems)
         with self.vault.writing():
-            finished = self._finish()
+            finished = self._finish(self._edited())
             lines = self._lines([{"op": "lift", "key": key} for key in dict.fromkeys(keys)], "user", via)
             return Written(lines, self._write(lines, {}, _message(lines)), finished)
 
@@ -547,7 +551,11 @@ class EntityStore:
         round open on this machine goes on each line: an undo of a decision of that round reopens its card and
         stoplists nothing (DR-0462). Tier 1's undo of its own carries the op's rule and why (DR-0469)."""
         with self.vault.writing():
-            finished = self._finish()
+            edited = self._edited()
+            finished = self._finish(edited)
+            if finished:
+                # Its commit moved HEAD: what differs from it is asked again.
+                edited = self._edited()
             log = curatelog.fold(curatelog.read_all(self.root).lines)
             problems: list[str] = []
             targets: list[Line] = []
@@ -576,7 +584,7 @@ class EntityStore:
                 raise RefusedError(problems)
             if not targets:
                 return Written(finished=finished)
-            taken = self._take_in(files)
+            taken = self._take_in(files, edited)
             parts: list[dict[str, Any]] = [
                 {"op": "undo", "key": t.key, "entity": t.entity, "of": t.id, "round": round_id}
                 | ({"rule": t.rule, "why": why} if by == "tier1" else {})
@@ -597,10 +605,14 @@ class EntityStore:
             for op_id, part in zip(ids, parts, strict=True)
         )
 
-    def _take_in(self, files: _Files) -> tuple[str, ...]:
-        """Commit, each on its own, the hand edits of the existing files this write touches."""
+    def _edited(self) -> set[str]:
+        """What differs from HEAD under entities/, untracked files too: asked once for a stopped write's lines and
+        the take-in both (DR-0529)."""
         git = self.vault.git
-        edited = {*git.changed_against_head("entities"), *git.untracked("entities", ignored_too=True)}
+        return {*git.changed_against_head("entities"), *git.untracked("entities", ignored_too=True)}
+
+    def _take_in(self, files: _Files, edited: set[str]) -> tuple[str, ...]:
+        """Commit, each on its own, the hand edits of the existing files this write touches."""
         taken: list[str] = []
         for entity_id in files.now:
             paths = files.paths.get(entity_id)
@@ -640,18 +652,20 @@ class EntityStore:
                 else:
                     write_replacing(home, path, text, "entity")
             return self.vault.commit(list(dict.fromkeys([*logs, *originals])), message)
-        except BaseException:
+        except BaseException as e:
             for rel, before in originals.items():
-                self.vault.git.run("reset", "-q", "--", rel, check=False)
+                if not isinstance(e, UnmergedError):
+                    self.vault.git.run("reset", "-q", "--", rel, check=False)
                 if before is None:
                     (self.root / rel).unlink(missing_ok=True)
                 else:
                     write_replacing(home, self.root / rel, before, "restore")
             raise
 
-    def _finish(self) -> tuple[str, ...]:
-        """Finish the lines a write that stopped before its commit left, and commit them with what they change."""
-        pending = curatelog.unfinished(self.vault, strict=True)
+    def _finish(self, edited: set[str]) -> tuple[str, ...]:
+        """Finish the lines a write that stopped before its commit left, and commit them with what they change.
+        `edited` is what differs from HEAD under entities/, asked as the write began."""
+        pending = curatelog.unfinished(self.vault, strict=True, edited=edited)
         if not pending:
             return ()
         log = curatelog.fold(curatelog.read_all(self.root).lines)
@@ -665,8 +679,6 @@ class EntityStore:
                 elif line.op == "undo" and line.of in log.by_id:
                     _unplan(files, log.by_id[line.of], log, set())
         # A write killed after its file's rename left the change in the tree: it goes in with its line.
-        git = self.vault.git
-        edited = {*git.changed_against_head("entities"), *git.untracked("entities", ignored_too=True)}
         logs = sorted({line.rel for line in pending} | (named & edited))
         body = "\n".join(f"Curate: {line.id} {line.op} {line.entity}" for line in pending)
         self._write([], files.outputs(), f"Entities: finish a write that stopped\n\n{body}", logs)

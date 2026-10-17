@@ -627,7 +627,7 @@ def test_the_identity_check_reads_both_keys_and_git_s_own_precedence(
     assert vault.git.has_identity() is expected
 
 
-def test_a_commit_starts_nine_git_processes(
+def test_a_commit_starts_six_git_processes(
     tmp_path: Path, config: VaultConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     vault = new_vault(tmp_path, config)
@@ -641,4 +641,4 @@ def test_a_commit_starts_nine_git_processes(
 
     monkeypatch.setattr(subprocess, "run", counting)
     vault.write_run("chat", [make_record(1)], RUN_AT)
-    assert len(started) == 9, started
+    assert len(started) == 6, started

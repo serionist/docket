@@ -18,7 +18,7 @@ import logging
 import os
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path, PurePosixPath
 
@@ -43,13 +43,15 @@ from docket.vault.processed import (
 from docket.vault.records import RawRecord
 from docket.vault.redact import Redactor
 from docket.vault.spans import RawLookup, problem
-from docket.vault.vault import Vault
+from docket.vault.vault import UnmergedError, Vault
 
 log = logging.getLogger(__name__)
 
 # On Windows another program holding the doc open makes the rename fail for a moment.
 REPLACE_TRIES = 5
 REPLACE_WAIT_SECONDS = 0.2
+# Below this many docs, one log each is no more calls than a rev-list and one log over their folders.
+BATCHED_HISTORIES = 3
 _MIDLINE = re.compile(r"(?:^|[ \t])(?:@\d|\[r:)")
 _POSITION_TAIL = re.compile(r"[@#][\d:-]+$")
 
@@ -109,6 +111,8 @@ class DocStore:
         # The rules vault.yaml has as the vault was opened: every text this store commits passes them (DR-0195).
         self.redactor = Redactor.from_config(vault.config.redaction)
         self.lists = vault.config.never_store
+        # A batch's revs, read in one log while put_many holds the lock (DR-0529); None outside one.
+        self._known: dict[str, list[tuple[int, str]]] | None = None
 
     # -- reading ---------------------------------------------------------------------------------------------------
 
@@ -137,17 +141,44 @@ class DocStore:
 
     def history(self, doc_id: str) -> list[tuple[int, str]]:
         """The doc's revs, newest commit first: (rev, commit) for every commit whose message has its `Doc:` line."""
+        if self._known is not None and doc_id in self._known:
+            return self._known[doc_id]
         # Signature lines a user's log.showSignature adds would read as commit ids.
         rel = self.path(doc_id).as_posix()
         out = self.vault.git.out("log", "--no-show-signature", "--format=%H%x1f%B%x1e", "--", rel)
         revs: list[tuple[int, str]] = []
         for entry in out.split("\x1e"):
             sha, _, message = entry.strip("\n").partition("\x1f")
-            for line in message.splitlines():
-                m = DOC_LINE.match(line.strip())
-                if m and m.group(1) == doc_id:
-                    revs.append((int(m.group(2)), sha))
-                    break
+            _add_rev(revs, doc_id, sha, message)
+        return revs
+
+    def histories(self, doc_ids: Sequence[str]) -> dict[str, list[tuple[int, str]]]:
+        """Each doc's revs as `history` reads them, from one log over the docs' type folders (DR-0529): a commit counts
+        for a doc when it touched the doc's file and its message has the doc's `Doc:` line. Across a merge a folder log
+        isn't the union of the per-file logs, so when one touched those folders, or the batch is too small to gain,
+        each doc's log is read on its own; one `rev-list --merges` decides."""
+        ids = list(dict.fromkeys(doc_ids))
+        if len(ids) < BATCHED_HISTORIES:
+            return {doc_id: self.history(doc_id) for doc_id in ids}
+        rels = {self.path(doc_id).as_posix(): doc_id for doc_id in ids}
+        folders = sorted({f"processed/{doc_id.partition(':')[0]}" for doc_id in ids})
+        git = self.vault.git
+        merges = git.run("rev-list", "--merges", "-1", "HEAD", "--", *folders, check=False)
+        if merges.returncode != 0 or merges.stdout.strip():
+            return {doc_id: self.history(doc_id) for doc_id in ids}
+        # NUL between names, so no name is quoted; names from the repo's top, so the prefix comes off.
+        out = git.out(
+            "log", "-z", "--no-renames", "--no-show-signature", "--format=%x1e%H%x1f%B", "--name-only", "--", *folders
+        )
+        revs: dict[str, list[tuple[int, str]]] = {doc_id: [] for doc_id in ids}
+        sha, message = "", ""
+        for field in out.split("\0"):
+            if field.startswith("\x1e"):
+                sha, _, message = field[1:].partition("\x1f")
+                continue
+            doc_id = rels.get(field.removeprefix("\n").removeprefix(git.prefix))
+            if doc_id is not None and sha:
+                _add_rev(revs[doc_id], doc_id, sha, message)
         return revs
 
     def exists(self, doc_id: str) -> bool:
@@ -306,20 +337,25 @@ class DocStore:
         writes: list[tuple[int, PutResult, str]] = []
         with self.vault.writing():
             seen: set[str] = set()
-            for i, doc, head, redacted in ready:
-                if doc.meta.id in seen:
-                    out[i] = DocRefusedError([DocProblem(None, f"{doc.meta.id} is in this batch twice")])
-                    continue
-                seen.add(doc.meta.id)
-                try:
-                    result, text = self._check_locked(doc, head, redacted)
-                except DocRefusedError as e:
-                    out[i] = e
-                    continue
-                if text is None:
-                    out[i] = result
-                else:
-                    writes.append((i, result, text))
+            # Every doc's revs in one log, under the lock (DR-0529); a take-in drops its own from them.
+            self._known = self.histories([doc.meta.id for _, doc, _, _ in ready])
+            try:
+                for i, doc, head, redacted in ready:
+                    if doc.meta.id in seen:
+                        out[i] = DocRefusedError([DocProblem(None, f"{doc.meta.id} is in this batch twice")])
+                        continue
+                    seen.add(doc.meta.id)
+                    try:
+                        result, text = self._check_locked(doc, head, redacted)
+                    except DocRefusedError as e:
+                        out[i] = e
+                        continue
+                    if text is None:
+                        out[i] = result
+                    else:
+                        writes.append((i, result, text))
+            finally:
+                self._known = None
             if writes:
                 lines = "\n".join(f"Doc: {result.id} rev {result.rev}" for _, result, _ in writes)
                 commit = self._write_all_and_commit([(r.path, t) for _, r, t in writes], f"{subject}\n\n{lines}")
@@ -435,10 +471,13 @@ class DocStore:
         self._replace(path, text.encode("utf-8"))
         try:
             self.vault.commit([rel], f"Doc: {doc_id} rev {rev} (edited by hand)")
-        except BaseException:
-            self._unstage(rel)
+        except BaseException as e:
+            if not isinstance(e, UnmergedError):
+                self._unstage(rel)
             self._replace(path, original)
             raise
+        if self._known is not None:
+            self._known.pop(doc_id, None)
         return rev, text
 
     # -- the pass ------------------------------------------------------------------------------------------------------
@@ -514,9 +553,10 @@ class DocStore:
                 originals.append((rel, path.read_bytes() if path.is_file() else None))
                 self._replace(path, text.encode("utf-8"))
             return self.vault.commit([rel for rel, _ in files], message)
-        except BaseException:
+        except BaseException as e:
             for rel, original in reversed(originals):
-                self._unstage(rel)
+                if not isinstance(e, UnmergedError):
+                    self._unstage(rel)
                 if original is None:
                     (self.root / rel).unlink(missing_ok=True)
                 else:
@@ -557,6 +597,15 @@ def _reads_back(doc: ProcessedDoc) -> bool:
     except DocRefusedError:
         return False
     return back == doc.meta.model_copy(update={"rev": 0})
+
+
+def _add_rev(revs: list[tuple[int, str]], doc_id: str, sha: str, message: str) -> None:
+    """The rev a commit's message gives a doc, its first `Doc:` line for it, when it has one."""
+    for line in message.splitlines():
+        m = DOC_LINE.match(line.strip())
+        if m and m.group(1) == doc_id:
+            revs.append((int(m.group(2)), sha))
+            return
 
 
 def _with_rev(text: str, rev: int) -> str:

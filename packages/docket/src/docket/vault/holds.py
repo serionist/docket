@@ -213,6 +213,6 @@ def _union_line(root: Path) -> None:
 def _union_uncommitted(vault: Vault) -> bool:
     """Whether the merge rule is in .gitattributes but not in HEAD's: only then does Docket commit that file, so a
     user's own edits there stay theirs."""
-    # ./ reads the vault's own file: in a folder of the user's repo, HEAD:.gitattributes is the repo's.
-    committed = vault.git.run("show", "HEAD:./.gitattributes", check=False).stdout
+    # The vault's own file: in a folder of the user's repo, HEAD:.gitattributes is the repo's. Read once per HEAD.
+    committed = vault.git.show_at_head(".gitattributes")
     return not _has_union(committed) and _has_union((vault.root / ".gitattributes").read_text(encoding="utf-8"))
