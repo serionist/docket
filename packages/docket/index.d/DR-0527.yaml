@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0527
+    title: Records whose redaction rules overlap get a new version once, with no migration; what a split stored stays
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#147"]
+    description: "A record whose redacted form changes under DR-0525 (two enabled rules' matches overlap, a match an earlier rule's marker cut off from what it looks at, or one only a second redaction found) lands as a new version when its source sends it again, as a rule turned on does (DR-0191): mixed and cut ones wait in staging again, and older versions keep what they stored. A doc is redacted the new way on its next put, the notes import and docket doc redact, and a document at the next docket scan. What a split already stored can't be joined again, since its first part is a marker: [redacted:tck]-123456 keeps -123456. No schema version and no migration; the CHANGELOG says how to find such fragments."
+    not_chosen:
+      - "Rewriting old versions in raw: raw is written once."
+      - "A command that finds the fragments: a search for the marker followed by text finds them, and only vaults with overlapping rules have any."

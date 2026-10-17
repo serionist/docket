@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0525
+    title: Every redaction rule reads the same text, and what any rule matches is redacted whole
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#147"]
+    description: "Redactor.text and segment_texts run every enabled rule's patterns over the text as given, reading between the markers already in it (DR-0190) but never between markers the same call adds, so a rule that comes earlier can't cut a later rule's match. The spans, a match's secret groups or the match whole, merge where they overlap and each becomes one marker (DR-0526). The rules then run again on the gaps between the spans, each gap as its own text, as a second redaction reads them, until a pass finds nothing or 4 passes ran. That makes redacting twice once, as DR-0190 says, and the gate's version check needs it: intake redacts once and promotion twice. A transcript's segments and a doc's lines are matched joined by line breaks, as before (DR-0190, DR-0197), and a merged span over a boundary takes each piece it touches whole. Turning a rule on or adding a pattern only adds spans on the text as given, so it never unredacts what another rule matched there; text where no two rules' matches overlap redacts as before."
+    binds:
+      - Every character an enabled rule matches on the text as given is redacted, whatever the rules' order.
+    not_chosen:
+      - "Rules in order, each between the markers the ones before it left: an earlier rule cuts a later one's match, and turning tck on stored the digits of TCK-123456."
+      - "One pass, no repeat: TCK and \\b\\d{6}\\b leave TCK123456 as [redacted:tck]123456 until a second redaction, so the gate stages the record again on every sync."
+      - "Today's output plus the union: a rule turned on can still take away a match an earlier marker made."
+      - "Passes until nothing is found, uncapped: \\b[0-9a-f]{8} after a marker finds 8 characters a pass, and 16 KB of hex took 1.1 s."
