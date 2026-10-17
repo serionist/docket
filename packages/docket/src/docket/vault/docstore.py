@@ -540,7 +540,7 @@ class DocStore:
                 if ref.doc == doc_id:
                     problems.append(DocProblem(n, f"{ref.token}: a line can't cite its own doc", line))
                     continue
-                if ref.hash is not None:
+                if ref.rev is not None and ref.hash is not None:
                     if not self.exists(ref.doc):
                         problems.append(DocProblem(n, f"{ref.token}: there is no doc {ref.doc}", line))
                     continue

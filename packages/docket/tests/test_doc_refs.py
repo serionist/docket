@@ -10,6 +10,7 @@ import pytest
 from docket_testkit import REC, copy_vault, git, note, sh, template_vault
 
 from docket import recall
+from docket.vault.anchors import AnchorError, parse_ref
 from docket.vault.docstore import DocStore
 from docket.vault.processed import DocRefusedError, cited_text, line_hash
 from docket.vault.vault import Vault
@@ -60,6 +61,7 @@ def head(vault: Vault) -> str:
         (f"[d:{BRIEF}@1#14]", "a line can't cite its own doc"),
         (f"[d:{NOTE}#14]", f"names no rev; cite the rev you read, as verify's cite gives it: [d:{NOTE}@1#14]"),
         (f"[d:{NOTE}@1]", "isn't a doc-line ref"),
+        (f"[d:{NOTE}#14=00000000]", "isn't a doc-line ref"),
     ],
 )
 def test_a_ref_that_cites_nothing_it_can_is_refused(vault: Vault, ref: str, says: str) -> None:
@@ -223,3 +225,20 @@ def test_verify_says_what_became_of_each_cited_line(vault: Vault) -> None:
     git(vault.root, "rm", "-q", NOTE_PATH)
     git(vault.root, "commit", "-qm", "Drop the note")
     assert {ref.problem for line in recall.verify(vault, BRIEF).lines for ref in line.refs} == {f"{NOTE} is gone"}
+
+
+def test_a_hash_with_no_rev_is_refused_everywhere_a_ref_is_read(vault: Vault) -> None:
+    # A hash only goes with a rev (DR-0540): [d:<id>#<n>=<hash>] is no ref, so it is never stored as pinned and left
+    # where no flag can see it. doc_put refuses it, verify names it, and a hand edit's take-in stops on it.
+    token = f"[d:{NOTE}#14=00000000]"
+    with pytest.raises(AnchorError, match="isn't a doc-line ref"):
+        parse_ref(token)
+    problems = refused(vault, brief(f"- The consultant was quoted. @12:08 {token}", covers=[REC]))
+    assert any(f"{token}: isn't a doc-line ref" in p for p in problems), problems
+    recall.doc_put(vault, brief(f"- The consultant. [d:{NOTE}@1#14]"))
+    path = vault.root / BRIEF_PATH
+    path.write_text(path.read_text(encoding="utf-8") + f"- Later. {token}\n", encoding="utf-8")
+    [line] = [one for one in recall.verify(vault, BRIEF).lines if one.text.startswith("- Later.")]
+    assert any(token in problem and "isn't a doc-line ref" in problem for problem in line.problems)
+    problems = refused(vault, brief(f"- The consultant again. [d:{NOTE}@1#14]", rev="1"))
+    assert any("has an anchor that doesn't parse" in p and token in p for p in problems), problems

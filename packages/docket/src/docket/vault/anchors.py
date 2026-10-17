@@ -45,7 +45,8 @@ _DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
 _SEPARATOR = re.compile(r"[\\/]")
 _MARKDOWN = re.compile(r"\.(?:md|markdown)$", re.IGNORECASE)
 _SLUG = r"[a-z0-9]+(?:-[a-z0-9]+)*"
-_REF = re.compile(rf"\[d:({_SLUG}:{_SLUG})(?:@([1-9]\d*))?#([1-9]\d*)(?:=([0-9a-f]{{8}}))?\]")
+# A hash only after a rev: [d:<id>@<rev>#<n>], the same pinned with =<hash>, or a hand edit's bare [d:<id>#<n>].
+_REF = re.compile(rf"\[d:({_SLUG}:{_SLUG})(?:@([1-9]\d*)#([1-9]\d*)(?:=([0-9a-f]{{8}}))?|#([1-9]\d*))\]")
 # What a reader says of a form it doesn't read: a newer Docket's, or more likely a bracket that only looks like one.
 UNREAD = "an anchor this Docket doesn't read; update Docket, or move it before the line's anchors"
 
@@ -239,8 +240,9 @@ def parse_ref(token: str) -> DocRef:
     m = _REF.fullmatch(token)
     if m is None:
         raise AnchorError("isn't a doc-line ref: [d:<doc id>@<rev>#<n>], the token verify gives as a line's cite")
-    rev = int(m.group(2)) if m.group(2) else None
-    return DocRef(m.group(1), rev, int(m.group(3)), m.group(4), token)
+    if m.group(2) is None:
+        return DocRef(m.group(1), None, int(m.group(5)), None, token)
+    return DocRef(m.group(1), int(m.group(2)), int(m.group(3)), m.group(4), token)
 
 
 def is_unread(token: str) -> bool:

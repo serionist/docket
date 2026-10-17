@@ -264,6 +264,7 @@ def test_a_ref_parses_and_writes_back_the_same(token: str, rev: int | None, line
         f"[d:{NOTE_ID}@0#7]",
         f"[d:{NOTE_ID}@2#0]",
         f"[d:{NOTE_ID}@2#7=0A1B2C3D]",
+        f"[d:{NOTE_ID}#7=0a1b2c3d]",
         f"[d:{NOTE_ID}@2#7=0a1b2c]",
         "[d:Recording-Note:x@2#7]",
         "[d:no-colon@2#7]",
