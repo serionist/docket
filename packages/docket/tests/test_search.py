@@ -23,6 +23,7 @@ from docket_testkit import (
     compound_chat,
     compound_template,
     copy_vault,
+    empty_vault,
     fts_and_check,
     index_config,
     index_template,
@@ -96,7 +97,7 @@ def test_a_bare_word_finds_its_inflected_form_through_its_dative_stem(vault: Vau
 
 
 def test_an_inflected_word_finds_the_bare_word_through_its_stem_stemmed_again(tmp_path: Path) -> None:
-    v = Vault.init(tmp_path / "vault", index_config(), "test-box")
+    v = empty_vault(tmp_path, index_config())
     said = [
         "Az ajánlat még nincs kész, a robot leállt.",
         "A projekt felelőse Dóra.",
@@ -218,7 +219,7 @@ def test_two_transcripts_of_one_stretch_collapse_and_a_record_s_own_windows_do_n
 
 
 def test_two_recordings_in_one_thread_at_other_hours_stay_apart(tmp_path: Path) -> None:
-    v = Vault.init(tmp_path / "vault", index_config(), "test-box")
+    v = empty_vault(tmp_path, index_config())
 
     def part(n: int, hour: int, said: str) -> RawRecord:
         segs = [{"start_ms": 0, "end_ms": 50000, "speaker": "Ben Sample", "text": said}]

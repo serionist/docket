@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import copy_vault, index_config, make_record, template_with
+from docket_testkit import copy_vault, empty_vault, index_config, make_record, template_with
 
 from docket.index import build, matching, rebuild, search
 from docket.index.languages import hungarian_cases, resolve
@@ -706,7 +706,7 @@ def test_speakers_authors_and_tags_are_mentions(vault: Vault) -> None:
 
 
 def test_ids_are_kept_as_written_and_matched_ignoring_case(tmp_path: Path) -> None:
-    v = Vault.init(tmp_path / "vault", index_config(), "test-box")
+    v = empty_vault(tmp_path, index_config())
     at = datetime(2026, 10, 14, 7, tzinfo=UTC)
     v.write_run("chat", [make_record(1, author="U0CLEO", text="Hello from chat.")], at)
     mail = make_record(rid="mail:<a@x.example>", source="mail", kind="mail", author="cleo@Tests.Example", text="Hi.")
@@ -727,7 +727,7 @@ def test_ids_are_kept_as_written_and_matched_ignoring_case(tmp_path: Path) -> No
 
 
 def test_an_author_written_name_and_id_is_matched_by_the_id_for_its_source(tmp_path: Path) -> None:
-    v = Vault.init(tmp_path / "vault", index_config(), "test-box")
+    v = empty_vault(tmp_path, index_config())
     at = datetime(2026, 10, 14, 7, tzinfo=UTC)
     named = make_record(2, author="C. Test (Northwind) <U0CLEO>", text="Hello from chat.")
     other = make_record(3, author="Someone <U0ELSE>", text="Hello again.")

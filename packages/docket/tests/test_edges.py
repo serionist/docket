@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import make_config, make_record, sh
+from docket_testkit import empty_vault, make_config, make_record, sh
 from filelock import FileLock
 
 from docket import userconfig
@@ -20,7 +20,6 @@ from docket.vault.git import Git, toplevel
 from docket.vault.lock import VaultLock
 from docket.vault.rawlog import parse_run_file
 from docket.vault.records import canonical_json
-from docket.vault.vault import Vault
 from docket.vault.wizard import Given, Wizard
 
 RUN_AT = datetime(2026, 10, 14, 15, 50, tzinfo=UTC)
@@ -52,7 +51,7 @@ def test_without_git_lfs_the_vault_still_starts(tmp_path: Path, monkeypatch: pyt
 
 
 def test_a_commit_with_nothing_new_is_none(tmp_path: Path) -> None:
-    vault = Vault.init(tmp_path / "v", make_config(), "test-box")
+    vault = empty_vault(tmp_path, make_config(), "v")
     assert vault.commit([], "nothing") is None
 
 
@@ -79,7 +78,7 @@ def test_a_file_outside_raw_is_no_run_file(tmp_path: Path) -> None:
 
 
 def test_blank_lines_in_a_run_file_are_skipped(tmp_path: Path) -> None:
-    vault = Vault.init(tmp_path / "v", make_config(), "test-box")
+    vault = empty_vault(tmp_path, make_config(), "v")
     folder = vault.root / "raw" / "chat" / "2026" / "10"
     folder.mkdir(parents=True)
     line = make_record(1).model_copy(update={"v": "sha256:x"}).to_json()
@@ -94,7 +93,7 @@ def test_carriage_returns_are_escaped() -> None:
 
 
 def test_status_reports_overlaps_and_uncommitted_runs(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    vault = Vault.init(tmp_path / "v", make_config(), "test-box")
+    vault = empty_vault(tmp_path, make_config(), "v")
     vault.rawlog.write_run("chat", [make_record(1)], RUN_AT)
     copy = next((vault.root / "raw").rglob("*.jsonl"))
     (copy.parent / "2026-10-14T1551-other-box.jsonl").write_text(copy.read_text(encoding="utf-8"), encoding="utf-8")

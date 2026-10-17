@@ -1091,11 +1091,12 @@ decisions:
       - "An MCP tool: a terminal one-off, like the import."
   - id: DR-0220
     title: The tests build each vault template once per run for every worker, and each test works on a copy
-    status: proposed
+    status: superseded
     at: "2026-10-15"
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#43"]
+    superseded_by: [DR-0531]
     description: "docket_testkit builds its templates (the fixture vault, the index fixture, a consuming project, the notes repo, an imported vault, a plain vault per config, a folder vault in its host, a host with its origin, convert's nested vault) once per pytest session: the first xdist worker to ask builds it under a file lock in the session's shared temp folder and under the tests' isolation, clearing whatever a failed build left, and writes a done marker last; the others wait and reuse it. A template is keyed by its builder's module and qualified name and its arguments, the folder named by the whole key's digest. Its index is refreshed once, a second after its last write. A test gets a copy (copytree, which keeps the files' times; each repo's index refreshed; each remote set to the copy's own path with git remote set-url) and never writes into a template: once all workers have finished, the controller walks every path under each template against the manifest taken when it was built, and an added, removed or changed path or link fails the run; caches a reader leaves (__pycache__, SQLite's -wal and -shm) don't count. Tests about init itself still call Vault.init. Before, each worker built a module's template again: 99 builds of 29 templates, 28% of a run's worker time."
     binds:
       - A test writes only its copy; a write into a template fails the run.

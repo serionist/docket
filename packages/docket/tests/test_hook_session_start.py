@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 import typer.main
-from docket_testkit import host_repo, make_config
+from docket_testkit import empty_vault, host_repo, make_config
 
 from docket import hooks, userconfig
 from docket.cli import app, main
@@ -93,7 +93,7 @@ def test_records_waiting_in_staging_are_counted_never_read(tmp_path: Path) -> No
 
 def test_the_service_s_vault_comes_before_the_default(tmp_path: Path) -> None:
     folder_vault(tmp_path / "a")
-    served = Vault.init(tmp_path / "b" / "vault", make_config(), "test-box")
+    served = empty_vault(tmp_path / "b", make_config())
     userconfig.set_service(vault=served.root)
     assert f"vault: {served.root}, nothing waiting" in context(start(status()))
 
@@ -224,7 +224,7 @@ def test_no_git_process_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, st
     if storage == "folder":
         vault = folder_vault(tmp_path)
     else:
-        vault = Vault.init(tmp_path / "vault", make_config(), "test-box")
+        vault = empty_vault(tmp_path, make_config())
         userconfig.set_default_vault(vault.root)
     stage_files(vault, 2)
     an_entity(vault)
