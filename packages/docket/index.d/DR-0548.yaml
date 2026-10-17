@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0548
+    title: Media is fetched from a source's media_folders or Docket's drop folder, or over https from its media_hosts with every address checked
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#42"]
+    description: "A path must resolve, after links, to a regular file under one of the source's media_folders (a new optional list on a source in vault.yaml, written as a folder source's folder is: relative to the repo or under ~/) or Docket's drop folder, <state dir>/drop/, whose files are deleted once stored. A URL must be https to a host exactly in the source's media_hosts; every address the host resolves to must be global (an IPv4-mapped IPv6 address checked as IPv4), one that isn't refuses the host, and the connection goes to a checked address with the host as SNI, ignoring proxies. At most 3 redirects, each checked the same way; 512 MiB, refused on Content-Length and cut off while reading; 15 s to connect, 60 s idle, 15 minutes in all. A URL is never logged, stored or put in an error. The settings in force treat both lists as tools: an entry added by hand waits for its commit, one removed applies at once, and docket media host or folder add asks at the console (DR-0517)."
+    not_chosen:
+      - "httpx: pinning a checked address with the right SNI fights its transport; http.client does it in a few lines."
+      - "Absolute folders in vault.yaml: they name one machine's drive; the drop folder covers another drive."
