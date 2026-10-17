@@ -11,11 +11,14 @@ import re
 import unicodedata
 from collections.abc import Iterable, Iterator
 from functools import lru_cache
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 from urllib.parse import unquote
 
 from docket.vault.config import NeverStore
 from docket.vault.records import RawRecord
+
+if TYPE_CHECKING:
+    from docket.vault.entities import Entity
 
 ListName = Literal["people", "containers", "keywords"]
 
@@ -196,6 +199,14 @@ def spelled(entity: str) -> str:
 def slug_listed(entity: str, lists: NeverStore) -> bool:
     """Whether a never-store list holds an entity id as written or the name it spells."""
     return any(listed(v, lists) is not None for v in (entity, spelled(entity)))
+
+
+def person_listed(entity: Entity, lists: NeverStore) -> bool:
+    """Whether the people list names an entity by any of its names, aliases or contact ids: listed by an address
+    alone or by a nickname, it is still that person. The people page drops their whole row and a brief is never
+    written for them (DR-0558)."""
+    values = [*entity.names.values(), *(a.text for a in entity.aliases), *(v for vs in entity.ids.values() for v in vs)]
+    return any(listed(v, lists) == "people" for v in values)
 
 
 def match(record: RawRecord, lists: NeverStore) -> ListName | None:

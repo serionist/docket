@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from docket.index import flags
 from docket.index import update as index_update
 from docket.index.build import open_index
+from docket.vault import brief_form
 from docket.vault.config import NeverStore
 from docket.vault.docstore import DocStore
 from docket.vault.entities import Entity, load_entities
@@ -111,11 +112,11 @@ def report(
 
 
 def _held(entity: Entity | None, entity_id: str, title: str | None, lists: NeverStore) -> bool:
-    """A brief a never-store list holds by its entity: its id or a name, or for a gone entity its title."""
-    if slug_listed(entity_id, lists):
-        return True
-    names = list(entity.names.values()) if entity is not None else ([title] if title else [])
-    return any(listed(n, lists) is not None for n in names)
+    """A brief a never-store list holds by its entity, as doc_put holds it (`brief_form.held`), or for a gone entity
+    by its id or its title."""
+    if entity is not None:
+        return brief_form.held(entity, lists)
+    return slug_listed(entity_id, lists) or (title is not None and listed(title, lists) is not None)
 
 
 def _title(doc: ProcessedDoc) -> str | None:

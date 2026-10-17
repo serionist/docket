@@ -146,10 +146,51 @@ def test_a_section_after_the_three_is_kept_with_a_warning(vault: Vault) -> None:
 # -- never-store ------------------------------------------------------------------------------------------------------
 
 
-def test_an_entity_a_list_holds_gets_no_brief(vault: Vault) -> None:
-    held = set_lists(vault, people=["Ben Sample"])
+@pytest.mark.parametrize("value", ["Ben Sample", "ben@northwind.example", "Ben", "U0BEN"])
+def test_an_entity_a_list_holds_by_any_name_alias_or_id_gets_no_brief(vault: Vault, value: str) -> None:
+    held = set_lists(vault, people=[value])
     problems = refused(held, brief("ben-sample", "Ben Sample", changed=[CITED.replace("<cite>", cite(held, TEN))]))
-    assert problems == ["doc: the brief is for an entity a never-store list holds; it gets no brief"]
+    assert problems == ["line 2: the brief is for an entity a never-store list holds; it gets no brief"]
+
+
+def test_a_person_listed_by_address_alone_is_named_by_no_brief(vault: Vault) -> None:
+    held = set_lists(vault, people=["ben@northwind.example"])
+    for line in ("- Ben Sample asked for it.", "- Sample Ben asked for it.", "- Ben asked for it."):
+        problems = refused(held, brief("northwind", "Northwind", changed=[f"{line} {cite(held, TEN)}"]))
+        assert [p.split(": ", 1)[1] for p in problems] == ["names someone a never-store list holds; leave them out"]
+
+
+@pytest.mark.parametrize(
+    ("value", "other"),
+    [("U0DORA", "dora-minta"), ("Cleo Nobody", "cleo-nobody")],
+    ids=["an entity the list holds by an id", "an id that spells a listed name"],
+)
+def test_a_listed_person_in_the_entities_list_is_refused(vault: Vault, value: str, other: str) -> None:
+    held = set_lists(vault, people=[value])
+    text = brief("ben-sample", "Ben Sample", changed=[f"- Above the budget. {cite(held, TEN)}"])
+    text = text.replace("entities: [ben-sample]", f"entities: [ben-sample, {other}]")
+    assert refused(held, text) == [
+        "line 6: entities: an entity here names someone a never-store list holds; leave them out"
+    ]
+
+
+def test_a_hand_edit_naming_a_listed_person_stays_on_disk(vault: Vault) -> None:
+    put_ben(vault)
+    held = set_lists(vault, people=["Dora Minta"])
+    path = held.root / "processed" / "brief" / "ben-sample.md"
+    edited = path.read_text(encoding="utf-8").replace(
+        "## Decisions", f"## Decisions\n- Dora Minta agreed. {cite(held, TEN)}"
+    )
+    path.write_text(edited, encoding="utf-8", newline="\n")
+    head = git(held.root, "rev-parse", "HEAD")
+    n = edited.split("\n").index(next(line for line in edited.split("\n") if line.startswith("- Dora Minta"))) + 1
+    assert refused(
+        held, brief("ben-sample", "Ben Sample", changed=[CITED.replace("<cite>", cite(held, TEN))], rev="1")
+    ) == [
+        f"doc: processed/brief/ben-sample.md was edited by hand, and its line {n} names someone a never-store list "
+        "holds; edit it or check it out again"
+    ]
+    assert (git(held.root, "rev-parse", "HEAD"), path.read_text(encoding="utf-8")) == (head, edited)
 
 
 @pytest.mark.parametrize(
@@ -285,9 +326,10 @@ def test_a_brief_whose_entity_is_gone_names_the_one_that_holds_its_name(vault: V
     assert (found.state, found.orphaned) == ("orphaned", "cleo-test")
 
 
-def test_a_brief_a_list_now_holds_is_hidden_and_counted(vault: Vault) -> None:
+@pytest.mark.parametrize("value", ["Ben Sample", "Ben", "ben@northwind.example"])
+def test_a_brief_a_list_now_holds_is_hidden_and_counted(vault: Vault, value: str) -> None:
     put_ben(vault)
-    held = set_lists(vault, people=["Ben Sample"])
+    held = set_lists(vault, people=[value])
     found = briefs.report(held, stale_only=False)
     assert (found.briefs, found.hidden) == ([], 1)
     asked = briefs.report(held, ["ben-sample", "northwind"])
