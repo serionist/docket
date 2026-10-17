@@ -9,6 +9,7 @@ can't start fails the test. CI runs it in its own Linux job; `DOCKET_TEST_SCREEN
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import threading
 import time
@@ -21,6 +22,7 @@ import uvicorn
 from curate_kit import curate_vault
 from docket_testkit import index_template
 from playwright.sync_api import Page, expect, sync_playwright
+from recording_kit import CRANE, NOTE, recording_template
 from settings_kit import settings_template
 from staging_kit import staging_vault
 from sync_kit import as_structured, as_text, memo, sync_template
@@ -80,6 +82,18 @@ def settings_service(settings_project: Path, tmp_path: Path) -> Iterator[tuple[i
 def curate_service(tmp_path: Path) -> Iterator[tuple[int, str]]:
     """The real service over the invented curate vault: recordings, notes and mail, no entity yet."""
     yield from _serve(curate_vault(tmp_path).root)
+
+
+@pytest.fixture(scope="module")
+def recording_project(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return recording_template(tmp_path_factory)
+
+
+@pytest.fixture
+def recording_service(recording_project: Path, tmp_path: Path) -> Iterator[tuple[int, str]]:
+    """The real service over the invented recording vault: calls kept as Plaud keeps them, a note on one."""
+    shutil.copytree(recording_project, tmp_path / "vault")
+    yield from _serve(tmp_path / "vault")
 
 
 def _serve(vault: Path) -> Iterator[tuple[int, str]]:
@@ -516,6 +530,76 @@ def test_the_settings_page_says_when_an_edit_isn_t_in_force(settings_service: tu
         _fits(page, ".notice")
         page.screenshot(path=str(shots / "settings-waiting-390.png"), full_page=True)
         browser.close()
+
+
+def test_the_recording_page_in_a_browser(recording_service: tuple[int, str], tmp_path: Path) -> None:
+    port, token = recording_service
+    shots = Path(os.environ.get("DOCKET_TEST_SCREENSHOTS") or tmp_path)
+    shots.mkdir(parents=True, exist_ok=True)
+    link = client.call("POST", "/api/session", token=token, at=port)
+    assert link is not None
+    errors: list[str] = []
+    base = f"http://127.0.0.1:{port}"
+    note = f"{base}/recording?rid={CRANE}&doc={NOTE}"
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel=None if BROWSER == "chromium" else BROWSER)
+        page = browser.new_page(viewport={"width": 1440, "height": 900})
+        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.on("requestfailed", lambda r: errors.append(f"request failed: {r.method} {r.url} ({r.failure})"))
+        page.on(
+            "response", lambda r: errors.append(f"{r.status} {r.request.method} {r.url}") if r.status >= 400 else None
+        )
+        page.goto(f"{link.body['url']}&next=/recording")
+        page.wait_for_url(f"{base}/recording")
+
+        # The start takes a locator; the page opens at its time.
+        page.fill("#rid", f"r:{CRANE}@01:40")
+        page.press("#rid", "Enter")
+        expect(page.locator("h1")).to_have_text("Harbour crane check")
+        expect(page.locator("li.segment.mark").first).to_contain_text("01:40")
+        expect(page.locator(".audio")).to_contain_text("No audio stored yet")
+
+        # A summary line's anchor marks the lines it points at, and the address holds the rid and the time.
+        page.goto(note)
+        page.click("a.anchor:has-text('@00:40-01:39')")
+        page.wait_for_url(f"{note}&at=00:40-01:39#at")
+        expect(page.locator("li.segment.mark")).to_have_count(3)
+        expect(page.locator(".summary-column .line.cited")).to_contain_text("west crane needs a new brake pad")
+        page.screenshot(path=str(shots / "recording.png"), full_page=True)
+
+        # At phone width the columns stack, the link scrolls the marked line into view, and nothing scrolls sideways.
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.goto(note)
+        page.click("a.anchor:has-text('@02:40')")
+        page.wait_for_url(f"{note}&at=02:40#at")
+        expect(page.locator("li#at")).to_be_in_viewport()
+        _fits(page, ".recording-locator", ".summary-column", "li#at")
+        page.screenshot(path=str(shots / "recording-390.png"))
+        page.set_viewport_size({"width": 1440, "height": 900})
+        page.click('[data-action="theme"]')
+        page.click('[data-action="theme"]')
+        page.reload()
+        assert page.evaluate("document.documentElement.dataset.theme") == "dark"
+        page.screenshot(path=str(shots / "recording-dark.png"), full_page=True)
+        assert not errors, errors
+        browser.close()
+
+        # Without JavaScript the page and its links work the same.
+        again = client.call("POST", "/api/session", token=token, at=port)
+        assert again is not None
+        scriptless = p.chromium.launch(channel=None if BROWSER == "chromium" else BROWSER)
+        bare = scriptless.new_context(java_script_enabled=False, viewport={"width": 1280, "height": 900})
+        plain = bare.new_page()
+        plain.goto(f"{again.body['url']}&next=/recording")
+        plain.wait_for_url(f"{base}/recording")
+        plain.goto(note)
+        plain.click("li.segment:nth-child(5) a.time")
+        plain.wait_for_url(f"{note}&at=01:20#at")
+        expect(plain.locator("li.segment.mark")).to_have_text([re.compile("01:20")])
+        expect(plain.locator(".summary-column .line.cited")).to_have_count(1)
+        plain.screenshot(path=str(shots / "recording-no-script.png"), full_page=True)
+        scriptless.close()
 
 
 def _add(page: Page, base: str, value: str, shot: Path) -> None:

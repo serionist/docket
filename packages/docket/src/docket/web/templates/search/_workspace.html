@@ -59,7 +59,7 @@
           {% for h in g.hits %}
           <li class="hit{% if h.open %} open{% endif %}">
             <a class="hit-link" {{ swap(h.link, '#panel') }} data-locator="{{ h.locator }}">{{ icon(h.icon) }}{{ locator(h.locator) }}{% if h.stretch %}<span class="stretch">{{ h.stretch }}</span>{% endif %}</a>
-            <p class="meta">{% if h.when %}<span>{{ h.when }}</span>{% endif %}{% if h.who %}<span dir="auto">{{ h.who }}</span>{% endif %}{% if h.found %}<span class="badge">{{ h.found }}</span>{% endif %}</p>
+            <p class="meta">{% if h.when %}<span>{{ h.when }}</span>{% endif %}{% if h.who %}<span dir="auto">{{ h.who }}</span>{% endif %}{% if h.found %}<span class="badge">{{ h.found }}</span>{% endif %}{% if h.recording %}<a class="to-recording" href="{{ h.recording }}">on the Recording page</a>{% endif %}</p>
             <p class="snippet" dir="auto">{{ h.snippet }}</p>
             {% if h.entities %}<p class="mentions">mentions {{ h.entities|join(', ') }}</p>{% endif %}
             {% if h.also %}

@@ -8,6 +8,9 @@ Unreleased in the same PR.
 
 ### Added
 
+- The Recording page, `/recording` in the web app: a recording's summary beside its transcript, each anchor a link
+  that marks the lines it points at, with the recording and the line in the address. Search's transcript hits open
+  there. No audio is stored yet, and the page says so.
 - The Settings page turns a redaction rule on, and makes a source mixed or private or turns it off, each with a
   button; making a source private asks once more first, naming what waits from it. Anything that lets more in stays
   a command or a line to change by hand.

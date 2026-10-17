@@ -172,6 +172,28 @@ def test_a_group_shows_its_summary_and_each_hit_why_it_was_found(client: TestCli
     assert any(href.endswith("&lines=21-22") for href in doc_hits), doc_hits
 
 
+def test_a_transcript_hit_opens_on_the_recording_page_at_its_stretch(client: TestClient) -> None:
+    tree = parse(client.get("/search?query=pallet+labels+printer").text)
+    hits = tree.find_all("li", class_="hit")
+    links = {
+        hit.find("a", class_="hit-link").attrs["data-locator"]: [
+            a.attrs["href"] for a in hit.find_all("a", class_="to-recording")
+        ]
+        for hit in hits
+    }
+    transcripts = {loc: found for loc, found in links.items() if loc.startswith("r:calls:")}
+    assert transcripts, links
+    for loc, found in transcripts.items():
+        rid, _, stretch = loc.removeprefix("r:").partition("@")
+        assert found == [f"/recording?rid={rid}&at={stretch}#at"]
+    assert all(not found for loc, found in links.items() if not loc.startswith("r:calls:"))
+    # The link lands on the page with the hit's lines marked.
+    href = next(iter(transcripts.values()))[0].partition("#")[0]
+    page = parse(client.get(href).text)
+    assert page.find("li", id="at")
+    assert page.find_all("li", class_="mark")
+
+
 def test_show_more_asks_for_twenty_more(client: TestClient) -> None:
     html = client.get("/search?query=Nortwin&k=2").text
     assert len(page_hits(html)) >= 2

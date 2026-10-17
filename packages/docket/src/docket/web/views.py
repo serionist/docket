@@ -21,6 +21,7 @@ from docket.plaintext import words
 from docket.vault.anchors import parse_locator
 from docket.vault.processed import DOC_TYPES
 from docket.web import templating
+from docket.web.recording_state import RecordingState, time_at
 from docket.web.state import MORE, SearchState
 from docket.web.templating import at, clock
 
@@ -90,6 +91,8 @@ class HitView:
     also: list[str]
     link: Link
     open: bool
+    # A transcript hit opens on the Recording page too, at its stretch (DR-0544).
+    recording: str | None = None
 
 
 @dataclass(frozen=True)
@@ -325,6 +328,14 @@ def terms(reading: QueryReading) -> list[str]:
     return out
 
 
+def recording_link(hit: Hit) -> str | None:
+    """A transcript hit's place on the Recording page: its rid, at its stretch."""
+    if hit.kind != "transcript" or hit.rid is None:
+        return None
+    at = time_at(hit.start, hit.end if hit.end != hit.start else None) if hit.start is not None else None
+    return RecordingState(rid=hit.rid, at=at).link()
+
+
 def hit_view(hit: Hit, state: SearchState, tz: ZoneInfo, names: dict[str, EntityLabel], marks: list[str]) -> HitView:
     lines = () if hit.lines is None else (f"{hit.lines[0]}-{hit.lines[1]}",)
     target = state.search_only().but(hit=hit.locator, lines=lines)
@@ -340,6 +351,7 @@ def hit_view(hit: Hit, state: SearchState, tz: ZoneInfo, names: dict[str, Entity
         also=list(hit.also),
         link=panel_link(target),
         open=state.hit == hit.locator,
+        recording=recording_link(hit),
     )
 
 

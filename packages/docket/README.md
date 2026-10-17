@@ -519,8 +519,8 @@ What the service refuses, and what it doesn't:
 
 ## The web app
 
-`docket open` signs your browser in to the service's own pages. In this version that is Search, Sync, Staging, Curate
-and Settings; the navigation shows the pages still to come, with the phase each arrives in.
+`docket open` signs your browser in to the service's own pages. In this version that is Search, Recording, Sync,
+Staging, Curate and Settings; the navigation shows the pages still to come, with the phase each arrives in.
 
 - Search runs the search Claude runs: the same words, names, time words and dates. Sources and a month narrow it;
   people and entities favour the hits that mention them, as Claude's boosts do. Facet counts are within the top 200.
@@ -535,6 +535,22 @@ and Settings; the navigation shows the pages still to come, with the phase each 
   browser from mid-2024 on.
 - A session lasts 12 hours, and ends when the service restarts; the sign-in page then names the `docket open` command
   that brings you back to the page you were on.
+
+### The Recording page
+
+`/recording?rid=<rid>` puts a recording's summary beside its transcript (DR-0544, DR-0545). It only reads.
+
+| Part | Shows |
+|---|---|
+| Summary | the minutes or recording note search attaches, else a legacy note; the other docs on the call as links; each anchor a link that marks the lines it points at |
+| Transcript | the one the rid names, else the one the summary covers; each line's time a link to that line; the call's other transcripts as links |
+| Audio | why there is none: no audio is stored yet |
+
+- Its URL holds `rid` (a recording's or a transcript's, or a locator such as `r:plaud:4f1c@02:30`), `doc` and `at`
+  (`02:30` or `02:30-03:20`). A link that sets `at` lands on the first line it marks, without JavaScript.
+- Search's transcript hits, and its panel on a recording, link here at the hit's time.
+- A held recording shows only that it is held, with a link to the holds on the Staging page.
+- Keys: `?`.
 
 ### The Sync page
 

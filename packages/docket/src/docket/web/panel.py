@@ -26,12 +26,16 @@ from docket.service.state import Service
 from docket.vault.anchors import Anchor, AnchorError, format_anchor, paragraphs, parse_locator, trailing_anchors
 from docket.vault.processed import DOC_TYPES
 from docket.vault.spans import Span
+from docket.web.recording_state import RecordingState, time_at
 from docket.web.state import MAX_AROUND, SearchState
 from docket.web.templating import at, clock
 from docket.web.views import Link, panel_link
 
 Mode = Literal["raw", "verify", "error"]
+Style = Literal["heading", "bullet", "text", "blank"]
 UNITS = {"time": "min", "part": "paragraph", "record": "message"}
+# The kinds of record the Recording page opens even without segments of their own.
+RECORDING_KINDS = ("recording", "transcript")
 
 
 @dataclass(frozen=True)
@@ -44,7 +48,7 @@ class AnchorLink:
 class LineView:
     n: int
     body: str
-    style: Literal["heading", "bullet", "text", "blank"]
+    style: Style
     anchors: list[AnchorLink]
     cited: bool = False
 
@@ -121,31 +125,44 @@ class PanelView:
     verify: Link | None = None
     verify_label: str = ""
     error: str = ""
+    # The open recording or transcript on the Recording page, at the hit's time (DR-0544).
+    recording: str | None = None
 
 
-def _frontmatter_end(doc: DocView) -> int:
+def frontmatter_end(doc: DocView) -> int:
     """The number of the frontmatter's closing line: every processed doc opens with its frontmatter (DR-0109)."""
     return next((line.n for line in doc.lines[1:] if line.text.strip() == "---"), 0)
 
 
+def anchored_rid(anchor: Anchor, covers: list[str]) -> str | None:
+    """The record an anchor points at: its own rid, or a short anchor's one covered record."""
+    return anchor.rid or (covers[0] if len(covers) == 1 else None)
+
+
 def _anchor_locator(anchor: Anchor, covers: list[str]) -> str | None:
-    rid = anchor.rid or (covers[0] if len(covers) == 1 else None)
+    rid = anchored_rid(anchor, covers)
     return None if rid is None else format_anchor(rid, anchor.kind, anchor.start, anchor.end)[1:-1]
 
 
-def line_view(n: int, text: str, covers: list[str], state: SearchState, cited: bool = False) -> LineView:
-    """A doc line: its words, and its anchors as links that open their raw in the panel."""
+def line_parts(text: str) -> tuple[Style, str, list[Anchor]]:
+    """A doc line's style, its words without the markdown that styles them, and the anchors at its end."""
     trailing = trailing_anchors(text)
     body = trailing.text.strip()
-    style: Literal["heading", "bullet", "text", "blank"] = "text"
+    style: Style = "text"
     if not body:
         style = "blank"
     elif body.startswith("#"):
         style, body = "heading", body.lstrip("#").strip()
     elif body.startswith(("- ", "* ")):
         style, body = "bullet", body[2:]
+    return style, body, trailing.anchors
+
+
+def line_view(n: int, text: str, covers: list[str], state: SearchState, cited: bool = False) -> LineView:
+    """A doc line: its words, and its anchors as links that open their raw in the panel."""
+    style, body, found = line_parts(text)
     anchors: list[AnchorLink] = []
-    for anchor in trailing.anchors:
+    for anchor in found:
         target = _anchor_locator(anchor, covers)
         to = None if target is None else panel_link(state.search_only().but(hit=target))
         anchors.append(AnchorLink(anchor.token, to))
@@ -153,7 +170,7 @@ def line_view(n: int, text: str, covers: list[str], state: SearchState, cited: b
 
 
 def summary_view(doc: DocView, state: SearchState, cited: set[int] | None = None) -> SummaryView:
-    start = _frontmatter_end(doc)
+    start = frontmatter_end(doc)
     lines = [line_view(line.n, line.text, doc.covers, state, line.n in (cited or set())) for line in doc.lines]
     body = [line for line in lines if line.n > start]
     title = next((line.body for line in body if line.style == "heading"), doc.id)
@@ -276,6 +293,9 @@ async def _record(
     neighbours = len(found.spans) > 1
     view.spans = [span_view(s, tz, anchor, whole=neighbours and s.rid == rid) for s in found.spans]
     view.title = next((s.title for s in found.spans if s.rid == rid and s.title), "") or rid
+    if any(s.segments or s.kind in RECORDING_KINDS for s in found.spans):
+        at = time_at(anchor.start, anchor.end) if anchor is not None and anchor.kind == "time" else None
+        view.recording = RecordingState(rid=rid, at=at).link()
     kind = anchor.kind if anchor is not None else "record"
     if kind != "record" or not any(s.segments for s in found.spans):
         _around(state, kind, view)

@@ -1,7 +1,7 @@
 """The navigation and the keys: every page of the design, by use, with the phase it arrives in, and the keys each
 built page answers to. The shell, the keys dialog and the footer read these, and `docket.js` handles the same keys.
 
-Only built pages are links; the others are slots that say when they come (DR-0176).
+Only built pages are links, first in their group; the others are slots that say when they come (DR-0546).
 """
 
 from __future__ import annotations
@@ -47,8 +47,16 @@ NAV: tuple[Group, ...] = (
                 "the search Claude uses, with facets by entity, source, person and time",
                 built=True,
             ),
+            # Built pages come first in their group, before its one "later" label.
+            Page(
+                "recording",
+                "Recording",
+                "/recording",
+                2,
+                "the summary next to the transcript, both transcripts",
+                built=True,
+            ),
             Page("briefs", "Briefs", "/briefs", 2, "per person, project and topic; the decision log per stream"),
-            Page("recording", "Recording", "/recording", 2, "the summary next to the transcript, both transcripts"),
         ),
     ),
     Group(
@@ -125,6 +133,8 @@ CURATE_KEYS: Keys = (
 # The keys each page answers, which its dialog lists, and the few its footer names, as (keys, a word).
 # The Settings page has nothing to move through; no key writes.
 SETTINGS_KEYS: Keys = ((("?",), "these keys"),)
+# The Recording page's lines are plain links, which Tab reaches; no key of its own yet.
+RECORDING_KEYS: Keys = ((("?",), "these keys"),)
 
 PAGE_KEYS: dict[str, Keys] = {
     "search": KEYS,
@@ -132,6 +142,7 @@ PAGE_KEYS: dict[str, Keys] = {
     "staging": STAGING_KEYS,
     "curate": CURATE_KEYS,
     "settings": SETTINGS_KEYS,
+    "recording": RECORDING_KEYS,
 }
 HINTS: dict[str, Keys] = {
     "search": ((("/",), "search"), (("j", "k"), "move"), (("Enter",), "open"), (("?",), "keys")),
@@ -139,4 +150,5 @@ HINTS: dict[str, Keys] = {
     "staging": ((("j", "k"), "move"), (("Enter",), "open"), (("?",), "keys")),
     "curate": ((("j", "k"), "move"), (("Enter",), "open"), (("?",), "keys")),
     "settings": ((("?",), "keys"),),
+    "recording": ((("?",), "keys"),),
 }
