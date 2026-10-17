@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0563
+    title: A decision is a processed doc on one project, topic or stream entity, proposed by Claude and confirmed only by the user
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#162"]
+    description: "A decision is the processed doc decision:<yyyy-mm-dd>-<words>, the date it was said. Its frontmatter adds status (proposed, confirmed or rejected), subject (one existing project, topic or stream entity, which entities holds too), replaces and contradicts (confirmed, current decisions on the same subject). Every put is proposed: confirmed and rejected are written only by the Briefs page (DR-0564). Its title is # Proposed: <the decision> until the page's rev writes # <it> on confirm or # Rejected: <it> on reject, so no reader, an older Docket included, takes a candidate as decided. Every content line ends with raw anchors, refs or both. doc_put refuses supersedes on a decision: the page's confirm moves replaces there, so the generic supersede only ever sees a confirmed replacement. A proposed decision takes new revs; a confirmed or rejected one takes none, and a change is a new decision that replaces it. A candidate whose every anchor and ref a rejected decision on the same subject already holds is refused. Never-store is as for briefs (DR-0558): no decision on a held subject, and the same people screen."
+    binds:
+      - The type decision and the keys status, subject, replaces and contradicts are part of the doc format (DR-0109).
+    not_chosen:
+      - "A superseded status written into the older decision: it would take a rev the user never made; superseded_by is derived."
+      - "supersedes on a candidate: an older Docket's generic supersede would read a proposal as in force."
