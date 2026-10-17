@@ -1,9 +1,9 @@
 ---
 title: Flag the lines built from a doc line that changed
 issue: "#160"
-status: draft
-approved_by:
-approved_at:
+status: approved
+approved_by: claude, the lead (autonomy grant)
+approved_at: "2026-10-17"
 ---
 
 # Flag the lines built from a doc line that changed
@@ -55,7 +55,7 @@ The hashed text is exactly this:
 | Rule | What it means |
 |---|---|
 | The line | the cited rev's file text, LF-normalized as anchors count lines (CRLF and a lone CR read as LF), cut into lines at LF |
-| The run | the line's text as `trailing_anchors` returns it: the trailing anchors, refs and anchor-like error tokens are dropped, and a table row's closing pipe is left out, as `trailing_anchors` leaves it out |
+| The run | on a content line of an anchored doc, the line's text as `trailing_anchors` returns it: the trailing anchors, refs and anchor-like error tokens are dropped, and a table row's closing pipe is left out, as `trailing_anchors` leaves it out. A legacy note's line, or any line that isn't a content line, is hashed whole, so "Meeting moved @14:30" changed to "@15:30" flags its dependents |
 | Spaces | leading whitespace is kept; only trailing spaces and tabs are stripped. A trailing no-break space is text, so it stays in the hash, and an edit that drops it flags |
 | Bytes | encoded as UTF-8 with no Unicode normalization. An editor that re-saves a doc in NFD flags its dependents; accepted, since a re-cite clears them |
 | Digest | sha256, the first 8 hex digits, lowercase |
@@ -80,12 +80,15 @@ would redact inside a pinned ref or a rid and commit that as the next rev, and t
 review probe shows it: `[r:calls:call-[redacted:pin]@12:08]` and `...#7=[redacted:hex]]`.
 
 **C, in this PR, for every later format change too:**
-- `derived.split` always splits off a line's trailing anchor-like run, whether its tokens parse or not, and redaction
-  never changes the run's bytes.
+- On content lines of an anchored doc, as today, `derived.split` always splits off the line's trailing anchor-like
+  run, whether its tokens parse or not, and redaction never changes the run's bytes. A legacy note's lines, and any
+  other line, stay whole text: they are redacted as text and never stop a write, so a legacy note ending in `@2pm` or
+  `[x:y]` redacts as before.
 - A run holding a token this Docket doesn't parse stops any write that would redact the doc: `docket doc redact`
   leaves the doc as it stands and names it, the take-in refuses and leaves the hand edit on disk, and doc_put refuses.
   For a reserved form it doesn't read (`[<letters>:...]` other than `[r:`, `[d:` and a redaction marker), the message
-  is "line N holds an anchor this Docket doesn't read; update Docket". For a malformed `[r:` or `@` token, it is the
+  is "line N holds an anchor this Docket doesn't read; update Docket, or move it before the line's anchors", since
+  `[todo:later]` is likelier a typo than a newer Docket. For a malformed `[r:` or `@` token, it is the
   anchor's own problem, to fix the line.
 - No line goes into a commit unredacted: the doc is left whole rather than written with one line skipped, so a secret
   typed into a token that only looks like an anchor never reaches git unredacted either.
@@ -95,8 +98,9 @@ review probe shows it: `[r:calls:call-[redacted:pin]@12:08]` and `...#7=[redacte
 - Accepted, with these mitigations:
   - the CHANGELOG and the README say to update every machine before docs cite lines, and never to run `docket doc
     redact` on an older one;
-  - `verify` and `docket doc stale` name a damaged token, an `[r:` or `[d:` token holding `[redacted:`, with the
-    newest earlier rev where that line's run was whole, to restore it from;
+  - `verify` and `docket doc stale` name a damaged token, a token in a content line's trailing run that starts with
+    `[r:` or `[d:` and holds `[redacted:`, with the newest earlier rev where that line's run was whole, to restore it
+    from;
   - a test covers the detection.
 - Today's only vaults sit on machines that are updated together.
 
@@ -177,8 +181,8 @@ refuses a doc holding one, and its `docket doc redact` damages it (DR-0541, B).
 | rebuilds | two rebuilds, and an update after the edit, give the same flags |
 | pinning | `[d:X@2#7]` comes back as `[d:X@2#7=<hash>]`, an earlier rev read from git once; a bare `[d:X#7]` is refused by doc_put and pinned by a take-in |
 | refusals | missing doc, missing rev, blank or fenced line, self-cite, a line whose text stands twice, malformed token |
-| the hash | CRLF and LF hash alike; a table row's closing pipe and trailing spaces don't count; leading spaces and a trailing no-break space do; NFD differs from NFC |
-| redaction | `docket doc redact` on a doc with refs leaves every ref's bytes as they were; a doc holding `[zz:...]` is left whole by the redact pass and the take-in, and refused by doc_put, each with the update message; a malformed `[r:` token holding an invented password is never committed, redacted or not |
+| the hash | CRLF and LF hash alike; a table row's closing pipe and trailing spaces don't count; leading spaces and a trailing no-break space do; NFD differs from NFC; a legacy note line "Meeting moved @14:30" changed to "@15:30" flags its dependents |
+| redaction | `docket doc redact` on a doc with refs leaves every ref's bytes as they were; a doc holding `[zz:...]` is left whole by the redact pass and the take-in, and refused by doc_put, each with the update message; a malformed `[r:` token holding an invented password is never committed, redacted or not; a legacy note line ending in `@2pm` is redacted as text and not refused |
 | damage | a line whose `[r:` or `[d:` token holds `[redacted:` is named by `verify` and `docket doc stale`, with the newest earlier rev where the run was whole |
 | corrections | not applied, then applied once the corrected doc's line changes; never counted as flagged |
 | older readers | a lenient parse of a doc with refs, as an older index does it, loads without a problem row |
@@ -192,7 +196,8 @@ All of these run on the synthetic fixture vault, with invented docs.
   alone), §5.4 (`derived_from`, `doc_lines`).
 - `anchors.py`'s module docstring with the new kind, the recall skill, and the MCP server's instructions.
 - The README and a `CHANGELOG.md` line: lines can cite doc lines and are flagged when those change; update every
-  machine before docs cite lines, and never run `docket doc redact` on an older one.
+  machine before docs cite lines, never run `docket doc redact` on an older one, and run `docket doc redact --dry-run`
+  once after updating, to see any doc the redact pass would now leave.
 
 ## Risks
 
@@ -212,3 +217,4 @@ All of these run on the synthetic fixture vault, with invented docs.
 | Round | Verdict | Findings |
 |---|---|---|
 | 1, at cff01f8 | changes needed: one major, four minors | H1 (major): an older Docket's `docket doc redact` reads a line with `[d:` as text and redacts inside its anchors, and the damage syncs. Now DR-0541: C in this PR (never redact inside an anchor run; a doc holding an unread reserved form is left whole and named), B for installed Dockets (warnings, damage named with the rev to restore from), A not chosen. H2: a ref to a line whose text stands twice is refused, with a Risks row. H3: the hashed text spelled out byte for byte. H4: clearing needs a fresh ref or the ref dropped; a rewrite under the old ref stays flagged. H5: doc_put refuses a bare ref and points at `cite`; only the take-in pins one. Also: the index keys named. H1 waits for its re-check |
+| 2, the H1 re-check at 85b5d52 | resolved, two minors | H1a: C splits the run only on content lines of an anchored doc, as today; a legacy note's lines and any other line stay whole text, tested with a legacy line ending in `@2pm`. H1b: a legacy note's line, or any non-content line, is hashed whole, tested with "@14:30" changed to "@15:30". Wording: the damage check names a content line's trailing run; the reserved-form message adds "or move it before the line's anchors"; the CHANGELOG asks for `docket doc redact --dry-run` once after updating. The stricter take-in (a malformed token stops the write) confirmed. Approved by the lead after it |
