@@ -242,3 +242,5 @@ Unreleased in the same PR.
   `docket models status --check` every time. Before, they could be missing when the error came before they were read.
 - On Windows, the service starts git without a console of its own: each git call it makes takes about 30 ms
   instead of about 160 ms, so a doc put, a promote or a curate decision through the service is several times faster.
+- On Windows, a command run from a shell with a console but no window (as Claude Code's is) starts git without
+  the no-window flag again: each git call takes about 110 ms there instead of about 180 ms.
