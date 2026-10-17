@@ -20,7 +20,7 @@ from docket import index, userconfig
 from docket.index import vectors
 from docket.index.build import vector_counts
 from docket.vault import redaction
-from docket.vault.config import NeverStore, Redaction, RedactionPattern
+from docket.vault.config import NeverStore, Redaction, RedactionPattern, SourceConfig, VaultConfig
 from docket.vault.vault import Vault
 from docket.web import settings_view
 from docket.web.templating import PAGE_CSP
@@ -257,3 +257,8 @@ def test_an_edit_not_in_force_is_said_at_the_top_and_a_loosening_is_for_your_own
     shown = said(page(client))
     assert "vault.yaml has an edit that isn't in force until you commit it." in shown
     assert "Cleo" not in shown
+    # Said once, at the top: a source's own problem doesn't repeat it, and one added by hand waits for its commit.
+    assert shown.count("isn't in force until you commit it") == 1
+    sources = VaultConfig.load(vault.root / "vault.yaml").sources
+    edit_config(vault, sources={**sources, "diary": SourceConfig(sensitivity="private")})
+    assert "not in force until you commit vault.yaml" in card(page(client), "source-diary")

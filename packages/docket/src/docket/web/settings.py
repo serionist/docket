@@ -34,7 +34,7 @@ from docket.index.query import Reach, reach
 from docket.models import report
 from docket.service.state import Service
 from docket.sources import runner
-from docket.vault import neverstore, redaction
+from docket.vault import inforce, neverstore, redaction
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.gate import Gate
 from docket.vault.neverstore import ListName
@@ -74,11 +74,15 @@ def gather(service: Service) -> Facts:
     sources: list[SourceFacts] = []
     for name, entry in sorted(config.sources.items()):
         problem: str | None = None
-        if entry.folder is None:
+        if name not in vault.config.sources:
+            # Added by hand and not committed: the runner takes it once it is (DR-0521).
+            problem = "not in force until you commit vault.yaml"
+        elif entry.folder is None:
             try:
                 runner.find_mapper(vault, name)
             except DocketError as e:
-                problem = str(e)
+                # The page says once, at the top, that an edit isn't in force.
+                problem = str(e).removesuffix(inforce.note(True))
         folder = here.get(name)
         sources.append(SourceFacts(name, entry, problem, str(folder) if folder is not None else None))
     said, errors = report.service_lines(service.models.status().model_dump())

@@ -402,6 +402,8 @@ Departures from the plan above, each small.
 | the status and redaction notices tested in `test_settings_in_force.py`, the question in `test_console_question.py` | `test_cli.py`, `test_vault_settings.py` | each file holds one part of the design |
 | a new pattern taken wherever the file puts it, and HEAD's patterns matched by name; the place check, its tests and its Risks rows gone, DR-0521's binds line pointing at DR-0525 | a new pattern run after HEAD's until committed, as first built | #147 is merged: a rule's place now changes only which marker names a tie |
 | a commit of Docket's own that names `vault.yaml` leaves a miss in the cache; the next read asks git | filing the file's text under the new commit | the file read after the commit could hold an edit made since, and must never pass for HEAD's |
+| on the Settings page, a source added by hand reads "not in force until you commit vault.yaml", and a source's own problem leaves the notice out | the runner's words as they are | the page shows the file and says once, at the top, that an edit isn't in force; the runner judges the settings in force |
+| a browser test of the notice at both widths, with its screenshots | none | the page's one visible change |
 | the schema's check before the console's refusal | the refusal first | a change that can't be written is refused for that, and the owner is never asked about it |
 | outside the writer only `Vault.init` writes `vault.yaml` as a file, held by a scan over the whole package | `Vault.init` and convert | convert writes it into git's tree, not as a file |
 
