@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from docket_testkit import folder_vault, git
+from docket_testkit import entity_vault, folder_vault, git
 
 from docket.cli import main
 from docket.errors import DocketError
@@ -217,3 +217,22 @@ def test_docket_render_prints_each_file_and_fails_on_one_left(vault: Vault, caps
     out = capsys.readouterr().out.splitlines()
     assert out[0].startswith("left       people.md")
     assert out[1] == "unchanged  glossary.md"
+
+
+def test_a_vault_in_no_repo_and_a_path_named_twice_are_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    alone = entity_vault(tmp_path)
+    assert main(["render", "--vault", str(alone.root)]) == 0
+    assert capsys.readouterr().out.splitlines() == ["nothing to render: vault.yaml names no file under rendered"]
+    path = alone.root / CONFIG_FILE
+    config = VaultConfig.load(path).model_copy(update={"rendered": [RenderedFile(kind="people", path="people.md")]})
+    path.write_text(config.dump(), encoding="utf-8", newline="\n")
+    git(alone.root, "commit", "-qm", "Render the people", "--", CONFIG_FILE)
+    assert main(["render", "--vault", str(alone.root)]) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        f"refused    people.md: {alone.root} isn't inside a git repo, so there is no repo to render into"
+    ]
+    twice = [{"kind": "people", "path": "people.md"}, {"kind": "glossary", "path": "people.md"}]
+    with pytest.raises(ValueError, match=r"people.md is rendered twice"):
+        VaultConfig.model_validate({**config.model_dump(mode="json"), "rendered": twice})
