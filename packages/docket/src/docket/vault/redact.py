@@ -1,15 +1,18 @@
 """Redaction: credentials, keys and phone numbers out of everything a record says, before it is written anywhere.
 
-A match becomes `[redacted:<rule>]`, so what is stored says which rule fired and never what it hid. Ids (`rid`,
-`container`, `thread`, `author`, `to`) are left alone: they are how a record is found, matched and deduplicated.
-`fidelity: verbatim` means not retyped by Claude, never unredacted, so `native` is redacted too, keys and values.
+A match becomes `[redacted:<rule>]`, so what is stored says which rule fired and never what it hid. Every rule reads
+the same text, the text as given, so whatever any rule matches there is redacted whole, in whatever order the rules
+come; spans that overlap become one marker (DR-0525, DR-0526). Ids (`rid`, `container`, `thread`, `author`, `to`) are
+left alone: they are how a record is found, matched and deduplicated. `fidelity: verbatim` means not retyped by
+Claude, never unredacted, so `native` is redacted too, keys and values.
 """
 
 from __future__ import annotations
 
 import re
+from bisect import bisect_left, bisect_right
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from itertools import accumulate
 from typing import Any, cast
@@ -19,6 +22,11 @@ from docket.vault.neverstore import strings
 from docket.vault.records import Attachment, RawRecord
 
 MARKER = re.compile(r"\[redacted:[a-z0-9-]+\]")
+# How many times the rules read a text: once as given, then the gaps between what they found, as a second redaction
+# would read them, and twice more for a match one of those finds at a marker. A pass runs only when the one before it
+# found something; the cap keeps a pattern that finds a few more characters each pass (`\b[0-9a-f]{8}` over a long hex
+# run after a marker) from taking a pass per match (DR-0525).
+PASSES = 4
 
 
 def marker(rule: str) -> str:
@@ -37,36 +45,51 @@ class Rule:
     name: str
     patterns: tuple[re.Pattern[str], ...]
 
-    def apply(self, text: str, counts: Counter[str]) -> str:
+    def find(self, text: str, start: int, end: int) -> Iterator[tuple[int, int]]:
+        """What the rule replaces in `text[start:end]`, read as a text of its own, in `text`'s offsets: each match
+        whole, or only its secret groups."""
+        piece = text[start:end]
         for pattern in self.patterns:
-            text = self.replace(text, self.spans(pattern, text), counts)
-        return text
-
-    def spans(self, pattern: re.Pattern[str], text: str) -> list[tuple[int, int]]:
-        """What a pattern replaces, in order: each match whole, or only its secret groups. It reads the text between
-        markers only, so a marker is never matched again and redacting twice is once."""
-        out: list[tuple[int, int]] = []
-        start = 0
-        for m in [*MARKER.finditer(text), None]:
-            end = len(text) if m is None else m.start()
-            for found in pattern.finditer(text[start:end]):
+            for found in pattern.finditer(piece):
                 groups = found.groupdict().items()
                 secrets = [found.span(g) for g, v in groups if g.startswith("secret") and v is not None]
-                out += [(start + a, start + b) for a, b in secrets or [found.span()] if a != b]
-            if m is not None:
-                start = m.end()
-        return out
+                yield from ((start + a, start + b) for a, b in secrets or [found.span()] if a != b)
 
-    def replace(self, text: str, spans: list[tuple[int, int]], counts: Counter[str]) -> str:
-        """The text with each span, in order, made this rule's marker."""
-        out: list[str] = []
-        last = 0
-        for start, end in spans:
-            out += [text[last:start], marker(self.name)]
-            last = end
-            counts[self.name] += 1
-        out.append(text[last:])
-        return "".join(out)
+
+@dataclass(frozen=True, order=True)
+class Span:
+    """A stretch of a text one marker replaces, and the index of the rule that names it."""
+
+    start: int
+    end: int
+    rule: int
+
+
+def _gaps(size: int, cuts: Iterable[tuple[int, int]]) -> Iterator[tuple[int, int]]:
+    """The stretches of a text of `size` characters outside the ones cut, in order."""
+    last = 0
+    for start, end in sorted(cuts):
+        if start > last:
+            yield last, start
+        last = max(last, end)
+    if last < size:
+        yield last, size
+
+
+def _merge(spans: Iterable[Span]) -> list[Span]:
+    """Spans that overlap as one, named by the rule with the longest span in it, a tie by rule order; spans that only
+    touch stay apart (DR-0526)."""
+    out: list[Span] = []
+    best = Span(0, 0, 0)
+    for span in sorted(spans):
+        if out and span.start < out[-1].end:
+            if (span.end - span.start, -span.rule) > (best.end - best.start, -best.rule):
+                best = span
+            out[-1] = Span(out[-1].start, max(out[-1].end, span.end), best.rule)
+        else:
+            best = span
+            out.append(span)
+    return out
 
 
 # -- the built-in rules -------------------------------------------------------------------------------------------
@@ -210,12 +233,45 @@ class Redactor:
 
     def text(self, text: str, counts: Counter[str] | None = None) -> str:
         counts = counts if counts is not None else Counter[str]()
-        for rule in self.rules:
-            text = rule.apply(text, counts)
-        return text
+        return self._write(text, self.spans(text), counts)
+
+    def spans(self, text: str) -> list[Span]:
+        """What markers replace in a text, in order, in its own offsets. Every rule reads the text as given, between
+        the markers already in it, so a marker is never matched again; then the gaps between what they found, each as
+        a text of its own, as a second redaction would read them, so redacting twice is once while PASSES suffice
+        (DR-0525)."""
+        found: list[Span] = []
+        marked = [m.span() for m in MARKER.finditer(text)]
+        for _ in range(PASSES):
+            new = self._read(text, [*marked, *((s.start, s.end) for s in found)])
+            if not new:
+                break
+            found = sorted([*found, *new])
+        return found
+
+    def _read(self, text: str, cuts: list[tuple[int, int]]) -> list[Span]:
+        """Every rule's spans in the gaps the cuts leave, each gap read as a text of its own, overlaps merged."""
+        return _merge(
+            Span(a, b, i)
+            for start, end in _gaps(len(text), cuts)
+            for i, rule in enumerate(self.rules)
+            for a, b in rule.find(text, start, end)
+        )
+
+    def _write(self, text: str, spans: list[Span], counts: Counter[str]) -> str:
+        """The text with each span made its rule's marker."""
+        out: list[str] = []
+        last = 0
+        for span in spans:
+            name = self.rules[span.rule].name
+            out += [text[last : span.start], marker(name)]
+            counts[name] += 1
+            last = span.end
+        out.append(text[last:])
+        return "".join(out)
 
     def record(self, record: RawRecord) -> tuple[RawRecord, Counter[str]]:
-        """The record with everything it says redacted, and how many matches each rule had."""
+        """The record with everything it says redacted, and how many markers each rule added."""
         counts = Counter[str]()
         attachments = [
             Attachment(
@@ -249,33 +305,41 @@ class Redactor:
         the end of one utterance and its value at the start of the next still match. A match that takes a boundary
         with it (a key block read out over two utterances) leaves no way to tell what was whose, so each segment it
         touches becomes that rule's marker whole."""
-        text = "\n".join(texts)
-        # Where each boundary between two segments is in the text as it is now; a taken one keeps the rule that took it.
-        bounds = [end - 1 for end in accumulate(len(t) + 1 for t in texts[:-1])]
-        taken: dict[int, str] = {}
-        for rule in self.rules:
-            for pattern in rule.patterns:
-                spans = rule.spans(pattern, text)
-                for start, end in reversed(spans):
-                    shift = len(marker(rule.name)) - (end - start)
-                    for k, at in enumerate(bounds):
-                        if k in taken:
-                            continue
-                        if start <= at < end:
-                            taken[k] = rule.name
-                        elif at >= end:
-                            bounds[k] = at + shift
-                text = rule.replace(text, spans, Counter[str]())
-        out: list[str] = []
-        first = last = 0
-        for k in range(len(texts)):
-            if k in taken:
-                continue
-            end = bounds[k] if k < len(bounds) else len(text)
-            out += [text[last:end]] if first == k else [marker(taken[first])] * (k - first + 1)
-            first, last = k + 1, end + 1
+        out = [self._write(t, spans, Counter[str]()) for t, spans in zip(texts, self.segment_spans(texts), strict=True)]
         counts.update(_rules(out) - _rules(texts))
         return out
+
+    def segment_spans(self, texts: list[str]) -> list[list[Span]]:
+        """What markers replace in each segment text, in its own offsets, read as `segment_texts` reads them: a segment
+        a merged span ran into is one span, the whole segment, named by the first span that ran over a boundary of its
+        run of such segments."""
+        text = "\n".join(texts)
+        starts = list(accumulate((len(t) + 1 for t in texts[:-1]), initial=0))[: len(texts)]
+        breaks = [start - 1 for start in starts[1:]]
+        # A boundary a span ran over, by its index, and that span's rule.
+        taken: dict[int, int] = {}
+        found: list[Span] = []
+        marked = [m.span() for m in MARKER.finditer(text)]
+        for _ in range(PASSES):
+            whole = [(starts[k], starts[k] + len(t)) for k, t in enumerate(texts) if k in taken or k - 1 in taken]
+            new = self._read(text, [*marked, *((s.start, s.end) for s in found), *whole])
+            if not new:
+                break
+            for span in new:
+                for k in range(bisect_left(breaks, span.start), bisect_left(breaks, span.end)):
+                    taken.setdefault(k, span.rule)
+            found = sorted([*found, *new])
+        inside: list[list[Span]] = [[] for _ in texts]
+        for span in found:
+            k = bisect_right(starts, span.start) - 1
+            inside[k].append(Span(span.start - starts[k], span.end - starts[k], span.rule))
+        first = 0
+        for k, t in enumerate(texts):
+            if k - 1 not in taken:
+                first = k
+            if k in taken or k - 1 in taken:
+                inside[k] = [Span(0, len(t), taken[first])]
+        return inside
 
     def _native(self, value: Any, counts: Counter[str], label: str | None) -> Any:
         if isinstance(value, dict):

@@ -1,0 +1,13 @@
+decisions:
+  - id: DR-0526
+    title: A merged redaction span is one marker, named by the rule with the longest span in it
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#147"]
+    description: "Spans that overlap, nested, crossing or the same, become one span and one marker. The rule whose own span in it is longest names it; a tie goes to the rule that comes first: private-key, api-key, password, phone, then the user's patterns in vault.yaml's order. Spans that only touch stay two markers, as before, and a run counts one per marker. So turning on a rule whose matches all sit inside another rule's leaves what is stored as it was: with tck-id on, turning tck on still stores [redacted:tck-id]."
+    not_chosen:
+      - "The rule that comes first: turning tck on would rename every [redacted:tck-id], a new version of each record with nothing more redacted."
+      - "A marker naming every rule, [redacted:tck+tck-id]: the marker is one name (DR-0190, DR-0198), and MARKER and the counts read it."
+      - "Touching spans merged: text where nothing overlaps would change."

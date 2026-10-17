@@ -81,7 +81,9 @@ flowchart LR
   recordings), a classification by Claude or by the user. Cuts of non-work stretches are applied to the transcript and
   the audio here. Redaction runs here on every text, and again on every derived text later: credentials by default,
   phone numbers and the user's own patterns when the user turns them on, each switched in `vault.yaml` (DR-0190).
-  Names are never redacted; the never-store lists keep them out (DR-0194).
+  Every rule reads the same text, so what any rule matches on the text as given is redacted whole whatever the order,
+  and turning a rule on never unredacts it; matches that overlap become one marker (DR-0525, DR-0526). Names are never redacted; the
+  never-store lists keep them out (DR-0194).
 - Only then are records written to the raw log and committed. An unclassified record waits in staging; the app
   shows how many.
 - A held recording goes in only once its owner releases it, typing back a code at their own console for the cuts
