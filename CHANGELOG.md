@@ -138,7 +138,7 @@ Unreleased in the same PR.
 ### Changed
 
 - Each write makes fewer git calls: it reads what HEAD names from the files in `.git` and asks git each question
-  once. A doc put makes 7 calls instead of 12, a release 21 instead of 39, and an import of 200 notes 13 instead of
+  once. A doc put makes 7 calls instead of 12, a release 22 instead of 39, and an import of 200 notes 13 instead of
   217. Commits, their messages and what they hold are as before. A write refused because a file has a conflict now
   leaves the conflict as git left it.
 - A search through the service on a vault that is a folder of your repo answers as fast as one in the command: it

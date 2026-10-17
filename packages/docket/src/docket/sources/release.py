@@ -344,8 +344,10 @@ def release(vault: Vault, source: str, folder: Path, proposals: Sequence[Proposa
         raise DocketError(problem)
     report = ReleaseReport()
     # A line or a list a crash left on disk uncommitted reaches git before anything else is decided on it, each read
-    # first, so one that doesn't parse is refused, never committed.
+    # first, so one that doesn't parse is refused, never committed. A conflict in the vault refuses here, before the
+    # owner sees a screen or types a code: the release's own commits would refuse it after (DR-0528).
     with vault.writing():
+        vault.refuse_unmerged()
         releaselog.read(vault.root, source)
         holds.read(vault.root, source)
         releaselog.commit_pending(vault, source)

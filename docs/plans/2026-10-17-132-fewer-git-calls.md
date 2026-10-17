@@ -12,7 +12,7 @@ approved_at: "2026-10-17"
 
 Each write asks git each question once, and reads from the git dir's files what they hold: whether HEAD is on a
 branch, and HEAD's commit id. Every commit, its message and what it holds stay as they are. A doc put goes from 12 git
-calls to 7, a release from 39 to 21, an import of 200 notes from 217 to 13.
+calls to 7, a release from 39 to 22, an import of 200 notes from 217 to 13.
 
 - In scope: the calls every commit makes (`Vault.commit`, `Git.commit`, the recovery check), the run files a commit
   sweeps in, curate's take-in, `put_many`'s doc histories, release's repeated HEAD questions, and a reader of `.git`
@@ -36,7 +36,7 @@ asked and how long it took. Three runs each, medians; a git call costs 16 to 20 
 | doc put | `docket doc put` (the service's `doc_put` makes the same 12) | 12 | 2 | 271 ms | 339 ms | 7 |
 | promote | `docket staging promote`, one source | 13 | 4 | 282 ms | 351 ms | 8 |
 | curate add | `docket curate add`, a create and an alias | 17 | 3 | 347 ms | 423 ms | 8 |
-| release | one recording: four lock holds, two commits | 39 | 22 | 760 ms | 1,104 ms | 21 |
+| release | one recording: four lock holds, two commits | 39 | 22 | 760 ms | 1,104 ms | 22 |
 | import notes | `docket import notes`, 11 notes | 28 | 2 | 584 ms | 768 ms | 13 |
 | `vault.yaml` write | `docket redaction set phone on` (`rewrite`) | 12 | 2 | 238 ms | 292 ms | 7, or 6 with #134 |
 | ingest | `docket ingest` from a folder: stages, commits nothing | 1 | 0 | 17 ms | 137 ms | 1 |
@@ -55,7 +55,7 @@ Expected, at the 17 ms a call costs here:
 | doc put | 5 | about 85 ms | about 255 ms |
 | promote | 5 | about 85 ms | about 265 ms |
 | curate add | 9 | about 155 ms | about 270 ms |
-| release | 18 | about 305 ms | about 800 ms |
+| release | 17 | about 290 ms | about 815 ms |
 | import notes, 11 notes | 15 | about 255 ms | about 510 ms |
 | import notes, 200 notes | 204 | about 3.5 s | about 5.5 s of #136's 9 s |
 | `vault.yaml` write | 5, or 6 with #134 | about 85 ms | about 205 ms |
@@ -82,7 +82,7 @@ Each path's own calls:
 | doc put | `log -- <doc>`: the doc's revs, under the lock | kept |
 | import notes | `rev-parse --show-toplevel` and `ls-files -co` on the notes folder; `log -- processed/legacy-note` for the latest revs; `rev-parse --verify HEAD`, `diff HEAD` and `ls-files --others` on `processed/legacy-note`; then one `log -- <doc>` per note under the lock (11 here; 200 in #136's measure, 3.6 s of its 9 s) | the HEAD test from files; the per-note logs as one `rev-list --merges` and one log over the batch's folders |
 | curate add | `rev-parse --verify HEAD`, `diff HEAD` and `ls-files --others` on `entities/_log` for a stopped write's lines, then the same three on `entities` for the take-in | the HEAD tests from files; one `diff` and one `ls-files` of `entities`, filtered for `_log` |
-| release | the recovery check six times (four lock holds, two nested commits), `rev-parse --verify HEAD` three times, the identity twice, `show HEAD:./.gitattributes` twice around a commit, the hold and log files' untracked and diff checks around a commit, `rev-parse --show-toplevel` for the mapper | `ls-files -u` before each of the two adds; the HEAD tests from files; the identity once; the rest kept, since a commit moved HEAD between |
+| release | the recovery check six times (four lock holds, two nested commits), `rev-parse --verify HEAD` three times, the identity twice, `show HEAD:./.gitattributes` twice around a commit, the hold and log files' untracked and diff checks around a commit, `rev-parse --show-toplevel` for the mapper | `ls-files -u` once where the release starts, before the owner sees a screen, and before each of the two adds; the HEAD tests from files; the identity once; the rest kept, since a commit moved HEAD between |
 | `vault.yaml` write | `show HEAD:./vault.yaml` | kept here; #134's cache of HEAD's `vault.yaml`, keyed by HEAD's id, answers it from a file while HEAD stays |
 
 The whole suite, `-n auto` with a counting plugin (3,873 tests, 410 s): 24,222 git calls, 5,967 s of git summed
@@ -168,6 +168,12 @@ A refusal there leaves the index as git left it. On main a conflict that appeare
 check, and the write's cleanup then ran `git reset` on the doc and cleared the user's conflict. The refusal is now an
 `UnmergedError`, and the doc store's and entity store's cleanups put their files back without the reset.
 
+A writer that asks the owner something before its first commit asks for unmerged paths first, too: a release calls
+`Vault.refuse_unmerged` in its first lock hold, before the screen and the code. Otherwise a conflict refused only the
+release's own commit, after the owner typed the code, with the log line left on disk; the next run then committed that
+line and said the recording was held again by a merge, which was false (F1, the code review of #156). One call per
+release.
+
 The check stays vault-wide, a plain `ls-files -u` from the vault's folder as today, not limited to the commit's paths:
 `ls-files` takes no `--pathspec-from-file`, and a backlog of run files on the command line could pass Windows'
 32,767-character limit.
@@ -252,6 +258,7 @@ and wall time.
 
 | Round | Verdict | Findings |
 |---|---|---|
+| code review of #156 | one minor | F1: a release during a conflict reached the owner's code prompt before its commit refused, since `writing()` no longer asks for unmerged paths; the release now asks at its start, before the screen, and a test holds it to no prompt and nothing written |
 | 2, the G1 re-check at ad92fab | resolved, one minor | G1a: `commit --only` resolves an unmerged path it names too, so a conflict between the check and the commit is still committed; the reason is corrected, the lead accepted the window (a Risks row, with the options not taken), the check stays vault-wide, and a second test pins a pop after the add. Approved by the lead after it |
 | additions after round 1 | from the coordinator | #152's discover: the count notes folder vaults' opens, and the reader takes its plain-checkout rule and `is_git_dir`. The console flag: measured under pythonw and python, then moved to its own PR ("Part of #132") with its own decision entry; DR-0530 stays the identity alone |
 | 1, at 90d0dac | changes needed | G1 (major): one `ls-files -u` per hold let a mid-hold conflict be committed; it now sits before each add. G2: the batched log takes `-z`, `--no-renames` and vault-relative names, tested under a non-ASCII path. G3: a merge in the folders' history sends `put_many` back to one log per doc, decided by one `rev-list --merges`. G4: the tests pin the files ref format, one reftable case tests the fallback, and Git 3.0's default is a risk. The reader answers "no commit yet" only from a cleanly read `packed-refs`, and status parsing reads a staged rename's second field |

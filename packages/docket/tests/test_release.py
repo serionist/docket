@@ -10,6 +10,7 @@ import io
 import json
 import os
 import re
+import subprocess
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -264,7 +265,9 @@ def test_a_release_makes_these_git_calls(
         assert releasing.release(opened, "rec", folder, [cut_01()]).released == ["rec-cut-01"]
     hold, log = "-- state/holds/rec.txt", "-- state/releases/rec.jsonl"
     assert calls == [
-        # The hold file kept as committed, the mapper found in the project, the log's first commit.
+        # A conflict refuses before the screen; then the hold file kept as committed, the mapper found in the project,
+        # the log's first commit.
+        "ls-files -u",
         f"ls-files -z --others {hold}",
         f"diff --name-only -z HEAD {hold}",
         "show HEAD:./.gitattributes",
@@ -279,6 +282,29 @@ def test_a_release_makes_these_git_calls(
         "show HEAD:./.gitattributes",
         *[c for c in COMMIT_CALLS if not c.startswith("config")],
     ]
+
+
+def test_a_release_during_a_conflict_refuses_before_any_question(
+    vault: Vault, folder: Path, owner: Callable[..., Owner]
+) -> None:
+    # An unmerged path, as a stash pop that conflicts leaves one: stages 1 to 3 and no *_HEAD file. The release's
+    # commits would refuse it only after the owner typed the code and its log line was on disk (#132, DR-0528).
+    ingest(vault, folder)
+    rel = "conflict.txt"
+    blob = sh(vault.root, "git", "hash-object", "-w", "--", "vault.yaml").strip()
+    # Paths from the top of the vault's repo, sent as bytes: text mode on Windows would end each line with a CR.
+    info = "".join(f"100644 {blob} {n}\t{vault.home.prefix}{rel}\n" for n in (1, 2, 3))
+    proc = subprocess.run(
+        ["git", "update-index", "--index-info"], cwd=vault.home.top, input=info.encode("utf-8"), check=False
+    )
+    assert proc.returncode == 0
+    assert sh(vault.root, "git", "ls-files", "-u")
+    before = snapshot(vault), releaselog.read(vault.root, "rec")
+    person = owner("code")
+    with pytest.raises(DocketError, match=f"{rel} in .* has a conflict; resolve it before Docket writes"):
+        releasing.release(Vault.open(vault.root), "rec", folder, [cut_01()])
+    assert person.prompts == []
+    assert (snapshot(vault), releaselog.read(vault.root, "rec")) == before
 
 
 @pytest.mark.parametrize("answer", ["y", "yes", "n", "ABC", "q"])

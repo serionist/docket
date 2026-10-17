@@ -242,7 +242,7 @@ class Vault:
         with self.lock:
             self._recover()
             everything = [*paths, *self.uncommitted_runs()]
-            self._refuse_unmerged()
+            self.refuse_unmerged()
             return self.git.commit(everything, message)
 
     def uncommitted_runs(self) -> list[str]:
@@ -257,14 +257,14 @@ class Vault:
             return SyncResult(False, False, message)
         with self.lock:
             self._recover()
-            self._refuse_unmerged()
+            self.refuse_unmerged()
             return self.git.sync()
 
     @contextmanager
     def writing(self) -> Generator[None]:
         """The lock, then the recovery check, for a writer that reads what it is about to change: nothing is read
         while a git operation is under way, and a rebase a killed sync left behind is undone first. Unmerged paths are
-        asked for at each commit, right before its add."""
+        asked for at each commit, right before its add, or first by a writer that calls `refuse_unmerged`."""
         with self.lock:
             self._recover()
             yield
@@ -293,12 +293,14 @@ class Vault:
         if not self.git.on_branch():
             raise DocketError(f"{repo} isn't on a branch (a detached HEAD); check out a branch before Docket writes")
 
-    def _refuse_unmerged(self) -> None:
+    def refuse_unmerged(self) -> None:
         """A conflict a stash pop or a merge --squash left leaves no *_HEAD file, only unmerged paths; committing then
         would take in the conflict markers and mark the conflict resolved, since add and commit --only both resolve a
         path they name. Only the vault's own paths count: git's partial commit leaves a conflict in the user's files as
         it is. One plain ls-files -u, vault-wide: it takes no pathspec file, and a backlog of run files named on the
-        command line could pass Windows' limit."""
+        command line could pass Windows' limit. Each commit asks right before its add; a writer that asks the owner
+        something before its first commit, as a release does, asks first too, so a conflict refuses before the
+        question (DR-0528)."""
         unmerged = sorted({line.split("\t", 1)[-1] for line in self.git.out("ls-files", "-u").splitlines()})
         if unmerged:
             raise UnmergedError(f"{', '.join(unmerged)} in {self.root} has a conflict; resolve it before Docket writes")
