@@ -323,25 +323,24 @@ def test_a_failed_media_commit_git_can_t_explain_leaves_its_files_for_the_next(
     put(vault)
     real = Vault.commit
 
+    asked = Git.head_id
+
+    def broken(self: Git) -> str | None:
+        raise DocketError("git rev-parse: broken")
+
     def fails(self: Vault, paths: list[str], message: str) -> str | None:
         if message.startswith("Media:"):
+            # Git then can't say where HEAD is, so whether the commit landed isn't known.
+            monkeypatch.setattr(Git, "head_id", broken)
             raise DocketError("git refused")
         return real(self, paths, message)
 
-    asked = Git.not_in_head
-
-    def broken(self: Git, under: str) -> list[str]:
-        if under == layout.STORED:
-            raise DocketError("git status: broken")
-        return asked(self, under)
-
     monkeypatch.setattr(Vault, "commit", fails)
-    monkeypatch.setattr(Git, "not_in_head", broken)
     with pytest.raises(DocketError, match="git refused"):
         Gate(vault).promote()
     assert layout.stored_files(vault.root, CALL) and not layout.staged_files(vault.root, CALL)
     monkeypatch.setattr(Vault, "commit", real)
-    monkeypatch.setattr(Git, "not_in_head", asked)
+    monkeypatch.setattr(Git, "head_id", asked)
     assert [m.stored for m in Gate(vault).promote().media] == [1]
     assert reader.state_of(vault, CALL) == "ok"
 

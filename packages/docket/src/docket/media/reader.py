@@ -6,7 +6,8 @@ can't be.
 | `ok` | the stored file and its key are here: `read` gives the bytes |
 | `not-fetched` | no media for the rid, staged or stored; a cut recording's is put, cut, at the next run |
 | `staged` | it waits at the gate with its record |
-| `held` | a hold covers the rid |
+| `held` | a hold covers the rid, stored or not |
+| `recut` | the stored file was cut by less than its family needs now: not played; the next run puts it again |
 | `not-downloaded` | an LFS pointer is in place of the stored file |
 | `no-key` | the stored file is here, its key isn't, or this machine can't open the key's seal |
 
@@ -20,13 +21,16 @@ from pathlib import Path
 from typing import Literal
 
 from docket.errors import DocketError
-from docket.media import crypto, layout
+from docket.media import crypto, cutlog, layout
+from docket.media import ranges as cut_ranges
 from docket.media.keystore import KeyStore
-from docket.vault import holds
+from docket.vault import holds, releaselog
 from docket.vault.records import owning_id
+from docket.vault.spans import RawLookup
+from docket.vault.staging import rid_hash
 from docket.vault.vault import Vault
 
-State = Literal["ok", "not-fetched", "staged", "held", "not-downloaded", "no-key"]
+State = Literal["ok", "not-fetched", "staged", "held", "recut", "not-downloaded", "no-key"]
 
 
 @dataclass(frozen=True)
@@ -52,10 +56,32 @@ def _held(vault: Vault, rid: str) -> bool:
     return owning_id(rid, source, holds.read(vault.root, source)) is not None
 
 
-def state_of(vault: Vault, rid: str, keys: KeyStore | None = None) -> State:
-    """Why a rid's media can or can't be played here, from the files and the key store, without decrypting."""
+def recut(vault: Vault, rid: str, raw: RawLookup | None = None) -> bool:
+    """Whether a rid's stored file was cut by less than its family needs now: the release's cuts and the `[cut]`
+    segments of its transcripts in raw, against its line in the cut log (DR-0562). A record cut by characters has no
+    time to cut at, so its stored file isn't played either."""
+    lookup = raw or RawLookup(vault.root)
+    records = [r for other in lookup.nested(rid) for r in lookup.versions(other)]
+    if not records:
+        return False
+    if any(cut_ranges.by_characters(r) for r in records):
+        return True
+    latest = (lookup.versions(rid) or records)[-1]
+    release = releaselog.read_all(vault.root).covering(latest)
+    needed = cut_ranges.needed(records, [(c.start, c.end) for c in release.cuts] if release is not None else [])
+    logged = cutlog.logged(vault.root, layout.source_of(rid)).get(rid_hash(rid), ())
+    return not cut_ranges.covers(logged, needed.ranges)
+
+
+def state_of(vault: Vault, rid: str, keys: KeyStore | None = None, raw: RawLookup | None = None) -> State:
+    """Why a rid's media can or can't be played here, from the files, the logs and the key store, without
+    decrypting. A stored file under a hold, or cut by less than its family needs now, isn't played."""
     path = _stored(vault, rid)
     if path is not None:
+        if _held(vault, rid):
+            return "held"
+        if recut(vault, rid, raw):
+            return "recut"
         if crypto.is_pointer(path):
             return "not-downloaded"
         store = keys or KeyStore(vault.home)
@@ -65,10 +91,10 @@ def state_of(vault: Vault, rid: str, keys: KeyStore | None = None) -> State:
     return "held" if _held(vault, rid) else "not-fetched"
 
 
-def read(vault: Vault, rid: str, keys: KeyStore | None = None) -> Media:
+def read(vault: Vault, rid: str, keys: KeyStore | None = None, raw: RawLookup | None = None) -> Media:
     """The rid's stored media in memory, or the state that says why not."""
     store = keys or KeyStore(vault.home)
-    state = state_of(vault, rid, store)
+    state = state_of(vault, rid, store, raw)
     path = _stored(vault, rid)
     if state != "ok" or path is None:
         return Media(state)

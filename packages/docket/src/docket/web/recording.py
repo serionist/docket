@@ -23,7 +23,7 @@ from docket.service.state import Service
 from docket.service.writer import IndexBuildingError
 from docket.vault import holds
 from docket.vault.records import owning_id, source_name_problem
-from docket.vault.spans import is_transcript
+from docket.vault.spans import RawLookup, is_transcript
 from docket.vault.vault import Vault
 from docket.web import templating
 from docket.web.recording_state import RecordingState, RecordingStateError
@@ -51,8 +51,9 @@ def gather(vault: Vault, state: RecordingState) -> Facts:
         above = lookup.recordings(record) if is_transcript(record) else []
         recording = (lookup.latest(above[0]) if above else None) or record
         transcripts = ((recording,) if recording.segments else ()) + tuple(lookup.transcripts(recording.rid))
-    if not is_recording(record, transcripts):
-        return Facts(rid, tz, record=record)
+        if not is_recording(record, transcripts):
+            return Facts(rid, tz, record=record)
+        audio = _audio(vault, recording.rid, lookup)
     ref = index.summary_for(vault, recording.rid)
     on = recall.read(vault, recording.rid, view="summary")
     attached = ref.id if ref is not None else None
@@ -80,7 +81,7 @@ def gather(vault: Vault, state: RecordingState) -> Facts:
         legacy=legacy,
         summary=summary,
         problems=tuple(problems),
-        audio=_audio(vault, recording.rid),
+        audio=audio,
     )
 
 
@@ -90,13 +91,14 @@ AUDIO: dict[reader.State, NoAudio] = {
     "not-fetched": "not-fetched",
     "staged": "staged",
     "held": "held",
+    "recut": "recut",
     "not-downloaded": "not-downloaded",
     "no-key": "no-key",
 }
 
 
-def _audio(vault: Vault, rid: str) -> NoAudio:
-    return AUDIO[reader.state_of(vault, rid)]
+def _audio(vault: Vault, rid: str, lookup: RawLookup) -> NoAudio:
+    return AUDIO[reader.state_of(vault, rid, raw=lookup)]
 
 
 def _page(

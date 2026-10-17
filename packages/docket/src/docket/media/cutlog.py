@@ -3,7 +3,8 @@
 The media commit that stores files appends one line for each, in the same commit: schema_version 1, the rid's hash,
 its ranges (none for audio stored as it was put), when and on which machine. Times and hashes only, never content, as
 the release log holds. It merges by union (the vault's `*.jsonl merge=union`); a file stored without a line counts as
-cut by none. #157's second part reads it, to find a stored file whose recording has gained a cut since.
+cut by none. A stored file whose family's ranges have outgrown its line is not played, and is put again, cut
+(DR-0562).
 
 It is written through a temp file in Docket's private folder and a rename, never through a link, as the release log
 is (DR-0200).
@@ -94,6 +95,17 @@ def read(root: Path, source: str) -> list[Line]:
         except ValidationError:
             raise DocketError(f"{rel(source)}: line {n} isn't a media cut line; fix or delete it") from None
     return out
+
+
+def logged(root: Path, source: str) -> dict[str, tuple[tuple[int, int], ...]]:
+    """What each rid's stored file was cut by, by the rid's hash: its latest line, by time and then by place. A rid with
+    no line was stored as it was put."""
+    found: dict[str, tuple[datetime, tuple[tuple[int, int], ...]]] = {}
+    for line in read(root, source):
+        before = found.get(line.rid)
+        if before is None or line.at >= before[0]:
+            found[line.rid] = (line.at, tuple((c.start, c.end) for c in line.cuts))
+    return {digest: cuts for digest, (_, cuts) in found.items()}
 
 
 def append(

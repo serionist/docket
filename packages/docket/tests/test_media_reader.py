@@ -71,14 +71,14 @@ def test_a_held_recording_s_audio_waits(tmp_path: Path) -> None:
     assert reader.state_of(vault, CALL) == "held"
 
 
-@pytest.mark.parametrize("state", ["not-fetched", "staged", "held", "not-downloaded", "no-key", "stored"])
+@pytest.mark.parametrize("state", ["not-fetched", "staged", "held", "recut", "not-downloaded", "no-key", "stored"])
 def test_the_recording_page_says_why_it_plays_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str
 ) -> None:
     vault = media_vault(tmp_path)
     in_raw(vault)
     named = {shown: found for found, shown in recording_page.AUDIO.items()}
-    monkeypatch.setattr(reader, "state_of", lambda found, rid, keys=None: named[state])
+    monkeypatch.setattr(reader, "state_of", lambda found, rid, keys=None, raw=None: named[state])
     sessions = Sessions()
     app = create_app(Settings(port=PORT, vault=vault.root, token=lambda: TOKEN), sessions=sessions)
     with TestClient(app, base_url=OURS, follow_redirects=False) as client:

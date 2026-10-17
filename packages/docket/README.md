@@ -289,7 +289,8 @@ cut is stored as it came.
 |---|---|
 | released with cuts, or a transcript cut by time | cut at the put, then stored with its record |
 | cut after its audio was put | the staged audio goes; the run's `media` line names the recording, and its media step puts it again, cut |
-| held | no audio until the release; then the next run puts it, cut |
+| cut after its audio was stored | the stored file isn't played (`recut`); the run names it, and the new file takes its place, the old one's key deleted here once the new one is committed |
+| held | no audio until the release, and a stored file isn't played; then the next run puts it, cut |
 | a record cut by characters | no audio: there is no time to cut it at |
 | decided by hand before Docket kept which way | no audio until `docket media confirm-cuts <rid>`, in your own terminal, shows each decision against the versions cut by hand and you confirm they were cuts |
 
