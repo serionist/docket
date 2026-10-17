@@ -10,6 +10,7 @@ forbid Claude. Callers use the module (`console.ask(...)`), so a test stands in 
 
 from __future__ import annotations
 
+import getpass
 import os
 import secrets
 import sys
@@ -79,6 +80,14 @@ def ask(prompt: str) -> str:
     """The owner's answer, read at the console; the end of input stops."""
     try:
         return input(prompt)
+    except EOFError:
+        return "q"
+
+
+def ask_hidden(prompt: str) -> str:
+    """A secret the owner types at the console, not echoed; the end of input stops."""
+    try:
+        return getpass.getpass(prompt)
     except EOFError:
         return "q"
 

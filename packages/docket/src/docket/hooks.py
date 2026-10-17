@@ -2,8 +2,9 @@
 holds no scripts.
 
 SessionStart says what state Docket is in: the service's line (the one `docket service status --quiet` prints), the
-vault's, whether Claude Code connects to the port the service listens on, whether a curate round is due, and how
-many doc lines cite a line that changed, as the running service's index counts them (DR-0542). Claude gets every
+vault's, whether Claude Code connects to the port the service listens on, whether a curate round is due, how many
+doc lines cite a line that changed, as the running service's index counts them (DR-0542), and how many media keys no
+export holds, as the running service counts them (DR-0550). Claude gets every
 line; the user sees them only when one needs them. Counts and paths only, never a record's text or title. The vault
 is read without `Vault.open`, whose checks run git: a hook in every session of every project stays cheap. It never
 fails the session: whatever goes wrong becomes a line.
@@ -93,6 +94,15 @@ def _service_vault(body: dict[str, Any]) -> list[Line]:
         lines.append(Line("index: not built yet; the first search builds it", False))
     elif index is not None and index.get("stale"):
         lines.append(Line(f"index: {index['stale']}; the next search rebuilds it", False))
+    unbacked = _count(body.get("media_unbacked"))
+    if unbacked:
+        lines.append(
+            Line(
+                f"media: {unbacked} key(s) no export holds yet; lose this clone and that media is gone for good. "
+                "`docket media keys export <file>`, in your own terminal",
+                True,
+            )
+        )
     if index is not None:
         flagged, unapplied = _count(index.get("flagged")), _count(index.get("unapplied"))
         if flagged or unapplied:

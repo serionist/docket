@@ -17,6 +17,13 @@ def lines(vault: Vault, keys: KeyStore | None = None) -> list[str]:
         where = "the system keychain" if info.store == "keyring" else "a file only you can read"
         out = [f"store    {where}, store {info.id}"]
     out.append(f"keys     {store.count()}")
+    unbacked = store.unbacked()
+    if unbacked:
+        out.append(
+            f"backup   {unbacked} key(s) no export holds; `docket media keys export <file>` in your own terminal"
+        )
+    elif store.count():
+        out.append("backup   every key is in an export")
     out.append(f"waiting  {media_staged.count_waiting(vault.root)} file(s) in staging")
     folder = vault.root / layout.STORED
     stored = sorted(folder.glob(f"*/*/*/*{layout.SUFFIX}")) if folder.is_dir() else []

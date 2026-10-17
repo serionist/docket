@@ -86,6 +86,19 @@ def unseal(data: bytes, identity: str) -> str:
     return decrypt(data, identity).decode("utf-8")
 
 
+def seal_with_passphrase(text: str, passphrase: str) -> bytes:
+    """A file sealed with a passphrase, by age's scrypt mode: a key export (DR-0550)."""
+    return _pyrage().passphrase.encrypt(text.encode("utf-8"), passphrase)
+
+
+def open_with_passphrase(data: bytes, passphrase: str) -> str:
+    age = _pyrage()
+    try:
+        return age.passphrase.decrypt(data, passphrase).decode("utf-8")
+    except Exception:
+        raise DocketError("the passphrase doesn't open it") from None
+
+
 def header(head: bytes) -> bytes:
     """The age header at the start of `head`: through the newline after its `---` line."""
     if not head.startswith(MAGIC):

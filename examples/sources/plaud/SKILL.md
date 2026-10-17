@@ -29,6 +29,8 @@ sources:
 
 Then commit `vault.yaml`: a source added by hand applies once it is committed.
 
+Audio is optional. Once a real run shows the host Plaud's audio links point at, `docket media host add plaud <host>` in your own terminal lets `media_put` fetch from it, and each run's steps gain the media step.
+
 Then run its tests where it was copied: `pytest .claude/skills/sources/plaud/tests`. The tests that go through
 Docket's own checks run only where `docket` can be imported, and are left out elsewhere.
 
@@ -49,6 +51,7 @@ This file holds only what is Plaud's own.
 | List again | `list_files` once more after the last `get_note`: Plaud renames a recording when it writes its notes, and the newest listing wins |
 | By id | for a retry or waiting id: `get_file`, then its transcript and its notes as above; "not found" or an error means it is gone: skip it as `gone` |
 | Rate limits | `429 Too Many Requests`: pause and retry with growing pauses; still limited in the listing, stop without closing; on one recording, skip it as `rate-limited` |
+| Audio | only when the steps end with a media step: after the close, `get_file` for each recording the run staged, then `media_put(rid="plaud:<file id>", url=<the https link to its audio it gives>)`; a recording with no such link stays without audio, and a refusal is noted, not retried |
 
 A page of 100 utterances stays under the 50,000 characters past which Claude Code hands the hook a file note instead
 of the result; a larger `limit` makes long calls too large to keep.
