@@ -1,0 +1,11 @@
+decisions:
+  - id: DR-0542
+    title: A ref's flag is computed from the index's derived_from and doc_lines, or from the vault for one doc, never stored
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#160"]
+    description: "Schema 9 adds derived_from (doc, line, ordinal, src, rev, src_line, hash), each pinned ref, indexed on src, and doc_lines (doc, hash, line), each citable line of every doc, keyed in that order; both load and drop with the doc's other rows. A ref is flagged when its doc is gone, when that doc is superseded, or when no citable line of its current text has the hash: one join, so rebuilds and updates agree. Only direct dependents are flagged; staleness spreads one rev at a time, so a cycle can't loop. A flag clears only when the dependent's next rev cites the line afresh or drops the ref; rewriting the text under the old ref leaves it. read works the flags out from the vault's files for the doc it shows; docket doc stale brings the index up to date and lists flagged lines, corrections not applied and damaged anchors; the index status carries the two counts, which the session-start hook prints when the service runs."
+    not_chosen:
+      - "A flag column written on each update: an edit of the cited doc would have to rewrite its dependents' rows, and a rebuild could disagree with a chain of updates."

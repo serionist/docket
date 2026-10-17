@@ -26,7 +26,7 @@ from filelock import FileLock
 from pydantic import BaseModel, ValidationError
 
 from docket.errors import DocketError
-from docket.index import matching, vectors
+from docket.index import flags, matching, vectors
 from docket.index.chunks import (
     COLUMNS,
     Chunk,
@@ -96,6 +96,9 @@ class IndexStatus(BaseModel):
     entities_changed: bool = False
     problems: list[str] = []
     vectors: list[VectorCoverage] = []
+    # Lines citing a doc line that changed, and correction lines not applied yet, as the index last saw them (DR-0542).
+    flagged: int = 0
+    unapplied: int = 0
 
 
 class RecordLocation(BaseModel):
@@ -360,7 +363,7 @@ class Indexer:
         if row is not None and row[0] is not None:
             doc = row[0]
             self.drop_owner(f"d {doc}")
-            for table in ("doc_covers", "doc_anchors", "old_paths"):
+            for table in ("doc_covers", "doc_anchors", "old_paths", "derived_from", "doc_lines"):
                 self.conn.execute(f"DELETE FROM {table} WHERE doc = ?", (doc,))  # noqa: S608 - fixed table names
             self.conn.execute("DELETE FROM docs WHERE id = ?", (doc,))
         self.conn.execute("DELETE FROM doc_files WHERE path = ?", (rel,))
@@ -399,6 +402,14 @@ class Indexer:
             self.conn.executemany(
                 "INSERT INTO doc_anchors (doc, line, ordinal, rid, kind, start, end) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 [(meta.id, a.line, a.ordinal, a.rid, a.kind, a.start, a.end) for a in anchors],
+            )
+            self.conn.executemany(
+                "INSERT INTO derived_from (doc, line, ordinal, src, rev, src_line, hash) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                flags.ref_rows(doc),
+            )
+            self.conn.executemany(
+                "INSERT OR IGNORE INTO doc_lines (doc, hash, line) VALUES (?, ?, ?)",
+                [(meta.id, found, n) for n, found in sorted(doc.citable().items())],
             )
             self.add_chunks(chunks)
         self.conn.execute("INSERT INTO doc_files (path, sha256, doc) VALUES (?, ?, ?)", (rel, _sha(data), doc_id))
@@ -718,6 +729,7 @@ def status(vault: Vault) -> IndexStatus:
         base.columns = list(langs.columns)
         base.counts = _counts(conn)
         base.problems = _problems(conn)
+        base.flagged, base.unapplied = flags.counts(conn)
         for table in vectors.tables(conn):
             have, total = vectors.coverage(conn, table)
             base.vectors.append(VectorCoverage(model=table.model, have=have, total=total))

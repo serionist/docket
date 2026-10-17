@@ -2,10 +2,11 @@
 holds no scripts.
 
 SessionStart says what state Docket is in: the service's line (the one `docket service status --quiet` prints), the
-vault's, whether Claude Code connects to the port the service listens on, and whether a curate round is due. Claude
-gets every line; the user sees them only when one needs them. Counts and paths only, never a record's text or title.
-The vault is read without `Vault.open`, whose checks run git: a hook in every session of every project stays cheap. It
-never fails the session: whatever goes wrong becomes a line.
+vault's, whether Claude Code connects to the port the service listens on, whether a curate round is due, and how
+many doc lines cite a line that changed, as the running service's index counts them (DR-0542). Claude gets every
+line; the user sees them only when one needs them. Counts and paths only, never a record's text or title. The vault
+is read without `Vault.open`, whose checks run git: a hook in every session of every project stays cheap. It never
+fails the session: whatever goes wrong becomes a line.
 """
 
 from __future__ import annotations
@@ -92,7 +93,18 @@ def _service_vault(body: dict[str, Any]) -> list[Line]:
         lines.append(Line("index: not built yet; the first search builds it", False))
     elif index is not None and index.get("stale"):
         lines.append(Line(f"index: {index['stale']}; the next search rebuilds it", False))
+    if index is not None:
+        flagged, unapplied = _count(index.get("flagged")), _count(index.get("unapplied"))
+        if flagged or unapplied:
+            # Worded as docket.index.flags.summary words it, which the hook doesn't import: it loads no index module.
+            said = [f"{flagged} line(s) cite lines that changed"] if flagged else []
+            said += [f"{unapplied} correction line(s) not applied"] if unapplied else []
+            lines.append(Line(f"docs: {', '.join(said)}; `docket doc stale`", False))
     return lines
+
+
+def _count(value: Any) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
 
 
 def _vault() -> list[Line]:

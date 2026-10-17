@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 
 import pytest
 import yaml
 
-from docket.vault.processed import DocProblem, DocRefusedError, doc_path, double_quoted, line_roles, parse_doc
+from docket.vault.processed import (
+    DocProblem,
+    DocRefusedError,
+    cited_text,
+    doc_path,
+    double_quoted,
+    line_hash,
+    line_roles,
+    parse_doc,
+)
 
 NOTE = """\
 ---
@@ -312,3 +322,48 @@ def test_which_lines_need_anchors() -> None:
     ]
     numbered = parse_doc(NOTE).roles()
     assert [(n, role) for n, _, role in numbered if role == "content"] == [(14, "content"), (15, "content")]
+
+
+# -- what a ref cites (#160, DR-0540) ----------------------------------------------------------------------------------
+
+
+def doc_text(doc_type: str, *lines: str, covers: str = "[calls:rec-1]") -> str:
+    head = f"---\nid: {doc_type}:2026-10-14-call\ntype: {doc_type}\ncovers: {covers}\nby: claude-test\n---\n"
+    return head + "\n".join(lines) + "\n"
+
+
+def test_the_hash_reads_a_content_line_without_its_anchors_and_any_other_line_whole() -> None:
+    def h(line: str, *, content: bool = True) -> str:
+        return line_hash(cited_text(line, content=content))
+
+    # A content line: anchors, refs, a table row's closing pipe and trailing spaces and tabs don't count.
+    assert h("- Ben said ten. @12:08") == h("- Ben said ten. @12:10 [d:minutes:x@2#7=0a1b2c3d]") == h("- Ben said ten.")
+    # A table row's anchors sit at the end of its last cell, so the row's closing pipe is left out as they are.
+    assert h("| Ben | ten @12:08 |") == h("| Ben | ten |") == h("| Ben | ten \t ")
+    # Leading spaces and a trailing no-break space are text; nothing is normalized.
+    assert h("  - Ben said ten.") != h("- Ben said ten.")
+    assert h("- Ben said ten.\N{NO-BREAK SPACE}") != h("- Ben said ten.")
+    assert h("- Zoe said caf\N{LATIN SMALL LETTER E WITH ACUTE}") != h("- Zoe said cafe\N{COMBINING ACUTE ACCENT}")
+    # A legacy note's line, or any line that isn't a content line, is hashed whole.
+    assert h("Meeting moved @14:30", content=False) != h("Meeting moved @15:30", content=False)
+    assert h("- Meeting moved @14:30") == h("- Meeting moved @15:30")
+    assert line_hash("- Ben said ten.") == hashlib.sha256(b"- Ben said ten.").hexdigest()[:8]
+
+
+def test_citable_lines_skip_blank_and_fenced_ones_and_crlf_hashes_as_lf() -> None:
+    lines = ["# Heading", "", "- Ben said ten. @12:08", "```", "code", "```", "- Cleo said Friday. @14:30"]
+    lf = parse_doc(doc_text("recording-note", *lines))
+    crlf = parse_doc(doc_text("recording-note", *lines).replace("\n", "\r\n"))
+    assert lf.citable() == crlf.citable()
+    assert sorted(lf.citable()) == [7, 9, 13]
+    legacy = parse_doc(doc_text("legacy-note", *lines, covers="[]"))
+    assert sorted(legacy.citable()) == [7, 9, 10, 11, 12, 13]
+    assert legacy.citable()[9] == line_hash("- Ben said ten. @12:08")
+
+
+def test_covers_may_be_empty_only_when_every_line_cites_doc_lines() -> None:
+    cited = doc_text("brief", "- Ten million. [d:minutes:2026-10-14-call@2#9]", covers="[]")
+    assert parse_doc(cited).meta.covers == []
+    for body in ("- Ten million.", "- Ten million. [d:minutes:2026-10-14-call@2#9] [r:calls:rec-1]"):
+        with pytest.raises(DocRefusedError, match="covers names at least one rid"):
+            parse_doc(doc_text("brief", body, covers="[]"))

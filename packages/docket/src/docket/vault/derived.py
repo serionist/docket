@@ -16,7 +16,7 @@ from collections import Counter
 from dataclasses import dataclass, replace
 from itertools import pairwise
 
-from docket.vault.anchors import normalize_newlines, trailing_anchors
+from docket.vault.anchors import UNREAD, is_unread, normalize_newlines, trailing_anchors
 from docket.vault.config import NeverStore
 from docket.vault.neverstore import matches_text
 from docket.vault.processed import DOC_TYPES, DocProblem, DocRefusedError, ProcessedDoc, key_line, line_roles
@@ -49,16 +49,38 @@ class Redacted:
 
 
 def split(doc_type: str, lines: list[str]) -> list[tuple[str, str]]:
-    """Each line as its text and its trailing run of anchors with the spaces before it. Only a content line of a doc
-    that has anchors keeps a run, and only when every token in it parses; any other line is all text."""
+    """Each line as its text and its trailing run of anchors and refs with the spaces before it. A content line of a
+    doc that has anchors keeps its run whether or not every token parses, so redaction never writes inside one
+    (DR-0541); a legacy note's lines and every other line are all text."""
     roles = line_roles(lines) if doc_type != LEGACY else ["free"] * len(lines)
     out: list[tuple[str, str]] = []
     for line, role in zip(lines, roles, strict=True):
         trailing = trailing_anchors(line) if role == "content" else None
-        if trailing is not None and trailing.anchors and not trailing.errors:
+        if trailing is not None and (trailing.anchors or trailing.refs or trailing.failed):
             out.append((line[: len(trailing.text)], line[len(trailing.text) :]))
         else:
             out.append((line, ""))
+    return out
+
+
+def run_stops(doc_type: str, lines: list[str]) -> list[tuple[int, str]]:
+    """The content lines (indexes) whose trailing run holds a token this Docket doesn't parse, each with what to say:
+    a write that would redact the doc leaves it whole instead, so nothing in such a line reaches a commit unredacted
+    and no anchor's bytes are rewritten (DR-0541)."""
+    if doc_type == LEGACY:
+        return []
+    out: list[tuple[int, str]] = []
+    for i, (line, role) in enumerate(zip(lines, line_roles(lines), strict=True)):
+        if role != "content":
+            continue
+        trailing = trailing_anchors(line)
+        if not trailing.failed:
+            continue
+        token, error = trailing.failed[0], trailing.errors[0]
+        if is_unread(token):
+            out.append((i, f"holds {token}, {UNREAD}"))
+        else:
+            out.append((i, f"has an anchor that doesn't parse ({error}); fix the line"))
     return out
 
 
@@ -237,7 +259,8 @@ def _rules_added(before: str, after: str) -> list[str]:
 
 def hand_edit(doc_type: str, text: str, last: str | None, redactor: Redactor, lists: NeverStore) -> HandEdit:
     """A hand edit to commit: its body redacted, its frontmatter left as written. What stops it: a body line on the
-    keywords list, as written or redacted, and in the frontmatter, which is committed as it stands, a comment, a key
+    keywords list, as written or redacted, a content line whose anchors hold a token this Docket doesn't parse
+    (DR-0541), and in the frontmatter, which is committed as it stands, a comment, a key
     this Docket doesn't know, a screened key, or a line the edit changed from the last rev (every line when there is
     none) that says a keyword, or holds what redaction would hide. Lines are read whole and in runs of neighbours, as a
     body is, so a label is its key and a value on the next line still counts. No marker is ever written into YAML, so
@@ -270,4 +293,6 @@ def hand_edit(doc_type: str, text: str, last: str | None, redactor: Redactor, li
     first = len(head) + 1
     written = "\n".join(body)
     stops.update((first + i, SAYS) for i, _ in keyword_lines(doc_type, written, redacted.body, lists))
+    for i, what in run_stops(doc_type, body):
+        stops.setdefault(first + i, what)
     return HandEdit("\n".join([*head, redacted.body]), redacted, sorted(stops.items()))

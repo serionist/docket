@@ -15,7 +15,7 @@ from docket.curate.propose import UNSEEN, CardSpelling
 from docket.index import SearchResult
 from docket.plaintext import printable
 from docket.questions import EvalReport, Score
-from docket.recall import ReadResult, VerifyResult
+from docket.recall import ReadResult, StaleReport, VerifyResult
 from docket.vault.anchors import format_time
 from docket.vault.curatelog import Line
 from docket.vault.docstore import PutResult, RedactReport
@@ -59,6 +59,9 @@ def put(result: PutResult) -> list[str]:
         where = ", ".join(str(n) for n in result.redacted_lines)
         counts = ", ".join(f"{n} {rule}" for rule, n in result.redactions.items())
         lines.append(f"redacted on line{'s' if len(result.redacted_lines) > 1 else ''} {where}: {counts}")
+    if result.pinned_lines:
+        where = ", ".join(str(n) for n in result.pinned_lines)
+        lines.append(f"pinned the doc-line refs on line{'s' if len(result.pinned_lines) > 1 else ''} {where}")
     return lines
 
 
@@ -103,7 +106,9 @@ def read(result: ReadResult) -> list[str]:
         lines.append(f"{result.doc.id} rev {result.doc.rev}  {result.doc.path}")
         if result.doc.superseded_by:
             lines.append(f"superseded by {', '.join(result.doc.superseded_by)}")
-        lines += [f"{line.n:>4}  {line.text}" for line in result.doc.lines]
+        for line in result.doc.lines:
+            lines.append(f"{line.n:>4}  {line.text}")
+            lines += [f"        ! {flag}" for flag in line.flags]
     elif result.view != "raw" and not result.lines and not result.legacy:
         lines.append("no current doc points at it yet")
     lines += [f"{cited.doc} rev {cited.rev} line {cited.n}: {cited.text}" for cited in result.lines]
@@ -120,6 +125,33 @@ def verify(result: VerifyResult) -> list[str]:
         lines += [f"        ! {problem}" for problem in checked.problems]
         for s in checked.spans:
             lines += span(s, "        ")
+        for ref in checked.refs:
+            if ref.problem is not None:
+                lines.append(f"        {ref.ref}  ! {ref.problem}")
+                continue
+            lines.append(f"        {ref.ref}  line {ref.n} now: {ref.text}")
+            for s in ref.spans:
+                lines += span(s, "          ")
+    return lines
+
+
+def stale(report: StaleReport) -> list[str]:
+    """What `docket doc stale` found: lines citing a line that changed, corrections not applied, damaged anchors."""
+    if not (report.flagged or report.unapplied or report.damaged):
+        return ["nothing flagged: every doc line cites a line that still reads the same"]
+    lines: list[str] = []
+    for title, found in (("cite a line that changed", report.flagged), ("corrections not applied", report.unapplied)):
+        if found:
+            lines.append(f"{len(found)} line(s) {title}:" if found is report.flagged else f"{len(found)} {title}:")
+            for one in found:
+                lines += [f"  {one.doc} line {one.n}: {one.text}", f"    {one.why}"]
+    if report.damaged:
+        lines.append(f"{len(report.damaged)} line(s) whose anchors an older Docket's redaction wrote inside:")
+        for hurt in report.damaged:
+            where = (
+                f"restore them from rev {hurt.restore_from}" if hurt.restore_from else "no earlier rev has them whole"
+            )
+            lines.append(f"  {hurt.doc} line {hurt.n}: {hurt.token}; {where}")
     return lines
 
 

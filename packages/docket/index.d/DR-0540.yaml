@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0540
+    title: A doc line cites the doc line it was built from with [d:...], pinned by doc_put to a hash of that line's text
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#160"]
+    description: "A content line may end with refs, [d:<doc id>@<rev>#<n>], beside its raw anchors or in their place: line n of that rev's file, as read and verify number it, and verify gives each line's ref as its cite. doc_put pins each ref to [d:<doc id>@<rev>#<n>=<hash>], the first 8 lowercase hex digits of the sha256 of the cited line's text in UTF-8, read from the cited doc's file when that rev is its current one, else from git once per doc and rev, and the put result names the lines it pinned. The text is the line after LF normalization: on a content line of an anchored doc, as trailing_anchors gives it, its trailing anchors, refs and anchor-like tokens and a table row's closing pipe left out; a legacy note's line, or any other line, whole. Leading whitespace stays and only trailing spaces and tabs go, so a trailing no-break space counts; nothing is Unicode-normalized, so an editor re-saving in NFD flags a doc's dependents. doc_put refuses a bare [d:<doc id>#<n>], whatever calls it, and points at the cite token; only a hand edit's take-in pins a bare ref, against the file as it stands. It refuses a ref to a doc that doesn't exist, a rev it never had, a line that is blank, fenced or past its end, the doc itself, and a line whose text also stands at another line of that rev. A pinned ref is kept as written once its doc exists. A content line needs a raw anchor or a ref; covers lists the rids the raw anchors use, and may be empty only when no line has a raw anchor and lines cite doc lines. verify follows a ref one level: the cited line as it reads now, with its own raw."
+    binds:
+      - The [d:...] form fills the slot DR-0198 kept for later anchor kinds; changing it needs a reader for this one.
+      - trailing_anchors returns refs in their own list, so what reads anchors is unchanged.
+    not_chosen:
+      - "A frontmatter key mapping line numbers to sources: it drifts from the lines on every edit, and nobody reading the line sees it."
+      - "Rev and line without a hash: every flag would need the cited doc's history from git and a diff, and the index would no longer build from the working tree alone (DR-0115)."
+      - "Pinning a bare ref on a put: a doc that changed between the writer's read and the put would be cited by a line that moved."

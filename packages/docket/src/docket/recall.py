@@ -30,10 +30,21 @@ from pydantic import BaseModel, Field
 
 from docket.documents import records as documents
 from docket.errors import DocketError
-from docket.index import lookup
+from docket.index import flags, lookup
+from docket.index import update as index_update
+from docket.index.build import open_index
 from docket.index.lookup import ReadIndex
 from docket.vault import legacy
-from docket.vault.anchors import Anchor, AnchorError, format_anchor, parse_locator, split_path_locator, trailing_anchors
+from docket.vault.anchors import (
+    Anchor,
+    AnchorError,
+    DocRef,
+    format_anchor,
+    format_ref,
+    parse_locator,
+    split_path_locator,
+    trailing_anchors,
+)
 from docket.vault.docstore import DocStore, PutResult
 from docket.vault.processed import DOC_TYPES, ProcessedDoc, parse_doc
 from docket.vault.records import RawRecord
@@ -49,6 +60,8 @@ class DocLine(BaseModel):
     n: int
     text: str
     anchors: list[str] = Field(default_factory=list[str])
+    # What became of the doc lines this line cites, and damage to its anchors (DR-0541, DR-0542).
+    flags: list[str] = Field(default_factory=list[str])
 
 
 class DocView(BaseModel):
@@ -101,12 +114,52 @@ class ReadResult(BaseModel):
     problems: list[str] = Field(default_factory=list[str])
 
 
+class VerifiedRef(BaseModel):
+    """A doc line a verified line cites, as it reads now: its number in the cited doc's current text, its text, and the
+    raw its own anchors point at; `problem` says when it can't be read so (DR-0543)."""
+
+    ref: str
+    doc: str
+    n: int | None = None
+    text: str = ""
+    spans: list[Span] = Field(default_factory=list[Span])
+    problem: str | None = None
+
+
 class VerifiedLine(BaseModel):
     n: int
     text: str
     anchors: list[str] = Field(default_factory=list[str])
     spans: list[Span] = Field(default_factory=list[Span])
     problems: list[str] = Field(default_factory=list[str])
+    # The token a line built from this one cites it by, and the doc lines this one cites.
+    cite: str | None = None
+    refs: list[VerifiedRef] = Field(default_factory=list[VerifiedRef])
+
+
+class StaleLine(BaseModel):
+    """A doc line whose ref says something: a line that changed under it, or a correction not applied yet."""
+
+    doc: str
+    n: int
+    text: str
+    ref: str
+    why: str
+
+
+class DamagedLine(BaseModel):
+    """A line whose anchors an older Docket's redaction wrote inside, and the newest earlier rev that has them whole."""
+
+    doc: str
+    n: int
+    token: str
+    restore_from: int | None = None
+
+
+class StaleReport(BaseModel):
+    flagged: list[StaleLine] = Field(default_factory=list[StaleLine])
+    unapplied: list[StaleLine] = Field(default_factory=list[StaleLine])
+    damaged: list[DamagedLine] = Field(default_factory=list[DamagedLine])
 
 
 class VerifyResult(BaseModel):
@@ -348,21 +401,31 @@ def _verify(call: _Call, doc: str, lines: list[int] | None, window: int) -> Veri
     wanted = set(lines) if lines else None
     out: list[VerifiedLine] = []
     numbered = found.roles()
+    citable = found.citable()
+    damage = _damage(call, found)
+
+    def cite(n: int) -> str | None:
+        return format_ref(found.meta.id, found.meta.rev, n) if n in citable else None
+
     for n, text, role in numbered:
         if wanted is not None and n not in wanted:
             continue
         if found.meta.type == "legacy-note" or role != "content":
             if wanted is not None:
-                out.append(VerifiedLine(n=n, text=text))
+                out.append(VerifiedLine(n=n, text=text, cite=cite(n)))
             continue
         trailing = trailing_anchors(text)
-        line = VerifiedLine(n=n, text=text, anchors=[a.token for a in trailing.anchors], problems=list(trailing.errors))
-        if not trailing.anchors and not trailing.errors:
+        line = VerifiedLine(
+            n=n, text=text, anchors=[a.token for a in trailing.anchors], problems=list(trailing.errors), cite=cite(n)
+        )
+        if not trailing.anchors and not trailing.refs and not trailing.errors:
             line.problems.append("no anchors at the end of the line")
+        line.problems += damage.get(n, [])
         for anchor in trailing.anchors:
             line.spans.append(_verify_one(lookup, anchor, covers, window))
             if anchor.rid is not None and anchor.rid not in covers:
                 line.problems.append(f"{anchor.rid} isn't in covers")
+        line.refs = [_verify_ref(call, ref, window) for ref in trailing.refs]
         out.append(line)
     body = {n for n, _, _ in numbered}
     out.extend(
@@ -370,6 +433,90 @@ def _verify(call: _Call, doc: str, lines: list[int] | None, window: int) -> Veri
         for n in sorted(wanted - body if wanted else set[int]())
     )
     return VerifyResult(doc=found.meta.id, rev=found.meta.rev, lines=out)
+
+
+def _verify_ref(call: _Call, ref: DocRef, window: int) -> VerifiedRef:
+    """A cited doc line as it reads now, one level deep: found by its hash in the cited doc's current text when the ref
+    is pinned, else by its number; its own anchors' raw beside it."""
+    out = VerifiedRef(ref=ref.token, doc=ref.doc)
+    cited = call.store.get(ref.doc)
+    if cited is None:
+        out.problem = f"{ref.doc} is gone"
+        return out
+    citable = cited.citable()
+    if ref.hash is not None:
+        n = next((m for m, found in sorted(citable.items()) if found == ref.hash), None)
+        if n is None:
+            out.problem = f"line {ref.line} of {ref.doc} rev {ref.rev} reads otherwise in rev {cited.meta.rev}"
+            return out
+    elif ref.rev is None or ref.rev == cited.meta.rev:
+        n = ref.line if ref.line in citable else None
+        if n is None:
+            out.problem = f"line {ref.line} of {ref.doc} has no text to cite"
+            return out
+    else:
+        out.problem = f"not pinned yet, and {ref.doc} is at rev {cited.meta.rev} now"
+        return out
+    text = dict(cited.lines())[n]
+    out.n, out.text = n, text
+    if cited.meta.type != "legacy-note":
+        out.spans = [_verify_one(call.raw, a, cited.meta.covers, window) for a in trailing_anchors(text).anchors]
+    return out
+
+
+def _marks(call: _Call, doc: ProcessedDoc) -> dict[int, list[str]]:
+    """What `read` says beside each line: the doc lines it cites that changed, a correction's state, and damage to
+    its anchors."""
+    marks: dict[int, list[str]] = {}
+    for found in flags.for_doc(doc, call.store.get, call.superseded_by):
+        if found.flagged or found.correction:
+            marks.setdefault(found.line, []).append(found.message)
+    for n, said in _damage(call, doc).items():
+        marks.setdefault(n, []).extend(said)
+    return marks
+
+
+def _damage(call: _Call, doc: ProcessedDoc) -> dict[int, list[str]]:
+    """The lines whose anchors an older Docket's redaction wrote inside, each with the rev to restore them from."""
+    hurt = flags.damaged(doc)
+    if not hurt:
+        return {}
+    rev = flags.restore_from(call.store.earlier(doc.meta.id, doc.meta.rev))
+    where = f"restore the line's anchors from rev {rev}" if rev is not None else "no earlier rev has them whole"
+    return {n: [f"{token}: an older Docket's redaction wrote inside this anchor; {where}"] for n, token in hurt}
+
+
+def stale(vault: Vault) -> StaleReport:
+    """Every current doc line that cites a line that changed, every correction line not applied yet, and every line
+    whose anchors an older Docket's redaction damaged (DR-0541, DR-0542). The index is brought up to date first."""
+    index_update(vault)
+    conn = open_index(vault)
+    try:
+        found = flags.from_index(conn)
+    finally:
+        conn.close()
+    store = DocStore(vault)
+    texts: dict[str, dict[int, str]] = {}
+
+    def line_of(doc_id: str, n: int) -> str:
+        if doc_id not in texts:
+            doc = store.get(doc_id)
+            texts[doc_id] = dict(doc.lines()) if doc is not None else {}
+        return texts[doc_id].get(n, "")
+
+    report = StaleReport()
+    for one in found:
+        if one.flagged or one.unapplied:
+            line = StaleLine(
+                doc=one.doc, n=one.line, text=line_of(one.doc, one.line), ref=one.ref.text, why=one.message
+            )
+            (report.flagged if one.flagged else report.unapplied).append(line)
+    for doc in store.all():
+        hurt = flags.damaged(doc)
+        if hurt:
+            rev = flags.restore_from(store.earlier(doc.meta.id, doc.meta.rev))
+            report.damaged += [DamagedLine(doc=doc.meta.id, n=n, token=token, restore_from=rev) for n, token in hurt]
+    return report
 
 
 def _verify_one(lookup: RawLookup, anchor: Anchor, covers: list[str], window: int) -> Span:
@@ -417,6 +564,7 @@ def _read_doc(call: _Call, doc: ProcessedDoc, locator: str, view: View) -> ReadR
     result = ReadResult(locator=locator, view=view)
     if view != "raw":
         superseded_by = call.superseded_by(meta.id)
+        marks = _marks(call, doc)
         result.doc = DocView(
             id=meta.id,
             type=meta.type,
@@ -430,7 +578,9 @@ def _read_doc(call: _Call, doc: ProcessedDoc, locator: str, view: View) -> ReadR
             old_paths=meta.old_paths,
             text=doc.source,
             lines=[
-                DocLine(n=n, text=text, anchors=[a.token for a in trailing_anchors(text).anchors])
+                DocLine(
+                    n=n, text=text, anchors=[a.token for a in trailing_anchors(text).anchors], flags=marks.get(n, [])
+                )
                 for n, text in enumerate(doc.source.removesuffix("\n").split("\n"), start=1)
             ],
         )

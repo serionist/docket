@@ -186,3 +186,27 @@ def test_the_doc_commands_speak_utf8_through_a_pipe(vault: Vault) -> None:
     assert read.returncode == 0
     assert "Árvíztűrő tükörfúrógép" in read.stdout.decode("utf-8")
     assert REC in read.stdout.decode("utf-8")
+
+
+def test_stale_lists_the_lines_citing_a_line_that_changed(
+    vault: Vault, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ten, friday = "- Ben: 10 million. @12:08", "- Cleo. @14:30-14:52"
+    main(["doc", "put", put_file(tmp_path, note(lines=[ten, friday]))])
+    cites = [f"- The consultant. [d:{NOTE_ID}@1#14]", f"- By Friday. [d:{NOTE_ID}@1#15]"]
+    main(["doc", "put", put_file(tmp_path, note("brief:northwind", covers=[], lines=cites), "brief.md")])
+    capsys.readouterr()
+    assert main(["doc", "stale"]) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "nothing flagged: every doc line cites a line that still reads the same"
+    ]
+    main(["doc", "put", put_file(tmp_path, note(lines=["- Ben: 12 million. @12:08", friday], rev="1"))])
+    capsys.readouterr()
+    assert main(["doc", "stale"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == "1 line(s) cite a line that changed:"
+    assert out[1].startswith("  brief:northwind line 13: - The consultant. [d:")
+    assert out[2] == (
+        f"    cites line 14 of {NOTE_ID} rev 1, which reads otherwise in rev 2; check it, then cite it again or drop it"
+    )
+    assert len(out) == 3

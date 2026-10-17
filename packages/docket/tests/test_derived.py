@@ -8,7 +8,7 @@ from collections import Counter
 import pytest
 
 from docket.vault import derived
-from docket.vault.anchors import trailing_anchors
+from docket.vault.anchors import UNREAD, trailing_anchors
 from docket.vault.config import NeverStore, Redaction, RedactionPattern
 from docket.vault.processed import DocRefusedError, ProcessedDoc, parse_doc
 from docket.vault.redact import Redactor
@@ -111,11 +111,13 @@ def test_a_table_row_fenced_code_and_a_heading_are_redacted_in_place() -> None:
     ]
 
 
-def test_a_legacy_note_and_a_line_with_a_bad_anchor_are_text_whole() -> None:
+def test_a_legacy_note_is_text_whole_and_a_bad_anchor_run_is_never_redacted() -> None:
     legacy = body("rang [r:calls:+15550100188]", doc_type="legacy-note")
     assert legacy.body == "rang [r:calls:[redacted:phone]]"
+    # A run that doesn't parse keeps its bytes (DR-0541); a write that would commit it stops on the line instead.
     bad = body("- rang [r:calls:+15550100188")
-    assert bad.body == "- rang [r:calls:[redacted:phone]"
+    assert bad.body == "- rang [r:calls:+15550100188"
+    assert [i for i, _ in derived.run_stops("recording-note", ["- rang [r:calls:+15550100188"])] == [0]
 
 
 def test_redacting_twice_is_once() -> None:
@@ -249,3 +251,29 @@ def test_a_put_s_by_holding_what_redaction_hides_is_refused_and_a_keyword_in_it_
 def test_a_blank_line_in_a_hand_edit_s_frontmatter_is_read_past() -> None:
     text = "---\nid: brief:x\ntype: brief\n\nby: claude\n---\n- fine @00:01\n"
     assert derived.hand_edit("brief", text, text, ON, DORA).stops == []
+
+
+# -- anchor runs (#160, DR-0541) ---------------------------------------------------------------------------------------
+
+REFS = "[r:calls:call-482913@12:08] [d:recording-note:2026-10-14-supplier-call@2#7=4f9a0c31]"
+
+
+@pytest.mark.parametrize(("name", "pattern"), [("pin", r"\b\d{6}\b"), ("hex", r"[0-9a-f]{8}"), ("day", r"\d{4}-\d{2}")])
+def test_redaction_never_writes_inside_a_line_s_anchors_and_refs(name: str, pattern: str) -> None:
+    redactor = Redactor.from_config(Redaction(patterns=[RedactionPattern(name=name, pattern=pattern)]))
+    out = body(f"- Ben put the consultant at 482913 in 2026-10 deadbeef. {REFS}", redactor=redactor)
+    assert out.body.endswith(f". {REFS}")
+    assert f"[redacted:{name}]" in out.body
+
+
+def test_a_legacy_note_ending_like_an_anchor_redacts_as_text_and_stops_nothing() -> None:
+    line = f"Call Cleo on {PHONE} @2pm"
+    assert body(line, doc_type="legacy-note").body == "Call Cleo on [redacted:phone] @2pm"
+    assert derived.run_stops("legacy-note", [line, "Moved [x:y]"]) == []
+
+
+def test_a_form_this_docket_doesnt_read_stops_the_line_with_the_update_message() -> None:
+    lines = ["# Notes", "- Later. @12:08 [zz:soon]", "- Fine. @12:10"]
+    assert derived.run_stops("recording-note", lines) == [(1, f"holds [zz:soon], {UNREAD}")]
+    # The run keeps its bytes when the rest of the line is redacted.
+    assert body(f"- Cleo on {PHONE}. @12:08 [zz:soon]").body == "- Cleo on [redacted:phone]. @12:08 [zz:soon]"

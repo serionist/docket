@@ -1,0 +1,13 @@
+decisions:
+  - id: DR-0541
+    title: Redaction never writes inside a line's anchors, and a doc whose anchors hold a token this Docket can't parse is left whole
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#160"]
+    description: "On content lines of an anchored doc, as before, the redactor splits off the trailing run of anchors, refs and anchor-like tokens whether or not they parse, and never changes its bytes; a legacy note's lines and every other line stay whole text, redacted as text, and never stop a write. A run holding a token this Docket doesn't parse stops every write that would redact the doc: docket doc redact leaves the doc as it stands and names it, a hand edit's take-in refuses and leaves the edit on disk, and doc_put refuses. For a reserved form it doesn't read ([<letters>:...] other than [r:, [d: and a redaction marker) the message is \"holds <token>, an anchor this Docket doesn't read; update Docket, or move it before the line's anchors\"; for a malformed [r: or @ token, the anchor's own problem. No line reaches a commit unredacted: the doc is left whole rather than written with a line skipped. Dockets already installed read [d: as such a form but split the line as text, so their docket doc redact would write inside refs and rids; that risk is accepted, with the CHANGELOG and README saying to update every machine before docs cite lines and never to run docket doc redact on an older one, and verify, read and docket doc stale naming a damaged token (one in a content line's trailing run that starts with [r: or [d: and holds [redacted:) with the newest earlier rev where the line's anchors were whole."
+    binds: [Every later anchor kind is protected from older redaction from this version on.]
+    not_chosen:
+      - "A vault format key an older Docket refuses: under #134 a new vault.yaml key counts as loosening, so it would need its own case in effective, and it would refuse every older command, not only the one that harms; today's vaults sit on machines updated together."
+      - "Redacting the other lines of such a doc and leaving the one line: a secret typed into a token that only looks like an anchor would be committed unredacted."

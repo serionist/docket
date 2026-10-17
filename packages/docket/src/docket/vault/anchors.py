@@ -5,14 +5,18 @@ A content line ends with its anchors, separated by spaces or tabs:
 - `@12:08`, `@1:02:15`, `@14:30-14:52`: a time or a stretch of the one record a doc covers;
 - `[r:<rid>@12:08]`: a time or a stretch of any record the doc covers;
 - `[r:<rid>#2]`, `[r:<rid>#2-4]`: paragraphs of a record's text, counted from 1;
-- `[r:<rid>]`: the whole record.
+- `[r:<rid>]`: the whole record;
+- `[d:<doc id>@<rev>#<n>]`: line n of a rev of another doc, which the line was built from (DR-0540). Docket pins it as
+  `[d:<doc id>@<rev>#<n>=<hash>]`, with the first 8 hex digits of the sha256 of that line's text; a hand edit may write
+  `[d:<doc id>#<n>]`, line n as the doc reads now, which its take-in pins.
 
 Times are offsets from the record's start in whole seconds: `m:ss` or `mm:ss` (minutes up to 99), or `h:mm:ss`. In an
 anchor a rid is written with `%` as `%25` and `]` as `%5D`, and its last `@` or `#` as `%40` or `%23` only when the
 rid's own tail would read as a position; the parser splits at the last `@` or `#` whose rest is a whole position, then
 decodes those four codes and nothing else. A redaction marker, `[redacted:<rule>]`, is text wherever it stands, so a
-secret redacted right before a line's anchors leaves them anchors. Docs in users' vaults depend on all of this: it is
-a one-way door (DR-0198).
+secret redacted right before a line's anchors leaves them anchors. Any other `[<letters>:...]` at a line's end is a
+form this Docket doesn't read, kept for later kinds. Docs in users' vaults depend on all of this: it is a one-way door
+(DR-0198).
 
 Lines and paragraphs are counted the same way for a doc and a record: CRLF and a lone CR read as LF, a line is the text
 between two LFs, a blank line holds only spaces, tabs and no-break spaces, and a paragraph is a run of non-blank lines.
@@ -22,7 +26,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from docket.vault.records import RID
@@ -40,6 +44,10 @@ _RESERVED = re.compile(r"\[[a-z]+:\S*\]")
 _DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
 _SEPARATOR = re.compile(r"[\\/]")
 _MARKDOWN = re.compile(r"\.(?:md|markdown)$", re.IGNORECASE)
+_SLUG = r"[a-z0-9]+(?:-[a-z0-9]+)*"
+_REF = re.compile(rf"\[d:({_SLUG}:{_SLUG})(?:@([1-9]\d*))?#([1-9]\d*)(?:=([0-9a-f]{{8}}))?\]")
+# What a reader says of a form it doesn't read: a newer Docket's, or more likely a bracket that only looks like one.
+UNREAD = "an anchor this Docket doesn't read; update Docket, or move it before the line's anchors"
 
 # The characters a blank line may hold. The no-break space is one, because HTML mail turned into text writes its
 # empty lines with it.
@@ -72,12 +80,32 @@ class Anchor:
 
 
 @dataclass(frozen=True)
+class DocRef:
+    """A line of another doc a line was built from (DR-0540): the doc, the rev it was read at (None for a bare ref,
+    the doc as it reads now), the line's number in that rev's file, and, once pinned, the hash of that line's text."""
+
+    doc: str
+    rev: int | None
+    line: int
+    hash: str | None = None
+    token: str = ""
+
+    @property
+    def text(self) -> str:
+        """The ref as Docket writes it."""
+        return format_ref(self.doc, self.rev, self.line, self.hash)
+
+
+@dataclass(frozen=True)
 class Trailing:
-    """A line split into its text and the anchors at its end; `errors` are anchor-like tokens that don't parse."""
+    """A line split into its text and the anchors and refs at its end. `errors` are anchor-like tokens that don't
+    parse, each with why, and `failed` the same tokens as written."""
 
     text: str
     anchors: list[Anchor]
     errors: list[str]
+    refs: list[DocRef] = field(default_factory=list[DocRef])
+    failed: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)
@@ -200,6 +228,30 @@ def format_anchor(rid: str | None, kind: Kind = "record", start: int = 0, end: i
     return f"[r:{encode_rid(rid)}{position}]"
 
 
+def format_ref(doc: str, rev: int | None, line: int, hash_: str | None = None) -> str:
+    """A doc-line ref as Docket writes it: `[d:<doc id>@<rev>#<n>]`, with `=<hash>` once pinned."""
+    at = "" if rev is None else f"@{rev}"
+    pin = "" if hash_ is None else f"={hash_}"
+    return f"[d:{doc}{at}#{line}{pin}]"
+
+
+def parse_ref(token: str) -> DocRef:
+    m = _REF.fullmatch(token)
+    if m is None:
+        raise AnchorError("isn't a doc-line ref: [d:<doc id>@<rev>#<n>], the token verify gives as a line's cite")
+    rev = int(m.group(2)) if m.group(2) else None
+    return DocRef(m.group(1), rev, int(m.group(3)), m.group(4), token)
+
+
+def is_unread(token: str) -> bool:
+    """A `[<letters>:...]` form this Docket doesn't read: neither an anchor, a ref nor a redaction marker."""
+    return (
+        _RESERVED.fullmatch(token) is not None
+        and MARKER.fullmatch(token) is None
+        and not token.startswith(("[r:", "[d:"))
+    )
+
+
 def parse_anchor(token: str) -> Anchor:
     if token.startswith("@"):
         kind, start, end = _position("@", token[1:])
@@ -225,36 +277,41 @@ def parse_anchor(token: str) -> Anchor:
 def _anchor_like(token: str) -> bool:
     return (
         (len(token) > 1 and token[0] == "@" and token[1] in "0123456789")
-        or token.startswith("[r:")
+        or token.startswith(("[r:", "[d:"))
         or (_RESERVED.fullmatch(token) is not None and MARKER.fullmatch(token) is None)
     )
 
 
 def trailing_anchors(line: str) -> Trailing:
-    """The anchors at the end of a line. A table row puts them at the end of its last cell. A token at the end that
-    starts like an anchor but doesn't parse is an error, and so is `[<letters>:...]`, kept for later anchor kinds; a
-    redaction marker is text."""
+    """The anchors and doc-line refs at the end of a line, in any order. A table row puts them at the end of its last
+    cell. A token at the end that starts like an anchor or a ref but doesn't parse is an error, and so is any other
+    `[<letters>:...]`, kept for later kinds; a redaction marker is text."""
     body = line.rstrip(" \t")
     if body.lstrip(" \t").startswith("|") and body.endswith("|") and len(body.strip(" \t")) > 1:
         body = body[:-1].rstrip(" \t")
     anchors: list[Anchor] = []
+    refs: list[DocRef] = []
     errors: list[str] = []
+    failed: list[str] = []
     while body:
         cut = max(body.rfind(" "), body.rfind("\t"))
         token = body[cut + 1 :]
         if not _anchor_like(token):
             break
-        if token.startswith(("@", "[r:")):
-            try:
+        try:
+            if token.startswith(("@", "[r:")):
                 anchors.append(parse_anchor(token))
-            except AnchorError as e:
-                errors.append(f"{token}: {e}")
-        else:
-            errors.append(f"{token}: only [r:...] is an anchor; other [<letters>:...] forms are kept for later")
+            elif token.startswith("[d:"):
+                refs.append(parse_ref(token))
+            else:
+                raise AnchorError(UNREAD)
+        except AnchorError as e:
+            errors.append(f"{token}: {e}")
+            failed.append(token)
         body = body[: cut + 1].rstrip(" \t") if cut >= 0 else ""
-    anchors.reverse()
-    errors.reverse()
-    return Trailing(body, anchors, errors)
+    for found in (anchors, refs, errors, failed):
+        found.reverse()
+    return Trailing(body, anchors, errors, refs, failed)
 
 
 # -- locators -----------------------------------------------------------------------------------------------------

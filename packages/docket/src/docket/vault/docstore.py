@@ -18,8 +18,9 @@ import logging
 import os
 import re
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import AbstractContextManager, nullcontext
+from dataclasses import replace
 from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel, Field
@@ -27,7 +28,7 @@ from pydantic import BaseModel, Field
 from docket.documents import records as documents
 from docket.errors import DocketError
 from docket.vault import derived
-from docket.vault.anchors import normalize_newlines, trailing_anchors
+from docket.vault.anchors import format_ref, normalize_newlines, trailing_anchors
 from docket.vault.git import DOC_LINE
 from docket.vault.home import make_private
 from docket.vault.processed import (
@@ -38,6 +39,7 @@ from docket.vault.processed import (
     doc_path,
     id_problem,
     key_line,
+    line_roles,
     parse_doc,
 )
 from docket.vault.records import RawRecord
@@ -74,6 +76,8 @@ class PutResult(BaseModel):
     redacted_lines: list[int] = Field(default_factory=list[int])
     # What the put met that refused nothing: a covered folder record that went, read from before it did (DR-0491).
     notes: list[str] = Field(default_factory=list[str])
+    # The lines whose doc-line refs Docket pinned to the text they cite, numbered as `read` numbers them (DR-0540).
+    pinned_lines: list[int] = Field(default_factory=list[int])
 
 
 class Redacting(BaseModel):
@@ -189,6 +193,12 @@ class DocStore:
         # ./ makes git read the path from the vault's folder, not the top of a host repo the vault is a folder of.
         return self.vault.git.out("cat-file", "blob", f"{sha}:./{self.path(doc_id).as_posix()}")
 
+    def earlier(self, doc_id: str, before: int) -> Iterator[tuple[int, ProcessedDoc]]:
+        """The doc's revs before `before`, newest first, each as its commit left it, read one at a time."""
+        for n, sha in self.history(doc_id):
+            if n < before:
+                yield n, parse_doc(self._blob(sha, doc_id), lenient=True)
+
     def at_rev(self, doc_id: str, rev: int) -> ProcessedDoc:
         """The doc as the commit that wrote that rev left it."""
         history = self.history(doc_id)
@@ -232,24 +242,26 @@ class DocStore:
     # -- putting -----------------------------------------------------------------------------------------------------
 
     def put(self, text: str, raw: RawOpener | None = None) -> PutResult:
-        """Store a doc: refused with every problem when its frontmatter is wrong, an anchor doesn't resolve, or it was
-        changed since the rev it carries; a no-op when nothing changed; else written as the next rev and committed.
-        `raw` opens what the anchors are checked through; without it the covered sources load whole."""
+        """Store a doc: refused with every problem when its frontmatter is wrong, an anchor or a doc-line ref doesn't
+        resolve, or it was changed since the rev it carries; a no-op when nothing changed; else written as the next rev
+        and committed, its refs pinned (DR-0540). `raw` opens what the anchors are checked through; without it the
+        covered sources load whole."""
         head = normalize_newlines(text.removeprefix("\ufeff")).split("\n")
         doc = parse_doc(text)
         if not _reads_back(doc):
             message = "the frontmatter can't be written so that it reads back the same; a value holds what YAML can't"
             raise DocRefusedError([DocProblem(None, message)])
         doc, redacted = derived.check(doc, head[1 : doc.head_lines - 1], self.redactor, self.lists)
+        doc, pinned, problems = self._pin_doc(doc)
         notes: list[str] = []
         # Closed before the lock: the write never holds the index or waits behind its update (DR-0516).
         with raw() if raw is not None else nullcontext(RawLookup(self.root)) as lookup:
-            problems = self._against_raw(doc, head, lookup, notes)
+            problems += self._against_raw(doc, head, lookup, notes)
         if problems:
             raise DocRefusedError(problems)
         with self.vault.writing():
             result = self._put_locked(doc, head, redacted)
-        return result.model_copy(update={"notes": notes})
+        return result.model_copy(update={"notes": notes, "pinned_lines": _pinned_lines(result, doc, pinned)})
 
     def _against_raw(
         self, doc: ProcessedDoc, head: list[str], lookup: RawLookup, notes: list[str] | None = None
@@ -278,7 +290,15 @@ class DocStore:
                 continue
             trailing = trailing_anchors(line)
             problems.extend(DocProblem(n, error, line) for error in trailing.errors)
-            if not trailing.anchors and not trailing.errors:
+            if meta.type == "correction" and not trailing.errors:
+                if not trailing.anchors:
+                    problems.append(
+                        DocProblem(n, "a correction's line ends with the raw that shows it: [r:<rid>]", line)
+                    )
+                if not trailing.refs:
+                    message = "a correction's line cites the line it corrects: [d:<doc id>@<rev>#<n>], verify's cite"
+                    problems.append(DocProblem(n, message, line))
+            if not trailing.anchors and not trailing.refs and not trailing.errors:
                 hint = " (anchors go at the very end, after the text)" if _MIDLINE.search(line) else ""
                 problems.append(DocProblem(n, f"no anchors at the end of the line: @mm:ss or [r:<rid>]{hint}", line))
             for anchor in trailing.anchors:
@@ -326,7 +346,8 @@ class DocStore:
                     if not _reads_back(doc):
                         raise DocRefusedError([DocProblem(None, "the frontmatter can't be written back")])
                     doc, redacted = derived.check(doc, head[1 : doc.head_lines - 1], self.redactor, self.lists)
-                    problems = self._against_raw(doc, head, lookup)
+                    doc, _, problems = self._pin_doc(doc)
+                    problems += self._against_raw(doc, head, lookup)
                 except DocRefusedError as e:
                     out[i] = e
                     continue
@@ -465,9 +486,17 @@ class DocStore:
                     for n, what in edit.stops
                 ]
             )
+        # Its refs pinned to the text they cite, a bare one too: a hand edit cites a line as it reads now (DR-0540).
+        lines = edit.text.split("\n")
+        close = lines.index("---", 1)
+        body, _, problems = self._pin(doc_id, edited.meta.type, lines[close + 1 :], close + 2, bare=True)
+        if problems:
+            raise DocRefusedError(
+                [DocProblem(None, f"{rel} was edited by hand, and its line {p.line}: {p.message}") for p in problems]
+            )
         rev = max(stored, edited.meta.rev) + 1
         original = path.read_bytes()
-        text = _with_rev(edit.text, rev)
+        text = _with_rev("\n".join([*lines[: close + 1], *body]), rev)
         self._replace(path, text.encode("utf-8"))
         try:
             self.vault.commit([rel], f"Doc: {doc_id} rev {rev} (edited by hand)")
@@ -479,6 +508,91 @@ class DocStore:
         if self._known is not None:
             self._known.pop(doc_id, None)
         return rev, text
+
+    # -- refs ------------------------------------------------------------------------------------------------------
+
+    def _pin_doc(self, doc: ProcessedDoc) -> tuple[ProcessedDoc, list[int], list[DocProblem]]:
+        """A doc for a put with its refs checked and pinned; a bare ref is refused."""
+        body, pinned, problems = self._pin(doc.meta.id, doc.meta.type, doc.body.split("\n"), doc.head_lines + 1)
+        return replace(doc, body="\n".join(body)), pinned, problems
+
+    def _pin(
+        self, doc_id: str, doc_type: str, body: list[str], first: int, *, bare: bool = False
+    ) -> tuple[list[str], list[int], list[DocProblem]]:
+        """Every doc-line ref on a content line checked and pinned (DR-0540): a ref with no hash gets the hash of the
+        line it cites, read from the cited doc's file when that rev is its current one, else from git, once per doc
+        and rev. A pinned ref is kept as written once its doc exists. A bare ref, which names no rev, is pinned only
+        for a hand edit (`bare`); a put refuses it. `first` is the line number in the file of body[0]. The body with
+        its refs pinned, the indexes of the lines that changed, and what is wrong."""
+        if doc_type == "legacy-note":
+            return body, [], []
+        cache: dict[tuple[str, int | None], ProcessedDoc | str] = {}
+        out = list(body)
+        pinned: list[int] = []
+        problems: list[DocProblem] = []
+        for i, (line, role) in enumerate(zip(body, line_roles(body), strict=True)):
+            trailing = trailing_anchors(line) if role == "content" else None
+            if trailing is None or not trailing.refs:
+                continue
+            n = first + i
+            swaps: dict[str, str] = {}
+            for ref in trailing.refs:
+                if ref.doc == doc_id:
+                    problems.append(DocProblem(n, f"{ref.token}: a line can't cite its own doc", line))
+                    continue
+                if ref.hash is not None:
+                    if not self.exists(ref.doc):
+                        problems.append(DocProblem(n, f"{ref.token}: there is no doc {ref.doc}", line))
+                    continue
+                cited = self._cited(ref.doc, ref.rev, cache)
+                if isinstance(cited, str):
+                    problems.append(DocProblem(n, f"{ref.token}: {cited}", line))
+                    continue
+                rev = cited.meta.rev
+                if ref.rev is None and not bare:
+                    token = format_ref(ref.doc, rev, ref.line)
+                    message = f"{ref.token} names no rev; cite the rev you read, as verify's cite gives it: {token}"
+                    problems.append(DocProblem(n, message, line))
+                    continue
+                citable = cited.citable()
+                found = citable.get(ref.line)
+                if found is None:
+                    message = f"{ref.token}: line {ref.line} of {ref.doc} rev {rev} has no text to cite"
+                    problems.append(DocProblem(n, message, line))
+                    continue
+                twin = next((m for m, other in sorted(citable.items()) if other == found and m != ref.line), None)
+                if twin is not None:
+                    message = (
+                        f"{ref.token}: line {ref.line}'s text also stands at line {twin}; cite a line whose text is "
+                        "its own"
+                    )
+                    problems.append(DocProblem(n, message, line))
+                    continue
+                swaps[ref.token] = format_ref(ref.doc, rev, ref.line, found)
+            if swaps:
+                text = line[: len(trailing.text)]
+                parts = re.split(r"([ \t]+)", line[len(trailing.text) :])
+                out[i] = text + "".join(swaps.get(part, part) for part in parts)
+                pinned.append(i)
+        return out, pinned, problems
+
+    def _cited(
+        self, doc_id: str, rev: int | None, cache: dict[tuple[str, int | None], ProcessedDoc | str]
+    ) -> ProcessedDoc | str:
+        """The doc a ref cites at its rev (the file's when the rev is its current one, or none is named), or why not."""
+        key = (doc_id, rev)
+        if key not in cache:
+            current = self._safe_get(doc_id)
+            if current is not None and (rev is None or rev == current.meta.rev):
+                cache[key] = current
+            elif rev is None or (current is None and not self.history(doc_id)):
+                cache[key] = f"there is no doc {doc_id}"
+            else:
+                try:
+                    cache[key] = self.at_rev(doc_id, rev)
+                except DocketError as e:
+                    cache[key] = str(e)
+        return cache[key]
 
     # -- the pass ------------------------------------------------------------------------------------------------------
 
@@ -619,6 +733,15 @@ def _with_rev(text: str, rev: int) -> str:
     after = next((i for i in range(1, close) if lines[i].startswith("type:")), 0)
     lines.insert(after + 1, f"rev: {rev}")
     return "\n".join(lines)
+
+
+def _pinned_lines(result: PutResult, doc: ProcessedDoc, pinned: list[int]) -> list[int]:
+    """The stored doc's lines whose refs a put pinned, numbered as `_told` numbers redacted ones; none when nothing was
+    written."""
+    if not result.changed or not pinned:
+        return []
+    close = normalize_newlines(doc.render(rev=0)).split("\n").index("---", 1)
+    return [close + 2 + i for i in pinned]
 
 
 def _told(redacted: derived.Redacted, text: str) -> tuple[dict[str, int], list[int]]:

@@ -1,0 +1,11 @@
+decisions:
+  - id: DR-0543
+    title: A verify mismatch becomes a correction doc and then the doc's next rev; verify stays read-only
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#160"]
+    description: "verify gives each line a cite token, [d:<doc>@<rev>#<n>]. When Claude finds a line its raw doesn't bear out, it puts a correction doc with doc_put: each content line holds the raw's anchors, the evidence, and at least one ref, the line it corrects, and by says who found it. Then it puts the corrected doc's next rev, which flags the dependents. A correction whose cited line still reads the same is not applied yet, and applied once that line changes; its refs count toward not applied, never toward flagged. The recall skill, its writing guide and the MCP server's instructions say so."
+    not_chosen:
+      - "verify writing the correction itself: a read-only tool would become a writer, and the judgement is Claude's."
