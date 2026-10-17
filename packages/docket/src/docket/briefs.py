@@ -12,6 +12,7 @@ entity is left out and counted as hidden.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -85,7 +86,9 @@ def report(
         entity_id = doc.meta.id.partition(":")[2]
         if wanted is not None and entity_id not in wanted:
             continue
-        if _held(by_id.get(entity_id), entity_id, _title(doc), lists):
+        entity = by_id.get(entity_id)
+        holders = _holders(doc, entity_id, known) if entity is None else []
+        if _held(entity, entity_id, _title(doc), lists, holders):
             out.hidden += 1
             continue
         shown.append(doc)
@@ -111,12 +114,18 @@ def report(
     return out
 
 
-def _held(entity: Entity | None, entity_id: str, title: str | None, lists: NeverStore) -> bool:
-    """A brief a never-store list holds by its entity, as doc_put holds it (`brief_form.held`), or for a gone entity
-    by its id or its title."""
+def _held(
+    entity: Entity | None, entity_id: str, title: str | None, lists: NeverStore, holders: Sequence[Entity] = ()
+) -> bool:
+    """A brief a never-store list holds by its entity, as doc_put holds it (`brief_form.held`); for a gone entity, by
+    its id, its title, or an entity that holds its name now, so an orphan never shows a listed survivor."""
     if entity is not None:
         return brief_form.held(entity, lists)
-    return slug_listed(entity_id, lists) or (title is not None and listed(title, lists) is not None)
+    return (
+        slug_listed(entity_id, lists)
+        or (title is not None and listed(title, lists) is not None)
+        or any(brief_form.held(e, lists) for e in holders)
+    )
 
 
 def _title(doc: ProcessedDoc) -> str | None:
@@ -128,15 +137,15 @@ def _name(entity: Entity, languages: list[str]) -> str:
     return first or entity.names[min(entity.names)]
 
 
-def _survivor(doc: ProcessedDoc, entity_id: str, known: list[Entity]) -> str | None:
-    """The one entity that holds a gone entity's name now, among its names or aliases, or None."""
+def _holders(doc: ProcessedDoc, entity_id: str, known: list[Entity]) -> list[Entity]:
+    """The entities that hold a gone entity's name now, its title or the name its id spells, among their names or
+    aliases."""
     gone = {fold(n) for n in (_title(doc), spelled(entity_id)) if n}
-    holding = [
-        e.id
+    return [
+        e
         for e in known
         if e.id != entity_id and gone & {fold(v) for v in (*e.names.values(), *(a.text for a in e.aliases))}
     ]
-    return holding[0] if len(holding) == 1 else None
 
 
 def _times(git: Git, commits: list[str]) -> dict[str, str]:
@@ -209,7 +218,10 @@ class _Reader:
             state="current",
         )
         if entity is None:
-            return base.model_copy(update={"state": "orphaned", "orphaned": _survivor(doc, entity_id, self.known)})
+            # The report holds back an orphan any of whose holders a list holds, so a survivor named here never is.
+            holders = _holders(doc, entity_id, self.known)
+            survivor = holders[0].id if len(holders) == 1 else None
+            return base.model_copy(update={"state": "orphaned", "orphaned": survivor})
         tree = _tree(self.git, commit, self.trees) if commit is not None and commit in self.times else None
         if tree is None:
             return base.model_copy(update={"state": "stale", "why": HISTORY_NOT_HERE})

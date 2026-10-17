@@ -153,8 +153,9 @@ def test_an_entity_a_list_holds_by_any_name_alias_or_id_gets_no_brief(vault: Vau
     assert problems == ["line 2: the brief is for an entity a never-store list holds; it gets no brief"]
 
 
-def test_a_person_listed_by_address_alone_is_named_by_no_brief(vault: Vault) -> None:
-    held = set_lists(vault, people=["ben@northwind.example"])
+@pytest.mark.parametrize("value", ["ben@northwind.example", "U0BEN"])
+def test_a_person_listed_by_an_address_or_a_chat_id_alone_is_named_by_no_brief(vault: Vault, value: str) -> None:
+    held = set_lists(vault, people=[value])
     for line in ("- Ben Sample asked for it.", "- Sample Ben asked for it.", "- Ben asked for it."):
         problems = refused(held, brief("northwind", "Northwind", changed=[f"{line} {cite(held, TEN)}"]))
         assert [p.split(": ", 1)[1] for p in problems] == ["names someone a never-store list holds; leave them out"]
@@ -324,6 +325,27 @@ def test_a_brief_whose_entity_is_gone_names_the_one_that_holds_its_name(vault: V
     git(vault.root, "commit", "-qam", "Dóra is Cleo")
     found = state(vault, "dora-minta")
     assert (found.state, found.orphaned) == ("orphaned", "cleo-test")
+
+
+def test_an_orphan_whose_name_a_listed_person_holds_now_is_hidden(vault: Vault) -> None:
+    benny = vault.root / "entities" / "person" / "benny.yaml"
+    benny.write_text("id: benny\ntype: person\nname: {en: Benny}\n", encoding="utf-8")
+    git(vault.root, "add", "entities/person/benny.yaml")
+    git(vault.root, "commit", "-qm", "Benny")
+    recall.doc_put(vault, brief("benny", "Benny", changed=[f"- Asked about the price. {cite(vault, TEN)}"]))
+    # Benny turns out to be Ben, merged by hand: his entity goes, and Ben gains the alias.
+    ben = vault.root / "entities" / "person" / "ben-sample.yaml"
+    ben.write_text(
+        ben.read_text(encoding="utf-8").replace("  - {text: Ben}", "  - {text: Ben}\n  - {text: Benny}"),
+        encoding="utf-8",
+    )
+    git(vault.root, "rm", "-q", "entities/person/benny.yaml")
+    git(vault.root, "commit", "-qam", "Benny is Ben")
+    orphan = state(vault, "benny")
+    assert (orphan.state, orphan.orphaned) == ("orphaned", "ben-sample")
+    held = set_lists(vault, people=["ben@northwind.example"])
+    found = briefs.report(held, stale_only=False)
+    assert ([b.id for b in found.briefs], found.hidden) == ([], 1)
 
 
 @pytest.mark.parametrize("value", ["Ben Sample", "Ben", "ben@northwind.example"])
