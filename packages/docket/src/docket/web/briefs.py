@@ -9,6 +9,7 @@ anything else is logged as its type and frames and answered with the error page,
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -20,7 +21,8 @@ from docket import briefs, recall
 from docket.errors import DocketError
 from docket.service.state import Service
 from docket.service.writer import IndexBuildingError
-from docket.vault import brief_form
+from docket.vault import brief_form, decision_form
+from docket.vault.docstore import DocStore
 from docket.vault.entities import load_entities
 from docket.vault.neverstore import slug_listed
 from docket.vault.vault import Vault
@@ -52,11 +54,16 @@ def gather(vault: Vault, state: BriefsState, now: datetime) -> Facts:
     if doc is None:  # pragma: no cover - a doc id always reads as a doc, or raises
         raise DocketError(f"no doc {state.brief}")
     hidden = frozenset(brief_form.hidden_lines(((line.n, line.text) for line in doc.lines), vault.root, lists))
+    store = DocStore(vault)
+    stored = store.get(state.brief)
+    standing = decision_form.standings(store.decisions())
+    unconfirmed = frozenset(decision_form.unconfirmed(stored, standing)) if stored is not None else frozenset[int]()
+    facts = Facts(now, tz, report, found, doc=doc, hidden_lines=hidden, unconfirmed=unconfirmed)
     if state.line is None or state.line in hidden:
-        return Facts(now, tz, report, found, doc=doc, hidden_lines=hidden)
+        return facts
     [line] = recall.verify(vault, state.brief, lines=[state.line]).lines
     cited = brief_form.hidden_lines(enumerate(ref.text for ref in line.refs), vault.root, lists)
-    return Facts(now, tz, report, found, doc=doc, hidden_lines=hidden, line=line, hidden_refs=frozenset(cited))
+    return replace(facts, line=line, hidden_refs=frozenset(cited))
 
 
 def _page(

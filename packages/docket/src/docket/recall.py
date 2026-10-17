@@ -34,7 +34,7 @@ from docket.index import flags, lookup
 from docket.index import update as index_update
 from docket.index.build import open_index
 from docket.index.lookup import ReadIndex
-from docket.vault import legacy
+from docket.vault import decision_form, legacy
 from docket.vault.anchors import (
     Anchor,
     AnchorError,
@@ -77,6 +77,9 @@ class DocView(BaseModel):
     supersedes: list[str]
     entities: list[str]
     superseded_by: list[str]
+    # A decision's status, and whether it is current: confirmed, and no confirmed decision supersedes it (DR-0565).
+    status: str | None = None
+    current: bool | None = None
     old_paths: list[str] = Field(default_factory=list[str])
     text: str
     lines: list[DocLine]
@@ -403,6 +406,7 @@ def _verify(call: _Call, doc: str, lines: list[int] | None, window: int) -> Veri
     numbered = found.roles()
     citable = found.citable()
     damage = _damage(call, found)
+    unbacked = _unbacked(call, found)
 
     def cite(n: int) -> str | None:
         return format_ref(found.meta.id, found.meta.rev, n) if n in citable else None
@@ -421,6 +425,8 @@ def _verify(call: _Call, doc: str, lines: list[int] | None, window: int) -> Veri
         if not trailing.anchors and not trailing.refs and not trailing.errors:
             line.problems.append("no anchors at the end of the line")
         line.problems += damage.get(n, [])
+        if n in unbacked:
+            line.problems.append(decision_form.NOT_A_DECISION)
         for anchor in trailing.anchors:
             line.spans.append(_verify_one(lookup, anchor, covers, window))
             if anchor.rid is not None and anchor.rid not in covers:
@@ -473,7 +479,17 @@ def _marks(call: _Call, doc: ProcessedDoc) -> dict[int, list[str]]:
             marks.setdefault(found.line, []).append(found.message)
     for n, said in _damage(call, doc).items():
         marks.setdefault(n, []).extend(said)
+    for n in sorted(_unbacked(call, doc)):
+        marks.setdefault(n, []).append(decision_form.NOT_A_DECISION)
     return marks
+
+
+def _unbacked(call: _Call, doc: ProcessedDoc) -> set[int]:
+    """A brief's Decisions lines that cite no confirmed decision, which `read`, `verify`, search and the page mark
+    (DR-0565)."""
+    if doc.meta.type != "brief":
+        return set()
+    return decision_form.unconfirmed(doc, decision_form.standings(call.store.decisions()))
 
 
 def _damage(call: _Call, doc: ProcessedDoc) -> dict[int, list[str]]:
@@ -575,6 +591,8 @@ def _read_doc(call: _Call, doc: ProcessedDoc, locator: str, view: View) -> ReadR
             supersedes=meta.supersedes,
             entities=meta.entities,
             superseded_by=superseded_by,
+            status=meta.status,
+            current=None if meta.status is None else meta.status == "confirmed" and not superseded_by,
             old_paths=meta.old_paths,
             text=doc.source,
             lines=[

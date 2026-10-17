@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from briefs_kit import ABOUT_BEN, BEN, CALL, DORA, HARBOUR, NORTHWIND, NOTE, briefs_template
-from docket_testkit import OFFER
+from docket_testkit import OFFER, git
 from docket_webkit import Element, a11y_problems, html_problems, parse, signed_in
 from starlette.testclient import TestClient
 
@@ -360,3 +360,18 @@ def test_an_orphan_no_one_entity_holds_the_name_of_says_so() -> None:
     view = build(Facts(datetime.now(UTC), ZoneInfo("UTC"), BriefsReport(briefs=[gone])), BriefsState())
     [group] = view.groups
     assert (group.type, group.rows[0].orphan) == ("orphaned", "its entity is gone, and no one entity holds its name")
+
+
+def test_a_decisions_line_from_before_the_log_is_marked_and_the_brief_stale(client: TestClient, tmp_path: Path) -> None:
+    root = tmp_path / "vault"
+    path = root / "processed" / "brief" / "harbour-site.md"
+    text = path.read_text(encoding="utf-8").replace("rev: 1", "rev: 2").rstrip("\n")
+    path.write_text(text + "\n- A new printer was decided. [r:chat:C0OPS/1791400800.000100]\n", encoding="utf-8")
+    git(root, "add", "--", str(path))
+    git(root, "commit", "-qm", f"Doc: {HARBOUR} rev 2")
+    n = line_of(tmp_path, HARBOUR, "- A new printer was decided.")
+    tree = page(client, f"/briefs?brief={HARBOUR}")
+    assert [s.text() for s in lines(tree)[n].find_all("span", class_="flag")] == ["not a confirmed decision"]
+    assert "a Decisions line cites no confirmed decision" in tree.find("main").text()
+    listed = {r.find("a").text(): r for r in page(client, "/briefs").find_all("li", class_="brief-row")}
+    assert listed["Harbour site"].attrs["data-state"] == "stale"

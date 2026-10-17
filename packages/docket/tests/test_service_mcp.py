@@ -98,6 +98,7 @@ def test_the_tools_names_parameters_and_annotations_match_the_golden_file(servic
         "read": True,
         "verify": True,
         "briefs": True,
+        "decisions": True,
         "doc_put": True,
         "run_open": True,
         "ingest": True,
@@ -285,3 +286,32 @@ def test_briefs_answers_each_brief_s_fields(service: Service) -> None:
     assert (one["state"], one["flagged"], one["orphaned"], one["why"], data["hidden"]) == ("current", 0, None, None, 0)
     assert "current   brief:ben-sample  Ben Sample (person), rev 1" in text_of(result)
     assert call(service, "briefs", {}).structured_content == {"briefs": [], "hidden": 0, "missing": []}
+
+
+def test_decisions_answers_each_decision_s_fields(service: Service) -> None:
+    note = DocStore(service.vault()).get("recording-note:2026-10-07-supplier-call")
+    assert note is not None
+    n = next(n for n, line in note.lines() if line.startswith("- Cleo sends the offer"))
+    text = (
+        "---\nid: decision:2026-10-13-offer-in-writing\ntype: decision\ncovers: []\nby: claude-test, decision\n"
+        "entities: [fleet-management]\nstatus: proposed\nsubject: fleet-management\n"
+        f"---\n\n# Proposed: the offer comes in writing\n\n- Cleo said so. [d:{note.meta.id}@{note.meta.rev}#{n}]\n"
+    )
+    put = call(service, "doc_put", {"text": text})
+    assert not put.is_error, text_of(put)
+    result = call(service, "decisions", {"entities": ["fleet-management"]})
+    assert not result.is_error, text_of(result)
+    data = result.structured_content
+    assert data is not None
+    assert set(data) == {"decisions", "hidden"}
+    [one] = data["decisions"]
+    assert set(one) == {
+        "id", "subject", "title", "status", "current", "rev", "rev_time", "by", "replaces", "contradicts",
+        "supersedes", "superseded_by", "contradicted_by", "flagged", "cite", "note",
+    }  # fmt: skip
+    assert (one["status"], one["current"], one["cite"], one["title"]) == (
+        "proposed", False, None, "the offer comes in writing",
+    )  # fmt: skip
+    assert text_of(result).startswith("proposed   decision:2026-10-13-offer-in-writing  the offer comes in writing")
+    assert call(service, "decisions", {"status": "confirmed"}).structured_content == {"decisions": [], "hidden": 0}
+    assert call(service, "decisions", {"status": "decided"}).is_error

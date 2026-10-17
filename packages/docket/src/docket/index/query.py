@@ -66,6 +66,7 @@ from docket.models.provider import RERANK_SECONDS, Off
 from docket.plaintext import WORD, fold, words
 from docket.vault import neverstore
 from docket.vault.config import NeverStore
+from docket.vault.decision_form import NOT_A_DECISION
 from docket.vault.vault import Vault
 
 CANDIDATES = 200
@@ -84,6 +85,8 @@ PREFIX_MIN = 3
 SNIPPET_BEFORE = 15
 SNIPPET_WORDS = 40
 TITLE_WORDS = 8
+# What a decision another replaced says before its title, in a hit and its group (DR-0565).
+SUPERSEDED = "Superseded: "
 # A title's lead: its text up to the first `: ` after at least three words, else its first 12 words (DR-0231).
 LEAD_END = ": "
 LEAD_MIN = 3
@@ -155,6 +158,8 @@ class Hit(BaseModel):
     also: list[str] = []
     # Where a document's hit sits in its file: `page 3`, `slide 4`, `Costs!41:80` (DR-0483).
     place: str | None = None
+    # What the hit's lines say of themselves: a brief's Decisions line that cites no confirmed decision (DR-0565).
+    marks: list[str] = []
 
 
 class Group(BaseModel):
@@ -673,7 +678,10 @@ class _Search:
 
     def group(self, key: str, hits: list[_Row]) -> Group:
         record = self.conn.execute("SELECT title, source, kind FROM records WHERE rid = ?", (key,)).fetchone()
-        doc = self.conn.execute("SELECT title FROM docs WHERE id = ?", (key,)).fetchone()
+        doc = self.conn.execute("SELECT title, type, superseded_by FROM docs WHERE id = ?", (key,)).fetchone()
+        if doc is not None and doc[1] == "decision" and doc[2] is not None:
+            # A decision another replaced says so wherever it shows (DR-0565).
+            doc = (f"{SUPERSEDED}{doc[0]}",)
         if record is not None:
             if record[2] == documents.FILE_KIND and documents.is_folder_rid(key, self.folder_sources):
                 # A folder source's file: its pages, slides and sheets are under it (DR-0482).
@@ -1048,6 +1056,27 @@ def _iso(value: datetime) -> str:
     return f"{at:%Y-%m-%dT%H:%M:%S}.{at.microsecond // 1000:03d}Z"
 
 
+def _unconfirmed(conn: sqlite3.Connection, briefs: set[str]) -> dict[str, set[int]]:
+    """Each brief's Decisions lines that cite no confirmed decision, by brief."""
+    if not briefs:
+        return {}
+    confirmed = {r[0] for r in conn.execute("SELECT id FROM docs WHERE type = 'decision' AND status = 'confirmed'")}
+    out: dict[str, set[int]] = {}
+    marks = ", ".join("?" * len(briefs))
+    query = f"SELECT doc, line, cites FROM decision_lines WHERE doc IN ({marks})"  # noqa: S608 - placeholders only
+    for doc, line, cites in conn.execute(query, sorted(briefs)):
+        if not set(json.loads(cites)) & confirmed:
+            out.setdefault(doc, set()).add(line)
+    return out
+
+
+def _marked(row: _Row, unconfirmed: dict[str, set[int]]) -> bool:
+    lines = unconfirmed.get(row.doc or "", set())
+    return (
+        row.line_from is not None and row.line_to is not None and any(row.line_from <= n <= row.line_to for n in lines)
+    )
+
+
 def search(
     vault: Vault,
     query: str,
@@ -1208,6 +1237,10 @@ def _run(
     counted = [rows[c] for c in ranked if found_by[c] != "vector" or c in shown]
     result = SearchResult(query=reading, candidates=len(counted), models=run, rerank=reranked)
     hit_rank = {row.id: n for n, row in enumerate(kept, start=1)}
+    replaced = {
+        r[0] for r in s.conn.execute("SELECT id FROM docs WHERE type = 'decision' AND superseded_by IS NOT NULL")
+    }
+    unconfirmed = _unconfirmed(s.conn, {row.doc for row in kept if row.doc and row.doc.startswith("brief:")})
     by_group: dict[str, list[_Row]] = {}
     for row in kept:
         by_group.setdefault(row.grp, []).append(row)
@@ -1226,7 +1259,7 @@ def _run(
                     lines=None if row.line_from is None or row.line_to is None else (row.line_from, row.line_to),
                     speakers=row.speakers,
                     authors=row.authors,
-                    title=row.title,
+                    title=f"{SUPERSEDED}{row.title}" if row.doc in replaced and row.title else row.title,
                     snippet=s.snippet(row.text),
                     rank=hit_rank[row.id],
                     found_by=found_by[row.id],
@@ -1234,6 +1267,7 @@ def _run(
                     anchors=row.anchors,
                     also=row.also,
                     place=s.place(row),
+                    marks=[NOT_A_DECISION] if _marked(row, unconfirmed) else [],
                 )
             )
         result.groups.append(group)

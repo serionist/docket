@@ -9,6 +9,10 @@ The frontmatter, in the order Docket writes it:
     by: claude-opus-5.5, sync 2026-10-14T16:07      <who>[, <run>]
     supersedes: [other docs it replaces]
     entities: [entity slugs]
+    status: proposed                                a decision only: proposed, confirmed or rejected
+    subject: fleet-management                       a decision only: the project, topic or stream it is on
+    replaces: [decisions it would supersede]        a decision only
+    contradicts: [decisions it says otherwise than] a decision only
     old_paths: [paths other files cite it by]       a legacy note only
     import_hash: sha256:...                         a legacy note only: the body the import last wrote
 
@@ -37,7 +41,11 @@ from docket.vault.records import RID
 
 log = logging.getLogger(__name__)
 
-DOC_TYPES = ("recording-note", "thread-summary", "digest", "minutes", "brief", "correction", "legacy-note")
+DOC_TYPES = ("recording-note", "thread-summary", "digest", "minutes", "brief", "correction", "legacy-note", "decision")
+# A decision's status: only the Briefs page writes the last two (DR-0564).
+STATUSES = ("proposed", "confirmed", "rejected")
+# The keys only a decision has (DR-0563).
+DECISION_KEYS = ("status", "subject", "replaces", "contradicts")
 SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 SLUG_MAX = 80
 # Windows can't create a file with one of these names, whatever its extension.
@@ -164,6 +172,10 @@ class DocMeta(BaseModel):
     by: str
     supersedes: list[str] = Field(default_factory=list[str])
     entities: list[str] = Field(default_factory=list[str])
+    status: str | None = None
+    subject: str | None = None
+    replaces: list[str] = Field(default_factory=list[str])
+    contradicts: list[str] = Field(default_factory=list[str])
     old_paths: list[str] = Field(default_factory=list[str])
     import_hash: str | None = None
 
@@ -172,15 +184,33 @@ class DocMeta(BaseModel):
     def _rev(cls, value: Any) -> Any:
         return 0 if isinstance(value, str) and value in NULLS else value
 
-    @field_validator("covers", "supersedes", "entities", "old_paths", mode="before")
+    @field_validator("covers", "supersedes", "entities", "replaces", "contradicts", "old_paths", mode="before")
     @classmethod
     def _lists(cls, value: Any) -> Any:
         return _as_list(value)
 
-    @field_validator("import_hash", mode="before")
+    @field_validator("import_hash", "status", "subject", mode="before")
     @classmethod
-    def _null_hash(cls, value: Any) -> Any:
+    def _nulls(cls, value: Any) -> Any:
         return None if isinstance(value, str) and value in NULLS else value
+
+    @field_validator("subject")
+    @classmethod
+    def _subject(cls, value: str | None) -> str | None:
+        if value is not None and not SLUG.match(value):
+            raise ValueError(f"the entity {value!r} isn't a slug: lowercase letters, digits and inner hyphens")
+        return value
+
+    @field_validator("replaces", "contradicts")
+    @classmethod
+    def _decisions(cls, value: list[str], info: ValidationInfo) -> list[str]:
+        for doc_id in value:
+            problem = id_problem(doc_id)
+            if problem:
+                raise ValueError(problem)
+            if not doc_id.startswith("decision:"):
+                raise ValueError(f"{doc_id} isn't a decision: decision:<yyyy-mm-dd>-<words>")
+        return _no_repeats(value, str(info.field_name))
 
     @field_validator("old_paths")
     @classmethod
@@ -261,7 +291,30 @@ class DocMeta(BaseModel):
             log.warning("%s has legacy-note fields this Docket keeps only on legacy notes", self.id)
         if self.id in self.supersedes:
             raise ValueError("a doc can't supersede itself")
+        self._decision(lenient)
         return self
+
+    def _decision(self, lenient: bool) -> None:
+        """A decision's own keys: a status this Docket knows and a subject; on any other doc, none of them. A lenient
+        read takes a decision with no status this Docket knows as proposed, which never reads as decided (DR-0565)."""
+        if self.type != "decision":
+            if self.status is not None or self.subject is not None or self.replaces or self.contradicts:
+                if not lenient:
+                    raise ValueError("status, subject, replaces and contradicts belong to a decision only")
+                log.warning("%s has decision fields this Docket keeps only on decisions", self.id)
+            return
+        if self.status not in STATUSES:
+            if not lenient:
+                raise ValueError(f"a decision's status is {', '.join(STATUSES)}")
+            log.warning("%s has a status this Docket doesn't know, read as proposed", self.id)
+            self.status = "proposed"
+        if self.subject is None and not lenient:
+            raise ValueError("a decision names its subject: the project, topic or stream entity it is on")
+        if self.id in (*self.replaces, *self.contradicts):
+            raise ValueError("a decision can't replace or contradict itself")
+        both = set(self.replaces) & set(self.contradicts)
+        if both:
+            raise ValueError(f"{min(both)} is in both replaces and contradicts: a candidate does one or the other")
 
     @property
     def who(self) -> str:
@@ -318,6 +371,10 @@ class ProcessedDoc:
             f"by: {_scalar(m.by, 'value')}",
             *_block("supersedes", m.supersedes),
             "entities: [" + ", ".join(_scalar(e, "flow") for e in m.entities) + "]",
+            *([f"status: {_scalar(m.status, 'value')}"] if m.status is not None else []),
+            *([f"subject: {_scalar(m.subject, 'value')}"] if m.subject is not None else []),
+            *(_block("replaces", m.replaces) if m.replaces else []),
+            *(_block("contradicts", m.contradicts) if m.contradicts else []),
             *(_block("old_paths", m.old_paths) if m.old_paths else []),
             *([f"import_hash: {m.import_hash}"] if m.import_hash is not None else []),
             "---",

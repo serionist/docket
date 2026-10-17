@@ -2,6 +2,8 @@
 
 `rebuild` is the contract: it reads the working tree (`raw/`, `processed/`, `entities/`; never `staging/`, never git
 objects) into a new file, sorted, and replaces the old one, so two rebuilds of one vault give the same database.
+A decision is the one exception: its status is read from git, and a confirmed or rejected one is indexed as its
+last commit holds it, the file noted when it says otherwise (DR-0564).
 `update` runs the same indexer on the live file for what changed since: new run files, docs whose bytes changed, and
 the entity files; anything it can't follow (a run file changed or removed, another schema or set of languages) makes it
 rebuild. Raw lines are read leniently: a line that doesn't load is a problem and the rest is indexed (DR-0115).
@@ -47,9 +49,10 @@ from docket.index.text import Analyzer
 from docket.models import config as models_config
 from docket.models.provider import Off
 from docket.plaintext import fold, words
-from docket.vault import legacy
+from docket.vault import decision_form, legacy
+from docket.vault.anchors import trailing_anchors
 from docket.vault.entities import entity_files, load_entities
-from docket.vault.processed import doc_path, parse_doc
+from docket.vault.processed import ProcessedDoc, doc_path, parse_doc
 from docket.vault.rawlog import RunFile, parse_run_file
 from docket.vault.records import Attachment, RawRecord
 from docket.vault.segments import segments
@@ -363,7 +366,7 @@ class Indexer:
         if row is not None and row[0] is not None:
             doc = row[0]
             self.drop_owner(f"d {doc}")
-            for table in ("doc_covers", "doc_anchors", "old_paths", "derived_from", "doc_lines"):
+            for table in ("doc_covers", "doc_anchors", "old_paths", "derived_from", "doc_lines", "decision_lines"):
                 self.conn.execute(f"DELETE FROM {table} WHERE doc = ?", (doc,))  # noqa: S608 - fixed table names
             self.conn.execute("DELETE FROM docs WHERE id = ?", (doc,))
         self.conn.execute("DELETE FROM doc_files WHERE path = ?", (rel,))
@@ -381,15 +384,17 @@ class Indexer:
             why = "isn't UTF-8" if isinstance(e, UnicodeDecodeError) else str(e)
             self.conn.execute("INSERT INTO problems (kind, place, message) VALUES ('doc', ?, ?)", (rel, why))
         else:
+            if doc.meta.type == "decision":
+                doc = self._decision(rel, doc, data)
             meta = doc.meta
             doc_id = meta.id
             chunks, anchors = doc_chunks(doc, self._info, self.tz)
             self.conn.execute(
-                "INSERT INTO docs (id, type, rev, path, title, by, supersedes, superseded_by, entities) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)",
+                "INSERT INTO docs (id, type, rev, path, title, by, supersedes, superseded_by, entities, status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
                 (
                     meta.id, meta.type, meta.rev, rel, doc_title(doc), meta.by, json.dumps(meta.supersedes),
-                    json.dumps(meta.entities),
+                    json.dumps(meta.entities), meta.status,
                 ),
             )  # fmt: skip
             self.conn.executemany(
@@ -407,12 +412,31 @@ class Indexer:
                 "INSERT INTO derived_from (doc, line, ordinal, src, rev, src_line, hash) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 flags.ref_rows(doc),
             )
+            if meta.type == "brief":
+                self.conn.executemany(
+                    "INSERT INTO decision_lines (doc, line, cites) VALUES (?, ?, ?)",
+                    [
+                        (meta.id, n, json.dumps(sorted({r.doc for r in trailing_anchors(line).refs})))
+                        for n, line in decision_form.decisions_lines(doc)
+                    ],
+                )
             self.conn.executemany(
                 "INSERT OR IGNORE INTO doc_lines (doc, hash, line) VALUES (?, ?, ?)",
                 [(meta.id, found, n) for n, found in sorted(doc.citable().items())],
             )
             self.add_chunks(chunks)
         self.conn.execute("INSERT INTO doc_files (path, sha256, doc) VALUES (?, ?, ?)", (rel, _sha(data), doc_id))
+
+    def _decision(self, rel: str, doc: ProcessedDoc, data: bytes) -> ProcessedDoc:
+        """A decision as every read takes it, from its last commit (DR-0564); a final one whose file says otherwise is
+        noted as edited on disk, not taken in."""
+        proc = self.vault.git.run("cat-file", "blob", f"HEAD:./{rel}", check=False)
+        text = proc.stdout if proc.returncode == 0 else None
+        found = decision_form.as_committed(doc, decision_form.committed_doc(text))
+        if found.meta.status in decision_form.FINAL and decision_form.edited(data.decode("utf-8"), text):
+            row = (rel, decision_form.EDITED)
+            self.conn.execute("INSERT INTO problems (kind, place, message) VALUES ('doc', ?, ?)", row)
+        return found
 
     def sync_docs(self, covering: set[str]) -> int:
         """Docs whose bytes changed, new or removed, and docs that cover a record that changed. Returns how many."""

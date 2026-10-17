@@ -82,7 +82,9 @@ How this final run goes:
    stop without closing.
 5. Close: ingest(run, captures=<the highest n you saw>, final=true, skipped=[...]).
 6. After closing: briefs() names the stale briefs. Say so once; rebuild them with the brief skill only
-   when the user asks."""
+   when the user asks.
+7. decisions(status="proposed") counts the candidates waiting for the user. Say so once; propose new ones from the
+   run's notes with the decision skill only when the user asks."""
 
 
 class Due(BaseModel):

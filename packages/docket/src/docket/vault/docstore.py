@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 
 from docket.documents import records as documents
 from docket.errors import DocketError
-from docket.vault import brief_form, derived
+from docket.vault import brief_form, decision_form, derived
 from docket.vault.anchors import format_ref, normalize_newlines, trailing_anchors
 from docket.vault.git import DOC_LINE
 from docket.vault.home import make_private
@@ -48,6 +48,9 @@ from docket.vault.spans import RawLookup, problem
 from docket.vault.vault import UnmergedError, Vault
 
 log = logging.getLogger(__name__)
+# A final decision's committed text, by its blob id: what every read of it takes (DR-0564), read once a process.
+_BLOBS: dict[str, str] = {}
+BLOBS_KEPT = 1000
 
 # On Windows another program holding the doc open makes the rename fail for a moment.
 REPLACE_TRIES = 5
@@ -139,9 +142,51 @@ class DocStore:
             raise DocketError(f"{path.relative_to(self.root).as_posix()} isn't UTF-8") from None
 
     def get(self, doc_id: str) -> ProcessedDoc | None:
-        """The doc as it is on disk, read leniently; None when there is no file."""
+        """The doc as it is on disk, read leniently; None when there is no file. A decision as every read takes it: a
+        final one whole from its last commit, a proposed one with its status and links from it (DR-0564)."""
         path = self.file(doc_id)
-        return parse_doc(self.read_file(path), lenient=True) if path.is_file() else None
+        if not path.is_file():
+            return None
+        doc = parse_doc(self.read_file(path), lenient=True)
+        if doc.meta.type != "decision":
+            return doc
+        return decision_form.as_committed(doc, decision_form.committed_doc(self.committed_text(doc_id)))
+
+    def committed_text(self, doc_id: str) -> str | None:
+        """The doc's text as HEAD holds it, or None when HEAD doesn't."""
+        rel = self.path(doc_id).as_posix()
+        proc = self.vault.git.run("cat-file", "blob", f"HEAD:./{rel}", check=False)
+        return proc.stdout if proc.returncode == 0 else None
+
+    def committed_texts(self, rels: list[str]) -> dict[str, str | None]:
+        """Several docs' texts as HEAD holds them, by their paths in the vault: one listing of HEAD's tree for their
+        folders, then each blob read once and kept by its id, so a final decision is read from git once a process."""
+        folders = sorted({rel.rpartition("/")[0] or rel for rel in rels})
+        proc = self.vault.git.run("ls-tree", "-r", "-z", "HEAD", "--", *folders, check=False)
+        blobs: dict[str, str] = {}
+        if proc.returncode == 0:
+            for entry in proc.stdout.split("\0"):
+                info, _, name = entry.partition("\t")
+                fields = info.split()
+                if len(fields) == 3 and fields[1] == "blob":
+                    blobs[name] = fields[2]
+        out: dict[str, str | None] = {}
+        for rel in rels:
+            sha = blobs.get(rel)
+            if sha is None:
+                out[rel] = None
+                continue
+            if sha not in _BLOBS:
+                if len(_BLOBS) >= BLOBS_KEPT:
+                    _BLOBS.clear()
+                _BLOBS[sha] = self.vault.git.out("cat-file", "blob", sha)
+            out[rel] = _BLOBS[sha]
+        return out
+
+    def decisions(self) -> list[ProcessedDoc]:
+        """Every decision, as every read takes it."""
+        folder = self.root / "processed" / "decision"
+        return self.at_paths(sorted(folder.rglob("*.md")) if folder.is_dir() else [])
 
     def history(self, doc_id: str) -> list[tuple[int, str]]:
         """The doc's revs, newest commit first: (rev, commit) for every commit whose message has its `Doc:` line."""
@@ -231,7 +276,14 @@ class DocStore:
                 log.warning("skipping %s: its id %s belongs at %s", rel, doc.meta.id, doc_path(doc.meta.id))
                 continue
             docs.append(doc)
-        return docs
+        rels = [doc_path(d.meta.id).as_posix() for d in docs if d.meta.type == "decision"]
+        if not rels:
+            return docs
+        texts = self.committed_texts(rels)
+        return [
+            decision_form.as_committed(d, decision_form.committed_doc(texts.get(doc_path(d.meta.id).as_posix())))
+            for d in docs
+        ]
 
     def _safe_get(self, doc_id: str) -> ProcessedDoc | None:
         try:
@@ -254,10 +306,7 @@ class DocStore:
         doc, redacted = derived.check(doc, head[1 : doc.head_lines - 1], self.redactor, self.lists)
         doc, pinned, problems = self._pin_doc(doc)
         notes: list[str] = []
-        if doc.meta.type == "brief":
-            # A brief's form and its never-store screen (DR-0555, DR-0558); a section the form doesn't name is a note.
-            found, notes = brief_form.check(doc, self.root, self.lists)
-            problems += found
+        problems += self._kind_problems(doc, notes)
         # Closed before the lock: the write never holds the index or waits behind its update (DR-0516).
         with raw() if raw is not None else nullcontext(RawLookup(self.root)) as lookup:
             problems += self._against_raw(doc, head, lookup, notes)
@@ -351,8 +400,7 @@ class DocStore:
                         raise DocRefusedError([DocProblem(None, "the frontmatter can't be written back")])
                     doc, redacted = derived.check(doc, head[1 : doc.head_lines - 1], self.redactor, self.lists)
                     doc, _, problems = self._pin_doc(doc)
-                    if doc.meta.type == "brief":
-                        problems += brief_form.check(doc, self.root, self.lists)[0]
+                    problems += self._kind_problems(doc, [])
                     problems += self._against_raw(doc, head, lookup)
                 except DocRefusedError as e:
                     out[i] = e
@@ -515,13 +563,35 @@ class DocStore:
             self._known.pop(doc_id, None)
         return rev, text
 
+    def _kind_problems(self, doc: ProcessedDoc, notes: list[str]) -> list[DocProblem]:
+        """What a brief's or a decision's own form refuses, on top of every doc's rules: a brief's sections, its
+        Decisions lines and its never-store screen (DR-0555, DR-0558, DR-0565), with a section the form doesn't name
+        added to `notes`; a decision's form, its status and links, and its never-store screen (DR-0563)."""
+        if doc.meta.type == "brief":
+            found, warned = brief_form.check(doc, self.root, self.lists)
+            notes += warned
+            return found + decision_form.brief_problems(doc, decision_form.standings(self.decisions()))
+        if doc.meta.type == "decision":
+            stored = decision_form.committed_doc(self.committed_text(doc.meta.id))
+            return decision_form.check(doc, stored, self.decisions(), self.root, self.lists)
+        return []
+
     def _hand_edit(self, edited: ProcessedDoc, text: str, last: str | None) -> derived.HandEdit:
-        """A hand edit as `derived.hand_edit` reads it, and for a brief its never-store checks too (DR-0558): an edit
-        that names a listed person stays on disk, as one that says a keyword does."""
+        """A hand edit as `derived.hand_edit` reads it, and for a brief or a decision its own stops too: one that names
+        a listed person stays on disk, as one that says a keyword does (DR-0558), and so does one that changes a
+        decision's status or links, or a confirmed or rejected decision at all (DR-0564), or one that adds a brief's
+        Decisions line no current decision backs (DR-0565)."""
         edit = derived.hand_edit(edited.meta.type, text, last, self.redactor, self.lists)
-        if edited.meta.type != "brief":
+        if edited.meta.type == "brief":
+            # A Decisions line the edit adds or changes is held to what a put holds it to (DR-0565); a line that also
+            # names a listed person says that instead.
+            standing = decision_form.standings(self.decisions())
+            found = dict.fromkeys(decision_form.brief_stops(edited, last, standing), decision_form.DECISIONS_EDIT)
+            found |= {p.line or 2: brief_form.NAMES_LISTED for p in brief_form.screen(edited, self.root, self.lists)}
+        elif edited.meta.type == "decision":
+            found = dict(decision_form.hand_stops(edited, text, last, self.root, self.lists))
+        else:
             return edit
-        found = {p.line or 2: brief_form.NAMES_LISTED for p in brief_form.screen(edited, self.root, self.lists)}
         return replace(edit, stops=sorted({**found, **dict(edit.stops)}.items()))
 
     # -- refs ------------------------------------------------------------------------------------------------------

@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 from docket.briefs import BriefsReport
 from docket.curate.batch import BatchView, Measure, Status
 from docket.curate.propose import UNSEEN, CardSpelling
+from docket.decisions import DecisionsReport, DecisionState
 from docket.index import SearchResult
 from docket.plaintext import printable
 from docket.questions import EvalReport, Score
@@ -105,6 +106,9 @@ def read(result: ReadResult) -> list[str]:
     lines += [f"! {problem}" for problem in result.problems]
     if result.doc is not None:
         lines.append(f"{result.doc.id} rev {result.doc.rev}  {result.doc.path}")
+        if result.doc.status is not None:
+            state = "current" if result.doc.current else "not current"
+            lines.append(f"a {result.doc.status} decision, {state}")
         if result.doc.superseded_by:
             lines.append(f"superseded by {', '.join(result.doc.superseded_by)}")
         for line in result.doc.lines:
@@ -190,6 +194,7 @@ def search(result: SearchResult, tz: ZoneInfo) -> list[str]:
             place = f"  {hit.place}" if hit.place else ""
             lines.append(f"  {hit.rank:>3}. {hit.locator}{doc_lines}{place}{at}{f'  {who}' if who else ''}")
             lines.append(f"       {hit.snippet}")
+            lines += [f"       ! {mark}" for mark in hit.marks]
             lines += [f"       -> {anchor}" for anchor in hit.anchors]
             if hit.also:
                 lines.append(f"       also {', '.join(hit.also)}")
@@ -371,6 +376,37 @@ def curate_status(status: Status, config: object) -> list[str]:
     else:
         lines += curate_measures(status.before, status.after) or [f"questions {status.questions}, measured at a round"]
     return lines
+
+
+def decisions(found: DecisionsReport) -> list[str]:
+    """What `docket decision list` and the `decisions` tool say: each decision's standing and title, then its links.
+    A proposed one never reads as decided: its standing says proposed (DR-0565)."""
+    lines: list[str] = []
+    for one in found.decisions:
+        standing = "current" if one.current else "superseded" if one.status == "confirmed" else one.status
+        lines.append(f"{standing:<10} {one.id}  {one.title}")
+        lines.append(f"           on {one.subject}, rev {one.rev}")
+        lines += [f"           {what} {', '.join(ids)}" for what, ids in _links(one) if ids]
+        if one.flagged:
+            lines.append(f"           {one.flagged} line(s) cite lines that changed")
+        if one.note:
+            lines.append(f"           {one.note}")
+    if not found.decisions:
+        lines.append("no decisions yet")
+    if found.hidden:
+        lines.append(f"hidden     {found.hidden} decision(s) on an entity a never-store list holds")
+    return lines
+
+
+def _links(one: DecisionState) -> list[tuple[str, list[str]]]:
+    superseded = [one.superseded_by] if one.superseded_by else []
+    return [
+        ("replaces", one.replaces),
+        ("contradicts", one.contradicts),
+        ("supersedes", one.supersedes),
+        ("superseded by", superseded),
+        ("contradicted by", one.contradicted_by),
+    ]
 
 
 def briefs(found: BriefsReport) -> list[str]:
