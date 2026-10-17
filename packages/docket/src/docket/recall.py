@@ -406,6 +406,7 @@ def _verify(call: _Call, doc: str, lines: list[int] | None, window: int) -> Veri
     numbered = found.roles()
     citable = found.citable()
     damage = _damage(call, found)
+    unbacked = _unbacked(call, found)
 
     def cite(n: int) -> str | None:
         return format_ref(found.meta.id, found.meta.rev, n) if n in citable else None
@@ -424,6 +425,8 @@ def _verify(call: _Call, doc: str, lines: list[int] | None, window: int) -> Veri
         if not trailing.anchors and not trailing.refs and not trailing.errors:
             line.problems.append("no anchors at the end of the line")
         line.problems += damage.get(n, [])
+        if n in unbacked:
+            line.problems.append(decision_form.NOT_A_DECISION)
         for anchor in trailing.anchors:
             line.spans.append(_verify_one(lookup, anchor, covers, window))
             if anchor.rid is not None and anchor.rid not in covers:
@@ -476,11 +479,17 @@ def _marks(call: _Call, doc: ProcessedDoc) -> dict[int, list[str]]:
             marks.setdefault(found.line, []).append(found.message)
     for n, said in _damage(call, doc).items():
         marks.setdefault(n, []).extend(said)
-    if doc.meta.type == "brief":
-        # A Decisions line that cites no confirmed decision, as the page marks it (DR-0565).
-        for n in decision_form.unconfirmed(doc, decision_form.standings(call.store.decisions())):
-            marks.setdefault(n, []).append(decision_form.NOT_A_DECISION)
+    for n in sorted(_unbacked(call, doc)):
+        marks.setdefault(n, []).append(decision_form.NOT_A_DECISION)
     return marks
+
+
+def _unbacked(call: _Call, doc: ProcessedDoc) -> set[int]:
+    """A brief's Decisions lines that cite no confirmed decision, which `read`, `verify`, search and the page mark
+    (DR-0565)."""
+    if doc.meta.type != "brief":
+        return set()
+    return decision_form.unconfirmed(doc, decision_form.standings(call.store.decisions()))
 
 
 def _damage(call: _Call, doc: ProcessedDoc) -> dict[int, list[str]]:

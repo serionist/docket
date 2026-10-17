@@ -332,7 +332,9 @@ def _raw(facts: Facts, n: int, flags: list[str]) -> RawView:
     line = facts.line
     if line is None:  # pragma: no cover - gather verifies the open line whenever it isn't hidden
         return RawView(n, empty=f"Line {n} has nothing to open.")
-    view = RawView(n, body=line_parts(line.text)[1], problems=list(line.problems), flags=flags)
+    # A mark read already gives the line is said once, among its flags.
+    problems = [p for p in line.problems if p not in flags]
+    view = RawView(n, body=line_parts(line.text)[1], problems=problems, flags=flags)
     view.spans = [_span(s, facts.tz) for s in line.spans]
     for i, ref in enumerate(line.refs):
         hidden = i in facts.hidden_refs

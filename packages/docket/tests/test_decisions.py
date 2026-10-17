@@ -597,3 +597,16 @@ def test_the_report_hides_a_decision_whose_title_or_link_names_someone_listed_la
     listed = set_lists(vault, people=["Dóra Minta", "Vera Plan"])
     found = decisions.report(listed)
     assert (found.decisions, found.hidden) == ([], 3)
+
+
+def test_verify_marks_a_decisions_line_no_decision_backs(vault: Vault, capsys: pytest.CaptureFixture[str]) -> None:
+    recall.doc_put(vault, brief(vault, "fleet-management", "Fleet management", []))
+    path = DocStore(vault).file("brief:fleet-management")
+    line = f"- The dashboard ships before the pilot. {cite(vault, NOTE, TEN)}"
+    path.write_text(path.read_text(encoding="utf-8") + f"{line}\n", encoding="utf-8", newline="\n")
+    git(vault.root, "commit", "-qam", "a brief as stored before #162, or committed with git")
+    [found] = [v for v in recall.verify(vault, "brief:fleet-management").lines if "dashboard" in v.text]
+    assert found.problems == ["not a confirmed decision"]
+    capsys.readouterr()
+    main(["doc", "verify", "brief:fleet-management", "--vault", str(vault.root)])
+    assert "not a confirmed decision" in capsys.readouterr().out
