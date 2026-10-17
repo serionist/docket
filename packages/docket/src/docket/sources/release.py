@@ -101,6 +101,10 @@ def _ask(prompt: str) -> str:
     return console.ask(prompt)
 
 
+# Docket's own `_ask`, to tell a copied test's stand-in from it.
+_OWN_ASK = _ask
+
+
 # -- reading a held recording ----------------------------------------------------------------------------------------
 
 
@@ -332,8 +336,14 @@ def release(vault: Vault, source: str, folder: Path, proposals: Sequence[Proposa
 
 
 def _question(lines: list[str], what: str, native: str) -> str:
-    """Show the screen and ask: "yes" for the code typed back, "no", or "stop"."""
-    return console.typed_back(lines, f"{what} {native}", "keep it held", f"{native} stays held", asker=_ask)
+    """Show the screen and ask: "yes" for the OS prompt's yes or the code typed back, "no", or "stop" (DR-0572)."""
+    do, keep, kept = f"{what} {native}", "keep it held", f"{native} stays held"
+    if _ask is not _OWN_ASK:
+        # A project's copy of the reference source's tests stands in for the owner under `_ask` and types the code
+        # back; it can't answer an OS prompt, so it gets the code, as before #143. Only a patch of Docket's own code
+        # gets here, the floor DR-0202 accepts.
+        return console.typed_back(lines, do, keep, kept, asker=_ask)
+    return console.confirm(lines, do, keep, kept, act="release a held recording", asker=_ask)
 
 
 def _release_one(vault: Vault, source: str, checked: _Checked, place: str, report: ReleaseReport) -> bool:

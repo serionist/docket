@@ -87,9 +87,9 @@ flowchart LR
 - Only then are records written to the raw log and committed. An unclassified record waits in staging; the app
   shows how many. The one version that goes in unstaged is the gate's own cut of one already in raw, made at
   promotion: a Whisper transcript following its family's cuts (DR-0596).
-- A held recording goes in only once its owner releases it, typing back a code at their own console for the cuts
-  they confirm. The release log keeps those cuts, and the gate applies them to every version of the recording, on
-  every machine (DR-0200 to DR-0203).
+- A held recording goes in only once its owner releases it at their own console, on the OS prompt or, where the
+  machine has none, a code typed back, for the cuts they confirm (DR-0572). The release log keeps those cuts, and the
+  gate applies them to every version of the recording, on every machine (DR-0200 to DR-0203).
 - Cursors are a high-water mark plus a lookback window plus a retry set and a waiting set per source, so late
   arrivals and rate-limited calls are caught on the next run. Each machine commits its own cursor file,
   `state/cursors-<machine>.yaml` (DR-0245), and a run's window starts at the furthest mark any machine reached, less
@@ -628,8 +628,8 @@ change lands on whoever uses that vendor, while the core still checks every rid 
   left out: `state/holds/<source>.txt`, ids only, read on every ingest and by the gate, failing closed (DR-0121,
   DR-0122). A held record in staging stops every ingest of its source until its file is deleted.
 - Releasing one: `/docket:cuts` turns the owner's words for each left-out stretch into time ranges on the transcript,
-  and the owner runs `docket hold release` in their own terminal, which asks for a code typed back per recording and
-  refuses Claude Code's shell, a pipe or a redirect. The release line is committed to `state/releases/<source>.jsonl`
+  and the owner runs `docket hold release` in their own terminal, which asks the OS prompt per recording, or a code
+  typed back where the machine has none, and refuses Claude Code's shell, a pipe or a redirect. The release line is committed to `state/releases/<source>.jsonl`
   before the hold comes off; the gate then cuts the recording by those times wherever it is staged, and leaves its
   records without segments out unless the owner kept them (DR-0200 to DR-0207). No audio is stored before #42, which
   cuts a released recording's audio by the same times.

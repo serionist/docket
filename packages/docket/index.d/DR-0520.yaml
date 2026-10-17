@@ -10,6 +10,7 @@ decisions:
     binds:
       - "Not a wall against a process running as the user: a pseudo-terminal of its own with CLAUDECODE cleared passes, as for the release (DR-0202); the skills forbid it."
       - The README says the owner's scripts have no way around the question, and that a hand edit is theirs.
+      - "The OS prompt this left to an issue of its own is #143's (DR-0572 to DR-0575)."
     not_chosen:
       - "A token in the keychain or an environment variable for scripts: Claude reads what a script reads."
       - "Asking about every hand edit: one that keeps more out needs no yes, and the owner's own commit of any edit is theirs."

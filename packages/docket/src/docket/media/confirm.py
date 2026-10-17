@@ -131,7 +131,13 @@ def confirm(vault: Vault, rid: str) -> int:
             "accounts for, so at least one was a private classification; the audio stays out"
         )
     screen = [*shown, "", "Each of these was a cut, and none a private classification?"]
-    answer = console.typed_back(screen, "confirm they were cuts", "leave them as they are", "nothing was confirmed")
+    answer = console.confirm(
+        screen,
+        "confirm they were cuts",
+        "leave them as they are",
+        "nothing was confirmed",
+        act="confirm a recording's decisions were cuts",
+    )
     if answer != "yes":
         return 0
     with vault.lock:

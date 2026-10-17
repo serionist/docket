@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from docket_testkit import AtConsole, git
+from docket_testkit import AtConsole, FakePrompt, git
 from media_kit import CALL, POLISHED, audio, dbfs, decoded, https_server, in_raw, media_vault, tone
 
 from docket.cli import main
@@ -319,6 +319,21 @@ def test_confirm_cuts_asks_at_the_console_and_n_changes_nothing(
     monkeypatch.setattr(console, "problem", lambda act: f"{act} asks you at a console: Claude Code's shell can't")
     with pytest.raises(DocketError, match="Claude Code's shell"):
         media_confirm(vault)
+
+
+def test_confirm_cuts_asks_the_os_prompt_where_there_is_one(
+    tmp_path: Path, owner: Callable[..., AtConsole], os_prompt: Callable[..., FakePrompt]
+) -> None:
+    """A confirmation lets audio in for good, so it asks the OS prompt (DR-0575); its no confirms nothing."""
+    from docket import osprompt
+
+    vault = _hand_cut(tmp_path)
+    _strip_kinds(vault)
+    hello = os_prompt(osprompt.Refused("cancelled"), osprompt.Verified())
+    owner("", "")
+    assert media_confirm(vault) == 0
+    assert media_confirm(vault) > 0
+    assert hello.acts == ["confirm a recording's decisions were cuts"] * 2
 
 
 def test_confirm_cuts_refuses_when_the_decisions_change_while_asked(

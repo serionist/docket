@@ -22,6 +22,7 @@ from typing import Any, Literal
 import pytest
 from filelock import FileLock
 
+from docket import osprompt
 from docket.errors import DocketError
 from docket.vault import forgotten, inforce
 from docket.vault.config import CONFIG_FILE, NeverStore, Owner, RedactionPattern, SourceConfig, VaultConfig
@@ -79,6 +80,19 @@ class AtConsole:
             assert found is not None, prompt
             return found.group(1).lower()
         return answer
+
+
+class FakePrompt:
+    """An OS prompt set up on this machine, for the `os_prompt` fixture: answers each question from the script given,
+    Verified() or Refused(why), and keeps each act it was asked about. Past the script it refuses."""
+
+    def __init__(self, *answers: osprompt.Answer) -> None:
+        self.answers = list(answers)
+        self.acts: list[str] = []
+
+    def __call__(self, act: str) -> osprompt.Answer:
+        self.acts.append(act)
+        return self.answers.pop(0) if self.answers else osprompt.Refused("the script ran out")
 
 
 def sh(cwd: Path, *args: str, check: bool = True) -> str:

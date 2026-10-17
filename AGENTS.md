@@ -130,13 +130,13 @@ agrees in the issue or, under an autonomy grant, with its decision recorded as p
 - the plugin's skill and hook names: `recall`, `setup`, `cuts` (DR-0207), `curate` (DR-0472), `brief` (DR-0555), `decision` (DR-0563), the SessionStart
   hook running `docket hook session-start` (DR-0161), and the PostToolUse hook running `docket hook post-tool-use`
   for `mcp__.*`, with its line prefixes (DR-0242);
-- the release's yes: only the owner releases a held recording, at their own console, by typing back a code, and no
-  page, route or tool releases one (DR-0202, DR-0382). What a release lets in reaches git for good.
+- the release's yes: only the owner releases a held recording, at their own console, on the OS prompt or a code typed
+  back where it has none (DR-0572), and no page, route or tool releases one (DR-0202, DR-0382). It reaches git for good.
 - the gate's loosening: pages make only the `vault.yaml` changes on DR-0506's list (a never-store value added, a
   redaction rule or pattern turned on, a source made stricter or turned off), held by `loosens()` and a scan; every
   other change is named, never made by a page, route or tool. A loosening applies only once committed, the gate
   obeying HEAD's `vault.yaml` plus what an edit only tightens (DR-0521), and the CLI makes or takes in one only at
-  the owner's console, with a code typed back (DR-0517). What a loosening lets in reaches git for good.
+  the owner's console, on the OS prompt or a code typed back (DR-0517, DR-0572). What it lets in reaches git for good.
 
 Each lands with its decision entry, marked `cost: one-way`.
 

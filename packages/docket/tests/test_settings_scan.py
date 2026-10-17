@@ -227,29 +227,37 @@ def test_outside_the_writer_only_init_writes_vault_yaml_as_a_file() -> None:
     assert found == {("vault/vault.py", "init")}
 
 
-def test_only_the_release_and_the_writer_ask_at_the_console() -> None:
-    """No page, route or tool asks the owner's question or answers it (DR-0518), and media keys leave the clone only
-    from the console's command (DR-0550)."""
+def _importers(name: str) -> set[str]:
+    """The package's files that import `docket.<name>`, in any form."""
     importers = set()
     for rel, module in _modules():
         for node in ast.walk(module):
-            if (
-                isinstance(node, ast.ImportFrom)
-                and node.module == "docket"
-                and any(a.name == "console" for a in node.names)
-            ):
+            if isinstance(node, ast.ImportFrom) and node.module == "docket" and any(a.name == name for a in node.names):
                 importers.add(rel)
-            if isinstance(node, ast.ImportFrom) and node.module == "docket.console":
+            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(f"docket.{name}"):
                 importers.add(rel)
-            if isinstance(node, ast.Import) and any(a.name == "docket.console" for a in node.names):
+            if isinstance(node, ast.Import) and any(a.name.startswith(f"docket.{name}") for a in node.names):
                 importers.add(rel)
-    assert importers == {
+    return importers
+
+
+def test_only_the_release_and_the_writer_ask_at_the_console() -> None:
+    """No page, route or tool asks the owner's question or answers it (DR-0518), and media keys leave the clone only
+    from the console's command (DR-0550). The CLI reads only which yes this machine asks, for docket vault status."""
+    assert _importers("console") == {
         "sources/release.py",
         "vault/settings.py",
         "models/api.py",
         "media/backup.py",
         "media/confirm.py",
+        "cli.py",
     }
+    from_cli = {node.func.attr for rel, module in _modules() if rel == "cli.py" for node in ast.walk(module)
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name) and node.func.value.id == "console"}  # fmt: skip
+    assert from_cli == {"which_yes"}
+    # Only the console asks the OS prompt, so no page, route or tool asks it or answers it (DR-0572).
+    assert {rel for rel in _importers("osprompt") if not rel.startswith("osprompt/")} == {"console.py"}
     exporters = {
         rel
         for rel, module in _modules()

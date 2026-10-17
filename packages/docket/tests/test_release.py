@@ -16,8 +16,9 @@ from typing import Any
 
 import pytest
 import typer
-from docket_testkit import COMMIT_CALLS, AtConsole, copy_project, git_calls, sh, template_project
+from docket_testkit import COMMIT_CALLS, AtConsole, FakePrompt, copy_project, git_calls, sh, template_project
 
+from docket import osprompt
 from docket.cli import app, main
 from docket.errors import DocketError
 from docket.sources import release as releasing
@@ -169,6 +170,29 @@ def test_show_names_what_intake_drops_without_printing_it(vault: Vault, folder: 
     lines = show_lines(show(vault, "rec", "rec-cut-01", folder))
     assert "rec:rec-cut-01/transcript  transcript  dropped at intake: never-store" in lines
     assert not any("cabin" in line for line in lines)
+
+
+def test_with_an_os_prompt_a_release_is_its_yes_and_a_no_keeps_it_held(
+    vault: Vault,
+    folder: Path,
+    owner: Callable[..., AtConsole],
+    os_prompt: Callable[..., FakePrompt],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The OS prompt answers the release where this machine has one; its no keeps the recording held (DR-0572)."""
+    ingest(vault, folder)
+    hello = os_prompt(osprompt.Refused("cancelled"), osprompt.Verified())
+    person = owner("", "")
+    report = releasing.release(vault, "rec", folder, [cut_01()])
+    assert report.released == []
+    assert report.held == [("rec-cut-01", "not confirmed")]
+    assert "Fake Hello didn't confirm it (cancelled); rec-cut-01 stays held" in capsys.readouterr().out
+    assert "rec-cut-01" in holds.read(vault.root, "rec")
+    report = releasing.release(vault, "rec", folder, [cut_01()])
+    assert report.released == ["rec-cut-01"]
+    assert hello.acts == ["release a held recording", "release a held recording"]
+    assert all(p.startswith("Press Enter to release rec-cut-01 with Fake Hello") for p in person.prompts)
+    assert "rec-cut-01" not in holds.read(vault.root, "rec")
 
 
 def test_a_confirmed_release_commits_the_log_then_the_hold_and_stages_the_recording_cut(
