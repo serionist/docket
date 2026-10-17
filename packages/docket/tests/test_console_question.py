@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 from docket_testkit import AtConsole, consuming_project, empty_vault, git, make_config, sh
+from pydantic import Field
 
 from docket import console
 from docket.cli import main
@@ -327,3 +328,67 @@ def test_a_loosening_during_a_conflict_refuses_before_any_question(
         cli(vault, credentials(False))
     assert person.prompts == []
     assert (text(vault), head(vault)) == (before, at)
+
+
+# -- the screen, entry by entry ---------------------------------------------------------------------------------------
+
+
+class LaterNeverStore(NeverStore):
+    domains: list[str] = Field(default_factory=list[str])
+
+
+class Later(VaultConfig):
+    never_store: LaterNeverStore = Field(default_factory=LaterNeverStore)  # pyright: ignore[reportIncompatibleVariableOverride]
+
+
+def test_the_screen_names_each_entry_added_or_removed_and_never_a_never_store_value() -> None:
+    before = make_config()
+    before.sources["notes"] = SourceConfig()
+    before.redaction = Redaction(
+        patterns=[RedactionPattern(name="ticket", pattern="TCK"), RedactionPattern(name="x", pattern="X")]
+    )
+    after = Later.model_validate(
+        {
+            **before.model_dump(),
+            "sources": {k: v for k, v in before.model_dump()["sources"].items() if k != "notes"},
+            "redaction": {"patterns": [{"name": "ticket", "pattern": "TCK"}]},
+            "never_store": {"domains": ["dora.invalid"]},
+        }
+    )
+    assert settings.changes(before, after) == [
+        "sources.notes: removed",
+        "never_store.domains: added",
+        "  never_store.domains: 1 added",
+        "redaction.patterns[1]: removed",
+    ]
+    back = settings.changes(after, before)
+    assert "redaction.patterns[1]: added" in back
+    assert "  redaction.patterns[1].name: x" in back
+
+
+def test_head_s_vault_yaml_gone_while_the_owner_reads_writes_nothing(
+    vault: Vault, owner: Callable[..., AtConsole]
+) -> None:
+    def takes_it_out_of_head() -> str:
+        git(vault.root, "rm", "-q", "--cached", CONFIG_FILE)
+        git(vault.root, "commit", "-qm", "no settings")
+        return "code"
+
+    owner(takes_it_out_of_head)
+    with pytest.raises(settings.StaleError, match="changed while you were asked"):
+        cli(vault, credentials(False))
+
+
+def test_a_no_at_a_folder_source_leaves_vault_yaml_as_it_was(
+    tmp_path: Path,
+    owner: Callable[..., AtConsole],
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = project_vault(tmp_path)
+    monkeypatch.chdir(vault.root.parent)
+    before = text(vault)
+    owner("n")
+    assert main(["source", "new", "papers", "--folder", "papers", "--vault", str(vault.root)]) == 1
+    assert "source   papers not added: the code wasn't typed back" in capsys.readouterr().out
+    assert text(vault) == before
