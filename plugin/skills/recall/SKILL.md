@@ -35,6 +35,7 @@ check every fact you use against the raw it came from, and answer with locators.
   about 50,000 characters goes to a file you read in parts.
 - A name a transcript mangled (an ASR form) still finds its person: try the name as the user says it, and the
   entity's id.
+- For a brief on someone or something, the `brief` skill writes or rebuilds it.
 - Recall doesn't write. When the user asks to fix a doc, [writing-docs.md](writing-docs.md) gives the form, and
   `doc_put` stores the fix as the doc's next revision; it isn't pre-approved, so Claude Code asks the user first.
 

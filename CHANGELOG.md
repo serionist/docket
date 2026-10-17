@@ -8,6 +8,11 @@ Unreleased in the same PR.
 
 ### Added
 
+- Briefs: a doc per person, project, customer or topic, `brief:<entity id>`, with what changed, the last
+  conversations and the decisions, every line cited. The plugin's `brief` skill writes one when you ask; `docket brief
+  stale` and the `briefs` tool say which are stale: records about the entity its last rev hadn't seen, a line citing a
+  line that changed, or its entity gone. A brief is never written for an entity a never-store list holds, and never
+  names a listed person. The Briefs page follows.
 - Voyage AI's API for search by meaning and the reranker, for a machine with no GPU and no time for CPU embedding:
   `docket models install --api`, then `docket models key voyage` and, in each vault, `docket models allow voyage`,
   all in your own terminal. It sends a vault's text off the machine only when the vault allows it in `vault.yaml`,

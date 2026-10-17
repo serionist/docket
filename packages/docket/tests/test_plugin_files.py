@@ -88,14 +88,17 @@ def frontmatter(skill: str) -> dict[str, str]:
     return {k.strip(): v.strip() for k, _, v in (line.partition(":") for line in head.splitlines())}
 
 
-def test_recall_pre_approves_only_docket_s_read_only_tools() -> None:
+def test_recall_and_brief_pre_approve_only_docket_s_read_only_tools() -> None:
     golden = json.loads((REPO / "packages/docket/tests/fixtures/mcp-tools.json").read_text(encoding="utf-8"))
     read_only = {t["name"] for t in golden if t["annotations"]["read_only_hint"]}
-    allowed = frontmatter("recall")["allowed-tools"].split()
+    assert read_only == {"search", "read", "verify", "briefs"}
     # The plugin's name, then the server's key in .mcp.json: the names Claude Code gives a plugin's tools.
     prefix = "mcp__plugin_docket_docket__"
-    assert all(name.startswith(prefix) for name in allowed)
-    assert {name.removeprefix(prefix) for name in allowed} == read_only == {"search", "read", "verify"}
+    for skill, tools in (("recall", {"search", "read", "verify"}), ("brief", {"briefs", "search", "read", "verify"})):
+        allowed = frontmatter(skill)["allowed-tools"].split()
+        assert all(name.startswith(prefix) for name in allowed), skill
+        assert {name.removeprefix(prefix) for name in allowed} == tools, skill
+        assert tools <= read_only, skill
     assert list(read_json(".mcp.json")["mcpServers"]) == ["docket"]
 
 

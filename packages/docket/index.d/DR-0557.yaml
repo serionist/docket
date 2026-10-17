@@ -1,0 +1,10 @@
+decisions:
+  - id: DR-0557
+    title: The Briefs page lists briefs by entity type and opens one beside the raw its lines cite, as the Recording page does
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#161"]
+    description: "The Briefs page, built in #161's second PR, follows the Recording page (#164, DR-0544): GET only, a whole page per state, plain links, the facts read through recall and the index. /briefs lists the briefs grouped by entity type, each with its entity's name, rev, age since that rev, flagged lines and new records, and orphans with their survivor. /briefs?brief=<id> shows the brief's lines with their flags beside the raw a chosen line cites (line=<n>, its spans as verify gives them, refs followed one level). The URL holds brief, line and type, in that order, defaults left out, unknown parameters ignored. A brief whose entity a never-store list now holds answers hidden, and a line a list now names opens nothing (DR-0558)."
+    binds: [The page's URL only gains optional parameters whose default keeps today's meaning.]

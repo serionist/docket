@@ -1,0 +1,11 @@
+decisions:
+  - id: DR-0558
+    title: A brief never exists for a listed entity and never names a listed person in any shape
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#161"]
+    description: "doc_put refuses a brief whose entity a never-store list holds by its id (slug_listed) or a name (listed). It screens the brief's every line, its title among them, and every ref's doc id with phrases built from each people-list value: the value without its <address> and each address in it, as _forms reads a value, each name in both word orders, as _orders does; and the names and aliases of every entity whose name or alias listed() flags, so a nickname or handle the store knows is caught. A ref's doc id is also held to slug_listed. The refusal names the line, never the value, on top of the keywords list every doc is screened with. A list that gains a value later: docket brief stale and the briefs tool leave out a brief whose entity is now listed, and count it as hidden; the Briefs page hides it, and hides a line a list now names, by URL too."
+    not_chosen:
+      - "The people list read as keywords as written: it reads a phrase in written order only, and a Name <address> value never matches as one string."

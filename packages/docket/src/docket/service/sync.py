@@ -70,7 +70,9 @@ How this final run goes:
    no docket line: stop without closing.
 4. "docket: not kept: <tool> (too large)": put that item in skipped as too-large and go on. Any other "not kept":
    stop without closing.
-5. Close: ingest(run, captures=<the highest n you saw>, final=true, skipped=[...])."""
+5. Close: ingest(run, captures=<the highest n you saw>, final=true, skipped=[...]).
+6. After closing: briefs() names the stale briefs. Say so once; rebuild them with the brief skill only
+   when the user asks."""
 
 
 class Due(BaseModel):

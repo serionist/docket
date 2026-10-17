@@ -9,7 +9,7 @@ from __future__ import annotations
 import html
 import re
 import unicodedata
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from functools import lru_cache
 from typing import Any, Literal, cast
 from urllib.parse import unquote
@@ -28,6 +28,8 @@ _PERCENT_U = re.compile(r"%u([0-9a-fA-F]{4})")
 _BACKSLASH_U = re.compile(r"\\u([0-9a-fA-F]{4})")
 # A second entity of one name ends its id in -<n>: rita-sample-2.
 _SLUG_NUMBER = re.compile(r"-[0-9]+$")
+# An address written in angle brackets after a name: `Ben Sample <ben@example.invalid>`.
+_BRACKETED = re.compile(r"<[^<>]*>")
 # Decoding stops when a round changes nothing; a link wrapped more often than this is beyond any mail client seen.
 DECODE_ROUNDS = 4
 
@@ -160,6 +162,19 @@ def _orders(value: str) -> list[str]:
     write a name family name first, and `Minta, Dóra` or a doubled space is still the name."""
     words = _words(value).split()
     return [" ".join(words), *([f"{words[1]} {words[0]}"] if len(words) == 2 else [])]
+
+
+def person_phrases(lists: NeverStore, known: Iterable[str] = ()) -> list[str]:
+    """The phrases that name someone on the people list in a text, to read as keywords (DR-0558): each value without
+    its `<address>` and each address in it, as `_forms` reads a value, and each name in both word orders, as `_orders`
+    does; with them, `known`, the names and aliases the store holds for a listed entity, read the same way."""
+    out: set[str] = set()
+    for value in (*lists.people, *known):
+        out.update(fold(a) for a in _ADDRESS.findall(value))
+        name = _ADDRESS.sub(" ", _BRACKETED.sub(" ", value))
+        if _words(name).strip():
+            out.update(_orders(name))
+    return sorted(out)
 
 
 def listed(value: str, lists: NeverStore) -> ListName | None:

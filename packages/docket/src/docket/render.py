@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from zoneinfo import ZoneInfo
 
+from docket.briefs import BriefsReport
 from docket.curate.batch import BatchView, Measure, Status
 from docket.curate.propose import UNSEEN, CardSpelling
 from docket.index import SearchResult
@@ -369,4 +370,31 @@ def curate_status(status: Status, config: object) -> list[str]:
         lines.append(f"questions set curate.questions in {config} to a question file to measure a round")
     else:
         lines += curate_measures(status.before, status.after) or [f"questions {status.questions}, measured at a round"]
+    return lines
+
+
+def briefs(found: BriefsReport) -> list[str]:
+    """What `docket brief stale` and the `briefs` tool say: each brief's state and why, then what is hidden or
+    missing. Ids, names, counts and rids only (DR-0556)."""
+    lines: list[str] = []
+    for one in found.briefs:
+        head = f"{one.state:<9} {one.id}  {one.name}" + (f" ({one.type})" if one.type else "") + f", rev {one.rev}"
+        lines.append(head)
+        if one.why:
+            lines.append(f"          {one.why}")
+        if one.new.count:
+            lines.append(f"          {one.new.count} new record(s): {', '.join(one.new.newest)}")
+        if one.flagged:
+            lines.append(f"          {one.flagged} line(s) cite lines that changed")
+        if one.state == "orphaned":
+            lines.append(
+                f"          its entity is gone; {one.orphaned} holds its name now"
+                if one.orphaned
+                else "          its entity is gone, and no one entity holds its name"
+            )
+    if not found.briefs:
+        lines.append("nothing stale: every brief is current")
+    if found.hidden:
+        lines.append(f"hidden    {found.hidden} brief(s) whose entity a never-store list holds")
+    lines += [f"no brief  {entity}" for entity in found.missing]
     return lines

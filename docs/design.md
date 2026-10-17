@@ -178,7 +178,7 @@ same result on any day.
 
 | Feature | How it works | Phase |
 |---|---|---|
-| Briefs | a processed doc per person, project and topic: open items both ways, what changed, the last conversations, the decisions; every line cited; rebuilt after a sync for the entities it touched and before each meeting | 2 |
+| Briefs | a processed doc per entity, `brief:<entity id>`: what changed, the last conversations, the decisions, in three fixed sections, every line cited (DR-0555); stale when its entity's records sit in run files its last rev's tree lacks, or a line is flagged (DR-0556); never for a listed entity, never naming a listed person (DR-0558); rebuilt by the brief skill when the user asks. Open items wait for the ledger, and a brief before each meeting for the calendar's meetings (phase 3) | 2 |
 | Decision log | candidates from processing, confirmed by the user; contradictions are marked, never resolved by the machine; a later decision supersedes an earlier one, and history stays | 2 |
 | Own documents | the work folder and attachments, read-only, so search covers what was written next to what was said: `docket scan` reads a folder source's docx, xlsx, pptx, pdf, md and txt as text, by page, slide and sheet (DR-0480) | 1 |
 | Highlights | a recorder's highlight button and later a hotkey; marked stretches go to the top of the minutes | 1 |
