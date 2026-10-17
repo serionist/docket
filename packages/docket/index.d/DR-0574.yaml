@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0574
+    title: The prompt is chosen by what the system reports, with no opt-out; once one is set up, its failure is a no, never the code
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#143"]
+    description: "At each question docket.osprompt asks the system whether a prompt is set up. Windows: Available from CheckAvailabilityAsync is the prompt; DeviceNotPresent, NotConfiguredForUser, DisabledByPolicy, or a Windows without the interop interface, is the code. macOS: canEvaluatePolicy true is the prompt; passcodeNotSet is the code. Linux: Docket's action file in one of polkit's actions folders (/usr/share, /etc, /run or /usr/local/share, under polkit-1/actions) with /usr/bin/pkcheck there is the prompt; either missing is the code. Anything else the check meets, such as DeviceBusy or an error, refuses. Once a prompt is set up the code is never asked: a cancel, a failure, a timeout or no desktop to show it on (SSH on Windows or macOS, a service's session) is a no that names the reason, and the owner runs the command at the machine. No flag, environment variable, config key or token chooses the code, for the owner's scripts either: whatever an owner's switch reads, an agent running as the owner flips (DR-0520). What decides set-up is out of reach without the owner's own factor or root: Windows Hello is removed in Settings after the PIN or the password, and polkit's folders are root's. An owner who wants the code back removes the factor. Root can too: passwordless sudo, or a UAC bypass when the owner is an admin, removes the file or turns Hello off by policy; accepted, since root is past every check Docket has."
+    binds:
+      - A test per system maps each availability answer to the prompt, the code or a refusal as listed, and a failed prompt to a no with no code asked.
+      - docket vault status says which yes this machine asks and, for the code, why and how to set a prompt up, without showing one.
+    not_chosen:
+      - "An owner's switch for the code (a flag, a variable, a config key): an agent running as the owner sets it."
+      - "The code when the prompt fails: an agent makes it fail, over ssh localhost or by asking where no desktop is, and types the code."
+      - "A per-machine record that the prompt was used, refusing the code after it: a file in the owner's folders, which the agent edits."

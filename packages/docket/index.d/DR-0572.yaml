@@ -1,0 +1,19 @@
+decisions:
+  - id: DR-0572
+    title: The owner's yes is the OS prompt where this machine has one and the code typed back where it hasn't, through one call in docket/console.py
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#143"]
+    description: "console.confirm(act, lines, do, keep, kept) is the one question for every step that asks the owner's yes at their console. The console's refusals come first, unchanged from DR-0202 and DR-0518: CLAUDECODE set, or no console on stdin and stdout. Then the screen. Where docket.osprompt finds a prompt set up on this machine (DR-0574), the console asks Press Enter to <do> with <prompt>, n to <keep>, q to stop; on Enter the OS prompt shows the act's own line, such as Docket: release a held recording, and only its verified answer is a yes. A cancel, a failure, no desktop to show it on, or two minutes without an answer is a no that names the reason, and never falls back to the code. Where none is set up, one line says why, and the code is asked as DR-0202 has it. The prompt is asked outside the vault lock, as the code is (DR-0519), and nothing it shows names a value from the vault. The release line and the commit body (confirmed at the console) stay as they are, so no stored data changes. The OS prompt says a person answered, not that Docket's code is intact: a process running as the owner can still patch Docket or call its internals, the floor DR-0202 accepts. What it stops is the common way round the console check, a pseudo-terminal of the agent's own with CLAUDECODE cleared, which reads the code and types it back."
+    binds:
+      - Only docket.console imports docket.osprompt; a test scans for it, so no page, route or tool asks the prompt or answers it.
+      - No flag, environment variable, config key or token answers or skips the prompt, or chooses the code where a prompt is set up (DR-0574).
+      - "Tests never reach a real prompt: an autouse fixture replaces osprompt.find, and a test's child process patches it before Docket's main runs."
+      - "Amends DR-0202 and DR-0517: the yes is the OS prompt, or the code where the machine has none. A one-way door on AGENTS.md's list, in the release's and the loosening's lines."
+    not_chosen:
+      - "The OS prompt without the console check, so Claude's shell can ask and the owner answers in the dialog: the owner would approve a screen they never read, and a prompt they didn't start can pass on a face."
+      - "Both the code and the OS prompt: the code adds nothing a pseudo-terminal can't type."
+      - "The OS prompt straight after the screen, with no console line: n and q would go, and a release of several recordings could only be stopped one prompt at a time."
+      - "A check that Docket's console is the foreground window: a child of Claude Code can open the console Claude Code runs in, which is in front while the owner watches."
