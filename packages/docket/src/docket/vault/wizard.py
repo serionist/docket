@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Literal, Protocol
 
 from docket import userconfig
+from docket.childproc import console_flags
 from docket.errors import DocketError
 from docket.vault import host, redaction
 from docket.vault import machine as machines
@@ -87,7 +88,10 @@ class Plan:
 
 
 def _git_config(key: str) -> str:
-    proc = subprocess.run(["git", "config", key], capture_output=True, text=True, encoding="utf-8", check=False)
+    proc = subprocess.run(
+        ["git", "config", key], capture_output=True, text=True, encoding="utf-8", check=False,
+        creationflags=console_flags(),
+    )  # fmt: skip
     return proc.stdout.strip()
 
 

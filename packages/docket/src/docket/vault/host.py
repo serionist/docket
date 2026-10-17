@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from docket.childproc import console_flags
 from docket.vault.git import Git
 from docket.vault.vault import ignored
 
@@ -71,6 +72,7 @@ def remote_visibility(url: str) -> Visibility:
                 check=False,
                 env=env,
                 timeout=30,
+                creationflags=console_flags(),
             )
         except subprocess.TimeoutExpired:
             return "unknown"

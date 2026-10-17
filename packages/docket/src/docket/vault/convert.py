@@ -32,6 +32,7 @@ from typing import Any
 
 from filelock import FileLock, Timeout
 
+from docket.childproc import console_flags
 from docket.errors import DocketError
 from docket.vault import host
 from docket.vault.config import CONFIG_FILE, VaultConfig
@@ -304,7 +305,12 @@ def _rewrite(where: Where, state: State) -> None:
         stream += f"deleteall\nM 040000 {tree} {where.name}\n\n".encode()
     stream += _folder_commit(where, state, len(shas))
     proc = subprocess.run(
-        ["git", "fast-import", "--quiet"], cwd=where.top, input=bytes(stream), capture_output=True, check=False
+        ["git", "fast-import", "--quiet"],
+        cwd=where.top,
+        input=bytes(stream),
+        capture_output=True,
+        check=False,
+        creationflags=console_flags(),
     )
     if proc.returncode != 0:
         raise DocketError(f"git fast-import: {proc.stderr.decode('utf-8', 'replace').strip()}")
@@ -461,7 +467,10 @@ def _with_storage(text: str) -> str:
 
 def _identity(where: Where) -> bytes:
     """Who the folder commit is by: git's own identity in the host, else the vault's owner, now."""
-    proc = subprocess.run(["git", "var", "GIT_COMMITTER_IDENT"], cwd=where.top, capture_output=True, check=False)
+    proc = subprocess.run(
+        ["git", "var", "GIT_COMMITTER_IDENT"], cwd=where.top, capture_output=True, check=False,
+        creationflags=console_flags(),
+    )  # fmt: skip
     if proc.returncode == 0 and proc.stdout.strip():
         return proc.stdout.strip()
     owner = VaultConfig.load(where.root / CONFIG_FILE).owner
@@ -471,7 +480,9 @@ def _identity(where: Where) -> bytes:
 
 def _blob(cwd: Path, spec: str) -> bytes | None:
     """A blob's bytes as git stores them, or None when there is none."""
-    proc = subprocess.run(["git", "cat-file", "blob", spec], cwd=cwd, capture_output=True, check=False)
+    proc = subprocess.run(
+        ["git", "cat-file", "blob", spec], cwd=cwd, capture_output=True, check=False, creationflags=console_flags()
+    )
     return proc.stdout if proc.returncode == 0 else None
 
 
@@ -479,7 +490,7 @@ def _cat_commits(top: Path, shas: list[str]) -> dict[str, tuple[list[bytes], byt
     """Every commit's header lines and message, read in one `git cat-file --batch`."""
     proc = subprocess.run(
         ["git", "cat-file", "--batch"], cwd=top, input="".join(f"{s}\n" for s in shas).encode(), capture_output=True,
-        check=True,
+        check=True, creationflags=console_flags(),
     )  # fmt: skip
     out = proc.stdout
     commits: dict[str, tuple[list[bytes], bytes]] = {}
