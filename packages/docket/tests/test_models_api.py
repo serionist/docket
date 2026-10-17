@@ -227,6 +227,9 @@ def test_settings_that_dont_read_send_nothing(vault: Vault, monkeypatch: pytest.
         assert screen.allowed() == screening.UNREADABLE
         assert screen.query("pallet") == screening.UNREADABLE
         assert screen.sendable(db, [1, 2]) == screening.UNREADABLE
+        # A search's one read finds nothing to hold, so every check inside reads again and says the same.
+        with screen.reading() as held:
+            assert held is None and screen.query("pallet") == screening.UNREADABLE
         table = vectors.table_of(VOYAGE_4)
         db.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (vectors.META + table.key, "{not json"))
         assert vectors.screened(db, table) is None
