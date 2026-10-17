@@ -179,7 +179,7 @@ same result on any day.
 | Feature | How it works | Phase |
 |---|---|---|
 | Briefs | a processed doc per entity, `brief:<entity id>`: what changed, the last conversations, the decisions, in three fixed sections, every line cited (DR-0555); stale when its entity's records sit in run files its last rev's tree lacks, or a line is flagged (DR-0556); never for a listed entity, never naming a listed person (DR-0558); rebuilt by the brief skill when the user asks. Open items wait for the ledger, and a brief before each meeting for the calendar's meetings (phase 3) | 2 |
-| Decision log | candidates from processing, confirmed by the user; contradictions are marked, never resolved by the machine; a later decision supersedes an earlier one, and history stays | 2 |
+| Decision log | a processed doc per decision, `decision:<yyyy-mm-dd>-<words>`, on a project, topic or stream entity (DR-0563): Claude proposes candidates with the decision skill; only the user's click on the Briefs page confirms or rejects one, and every read takes a decision's status from git (DR-0564); a proposed one never reads as decided, and a brief's Decisions cite current decisions only (DR-0565); a contradiction is marked, never resolved by the machine; a later decision supersedes an earlier one, and history stays | 2 |
 | Own documents | the work folder and attachments, read-only, so search covers what was written next to what was said: `docket scan` reads a folder source's docx, xlsx, pptx, pdf, md and txt as text, by page, slide and sheet (DR-0480) | 1 |
 | Highlights | a recorder's highlight button and later a hotkey; marked stretches go to the top of the minutes | 1 |
 | Secrets | never in the vault; a keychain-backed `docket secret`, never indexed or sent to a model unless asked for by name | 2 |
@@ -702,6 +702,8 @@ MCP tools:
 | `search` | query, boosts and filters (sources, people, entities, since and until as a date or a time, k); hits with locators |
 | `read` | a locator or doc: the summary, the raw, or both, with `around` (minutes, paragraphs or messages) and a doc's `rev` |
 | `verify` | a doc's lines next to their raw spans |
+| `briefs` | which briefs are stale and why (DR-0556) |
+| `decisions` | each decision and where it stands, with its links both ways and the cite a brief takes (DR-0565) |
 | `timeline` | an entity's mentions by date and container |
 | `entity` | canonical name, aliases, related, ids, last seen, open items |
 | `doc_put` | write a processed doc; checks the frontmatter and that every anchor resolves |

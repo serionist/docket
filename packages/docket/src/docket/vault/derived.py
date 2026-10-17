@@ -19,7 +19,15 @@ from itertools import pairwise
 from docket.vault.anchors import UNREAD, is_unread, normalize_newlines, trailing_anchors
 from docket.vault.config import NeverStore
 from docket.vault.neverstore import matches_text
-from docket.vault.processed import DOC_TYPES, DocProblem, DocRefusedError, ProcessedDoc, key_line, line_roles
+from docket.vault.processed import (
+    DECISION_KEYS,
+    DOC_TYPES,
+    DocProblem,
+    DocRefusedError,
+    ProcessedDoc,
+    key_line,
+    line_roles,
+)
 from docket.vault.redact import BUILTIN_NAMES, MARKER, Redactor
 
 LEGACY = "legacy-note"
@@ -30,8 +38,10 @@ PATTERN_SAYS = (
     "another name"
 )
 # The frontmatter keys this Docket writes, and of them the ones whose values are screened in any doc.
-KNOWN = frozenset({"id", "type", "rev", "covers", "by", "supersedes", "entities", "old_paths", "import_hash"})
-SCREENED = frozenset({"id", "entities", "supersedes", "old_paths"})
+KNOWN = frozenset(
+    {"id", "type", "rev", "covers", "by", "supersedes", "entities", "old_paths", "import_hash", *DECISION_KEYS}
+)
+SCREENED = frozenset({"id", "entities", "supersedes", "old_paths", "subject", "replaces", "contradicts"})
 _KEY = re.compile(r"^([A-Za-z_][\w-]*)[ \t]*:(.*)$")
 # The rev line a take-in rewrites whole: `rev:` and a number, nothing else.
 _REV = re.compile(r"rev:[ \t]*\d*[ \t]*")

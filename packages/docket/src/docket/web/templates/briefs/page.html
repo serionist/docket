@@ -72,7 +72,7 @@
       {% for l in view.lines %}
       <div class="line {{ l.style }}{% if l.open %} cited{% endif %}{% if l.flagged %} flagged{% endif %}{% if l.hidden %} hidden-line{% endif %}" data-line="{{ l.n }}">
         <span class="n" aria-hidden="true">{{ l.n }}</span>
-        <span class="body" dir="auto">{% if l.url %}<a class="line-link" href="{{ l.url }}"{% if l.open %} aria-current="true"{% endif %}>{{ l.body }}</a>{% else %}{{ l.body }}{% endif %}{% if l.flagged %} <span class="badge flag">changed under it</span>{% endif %}</span>
+        <span class="body" dir="auto">{% if l.url %}<a class="line-link" href="{{ l.url }}"{% if l.open %} aria-current="true"{% endif %}>{{ l.body }}</a>{% else %}{{ l.body }}{% endif %}{% if l.flagged %} <span class="badge flag">changed under it</span>{% endif %}{% if l.unconfirmed %} <span class="badge flag">not a confirmed decision</span>{% endif %}</span>
         {% if l.anchors or l.refs %}
         <span class="cites">
           {% for a in l.anchors %}{% if a.url %}<a class="anchor" href="{{ a.url }}" title="{{ a.title }}">{{ a.text }}</a>{% else %}<span class="anchor">{{ a.text }}</span>{% endif %} {% endfor %}

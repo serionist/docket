@@ -47,14 +47,14 @@ def check(doc: ProcessedDoc, root: Path, lists: NeverStore) -> tuple[list[DocPro
         message = f"{doc.meta.id} is for an entity that doesn't exist; a brief is brief:<entity id>"
         problems.append(DocProblem(None, message))
     elif held(found, lists):
-        problems.append(DocProblem(_head_line(doc, "id"), HELD))
+        problems.append(DocProblem(head_line(doc, "id"), HELD))
         return problems, []
     if entity_id not in doc.meta.entities:
         problems.append(DocProblem(None, f"entities: a brief names its entity, {entity_id}"))
     problems += _sections(doc)
     warned = [f"a section the form doesn't name yet, kept until the form settles: {title}" for title in _extra(doc)]
-    problems += _in_entities(doc, entities, lists)
-    problems += _screen(doc, entities, lists)
+    problems += in_entities(doc, entities, lists)
+    problems += people_screen(doc, entities, lists)
     return problems, warned
 
 
@@ -63,8 +63,8 @@ def screen(doc: ProcessedDoc, root: Path, lists: NeverStore) -> list[DocProblem]
     the people screen, each problem on a line of the file. The form is a put's to hold, not the take-in's."""
     entities = load_entities(root).entities
     found = next((e for e in entities if e.id == entity_of(doc.meta.id)), None)
-    problems = [DocProblem(_head_line(doc, "id"), HELD)] if found is not None and held(found, lists) else []
-    return problems + _in_entities(doc, entities, lists) + _screen(doc, entities, lists)
+    problems = [DocProblem(head_line(doc, "id"), HELD)] if found is not None and held(found, lists) else []
+    return problems + in_entities(doc, entities, lists) + people_screen(doc, entities, lists)
 
 
 def held(entity: Entity, lists: NeverStore) -> bool:
@@ -81,11 +81,11 @@ def _aliases(entity: Entity) -> list[str]:
     return [a.text for a in entity.aliases]
 
 
-def _head_line(doc: ProcessedDoc, key: str) -> int | None:
+def head_line(doc: ProcessedDoc, key: str) -> int | None:
     return key_line(doc.source.split("\n")[1 : doc.head_lines - 1], key) if doc.source else None
 
 
-def _in_entities(doc: ProcessedDoc, entities: list[Entity], lists: NeverStore) -> list[DocProblem]:
+def in_entities(doc: ProcessedDoc, entities: list[Entity], lists: NeverStore) -> list[DocProblem]:
     """An id in the brief's `entities` that names a listed person, or an entity a list holds, by its id alone."""
     by_id = {e.id: e for e in entities}
     named = [
@@ -93,7 +93,7 @@ def _in_entities(doc: ProcessedDoc, entities: list[Entity], lists: NeverStore) -
         for entity_id in doc.meta.entities
         if slug_listed(entity_id, lists) or (entity_id in by_id and held(by_id[entity_id], lists))
     ]
-    return [DocProblem(_head_line(doc, "entities"), IN_ENTITIES)] if named else []
+    return [DocProblem(head_line(doc, "entities"), IN_ENTITIES)] if named else []
 
 
 def _headings(doc: ProcessedDoc) -> list[tuple[int, str, str]]:
@@ -133,11 +133,11 @@ def hidden_lines(lines: Iterable[tuple[int, str]], root: Path, lists: NeverStore
     """The lines a page shows as hidden now (DR-0558): one that says a keyword, names a listed person by the screen
     doc_put holds a brief to, or cites a doc whose id names one. A list that gained a value after the brief was put
     hides its lines from then on."""
-    phrases = _phrases(load_entities(root).entities, lists)
-    return {n for n, line in lines if matches_text(line, lists) or _names(line, phrases, lists) is not None}
+    shapes = phrases(load_entities(root).entities, lists)
+    return {n for n, line in lines if matches_text(line, lists) or names(line, shapes, lists) is not None}
 
 
-def _phrases(entities: list[Entity], lists: NeverStore) -> NeverStore:
+def phrases(entities: list[Entity], lists: NeverStore) -> NeverStore:
     """The people list in all its shapes, with the names, aliases and contact ids of each entity the people list names
     by any of them, or a list holds by a name or an alias, read as keywords."""
     known = [
@@ -149,20 +149,20 @@ def _phrases(entities: list[Entity], lists: NeverStore) -> NeverStore:
     return NeverStore(keywords=person_phrases(lists, known))
 
 
-def _names(line: str, phrases: NeverStore, lists: NeverStore) -> str | None:
+def names(line: str, shapes: NeverStore, lists: NeverStore) -> str | None:
     """What a line names, as a problem's message: a listed person in its text, or a ref to a doc whose id names one."""
-    if not phrases.keywords:
+    if not shapes.keywords:
         return None
     trailing = trailing_anchors(line)
-    if matches_text(trailing.text, phrases):
+    if matches_text(trailing.text, shapes):
         return NAMES_SOMEONE
-    if any(matches_text(r.doc, phrases) or slug_listed(entity_of(r.doc), lists) for r in trailing.refs):
+    if any(matches_text(r.doc, shapes) or slug_listed(entity_of(r.doc), lists) for r in trailing.refs):
         return f"a ref here cites a doc whose id {NAMES_SOMEONE}"
     return None
 
 
-def _screen(doc: ProcessedDoc, entities: list[Entity], lists: NeverStore) -> list[DocProblem]:
+def people_screen(doc: ProcessedDoc, entities: list[Entity], lists: NeverStore) -> list[DocProblem]:
     """Every line, the title among them, and every ref's doc id, held to the people list in all its shapes."""
-    phrases = _phrases(entities, lists)
-    found = ((n, _names(line, phrases, lists)) for n, line in doc.lines())
+    shapes = phrases(entities, lists)
+    found = ((n, names(line, shapes, lists)) for n, line in doc.lines())
     return [DocProblem(n, message, "") for n, message in found if message is not None]

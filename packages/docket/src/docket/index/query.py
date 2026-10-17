@@ -84,6 +84,8 @@ PREFIX_MIN = 3
 SNIPPET_BEFORE = 15
 SNIPPET_WORDS = 40
 TITLE_WORDS = 8
+# What a decision another replaced says before its title, in a hit and its group (DR-0565).
+SUPERSEDED = "Superseded: "
 # A title's lead: its text up to the first `: ` after at least three words, else its first 12 words (DR-0231).
 LEAD_END = ": "
 LEAD_MIN = 3
@@ -673,7 +675,10 @@ class _Search:
 
     def group(self, key: str, hits: list[_Row]) -> Group:
         record = self.conn.execute("SELECT title, source, kind FROM records WHERE rid = ?", (key,)).fetchone()
-        doc = self.conn.execute("SELECT title FROM docs WHERE id = ?", (key,)).fetchone()
+        doc = self.conn.execute("SELECT title, type, superseded_by FROM docs WHERE id = ?", (key,)).fetchone()
+        if doc is not None and doc[1] == "decision" and doc[2] is not None:
+            # A decision another replaced says so wherever it shows (DR-0565).
+            doc = (f"{SUPERSEDED}{doc[0]}",)
         if record is not None:
             if record[2] == documents.FILE_KIND and documents.is_folder_rid(key, self.folder_sources):
                 # A folder source's file: its pages, slides and sheets are under it (DR-0482).
@@ -1208,6 +1213,9 @@ def _run(
     counted = [rows[c] for c in ranked if found_by[c] != "vector" or c in shown]
     result = SearchResult(query=reading, candidates=len(counted), models=run, rerank=reranked)
     hit_rank = {row.id: n for n, row in enumerate(kept, start=1)}
+    replaced = {
+        r[0] for r in s.conn.execute("SELECT id FROM docs WHERE type = 'decision' AND superseded_by IS NOT NULL")
+    }
     by_group: dict[str, list[_Row]] = {}
     for row in kept:
         by_group.setdefault(row.grp, []).append(row)
@@ -1226,7 +1234,7 @@ def _run(
                     lines=None if row.line_from is None or row.line_to is None else (row.line_from, row.line_to),
                     speakers=row.speakers,
                     authors=row.authors,
-                    title=row.title,
+                    title=f"{SUPERSEDED}{row.title}" if row.doc in replaced and row.title else row.title,
                     snippet=s.snippet(row.text),
                     rank=hit_rank[row.id],
                     found_by=found_by[row.id],

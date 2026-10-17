@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 from docket.index import flags
 from docket.index import update as index_update
 from docket.index.build import open_index
-from docket.vault import brief_form
+from docket.vault import brief_form, decision_form
 from docket.vault.config import NeverStore
 from docket.vault.docstore import DocStore
 from docket.vault.entities import Entity, load_entities
@@ -100,11 +100,12 @@ def report(
     git = Git(vault.root, home=vault.home)
     histories = store.histories([d.meta.id for d in shown])
     commits = {d.meta.id: histories[d.meta.id][0][1] for d in shown if histories.get(d.meta.id)}
-    times = _times(git, sorted(set(commits.values())))
+    times = commit_times(git, sorted(set(commits.values())))
+    standing = decision_form.standings(store.decisions())
     trees: dict[str, set[str] | None] = {}
     conn = open_index(vault)
     try:
-        reader = _Reader(by_id, known, languages, commits, times, trees, git, conn, flags.from_index(conn))
+        reader = _Reader(by_id, known, languages, commits, times, trees, git, conn, flags.from_index(conn), standing)
         for doc in shown:
             state = reader.state(doc)
             if not stale_only or state.state != "current":
@@ -148,7 +149,7 @@ def _holders(doc: ProcessedDoc, entity_id: str, known: list[Entity]) -> list[Ent
     ]
 
 
-def _times(git: Git, commits: list[str]) -> dict[str, str]:
+def commit_times(git: Git, commits: list[str]) -> dict[str, str]:
     """Each commit's time (UTC, ISO), one call for all, or one each when some aren't on this clone."""
     if not commits:
         return {}
@@ -202,6 +203,7 @@ class _Reader:
     git: Git
     conn: sqlite3.Connection
     found: list[flags.Flag]
+    standing: dict[str, decision_form.Standing]
 
     def state(self, doc: ProcessedDoc) -> BriefState:
         entity_id = doc.meta.id.partition(":")[2]
@@ -222,11 +224,14 @@ class _Reader:
             holders = _holders(doc, entity_id, self.known)
             survivor = holders[0].id if len(holders) == 1 else None
             return base.model_copy(update={"state": "orphaned", "orphaned": survivor})
+        unconfirmed = bool(decision_form.unconfirmed(doc, self.standing))
         tree = _tree(self.git, commit, self.trees) if commit is not None and commit in self.times else None
         if tree is None:
-            return base.model_copy(update={"state": "stale", "why": HISTORY_NOT_HERE})
+            why = f"{HISTORY_NOT_HERE}; {decision_form.NOT_CONFIRMED}" if unconfirmed else HISTORY_NOT_HERE
+            return base.model_copy(update={"state": "stale", "why": why})
         seen = [(rid, ts) for rid, path, ts in self.conn.execute(_MENTIONS, (entity_id,)) if path not in tree]
         seen.sort(key=lambda pair: (pair[1], pair[0]), reverse=True)
         new = NewRecords(count=len(seen), newest=[rid for rid, _ in seen[:NEWEST]])
-        stale = bool(new.count or base.flagged)
-        return base.model_copy(update={"new": new, "state": "stale" if stale else "current"})
+        stale = bool(new.count or base.flagged or unconfirmed)
+        why = decision_form.NOT_CONFIRMED if unconfirmed else None
+        return base.model_copy(update={"new": new, "state": "stale" if stale else "current", "why": why})

@@ -63,8 +63,11 @@ def build_briefs_vault(root: Path) -> Vault:
                     f"- The consultant's price is above the budget. {cite(vault, TEN)}",
                     f"- The offer comes by mail. [r:{OFFER}#1]",
                 ],
-                [f"- 7 Oct, supplier call: Cleo sends the offer in writing by Friday. [r:{CALL}@04:00-05:00]"],
-                [f"- Dóra agrees the deadline with Ben on Friday. {cite(vault, DEADLINE)}"],
+                [
+                    f"- 7 Oct, supplier call: Cleo sends the offer in writing by Friday. [r:{CALL}@04:00-05:00]",
+                    f"- Dóra said she agrees the deadline with Ben on Friday. {cite(vault, DEADLINE)}",
+                ],
+                [],
             ],
         ),
         brief(
@@ -83,8 +86,8 @@ def build_briefs_vault(root: Path) -> Vault:
             [COLD, ORDERED],
             [
                 [f"- The label printer by dock two fails in the cold. [r:{COLD}]"],
+                [f"- A cold model was ordered, the chat said. [r:{ORDERED}]"],
                 [],
-                [f"- A cold model was ordered. [r:{ORDERED}]"],
             ],
         ),
         brief(

@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 import typer
 from pydantic import ValidationError
 
-from docket import __version__, briefs, index, questions, recall, render, userconfig
+from docket import __version__, briefs, decisions, index, questions, recall, render, userconfig
 from docket.curate import batch as curate
 from docket.documents import scan as documents_scan
 from docket.errors import DocketError
@@ -52,7 +52,7 @@ from docket.vault import convert, curatelog, cuts, holds, inforce, redaction, re
 from docket.vault.docstore import DocStore
 from docket.vault.entitystore import EntityStore, RefusedError, Written, load_changes
 from docket.vault.gate import Gate, Label
-from docket.vault.processed import DocRefusedError
+from docket.vault.processed import STATUSES, DocRefusedError
 from docket.vault.records import RawRecord, source_name_problem
 from docket.vault.spans import WINDOW
 from docket.vault.staging import Classifier, Entry, State
@@ -74,6 +74,8 @@ doc_app = typer.Typer(help="Processed docs: put one with its anchors, read it, v
 app.add_typer(doc_app, name="doc")
 brief_app = typer.Typer(help="Briefs: which are stale, and why.", no_args_is_help=True)
 app.add_typer(brief_app, name="brief")
+decision_app = typer.Typer(help="Decisions: where each stands.", no_args_is_help=True)
+app.add_typer(decision_app, name="decision")
 index_app = typer.Typer(help="The index: built from the vault on this machine, for search.", no_args_is_help=True)
 app.add_typer(index_app, name="index")
 service_app = typer.Typer(
@@ -820,6 +822,24 @@ def brief_stale(
     orphans; and with --entity, each one's state, or that it has no brief yet. The /docket:brief skill rebuilds them."""
     found = find_vault(vault)
     say_all(render.briefs(briefs.report(found, entity, stale_only=entity is None)))
+
+
+@decision_app.command("list")
+def decision_list(
+    entity: Annotated[
+        list[str] | None, typer.Option("--entity", help="Only the decisions on this entity; again for more.")
+    ] = None,
+    status: Annotated[
+        str | None, typer.Option("--status", help="Only decisions with this status: proposed, confirmed or rejected.")
+    ] = None,
+    vault: VaultOption = None,
+) -> None:
+    """Each decision, newest first: proposed, current, superseded or rejected, with what it replaces, contradicts or
+    supersedes and what replaced or contradicted it. Only the Briefs page confirms or rejects one."""
+    if status is not None and status not in STATUSES:
+        raise DocketError(f"--status is {', '.join(STATUSES)}, not {status!r}")
+    found = find_vault(vault)
+    say_all(render.decisions(decisions.report(found, entity, status)))
 
 
 @doc_app.command("put")

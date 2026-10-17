@@ -1,7 +1,7 @@
 ---
 name: brief
 description: Write or rebuild a brief, the doc about one person, project, customer or topic that says what changed, the last conversations and the decisions, every line cited. Use when the user asks for a brief on someone or something, asks what changed with them, or after a sync when the user wants the stale briefs rebuilt.
-allowed-tools: mcp__plugin_docket_docket__briefs mcp__plugin_docket_docket__search mcp__plugin_docket_docket__read mcp__plugin_docket_docket__verify
+allowed-tools: mcp__plugin_docket_docket__briefs mcp__plugin_docket_docket__decisions mcp__plugin_docket_docket__search mcp__plugin_docket_docket__read mcp__plugin_docket_docket__verify
 ---
 
 # A brief
@@ -13,8 +13,8 @@ stale ones after a sync.
 ## The method
 
 1. **Which.** `briefs` for the stale list, or `briefs` with `entities` set to the one the user named. Each comes with
-   why it is stale: records its last rev hadn't seen (the newest rids), lines that cite a line that changed, or its
-   history not on this clone. An orphan's entity is gone; when the result names the entity that holds its name now,
+   why it is stale: records its last rev hadn't seen (the newest rids), lines that cite a line that changed, a
+   Decisions line that cites no confirmed decision, or its history not on this clone. An orphan's entity is gone; when the result names the entity that holds its name now,
    that is the brief its lines go into.
 2. **Read.** `read` the brief as it is, if there is one. `search` the entity's records since the brief's rev time,
    with the entity in `entities`. `read` and `verify` the notes and minutes they are summed up in, for each line you
@@ -41,7 +41,11 @@ stale ones after a sync.
 
    - **What changed:** since the brief's last rev, the facts that moved.
    - **Last conversations:** newest first, at most ten, each with its date and what was said.
-   - **Decisions:** what was decided in them.
+   - **Decisions:** the entity's current decisions only, from `decisions` with `entities` set to it: each line
+     reads exactly `- <its title> <its cite>`, as the tool gives them. A decision that is only proposed isn't
+     decided, and isn't there; with no current decision the section stays empty.
+   - What changed and Last conversations say what was said or proposed ("Ben said …", "proposed …"), never that
+     something was decided: only the Decisions section says that, from the log.
    - Each line ends with what it was built from: a note's line as `[d:<doc id>@<rev>#<n>]`, the `cite` token `verify`
      gives that line, or the raw's own anchor. A line with neither is refused. List in `covers` the rids your raw
      anchors use; it stays empty when every line cites note lines.

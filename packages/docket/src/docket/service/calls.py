@@ -13,8 +13,9 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel
 
-from docket import briefs, index, recall, render
+from docket import briefs, decisions, index, recall, render
 from docket.briefs import BriefsReport
+from docket.decisions import DecisionsReport
 from docket.index import SearchResult
 from docket.media import put as media
 from docket.media.keystore import KeyStore
@@ -73,6 +74,20 @@ async def verify(
         result = recall.verify(service.vault(), doc, lines=list(lines) if lines else None, window=window)
         return result, render.text(render.verify(result))
 
+    return await asyncio.to_thread(run)
+
+
+async def decision_states(
+    service: Service, entities: list[str] | None = None, status: str | None = None
+) -> tuple[DecisionsReport, str]:
+    """The decisions and where each stands, read-only, after the index is brought up to date (DR-0565). The tool's
+    schema holds `status` to the three a decision has."""
+
+    def run() -> tuple[DecisionsReport, str]:
+        found = decisions.report(service.vault(), entities, status, update=False)
+        return found, render.text(render.decisions(found))
+
+    await service.updater.fresh()
     return await asyncio.to_thread(run)
 
 

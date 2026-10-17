@@ -77,6 +77,9 @@ class DocView(BaseModel):
     supersedes: list[str]
     entities: list[str]
     superseded_by: list[str]
+    # A decision's status, and whether it is current: confirmed, and no confirmed decision supersedes it (DR-0565).
+    status: str | None = None
+    current: bool | None = None
     old_paths: list[str] = Field(default_factory=list[str])
     text: str
     lines: list[DocLine]
@@ -575,6 +578,8 @@ def _read_doc(call: _Call, doc: ProcessedDoc, locator: str, view: View) -> ReadR
             supersedes=meta.supersedes,
             entities=meta.entities,
             superseded_by=superseded_by,
+            status=meta.status,
+            current=None if meta.status is None else meta.status == "confirmed" and not superseded_by,
             old_paths=meta.old_paths,
             text=doc.source,
             lines=[

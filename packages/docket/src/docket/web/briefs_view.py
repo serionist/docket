@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 from docket.briefs import BriefsReport, BriefState
 from docket.recall import DocLine, DocView, VerifiedLine
 from docket.vault.anchors import Anchor, format_anchor, trailing_anchors
+from docket.vault.decision_form import NOT_CONFIRMED
 from docket.vault.spans import Span
 from docket.web.briefs_state import ORPHANED, TYPES, BriefsState
 from docket.web.panel import SpanView, Style, anchored_rid, frontmatter_end, line_parts, span_view
@@ -47,6 +48,8 @@ class Facts:
     hidden_lines: frozenset[int] = frozenset()
     line: VerifiedLine | None = None
     hidden_refs: frozenset[int] = frozenset()
+    # A Decisions line citing no confirmed decision, from a brief stored before decisions came (DR-0565).
+    unconfirmed: frozenset[int] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -94,6 +97,7 @@ class BriefLine:
     flagged: bool
     hidden: bool
     open: bool
+    unconfirmed: bool = False
 
 
 @dataclass(frozen=True)
@@ -247,8 +251,11 @@ def _brief(facts: Facts, state: BriefsState, found: BriefState, doc: DocView) ->
     age = _age(found, facts.now)
     view.meta = " \N{MIDDLE DOT} ".join(p for p in (found.type or ORPHANED, f"rev {found.rev}", age) if p)
     view.back = state.but(brief=None, line=None).url()
-    if found.why:
-        view.notices.append(f"Stale: {found.why}, so Docket can't tell which records it hasn't seen.")
+    for why in found.why.split("; ") if found.why else []:
+        if why == NOT_CONFIRMED:
+            view.notices.append(f"Stale: {why}; marked below. The brief skill's next rev cites the log's decisions.")
+        else:
+            view.notices.append(f"Stale: {why}, so Docket can't tell which records it hasn't seen.")
     if found.new.count:
         newest = " (the newest five)" if found.new.count > len(found.new.newest) else ""
         view.notices.append(
@@ -283,7 +290,9 @@ def _line(line: DocLine, doc: DocView, facts: Facts, state: BriefsState) -> Brie
     links = [_anchor(anchored_rid(a, doc.covers), a) for a in anchors]
     refs = [_doc_link(r.doc, r.line) for r in trailing.refs]
     url = state.but(line=n).link() if anchors or trailing.refs else None
-    return BriefLine(n, body, style, url, links, refs, flagged=flagged, hidden=False, open=state.line == n)
+    open_ = state.line == n
+    unconfirmed = n in facts.unconfirmed
+    return BriefLine(n, body, style, url, links, refs, flagged, hidden=False, open=open_, unconfirmed=unconfirmed)
 
 
 def _anchor(rid: str | None, anchor: Anchor) -> Link:

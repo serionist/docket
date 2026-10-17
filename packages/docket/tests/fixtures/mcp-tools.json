@@ -178,6 +178,48 @@
     }
   },
   {
+    "name": "decisions",
+    "input_schema": {
+      "properties": {
+        "entities": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "anyOf": [
+            {
+              "enum": [
+                "proposed",
+                "confirmed",
+                "rejected"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "annotations": {
+      "read_only_hint": true,
+      "open_world_hint": false
+    }
+  },
+  {
     "name": "doc_put",
     "input_schema": {
       "properties": {
