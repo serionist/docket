@@ -237,6 +237,25 @@ def test_a_brief_whose_history_isnt_here_is_stale_never_current(vault: Vault, mo
     assert (found.state, found.why, found.rev_time) == ("stale", briefs.HISTORY_NOT_HERE, None)
 
 
+def test_one_brief_s_missing_commit_leaves_the_others_as_they_are(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    put_ben(vault)
+    recall.doc_put(vault, brief("northwind", "Northwind", changed=[f"- Above the budget. {cite(vault, TEN)}"]))
+    real = DocStore.histories
+
+    def one_missing(store: DocStore, ids: list[str]) -> dict[str, list[tuple[int, str]]]:
+        return {**real(store, ids), "brief:northwind": [(1, "0" * 40)]}
+
+    monkeypatch.setattr(DocStore, "histories", one_missing)
+    ben, northwind = sorted(briefs.report(vault, stale_only=False).briefs, key=lambda b: b.id)
+    assert (ben.state, ben.why, ben.rev_time is not None) == ("current", None, True)
+    assert (northwind.state, northwind.why, northwind.rev_time) == ("stale", briefs.HISTORY_NOT_HERE, None)
+
+    monkeypatch.setattr(DocStore, "histories", lambda _store, _ids: {})
+    assert {b.why for b in briefs.report(vault, stale_only=False).briefs} == {briefs.HISTORY_NOT_HERE}
+
+
 def test_a_merge_in_the_briefs_history_reads_each_brief_s_own_log(vault: Vault) -> None:
     # The fixture leaves its entity files staged, not committed; a branch switch and a merge want them in a commit.
     git(vault.root, "commit", "-qm", "Entities", "--", "entities")
