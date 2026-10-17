@@ -109,20 +109,20 @@ Users and their stored data depend on these. Change one only in a PR that names 
 agrees in the issue or, under an autonomy grant, with its decision recorded as proposed for his review (DR-0012):
 
 - the names: the `docket` package and command, the plugin's and the marketplace's name `docket`;
-- the vault's format: its layout, run-file names and where Docket's own files live (DR-0141), the raw record's
-  version (DR-0020), `vault.yaml` (DR-0021), its `storage` (DR-0140), its redaction keys (DR-0192) and its
-  `api_provider` (DR-0537), the vault's own `.gitattributes` (DR-0142), staging's files and states (DR-0024), the
-  processed doc's format (DR-0109), the anchor grammar (DR-0198), a transcript's segments as a record field
-  (DR-0111), doc revisions as the commits that wrote them (DR-0112), entity files (DR-0113), a transcript's text
-  rendered by the core (DR-0120), hold lists (DR-0121), release logs (DR-0200), a cut record's fidelity (DR-0126), a
-  legacy note's old paths and import hash (DR-0130), old paths as locators (DR-0131), each machine's cursor file
-  (DR-0245), the curate log's path, lines and keys (DR-0460, DR-0461), a folder source's rids, `<source>:<12 hex>`
-  with `/page<n>`, `/slide<n>` and `/sheet<n>` under them (DR-0482), media's paths, staged and stored, and
-  its sidecar and withheld marks (DR-0547), the sidecar's cuts and `_decided.jsonl`'s kinds (DR-0561), the media cut
-  log and the sidecar's replaced keys (DR-0562);
+- the vault's format: its layout, run-file names and where Docket's own files live (DR-0141), the raw record's version
+  (DR-0020), `vault.yaml` (DR-0021), its `storage` (DR-0140), its redaction keys (DR-0192) and its `api_provider`
+  (DR-0537), the vault's own `.gitattributes` (DR-0142), staging's files and states (DR-0024), the processed doc's
+  format (DR-0109), the anchor grammar (DR-0198), a transcript's segments as a record field (DR-0111), doc revisions as
+  the commits that wrote them (DR-0112), entity files (DR-0113), a transcript's text rendered by the core (DR-0120),
+  hold lists (DR-0121), release logs (DR-0200), a cut record's fidelity (DR-0126), a legacy note's old paths and import
+  hash (DR-0130), old paths as locators (DR-0131), each machine's cursor file (DR-0245), the curate log's path, lines
+  and keys (DR-0460, DR-0461), a folder source's rids, `<source>:<12 hex>` with `/page<n>`, `/slide<n>` and `/sheet<n>`
+  under them (DR-0482), media's paths, staged and stored, and its sidecar and withheld marks (DR-0547), the sidecar's
+  cuts and `_decided.jsonl`'s kinds (DR-0561), the media cut log and the sidecar's replaced keys (DR-0562), a Whisper
+  transcript's rid suffix `/whisper`, its engine string and its `via` (DR-0570);
 - a source's mapper interface (DR-0119), and the names and keys of a source in `vault.yaml` (DR-0124, DR-0125),
   `folder` and `exclude` (DR-0481) and `media_folders` (DR-0548) among them;
-- the question file `docket eval` reads, which users keep outside the repo (DR-0290);
+- the question file `docket eval` reads, kept outside the repo (DR-0290); the user config's `speech` section (DR-0568);
 - the media key export's file, `schema_version` 1, which users keep as their backup (DR-0550);
 - the MCP tools' names and parameters: `search`, `read`, `verify` and `doc_put` (DR-0150), `run_open` and `ingest`
   (DR-0241), `media_put` (DR-0547), `briefs` (DR-0556), `decisions` (DR-0565), and the plugin's server key `docket` that

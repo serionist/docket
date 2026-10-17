@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0568
+    title: "docket models install --speech: off by default, on a CPU only when asked, the choice in the user config's speech section"
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#158"]
+    description: "`docket models install --speech` builds the speech environment for the device (auto, cpu or cuda, picked as --device picks it for the embedder) and fetches large-v3; `--speech-model tiny` fetches tiny instead. A plain `docket models install` never installs speech. Before it downloads it says the model's size and the packages', and on CUDA that it installs NVIDIA's cuBLAS under NVIDIA's terms and needs about 4.5 GB of the GPU's memory while it transcribes (faster-whisper's own figure for large-v2, the same size), on top of search's 2 to 3 GB: a GPU under 6 GB is refused, naming --device cpu, and one under 8 GB is told Whisper runs only while nothing else holds it. On a CPU it says an hour of audio takes about an hour, so Docket transcribes only when asked. It times the worker once on 30 s of generated audio with VAD off, as the reranker is timed (DR-0455), and keeps the seconds and, on CUDA, the peak VRAM nvidia-smi saw above where it started in the environment's marker, docket-speech.json, with the requirements' hash and the Python, so a marker from another Docket or Python asks for the install again. The choice is a top-level section of the user config, `speech: {model, device}`, not a key of the models block, which refuses keys it doesn't know and would turn search's models on by being there. `docket models status` shows a speech line once speech was installed. `docket models remove --speech` removes the speech environments, the speech models' files and the section; a plain `docket models remove` removes them with search's."
+    binds:
+      - "The user config's speech section keeps its two keys, model (a catalogue name) and device (cpu or cuda): changing their meaning is a door."
+    not_chosen:
+      - "models.speech in the models block, as the plan first said: that block refuses keys it doesn't know, and one holding only speech would turn search's models on."
+      - "--speech taking the model as an optional value: the command line's parser can't take an option whose value may be left out, so the model is --speech-model."

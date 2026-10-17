@@ -133,7 +133,7 @@ def pick_device(wanted: str, *, which: Which = shutil.which, run: Run = subproce
     raise DocketError(f"--device is auto, cpu or cuda, not {wanted!r}")
 
 
-def _uv(args: Sequence[str], what: str, run: Run) -> None:
+def uv_step(args: Sequence[str], what: str, run: Run) -> None:
     done = run(list(args), capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
     if done.returncode != 0:
         tail = "\n".join((done.stderr or done.stdout).strip().splitlines()[-5:])
@@ -145,9 +145,9 @@ def build_env(device: Device, uv: str, run: Run) -> None:
     env = config.env_dir(device)
     env.parent.mkdir(parents=True, exist_ok=True)
     try:
-        _uv([uv, "venv", "--clear", "--python", sys.executable, str(env)], "making the models' environment", run)
+        uv_step([uv, "venv", "--clear", "--python", sys.executable, str(env)], "making the models' environment", run)
         with resources.as_file(resources.files("docket.models").joinpath(f"requirements-{device}.txt")) as wanted:
-            _uv(
+            uv_step(
                 [uv, "pip", "install", "--python", str(config.env_python(env)), "--require-hashes", "-r", str(wanted)],
                 "installing the models' packages",
                 run,
@@ -170,7 +170,7 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def fetch(embedder: Embedder | Reranker, file: ModelFile, opener: Opener = _open) -> bool:
+def fetch(embedder: config.Hosted, file: ModelFile, opener: Opener = _open) -> bool:
     """Download one file at the pinned revision, resuming a `.part` left before, and keep it only when its sha256 is
     the catalogue's. Returns whether it downloaded anything."""
     target = config.file_path(embedder, file)

@@ -756,7 +756,8 @@ def _preview(
 def _facts(view: RawRecord) -> list[tuple[str, str]]:
     facts: list[tuple[str, str]] = []
     facts += [("author", view.author)] if view.author else []
-    facts += [("to", ", ".join(view.to))] if view.to else []
+    # A transcript's people are who spoke, as a machine transcript carries its recording's (DR-0570).
+    facts += [("speakers" if view.segments else "to", ", ".join(view.to))] if view.to else []
     facts += [("container", view.container)] if view.container else []
     facts += [("thread", view.thread)] if view.thread else []
     facts += [("attachments", ", ".join(a.name for a in view.attachments))] if view.attachments else []

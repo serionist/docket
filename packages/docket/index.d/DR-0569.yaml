@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0569
+    title: docket transcribe makes a transcript only from stored audio that reads ok, with the family's checks before and after
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#158"]
+    description: "One job at a time on a machine: a lock file in the state folder, speech.lock, with the holder's pid in speech.pid; a second `docket transcribe` says one is running and whose pid, or with --wait waits for it. The recording's source must be one this machine ingests, its cursor file holding it, since the withheld marks the checks read are this clone's alone (DR-0547). Step 1, under the vault's lock: Gate.family_plan runs media's screen (Screen.plan, as at promotion, after the sweep), whose family checks (Screen.family) are the source in force, on and not private, no version of a record of the family, staged or in raw, matching a never-store value, no withheld mark and no private decision; then no hold, no release leaving a record out and no record cut by characters. And the reader's state is ok: the audio stored, cut by every range its family needs (DR-0562), its key here. Step 2: the stored file decrypted into the per-process plain folder (DR-0559) and decoded by the child's pcm mode to 16 kHz mono float32, at most 12 hours; both plain files go on every path. Step 3: the worker, with faster-whisper's Silero VAD (threshold 0.5, 2 s of silence at least, 400 ms of padding), condition_on_previous_text off, beam 5 at temperature 0 with no fallback, so the same audio and engine give the same segments, in pieces of at most 30 minutes, each ending on the quietest second of the minute before, the first piece's language holding for the rest. Its time limit is half the audio's length on CUDA and three times it on a CPU, never under ten minutes. Step 4, under the vault's lock again: step 1's checks, and nothing is staged if the stored file's key changed or a version from this file and engine arrived meanwhile. The language: the recorder's transcript's lang, else the owner's only language, else Whisper detects it. A Hungarian recording gets a prompt, \"Résztvevők és témák:\" and up to 40 names in at most 480 characters: the family's people (author, recipients and speakers) resolved to entities, their related projects and the entities its records name, by their names and asr aliases. A name a never-store list holds, or one the redaction rules would change, is left out, since Whisper can repeat a prompt's words."
+    binds:
+      - No transcript is made from audio that doesn't read ok, and none is staged unless the checks pass again after the worker.
+      - The prompt goes only to the local worker and is never logged.
+    not_chosen:
+      - "Transcribing at media_put, from the audio as it came: a transcript is made only from audio stored cut."
+      - "Running jobs side by side: two large-v3 workers would take twice the GPU's memory for little gain."

@@ -42,6 +42,8 @@ TIME_LIMIT = 900.0
 HELLO_SECONDS = 30.0
 MEMORY = 512 * MIB
 MAX_MS = 12 * 3600 * 1000
+# 16 kHz mono float32, as the speech worker takes it.
+PCM_BYTES_PER_SECOND = 16_000 * 4
 PAD_MS = 250
 # The timeline checks, failing closed (DR-0560): the transcript must end before the audio does, give or take END_SLACK,
 # and the audio's first sound must fall within ONSET_SLACK of the transcript's first words.
@@ -179,10 +181,41 @@ def cut(
         raise
 
 
-def _cut(answer: dict[str, Any], output: Path) -> Cut:
+def decode_pcm(
+    home: Home,
+    source: Path,
+    ext: str,
+    *,
+    command: Sequence[str] | None = None,
+    time_limit: float = TIME_LIMIT,
+    memory: int = MEMORY,
+    hello_seconds: float = HELLO_SECONDS,
+) -> Cut:
+    """`source` decoded in the child to 16 kHz mono float32 beside it, for the speech worker (DR-0569): at most
+    12 hours, so at most what 12 hours take."""
+    output = plain_file(home, ".f32")
+    request: dict[str, Any] = {
+        "mode": "pcm",
+        "input": str(source),
+        "format": ext,
+        "output": str(output),
+        "cuts": [],
+        "max_ms": MAX_MS,
+        "max_bytes": MAX_MS // 1000 * PCM_BYTES_PER_SECOND,
+    }
+    argv = [*(command or (sys.executable, *CHILD)), "--memory", str(memory)]
+    try:
+        answer = _run(argv, request, output.parent, time_limit=time_limit, memory=memory, hello_seconds=hello_seconds)
+        return _cut(answer, output, failed="the audio wasn't decoded for speech")
+    except BaseException:
+        done_with(output)
+        raise
+
+
+def _cut(answer: dict[str, Any], output: Path, *, failed: str = "the audio wasn't stored") -> Cut:
     try:
         if "not_read" in answer:
-            raise DocketError(f"the audio wasn't stored: {answer['not_read']['detail']}")
+            raise DocketError(f"{failed}: {answer['not_read']['detail']}")
         facts = answer["done"]
         bit_rate = facts["bit_rate"]
         onset = facts["onset_ms"]
@@ -196,7 +229,7 @@ def _cut(answer: dict[str, Any], output: Path) -> Cut:
             bit_rate=int(bit_rate) if bit_rate is not None else None,
         )
     except (KeyError, TypeError, ValueError):
-        raise DocketError("the audio cutter answered out of its protocol, so nothing was stored") from None
+        raise DocketError(f"the audio cutter answered out of its protocol: {failed}") from None
 
 
 def _run(

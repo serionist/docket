@@ -1624,9 +1624,21 @@ def models_install(
     api: Annotated[
         bool, typer.Option("--api", help="Use Voyage AI's API instead, at your own console; nothing is installed.")
     ] = False,
+    speech: Annotated[
+        bool, typer.Option("--speech", help="Install speech to text instead: Whisper, for docket transcribe.")
+    ] = False,
+    speech_model: Annotated[
+        str, typer.Option("--speech-model", help="With --speech: large-v3 (the default), or tiny for a quick try.")
+    ] = "large-v3",
 ) -> None:
     """Build the models' environment, fetch the embedder's and the reranker's files, check they run, time the
-    reranker, and turn models on here; or, with --api, choose Voyage AI's API for this machine."""
+    reranker, and turn models on here; with --api, choose Voyage AI's API for this machine; with --speech, install
+    Whisper for docket transcribe instead."""
+    if speech:
+        from docket.speech import setup  # noqa: PLC0415
+
+        setup.install(speech_model, device, say=say)
+        return
     if api:
         from docket.models import api as api_models  # noqa: PLC0415
 
@@ -1703,10 +1715,14 @@ def models_status(
     from docket.models.config import ApiChoice, RerankTiming  # noqa: PLC0415
     from docket.models.provider import Off  # noqa: PLC0415
     from docket.models.runtime import rerank_spec, timed, worker_for  # noqa: PLC0415
+    from docket.speech import setup  # noqa: PLC0415
 
     found_report = report.read()
     choice = found_report.choice
     say_all(report.lines(found_report))
+    speech = setup.status()
+    if speech is not None:
+        say(speech)
     if isinstance(choice, ApiChoice):
         opened = _vault_or_none(vault)
         say_all(api_models.status(opened))
@@ -1794,11 +1810,32 @@ def _models_vectors(vault: Path | None, *, on: bool) -> None:
 
 
 @models_app.command("remove")
-def models_remove() -> None:
-    """Delete the models' environments, files and choice; keyword search goes on."""
+def models_remove(
+    speech: Annotated[bool, typer.Option("--speech", help="Remove only speech to text; search's models stay.")] = False,
+) -> None:
+    """Delete the models' environments, files and choice, speech's too; keyword search goes on."""
     from docket.models import install  # noqa: PLC0415
+    from docket.speech import setup  # noqa: PLC0415
 
-    install.remove(say=say)
+    setup.remove(say=say)
+    if not speech:
+        install.remove(say=say)
+
+
+@app.command("transcribe")
+def transcribe(
+    rid: Annotated[str, typer.Argument(help="The recording whose stored audio to transcribe.")],
+    wait: Annotated[bool, typer.Option("--wait", help="Wait for a transcription already running here.")] = False,
+    vault: VaultOption = None,
+) -> None:
+    """Transcribe a recording's stored audio with Whisper on this machine and stage the transcript at the gate. Its
+    audio must be stored and cut by every cut its records need; docket models install --speech sets Whisper up."""
+    from docket.speech import job  # noqa: PLC0415
+
+    done = job.transcribe(find_vault(vault), rid, wait=wait, say=say)
+    say(done.line)
+    if not done.staged:
+        raise typer.Exit(1)
 
 
 @hook_app.command("session-start")

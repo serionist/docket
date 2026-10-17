@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0567
+    title: Speech to text runs faster-whisper on CTranslate2 in an environment of its own, one worker process per job
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#158"]
+    description: "Docket transcribes with faster-whisper 1.2.1 on CTranslate2 4.8.2, float16 on CUDA and int8 on the CPU, in models/env-speech-<device>, built with uv from hashed requirements shipped in the wheel (requirements-speech-cpu.txt and requirements-speech-cuda.txt, compiled from their .in files by devkit models-lock), as the embedder's environment is (DR-0332). It is an environment of its own because CTranslate2's wheels are built against CUDA 12, so the CUDA one takes NVIDIA's cuBLAS 12 (nvidia-cublas-cu12), and faster-whisper's VAD runs on the CPU ONNX Runtime, which would clash with the embedder's GPU build; onnxruntime, tokenizers and numpy stay pinned to the dev group's versions. Models: large-v3 (Systran/faster-whisper-large-v3 at edaa852ec7e1, 3.09 GB) for every user and tiny (Systran/faster-whisper-tiny at d90ca5fe2602, 76 MB) for CI and a quick try, both MIT, fetched from Hugging Face at the pinned revision with each file's sha256 (DR-0333). Each job starts `<env python> -I -X utf8 speech/worker.py '<spec>'` with the stripped environment (DR-0330) and HF_HUB_OFFLINE=1, and the model loads with local_files_only=True, so nothing reaches the network. The worker imports only the standard library until its job starts, has a minute to load and say hello, and answers JSON lines: hello, each segment, progress, done, or an error by its type only. Its stderr is kept, the last 64 KB, for the install's error, and never logged. Measured on an RTX 5090: large-v3 in float16 at 26 times the audio's speed (11 minutes of audio in 25.5 s, the model loaded in 2.3 s), in float32 at 23 times; on the CPU in int8 at 1.7 times on 8 threads and about once on 16; tiny at 44 times on 4 threads."
+    binds:
+      - The worker never logs a segment, a name or the prompt, and names an error by its type only.
+      - Every speech package is pinned in requirements-speech-*.in and installed from the hashed file; nothing goes in unpinned.
+    not_chosen:
+      - "openai-whisper on PyTorch: a 2 GB framework for one model, and slower."
+      - "Whisper through ONNX Runtime in the embedder's environment: no maintained export with timestamps and beam search. It stays the fallback if CUDA 12 goes."
+      - "whisper.cpp: a native build for each system, outside the route of uv and hashed wheels."

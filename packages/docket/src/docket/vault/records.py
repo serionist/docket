@@ -79,6 +79,10 @@ class Segment(BaseModel):
         return self
 
 
+# What a transcript Docket made by machine from a recording's stored audio says it came by (DR-0570).
+TRANSCRIBED_VIA = "docket transcribe"
+
+
 class RawRecord(BaseModel):
     """One item from a source: a message, an event, a recording, a transcript, a vendor's summary."""
 
@@ -100,7 +104,8 @@ class RawRecord(BaseModel):
     native: dict[str, Any] = Field(default_factory=dict[str, Any])
     fetched: datetime
     via: str
-    # verbatim: as the source gave it; derived: its id built from its content; cut: verbatim, then cut by hand.
+    # verbatim: as the source gave it; derived: made by machine from the source's own data, or its id built from its
+    # content (DR-0570); cut: verbatim, then cut by hand.
     fidelity: Literal["verbatim", "derived", "cut"] = "verbatim"
     run: str = ""
     engine: str | None = None
