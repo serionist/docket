@@ -186,6 +186,7 @@ def https_server(tmp_path: Path, body: bytes) -> Iterator[Server]:
 
     server = Quiet(("127.0.0.1", 0), Handler)
     serving = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    serving.minimum_version = ssl.TLSVersion.TLSv1_2
     serving.load_cert_chain(cert, key)
     server.socket = serving.wrap_socket(server.socket, server_side=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
