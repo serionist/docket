@@ -51,17 +51,16 @@ class Flag:
     @property
     def message(self) -> str:
         cited = f"line {self.ref.line} of {self.ref.doc} rev {self.ref.rev}"
+        if self.why is None:
+            said = f"{'corrects' if self.correction else 'cites'} {cited}, which still reads the same"
+            return f"{said}: not applied yet" if self.correction else said
         if self.correction:
-            if self.why is None:
-                return f"corrects {cited}, which still reads the same: not applied yet"
             return f"corrects {cited}: applied"
         if self.why == "gone":
             return f"cites {cited}, and {self.ref.doc} is gone"
         if self.why == "superseded":
             return f"cites {cited}, and {self.ref.doc} is superseded by {self.superseded_by}"
-        if self.why == "changed":
-            return f"cites {cited}, which reads otherwise in rev {self.now}; check it, then cite it again or drop it"
-        return f"cites {cited}"
+        return f"cites {cited}, which reads otherwise in rev {self.now}; check it, then cite it again or drop it"
 
 
 def pinned_refs(doc: ProcessedDoc) -> list[tuple[int, DocRef]]:

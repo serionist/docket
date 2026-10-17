@@ -185,3 +185,39 @@ def test_anchors_an_older_docket_redacted_are_named_with_the_rev_to_restore(vaul
     assert said in next(one.flags for one in shown.lines if one.n == n)
     damaged = recall.stale(vault).damaged
     assert [(d.doc, d.n, d.restore_from) for d in damaged] == [(BRIEF, n, 1)]
+
+
+def test_a_pinned_ref_to_a_doc_that_never_was_is_refused(vault: Vault) -> None:
+    problems = refused(vault, brief("- The consultant. [d:minutes:2026-10-14-nothing@1#3=0a1b2c3d]"))
+    assert any("there is no doc minutes:2026-10-14-nothing" in p for p in problems), problems
+
+
+def test_a_hand_edit_s_ref_to_nothing_stops_its_take_in(vault: Vault) -> None:
+    recall.doc_put(vault, brief(f"- The consultant. [d:{NOTE}@1#14]"))
+    path = vault.root / BRIEF_PATH
+    path.write_text(path.read_text(encoding="utf-8") + "- Later. [d:minutes:2026-10-14-nothing#3]\n", encoding="utf-8")
+    problems = refused(vault, brief(f"- The consultant again. [d:{NOTE}@1#14]", rev="1"))
+    assert problems == [
+        f"doc: {BRIEF_PATH} was edited by hand, and its line 14: [d:minutes:2026-10-14-nothing#3]: there is no doc "
+        "minutes:2026-10-14-nothing"
+    ]
+
+
+def test_verify_says_what_became_of_each_cited_line(vault: Vault) -> None:
+    recall.doc_put(vault, brief(f"- The consultant. [d:{NOTE}@1#14]", f"- By Friday. [d:{NOTE}@1#15]"))
+    recall.doc_put(vault, note(NOTE, lines=[TWELVE, FRIDAY], rev="1"))
+    path = vault.root / BRIEF_PATH
+    # Unpinned refs a hand edit left, not taken in yet: one by the current rev's number, one by an old rev.
+    path.write_text(
+        path.read_text(encoding="utf-8") + f"- Now. [d:{NOTE}#15]\n- Then. [d:{NOTE}@1#15]\n", encoding="utf-8"
+    )
+    refs = [(line.text.split(".")[0], line.refs[0]) for line in recall.verify(vault, BRIEF).lines if line.refs]
+    assert [(said, ref.n, ref.problem) for said, ref in refs] == [
+        ("- The consultant", None, f"line 14 of {NOTE} rev 1 reads otherwise in rev 2"),
+        ("- By Friday", 15, None),
+        ("- Now", 15, None),
+        ("- Then", None, f"not pinned yet, and {NOTE} is at rev 2 now"),
+    ]
+    git(vault.root, "rm", "-q", NOTE_PATH)
+    git(vault.root, "commit", "-qm", "Drop the note")
+    assert {ref.problem for line in recall.verify(vault, BRIEF).lines for ref in line.refs} == {f"{NOTE} is gone"}

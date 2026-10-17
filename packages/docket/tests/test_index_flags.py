@@ -127,7 +127,9 @@ def test_an_unrelated_edit_flags_nothing(vault: Vault) -> None:
     # A new line above the cited one moves it down: the numbers shift, the text doesn't.
     put_note(vault, "- Ada opened the call. @0:00", TEN, FRIDAY, rev=1)
     assert line_no(vault, NOTE, TEN) == 15
-    assert flagged(from_index(vault)) == []
+    found = from_index(vault)
+    assert flagged(found) == []
+    assert [f.message for f in found] == [f"cites line 14 of {NOTE} rev 1, which still reads the same"]
     assert read_flags(vault) == {}
 
 
@@ -189,6 +191,7 @@ def test_a_correction_waits_until_the_corrected_line_changes(vault: Vault) -> No
     put(vault, correction)
     found = from_index(vault)
     assert [f.unapplied for f in found] == [True]
+    assert found[0].message.endswith("which still reads the same: not applied yet")
     assert flagged(found) == []
     put_note(vault, TEN, FRIDAY, rev=1)
     found = from_index(vault)
