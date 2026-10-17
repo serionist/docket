@@ -245,3 +245,15 @@ def test_a_vault_yaml_that_doesnt_parse_names_the_place_never_the_line(client: T
         assert answer.status_code == 400, route
         assert "dora.secret" not in answer.text, route
         assert where in said(answer.text), route
+
+
+def test_an_edit_not_in_force_is_said_at_the_top_and_a_loosening_is_for_your_own_terminal(
+    client: TestClient, vault: Vault
+) -> None:
+    html = said(page(client))
+    assert "isn't in force until you commit it" not in html
+    assert "run it in your own terminal, where it shows the change and asks you to type back a code" in html
+    edit_config(vault, never_store=NeverStore())
+    shown = said(page(client))
+    assert "vault.yaml has an edit that isn't in force until you commit it." in shown
+    assert "Cleo" not in shown

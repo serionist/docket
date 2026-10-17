@@ -26,7 +26,7 @@ from typing import Any, Literal
 
 from docket.errors import DocketError
 from docket.vault import cuts as cutting
-from docket.vault import holds, neverstore, releaselog
+from docket.vault import holds, inforce, neverstore, releaselog
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.cuts import CUT_MARKER, Cut
 from docket.vault.records import RawRecord, version
@@ -112,6 +112,8 @@ class Gate:
         self._read_runs: set[Path] = set()
         self._holds = holds.Holds()
         self._releases = releaselog.Releases()
+        # Whether the last read found an edit of vault.yaml not in force, for the messages that send the user there.
+        self._waiting = False
 
     def stage(self, records: Iterable[RawRecord]) -> StageResult:
         """Take records from a connector: drop, skip or stage each one."""
@@ -123,10 +125,12 @@ class Gate:
                 if source is None:
                     raise DocketError(
                         f"source {record.source!r} isn't in vault.yaml; add it with its sensitivity (work, mixed or "
-                        "private) so the gate can tell how private it is"
+                        f"private) so the gate can tell how private it is{inforce.note(self._waiting)}"
                     )
                 if not source.enabled:
-                    raise DocketError(f"source {record.source!r} is disabled in vault.yaml")
+                    raise DocketError(
+                        f"source {record.source!r} is disabled in vault.yaml{inforce.note(self._waiting)}"
+                    )
             result = StageResult(dropped=self._sweep(config))
             scan = self.staging.scan()
             staged_keys = {e.key for e in scan.entries}
@@ -307,13 +311,15 @@ class Gate:
         return Held(entry.key, entry.staged.record.source, problem)
 
     def _config(self) -> VaultConfig:
-        """vault.yaml as it is now: a list the user just edited applies at once, and one that doesn't load stops
-        the gate rather than leave it on an older list."""
+        """The settings in force now (DR-0521): what an edit of vault.yaml only tightens applies at once, the rest once
+        committed, and a file that doesn't load stops the gate rather than leave it on older settings."""
         path = self.vault.root / CONFIG_FILE
         try:
-            return VaultConfig.load(path)
+            settings = inforce.load(self.vault.root, self.vault.home)
         except OSError as e:
             raise DocketError(f"{path}: can't read it: {e}") from e
+        self._waiting = settings.waiting
+        return settings.in_force
 
     def would_drop(self, config: VaultConfig) -> Counter[str]:
         """What the sweep would drop from staging under these settings, by why, writing nothing: a page names it before

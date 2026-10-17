@@ -99,7 +99,8 @@ def _calls(name: str) -> set[tuple[str, str]]:
 
 
 def test_vault_yaml_is_written_only_by_its_one_writer() -> None:
-    assert _calls("write_config") == {("vault/settings.py", "rewrite")}
+    assert _calls("write_config") == {("vault/settings.py", "_write")}
+    assert {c for c in _calls("_write") if c[0] == "vault/settings.py"} == {("vault/settings.py", "rewrite")}
 
 
 def test_the_writer_s_general_entry_is_called_only_by_the_cli_s_two_writers_and_the_stricter_operations() -> None:
@@ -206,3 +207,54 @@ def read(vault, CONFIG_FILE):
 def test_what_pages_may_import_is_there_and_never_the_general_entry() -> None:
     assert "rewrite" not in settings.FOR_PAGES
     assert all(hasattr(settings, name) for name in settings.FOR_PAGES)
+
+
+def test_outside_the_writer_only_init_writes_vault_yaml_as_a_file() -> None:
+    """A new vault's first vault.yaml is Vault.init's; every later change is rewrite's, through write_config, so a
+    command added later can't write the file around the console's question (DR-0517)."""
+    found = {
+        (rel, node.name)
+        for rel, module in _modules()
+        for node in ast.walk(module)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and _names_the_file(node) and _writes(node)
+    }
+    assert found == {("vault/vault.py", "init")}
+
+
+def test_only_the_release_and_the_writer_ask_at_the_console() -> None:
+    """No page, route or tool asks the owner's question or answers it (DR-0518)."""
+    importers = set()
+    for rel, module in _modules():
+        for node in ast.walk(module):
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.module == "docket"
+                and any(a.name == "console" for a in node.names)
+            ):
+                importers.add(rel)
+            if isinstance(node, ast.ImportFrom) and node.module == "docket.console":
+                importers.add(rel)
+            if isinstance(node, ast.Import) and any(a.name == "docket.console" for a in node.names):
+                importers.add(rel)
+    assert importers == {"sources/release.py", "vault/settings.py"}
+
+
+def _attribute_calls(owner: str, name: str) -> set[tuple[str, str]]:
+    """Where `owner.name(...)` is called: each file and the top-level function or class around the call."""
+    found: set[tuple[str, str]] = set()
+    for rel, module in _modules():
+        for top in module.body:
+            where = top.name if isinstance(top, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) else ""
+            for node in ast.walk(top):
+                func = node.func if isinstance(node, ast.Call) else None
+                if not (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)):
+                    continue
+                if func.attr == name and func.value.id == owner:
+                    found.add((rel, where))
+    return found
+
+
+def test_the_vault_and_the_gate_read_the_settings_in_force_through_one_loader() -> None:
+    """What the jobs obey comes from inforce.load alone (DR-0521): Vault.open's config, and the gate's on every call."""
+    assert _attribute_calls("inforce", "load") == {("vault/vault.py", "Vault"), ("vault/gate.py", "Gate")}
+    assert {c for c in _calls("effective") if c[0] != "vault/inforce.py"} == set()

@@ -60,6 +60,8 @@ class NewSource:
     registered: bool
     block: str | None
     commit: str | None
+    # Not added: the owner didn't type the code back, and the folder written for it is gone again.
+    declined: bool = False
 
 
 def template_files(kind: str) -> dict[str, bytes]:
@@ -102,11 +104,13 @@ def new_source(
         files = {rel: data.decode("utf-8").replace(PLACEHOLDER, name).encode("utf-8") for rel, data in files.items()}
     _write_folder(folder, files)
     try:
-        registered, block, commit = _register(vault, name, entry)
+        registered, block, commit, declined = _register(vault, name, entry)
     except BaseException:
         remove_tree(folder)
         raise
-    return NewSource(name, folder, sorted(files), example, entry, registered, block, commit)
+    if declined:
+        remove_tree(folder)
+    return NewSource(name, folder, sorted(files), example, entry, registered, block, commit, declined)
 
 
 @dataclass(frozen=True)
@@ -116,6 +120,7 @@ class NewFolderSource:
     registered: bool
     block: str | None
     commit: str | None
+    declined: bool = False
 
 
 def new_folder_source(vault: Vault, name: str, given: Path) -> NewFolderSource:
@@ -141,8 +146,8 @@ def new_folder_source(vault: Vault, name: str, given: Path) -> NewFolderSource:
         )
     except ValidationError as e:
         raise DocketError(f"source {name}: " + "; ".join(str(err["msg"]) for err in e.errors())) from None
-    registered, block_text, commit = _register(vault, name, entry)
-    return NewFolderSource(name, entry, registered, block_text, commit)
+    registered, block_text, commit, declined = _register(vault, name, entry)
+    return NewFolderSource(name, entry, registered, block_text, commit, declined)
 
 
 def written_folder(vault: Vault, given: Path) -> str:
@@ -207,7 +212,7 @@ def _write_folder(folder: Path, files: dict[str, bytes]) -> None:
         raise
 
 
-def _register(vault: Vault, name: str, entry: SourceConfig) -> tuple[bool, str | None, str | None]:
+def _register(vault: Vault, name: str, entry: SourceConfig) -> tuple[bool, str | None, str | None, bool]:
     """`sources.<name>` in vault.yaml, through vault.yaml's one writer: rewritten and committed only when the file is
     exactly what Docket would write for it, now or in the form before the redaction switches were split; otherwise the
     entry, to paste."""
@@ -217,8 +222,8 @@ def _register(vault: Vault, name: str, entry: SourceConfig) -> tuple[bool, str |
 
     done = settings.rewrite(vault, edit, f"Config: source {name}", via="cli")
     if done.by_hand:
-        return False, block(name, entry), None
-    return True, None, done.commit
+        return False, block(name, entry), None, False
+    return not done.declined, None, done.commit, done.declined
 
 
 def block(name: str, entry: SourceConfig) -> str:

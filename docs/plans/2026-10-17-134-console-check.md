@@ -386,6 +386,22 @@ service.
 | tests that loosen by an uncommitted edit stop biting | resolved: their helpers commit the edit, step 4 |
 | the terminal case is slow or flaky | resolved: one case with a deadline, never on Windows |
 
+## Taken while building
+
+Departures from the plan above, each small.
+
+| Decided | Not taken | Why |
+|---|---|---|
+| `release.py` keeps `_console_problem` and `_ask`, each only a call through to `docket.console` | the names gone | a project's copy of the Plaud reference's tests stands in for the owner under them, and `monkeypatch.setattr` fails on a name that went |
+| the console's words for the loosening: "a vault.yaml change that isn't only stricter" | "a change that lets more into the vault" | `loosens()` also covers neutral changes, such as a time zone |
+| the CLI's refusal over an uncommitted loosening edit: #141's words, then "or confirm it:" and the console's reason | the console's reason alone | the owner learns both ways out: commit or undo it, or run the command at the console |
+| `settings` binds `RANK`, `LISTS` and `loosens` from `inforce` as names of its own | importing them | the type checker counts an import as private, and pages read them from `settings` |
+| the test kit's `commit_config`, called where a test edits `vault.yaml` by hand and expects a loosening or neutral change at once (`test_gate.py`, `test_documents_scan.py`, `test_service_api_runs.py`, `test_curate_tier1.py`, `test_cli_index.py`); a folder vault moved into a repo by hand opens once its `vault.yaml` is committed there, not only added (`test_home.py`) | the edits left uncommitted | the settings in force read HEAD |
+| the Settings page reads the file as `vault.written` | `vault.config` | `vault.config` is now the settings in force; the page shows and changes the file |
+| the notice also on the "turned off" and "disabled" refusals of the gate, the scan and sync | the four named only | each sends the owner to `vault.yaml` the same way |
+| the status and redaction notices tested in `test_settings_in_force.py`, the question in `test_console_question.py` | `test_cli.py`, `test_vault_settings.py` | each file holds one part of the design |
+| a new pattern runs after HEAD's, as built in step 2 | taking it in place now | #147 makes a rule's place change only which marker names a tie; once it is on main, the place check, its tests and its Risks rows go, and DR-0521's binds line points at #147's decision |
+
 ## Plan review
 
 Round 1, the coordinator's reviewer at `d82a639`: changes needed, one major and six minors, all folded in `540addb`.

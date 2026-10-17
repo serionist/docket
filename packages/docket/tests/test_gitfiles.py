@@ -55,6 +55,22 @@ def test_a_branch_with_commits_reads_as_git_answers(tmp_path: Path) -> None:
     assert answers(top) == (symref(top), head(top)) == ("refs/heads/main", second)
 
 
+def test_a_new_commit_s_parents_are_read_from_its_object(tmp_path: Path) -> None:
+    """The settings in force move their cache on a commit of Docket's own by its parent (DR-0521): read from the
+    loose object git just wrote, and unknown for one packed, missing or not a commit."""
+    top = repo(tmp_path / "r")
+    first = commit(top)
+    assert gitfiles.commit_parents(top / ".git", first) == ()
+    second = commit(top, "b.txt")
+    assert gitfiles.commit_parents(top / ".git", second) == (first,)
+    tree = sh(top, "git", "rev-parse", "HEAD^{tree}").strip()
+    assert gitfiles.commit_parents(top / ".git", tree) is UNKNOWN
+    assert gitfiles.commit_parents(top / ".git", "not an id") is UNKNOWN
+    git(top, "gc", "-q")
+    assert gitfiles.commit_parents(top / ".git", second) is UNKNOWN
+    assert gitfiles.commit_parents(tmp_path / "nowhere", second) is UNKNOWN
+
+
 def test_a_branch_with_no_commit_yet_has_no_id(tmp_path: Path) -> None:
     top = repo(tmp_path / "r")
     assert answers(top) == (symref(top), head(top)) == ("refs/heads/main", None)

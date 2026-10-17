@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from docket_testkit import empty_vault, git, make_config, sh
+from docket_testkit import AtConsole, empty_vault, git, make_config, sh
 from pydantic import Field
 
 from docket.cli import main
@@ -283,11 +283,13 @@ def test_a_page_s_loosening_is_refused_and_nothing_is_written(tmp_path: Path) ->
     assert sh(vault.root, "git", "rev-parse", "HEAD") == head
 
 
-def test_the_cli_may_loosen(tmp_path: Path) -> None:
+def test_the_cli_may_loosen(tmp_path: Path, owner: Callable[..., AtConsole]) -> None:
+    """At the owner's console, with the code typed back (DR-0517)."""
+    owner("code")
     vault = make_vault(tmp_path)
     done = settings.rewrite(vault, source("calls", sensitivity="work"), "Config: source calls work", via="cli")
     assert done.changed
-    assert last_message(vault) == "Config: source calls work"
+    assert last_message(vault) == "Config: source calls work\n\nconfirmed at the console"
 
 
 def test_no_change_writes_nothing(tmp_path: Path) -> None:
@@ -494,7 +496,9 @@ def test_an_uncommitted_edit_that_lets_more_in_is_never_taken_in(
     path.write_text(edited, encoding="utf-8", newline="\n")
     assert VaultConfig.load(path).written_by_docket(edited), what
     head = sh(vault.root, "git", "rev-parse", "HEAD")
-    with pytest.raises(settings.UncommittedLooseningError, match="edit that isn't committed and lets more in") as found:
+    with pytest.raises(
+        settings.UncommittedLooseningError, match="an edit that isn't in force until you commit it"
+    ) as found:
         settings.add_listed(vault, "people", "Dora Example", shown=shown(vault))
     assert "Dora" not in str(found.value)
     assert main(["redaction", "set", "phone", "on", "--vault", str(vault.root)]) == 2

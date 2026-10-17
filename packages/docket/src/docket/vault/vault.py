@@ -22,6 +22,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from docket.errors import DocketError
+from docket.vault import inforce
 from docket.vault import machine as machines
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.git import DOC_LINE, Git, Identity, SyncResult
@@ -137,7 +138,9 @@ class Vault:
         self, root: Path, config: VaultConfig, home: Home | None = None, *, lock_timeout: float = LOCK_TIMEOUT_SECONDS
     ) -> None:
         self.root = root
+        # The settings in force, and vault.yaml as written; the same unless an edit not committed holds more.
         self.config = config
+        self.written = config
         self.home = home or Home.resolve(root, config.storage)
         self.machine = machines.resolve(self.home.private)
         owner_email = config.owner.emails[0] if config.owner.emails else "docket@localhost"
@@ -175,11 +178,15 @@ class Vault:
                 f"a convert of {root} stopped part way; run `docket vault convert` to finish it, or `docket vault "
                 "convert --abort` to undo it"
             )
-        config = VaultConfig.load(root / CONFIG_FILE)
-        home = Home.resolve(root, config.storage)
+        written = VaultConfig.load(root / CONFIG_FILE)
+        home = Home.resolve(root, written.storage)
         if home.folder:
             _check_tracked(home)
-        return cls(root, config, home, lock_timeout=lock_timeout)
+        # What the jobs obey: HEAD's vault.yaml with what an uncommitted edit only tightens (DR-0521).
+        settings = inforce.load(root, home)
+        vault = cls(root, settings.in_force, home, lock_timeout=lock_timeout)
+        vault.written = settings.file
+        return vault
 
     @classmethod
     def init(cls, path: Path, config: VaultConfig, machine: str) -> Vault:
@@ -243,7 +250,15 @@ class Vault:
             self._recover()
             everything = [*paths, *self.uncommitted_runs()]
             self.refuse_unmerged()
-            return self.git.commit(everything, message)
+            commit = self.git.commit(everything, message)
+            if commit is not None:
+                inforce.carry(self.home, commit, self.git.parents, paths)
+            return commit
+
+    @property
+    def waiting(self) -> bool:
+        """Whether vault.yaml holds an edit that isn't in force until it is committed."""
+        return self.written != self.config
 
     def uncommitted_runs(self) -> list[str]:
         """Run files not in HEAD: untracked, or staged by an add whose commit never came. One an ignore rule hides

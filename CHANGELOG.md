@@ -156,11 +156,18 @@ Unreleased in the same PR.
   address a pattern redacts, a phone number or a password, is refused now, as a record holding it is dropped. A doc
   redacted before still goes in again. `docket doc redact` names such a stored doc and leaves it for you to edit,
   where it redacted it before.
+- A change that lets more into the vault asks you at your own console: `docket redaction set <rule> off` and `docket
+  source new` show the change and wait for a code typed back, and are refused in Claude Code's shell, from a pipe or a
+  redirect. A script that ran them now gets that refusal. The setup skill hands you each `docket source new` to run in
+  your terminal.
+- An edit of `vault.yaml` by hand applies at once only where it keeps more out; the rest applies once you commit it, and
+  `docket vault status` says: vault.yaml has an edit that isn't in force until you commit it. A vault holding such an
+  edit when you upgrade stops applying its looser part until then.
 - An edit of `vault.yaml` not committed yet is committed on its own, as `Config: vault.yaml as edited`, before
   `docket redaction set`, `docket source new` or the Settings page commits a change to it, so each commit says what
   it did. An edit that lets more in than the committed file (a rule turned off, a source made looser, a never-store
-  value taken off) is never committed this way: the change is refused, nothing is written, and you commit or undo the
-  edit yourself.
+  value taken off) is never committed this way unasked: a page refuses the change and writes nothing, and a command
+  asks you about the edit at your own console, with a code typed back, or you commit or undo it yourself.
 - A `vault.yaml` that doesn't read as YAML is named by its line and column and what was wrong there, no longer with
   the line's text, so a never-store value on it never shows in a page, a terminal or a log.
 - Verifying a doc and writing one no longer load the raw log of each source it covers when the search index is

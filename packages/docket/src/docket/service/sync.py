@@ -29,7 +29,7 @@ from docket.sources import ingest as ingesting
 from docket.sources import local, runner
 from docket.sources.contract import TOKEN, Manifest, MapperRefusedError, Skipped, Window
 from docket.sources.runner import MapperFailedError
-from docket.vault import cursors, holds, releaselog
+from docket.vault import cursors, holds, inforce, releaselog
 from docket.vault.gate import Gate
 from docket.vault.lock import LockBusyError
 from docket.vault.vault import Vault
@@ -177,9 +177,11 @@ def _checked_source(vault: Vault, source: str) -> list[str]:
     if config is None:
         runnable = sorted(n for n, c in vault.config.sources.items() if c.enabled and c.tools and c.mapper)
         names = ", ".join(runnable) or "none yet"
-        raise DocketError(f"no source {source!r} in vault.yaml; sources that can run: {names}")
+        raise DocketError(
+            f"no source {source!r} in vault.yaml; sources that can run: {names}{inforce.note(vault.waiting)}"
+        )
     if not config.enabled:
-        raise DocketError(f"source {source} is turned off in vault.yaml")
+        raise DocketError(f"source {source} is turned off in vault.yaml{inforce.note(vault.waiting)}")
     if config.sensitivity == "private":
         raise DocketError(f"source {source} is private in vault.yaml: nothing from it is stored, so it runs no sync")
     if config.folder is not None:
@@ -188,7 +190,9 @@ def _checked_source(vault: Vault, source: str) -> list[str]:
             "no sync"
         )
     if not config.tools:
-        raise DocketError(f"source {source} lists no tools in vault.yaml; set sources.{source}.tools")
+        raise DocketError(
+            f"source {source} lists no tools in vault.yaml; set sources.{source}.tools{inforce.note(vault.waiting)}"
+        )
     runner.find_mapper(vault, source)
     return sorted(config.tools)
 

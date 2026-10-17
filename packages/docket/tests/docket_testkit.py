@@ -484,6 +484,13 @@ def git(cwd: Path, *args: str) -> str:
     return sh(cwd, "git", "-c", "user.name=Ada Example", "-c", "user.email=ada@example.invalid", *args)
 
 
+def commit_config(root: Path) -> None:
+    """vault.yaml as edited by hand, committed as the user would, so what it loosens is in force (DR-0521). An
+    edit that changed nothing commits nothing."""
+    if sh(root, "git", "status", "--porcelain", "--", "vault.yaml").strip():
+        git(root, "commit", "-qm", "Settings", "--", "vault.yaml")
+
+
 def configure(
     root: Path,
     *,

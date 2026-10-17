@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from docket_testkit import empty_vault, make_config, sh
+from docket_testkit import AtConsole, empty_vault, make_config, sh
 
 from docket.cli import main
 from docket.vault import redaction
@@ -72,7 +73,10 @@ def test_set_phone_on_commits_once_and_says_what_stays(tmp_path: Path, capsys: p
     assert len(subjects(vault)) == 2
 
 
-def test_set_credentials_off_warns_what_is_stored(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_set_credentials_off_warns_what_is_stored(
+    owner: Callable[..., AtConsole], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    owner("code", "code", "code", "code")  # each loosening below is typed back at the console (DR-0517)
     vault = make_vault(tmp_path)
     assert main(["redaction", "set", "credentials", "off", "--vault", str(vault.root)]) == 0
     assert f"note     {redaction.CREDENTIALS_OFF}" in capsys.readouterr().out
@@ -81,7 +85,8 @@ def test_set_credentials_off_warns_what_is_stored(tmp_path: Path, capsys: pytest
     assert f"warning      {redaction.CREDENTIALS_OFF}" in capsys.readouterr().out
 
 
-def test_set_turns_a_pattern_off_by_its_name(tmp_path: Path) -> None:
+def test_set_turns_a_pattern_off_by_its_name(owner: Callable[..., AtConsole], tmp_path: Path) -> None:
+    owner("code", "code", "code", "code")  # each loosening below is typed back at the console (DR-0517)
     vault = make_vault(
         tmp_path, RedactionPattern(name="door code", pattern="x"), RedactionPattern(name="y", pattern="y")
     )
@@ -127,7 +132,10 @@ def test_a_rule_set_can_t_place_is_refused(
     assert (vault.root / "vault.yaml").read_text(encoding="utf-8") == before
 
 
-def test_the_group_s_vault_reaches_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_group_s_vault_reaches_set(
+    owner: Callable[..., AtConsole], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner("code", "code", "code", "code")  # each loosening below is typed back at the console (DR-0517)
     here = make_vault(tmp_path / "a")
     there = make_vault(tmp_path / "b")
     monkeypatch.chdir(here.root)
@@ -143,7 +151,10 @@ def test_set_takes_on_or_off_only(tmp_path: Path, capsys: pytest.CaptureFixture[
     assert "on or off" in capsys.readouterr().err
 
 
-def test_a_hand_edited_vault_yaml_gets_the_line_to_change(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_hand_edited_vault_yaml_gets_the_line_to_change(
+    owner: Callable[..., AtConsole], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    owner("code", "code", "code", "code")  # each loosening below is typed back at the console (DR-0517)
     vault = make_vault(tmp_path, RedactionPattern(name="door", pattern="x"))
     path = vault.root / "vault.yaml"
     mine = path.read_text(encoding="utf-8").replace("redaction:\n", "redaction:   # mine\n", 1)

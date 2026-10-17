@@ -65,7 +65,7 @@ def gather(service: Service) -> Facts:
     vault = service.vault()
     data = (vault.root / CONFIG_FILE).read_bytes()
     text = data.decode("utf-8")
-    config = vault.config
+    config = vault.written
     folders_problem: str | None = None
     try:
         here = userconfig.folders().get(vault.root.resolve(), {})
@@ -87,6 +87,7 @@ def gather(service: Service) -> Facts:
         machine=vault.machine,
         config=config,
         docket_form=config.written_by_docket(text),
+        waiting=vault.waiting,
         sources=sources,
         models=report.read(),
         config_path=userconfig.config_path(),
@@ -130,7 +131,7 @@ def _staged(service: Service, name: ListName, value: str) -> tuple[int, str, boo
     vault = service.vault()
     data = (vault.root / CONFIG_FILE).read_bytes()
     text = data.decode("utf-8")
-    config = vault.config
+    config = vault.written
     docket_form = config.written_by_docket(text)
     takes_in = edit_to_take_in(vault, config, text) if docket_form else False
     dropped = Gate(vault).would_drop(_with(config, name, value))
@@ -153,7 +154,7 @@ def _private_staged(service: Service, source: str) -> tuple[int, str, bool, bool
     vault = service.vault()
     data = (vault.root / CONFIG_FILE).read_bytes()
     text = data.decode("utf-8")
-    config = vault.config
+    config = vault.written
     entry = config.sources.get(source)
     if entry is None:
         raise DocketError(f"no source {source} in vault.yaml")
@@ -260,7 +261,7 @@ def router(service: Service) -> APIRouter:
         async def posted(form: QueryParams) -> Response:
             name, value = _list_name(form.get("list")), checked_value(form.get("value") or "")
             if form.get("confirmed") != "1":
-                if neverstore.holds(service.vault().config.never_store, name, value):
+                if neverstore.holds(service.vault().written.never_store, name, value):
                     return _done(name, 0)
                 return await confirm(request, name, value)
             shown = (form.get("shown") or "").strip()

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import git, host_repo, make_config
+from docket_testkit import commit_config, git, host_repo, make_config
 from documents_kit import docx, pdf, wp, xlsx
 from documents_scan_kit import (
     MTIME,
@@ -129,6 +129,7 @@ def rewrite(vault: Vault, change: Callable[[VaultConfig], object]) -> Vault:
     config = VaultConfig.load(vault.root / "vault.yaml")
     change(config)
     (vault.root / "vault.yaml").write_text(config.dump(), encoding="utf-8", newline="\n")
+    commit_config(vault.root)
     return Vault.open(vault.root)
 
 

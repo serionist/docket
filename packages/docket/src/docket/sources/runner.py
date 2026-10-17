@@ -19,6 +19,7 @@ from typing import IO, Any, cast
 
 from docket.childproc import GROUPS, child_env, stop
 from docket.errors import DocketError
+from docket.vault import inforce
 from docket.vault.git import toplevel
 from docket.vault.records import source_name_problem
 from docket.vault.vault import Vault
@@ -73,11 +74,14 @@ def find_mapper(vault: Vault, source: str) -> Path:
         raise DocketError(problem)
     config = vault.config.sources.get(source)
     if config is None:
-        raise DocketError(f"source {source!r} isn't in vault.yaml; add it with its sensitivity and its mapper")
+        raise DocketError(
+            f"source {source!r} isn't in vault.yaml; add it with its sensitivity and its mapper"
+            f"{inforce.note(vault.waiting)}"
+        )
     if config.mapper is None:
         raise DocketError(
             f"source {source!r} has no mapper in vault.yaml; set sources.{source}.mapper to "
-            f".claude/skills/sources/{source}/mapper.py"
+            f".claude/skills/sources/{source}/mapper.py{inforce.note(vault.waiting)}"
         )
     repo = consuming_repo(vault.root)
     inside = vault.root.resolve()

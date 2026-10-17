@@ -130,7 +130,9 @@ agrees in the issue or, under an autonomy grant, with its decision recorded as p
   page, route or tool releases one (DR-0202, DR-0382). What a release lets in reaches git for good.
 - the gate's loosening: pages make only the `vault.yaml` changes on DR-0506's list (a never-store value added, a
   redaction rule or pattern turned on, a source made stricter or turned off), held by `loosens()` and a scan; every
-  other change is named, never made by a page, route or tool. What a loosening lets in reaches git for good.
+  other change is named, never made by a page, route or tool. A loosening applies only once committed, the gate
+  obeying HEAD's `vault.yaml` plus what an edit only tightens (DR-0521), and the CLI makes or takes in one only at
+  the owner's console, with a code typed back (DR-0517). What a loosening lets in reaches git for good.
 
 Each lands with its decision entry, marked `cost: one-way`.
 

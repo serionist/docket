@@ -62,6 +62,9 @@ class Git:
         self._identity: bool | None = None
         # HEAD's blobs by commit id and path: a commit's content never changes.
         self._blobs: dict[tuple[str, str], str] = {}
+        # The parents of the last commit this made, from its object: the settings in force move their cache
+        # forward on a commit of Docket's own with no call of their own (DR-0521).
+        self.parents: tuple[str, ...] = ()
 
     def run(
         self,
@@ -199,7 +202,10 @@ class Git:
             raise
         # The branch's ref file holds the new id the moment the commit returns (DR-0528).
         found = self.head_id()
-        return found if found is not None else self.out("rev-parse", "HEAD").strip()
+        commit = found if found is not None else self.out("rev-parse", "HEAD").strip()
+        parents = gitfiles.commit_parents(self.git_dir, commit)
+        self.parents = () if isinstance(parents, gitfiles.Unknown) else parents
+        return commit
 
     def _vault_names(self, out: str) -> list[str]:
         """Names git printed from the repo's top, made relative to the vault."""

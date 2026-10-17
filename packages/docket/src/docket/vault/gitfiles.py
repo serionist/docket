@@ -1,5 +1,5 @@
-"""What git keeps as plain files in a git dir, read without starting git (DR-0528): whether HEAD is on a branch, and
-HEAD's commit id.
+"""What git keeps as plain files in a git dir, read without starting git (DR-0528): whether HEAD is on a branch,
+HEAD's commit id, and a new commit's parents.
 
 Only a plain checkout's git dir is read, the one `home.is_git_dir` vouches for, with no `commondir` file: the same
 rule `home` uses before it trusts a repo it found. Anything else answers `UNKNOWN`, and the caller asks git as before:
@@ -9,6 +9,7 @@ a git dir whose refs aren't files (reftable), a file that doesn't read as git wr
 from __future__ import annotations
 
 import re
+import zlib
 from pathlib import Path
 from typing import Final
 
@@ -66,6 +67,30 @@ def head_id(git_dir: Path) -> str | Unknown | None:
             return UNKNOWN
         return _packed(git_dir, ref)
     return UNKNOWN
+
+
+def commit_parents(git_dir: Path, commit: str) -> tuple[str, ...] | Unknown:
+    """A commit's parents from its loose object, as git writes one the moment a commit is made: zlib, then `commit
+    <size>`, a NUL and the headers, `tree` first and the `parent` lines after it. A packed or missing object, or one
+    that doesn't read as a commit, is unknown."""
+    if not _ID.match(commit) or isinstance(_head(git_dir), Unknown):
+        return UNKNOWN
+    try:
+        data = zlib.decompress((git_dir / "objects" / commit[:2] / commit[2:]).read_bytes())
+    except (OSError, zlib.error):
+        return UNKNOWN
+    kind, _, body = data.partition(b"\0")
+    if not kind.startswith(b"commit "):
+        return UNKNOWN
+    parents: list[str] = []
+    for line in body.split(b"\n")[1:]:
+        if not line.startswith(b"parent "):
+            break
+        found = line.removeprefix(b"parent ").decode("ascii", "replace")
+        if not _ID.match(found):
+            return UNKNOWN
+        parents.append(found)
+    return tuple(parents)
 
 
 def _head(git_dir: Path) -> str | Unknown:

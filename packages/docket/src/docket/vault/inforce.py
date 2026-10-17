@@ -9,14 +9,121 @@ change itself (DR-0506). One rule, so the page's door, the take-in, the console'
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import contextlib
+import json
+import secrets
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
 
-from docket.vault.config import NeverStore, Redaction, RedactionPattern, SourceConfig, VaultConfig
+from docket.errors import DocketError
+from docket.vault.config import CONFIG_FILE, NeverStore, Redaction, RedactionPattern, SourceConfig, VaultConfig
+from docket.vault.git import Git
+from docket.vault.home import Home
 from docket.vault.neverstore import ListName
+from docket.vault.staging import write_replacing
 
 # Stricter to the right: work stores everything, mixed waits for a classification, private stores nothing.
 RANK = {"work": 0, "mixed": 1, "private": 2}
 LISTS: tuple[ListName, ...] = ("people", "containers", "keywords")
+# What every place that reads the settings in force says while the file holds more: never a value, and never that the
+# edit lets more in, since what waits can be neutral, such as a time zone.
+NOTICE = "vault.yaml has an edit that isn't in force until you commit it"
+UNREADABLE_HEAD = (
+    "vault.yaml isn't in the last commit as a file Docket can read, so an edit of it can't be weighed; commit it "
+    "yourself, then try again"
+)
+# HEAD's vault.yaml by the commit that holds it, so no git call is made while HEAD stays. Disposable: one that doesn't
+# read is a miss.
+CACHE = "committed-vault-yaml.json"
+
+
+class UnreadableHeadError(DocketError):
+    """HEAD holds no vault.yaml Docket can read, so nothing can be weighed against it."""
+
+
+@dataclass(frozen=True)
+class Settings:
+    """vault.yaml as written, and the settings in force under it."""
+
+    file: VaultConfig
+    in_force: VaultConfig
+
+    @property
+    def waiting(self) -> bool:
+        """Whether the file holds an edit that isn't in force until it is committed."""
+        return self.in_force != self.file
+
+
+def note(waiting: bool) -> str:
+    """What a message that sends the owner to vault.yaml adds while an edit there isn't in force."""
+    return f"; {NOTICE}" if waiting else ""
+
+
+def load(root: Path, home: Home) -> Settings:
+    """The settings in force for the vault at `root`: HEAD's vault.yaml with what the file only tightens. A file that
+    is HEAD's is in force whole, with nothing else read. A change of `storage` not committed stops here, since the git
+    dir HEAD is read from depends on it."""
+    path = root / CONFIG_FILE
+    text = path.read_text(encoding="utf-8")
+    file = VaultConfig.parse(text, path)
+    held = committed_text(root, home)
+    if held == text.replace("\r\n", "\n"):
+        return Settings(file, file)
+    try:
+        committed = VaultConfig.parse(held, Path(f"HEAD:{CONFIG_FILE}"))
+    except DocketError:
+        raise UnreadableHeadError(UNREADABLE_HEAD) from None
+    if committed.storage != file.storage:
+        raise DocketError(f"{NOTICE}: its storage, which Docket reads HEAD by")
+    return Settings(file, effective(committed, file))
+
+
+def committed_text(root: Path, home: Home) -> str:
+    """HEAD's vault.yaml, from the cache when HEAD is the commit it was read at, else by `git show <id>:` with the id
+    read first, so a commit landing between the two reads never files one commit's text under another's id. HEAD's id
+    comes from the git dir's files (DR-0528), or from git where they can't say, such as a linked worktree."""
+    git = Git(root, home=home)
+    commit = git.head_id()
+    if commit is None:
+        raise UnreadableHeadError(UNREADABLE_HEAD)
+    cached = _cached(home)
+    if cached is not None and cached[0] == commit:
+        return cached[1]
+    found = git.run("show", f"{commit}:./{CONFIG_FILE}", check=False)
+    if found.returncode != 0:
+        raise UnreadableHeadError(UNREADABLE_HEAD)
+    text = found.stdout.replace("\r\n", "\n")
+    remember(home, commit, text)
+    return text
+
+
+def carry(home: Home, commit: str, parents: Sequence[str], paths: Sequence[str]) -> None:
+    """After a commit of Docket's own that didn't name vault.yaml, made on the cached commit: the cache moves to it,
+    since `--only` never takes a path it wasn't given. One that named vault.yaml leaves a miss for the next read, which
+    asks git: the file read now could already hold an edit made after the commit, and must never pass for HEAD's."""
+    if CONFIG_FILE in paths:
+        return
+    cached = _cached(home)
+    if cached is not None and list(parents) == [cached[0]]:
+        remember(home, commit, cached[1])
+
+
+def _cached(home: Home) -> tuple[str, str] | None:
+    try:
+        data = json.loads((home.private / CACHE).read_text(encoding="utf-8"))
+        commit, text = data["commit"], data["text"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return (commit, text) if isinstance(commit, str) and isinstance(text, str) else None
+
+
+def remember(home: Home, commit: str, text: str) -> None:
+    """File HEAD's vault.yaml under its commit. A write that fails leaves a miss for the next read, never an error: the
+    service's threads may race here, and each writes through a temp file of its own."""
+    with contextlib.suppress(OSError, DocketError):
+        body = json.dumps({"commit": commit, "text": text})
+        write_replacing(home, home.private / CACHE, body, f"vault-cache.{secrets.token_hex(4)}")
 
 
 def effective(committed: VaultConfig, file: VaultConfig) -> VaultConfig:
