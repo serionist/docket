@@ -26,7 +26,7 @@ from docket.media import crypto, layout
 from docket.media import staged as media_staged
 from docket.media.fetch import MAX_BYTES, Capped, Fetcher, Limits, media_folder, open_path
 from docket.media.keystore import KeyStore
-from docket.vault import cursors, inforce
+from docket.vault import cursors
 from docket.vault.gate import Gate
 from docket.vault.records import RID, is_native_id
 from docket.vault.vault import Vault
@@ -90,7 +90,8 @@ def fetch(vault: Vault, rid: str, *, path: str | None, url: str | None, fetcher:
     if (path is None) == (url is None):
         raise DocketError("media_put takes a path or a url: one of them")
     bounds = fetcher.limits if fetcher is not None else limits()
-    entry = inforce.load(vault.root, vault.home).in_force.sources.get(layout.source_of(rid))
+    # The settings in force as the vault was opened; the checks after the fetch read them again, through the gate.
+    entry = vault.config.sources.get(layout.source_of(rid))
     if entry is None:
         raise DocketError(f"source {layout.source_of(rid)} isn't in vault.yaml in force")
     taken: Path | None = None

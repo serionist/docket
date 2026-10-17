@@ -307,14 +307,18 @@ def test_a_crash_between_the_move_and_the_commit_is_finished_next_time(tmp_path:
 def test_a_leftover_without_its_sidecar_is_never_committed(tmp_path: Path) -> None:
     vault = media_vault(tmp_path)
     in_raw(vault)
+    put(vault)
+    [file] = layout.staged_files(vault.root, CALL)
+    media_staged.move(file, layout.stored_path(vault.root, CALL, datetime(2026, 10, 12, tzinfo=UTC), "mp3"))
     stray = layout.stored_path(vault.root, "plaud:rec-x", datetime(2026, 10, 1, tzinfo=UTC), "mp3")
-    stray.parent.mkdir(parents=True)
     stray.write_bytes(b"x")
     result = Gate(vault).promote()
+    assert [m.stored for m in result.media] == [1]
     assert result.media_held == [
         f"{stray.relative_to(vault.root).as_posix()} has no sidecar in staging, so it isn't committed"
     ]
     assert stray.exists()
+    assert stray.name not in git(vault.root, "ls-files", "media")
 
 
 def test_a_leftover_that_fails_its_checks_is_deleted(tmp_path: Path) -> None:

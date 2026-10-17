@@ -159,11 +159,14 @@ def _forget_sidecar(path: Path, keys: KeyStore, keep: frozenset[str] | None) -> 
 def delete(root: Path, keys: KeyStore, rid: str) -> int:
     """Delete a rid's staged media: its files, then its sidecar, each with its key, never a key of its stored media.
     Returns how many files went."""
-    keep = _stored_keys(root, rid)
     files = layout.staged_files(root, rid)
+    sidecar = layout.sidecar_path(root, rid)
+    if not files and not sidecar.exists():
+        # The common case, for every record a sync drops: nothing staged, so nothing to read in media/.
+        return 0
+    keep = _stored_keys(root, rid)
     for path in files:
         _forget_file(path, keys, keep)
-    sidecar = layout.sidecar_path(root, rid)
     if sidecar.exists():
         _forget_sidecar(sidecar, keys, keep)
     return len(files)

@@ -904,7 +904,7 @@ def media_drop() -> None:
 
 def _media_change(vault: Path | None, source: str, field: MediaField, value: str, *, add: bool) -> None:
     found = find_vault(vault)
-    done = media_sources.change(found, source, field, value, add=add)
+    done = media_sources.set_media_list(found, source, field, value, add=add)
     word = media_sources.WORDS[field]
     if done.declined:
         say(f"media    {word} not changed: the code wasn't typed back")

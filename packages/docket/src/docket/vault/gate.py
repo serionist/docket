@@ -37,7 +37,7 @@ from docket.vault import cuts as cutting
 from docket.vault import holds, inforce, neverstore, releaselog
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.cuts import CUT_MARKER, Cut
-from docket.vault.host import lfs_state
+from docket.vault.host import Lfs, lfs_state
 from docket.vault.records import RawRecord, version
 from docket.vault.redact import Redactor, markers
 from docket.vault.spans import RawLookup
@@ -367,10 +367,14 @@ class Gate:
         its files back to staging."""
         root = self.vault.root
         swept = self._media_sweep(config)
+        result.media_dropped = self._media_dropped
+        if not swept.waiting and not swept.leftover:
+            # Nothing waits: no git call, so a promotion of records alone costs what it did.
+            return
         screen = self._screen(config)
-        lfs = lfs_state(self.vault.home.top)
-        problem = None if lfs.installed and lfs.filter_set else f"git-lfs {lfs.summary()}"
-        untracked = self.vault.git.not_in_head(media_layout.STORED)
+        # A file a crash left in media/ uncommitted always has its sidecar in staging still: git is asked only then.
+        untracked = self.vault.git.not_in_head(media_layout.STORED) if swept.leftover else []
+        lfs: Lfs | None = None
         # A sidecar left beside a file a commit already took, by a crash before its deletion: only the sidecar goes.
         for sidecar, rid in swept.leftover:
             if not set(media_staged.rel(root, media_layout.stored_files(root, rid))) & set(untracked):
@@ -399,6 +403,8 @@ class Gate:
             versions = screen.raw.versions(item.sidecar.rid)
             if not versions:
                 continue
+            lfs = lfs or lfs_state(self.vault.home.top)
+            problem = None if lfs.installed and lfs.filter_set else f"git-lfs {lfs.summary()}"
             if problem is not None:
                 if item.sidecar.problem != problem:
                     media_staged.write_sidecar(

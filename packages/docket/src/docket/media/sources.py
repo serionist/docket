@@ -29,7 +29,7 @@ def _checked(field: Field, value: str) -> str:
     return value
 
 
-def change(vault: Vault, source: str, field: Field, value: str, *, add: bool) -> Rewritten:
+def set_media_list(vault: Vault, source: str, field: Field, value: str, *, add: bool) -> Rewritten:
     """Add or remove one host or folder of a source, and commit vault.yaml."""
     value = _checked(field, value)
 
