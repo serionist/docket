@@ -3,15 +3,19 @@ from __future__ import annotations
 import pytest
 
 from docket.vault.anchors import (
+    UNREAD,
     Anchor,
     AnchorError,
     decode_rid,
     encode_rid,
     format_anchor,
+    format_ref,
     format_time,
+    is_unread,
     paragraphs,
     parse_anchor,
     parse_locator,
+    parse_ref,
     parse_time,
     split_lines,
     split_path_locator,
@@ -231,3 +235,62 @@ def test_what_isnt_a_path_locator(text: str) -> None:
 def test_a_path_locator_whose_stretch_runs_backwards_is_refused() -> None:
     with pytest.raises(AnchorError, match="ends before it starts"):
         split_path_locator("x.md@14:52-14:30")
+
+
+# -- doc-line refs (#160, DR-0540) -------------------------------------------------------------------------------------
+
+NOTE_ID = "recording-note:2026-10-14-supplier-call"
+
+
+@pytest.mark.parametrize(
+    ("token", "rev", "line", "hash_"),
+    [
+        (f"[d:{NOTE_ID}@2#7]", 2, 7, None),
+        (f"[d:{NOTE_ID}#7]", None, 7, None),
+        (f"[d:{NOTE_ID}@12#140=0a1b2c3d]", 12, 140, "0a1b2c3d"),
+    ],
+)
+def test_a_ref_parses_and_writes_back_the_same(token: str, rev: int | None, line: int, hash_: str | None) -> None:
+    ref = parse_ref(token)
+    assert (ref.doc, ref.rev, ref.line, ref.hash) == (NOTE_ID, rev, line, hash_)
+    assert ref.text == token == format_ref(NOTE_ID, rev, line, hash_)
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        f"[d:{NOTE_ID}]",
+        f"[d:{NOTE_ID}@2]",
+        f"[d:{NOTE_ID}@0#7]",
+        f"[d:{NOTE_ID}@2#0]",
+        f"[d:{NOTE_ID}@2#7=0A1B2C3D]",
+        f"[d:{NOTE_ID}#7=0a1b2c3d]",
+        f"[d:{NOTE_ID}@2#7=0a1b2c]",
+        "[d:Recording-Note:x@2#7]",
+        "[d:no-colon@2#7]",
+    ],
+)
+def test_what_isnt_a_ref_is_an_error_at_a_line_s_end(token: str) -> None:
+    with pytest.raises(AnchorError):
+        parse_ref(token)
+    found = trailing_anchors(f"- a line @12:08 {token}")
+    assert (found.refs, found.failed, [a.token for a in found.anchors]) == ([], [token], ["@12:08"])
+
+
+def test_refs_and_anchors_sit_at_a_line_s_end_in_any_order() -> None:
+    found = trailing_anchors(f"| Ben | 10 million [d:{NOTE_ID}@2#7] @12:08 [d:{NOTE_ID}@2#9=0a1b2c3d] |")
+    assert found.text == "| Ben | 10 million"
+    assert [a.token for a in found.anchors] == ["@12:08"]
+    assert [(r.line, r.hash) for r in found.refs] == [(7, None), (9, "0a1b2c3d")]
+    # A redaction marker stays text, a ref after it is still a ref.
+    marked = trailing_anchors(f"- the code [redacted:password] [d:{NOTE_ID}@2#7]")
+    assert (marked.text, len(marked.refs)) == ("- the code [redacted:password]", 1)
+
+
+def test_a_form_this_docket_doesnt_read_is_named_as_one() -> None:
+    found = trailing_anchors("- later [zz:soon] @12:08")
+    assert found.failed == ["[zz:soon]"]
+    assert found.errors == [f"[zz:soon]: {UNREAD}"]
+    assert is_unread("[zz:soon]")
+    assert not is_unread("[redacted:phone]")
+    assert not is_unread(f"[d:{NOTE_ID}@2]")

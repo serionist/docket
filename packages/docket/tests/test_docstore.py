@@ -112,7 +112,7 @@ def test_a_doc_is_written_at_rev_1_and_committed(routed: Vault) -> None:
         (note(covers=[REC, MAIL], lines=["- which one? @12:08"]), "@12:08 needs a doc covering one record"),
         (note(rev="3"), "there is no recording-note:2026-10-14-supplier-call yet; leave rev out"),
         (note(supersedes="brief:nobody"), "supersedes: brief:nobody doesn't exist"),
-        (note(lines=["- a reserved form [d:digest-1]"]), "only [r:...] is an anchor"),
+        (note(lines=["- a reserved form [zz:digest-1]"]), "an anchor this Docket doesn't read"),
         (note(lines=["- not a time [r:calls:rec-0042@1:60]"]), "if @1:60 is meant as a position, it isn't one"),
     ],
 )

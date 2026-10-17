@@ -24,6 +24,7 @@ from docket.curate import batch as curate
 from docket.documents import scan as documents_scan
 from docket.errors import DocketError
 from docket.imports import notes
+from docket.index import flags as index_flags
 from docket.index.build import db_path
 from docket.index.embedpass import fill
 from docket.models.client import Worker
@@ -803,6 +804,14 @@ def doc_verify(
     say_all(render.verify(recall.verify(find_vault(vault), doc, lines=line or None, window=window)))
 
 
+@doc_app.command("stale")
+def doc_stale(vault: VaultOption = None) -> None:
+    """The doc lines that cite a line that changed since, the corrections not applied yet, and anchors an older
+    Docket's redaction wrote inside. Each flagged line clears when its doc's next rev cites the line again, as verify's
+    cite gives it, or drops the ref."""
+    say_all(render.stale(recall.stale(find_vault(vault))))
+
+
 @doc_app.command("redact")
 def doc_redact(
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Say what would change, and write nothing.")] = False,
@@ -1103,6 +1112,8 @@ def index_status(vault: VaultOption = None) -> None:
     if st.new_runs or st.changed_docs or st.entities_changed:
         entities = ", the entity files" if st.entities_changed else ""
         say(f"new since  {st.new_runs} run file(s), {st.changed_docs} doc(s){entities}: docket index update")
+    if st.flagged or st.unapplied:
+        say(f"flagged    {index_flags.summary(st.flagged, st.unapplied)}: docket doc stale")
     for problem in st.problems:
         say(f"! {problem}")
     if st.changed_runs:

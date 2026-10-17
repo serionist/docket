@@ -23,7 +23,8 @@ check every fact you use against the raw it came from, and answer with locators.
    (minutes of a recording, paragraphs of a mail, messages of a chat).
 4. **Answer.** The answer first, in a sentence or two. Then each fact with the raw's own words, quoted, and its
    locator: `[r:<rid>@12:08]` for a moment in a recording, `[r:<rid>#2]` for a paragraph, a doc's id and line, or a
-   note's old path. When the summary and the raw disagree, say so and give the raw's words.
+   note's old path. When the summary and the raw disagree, say so and give the raw's words. When the user wants the
+   doc fixed, the fix is a correction doc and then the doc's next revision ([writing-docs.md](writing-docs.md)).
 5. **Nothing found.** Say what you searched (the words, the names, the window), and offer wider words or a longer
    window. Never fill a gap from memory or from what seems likely.
 

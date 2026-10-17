@@ -149,6 +149,15 @@ sequenceDiagram
 - A correction propagates. Every ledger item, decision and brief line records what it was built from
   (`derived_from`). A correction is a new version of the doc (its next rev, DR-0112), and its dependents are flagged
   for review.
+  - A line cites the doc line it was built from as `[d:<doc id>@<rev>#<n>]`, the token `verify` gives as each line's
+    `cite`; doc_put pins it to the first 8 hex digits of the sha256 of that line's text, its anchors left out
+    (DR-0540).
+  - A ref is flagged when the line it cites reads otherwise in its doc's current rev, or that doc is gone or
+    superseded: `read` says so beside the line, `docket doc stale` lists it, and the session start counts it. Only
+    direct dependents are flagged, and a flag clears when the line is cited afresh or its ref dropped (DR-0542).
+  - A mismatch `verify` shows becomes a `correction` doc (each line the raw's anchor and a ref to the line it
+    corrects), then the doc's next rev, which is what flags the dependents; the correction counts as not applied until
+    that line changes (DR-0543).
 
 ### 3.4 Tasks
 
@@ -368,7 +377,10 @@ supersedes: []
 entities: [marco, northwind, fleet-management]
 ```
 
-Every bullet ends with its anchors. Docs are written through the `doc_put` tool, which redacts the doc line by line,
+Every bullet ends with its anchors, raw anchors or refs to the doc lines it was built from, or both; `covers` may be
+empty only when no line has a raw anchor (DR-0540). Redaction never writes inside a line's anchors, and a doc whose
+anchors hold a token this Docket doesn't parse is left whole by every write that would redact it, with the line named
+(DR-0541). Docs are written through the `doc_put` tool, which redacts the doc line by line,
 refuses one that says something on the never-store keywords list, then checks the frontmatter and that every anchor
 resolves before it accepts the doc (DR-0195). The notes import and a hand edit taken in pass the same rules, and
 `docket doc redact` applies them to the docs already stored (DR-0210). A doc lives at
@@ -384,7 +396,7 @@ the earlier ones (DR-0112).
 | `records`, `record_versions`, `crosswalk` | every raw record's current version with its file and line in the raw log, and every version with its byte offset there (DR-0445); old and new ids of one thing |
 | `segments` | transcript utterances: rid, engine, start and end ms, speaker, person, text |
 | `chunks`, `chunks_fts`, `chunk_vec_<model>` | the searchable units; FTS5 over the text as written and a stemmed column per language (DR-0114); a vector table per model, keyed by the hash of each chunk's input and kept in step with the chunks by every update and rebuild (DR-0336) |
-| `docs`, `doc_covers`, `doc_anchors`, `old_paths`, `derived_from` | processed docs, the records each covers, each line's anchors, legacy notes' old paths, and what each item and brief line was built from |
+| `docs`, `doc_covers`, `doc_anchors`, `old_paths`, `derived_from`, `doc_lines` | processed docs, the records each covers, each line's anchors, legacy notes' old paths, each line's pinned refs to the doc lines it was built from, and each doc's citable lines by hash, which one join reads the flags from (DR-0542) |
 | `entities`, `aliases`, `alias_terms`, `entity_links`, `external_ids` | the keyword layer loaded from YAML, with each alias's forms and misspellings |
 | `mentions`, `extracts` | which chunk mentions which entity; typed values (ticket, amount, date, URL) |
 | `items`, `item_log`, `meetings`, `points`, `streams` | the ledger, folded from the op log |

@@ -109,6 +109,19 @@ def test_the_service_s_own_vault_problem_and_index_reach_claude(tmp_path: Path) 
     assert "systemMessage" not in stale
 
 
+def test_doc_lines_citing_changed_lines_are_counted_for_claude(tmp_path: Path) -> None:
+    folder_vault(tmp_path)
+    out = start(status(index={"exists": True, "flagged": 3, "unapplied": 1}))
+    said = "docs: 3 line(s) cite lines that changed, 1 correction line(s) not applied; `docket doc stale`"
+    assert said in context(out).splitlines()
+    assert "systemMessage" not in out
+    quiet = start(status(index={"exists": True, "flagged": 0, "unapplied": 0}))
+    assert not any(line.startswith("docs:") for line in context(quiet).splitlines())
+    # A body that isn't a count says nothing rather than something wrong.
+    odd = start(status(index={"exists": True, "flagged": "3", "unapplied": True}))
+    assert not any(line.startswith("docs:") for line in context(odd).splitlines())
+
+
 def test_a_vault_yaml_that_won_t_load_and_a_vault_that_s_gone(tmp_path: Path) -> None:
     vault = folder_vault(tmp_path)
     (vault.root / "vault.yaml").write_text("primary_machine: [\n", encoding="utf-8")

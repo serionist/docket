@@ -20,6 +20,7 @@ format is a one-way door (DR-0109): docs in users' vaults depend on it.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import unicodedata
@@ -31,7 +32,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator, model_validator
 
 from docket.errors import DocketError
-from docket.vault.anchors import is_blank, normalize_newlines
+from docket.vault.anchors import is_blank, normalize_newlines, trailing_anchors
 from docket.vault.records import RID
 
 log = logging.getLogger(__name__)
@@ -251,8 +252,9 @@ class DocMeta(BaseModel):
             if not lenient:
                 raise ValueError(f"type {self.type!r} isn't one of {', '.join(DOC_TYPES)}")
             log.warning("%s has a type this Docket doesn't know: %s", self.id, self.type)
-        if not self.covers and self.type != "legacy-note" and not lenient:
-            raise ValueError("covers names at least one rid")
+        cites_only = bool(info.context and info.context.get("cites_only"))
+        if not self.covers and self.type != "legacy-note" and not lenient and not cites_only:
+            raise ValueError("covers names at least one rid, unless no line has a raw anchor and lines cite doc lines")
         if self.type != "legacy-note" and (self.old_paths or self.import_hash is not None):
             if not lenient:
                 raise ValueError("old_paths and import_hash belong to a legacy note only")
@@ -293,6 +295,17 @@ class ProcessedDoc:
         numbered = self.lines()
         roles = line_roles([line for _, line in numbered])
         return [(n, line, role) for (n, line), role in zip(numbered, roles, strict=True)]
+
+    def citable(self) -> dict[int, str]:
+        """The lines a ref may cite, by their number in the file, each with its hash (DR-0540): every body line that
+        isn't blank or in fenced code or a comment; in a legacy note, every line that isn't blank."""
+        legacy = self.meta.type == "legacy-note"
+        out: dict[int, str] = {}
+        for n, line, role in self.roles():
+            if is_blank(line) or (role == "skip" and not legacy):
+                continue
+            out[n] = line_hash(cited_text(line, content=role == "content" and not legacy))
+        return out
 
     def render(self, rev: int | None = None) -> str:
         m = self.meta
@@ -396,8 +409,10 @@ def parse_doc(text: str, *, lenient: bool = False) -> ProcessedDoc:
         fields = {k: v for k, v in fields.items() if k in DocMeta.model_fields}
         if extra:
             log.warning("a doc has keys this Docket doesn't know, kept as they are: %s", ", ".join(sorted(extra)))
+    # Only a strict read asks whether the body cites doc lines alone: a lenient one never refuses empty covers.
+    context = {"lenient": lenient, "cites_only": not lenient and cites_only(lines[close + 1 :])}
     try:
-        meta = DocMeta.model_validate(fields, context={"lenient": lenient})
+        meta = DocMeta.model_validate(fields, context=context)
     except ValidationError as e:
         problems: list[DocProblem] = []
         for err in e.errors():
@@ -406,6 +421,35 @@ def parse_doc(text: str, *, lenient: bool = False) -> ProcessedDoc:
             problems.append(DocProblem(key_line(head, key) if key else None, f"{key or 'frontmatter'}: {message}"))
         raise DocRefusedError(problems) from None
     return ProcessedDoc(meta, "\n".join(lines[close + 1 :]), close + 1, extra, "\n".join(lines))
+
+
+# -- what a ref cites ----------------------------------------------------------------------------------------------
+
+
+def cited_text(line: str, *, content: bool) -> str:
+    """What a ref's hash covers (DR-0540): a content line of an anchored doc as `trailing_anchors` gives its text, its
+    trailing anchors, refs and anchor-like tokens left out, and a table row's closing pipe too; any other line whole.
+    Leading whitespace stays, trailing spaces and tabs go, and nothing is normalized beyond the LF the doc was read
+    with."""
+    return trailing_anchors(line).text if content else line.rstrip(" \t")
+
+
+def line_hash(text: str) -> str:
+    """The first 8 hex digits of the sha256 of a line's cited text in UTF-8."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
+
+
+def cites_only(lines: list[str]) -> bool:
+    """Whether a body's content lines cite doc lines and none has a raw anchor: then `covers` may be empty."""
+    cited = False
+    for line, role in zip(lines, line_roles(lines), strict=True):
+        if role != "content":
+            continue
+        trailing = trailing_anchors(line)
+        if trailing.anchors:
+            return False
+        cited = cited or bool(trailing.refs)
+    return cited
 
 
 # -- which lines need anchors -------------------------------------------------------------------------------------

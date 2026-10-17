@@ -23,7 +23,8 @@ from docket.index.text import snowball_version
 # 7: each record version's byte offset in its run file (DR-0445); a line that isn't UTF-8 and a record in another
 # source's folder are problems (DR-0446).
 # 8: an author written Name <id> mentions the entity whose ids for the record's source hold the id (DR-0471).
-SCHEMA_VERSION = 8
+# 9: derived_from and doc_lines, what each line cites and every doc's citable lines (DR-0542).
+SCHEMA_VERSION = 9
 TOKENIZER = "unicode61 remove_diacritics 2"
 # remove_diacritics 2 came in SQLite 3.27.
 MIN_SQLITE = (3, 27, 0)
@@ -72,6 +73,13 @@ CREATE TABLE doc_anchors (
   doc TEXT NOT NULL, line INTEGER NOT NULL, ordinal INTEGER NOT NULL, rid TEXT NOT NULL, kind TEXT NOT NULL,
   start INTEGER NOT NULL, end INTEGER, PRIMARY KEY (doc, line, ordinal)
 ) WITHOUT ROWID;
+CREATE TABLE derived_from (
+  doc TEXT NOT NULL, line INTEGER NOT NULL, ordinal INTEGER NOT NULL, src TEXT NOT NULL, rev INTEGER NOT NULL,
+  src_line INTEGER NOT NULL, hash TEXT NOT NULL, PRIMARY KEY (doc, line, ordinal)
+) WITHOUT ROWID;
+CREATE INDEX derived_from_src ON derived_from (src);
+CREATE TABLE doc_lines (doc TEXT NOT NULL, hash TEXT NOT NULL, line INTEGER NOT NULL, PRIMARY KEY (doc, hash, line))
+  WITHOUT ROWID;
 CREATE TABLE entities (
   id TEXT PRIMARY KEY, type TEXT NOT NULL, path TEXT NOT NULL, names TEXT NOT NULL, status TEXT NOT NULL, role TEXT,
   note TEXT
