@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import zlib
 from pathlib import Path
 
 import pytest
@@ -66,6 +67,13 @@ def test_a_new_commit_s_parents_are_read_from_its_object(tmp_path: Path) -> None
     tree = sh(top, "git", "rev-parse", "HEAD^{tree}").strip()
     assert gitfiles.commit_parents(top / ".git", tree) is UNKNOWN
     assert gitfiles.commit_parents(top / ".git", "not an id") is UNKNOWN
+    # A commit object whose parent line isn't an id, written as git stores a loose object.
+    odd = "f" * 40
+    (top / ".git" / "objects" / odd[:2]).mkdir(exist_ok=True)
+    body = f"tree {tree}\nparent not-an-id\nauthor A <a@example.invalid> 0 +0000\n\nodd\n".encode()
+    (top / ".git" / "objects" / odd[:2] / odd[2:]).write_bytes(zlib.compress(b"commit %d\0" % len(body) + body))
+    assert gitfiles.commit_parents(top / ".git", odd) is UNKNOWN
+    (top / ".git" / "objects" / odd[:2] / odd[2:]).unlink()
     git(top, "gc", "-q")
     assert gitfiles.commit_parents(top / ".git", second) is UNKNOWN
     assert gitfiles.commit_parents(tmp_path / "nowhere", second) is UNKNOWN
