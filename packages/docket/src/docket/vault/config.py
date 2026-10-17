@@ -254,6 +254,10 @@ class VaultConfig(_Model):
     sources: dict[str, SourceConfig] = Field(default_factory=dict[str, SourceConfig])
     never_store: NeverStore = Field(default_factory=NeverStore)
     redaction: Redaction = Field(default_factory=Redaction)
+    # The API provider this vault's text may go to for embeddings and reranking (#89, DR-0537); none when absent. A
+    # key added later to the settings in force: it applies once committed, and turning it either way asks at the
+    # owner's console (DR-0517, DR-0521).
+    api_provider: Literal["voyage"] | None = None
 
     @field_validator("sources")
     @classmethod
@@ -292,7 +296,15 @@ class VaultConfig(_Model):
             raise DocketError(f"{path}: {problems}") from e
 
     def dump(self) -> str:
-        return _dump(self.model_dump(mode="json"))
+        return _dump(self._written())
+
+    def _written(self) -> dict[str, Any]:
+        """The settings as Docket writes them: `api_provider` only when set, as a source's `folder` is, so a vault that
+        never opts in keeps its vault.yaml byte for byte and opens on a Docket that doesn't know the key (DR-0537)."""
+        data = self.model_dump(mode="json")
+        if data.get("api_provider") is None:
+            data.pop("api_provider", None)
+        return data
 
     def written_by_docket(self, text: str) -> bool:
         """Whether a vault.yaml's text is exactly what Docket writes for these settings, now or before the redaction
@@ -300,7 +312,7 @@ class VaultConfig(_Model):
         if text == self.dump():
             return True
         legacy = self.redaction.legacy()
-        return legacy is not None and text == _dump({**self.model_dump(mode="json"), "redaction": legacy})
+        return legacy is not None and text == _dump({**self._written(), "redaction": legacy})
 
 
 def yaml_problem(error: yaml.YAMLError) -> str:

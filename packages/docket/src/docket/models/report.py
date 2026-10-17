@@ -12,8 +12,9 @@ from pathlib import Path
 from typing import Any, cast
 
 from docket.models import config, install, runtime
-from docket.models.config import Choice, Device, RerankTiming
+from docket.models.config import ApiChoice, Choice, Device, RerankTiming
 from docket.models.provider import Off
+from docket.models.voyage import Usage
 
 
 @dataclass(frozen=True)
@@ -29,13 +30,15 @@ class Environment:
 class Report:
     """The choice, and each line `docket models status` prints about it, without the labels."""
 
-    choice: Choice | Off
+    choice: Choice | ApiChoice | Off
     models: str
     environments: list[Environment] = field(default_factory=list[Environment])
     # None while models are off: there are no files, search or reranker to speak of.
     files: str | None = None
     search: str | None = None
     reranker: str | None = None
+    # The api provider's tokens this month on this machine, of its cap (DR-0539).
+    sent: str | None = None
 
     @property
     def on(self) -> bool:
@@ -46,6 +49,8 @@ def read() -> Report:
     choice = config.read()
     if isinstance(choice, Off):
         models = f"off{f': {choice.why}' if choice.why else ' (docket models install turns them on)'}"
+    elif isinstance(choice, ApiChoice):
+        models = f"{choice.embedder.name} through Voyage AI's API, {choice.embedder.dims} dimensions"
     else:
         models = f"{choice.embedder.name} on {choice.device}"
     environments: list[Environment] = []
@@ -56,8 +61,21 @@ def read() -> Report:
             environments.append(Environment(device, line, config.env_dir(device)))
     if isinstance(choice, Off):
         return Report(choice, models, environments)
-    missing = config.missing_files(choice.embedder)
     problem = install.vectors_problem()
+    if isinstance(choice, ApiChoice):
+        reranker = choice.reranker
+        return Report(
+            choice,
+            models,
+            environments,
+            files="none here: the api provider runs at Voyage AI",
+            search="! " + problem if problem else "uses the vectors",
+            reranker=f"{reranker.name} through Voyage AI's API, {reranker.pairs} pairs"
+            if reranker is not None
+            else choice.reranker_why or "none",
+            sent=f"{Usage().spent():,} of {choice.monthly_tokens:,} tokens this month",
+        )
+    missing = config.missing_files(choice.embedder)
     return Report(
         choice,
         models,
@@ -74,6 +92,8 @@ def lines(report: Report) -> list[str]:
     out += [f"env {e.device:<6} {e.line} ({e.path})" for e in report.environments]
     if report.on:
         out += [f"files      {report.files}", f"search     {report.search}", f"reranker   {report.reranker}"]
+    if report.sent is not None:
+        out.append(f"sent       {report.sent}")
     return out
 
 

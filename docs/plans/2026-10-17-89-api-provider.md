@@ -229,6 +229,34 @@ Recorded as `proposed` for the maintainer's review.
 | the screen: chunks from the index only, held back unless every record's source is still there and not private, on the records' never-store match, and on a change the redactor would make to the input, the title or the text, under the settings in force; the query held to every never-store list; reranks send only chunks passed under the current fingerprint, the rest keeping their places | redacting at send: the input and its hash would depend on the settings, and the vector with them; trusting what was stored: a value added to a never-store list later would still be sent | DR-0538 |
 | the key in the keychain only, set at the console; usage counted per machine, a monthly token cap of 50M; the pass backs off, searches never retry | a file fallback, as the service token has: the key in a file that tools and transcripts reach by its path, where the keychain keeps it out of those, though not from a process running as the user; no cap: a loop could spend without a stop | DR-0539 |
 
+### Taken while building
+
+Built on c25f330, with #134 in. The plan's assumptions held: `effective()` starts from HEAD and puts in only
+`never_store`, `redaction` and `sources`, so `api_provider` waits for its commit with no line of its own;
+`rewrite(via="cli")` asks through `console.problem()` for any change of it; `Vault.open` gives the settings in force.
+
+| Planned | Built | Why |
+|---|---|---|
+| `VoyageRunner` in `models/api.py` | the runner, `send`, the key store and the usage in `models/voyage.py`; `models/api.py` holds the commands' logic: `choose`, `keep_key`, `allow`, `status` | the provider and the locks apart |
+| the screen reads `inforce.load` | `Vault.open(root).config` | `inforce.load` has one caller each in `Vault` and `Gate`, which #134's scan pins (DR-0521) |
+| the redactor over the input, the title alone and the text alone | also over each of the chunk's records, field by field, as intake redacts (`Redactor.record`) | a record chunk's text starts with its title, so a pattern anchored on the record's text never meets the chunk's text alone |
+| `fill(..., screen=...)` | `fill` finds the screen on the models (`models.guard`), so callers and test doubles keep their signature; an API pass moves past what it held back with a cursor, a local pass reads from the start as before | the local pass's "the index kept changing" stop depends on reading the same rows again |
+| the full screen when the fingerprint moves, from the first batch | also at the start of every pass, new chunks or none | a pass with nothing new to embed left the table's fingerprint stale, and the reranker skipped for good; the source test caught it |
+| a rerank trusts every vector under the current fingerprint | it also checks each candidate's sources from its row, with no record read | an index update gives a new chunk the vector of another with the same input, so a private source's twin of a passed chunk would have been sent; its text is the same bytes, but its records aren't |
+| the query screened in the search | in the runner's gate, for a query's vector and a rerank's query alike | one place both paths pass; the vector stage needed no change |
+| `models status` counts the held-back chunks | the pass's own line says them (`docket index update`: "N held back by the vault's settings"), and `PassReport.held` | `models status` reads no index for the API, as for the local models |
+| tests in `test_models_key.py` and `test_cli_models.py` | the key store in `test_models_api.py`, the commands in `test_cli_models_api.py` | one file per surface |
+| `test_settings_scan.py` as #134 left it | `models/api.py`'s `allow` joins `rewrite`'s callers, pinned to `docket models allow`; `models/api.py` joins `console`'s importers, pinned to `console.problem` alone | the opt-in writes through the one writer, and the machine choice and the key refuse outside a console without asking a code |
+| `--check` | sends one query's vector, as any search would | the user runs it; tests use the fake |
+
+Voyage's docs, checked again on 17 Oct 2026 at build (through a research agent reading docs only; no key, no call):
+voyage-4 at $0.06 and rerank-2.5-lite at $0.02 a million tokens, 200M free tokens each (the page contradicts itself
+for rerankers); `output_dimension` 512 allowed; 1,000 texts and 320k tokens a request; Tier 1 2,000 RPM, 8M TPM for
+voyage-4 and 4M for rerank-2.5-lite, with a payment method on file; no `Retry-After`; the training opt-out with
+zero-day retention for an organization with a payment method; still no language list naming Hungarian, and no
+region, retention default or SOC 2 statement. One correction: the rerank answer is `data[]` with `index` and
+`relevance_score`, and `usage.total_tokens`, which the runner reads.
+
 ## Doors and data
 
 - **One-way door:** `vault.yaml` gains `api_provider` (DR-0021, DR-0537).
@@ -314,7 +342,7 @@ and `DOCKET_VAULT` unset; invented records only, and no network.
 | Risk | Status |
 |---|---|
 | Hungarian isn't named in Voyage's docs; search quality there is unmeasured, and CI makes no real calls | open: before the maintainer turns it on, `docket eval` with his key on the question set's Hungarian kinds, against the local floors; Cohere's embed-multilingual-v3.0 lists Hungarian and is the fallback choice |
-| Voyage's facts come from docs read on 17 Oct: prices, limits, the 200M free tokens, the training opt-out; no region, retention default or SOC 2 statement was found | open: checked again when built; the README sends the owner to Voyage's dashboard for zero-day retention |
+| Voyage's facts come from docs read on 17 Oct: prices, limits, the 200M free tokens, the training opt-out; no region, retention default or SOC 2 statement was found | open: checked again on 17 Oct 2026 at build (Taken while building), with the same gaps; the README sends the owner to Voyage's dashboard for zero-day retention |
 | 0.75 s may be short for a rerank over the network | accepted: past it the fused order stands and the pause follows (#67's contract); `docket eval` reranks with no budget |
 | uv's standalone Python on macOS may have no CA bundle of its own | open: the trust-store test runs on each system; `truststore` (MIT) is the fix if it fails, a dependency the PR names |
 | A machine with no payment method on Voyage gets far lower limits than Tier 1 | accepted: the pass backs off and resumes; the README says the free tokens need a payment method on file |

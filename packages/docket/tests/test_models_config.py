@@ -37,8 +37,10 @@ def test_no_block_is_off_with_nothing_to_say() -> None:
     [
         (["cpu"], "isn't a map of provider, device and embedder"),
         ({"provider": "local", "devise": "cpu"}, "keys this Docket doesn't know (devise)"),
-        ({"provider": "api"}, "names the api provider, which isn't there yet"),
-        ({"provider": "cloud"}, "names provider 'cloud'; it is local or none"),
+        ({"provider": "api", "embedder": "large"}, "names an embedder the api provider doesn't have (voyage-4)"),
+        ({"provider": "api", "api_monthly_tokens": 0}, "gives api_monthly_tokens as 0; it is a whole number"),
+        ({"provider": "api", "api_monthly_tokens": True}, "gives api_monthly_tokens as True"),
+        ({"provider": "cloud"}, "names provider 'cloud'; it is local, api or none"),
         ({"device": "tpu"}, "names device 'tpu'; it is cpu or cuda"),
         ({"embedder": "large"}, "names an embedder this Docket doesn't have (e5-small)"),
     ],

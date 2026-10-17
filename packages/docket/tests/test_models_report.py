@@ -26,10 +26,11 @@ def test_no_block_is_off_with_how_to_turn_them_on() -> None:
 
 
 def test_a_block_that_doesnt_read_is_off_with_its_reason() -> None:
-    choose({"provider": "api"})
+    choose({"provider": "api", "embedder": "large"})
     found = report.read()
     assert not found.on
-    assert found.models.startswith("off: the models block in") and "names the api provider" in found.models
+    assert found.models.startswith("off: the models block in")
+    assert "names an embedder the api provider doesn't have" in found.models
 
 
 def test_a_choice_shows_its_environment_files_search_and_reranker(monkeypatch: pytest.MonkeyPatch) -> None:

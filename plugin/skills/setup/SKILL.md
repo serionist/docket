@@ -118,6 +118,10 @@ Tell the user, briefly:
 - each blank source needs its `SKILL.md` filled and its mapper written, from a saved payload; its tests run with
   `python -m pytest .claude/skills/sources/<name>/tests`;
 - recordings and mail already fetched go in with `docket ingest <name> <folder> --vault <path>`;
-- the new folders under `.claude/skills/sources/` are theirs to commit; Docket commits only the vault.
+- the new folders under `.claude/skills/sources/` are theirs to commit; Docket commits only the vault;
+- search by meaning on a machine with no GPU can go through Voyage AI's API, which sends the vault's text off the
+  machine: only if they ask, give them `docket models install --api`, `docket models key voyage` and `docket models
+  allow voyage --vault <path>` to run in their own terminal, one at a time. Never run these, set the key or edit
+  `api_provider` yourself.
 
 Run again later, this skill adds sources to the vault the user confirms.

@@ -976,13 +976,15 @@ def curate_status(
 
 
 @contextlib.contextmanager
-def _query_models(no_models: bool, *, measure: bool = False) -> Generator[Models | Off | None]:
+def _query_models(
+    no_models: bool, *, measure: bool = False, vault: Vault | None = None
+) -> Generator[Models | Off | None]:
     """The models for a command that only asks queries, started for the command and stopped at its end: `docket
     search`'s on the CPU, `docket eval`'s where the reranker runs (DR-0457); None with --no-models."""
     if no_models:
         yield None
         return
-    models = open_models(queries_only=not measure, measure=measure)
+    models = open_models(queries_only=not measure, measure=measure, vault=vault)
     if measure and isinstance(models, Models) and models.reranker is not None and models.reranker.device == "cuda":
         say("(the reranker runs on the GPU, so this worker took a few seconds to start)")
     try:
@@ -1021,7 +1023,7 @@ def _embed(vault: Vault, no_models: bool) -> None:
     service when it runs for the vault with the same model."""
     if no_models:
         return
-    models = open_models(start=False, rerank=False)
+    models = open_models(start=False, rerank=False, vault=vault)
     if isinstance(models, Off):
         if models.why:
             say(f"! {models.why}")
@@ -1049,7 +1051,8 @@ def _embed(vault: Vault, no_models: bool) -> None:
                 say(f"vectors    {have} of {total} chunks")
 
         report = fill(vault, models, progress=progress)
-        say(f"vectors    {report.model}  {report.have} of {report.total} chunks ({report.embedded} embedded)")
+        held = f", {report.held} held back by the vault's settings" if report.held else ""
+        say(f"vectors    {report.model}  {report.have} of {report.total} chunks ({report.embedded} embedded{held})")
         if report.why:
             say(f"! {report.why}")
     finally:
@@ -1140,7 +1143,7 @@ def search_command(
                 for problem in report.problems:
                     if problem.startswith("vault.yaml"):
                         say(f"! {problem}")
-        with _query_models(no_models) as models:
+        with _query_models(no_models, vault=v) as models:
             result = index.search(
                 v, text, people=people, entities=entities, sources=sources, since=start, until=end, k=k, models=models
             )
@@ -1157,7 +1160,7 @@ def _service_search(vault: Vault, asked: dict[str, Any]) -> index.SearchResult |
         return None
     at = client.port()
     status = client.call("GET", "/api/models", token=token, at=at)
-    if status is None or status.status != 200 or not _same_embedder(status.body):
+    if status is None or status.status != 200 or not _same_embedder(status.body, vault):
         return None
     given = {key: value for key, value in asked.items() if value is not None}
     path = f"/api/search?{urlencode(given, doseq=True)}"
@@ -1172,11 +1175,11 @@ def _service_search(vault: Vault, asked: dict[str, Any]) -> index.SearchResult |
         return None
 
 
-def _same_embedder(status: dict[str, Any]) -> bool:
+def _same_embedder(status: dict[str, Any], vault: Vault) -> bool:
     """Whether the service's models, in its own words, search as this command's would: both off, or its worker up
     with the same embedder. A service started before an install or a remove, or whose worker is down, would answer
     without the vectors this command has, or with vectors it hasn't."""
-    models = open_models(start=False, rerank=False)
+    models = open_models(start=False, rerank=False, vault=vault)
     if isinstance(models, Off):
         return status.get("state") == "off"
     try:
@@ -1197,7 +1200,7 @@ def eval_command(
     """Measure search with your own questions: recall at k and MRR per kind of question. Writes nothing."""
     v = find_vault(vault)
     asked = questions.load(file, ZoneInfo(v.config.owner.time_zone))
-    with _query_models(no_models, measure=True) as models:
+    with _query_models(no_models, measure=True, vault=v) as models:
         report = questions.run(v, asked, k=k, models=models)
     if as_json:
         # ASCII only: a question's text can't put a terminal code on the screen.
@@ -1402,12 +1405,74 @@ def models_install(
     no_reranker: Annotated[
         bool, typer.Option("--no-reranker", help="Leave the reranker out, and remove its files if they are here.")
     ] = False,
+    api: Annotated[
+        bool, typer.Option("--api", help="Use Voyage AI's API instead, at your own console; nothing is installed.")
+    ] = False,
 ) -> None:
     """Build the models' environment, fetch the embedder's and the reranker's files, check they run, time the
-    reranker, and turn models on here."""
+    reranker, and turn models on here; or, with --api, choose Voyage AI's API for this machine."""
+    if api:
+        from docket.models import api as api_models  # noqa: PLC0415
+
+        chosen = api_models.choose(reranker=not no_reranker)
+        reranker = chosen.reranker.name if chosen.reranker is not None else "no reranker"
+        say(f"models     {chosen.embedder.name} and {reranker} through Voyage AI's API, chosen for this machine")
+        say(f"sends      at most {chosen.monthly_tokens:,} tokens a month (api_monthly_tokens in your config)")
+        say(f"next       {api_models.KEY_HINT}; then docket models allow voyage in each vault, at your console")
+        say("then       docket service install, so the service reads its models again")
+        return
     from docket.models import install  # noqa: PLC0415
 
     install.install(device, rerank=not no_reranker, say=say)
+
+
+@models_app.command("key")
+def models_key(
+    provider: Annotated[str, typer.Argument(help="The api provider: voyage.")],
+    forget: Annotated[bool, typer.Option("--forget", help="Remove the key from this machine's keychain.")] = False,
+) -> None:
+    """Keep the api provider's key in this machine's keychain, typed at your own console and never shown; or forget
+    it, which stops sending from this machine at once."""
+    import getpass  # noqa: PLC0415
+
+    from docket.models import api as api_models  # noqa: PLC0415
+    from docket.models.voyage import KeyStore  # noqa: PLC0415
+
+    if api_models.check_provider(provider) is None:
+        raise DocketError("give the provider whose key this is: voyage")
+    if forget:
+        had = KeyStore().forget()
+        say("key        forgotten: this machine sends nothing to Voyage AI" if had else "key        none was kept here")
+        return
+    api_models.keep_key(lambda: getpass.getpass("Voyage API key (not shown): "))
+    say("key        kept in this machine's keychain, as docket / voyage-api-key")
+
+
+@models_app.command("allow")
+def models_allow(
+    ctx: typer.Context,
+    provider: Annotated[str, typer.Argument(help="voyage, or none to stop.")],
+    vault: VaultOption = None,
+) -> None:
+    """Allow this vault's text to go to an api provider, or none, in vault.yaml; asked at your own console either way,
+    and committed."""
+    from docket.models import api as api_models  # noqa: PLC0415
+
+    named: Path | None = vault if vault is not None else ctx.obj
+    found = find_vault(named)
+    wanted = api_models.check_provider(provider)
+    done = api_models.allow(found, wanted)
+    if done.declined:
+        say("api        not changed: the code wasn't typed back")
+        raise typer.Exit(1)
+    if done.by_hand is not None:
+        say(f"vault.yaml has comments or a layout of your own, so it is left as it is; set it there: {done.by_hand}")
+        raise typer.Exit(1)
+    what = f"allows {wanted}" if wanted is not None else "allows no api provider"
+    if done.changed:
+        say(f"api        this vault {what}" + (f", committed {done.commit[:12]}" if done.commit else ""))
+    else:
+        say(f"api        this vault {what} already{inforce.note(found.waiting)}")
 
 
 @models_app.command("status")
@@ -1417,20 +1482,27 @@ def models_status(
 ) -> None:
     """What this machine's models are: the choice, the environments, the files, the vault's vectors and the service's
     worker."""
+    from docket.models import api as api_models  # noqa: PLC0415
     from docket.models import config, report  # noqa: PLC0415
-    from docket.models.config import RerankTiming  # noqa: PLC0415
+    from docket.models.config import ApiChoice, RerankTiming  # noqa: PLC0415
     from docket.models.provider import Off  # noqa: PLC0415
     from docket.models.runtime import rerank_spec, timed, worker_for  # noqa: PLC0415
 
     found_report = report.read()
     choice = found_report.choice
     say_all(report.lines(found_report))
+    if isinstance(choice, ApiChoice):
+        opened = _vault_or_none(vault)
+        say_all(api_models.status(opened))
     _models_vectors(vault, on=found_report.on)
     service = _service_models()
     if service is not None:
         said, errors = report.service_lines(service)
         say_all([f"service    {line}" for line in said] + errors)
     if check:
+        if isinstance(choice, ApiChoice):
+            _check_api(_vault_or_none(vault))
+            return
         found = choice if isinstance(choice, Off) else config.installed(choice.device)
         if isinstance(choice, Off) or isinstance(found, (Off, str)):
             say(f"! {found if isinstance(found, str) else 'models are off'}")
@@ -1453,6 +1525,29 @@ def models_status(
                 raise typer.Exit(1)
         finally:
             worker.stop()
+
+
+def _vault_or_none(vault: Path | None) -> Vault | None:
+    try:
+        return find_vault(vault)
+    except DocketError:
+        return None
+
+
+def _check_api(vault: Vault | None) -> None:
+    """--check for the api provider: one query's vector, sent only as any search's would be."""
+    models = open_models(start=False, rerank=False, vault=vault)
+    if isinstance(models, Off):
+        say(f"! {models.why or 'models are off'}")
+        raise typer.Exit(1)
+    try:
+        got = models.query_vector("a question")
+    finally:
+        models.close()
+    if isinstance(got, str):
+        say(f"! {got}")
+        raise typer.Exit(1)
+    say(f"api        up: {models.embedder.name}, {len(got) // 4} dims")
 
 
 def _check_reranker(worker: Worker) -> bool:

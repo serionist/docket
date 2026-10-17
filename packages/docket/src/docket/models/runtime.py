@@ -15,10 +15,13 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from docket.models.catalogue import Embedder, Reranker
+from docket.index import vectors
+from docket.index.screen import Screen
+from docket.models.catalogue import API_BATCH_CHARS, Embedder, Reranker
 from docket.models.client import Worker, worker_command
 from docket.models.config import (
     RERANK_ON_SECONDS,
+    ApiChoice,
     Choice,
     Device,
     Installed,
@@ -31,6 +34,27 @@ from docket.models.config import (
     read,
 )
 from docket.models.provider import Models, Off
+from docket.models.voyage import Gate, VoyageRunner
+from docket.vault.vault import Vault
+
+
+def api_models(choice: ApiChoice, vault: Vault | None, *, rerank: bool = True) -> Models | Off:
+    """The API provider's models for a vault: a runner that sends only while the vault allows it, its key is here and
+    the month's tokens last, and the screen the pass and the rerank ask first (DR-0536, DR-0538)."""
+    if vault is None:
+        return Off("the api provider opens for a vault, whose settings say whether its text may go")
+    screen = Screen(vault, choice.embedder.provider, vectors.table_of(choice.embedder))
+    reranker = choice.reranker if rerank else None
+    runner = VoyageRunner(choice.embedder, reranker, Gate(screen.allowed, screen.query), monthly=choice.monthly_tokens)
+    return Models(
+        choice.embedder,
+        runner,
+        API_BATCH_CHARS,
+        reranker=reranker,
+        pairs=reranker.pairs if reranker is not None else 0,
+        rerank_why=choice.reranker_why if rerank else None,
+        guard=screen,
+    )
 
 
 def threads() -> int:
@@ -91,14 +115,22 @@ def timed(choice: Choice, found: Installed) -> RerankTiming | str | None:
 
 
 def open_models(
-    *, queries_only: bool = False, measure: bool = False, start: bool = True, rerank: bool = True
+    *,
+    queries_only: bool = False,
+    measure: bool = False,
+    start: bool = True,
+    rerank: bool = True,
+    vault: Vault | None = None,
 ) -> Models | Off:
     """The models as the user chose them, their worker started unless asked not to; or Off with why they can't run.
     `queries_only` is `docket search`'s worker, `measure` `docket eval`'s; a command that only embeds passes rerank
-    False, and its worker loads no reranker."""
+    False, and its worker loads no reranker. The API provider opens for a vault, whose settings in force say whether
+    its text may go (DR-0537)."""
     choice = read()
     if isinstance(choice, Off):
         return choice
+    if isinstance(choice, ApiChoice):
+        return api_models(choice, vault, rerank=rerank)
     found = installed(choice.device)
     if isinstance(found, str):
         return Off(found)

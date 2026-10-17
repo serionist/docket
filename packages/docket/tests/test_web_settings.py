@@ -189,8 +189,8 @@ def test_this_machines_folder_and_models_come_from_its_config(client: TestClient
     assert "off (docket models install turns them on)" in html
     assert "docket models install --no-reranker" in html
     assert "provider: none" in html
-    userconfig.set_section("models", {"provider": "api"})
-    assert "names the api provider, which isn't there yet, so models are off" in said(page(client))
+    userconfig.set_section("models", {"provider": "api", "embedder": "large"})
+    assert "names an embedder the api provider doesn't have (voyage-4), so models are off" in said(page(client))
     userconfig.set_section("folders", {str(vault.root): {"documents": "relative/path"}})
     assert "must be an absolute folder" in page(client)
 

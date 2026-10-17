@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence, Set
 from typing import Protocol, runtime_checkable
 
-from docket.models.catalogue import Reranker
+from docket.models.catalogue import Ranking
 
 
 @runtime_checkable
@@ -20,7 +20,7 @@ class Reranks(Protocol):
     """What search needs of models that rerank (`provider.Models`): the reranker when it is on here, its pairs, why it
     isn't on, whether a search says so, and a rerank within a budget."""
 
-    reranker: Reranker | None
+    reranker: Ranking | None
     pairs: int
     rerank_why: str | None
     rerank_said: bool

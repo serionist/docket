@@ -397,6 +397,7 @@ def _models(facts: Facts) -> ModelsView:
     rows += [(f"Environment, {e.device}", f"{e.line} ({e.path})") for e in found.environments]
     if found.on:
         rows += [("Files", found.files or ""), ("Search", found.search or ""), ("Reranker", found.reranker or "")]
+        rows += [("Sent to the API", found.sent)] if found.sent is not None else []
         rows += [("Vectors", f"{v.model}: {v.have:,} of {v.total:,} chunks") for v in facts.vectors]
         if not facts.vectors:
             rows.append(("Vectors", "none yet: the service embeds after its next index update"))
@@ -407,6 +408,12 @@ def _models(facts: Facts) -> ModelsView:
         Command("Without the reranker", "docket models install --no-reranker"),
         Command("Then restart the service, which reads its models when it starts", "docket service install"),
         Command("Remove them; keyword search goes on", "docket models remove"),
+        Command(
+            "Or Voyage AI's API instead, in your own terminal: this machine's choice, its key, then the vault's yes",
+            "docket models install --api",
+        ),
+        Command("The key, kept in this machine's keychain", "docket models key voyage"),
+        Command("Allow this vault's text to go to Voyage AI", "docket models allow voyage"),
         Command("First, where the service's worker holds the files", "docket service stop"),
     ]
     return ModelsView(

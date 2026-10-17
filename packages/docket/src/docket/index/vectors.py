@@ -14,11 +14,12 @@ import importlib
 import json
 import re
 import sqlite3
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, cast
 
-from docket.models.catalogue import Embedder, input_hash, passage_input
+from docket.models.catalogue import Embedding, input_hash, passage_input
 
 META = "vec."
 # The scan reads the table through a map: 67 ms over 100,000 vectors of 384 dims against 205 ms read page by page.
@@ -44,7 +45,7 @@ class VecTable:
         return passage_input(self.prefix, title, text)
 
 
-def table_of(embedder: Embedder) -> VecTable:
+def table_of(embedder: Embedding) -> VecTable:
     return VecTable(embedder.key, embedder.name, embedder.revision, embedder.dims, embedder.passage_prefix)
 
 
@@ -76,6 +77,37 @@ def create(conn: sqlite3.Connection, table: VecTable) -> None:
     conn.execute(
         "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (META + table.key, json.dumps(about, sort_keys=True))
     )
+
+
+def screened(conn: sqlite3.Connection, table: VecTable) -> str | None:
+    """The settings' fingerprint an API table's vectors passed the screen under (DR-0538), or None."""
+    row = conn.execute("SELECT value FROM meta WHERE key = ?", (META + table.key,)).fetchone()
+    try:
+        data: Any = json.loads(row[0]) if row is not None else {}
+    except ValueError:
+        return None
+    found: object = cast(dict[str, Any], data).get("screened") if isinstance(data, dict) else None
+    return found if isinstance(found, str) else None
+
+
+def mark_screened(conn: sqlite3.Connection, table: VecTable, fingerprint: str) -> None:
+    """Record that every vector in an API table passed the screen under these settings."""
+    about = {"model": table.model, "revision": table.revision, "dims": table.dims, "prefix": table.prefix}
+    about["screened"] = fingerprint
+    conn.execute(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (META + table.key, json.dumps(about, sort_keys=True))
+    )
+
+
+def having(conn: sqlite3.Connection, table: VecTable, chunks: Sequence[int]) -> set[int]:
+    """The chunks that hold a vector in the table."""
+    ids = list(chunks)
+    out: set[int] = set()
+    for start in range(0, len(ids), 500):
+        part = ids[start : start + 500]
+        marks = ", ".join("?" * len(part))
+        out |= {int(c) for (c,) in conn.execute(f"SELECT chunk FROM {table.name} WHERE chunk IN ({marks})", part)}  # noqa: S608 - a checked key
+    return out
 
 
 def drop(conn: sqlite3.Connection, table: VecTable) -> None:
@@ -150,7 +182,7 @@ class QueryVectors(Protocol):
     """What search needs of the models: their embedder, and a query's vector or why there is none."""
 
     @property
-    def embedder(self) -> Embedder: ...
+    def embedder(self) -> Embedding: ...
 
     def query_vector(self, words: str) -> bytes | str: ...
 
