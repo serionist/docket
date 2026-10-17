@@ -207,9 +207,10 @@ def test_verify_says_what_became_of_each_cited_line(vault: Vault) -> None:
     recall.doc_put(vault, brief(f"- The consultant. [d:{NOTE}@1#14]", f"- By Friday. [d:{NOTE}@1#15]"))
     recall.doc_put(vault, note(NOTE, lines=[TWELVE, FRIDAY], rev="1"))
     path = vault.root / BRIEF_PATH
-    # Unpinned refs a hand edit left, not taken in yet: one by the current rev's number, one by an old rev.
+    # Unpinned refs a hand edit left, not taken in yet: by the current rev's number, by an old rev, to a blank line.
     path.write_text(
-        path.read_text(encoding="utf-8") + f"- Now. [d:{NOTE}#15]\n- Then. [d:{NOTE}@1#15]\n", encoding="utf-8"
+        path.read_text(encoding="utf-8") + f"- Now. [d:{NOTE}#15]\n- Then. [d:{NOTE}@1#15]\n- Blank. [d:{NOTE}#13]\n",
+        encoding="utf-8",
     )
     refs = [(line.text.split(".")[0], line.refs[0]) for line in recall.verify(vault, BRIEF).lines if line.refs]
     assert [(said, ref.n, ref.problem) for said, ref in refs] == [
@@ -217,6 +218,7 @@ def test_verify_says_what_became_of_each_cited_line(vault: Vault) -> None:
         ("- By Friday", 15, None),
         ("- Now", 15, None),
         ("- Then", None, f"not pinned yet, and {NOTE} is at rev 2 now"),
+        ("- Blank", None, f"line 13 of {NOTE} has no text to cite"),
     ]
     git(vault.root, "rm", "-q", NOTE_PATH)
     git(vault.root, "commit", "-qm", "Drop the note")

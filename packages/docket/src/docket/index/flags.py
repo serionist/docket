@@ -126,10 +126,9 @@ def counts(conn: sqlite3.Connection) -> tuple[int, int]:
 
 def summary(flagged: int, unapplied: int) -> str:
     """The two counts as the session-start line and `docket index status` say them."""
-    parts = [f"{flagged} line(s) cite lines that changed"] if flagged else []
-    if unapplied:
-        parts.append(f"{unapplied} correction line(s) not applied")
-    return ", ".join(parts) or "nothing flagged"
+    said = [f"{flagged} line(s) cite lines that changed"] if flagged else []
+    said += [f"{unapplied} correction line(s) not applied"] if unapplied else []
+    return ", ".join(said)
 
 
 # -- from the vault, for one doc ---------------------------------------------------------------------------------------
