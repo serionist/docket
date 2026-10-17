@@ -15,7 +15,9 @@ The child's stderr is read and dropped, never logged: a library's message can qu
 
 from __future__ import annotations
 
+import collections
 import contextlib
+import functools
 import json
 import os
 import queue
@@ -314,6 +316,6 @@ def _read(pipe: IO[bytes], answers: queue.Queue[dict[str, Any] | None]) -> None:
 
 
 def _drop(pipe: IO[bytes]) -> None:
+    """The child's stderr, read to its end and kept nowhere, with no step that runs only when it wrote something."""
     with pipe:
-        while pipe.read(4096):
-            pass
+        collections.deque(iter(functools.partial(pipe.read, 4096), b""), maxlen=0)
