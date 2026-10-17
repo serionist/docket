@@ -1,0 +1,13 @@
+decisions:
+  - id: DR-0539
+    title: The API key lives only in the keychain, set at the owner's console; usage is counted per machine under a monthly token cap
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#89"]
+    description: "The Voyage key lives in the system keychain through keyring, entry docket / voyage-api-key, after a read-back check, with no file fallback: a machine without a keychain can't use the provider, and docket models status says so. docket models key voyage reads it with getpass only at the owner's console (#134's console.problem: refused under CLAUDECODE and from a pipe); --forget removes it. It is read at start and after a 401, and never logged, printed or put in an error. Each answer's usage.total_tokens adds to this machine's monthly count in the state folder; api_monthly_tokens in the models block, 50M by default, stops every send past it until the month turns or it is raised. The embedding pass backs off 1, 2, 4 and on up to 60 s on a 429 or a 5xx and gives up for that pass after 6 tries; a search never retries; a 401 or 403 stops every send until the key is set again. A rerank keeps DR-0454's 0.75 s, the HTTP timeout at its deadline, and the query's vector the worker's 2 s."
+    not_chosen:
+      - "A file fallback, as the service token has: a billing credential in a file any process of the user reads."
+      - "No cap: a loop that embeds again and again would spend with no stop."
+      - "Retries inside a search: the budget is 0.75 s, and the fused order is the fallback."

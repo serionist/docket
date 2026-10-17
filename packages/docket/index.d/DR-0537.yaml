@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0537
+    title: vault.yaml's api_provider allows a named API provider for the vault, written only when set, a key added later under loosens()
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#89", "#134"]
+    description: "vault.yaml gains api_provider, whose one value is voyage; absent means no API provider may get the vault's text. dump() writes it only when set, so a vault that never opts in keeps its vault.yaml byte for byte, stays in Docket's form and opens on machines not upgraded yet; one that opts in is refused by an older Docket as an unknown key (DR-0021), which fails safe. It is a key added later to #134's settings in force, with no line in loosens() or effective(): effective() puts in only the fields its table names, so api_provider stays HEAD's until committed whichever way the file changed, and loosens(), effective(before, after) != after, flags any change of it. So docket models allow voyage and allow none write through rewrite(via=\"cli\") and ask at the owner's console, an uncommitted edit never applies it before its commit, and no page sets it (DR-0506). The machine's choice and the keychain key are the instant offs."
+    binds: [A vault that never opts in keeps its vault.yaml byte for byte.]
+    not_chosen:
+      - "A list of providers: one at a time is enough, and a list can come with a second provider."
+      - "A row in effective() for an instant off: the machine choice and the key already stop sending at once."
+      - "The user config: whether the vault text may leave belongs to the vault (DR-0335)."
