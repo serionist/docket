@@ -1,12 +1,13 @@
 decisions:
   - id: DR-0530
-    title: Git's identity is asked once per opened vault, not kept across commands or service calls
+    title: The git runner asks git's identity once per opened vault, and starts git without a console of its own when Docket has none
     status: proposed
     at: "2026-10-17"
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#132"]
-    description: "Whether git has an identity (user.name and user.email, from any of its config levels), which decides whether Docket passes its fallback identity, is asked once per opened vault: a Vault lives for one command, or for one call of the service, which opens the vault on every call. A release, which commits twice, asks once. The answer isn't kept beyond that object: a long-running process opens the vault again for each call, so a config file changed in place between two calls (the system's, an included one) still decides the next commit's author as git would."
+    description: "Whether git has an identity (user.name and user.email, from any of its config levels), which decides whether Docket passes its fallback identity, is asked once per opened vault: a Vault lives for one command, or for one call of the service, which opens the vault on every call. A release, which commits twice, asks once. The answer isn't kept beyond that object: a long-running process opens the vault again for each call, so a config file changed in place between two calls (the system's, an included one) still decides the next commit's author as git would. On Windows, every git process Docket starts passes CREATE_NO_WINDOW when Docket's own process has no console (GetConsoleWindow answers none, asked once per process), as the service under pythonw has none: there, a console app given no flag gets a console of its own, and a git call took a median of 157 to 170 ms against 32 ms with the flag. With a console, as the command line and the tests have, git inherits it and no flag is passed: the flag there made each call 29 to 31 ms against 17 to 18 ms."
     not_chosen:
       - "Keeping the answer for the process, keyed by the config files Docket can name: it would save one call per commit (1,370 in the suite) but miss the system config and included files changed in place, so the fallback author could stand in for the one git now has."
       - "Committing first and passing the fallback only on failure: git guesses an identity from the host name where none is configured, so the author would change."
+      - "CREATE_NO_WINDOW on every git call, as the models' and documents' workers pass it: they start one worker per run, while the command line and the tests make thousands of git calls, each 12 ms slower with the flag where a console exists."

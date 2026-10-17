@@ -17,9 +17,12 @@ calls to 7, a release from 39 to 21, an import of 200 notes from 217 to 13.
 - In scope: the calls every commit makes (`Vault.commit`, `Git.commit`, the recovery check), the run files a commit
   sweeps in, curate's take-in, `put_many`'s doc histories, release's repeated HEAD questions, and a reader of `.git`
   files that #134 can share.
-- Out of scope: a folder vault's open (one `rev-parse` per `Vault.open`), the consuming repo's lookup for a mapper,
-  `git lfs install` at init, the test kit's own git (#149). The staged check after `add` and one `ls-files -u` per
-  commit stay (Design). Each write keeps its commits: none are merged.
+- Also in scope: on Windows, git started without a console window of its own when Docket has no console, as the
+  service under pythonw has none (No console per git call).
+- Out of scope: a folder vault's open, which #152 caches (two `git rev-parse` per open on main, none after the first
+  per folder and process), the consuming repo's lookup for a mapper, `git lfs install` at init, the test kit's own git
+  (#149). The staged check after `add` and one `ls-files -u` per commit stay (Design). Each write keeps its commits:
+  none are merged.
 
 ## The count
 
@@ -40,6 +43,10 @@ asked and how long it took. Three runs each, medians; a git call costs 16 to 20 
 
 "Asked twice" counts calls identical to an earlier one in the same write. Not all can go: promote asks for
 uncommitted run files before and after it writes one, and release asks about its hold file again after a commit.
+
+These are repo vaults, whose `Vault.open` asks git nothing. A folder vault's open adds two `git rev-parse` calls on
+main; #152, likely merged first, makes it none after the first open per folder and process, so the counts above hold
+for folder vaults too once it lands.
 
 Expected, at the 17 ms a call costs here:
 
@@ -104,18 +111,38 @@ A module, `vault/gitfiles.py`, reads what git keeps as plain files:
 | Function | Reads | Answers |
 |---|---|---|
 | `head(git_dir)` | `HEAD` | a branch ref (`ref: refs/heads/main`), a commit id (detached), or unknown |
-| `head_id(git_dir)` | `HEAD`, the ref's file under `refs/`, else its line in `packed-refs`, through `commondir` when there is one | the commit id; "no commit yet" only when the ref has no file and `packed-refs` is absent or read cleanly without it; else unknown |
+| `head_id(git_dir)` | `HEAD`, the ref's file under `refs/`, else its line in `packed-refs` | the commit id; "no commit yet" only when the ref has no file and `packed-refs` is absent or read cleanly without it; else unknown |
 
+- It takes #152's rule rather than one of its own: it reads only a plain checkout's git dir, the top's `.git` that
+  passes `home.is_git_dir`, which is what `home.discover` keeps an answer for. A git dir with a `commondir` file (a
+  linked worktree) is unknown; Docket refuses those for a vault anyway (`home.py`).
 - Unknown, and the caller makes today's git call: any read error, a git dir whose refs aren't files (reftable:
   `refs/heads/.invalid` in `HEAD`, or `extensions.refStorage` set), or a file that doesn't read as git writes it (an
   id not 40 or 64 hex).
 - Used by: the recovery check's branch test, `changed_against_head`'s HEAD test (`git.py` and `host.py`), and
   `Git.commit`'s new id.
-- Docket refuses linked worktrees (`home.py`), so a vault's git dir is its common dir. `commondir` is followed anyway,
-  so the reader is right for #134 too.
 - Shared with #134, without either waiting: #134's committed-settings cache keys on HEAD's id read from these same
   files. Whichever merges first adds `gitfiles.py`; the other rebases onto it. #132 changes nothing in settings, and
   #134 can keep its own reader until then.
+
+### No console per git call (DR-0530)
+
+The service runs under pythonw on Windows, with no console, and the vault's git runner passes no creation flags, so
+each git process gets a console of its own. Timed on this desktop, 90 calls each (`git --version`, `rev-parse HEAD`,
+`ls-files -u`), two runs:
+
+| Docket's process | No flag, median | `CREATE_NO_WINDOW`, median |
+|---|---|---|
+| pythonw, no console | 157 to 170 ms | 32 ms |
+| python, with a console | 17 to 18 ms | 29 to 31 ms |
+
+- Every git process Docket starts (`Git.run`, `home.rev_parse`, `git.toplevel`, convert's calls) passes
+  `CREATE_NO_WINDOW` when Docket's own process has no console, asked once per process (`GetConsoleWindow`), and no
+  flag when it has one, where git inherits it. Elsewhere than Windows nothing changes.
+- The models' and documents' workers pass the flag always, which is right for them: one worker per run. For git, the
+  command line and the tests would pay 12 ms more on each of thousands of calls.
+- For the service, the flag alone cuts each git call by about 130 ms: a doc put through it, 12 calls today, from about
+  2 s of git to about 0.4 s, and to about 0.2 s with 7 calls.
 
 ### The recovery check (DR-0528)
 
@@ -166,7 +193,9 @@ way.
 5. The run-file check as one status call, held to the two calls' answers.
 6. curate's entity paths once; `put_many`'s histories in one log unless a merge touched the folders; HEAD's
    `.gitattributes` once per HEAD.
-7. A call-count test per path; the trace before and after on Windows; the suite's git time with the counting plugin.
+7. The console flag in one helper every git launch uses, and its test; the per-call time under pythonw before and
+   after.
+8. A call-count test per path; the trace before and after on Windows; the suite's git time with the counting plugin.
 
 ## Tests
 
@@ -178,6 +207,7 @@ way.
 | reftable | one vault made with `init.defaultRefFormat=reftable`: the reader answers unknown and the fallback calls run, so its call list has today's calls; skipped where the git lacks reftable |
 | the run-file check | status and the two calls give the same list: an untracked run file, one a `.gitignore` hides, one staged by an add whose commit never came, a staged rename, none; on a repo vault and a folder vault |
 | the batched histories | the same revs as one log per file: a hand commit that touched a doc without a `Doc:` line, a commit whose message names a doc it didn't touch, a doc deleted and put again; a folder vault under a non-ASCII path; and a merge in the doc folder's history, where one log per doc runs and the revs match |
+| the console flag | on Windows, a git call passes `CREATE_NO_WINDOW` when `GetConsoleWindow` answers none and no flag when it answers a console; one git process under pythonw is timed with and without it; elsewhere no flag |
 | every vault test | unchanged, as the issue asks: commits, messages and trees as before |
 
 Measured in the PR: each path before and after with the same trace (three runs, Windows), and the suite's git time
@@ -199,10 +229,13 @@ and wall time.
 | the folder log lists a doc's commits differently from a per-file log | without a merge, the commits that touched the file are in both; with one, `rev-list --merges` sends `put_many` back to one log per doc; tested both ways |
 | a user's git starts within one write | marker files and the branch are read at every check, and `ls-files -u` sits right before each add |
 | #134 changes `Vault` and the git layer too | the shared reader is one module; either rebases onto the other |
+| #152 changes `home.py` | the reader uses `is_git_dir` and #152's plain-checkout rule; whichever lands second rebases |
+| `GetConsoleWindow` answers wrong for some host (a console without a window) | the worst case is today's path: no flag with a console, or the flag where git would have inherited one, 12 ms a call |
 | savings smaller elsewhere | a git call costs about 5 ms on macOS and Linux, so the share saved is the same and the seconds fewer |
 
 ## Plan review
 
 | Round | Verdict | Findings |
 |---|---|---|
+| additions after round 1 | from the coordinator | #152's discover: the count notes folder vaults' opens, and the reader takes its plain-checkout rule and `is_git_dir`. The console flag: git started without a console of its own when Docket has none, measured under pythonw and python |
 | 1, at 90d0dac | changes needed | G1 (major): one `ls-files -u` per hold let a mid-hold conflict be committed; it now sits before each add. G2: the batched log takes `-z`, `--no-renames` and vault-relative names, tested under a non-ASCII path. G3: a merge in the folders' history sends `put_many` back to one log per doc, decided by one `rev-list --merges`. G4: the tests pin the files ref format, one reftable case tests the fallback, and Git 3.0's default is a risk. The reader answers "no commit yet" only from a cleanly read `packed-refs`, and status parsing reads a staged rename's second field |
