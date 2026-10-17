@@ -405,6 +405,10 @@ Departures from the plan above, each small.
 | on the Settings page, a source added by hand reads "not in force until you commit vault.yaml", and a source's own problem leaves the notice out | the runner's words as they are | the page shows the file and says once, at the top, that an edit isn't in force; the runner judges the settings in force |
 | a browser test of the notice at both widths, with its screenshots | none | the page's one visible change |
 | the schema's check before the console's refusal | the refusal first | a change that can't be written is refused for that, and the owner is never asked about it |
+| HEAD's id from #132's `gitfiles` (git where its files can't say, as in a linked worktree), and a commit's parent from its loose object, `gitfiles.commit_parents` | a reader of our own, through `commondir`; the parent from `git rev-parse` | one reader of git's files; #132 took the call after each commit away |
+| `Vault.init` files the text it commits in the cache, so a `vault.yaml` write asks git nothing about HEAD | a miss at the first read | #132's plan left that one call for this cache to answer |
+| `refuse_unmerged()` before the question, as the release does since #132 | a conflict found at the commit | a conflict refuses before the owner types a code (DR-0528) |
+| each test template's vaults read once before its manifest is taken | the manifest ignoring the cache | opening a template must write nothing into it, and a read once at build makes every later read a hit |
 | outside the writer only `Vault.init` writes `vault.yaml` as a file, held by a scan over the whole package | `Vault.init` and convert | convert writes it into git's tree, not as a file |
 
 ## Plan review

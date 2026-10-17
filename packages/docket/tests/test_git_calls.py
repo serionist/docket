@@ -132,11 +132,12 @@ def test_an_import_of_notes_makes_one_history_call_for_the_batch(
     ]
 
 
-def test_a_vault_yaml_write_makes_seven_git_calls(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_vault_yaml_write_makes_six_git_calls(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     vault = fixture_vault(tmp_path)
     with git_calls(monkeypatch) as calls:
         run(vault, "redaction", "set", "phone", "on")
-    assert calls == ["show HEAD:./vault.yaml", *COMMIT_CALLS]
+    # HEAD's vault.yaml, which the take-in weighs an edit against, comes from the settings in force's cache (DR-0521).
+    assert calls == COMMIT_CALLS
 
 
 # -- the run-file check: one status call answers as the two calls did --------------------------------------------------

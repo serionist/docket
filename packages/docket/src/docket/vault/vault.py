@@ -223,7 +223,10 @@ class Vault:
             vault = cls(path, config, home)
             if not folder:
                 vault.git.lfs_install()
-            vault.git.commit(written, "Start the vault")
+            started = vault.git.commit(written, "Start the vault")
+            if started is not None:
+                # The settings in force read HEAD's vault.yaml: this commit's is the text just written (DR-0521).
+                inforce.remember(home, started, config.dump())
             return vault
         except BaseException:
             if created:
