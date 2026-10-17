@@ -1,9 +1,9 @@
 ---
 title: Add an API provider for embeddings and reranks, opt-in in vault.yaml
 issue: "#89"
-status: draft
-approved_by:
-approved_at:
+status: approved
+approved_by: claude, the lead (autonomy grant)
+approved_at: 2026-10-17
 ---
 
 # Add an API provider for embeddings and reranks, opt-in in vault.yaml
@@ -140,10 +140,13 @@ The screen is the vault's settings in force (#134), at the moment of sending:
   settings in force and isn't `private`. Raw is written once, so a source the owner made private after a bad recording
   slipped in as work still has that recording in the index. A removed source's records are held back too, since their
   sensitivity is unknown now. A source that is there but off is a pause, not a judgement, so its records may go. A
-  doc's chunk is held to the sources of the records its doc covers.
+  doc's chunk is held to the sources of the records its doc covers. Each record's source is its rid's `source:`
+  prefix, which needs no read.
 - **Never-store, on the records.** A chunk is held back when any record it comes from matches the never-store lists as
   intake reads a record (`neverstore.match`), or its text says a listed keyword. A doc's chunk is checked on its text
-  and the records its doc covers. The records are read through the raw lookup by place (#76).
+  and the records its doc covers. The records are read through the raw lookup by place (#76). A record that can't be
+  read here (its run file missing or not parsing) holds the chunk back; only a doc that covers no record at all is
+  screened on its text alone.
 - **Redaction.** A chunk is held back when the redactor of the settings in force would change its input, its title
   alone or its text alone, as intake redacts each field on its own: an anchored pattern (`^ACCT-\d+`) meets a text
   that starts with it, but not the joined input, where the title comes first. A rule turned on after the text was
@@ -160,7 +163,9 @@ The screen is the vault's settings in force (#134), at the moment of sending:
 - **Rerank candidates.** Fifty record reads don't fit in 0.75 s, so the pass's screen stands in for them:
   - a chunk gets an API vector only when the pass passed it;
   - a rerank sends only candidates with a vector, and only while the table's fingerprint is the current one; otherwise
-    the whole rerank is skipped for that search, with the reason, as a budget overrun is;
+    the whole rerank is skipped for that search, with the reason, as a budget overrun is. The current fingerprint is
+    computed from the settings in force on each search, never kept in the service's keeper, so a source made private
+    a moment ago already stops the next rerank;
   - candidates not sent (no vector yet, such as a record ingested a minute ago, or held back) keep their fused
     positions, and the sent ones are reranked among the positions they held, in DR-0452's two tiers, so a new record
     never sinks for want of a vector.
@@ -268,7 +273,7 @@ and `DOCKET_VAULT` unset; invented records only, and no network.
 | Test | Asserts |
 |---|---|
 | `test_models_api.py`: `test_nothing_staged_or_never_store_reaches_the_provider` | a record staged and not promoted holds `zebrastaged`; a record in raw holds `zebrakept`, then `zebrakept` joins `never_store.keywords` and is committed; a record from `U0NEVER` is in raw, then `U0NEVER` joins the people list; a record holds a value a pattern turned on later would redact. After an index update, a full pass, and searches with rerank for `pallet`, `zebrakept` and `zebrastaged`: no request `FakeVoyage` saw holds any of those texts or that record; the `zebrakept` query sent nothing; `models status` counts three held back |
-| `test_models_api.py`: `test_a_source_made_private_or_removed_keeps_its_records_here` | a record in raw whose source is then made `private`, and one whose source is then removed, each committed: nothing of either reaches `FakeVoyage`, in the pass or in a rerank; a source turned off but kept lets its records go; each change moves the fingerprint |
+| `test_models_api.py`: `test_a_source_made_private_or_removed_keeps_its_records_here` | a record in raw whose source is then made `private`, and one whose source is then removed, each committed: nothing of either reaches `FakeVoyage`, in the pass or in a rerank, the rerank run right after the change in the same service, so its fingerprint is the settings in force on that search; a source turned off but kept lets its records go; each change moves the fingerprint; a doc covering a record whose run file is gone here is held back, and one covering no record is screened on its text |
 | `test_models_api.py`: `test_a_query_holding_a_never_store_value_stays_here` | queries naming a listed person (both word orders), a listed container and a listed keyword send nothing, and the search says why without the value |
 | `test_models_api.py`: `test_an_anchored_pattern_holds_back_a_chunk_by_its_text_alone` | `^ACCT-\d+` turned on after a chunk whose text starts `ACCT-1234` under the title `Budget call` was indexed: the chunk is held back, though the joined input doesn't match |
 | `test_models_api.py`: `test_candidates_not_sent_keep_their_places` | a chunk ingested after the last pass, in the top 50 with no vector: it keeps its fused position, and only the sent candidates move among their own positions |
@@ -296,7 +301,9 @@ and `DOCKET_VAULT` unset; invented records only, and no network.
     zero-day retention setting, costs and the cap;
   - the models commands: `allow`, `key`, `install --api`, each at the owner's console;
   - that the keychain keeps the key out of transcripts and files, not from a process running as the user;
-  - that on a vault used from several machines, each machine's choice and key are its own instant offs.
+  - that on a vault used from several machines, each machine's choice and key are its own instant offs;
+  - that turning a source off pauses its capture and leaves its stored records going to the provider; making it
+    private keeps them here.
 - `docs/design.md`: the models paragraph names the API provider and the screen.
 - AGENTS.md's one-way doors gain `api_provider` (DR-0537).
 - The setup skill offers the provider only as the owner's own commands, run at their console.
@@ -314,7 +321,7 @@ and `DOCKET_VAULT` unset; invented records only, and no network.
 | 512 dimensions lose some quality against 1024 | accepted: keeps the index and the scan near today's; the same eval run measures it |
 | Turning the vault key off by a hand edit waits for the commit | accepted: the machine's choice and the key are instant offs |
 | #134's accepted gap, an agent's own `git commit` of a hand edit, can put `api_provider` in force | accepted: sending still needs this machine's choice and key, each set only at the owner's console (V7) |
-| A source a chunk can't be traced to (a doc covering no record, a legacy note) is screened on its text alone | accepted: such a doc was screened at its put, and its text by the never-store keywords and the redactor here |
+| A doc that covers no record at all, such as a legacy note, is screened on its text alone | accepted: such a doc was screened at its put, and its text is held to the never-store keywords and the redactor here; a covered record that can't be read holds its chunk back |
 | The record read in the screen slows the pass on a vault of 100,000 chunks | open: measured in the build against the pass on the perf vault; the reads come by place (#76) |
 | Voyage is part of MongoDB now, and its endpoint may move (`ai.mongodb.com`) | accepted: the base URL is one constant |
 | #134 hasn't merged | open: this is built after it; if its `effective()` changes shape, the key still falls under "a key added later" |
@@ -322,7 +329,7 @@ and `DOCKET_VAULT` unset; invented records only, and no network.
 ## Plan review
 
 Round 1, 17 Oct 2026, a read-only review for the lead at 9598eb8: changes needed, one major and six minors. All seven
-are folded in above; the reviewer checks V1 again.
+are folded in above.
 
 | Finding | What | Fixed |
 |---|---|---|
@@ -336,3 +343,12 @@ are folded in above; the reviewer checks V1 again.
 
 Also from the review's notes: "written only when set" follows `folder`'s serializer, not `exclude_none`; the
 byte-for-byte fixture has a source with no mapper; the README names the instant offs per machine.
+
+Round 2, 17 Oct 2026, V1 checked again at 9ddbdd4: resolved, with one minor and two notes, folded in above; approved
+by the lead.
+
+| Finding | What | Fixed |
+|---|---|---|
+| V1a, minor | a covered record's source came from reading it, and a record that couldn't be read fell back to the doc's text | the source is the rid's `source:` prefix; a covered record that can't be read holds the chunk back; the text alone only for a doc that covers no record |
+| note 1 | where the rerank's current fingerprint comes from | computed from the settings in force on each search, never kept in the service's keeper; the source test reranks right after its change |
+| note 2 | turning a source off | the README says it pauses capture and leaves its stored records going to the provider; private keeps them here |
