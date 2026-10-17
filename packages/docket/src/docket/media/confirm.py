@@ -2,11 +2,12 @@
 
 A decision written before `_decided.jsonl` kept its kind could have been a private classification, so it refuses the
 recording's media. This shows the evidence for each of the recording's rids with such decisions: how many there are,
-and which of its versions in raw were cut by hand, with their runs and cut times. A version whose every `[cut]` span
-lies inside the release's cuts was cut by the release alone, and is left out, since a release leaves no decision.
-When a rid has more kind-less decisions than versions cut by hand, at least one was a private classification, and
-nothing is confirmed. Otherwise the owner types back a code at their own console, and each of those keys gets a `cut`
-line. Claude Code's shell, a pipe or a redirect is refused (DR-0518).
+and the versions in raw each could be. Only a version this clone promoted cut by hand counts, since `decided` is this
+clone's alone while raw is shared; a version cut by the release alone (its every `[cut]` span inside the release's
+cuts) leaves no decision, and one for each `cut` decision the rid already has is spoken for. When a rid has more
+kind-less decisions than versions left, at least one was a private classification, and nothing is confirmed.
+Otherwise the owner types back a code at their own console, and each of those keys gets a `cut` line. Claude Code's
+shell, a pipe or a redirect is refused (DR-0518).
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from docket.media import layout
 from docket.media import ranges as cut_ranges
 from docket.media.ranges import Range
 from docket.vault import releaselog
+from docket.vault.rawlog import RUN_FILE
 from docket.vault.spans import RawLookup
 from docket.vault.staging import Staging, rid_hash
 from docket.vault.vault import Vault
@@ -26,23 +28,43 @@ from docket.vault.vault import Vault
 ACT = "a confirmation that a recording's decisions were cuts"
 
 
+Version = tuple[str, tuple[Range, ...]]
+
+
 @dataclass(frozen=True)
 class Evidence:
-    """One rid's kind-less decisions, and its versions in raw cut by hand, each by its run, with what was cut."""
+    """One rid's kind-less decisions; its versions in raw cut by hand on this clone and elsewhere, each by its run with
+    what was cut; and how many `cut` decisions it already has, each accounting for one version cut here."""
 
     rid: str
     keys: tuple[str, ...]
-    by_hand: tuple[tuple[str, tuple[Range, ...]], ...]
+    here: tuple[Version, ...]
+    elsewhere: tuple[Version, ...]
+    cut_decisions: int
+
+    @property
+    def left(self) -> int:
+        """The versions cut here that no `cut` decision accounts for: what a kind-less decision could be."""
+        return max(0, len(self.here) - self.cut_decisions)
 
     @property
     def matches(self) -> bool:
-        return len(self.keys) <= len(self.by_hand)
+        return len(self.keys) <= self.left
 
 
 def _clock(ms: int) -> str:
     seconds = ms // 1000
     hours, rest = divmod(seconds, 3600)
     return f"{hours}:{rest // 60:02d}:{rest % 60:02d}" if hours else f"{rest // 60}:{rest % 60:02d}"
+
+
+def _machine(run: str) -> str | None:
+    found = RUN_FILE.match(f"{run}.jsonl")
+    return found.group(3) if found is not None else None
+
+
+def _spans(spans: tuple[Range, ...]) -> str:
+    return ", ".join(f"{_clock(s)}-{_clock(e)}" for s, e in spans)
 
 
 def evidence(vault: Vault, rid: str) -> list[Evidence]:
@@ -58,15 +80,18 @@ def evidence(vault: Vault, rid: str) -> list[Evidence]:
     granted = [(c.start, c.end) for c in release.cuts] if release is not None else []
     out: list[Evidence] = []
     for other in family:
-        keys = tuple(sorted(k for k, kind in decided.kinds.get(rid_hash(other), {}).items() if kind is None))
+        kinds = decided.kinds.get(rid_hash(other), {})
+        keys = tuple(sorted(k for k, kind in kinds.items() if kind is None))
         if not keys:
             continue
-        cut: list[tuple[str, tuple[Range, ...]]] = []
+        here: list[Version] = []
+        elsewhere: list[Version] = []
         for version in raw.versions(other):
-            spans = cut_ranges.by_hand(version, granted)
+            spans = tuple(cut_ranges.by_hand(version, granted))
             if spans:
-                cut.append((version.run, tuple(spans)))
-        out.append(Evidence(other, keys, tuple(cut)))
+                (here if _machine(version.run) == vault.machine else elsewhere).append((version.run, spans))
+        cut = sum(1 for kind in kinds.values() if kind == "cut")
+        out.append(Evidence(other, keys, tuple(here), tuple(elsewhere), cut))
     return out
 
 
@@ -74,10 +99,16 @@ def lines(found: list[Evidence]) -> list[str]:
     out: list[str] = []
     for item in found:
         out.append(
-            f"{item.rid}: {len(item.keys)} decision(s) without a kind, {len(item.by_hand)} version(s) cut by hand"
+            f"{item.rid}: {len(item.keys)} decision(s) without a kind; {len(item.here)} version(s) cut by hand on "
+            f"this machine, {item.cut_decisions} of them already a cut decision"
         )
-        for run, spans in item.by_hand:
-            out.append(f"  {run}: cut at {', '.join(f'{_clock(s)}-{_clock(e)}' for s, e in spans)}")
+        could = " or ".join(run for run, _ in item.here) if item.left else "none of its versions"
+        for key in item.keys:
+            out.append(f"  decision {key[:8]} could be: {could}")
+        for run, spans in item.here:
+            out.append(f"  {run}: cut at {_spans(spans)}")
+        for run, spans in item.elsewhere:
+            out.append(f"  {run}: cut at {_spans(spans)} on another machine, which this one's decisions don't cover")
     return out
 
 
@@ -96,8 +127,8 @@ def confirm(vault: Vault, rid: str) -> int:
             console.say(line)
         names = ", ".join(item.rid for item in short)
         raise DocketError(
-            f"{names}: more decisions without a kind than versions cut by hand, so at least one was a private "
-            "classification; the audio stays out"
+            f"{names}: more decisions without a kind than versions this machine cut by hand that no cut decision "
+            "accounts for, so at least one was a private classification; the audio stays out"
         )
     screen = [*shown, "", "Each of these was a cut, and none a private classification?"]
     answer = console.typed_back(screen, "confirm they were cuts", "leave them as they are", "nothing was confirmed")

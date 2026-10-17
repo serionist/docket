@@ -242,7 +242,8 @@ def test_a_kind_less_decision_refuses_until_the_owner_confirms_it_was_a_cut(
     owner("code")
     assert main(["media", "confirm-cuts", CALL, "--vault", str(vault.root)]) == 0
     out = capsys.readouterr().out
-    assert f"{POLISHED}: 1 decision(s) without a kind, 1 version(s) cut by hand" in out
+    assert f"{POLISHED}: 1 decision(s) without a kind; 1 version(s) cut by hand on this machine, 0 of them" in out
+    assert "could be: 2026-" in out
     assert "cut at 0:10-0:19" in out, "the hand cut's span, not the release's"
     assert "cuts     1 decision(s) marked as cuts" in out
     assert Gate(vault).media_due("plaud") == ["rec-a"]
@@ -261,12 +262,47 @@ def test_confirm_cuts_refuses_more_kind_less_decisions_than_versions_cut_by_hand
         out.write(json.dumps({"rid": rid_hash(POLISHED), "key": "a" * 64}) + "\n")
     before = staging.decided_file.read_bytes()
     owner("code")
-    with pytest.raises(DocketError, match="more decisions without a kind than versions cut by hand"):
+    with pytest.raises(DocketError, match="more decisions without a kind than versions this machine cut by hand"):
         media_confirm(vault)
-    assert f"{POLISHED}: 2 decision(s) without a kind, 1 version(s) cut by hand" in capsys.readouterr().out
+    assert (
+        f"{POLISHED}: 2 decision(s) without a kind; 1 version(s) cut by hand on this machine" in capsys.readouterr().out
+    )
     assert staging.decided_file.read_bytes() == before
     with pytest.raises(DocketError, match="nothing to confirm"):
         media_confirm(media_vault(tmp_path / "plain"))
+
+
+def test_a_version_cut_after_kinds_or_on_another_machine_isn_t_evidence(
+    tmp_path: Path, owner: Callable[..., AtConsole], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An old private decision beside a version cut by hand since: that version's own decision says cut, so nothing
+    is left for the kind-less one to be. A version another clone cut has no decision here at all."""
+    vault = media_vault(tmp_path)
+    staging = Staging(vault.root, vault.home)
+    staging.decided_file.parent.mkdir(parents=True, exist_ok=True)
+    with staging.decided_file.open("a", encoding="utf-8") as out:
+        out.write(json.dumps({"rid": rid_hash(POLISHED), "key": "d" * 64}) + "\n")
+    Gate(vault).classify(POLISHED, "work", [Cut(start=12_000, end=13_000, unit="ms")])
+    in_raw(vault)
+    owner("code")
+    with pytest.raises(DocketError, match="no cut decision accounts for"):
+        media_confirm(vault)
+    out = capsys.readouterr().out
+    assert "1 version(s) cut by hand on this machine, 1 of them already a cut decision" in out
+    assert "decision dddddddd could be: none of its versions" in out
+    # The same version, written by another machine: shown, never counted.
+    other = media_vault(tmp_path / "other")
+    other_staging = Staging(other.root, other.home)
+    other_staging.decided_file.parent.mkdir(parents=True, exist_ok=True)
+    with other_staging.decided_file.open("a", encoding="utf-8") as out_file:
+        out_file.write(json.dumps({"rid": rid_hash(POLISHED), "key": "e" * 64}) + "\n")
+    [version] = vault.rawlog.read(POLISHED)
+    other.rawlog.machine = "desk-two"
+    other.rawlog.write_run("plaud", [version])
+    other.commit([], "Raw: plaud, from another machine")
+    with pytest.raises(DocketError, match="no cut decision accounts for"):
+        media_confirm(other)
+    assert "on another machine, which this one's decisions don't cover" in capsys.readouterr().out
 
 
 def test_confirm_cuts_asks_at_the_console_and_n_changes_nothing(
