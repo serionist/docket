@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -21,7 +22,10 @@ from typing import Any, Literal
 import pytest
 from filelock import FileLock
 
-from docket.vault.config import NeverStore, Owner, RedactionPattern, SourceConfig, VaultConfig
+from docket.errors import DocketError
+from docket.vault import inforce
+from docket.vault.config import CONFIG_FILE, NeverStore, Owner, RedactionPattern, SourceConfig, VaultConfig
+from docket.vault.home import Home
 from docket.vault.records import RawRecord, version
 from docket.vault.vault import Vault, remove_tree
 
@@ -298,6 +302,7 @@ def _template(build: Callable[[Path], Path], key: str, factory: pytest.TempPathF
             isolated_git(mp, templates / f"{name}.home")
             made = build(folder)
             settle(folder)
+            warm(folder)
         (templates / f"{name}.manifest.json").write_text(json.dumps(manifest(folder)), encoding="utf-8")
         rel = made.resolve().relative_to(folder.resolve()).as_posix()
         done.write_text(rel, encoding="utf-8")
@@ -335,6 +340,18 @@ def settle(folder: Path) -> None:
     for repo in repos:
         sh(repo, "git", "config", "core.trustctime", "false")
         sh(repo, "git", "update-index", "-q", "--refresh", check=False)
+
+
+def warm(folder: Path) -> None:
+    """Each vault in a template read once, as Docket reads one, so the settings in force find HEAD's vault.yaml in
+    their cache before the manifest is taken: a test that opens the template itself then writes nothing into it
+    (DR-0521). A vault.yaml that isn't a vault's, or doesn't read, is left as it is."""
+    for config in folder.rglob(CONFIG_FILE):
+        if ".git" in config.parts:
+            continue
+        with contextlib.suppress(DocketError, OSError, ValueError):
+            root = config.parent
+            inforce.load(root, Home.resolve(root, VaultConfig.load(config).storage))
 
 
 def _fit(template: Path, repo: Path, copy: Path) -> None:
