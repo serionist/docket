@@ -8,6 +8,13 @@ Unreleased in the same PR.
 
 ### Added
 
+- Voyage AI's API for search by meaning and the reranker, for a machine with no GPU and no time for CPU embedding:
+  `docket models install --api`, then `docket models key voyage` and, in each vault, `docket models allow voyage`,
+  all in your own terminal. It sends a vault's text off the machine only when the vault allows it in `vault.yaml`,
+  the machine chose it and its key is in the keychain; only chunks that pass the vault's settings in force go, never
+  anything staged, never-store, from a source now private or gone, or that a redaction rule would change. The
+  README's "Through Voyage AI's API" says what leaves the machine and when. A vault that opts in can't be opened by an
+  older Docket.
 - The Recording page, `/recording` in the web app: a recording's summary beside its transcript, each anchor a link
   that marks the lines it points at, with the recording and the line in the address. Search's transcript hits open
   there. No audio is stored yet, and the page says so.

@@ -52,12 +52,20 @@ class ModelsStatus(BaseModel):
 class ModelsKeeper:
     def __init__(self, vault: Callable[[], Vault], opener: Callable[..., Models | Off] | None = None) -> None:
         self._vault = vault
-        self._opener = opener if opener is not None else open_models
+        self._opener = opener if opener is not None else self._open
         self.models: Models | Off = Off()
         self.last: PassReport | None = None
         self._wake = threading.Event()
         self._stopping = threading.Event()
         self._thread: threading.Thread | None = None
+
+    def _open(self, **kwargs: bool) -> Models | Off:
+        """The user's models for the service's vault: the API provider opens only for one (DR-0537)."""
+        try:
+            vault = self._vault()
+        except (DocketError, OSError):
+            vault = None
+        return open_models(vault=vault, **kwargs)
 
     def start(self) -> None:
         """Read the user's choice and, when models are on, start the worker and a first pass in the background."""

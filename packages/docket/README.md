@@ -340,6 +340,9 @@ same without them. Both run on ONNX Runtime in a worker process of its own, on t
 | `docket models install [--device auto\|cpu\|cuda] [--no-reranker]` | builds the models' environment with uv, fetches the embedder's and the device's reranker's pinned files, checks the worker runs, times the reranker and turns models on for this machine; `--no-reranker` leaves the reranker out and removes its files |
 | `docket models status [--check]` | the choice, the environment, the files, the reranker's timing or why it is off, each model's vectors in the vault's index, and the running service's worker with its reranks and the last lines it wrote to stderr; `--check` starts a worker once and says what it runs on |
 | `docket models remove` | deletes the environment, the files and the choice; search goes on with keywords. On Windows the service's worker holds its files: models go off at once, and the remove asks you to stop the service and run it again |
+| `docket models install --api [--no-reranker]` | chooses Voyage AI's API for this machine instead (Through Voyage AI's API, below), at your own console; nothing is downloaded |
+| `docket models key voyage [--forget]` | keeps the Voyage key in this machine's keychain, typed at your own console and never shown; `--forget` removes it, and this machine sends nothing from then on |
+| `docket models allow voyage\|none [--vault]` | lets this vault's text go to Voyage AI, or stops it, in `vault.yaml`; asked at your own console either way, and committed |
 
 - Downloads, once: 0.98 GB of model files for the CPU or 1.64 GB for CUDA, the reranker's 0.49 GB or 1.15 GB of them,
   and about 50 MB of packages for the CPU or 1.3 GB for CUDA (NVIDIA's CUDA 13 and cuDNN wheels, under NVIDIA's
@@ -347,8 +350,8 @@ same without them. Both run on ONNX Runtime in a worker process of its own, on t
   GPU; CUDA 13 needs a driver of R580 or later, and the install says when ONNX Runtime fell back to the CPU.
 - The choice is this machine's, in your config's `models:` block, never in `vault.yaml`: each machine embeds with what
   it has. A block Docket can't read, or a config that isn't YAML, turns models off and says why.
-- Nothing leaves the machine. The files live under your user cache and data folders, never in the vault or a repo,
-  and after the install nothing touches the network.
+- With these local models nothing leaves the machine. The files live under your user cache and data folders, never in
+  the vault or a repo, and after the install nothing touches the network.
 - Vectors need a Python whose SQLite can load extensions. uv's own Pythons can; some others can't (the one on
   GitHub's macOS runners, for one), and `docket models install` says so. `uv tool install --python-preference
   only-managed docket` installs Docket on uv's own.
@@ -383,6 +386,55 @@ The reranker:
 - `docket search` reranks as the service does when the service answers it. On its own (no service for the vault,
   `--no-update`) it reranks on the CPU only; on a GPU machine it goes without, and its line says so.
   `docket eval` reranks where the service does, with no time limit, and says how many questions went without it.
+
+### Through Voyage AI's API
+
+A machine with no GPU and no time for CPU embedding can use Voyage AI instead: voyage-4 at 512 dimensions for search
+by meaning, rerank-2.5-lite for the reranker's 50 pairs. It sends your vault's text off the machine, so it runs only
+when three things hold at once, each set in your own terminal:
+
+| Lock | Set with | Off |
+|---|---|---|
+| this vault allows it: `api_provider: voyage` in `vault.yaml`, committed | `docket models allow voyage` | `docket models allow none`, asked too |
+| this machine chose it, in your config's `models:` block | `docket models install --api` | `docket models remove`, at once |
+| the key is in this machine's keychain | `docket models key voyage` | `docket models key voyage --forget`, at once |
+
+What leaves this machine, to `api.voyageai.com` over HTTPS:
+
+| What | When |
+|---|---|
+| a chunk's title and text | once, by the embedding pass after an index update, and again only when its text changes |
+| a search's query | on each search, for its vector |
+| a search's query and its top 50 candidates' text | on each search's rerank |
+
+Before anything is sent, Docket screens it with the vault's settings in force:
+
+- Only chunks of the index go, and the index never reads `staging/`.
+- A chunk stays here when one of its records comes from a source that isn't in `vault.yaml` any more, or is private
+  now; when a record or its text matches a never-store list; or when a redaction rule in force would change its text.
+  Raw is written once, so a source you make private keeps its old records here.
+- Turning a source off pauses its capture and leaves its stored records going to Voyage; making it private keeps them
+  here.
+- A query that holds a never-store value, or that a rule would redact, isn't sent: that search goes without vectors and
+  the reranker, and says why without naming what matched.
+- A setting changed since the last check stops the reranker until the next embedding pass has screened every chunk
+  again.
+
+Costs and limits:
+
+- voyage-4 lists at $0.06 a million tokens and rerank-2.5-lite at $0.02, each with 200 million free tokens per account
+  (Voyage's docs, read 17 Oct 2026). A first pass over a vault of 100,000 chunks is about 37 million tokens; a rerank
+  about 25,000.
+- `api_monthly_tokens` in your config's `models:` block caps what this machine sends in a month, 50 million by
+  default; past it nothing is sent until the next month. `docket models status` shows the month's count.
+- The free tokens and Voyage's first tier need a payment method on file with Voyage. A pass meeting Voyage's rate
+  limit waits and goes on; a search never waits for it.
+- In Voyage's dashboard, opt out of their storing and training on your data, which gives zero-day retention.
+
+The key lives in this machine's keychain only, never in the vault or your config. The keychain keeps it out of
+transcripts and files, not from a program running as you, which can ask the keychain as Docket does. On a vault used
+from several machines, each machine's choice and key are its own instant offs; `api_provider: none`, committed, stops
+them all. The rerank keeps its 0.75 s and its fallback to the order without it.
 
 ## Entities
 

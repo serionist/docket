@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from docket.models.catalogue import Embedder, Reranker
+from docket.models.catalogue import Embedding, Ranking
 from docket.models.client import PAST_BUDGET, Skip
 
 # Past the model's 512 tokens the tokenizer cuts a text, so a longer one costs no more.
@@ -92,21 +92,25 @@ class RerankCounts:
 
 class Models:
     """An embedder and its worker, and the reranker the worker runs when it is on here: `rerank_why` says why it
-    isn't, and `rerank_said` asks every search to say so, as `docket search` does where the reranker is the GPU's."""
+    isn't, and `rerank_said` asks every search to say so, as `docket search` does where the reranker is the GPU's.
+    `guard` is an API provider's screen (#89, DR-0538), which the embedding pass and the rerank ask before they send;
+    None for the local provider, whose text never leaves the machine."""
 
     def __init__(
         self,
-        embedder: Embedder,
+        embedder: Embedding,
         worker: Runner,
         budget: int,
         *,
-        reranker: Reranker | None = None,
+        reranker: Ranking | None = None,
         pairs: int = 0,
         rerank_why: str | None = None,
         rerank_said: bool = False,
         clock: Callable[[], float] = time.monotonic,
         wall: Callable[[], float] = time.time,
+        guard: object | None = None,
     ) -> None:
+        self.guard = guard
         self.embedder = embedder
         self.worker = worker
         self.budget = budget

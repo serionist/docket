@@ -24,6 +24,8 @@ The parameters follow the design's MCP `search` tool, which the service (#8) map
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import functools
 import json
 import re
@@ -42,6 +44,7 @@ from pydantic import BaseModel
 from docket.documents import records as documents
 from docket.errors import DocketError
 from docket.index import matching, rerank, vectors
+from docket.index import screen as screening
 from docket.index.build import db_path, languages_of, open_index
 from docket.index.languages import Language, Languages
 from docket.index.terms import Checker, Word, phrase_of, tokens
@@ -866,7 +869,9 @@ class _VectorStage:
         self.table = vectors.table_of(models.embedder)
         self.found: list[tuple[int, str]] = []
         self.why: str | None = None
-        self._thread = threading.Thread(target=self._run, args=(models, db, text, filters), daemon=True)
+        # In the search's context, so an API provider's checks see the settings the search read (DR-0538).
+        context = contextvars.copy_context()
+        self._thread = threading.Thread(target=context.run, args=(self._run, models, db, text, filters), daemon=True)
         self._thread.start()
 
     def _run(self, models: vectors.QueryVectors, db: Path, text: str, filters: tuple[str, list[object]]) -> None:
@@ -1002,19 +1007,40 @@ def _rerank(
         run.state, run.why = "skipped", "nothing to compare: the query is only time words or filters"
         return fused.today, run
     top = rerank.candidates(_walked(fused.today, fused.rows, k), fused.at(RERANK_WEIGHT), models.pairs)
-    run.pairs = len(top)
-    if len(top) < 2:
+    sent = top
+    guard = screening.of(models)
+    if guard is not None:
+        # An API provider gets only the candidates its screen passed under the settings in force (DR-0538).
+        allowed = guard.sendable(s.conn, top)
+        if isinstance(allowed, str):
+            run.state, run.why = "skipped", allowed
+            return fused.today, run
+        sent = [c for c in top if c in allowed]
+    run.pairs = len(sent)
+    if len(sent) < 2:
         return fused.today, run
-    texts = [rerank_passage(fused.rows[c].title, fused.rows[c].text) for c in top]
+    texts = [rerank_passage(fused.rows[c].title, fused.rows[c].text) for c in sent]
     scores = models.rerank(asked, texts, budget)
     if isinstance(scores, str):
         run.state, run.why, run.pairs = "skipped", scores, 0
         return fused.today, run
-    head = rerank.order(top, scores, fused.found_by, _boosted(s.conn, top, boosts))
+    head = _in_places(top, sent, rerank.order(sent, scores, fused.found_by, _boosted(s.conn, sent, boosts)))
     chosen = set(head)
     # The tiers keep the all-words hits of the top N above the rest of it; the move keeps them above a chunk only the
     # vectors found anywhere in the order, one folded into a hit included (DR-0338).
     return _after_all_words(head + [c for c in fused.today if c not in chosen], fused.found_by), run
+
+
+def _in_places(top: list[int], sent: list[int], order: list[int]) -> list[int]:
+    """The top N with the sent candidates in their reranked order, in the places they held, and every other one left
+    where the fused order put it, so a chunk with no vector yet never sinks for want of one."""
+    if len(sent) == len(top):
+        return order
+    places = [i for i, chunk in enumerate(top) if chunk in set(sent)]
+    out = list(top)
+    for i, chunk in zip(places, order, strict=True):
+        out[i] = chunk
+    return out
 
 
 def _iso(value: datetime) -> str:
@@ -1042,12 +1068,16 @@ def search(
     if not 1 <= k <= MAX_K:
         raise DocketError(f"k is from 1 to {MAX_K}")
     conn = open_index(vault)
+    guard = screening.of(models)
     try:
         s = _Search(conn, vault, languages_of(vault))
-        return _run(
-            s, query, people=people, entities=entities, sources=sources, since=since, until=until, k=k, now=now,
-            models=models, rerank_budget=rerank_budget,
-        )  # fmt: skip
+        # An API provider's checks read the settings in force once for the whole search, before the rerank's
+        # deadline starts (DR-0538).
+        with guard.reading() if guard is not None else contextlib.nullcontext():
+            return _run(
+                s, query, people=people, entities=entities, sources=sources, since=since, until=until, k=k, now=now,
+                models=models, rerank_budget=rerank_budget,
+            )  # fmt: skip
     finally:
         conn.close()
 

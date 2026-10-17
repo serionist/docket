@@ -1,0 +1,18 @@
+decisions:
+  - id: DR-0536
+    title: The models are chosen per machine, local, api or none; the API provider is Voyage AI, voyage-4 at 512 dimensions and rerank-2.5-lite, run in process
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#89"]
+    supersedes: [DR-0335, DR-0340]
+    description: "The models are chosen per machine in the user's config.yaml, in a models block: provider (local, api or none), device (cpu or cuda, written by docket models install, for local), embedder, reranker, and api_monthly_tokens (for api, 50M by default, DR-0539). A block that doesn't read (an unknown key or value), or a config.yaml that isn't YAML, turns models off and says why in docket models status, the service's status and search's models field; it never stops the service or keyword search. vault.yaml is committed and shared by every machine of a vault and refuses unknown keys (DR-0021), so a machine not yet upgraded would refuse the vault, and a per-machine map in it would change the vault whenever a machine is added; the index is per machine (DR-0115), so each machine embeds with what it has. The block is not a door before the first release, as the REST API isn't (DR-0151). Whether a vault's text may leave the machine belongs to the vault: api_provider in vault.yaml (DR-0537). The reranker's name is the exception: an unknown one reads as the reranker off with the reason, and the embedder stays on, since the embedder doesn't depend on it (DR-0451). The API provider is Voyage AI: voyage-4 as the embedder, at output_dimension 512 with input_type query or document instead of prefixes, and rerank-2.5-lite as the reranker at 50 pairs. They run through VoyageRunner in models/voyage.py, an in-process implementation of provider.Runner over HTTPS to https://api.voyageai.com/v1/ with a bearer key, the OS trust store and the environment's proxies; one function, send, is the only network path, its opener without a redirect handler, so a 3xx is an error naming its status, and a reason or a log line carries only the status and fixed words, never a response body or the request. There is no worker process: DR-0330's reason, ONNX's environment, doesn't apply, and provider.Models (the budget, the counts, the pause) wraps it unchanged. docket models install --api writes the machine's choice at the owner's console; the vectors go to chunk_vec_voyage_4_d512 (DR-0336), apart from any local model's. It sends only when the vault allows it (DR-0537), the machine chose it and the key is in the keychain (DR-0539), and only what passes the screen (DR-0538). Restates DR-0335 with api allowed, and supersedes DR-0340, the interface that refused api until this issue."
+    not_chosen:
+      - "Cohere: zero data retention only for approved enterprise customers, prompts logged 30 days, no published price in the pages read."
+      - "Jina AI: now under Elastic data terms, per-token prices unpublished, its v4 embedder non-commercial."
+      - "Google Vertex AI: cloud IAM and a project, not a key a user pastes once."
+      - "OpenAI or Mistral: embeddings with no reranker."
+      - "1024 dimensions: twice the table and the scan, against the 384 the vector stage is measured at."
+      - "vault.yaml, keyed by machine: a door, refused by machines not yet upgraded, changed whenever a machine is added."
+      - "Refusing a bad block, as the service's keys are: a typo in an optional feature would stop keyword search too."

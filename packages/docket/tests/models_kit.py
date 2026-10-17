@@ -21,11 +21,14 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+import keyring
+import keyring.backend
+import keyring.errors
 import pytest
 
 from docket import userconfig
 from docket.index.vectors import load_extension
-from docket.models import catalogue, config, runtime
+from docket.models import catalogue, config, runtime, voyage
 from docket.models.catalogue import RERANK_BATCH, Embedder, ModelFile, Reranker
 from docket.models.client import Skip, Worker
 from docket.models.provider import Models
@@ -266,3 +269,86 @@ def with_reranker(monkeypatch: pytest.MonkeyPatch, reranker: Reranker = FAKE_RER
     choose({"device": reranker.device, "embedder": FAKE.name, "reranker": reranker.name})
     make_env(reranker.device, reranker=timing(reranker, seconds))
     monkeypatch.setattr(runtime, "missing_files", lambda model: [])
+
+
+# -- the API provider (#89) ------------------------------------------------------------------------------------------
+
+# An invented key, never a real one: tests that send install FakeVoyage, and the real path refuses (conftest).
+FAKE_KEY = "pa-test-not-a-real-key-0000"
+
+
+class FakeVoyage:
+    """Voyage AI as tests see it, in place of `voyage.send`: trigram vectors of the dimensions asked for, rerank scores
+    by `pair_score`, each answer's tokens, and every request kept. `fail` holds, per path, what to answer next, in
+    order: an HTTP status, or "late" for a timeout. `before` runs before each request is answered."""
+
+    def __init__(self) -> None:
+        self.requests: list[tuple[str, dict[str, Any]]] = []
+        self.fail: dict[str, list[int | str]] = {"/embeddings": [], "/rerank": []}
+        self.before: Any = None
+
+    def __call__(self, path: str, body: dict[str, Any], key: str, timeout: float) -> dict[str, Any]:
+        assert key == FAKE_KEY
+        self.requests.append((path, body))
+        if self.before is not None:
+            self.before(path, body)
+        if self.fail.get(path):
+            what = self.fail[path].pop(0)
+            if what == "late":
+                raise voyage.ApiError("Voyage didn't answer in time", timeout=True)
+            raise voyage.ApiError(f"Voyage answered {what}", int(what))
+        if path == "/embeddings":
+            dims = int(body["output_dimension"])
+            texts = [str(t) for t in body["input"]]
+            vectors = [list(struct.unpack(f"<{dims}f", trigram_vector(t, dims))) for t in texts]
+            data = [{"object": "embedding", "embedding": v, "index": i} for i, v in enumerate(vectors)]
+            return {"object": "list", "data": data, "usage": {"total_tokens": sum(len(t) // 4 + 1 for t in texts)}}
+        documents = [str(d) for d in body["documents"]]
+        scores = [{"index": i, "relevance_score": pair_score(str(body["query"]), d)} for i, d in enumerate(documents)]
+        scores.sort(key=lambda r: -float(r["relevance_score"]))
+        return {"object": "list", "data": scores, "usage": {"total_tokens": 10 * len(documents)}}
+
+    def sent(self) -> str:
+        """Every text the fake was sent, queries, inputs and documents, one per line."""
+        out: list[str] = []
+        for _, body in self.requests:
+            out += [str(t) for t in body.get("input", [])]
+            out += [str(body["query"])] if "query" in body else []
+            out += [str(d) for d in body.get("documents", [])]
+        return "\n".join(out)
+
+    def paths(self) -> list[str]:
+        return [path for path, _ in self.requests]
+
+
+class MemoryKeyring(keyring.backend.KeyringBackend):
+    """A keychain in memory for one test: the real one is never touched."""
+
+    priority = 1  # pyright: ignore[reportAssignmentType]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.kept: dict[tuple[str, str], str] = {}
+
+    def get_password(self, service: str, username: str) -> str | None:
+        return self.kept.get((service, username))
+
+    def set_password(self, service: str, username: str, password: str) -> None:
+        self.kept[(service, username)] = password
+
+    def delete_password(self, service: str, username: str) -> None:
+        if (service, username) not in self.kept:
+            raise keyring.errors.PasswordDeleteError("no such key")
+        del self.kept[(service, username)]
+
+
+def with_voyage(monkeypatch: pytest.MonkeyPatch, *, key: bool = True, reranker: bool = True) -> FakeVoyage:
+    """This machine chose the api provider, its key is in an in-memory keychain, and FakeVoyage answers."""
+    chain = MemoryKeyring()
+    keyring.set_keyring(chain)
+    if key:
+        chain.set_password(voyage.KEY_SERVICE, voyage.KEY_USER, FAKE_KEY)
+    choose({"provider": "api", "reranker": catalogue.VOYAGE_RERANK.name if reranker else "none"})
+    fake = FakeVoyage()
+    monkeypatch.setattr(voyage, "send", fake)
+    return fake

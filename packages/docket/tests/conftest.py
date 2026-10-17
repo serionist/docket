@@ -12,6 +12,7 @@ from docket_testkit import TEST_GITCONFIG, AtConsole, make_config, make_record, 
 from keyring.backends.fail import Keyring as FailKeyring
 
 from docket import console
+from docket.models import voyage
 from docket.vault.config import VaultConfig
 from docket.vault.records import RawRecord
 
@@ -73,6 +74,17 @@ def isolated(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.Monke
     monkeypatch.delenv("CLAUDECODE", raising=False)
     for name in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The API provider's one network path fails every test that reaches it: a test that means to send installs its
+    own fake (`models_kit.FakeVoyage`). No test makes a real call or holds a real key."""
+
+    def refused(*_: object, **__: object) -> dict[str, object]:
+        raise AssertionError("a test reached Voyage's real network path; install models_kit.FakeVoyage")
+
+    monkeypatch.setattr(voyage, "send", refused)
 
 
 @pytest.fixture

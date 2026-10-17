@@ -107,6 +107,7 @@ def test_the_writer_s_general_entry_is_called_only_by_the_cli_s_two_writers_and_
     assert _calls("rewrite") == {
         ("vault/redaction.py", "set_rule"),
         ("sources/scaffold.py", "_register"),
+        ("models/api.py", "allow"),
         ("vault/settings.py", "add_listed"),
         ("vault/settings.py", "rule_on"),
         ("vault/settings.py", "stricter"),
@@ -117,6 +118,8 @@ def test_the_writer_s_general_entry_is_called_only_by_the_cli_s_two_writers_and_
 def test_the_writers_that_can_loosen_are_called_only_by_the_command_line() -> None:
     for name in ("set_rule", "new_source", "new_folder_source"):
         assert {rel for rel, _ in _calls(name)} == {"cli.py"}, name
+    # `docket models allow`: the api provider's opt-in (DR-0537), whose every change loosens.
+    assert _attribute_calls("api_models", "allow") == {("cli.py", "models_allow")}
 
 
 def test_pages_and_the_service_import_only_what_pages_may_use() -> None:
@@ -236,7 +239,12 @@ def test_only_the_release_and_the_writer_ask_at_the_console() -> None:
                 importers.add(rel)
             if isinstance(node, ast.Import) and any(a.name == "docket.console" for a in node.names):
                 importers.add(rel)
-    assert importers == {"sources/release.py", "vault/settings.py"}
+    assert importers == {"sources/release.py", "vault/settings.py", "models/api.py"}
+    # The api provider's machine choice and key only refuse outside the owner's console (DR-0539): no code is asked.
+    asked = {node.func.attr for rel, module in _modules() if rel == "models/api.py" for node in ast.walk(module)
+             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+             and isinstance(node.func.value, ast.Name) and node.func.value.id == "console"}  # fmt: skip
+    assert asked == {"problem"}
 
 
 def _attribute_calls(owner: str, name: str) -> set[tuple[str, str]]:
@@ -256,5 +264,11 @@ def _attribute_calls(owner: str, name: str) -> set[tuple[str, str]]:
 
 def test_the_vault_and_the_gate_read_the_settings_in_force_through_one_loader() -> None:
     """What the jobs obey comes from inforce.load alone (DR-0521): Vault.open's config, and the gate's on every call."""
-    assert _attribute_calls("inforce", "load") == {("vault/vault.py", "Vault"), ("vault/gate.py", "Gate")}
+    # And the API provider's screen (DR-0538): the same settings in force, read once per search or batch with no git
+    # call while HEAD stays, where opening the whole vault five times a search cost a git call each on a folder vault.
+    assert _attribute_calls("inforce", "load") == {
+        ("vault/vault.py", "Vault"),
+        ("vault/gate.py", "Gate"),
+        ("index/screen.py", "Screen"),
+    }
     assert {c for c in _calls("effective") if c[0] != "vault/inforce.py"} == set()

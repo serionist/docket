@@ -1,4 +1,4 @@
-"""The models on this machine: the user's choice in their config's `models:` block (DR-0335), where the worker's
+"""The models on this machine: the user's choice in their config's `models:` block (DR-0536), where the worker's
 environment and the model files live, and what `docket models install` left there.
 
 A block that doesn't read turns models off and says why; it never stops the service or keyword search. The files live
@@ -22,10 +22,16 @@ from platformdirs import user_cache_path, user_data_path
 
 from docket import userconfig
 from docket.models.catalogue import (
+    API_EMBEDDERS,
+    API_RERANKERS,
+    DEFAULT_API_EMBEDDER,
+    DEFAULT_API_RERANKER,
     DEFAULT_EMBEDDER,
     EMBEDDERS,
     RERANK_BATCH,
     RERANKERS,
+    ApiEmbedder,
+    ApiReranker,
     Embedder,
     ModelFile,
     Reranker,
@@ -34,8 +40,11 @@ from docket.models.provider import Off
 
 Device = Literal["cpu", "cuda"]
 DEVICES: tuple[Device, ...] = ("cpu", "cuda")
-PROVIDERS = ("local", "none")
-KEYS = ("provider", "device", "embedder", "reranker")
+PROVIDERS = ("local", "api", "none")
+KEYS = ("provider", "device", "embedder", "reranker", "api_monthly_tokens")
+# The API provider's tokens a month on this machine, past which it sends nothing (DR-0539): about $3 at voyage-4's
+# list price, and a stop for a loop that embeds again and again.
+DEFAULT_MONTHLY_TOKENS = 50_000_000
 # The reranker is on only where the install timed its pairs within this (DR-0455), leaving its 0.75 s budget room.
 RERANK_ON_SECONDS = 0.6
 MARKER = "docket-models.json"
@@ -53,7 +62,18 @@ class Choice:
     reranker_why: str | None = None
 
 
-def read() -> Choice | Off:
+@dataclass(frozen=True)
+class ApiChoice:
+    """The API provider is this machine's choice (#89): its embedder, its reranker or none, and the monthly tokens it
+    may send. Whether it sends is also the vault's to say (DR-0537), and the key's (DR-0539)."""
+
+    embedder: ApiEmbedder
+    reranker: ApiReranker | None
+    monthly_tokens: int
+    reranker_why: str | None = None
+
+
+def read() -> Choice | ApiChoice | Off:
     """The user's choice, or Off: with no reason when there is no block or it says provider none, with one when the
     block doesn't read."""
     try:
@@ -71,12 +91,12 @@ def read() -> Choice | Off:
     if unknown:
         return Off(f"{where} has keys this Docket doesn't know ({', '.join(unknown)}), so models are off")
     provider = block.get("provider", "local")
-    if provider == "api":
-        return Off(f"{where} names the api provider, which isn't there yet, so models are off")
     if provider not in PROVIDERS:
-        return Off(f"{where} names provider {provider!r}; it is local or none, so models are off")
+        return Off(f"{where} names provider {provider!r}; it is local, api or none, so models are off")
     if provider == "none":
         return Off()
+    if provider == "api":
+        return _api(block, where)
     device = block.get("device", "cpu")
     if device not in DEVICES:
         return Off(f"{where} names device {device!r}; it is cpu or cuda, so models are off")
@@ -90,10 +110,43 @@ def read() -> Choice | Off:
         return Choice(device, embedder)
     reranker = RERANKERS.get(str(named))
     if reranker is None:
-        # The embedder doesn't depend on the reranker, so only the reranker is off (DR-0335, DR-0451).
+        # The embedder doesn't depend on the reranker, so only the reranker is off (DR-0536, DR-0451).
         why = f"{where} names a reranker this Docket doesn't have ({', '.join(RERANKERS)}), so the reranker is off"
         return Choice(device, embedder, None, why)
     return Choice(device, embedder, reranker)
+
+
+def _api(block: dict[str, Any], where: str) -> ApiChoice | Off:
+    embedder = API_EMBEDDERS.get(str(block.get("embedder", DEFAULT_API_EMBEDDER)))
+    if embedder is None:
+        names = ", ".join(API_EMBEDDERS)
+        return Off(f"{where} names an embedder the api provider doesn't have ({names}), so models are off")
+    monthly = block.get("api_monthly_tokens", DEFAULT_MONTHLY_TOKENS)
+    if isinstance(monthly, bool) or not isinstance(monthly, int) or monthly < 1:
+        why = f"{where} gives api_monthly_tokens as {monthly!r}; it is a whole number of tokens"
+        return Off(f"{why}, so models are off")
+    named = block.get("reranker", DEFAULT_API_RERANKER)
+    if named == "none":
+        return ApiChoice(embedder, None, monthly)
+    reranker = API_RERANKERS.get(str(named))
+    if reranker is None:
+        # As the local provider has it: the embedder doesn't depend on the reranker (DR-0536, DR-0451).
+        names = ", ".join(API_RERANKERS)
+        why = f"{where} names a reranker the api provider doesn't have ({names}), so the reranker is off"
+        return ApiChoice(embedder, None, monthly, why)
+    return ApiChoice(embedder, reranker, monthly)
+
+
+def write_api(embedder: ApiEmbedder, reranker: ApiReranker | None, monthly: int = DEFAULT_MONTHLY_TOKENS) -> None:
+    userconfig.set_section(
+        "models",
+        {
+            "provider": "api",
+            "embedder": embedder.name,
+            "reranker": reranker.name if reranker is not None else "none",
+            "api_monthly_tokens": monthly,
+        },
+    )
 
 
 def write(device: Device, embedder: Embedder, reranker: Reranker | None = None) -> None:

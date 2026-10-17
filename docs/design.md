@@ -230,6 +230,10 @@ flowchart TB
 - Models run in worker processes, each in its own environment: the embedder and reranker stay loaded (DR-0330,
   DR-0332), and a command that only asks queries starts one for itself; Whisper starts per job and ends, freeing its
   VRAM, and its CUDA libraries never share a process with another worker's.
+- Or, per machine, Voyage AI's API for the embedder and reranker, in process (DR-0536): only when the vault allows it in
+  `vault.yaml` (DR-0537), the machine chose it and its key is in the keychain (DR-0539), and only what passes a screen
+  of the vault's settings in force: chunks of the index whose sources are still there and not private, past the
+  never-store lists and the redaction rules, and queries past the same lists (DR-0538).
 - Security on localhost (DR-0152): bound to 127.0.0.1; every request's Host checked; the browser gets a session
   cookie (SameSite=Strict) from a one-time link `docket open` opens, and only the web app's static files go without
   it (DR-0177); every write checks Origin and Sec-Fetch-Site;

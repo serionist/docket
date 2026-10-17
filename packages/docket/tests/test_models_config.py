@@ -18,7 +18,7 @@ from docket.index import build
 from docket.models import config, runtime
 from docket.models.catalogue import BGE_RERANKER, E5_SMALL, MMARCO_RERANKER
 from docket.models.client import Worker
-from docket.models.config import Choice, Installed, RerankTiming, read
+from docket.models.config import ApiChoice, Choice, Installed, RerankTiming, read
 from docket.models.provider import Models, Off
 
 
@@ -37,8 +37,10 @@ def test_no_block_is_off_with_nothing_to_say() -> None:
     [
         (["cpu"], "isn't a map of provider, device and embedder"),
         ({"provider": "local", "devise": "cpu"}, "keys this Docket doesn't know (devise)"),
-        ({"provider": "api"}, "names the api provider, which isn't there yet"),
-        ({"provider": "cloud"}, "names provider 'cloud'; it is local or none"),
+        ({"provider": "api", "embedder": "large"}, "names an embedder the api provider doesn't have (voyage-4)"),
+        ({"provider": "api", "api_monthly_tokens": 0}, "gives api_monthly_tokens as 0; it is a whole number"),
+        ({"provider": "api", "api_monthly_tokens": True}, "gives api_monthly_tokens as True"),
+        ({"provider": "cloud"}, "names provider 'cloud'; it is local, api or none"),
         ({"device": "tpu"}, "names device 'tpu'; it is cpu or cuda"),
         ({"embedder": "large"}, "names an embedder this Docket doesn't have (e5-small)"),
     ],
@@ -284,3 +286,16 @@ def test_a_command_that_only_embeds_loads_no_reranker(monkeypatch: pytest.Monkey
     models = runtime.open_models(rerank=False)
     assert isinstance(models, Models) and models.reranker is None and models.rerank_why is None
     assert "reranker" not in json.loads(started[-1])
+
+
+def test_the_api_provider_reads_its_reranker_or_none() -> None:
+    set_block({"provider": "api", "reranker": "none"})
+    got = read()
+    assert isinstance(got, ApiChoice) and got.reranker is None and got.reranker_why is None
+    set_block({"provider": "api", "reranker": "big"})
+    got = read()
+    assert isinstance(got, ApiChoice) and got.reranker is None
+    assert got.reranker_why is not None and "names a reranker the api provider doesn't have" in got.reranker_why
+    set_block({"provider": "api"})
+    got = read()
+    assert isinstance(got, ApiChoice) and got.reranker is not None and got.reranker.name == "rerank-2.5-lite"

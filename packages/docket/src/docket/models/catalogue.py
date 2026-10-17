@@ -10,11 +10,43 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Protocol
 
 # A title already in the text's opening adds nothing; a transcript window carries its recording's name only in its
 # title, so there it is added.
 TITLE_IN = 200
+
+
+class Embedding(Protocol):
+    """What the index and search need of an embedder, local or through an API (#89): the name and revision that name
+    its vector table, its dimensions, and how a query and a passage become its input."""
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def revision(self) -> str: ...
+
+    @property
+    def dims(self) -> int: ...
+
+    @property
+    def passage_prefix(self) -> str: ...
+
+    @property
+    def key(self) -> str: ...
+
+    def query(self, text: str) -> str: ...
+
+
+class Ranking(Protocol):
+    """What search and the reports need of a reranker, local or through an API: its name and where it runs."""
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def device(self) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -168,3 +200,54 @@ MMARCO_RERANKER = Reranker(
 RERANKERS: dict[str, Reranker] = {r.name: r for r in (BGE_RERANKER, MMARCO_RERANKER)}
 # Each device's reranker (DR-0456): one per device, none for a device with no entry.
 RERANKER_FOR: dict[str, str] = {"cuda": BGE_RERANKER.name, "cpu": MMARCO_RERANKER.name}
+
+
+# -- the API provider (#89, DR-0536) ---------------------------------------------------------------------------------
+
+# A batch's request to the API: at most this many inputs and characters, well inside Voyage's 1,000 texts and 320k
+# tokens a request, so one slow request holds the pass up for seconds, not minutes.
+API_BATCH = 128
+API_BATCH_CHARS = 200_000
+
+
+@dataclass(frozen=True)
+class ApiEmbedder:
+    """An embedder an API runs: the provider and its model, the dimensions asked for, and no files. The revision names
+    the table with the dimensions, since the provider versions its models by their names."""
+
+    name: str
+    provider: str
+    model: str
+    revision: str
+    dims: int
+    query_prefix: str = ""
+    passage_prefix: str = ""
+
+    @property
+    def key(self) -> str:
+        return f"{self.name.replace('-', '_').replace('.', '_')}_{self.revision[:8]}"
+
+    def query(self, text: str) -> str:
+        return f"{self.query_prefix}{text}"
+
+
+@dataclass(frozen=True)
+class ApiReranker:
+    """A reranker an API runs, and how many pairs a search sends it."""
+
+    name: str
+    provider: str
+    model: str
+    pairs: int
+    device: str = "api"
+
+
+# Voyage AI (DR-0536): 512 dimensions keep the table and the scan near the 384 the vector stage is measured at, and the
+# lite reranker is the faster of the two, for a rerank's 0.75 s (DR-0454).
+VOYAGE = "voyage"
+VOYAGE_4 = ApiEmbedder(name="voyage-4", provider=VOYAGE, model="voyage-4", revision="d512", dims=512)
+VOYAGE_RERANK = ApiReranker(name="rerank-2.5-lite", provider=VOYAGE, model="rerank-2.5-lite", pairs=50)
+API_EMBEDDERS: dict[str, ApiEmbedder] = {VOYAGE_4.name: VOYAGE_4}
+API_RERANKERS: dict[str, ApiReranker] = {VOYAGE_RERANK.name: VOYAGE_RERANK}
+DEFAULT_API_EMBEDDER = VOYAGE_4.name
+DEFAULT_API_RERANKER = VOYAGE_RERANK.name

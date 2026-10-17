@@ -143,6 +143,8 @@ CASES: list[tuple[str, Change, bool]] = [
     ("the time zone changed", top(owner=BASE.owner.model_copy(update={"time_zone": "UTC"})), True),
     ("the storage changed", top(storage="folder"), True),
     ("the primary machine changed", top(primary_machine="other-box"), True),
+    # A key added later (DR-0537): any change of it loosens, with no line of its own in the door.
+    ("the api provider allowed", top(api_provider="voyage"), True),
     ("two stricter changes", both(source("calls", sensitivity="private"), lists(people=["Cleo Test", "Ben"])), False),
     ("a stricter change and a tool", both(source("calls", sensitivity="private"), source("memo", tools=["x"])), True),
 ]
@@ -611,3 +613,21 @@ def test_the_take_in_rule_holds_for_a_rule_and_a_source(tmp_path: Path) -> None:
         with pytest.raises(settings.UncommittedLooseningError):
             write()
     assert text(vault) == edited
+
+
+def test_api_provider_is_written_only_when_set_and_waits_for_its_commit_either_way() -> None:
+    config = make_config()
+    assert all(entry.mapper is None for entry in config.sources.values())
+    written = config.dump()
+    # A vault that never opts in keeps its vault.yaml byte for byte, a source with no mapper keeping `mapper: null`.
+    assert "api_provider" not in written and "mapper: null" in written
+    assert config.written_by_docket(written)
+    allowed = config.model_copy(update={"api_provider": "voyage"})
+    assert "\napi_provider: voyage\n" in allowed.dump()
+    assert VaultConfig.parse(allowed.dump(), Path("vault.yaml")).api_provider == "voyage"
+    with pytest.raises(DocketError, match="api_provider"):
+        VaultConfig.parse(written + "api_provider: cloud\n", Path("vault.yaml"))
+    # The settings in force keep HEAD's value until the edit is committed, whichever way it went.
+    assert effective(config, allowed).api_provider is None
+    assert effective(allowed, config).api_provider == "voyage"
+    assert loosens(config, allowed) and loosens(allowed, config)
