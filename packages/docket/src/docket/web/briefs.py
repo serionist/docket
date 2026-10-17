@@ -5,12 +5,15 @@ the user's click on a decision, the only writer of a decision's status (DR-0564,
 `docket.briefs`, `docket.decisions` and recall's own reads, and writes nothing. The report reads the index, so the page
 waits for an update as a search does.
 
-The click is a plain form post the Guard checks (DR-0152), as the Settings page's are: same origin, the browser's
-session, never the token, so no client of Docket's API reaches it. It runs on the service's writer thread through
-`DocStore.decide`, carries the rev the page showed, and answers a 303 back to the page with `done`; a decision that
-moved since, or one that replaces or contradicts a decision no longer current, writes nothing and answers 409 with the
-page as it stands now. A value the URL or the form can't hold, or a `DocketError`, is the page's own error state;
-anything else is logged as its type and frames and answered with the error page, as on the other pages (DR-0170).
+The click is a plain form post the Guard checks (DR-0152), as the Settings page's are: same origin and the browser's
+session. A post that sends the token is refused, which stops a client of Docket's API that sends it; a token holder
+can still mint a session (`POST /api/session`, `docket open`) and post with its cookie, the floor DR-0382 and
+DR-0564 accept: a deliberate step, outside every door Docket gives Claude. It runs on the service's writer thread
+through `DocStore.decide`, carries the rev the page showed, and answers a 303 back to the page with `done`; a decision
+that moved since, or one that replaces or contradicts a decision no longer current, writes nothing and answers 409
+with the page as it stands now. A value the URL or the form can't hold, or a `DocketError`, is the page's own error
+state; anything else is logged as its type and frames and answered with the error page, as on the other pages
+(DR-0170).
 """
 
 from __future__ import annotations
