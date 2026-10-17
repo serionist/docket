@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import make_record, sh
+from docket_testkit import commit_config, make_record, sh
 from starlette.testclient import TestClient
 from sync_kit import (
     BEARER,
@@ -96,6 +96,7 @@ def set_config(vault: Vault, change: Any) -> None:
     config = VaultConfig.load(vault.root / "vault.yaml")
     change(config)
     (vault.root / "vault.yaml").write_text(config.dump(), encoding="utf-8")
+    commit_config(vault.root)
 
 
 # -- whole runs --------------------------------------------------------------------------------------------------------

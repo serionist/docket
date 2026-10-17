@@ -39,7 +39,7 @@ from docket.sources.contract import Manifest
 from docket.sources.ingest import IngestReport, ingest_run
 from docket.sources.local import record as record_import_folder
 from docket.sources.runner import MapperFailedError
-from docket.vault import convert, curatelog, cuts, holds, redaction, releaselog
+from docket.vault import convert, curatelog, cuts, holds, inforce, redaction, releaselog
 from docket.vault.docstore import DocStore
 from docket.vault.entitystore import EntityStore, RefusedError, Written, load_changes
 from docket.vault.gate import Gate, Label
@@ -257,6 +257,8 @@ def vault_status(vault: VaultOption = None) -> None:
     if s.branch_warning:
         typer.echo(f"warning  {s.branch_warning}")
     typer.echo(f"machine  {s.machine}")
+    if found.waiting:
+        typer.echo(f"settings {inforce.NOTICE}")
     typer.echo(f"runs     {s.runs}")
     for source, count in sorted(s.records.items()):
         typer.echo(f"records  {source}: {count}")
@@ -423,8 +425,11 @@ def source_new(
         raise DocketError(f"found {found.root} by {how}; pass --vault {found.root} to add a source there")
     if folder is not None:
         added = scaffold.new_folder_source(found, name, folder)
+        if added.declined:
+            say(f"source   {name} not added: the code wasn't typed back, so vault.yaml is as it was")
+            raise typer.Exit(1)
         if added.registered:
-            commit = f", committed {added.commit[:12]}" if added.commit else ""
+            commit = f", committed {added.commit[:12]}" if added.commit else inforce.note(found.waiting)
             say(f"source   {name} in vault.yaml: a folder source, folder {added.entry.folder}{commit}")
         else:
             say("source   vault.yaml has comments or a layout of your own, so it is left as it is; add under sources:")
@@ -432,13 +437,19 @@ def source_new(
         say(f"next     docket scan {name}")
         return
     made = scaffold.new_source(found, name, example=example, sensitivity=sensitivity, tools=tool or [])
+    if made.declined:
+        say(
+            f"source   {name} not added: the code wasn't typed back, so vault.yaml is as it was and "
+            f"{made.folder} is gone"
+        )
+        raise typer.Exit(1)
     say(f"wrote    {made.folder}" + (", Docket's reference" if made.example else ", from the blank template"))
     for rel in made.files:
         say(f"         {rel}")
     entry = made.entry
     tools = ", ".join(entry.tools) or "none yet"
     if made.registered:
-        commit = f", committed {made.commit[:12]}" if made.commit else ""
+        commit = f", committed {made.commit[:12]}" if made.commit else inforce.note(found.waiting)
         say(f"source   {name} in vault.yaml: {entry.sensitivity}, mapper {entry.mapper}, tools {tools}{commit}")
     else:
         say("source   vault.yaml has comments or a layout of your own, so it is left as it is; add under sources:")
@@ -526,7 +537,10 @@ def redaction_show(ctx: typer.Context, vault: VaultOption = None) -> None:
     # `docket redaction --vault <path> set ...` names the vault before the subcommand: set takes it from here.
     ctx.obj = vault
     if ctx.invoked_subcommand is None:
-        say_all(redaction.describe(find_vault(vault).config.redaction))
+        found = find_vault(vault)
+        say_all(redaction.describe(found.config.redaction))
+        if found.waiting:
+            say(f"note     {inforce.NOTICE}")
 
 
 @redaction_app.command("set")
@@ -540,13 +554,18 @@ def redaction_set(
     if state not in ("on", "off"):
         raise DocketError(f"the setting is on or off, not {state!r}")
     named: Path | None = vault if vault is not None else ctx.obj
-    done = redaction.set_rule(find_vault(named), rule, state == "on")
+    found = find_vault(named)
+    done = redaction.set_rule(found, rule, state == "on")
+    if done.declined:
+        say(f"redact   {rule} not changed: the code wasn't typed back")
+        raise typer.Exit(1)
     if done.by_hand is not None:
         say(f"vault.yaml has comments or a layout of your own, so it is left as it is; set it there: {done.by_hand}")
     elif done.changed:
         say(f"redact   {rule} {state}" + (f", committed {done.commit[:12]}" if done.commit else ""))
     else:
-        say(f"redact   {rule} is {state} already")
+        # As vault.yaml has it: an edit by hand not committed yet may have set it, and it isn't in force until then.
+        say(f"redact   {rule} is {state} already{inforce.note(found.waiting)}")
     for note in done.notes:
         say(f"note     {note}")
     if done.by_hand is not None:

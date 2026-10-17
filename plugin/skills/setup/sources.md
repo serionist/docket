@@ -18,6 +18,7 @@ fills from a saved payload.
 
 - A source's tools go in `vault.yaml` by their own names, without the host's prefix: `mcp__plaud__list_files` is
   `list_files`, `mcp__plugin_slack_slack__slack_read_channel` is `slack_read_channel`. Pass the ones that return the
-  source's content, one `--tool` each; the user can change them later.
+  source's content, one `--tool` each; the user can change them later, in `vault.yaml`, where a tool added applies
+  once they commit it.
 - A source not listed here gets a name of its own (lowercase letters, digits, dots, `_` and `-`) and the blank
   template, `mixed` unless the user says it is all work.

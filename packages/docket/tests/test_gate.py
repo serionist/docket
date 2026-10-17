@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import empty_vault, make_record, plaud_records, sh
+from docket_testkit import commit_config, empty_vault, make_record, plaud_records, sh
 
 from docket.errors import DocketError
 from docket.vault import gate as gate_module
@@ -52,9 +52,11 @@ def note(n: int, **fields: Any) -> RawRecord:
 
 
 def rewrite(vault: Vault, change: Callable[[VaultConfig], object]) -> None:
+    """A settings change made by hand and committed, as the user would: what loosens applies once committed."""
     config = VaultConfig.load(vault.root / "vault.yaml")
     change(config)
     (vault.root / "vault.yaml").write_text(config.dump(), encoding="utf-8", newline="\n")
+    commit_config(vault.root)
 
 
 def in_raw(vault: Vault) -> list[RawRecord]:

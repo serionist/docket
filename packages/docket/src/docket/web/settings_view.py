@@ -21,7 +21,7 @@ from docket.errors import DocketError
 from docket.index.build import VectorCoverage
 from docket.index.query import Reach
 from docket.models.report import Report
-from docket.vault import redaction
+from docket.vault import inforce, redaction
 from docket.vault.config import SourceConfig, VaultConfig
 from docket.vault.settings import BUILTIN_RULES, LISTS, RANK, item_line, key_line, pattern_block, source_block
 from docket.web.commands import filled
@@ -121,6 +121,8 @@ class Facts:
     models: Report
     config_path: Path
     folders_problem: str | None = None
+    # vault.yaml holds an edit not committed yet that isn't in force until it is (DR-0521).
+    waiting: bool = False
     # The running service's models in its own words, and the end of its worker's stderr.
     service: list[str] = field(default_factory=list[str])
     service_errors: list[str] = field(default_factory=list[str])
@@ -225,6 +227,8 @@ class SettingsView:
     unfilled: list[tuple[str, str]]
     shown_hash: str = ""
     done: str | None = None
+    # Said at the top while vault.yaml holds an edit that isn't in force, naming no value.
+    waiting: str | None = None
 
 
 def build(facts: Facts, state: SettingsState) -> SettingsView:
@@ -245,8 +249,9 @@ def build(facts: Facts, state: SettingsState) -> SettingsView:
     if facts.docket_form:
         form = (
             "vault.yaml is as Docket writes it: a change that keeps more out has its button here, and every change "
-            "that lets more in is a command to run or a line to change by hand. vault.yaml is committed, so a change "
-            "reaches your other machines with the vault."
+            "that lets more in is a command to run in your own terminal, which asks you to type back a code, or a "
+            "line to change by hand, which applies once you commit it. vault.yaml is committed, so a change reaches "
+            "your other machines with the vault."
         )
     else:
         form = (
@@ -258,6 +263,7 @@ def build(facts: Facts, state: SettingsState) -> SettingsView:
         form=form,
         docket_form=facts.docket_form,
         machine=facts.machine,
+        waiting=f"{inforce.NOTICE}." if facts.waiting else None,
         primary=config.primary_machine,
         sources=sources,
         lists=lists,

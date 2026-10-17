@@ -4,10 +4,11 @@ out (DR-0480, DR-0481)."""
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from docket_testkit import git, host_repo, make_config
+from docket_testkit import AtConsole, git, host_repo, make_config
 from documents_scan_kit import SOURCE, folder_vault, name, put, rid
 
 from docket.cli import main, scan_lines
@@ -119,8 +120,9 @@ def repo_vault(tmp_path: Path) -> tuple[Path, Vault]:
 
 
 def test_a_folder_source_is_added_as_every_machine_reads_it(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    owner: Callable[..., AtConsole], tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    owner(*["code"] * 6)  # each loosening below is typed back at the console (DR-0517)
     top, vault = repo_vault(tmp_path)
     (top / "docs").mkdir()
     assert main(["source", "new", SOURCE, "--folder", str(top / "docs"), "--vault", str(vault.root)]) == 0
@@ -150,7 +152,10 @@ def test_folder_goes_alone(tmp_path: Path, capsys: pytest.CaptureFixture[str], e
     assert "--folder goes alone" in capsys.readouterr().err
 
 
-def test_a_mapper_source_isn_t_turned_into_a_folder_source(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_mapper_source_isn_t_turned_into_a_folder_source(
+    owner: Callable[..., AtConsole], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    owner("code", "code", "code", "code")  # each loosening below is typed back at the console (DR-0517)
     top, vault = repo_vault(tmp_path)
     assert main(["source", "new", "memo", "--tool", "get_memo", "--vault", str(vault.root)]) == 0
     assert main(["source", "new", "memo", "--folder", str(top), "--vault", str(vault.root)]) == 2
@@ -158,7 +163,10 @@ def test_a_mapper_source_isn_t_turned_into_a_folder_source(tmp_path: Path, capsy
     assert main(["source", "new", "Bad", "--folder", str(top), "--vault", str(vault.root)]) == 2
 
 
-def test_a_hand_written_vault_yaml_gets_the_entry_to_paste(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_hand_written_vault_yaml_gets_the_entry_to_paste(
+    owner: Callable[..., AtConsole], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    owner("code", "code", "code", "code")  # each loosening below is typed back at the console (DR-0517)
     top, vault = repo_vault(tmp_path)
     path = vault.root / "vault.yaml"
     path.write_text("# mine\n" + path.read_text(encoding="utf-8"), encoding="utf-8")

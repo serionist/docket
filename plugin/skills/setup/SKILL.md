@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Set up Docket for the user, or add a source to it - checks Docket is installed, asks which sources to set up, where the vault lives and which languages they work in, creates the vault, and scaffolds each source's skill and mapper. Use when the user asks to set up, install or configure Docket, add a source to it, or when the session-start status says Docket has no vault yet.
+description: Set up Docket for the user, or add a source to it - checks Docket is installed, asks which sources to set up, where the vault lives and which languages they work in, creates the vault, and hands the user the command that scaffolds each source's skill and mapper. Use when the user asks to set up, install or configure Docket, add a source to it, or when the session-start status says Docket has no vault yet.
 allowed-tools: Bash(docket --version) Bash(docket vault status) Bash(docket vault status *) Bash(docket service status) Bash(docket service status *)
 ---
 
@@ -63,8 +63,9 @@ docket init --yes --no-sources --path <path> --storage <folder|repo> --remote no
 ```
 
 One `--email` and one `--language` per value. Add `--no-redact-credentials` only on the user's no to credentials,
-and `--redact-phone` only on their yes to phone numbers. Show the user the summary init prints. Either can change
-later: `docket redaction set <credentials|phone> <on|off> --vault <path>`.
+and `--redact-phone` only on their yes to phone numbers. Show the user the summary init prints. Either can be
+turned on later with `docket redaction set <credentials|phone> on --vault <path>`; turning one off is the user's,
+at their own console.
 
 **A refusal.** Init refuses a folder in a repo that looks shared, a remote it can't check, or a parent repo with
 uncommitted changes. Show the refusal exactly as Docket wrote it and ask about that one check in its own
@@ -81,13 +82,20 @@ every override it took: show it to the user.
 
 ## Each source
 
-For each chosen source, with the vault named:
+Adding a source lets more into the vault, so the user runs its command in their own terminal (Windows Terminal,
+PowerShell, a macOS or Linux terminal; in Git Bash's own window, through `winpty`). Give them one command at a
+time and wait for it to finish: each shows what it adds to `vault.yaml` and asks them to type back a code, and a
+block pasted at once would feed its second line into the first one's question. With the vault named:
 
 ```
 docket source new <name> --vault <path> --sensitivity <work|mixed|private> --tool <tool>
 docket source new plaud --vault <path> --example
 docket source new documents --vault <path> --folder <folder>
 ```
+
+- Never run these yourself, pipe into them, wrap them in a console or pseudo-terminal of your own, edit or commit
+  `vault.yaml` to add a source, or clear `CLAUDECODE`. Auto mode changes nothing here. A refusal that names an
+  uncommitted edit of `vault.yaml` goes to the user as it stands.
 
 One `--tool` per tool. `--example` where sources.md lists a reference; its sensitivity and tools come with it. Each
 command prints the folder it wrote, under the project's `.claude/skills/sources/`. Claude Code doesn't load those

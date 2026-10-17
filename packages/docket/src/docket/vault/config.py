@@ -275,8 +275,13 @@ class VaultConfig(_Model):
 
     @staticmethod
     def load(path: Path) -> VaultConfig:
+        return VaultConfig.parse(path.read_text(encoding="utf-8"), path)
+
+    @staticmethod
+    def parse(text: str, path: Path) -> VaultConfig:
+        """vault.yaml's text as the settings, an error named by `path`: the file, or the one HEAD holds."""
         try:
-            data: Any = yaml.load(path.read_text(encoding="utf-8"), Loader=UniqueKeyLoader)  # noqa: S506 - a SafeLoader
+            data: Any = yaml.load(text, Loader=UniqueKeyLoader)  # noqa: S506 - a SafeLoader
         except yaml.YAMLError as e:
             # Not `from e`: PyYAML's message quotes the line it stopped at, which can be a never-store value.
             raise DocketError(f"{path}: not valid YAML: {yaml_problem(e)}") from None

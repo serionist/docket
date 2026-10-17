@@ -39,7 +39,7 @@ from docket.documents.extract import Done, Extractor, Failed, NotRead, Outcome
 from docket.documents.limits import LIMITS, MIB, Limits, NotReadError, mib
 from docket.documents.parts import PLAIN, Extracted, Format, format_of
 from docket.errors import DocketError
-from docket.vault import holds, neverstore
+from docket.vault import holds, inforce, neverstore
 from docket.vault.config import NeverStore, SourceConfig
 from docket.vault.gate import Gate, StageResult
 from docket.vault.git import toplevel
@@ -179,11 +179,11 @@ def scan(
     config = vault.config.sources.get(source)
     if config is None:
         names = ", ".join(folder_sources(vault)) or "none"
-        raise DocketError(f"no source {source!r} in vault.yaml; folder sources: {names}")
+        raise DocketError(f"no source {source!r} in vault.yaml; folder sources: {names}{inforce.note(vault.waiting)}")
     if config.folder is None:
         raise DocketError(f"source {source} isn't a folder source: it has no folder in vault.yaml")
     if not config.enabled:
-        raise DocketError(f"source {source} is turned off in vault.yaml")
+        raise DocketError(f"source {source} is turned off in vault.yaml{inforce.note(vault.waiting)}")
     primary = vault.config.primary_machine
     if vault.machine != primary:
         raise DocketError(

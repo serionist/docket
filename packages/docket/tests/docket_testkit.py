@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -21,7 +22,10 @@ from typing import Any, Literal
 import pytest
 from filelock import FileLock
 
-from docket.vault.config import NeverStore, Owner, RedactionPattern, SourceConfig, VaultConfig
+from docket.errors import DocketError
+from docket.vault import inforce
+from docket.vault.config import CONFIG_FILE, NeverStore, Owner, RedactionPattern, SourceConfig, VaultConfig
+from docket.vault.home import Home
 from docket.vault.records import RawRecord, version
 from docket.vault.vault import Vault, remove_tree
 
@@ -55,6 +59,26 @@ CALL_SEGMENTS: list[dict[str, Any]] = [
     {"start_ms": 3700000, "end_ms": 3725000, "speaker": "Ben Sample", "text": "Bye for now."},
 ]
 MAIL_TEXT = "Hello Ben,\r\n\r\nThe offer stands at 10 million.\r\nUntil Friday.\r\n \N{NO-BREAK SPACE}\r\nCleo\r\n"
+
+
+class AtConsole:
+    """The owner at the console: answers each question from a script, typing back the code when the script says
+    "code"; every prompt is kept. The `owner` fixture puts one in docket.console's place."""
+
+    def __init__(self, *answers: str | Callable[[], str]) -> None:
+        self.answers = list(answers)
+        self.prompts: list[str] = []
+
+    def __call__(self, prompt: str) -> str:
+        self.prompts.append(prompt)
+        answer = self.answers.pop(0) if self.answers else "q"
+        if callable(answer):
+            answer = answer()
+        if answer == "code":
+            found = re.search(r"Type ([A-Z]{4}) to", prompt)
+            assert found is not None, prompt
+            return found.group(1).lower()
+        return answer
 
 
 def sh(cwd: Path, *args: str, check: bool = True) -> str:
@@ -278,6 +302,7 @@ def _template(build: Callable[[Path], Path], key: str, factory: pytest.TempPathF
             isolated_git(mp, templates / f"{name}.home")
             made = build(folder)
             settle(folder)
+            warm(folder)
         (templates / f"{name}.manifest.json").write_text(json.dumps(manifest(folder)), encoding="utf-8")
         rel = made.resolve().relative_to(folder.resolve()).as_posix()
         done.write_text(rel, encoding="utf-8")
@@ -315,6 +340,18 @@ def settle(folder: Path) -> None:
     for repo in repos:
         sh(repo, "git", "config", "core.trustctime", "false")
         sh(repo, "git", "update-index", "-q", "--refresh", check=False)
+
+
+def warm(folder: Path) -> None:
+    """Each vault in a template read once, as Docket reads one, so the settings in force find HEAD's vault.yaml in
+    their cache before the manifest is taken: a test that opens the template itself then writes nothing into it
+    (DR-0521). A vault.yaml that isn't a vault's, or doesn't read, is left as it is."""
+    for config in folder.rglob(CONFIG_FILE):
+        if ".git" in config.parts:
+            continue
+        with contextlib.suppress(DocketError, OSError, ValueError):
+            root = config.parent
+            inforce.load(root, Home.resolve(root, VaultConfig.load(config).storage))
 
 
 def _fit(template: Path, repo: Path, copy: Path) -> None:
@@ -462,6 +499,13 @@ def copy_project(template: Path, tmp_path: Path) -> Vault:
 def git(cwd: Path, *args: str) -> str:
     """git as the user of a host repo: an invented identity, the user's own commits."""
     return sh(cwd, "git", "-c", "user.name=Ada Example", "-c", "user.email=ada@example.invalid", *args)
+
+
+def commit_config(root: Path) -> None:
+    """vault.yaml as edited by hand, committed as the user would, so what it loosens is in force (DR-0521). An
+    edit that changed nothing commits nothing."""
+    if sh(root, "git", "status", "--porcelain", "--", "vault.yaml").strip():
+        git(root, "commit", "-qm", "Settings", "--", "vault.yaml")
 
 
 def configure(

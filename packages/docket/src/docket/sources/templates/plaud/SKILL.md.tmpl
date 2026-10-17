@@ -13,8 +13,8 @@ file turns a run's captures into records. This folder is an example to copy, not
 ## Set it up
 
 `docket source new plaud --example --vault <vault>` copies this folder to `.claude/skills/sources/plaud/` in the repo
-that holds the vault and adds the source to `vault.yaml`; Docket's `/docket:setup` runs it for you. By hand, the same
-two steps:
+that holds the vault and adds the source to `vault.yaml`, after you type back the code it shows; run it in your own
+terminal, as `/docket:setup` tells you. By hand, the same two steps:
 
 1. Copy this folder to `.claude/skills/sources/plaud/` in the repo that holds the vault.
 2. In `vault.yaml`, add the source:
@@ -26,6 +26,8 @@ sources:
     mapper: .claude/skills/sources/plaud/mapper.py
     tools: [list_files, get_file, get_transcript, get_note]
 ```
+
+Then commit `vault.yaml`: a source added by hand applies once it is committed.
 
 Then run its tests where it was copied: `pytest .claude/skills/sources/plaud/tests`. The tests that go through
 Docket's own checks run only where `docket` can be imported, and are left out elsewhere.

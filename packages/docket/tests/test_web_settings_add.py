@@ -303,7 +303,7 @@ def test_an_uncommitted_edit_that_lets_more_in_is_refused_at_both_steps(client: 
     )
     for answer in (asked, added):
         assert answer.status_code == 400
-        assert "vault.yaml has an edit that isn't committed and lets more in" in said(answer.text)
+        assert "vault.yaml has an edit that isn't in force until you commit it" in said(answer.text)
         assert NAME not in answer.text
     assert path.read_text(encoding="utf-8") == edited
     assert sh(vault.root, "git", "rev-parse", "HEAD") == at

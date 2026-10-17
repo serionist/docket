@@ -652,7 +652,8 @@ How it is built (DR-0170 to DR-0176):
   card, the edit form and what the last change did.
 - The Settings page shows each source, the never-store lists (their values only with `show=lists`), redaction and
   this machine's models (DR-0505, DR-0510). Pages make only the `vault.yaml` changes that keep more out, through the
-  CLI's writer and its `loosens()` check; every other change is a loosening, named as its command or its line and
+  CLI's writer and its `loosens()` check; every other change is a loosening, named as its command, which asks at
+  the owner's console (DR-0517), or its line, which applies once committed (DR-0521), and
   never made by a page (DR-0506). A redaction rule turned on, a source made mixed or turned off is one form post on
   the writer thread, and a source made private asks once more first. A never-store value is added in two form posts
   on the writer thread: the first

@@ -79,8 +79,8 @@ terms:
     definition: "What read takes: a doc's id or path, or a record part such as r:<rid>@12:08, the same in brackets, or a bare rid."
     see: [packages/docket/src/docket/vault/anchors.py]
   - term: loosening
-    definition: "Any vault.yaml change outside DR-0506's short list (a never-store value added, a redaction rule or pattern turned on, a source made stricter or turned off): a value taken off, a rule turned off, a source added, made looser or turned on, its tools, mapper, hosts or folder, and any key added later. What it lets in reaches git for good, so it is made at the console or by hand, never by a page."
-    see: [packages/docket/src/docket/vault/settings.py]
+    definition: "Any vault.yaml change loosens() flags: everything but a change that only keeps more out (a never-store value added, a rule turned on, a new pattern, a source made stricter, turned off or removed, an exclude added, a tool removed). A value taken off, a rule turned off, a source added, made looser or turned on, its mapper, hosts or folder, the owner's settings and any key added later. What it lets in reaches git for good, so no page makes one, the CLI makes one only at the owner's console with a code typed back, and one made by hand applies once committed."
+    see: [packages/docket/src/docket/vault/inforce.py]
   - term: mapper
     definition: "A source's code in the consuming project, map_run(run) in .claude/skills/sources/<source>/mapper.py: a run's captures and manifest in, records in the core's shape out, as plain JSON. Docket runs it in its own process and checks what it returns."
     see: [packages/docket/src/docket/sources/contract.py]
@@ -142,6 +142,9 @@ terms:
   - term: session link
     definition: "The one-time link docket open asks the service for: good once and for a minute, it starts a browser session that lasts 12 hours at most and ends when the service stops."
     see: [packages/docket/src/docket/service/sessions.py]
+  - term: settings in force
+    definition: "What the gate and every job that decides what gets in obey: HEAD's vault.yaml with every part of an uncommitted edit that only keeps more out. The rest of the edit waits until it is committed, and docket vault status and the Settings page say so."
+    see: [packages/docket/src/docket/vault/inforce.py]
   - term: staging gate
     definition: "The checks every record passes on its way from a connector to the raw log: the never-store lists, the source rules, classification, cuts and redaction. Records wait in the vault's staging/ folder, never committed."
     see: [packages/docket/src/docket/vault/gate.py]

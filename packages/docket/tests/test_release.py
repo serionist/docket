@@ -6,19 +6,17 @@ from __future__ import annotations
 
 import ast
 import inspect
-import io
 import json
-import os
 import re
 import subprocess
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 import typer
-from docket_testkit import COMMIT_CALLS, copy_project, git_calls, sh, template_project
+from docket_testkit import COMMIT_CALLS, AtConsole, copy_project, git_calls, sh, template_project
 
 from docket.cli import app, main
 from docket.errors import DocketError
@@ -113,37 +111,6 @@ def folder(tmp_path: Path) -> Path:
     return out
 
 
-class Owner:
-    """The owner at the console: answers each question from a script, typing back the code when the script says
-    "code"; every prompt is kept."""
-
-    def __init__(self, *answers: str | Callable[[], str]) -> None:
-        self.answers = list(answers)
-        self.prompts: list[str] = []
-
-    def __call__(self, prompt: str) -> str:
-        self.prompts.append(prompt)
-        answer = self.answers.pop(0) if self.answers else "q"
-        if callable(answer):
-            answer = answer()
-        if answer == "code":
-            found = re.search(r"Type ([A-Z]{4}) to", prompt)
-            assert found is not None, prompt
-            return found.group(1).lower()
-        return answer
-
-
-@pytest.fixture
-def owner(monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[..., Owner]]:
-    def at_console(*answers: str | Callable[[], str]) -> Owner:
-        person = Owner(*answers)
-        monkeypatch.setattr(releasing, "_console_problem", lambda: None)
-        monkeypatch.setattr(releasing, "_ask", person)
-        return person
-
-    yield at_console
-
-
 def ingest(vault: Vault, folder: Path) -> None:
     assert main(["ingest", "rec", str(folder), "--vault", str(vault.root)]) == 0
 
@@ -205,7 +172,7 @@ def test_show_names_what_intake_drops_without_printing_it(vault: Vault, folder: 
 
 
 def test_a_confirmed_release_commits_the_log_then_the_hold_and_stages_the_recording_cut(
-    vault: Vault, folder: Path, owner: Callable[..., Owner], capsys: pytest.CaptureFixture[str]
+    vault: Vault, folder: Path, owner: Callable[..., AtConsole], capsys: pytest.CaptureFixture[str]
 ) -> None:
     ingest(vault, folder)
     person = owner("code")
@@ -255,7 +222,7 @@ def test_a_confirmed_release_commits_the_log_then_the_hold_and_stages_the_record
 
 
 def test_a_release_makes_these_git_calls(
-    vault: Vault, folder: Path, owner: Callable[..., Owner], monkeypatch: pytest.MonkeyPatch
+    vault: Vault, folder: Path, owner: Callable[..., AtConsole], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Every git call of one release, in order (#132): a call added later fails here with its name."""
     ingest(vault, folder)
@@ -285,7 +252,7 @@ def test_a_release_makes_these_git_calls(
 
 
 def test_a_release_during_a_conflict_refuses_before_any_question(
-    vault: Vault, folder: Path, owner: Callable[..., Owner]
+    vault: Vault, folder: Path, owner: Callable[..., AtConsole]
 ) -> None:
     # An unmerged path, as a stash pop that conflicts leaves one: stages 1 to 3 and no *_HEAD file. The release's
     # commits would refuse it only after the owner typed the code and its log line was on disk (#132, DR-0528).
@@ -309,7 +276,7 @@ def test_a_release_during_a_conflict_refuses_before_any_question(
 
 @pytest.mark.parametrize("answer", ["y", "yes", "n", "ABC", "q"])
 def test_anything_but_the_code_writes_nothing(
-    vault: Vault, folder: Path, owner: Callable[..., Owner], answer: str
+    vault: Vault, folder: Path, owner: Callable[..., AtConsole], answer: str
 ) -> None:
     ingest(vault, folder)
     before = snapshot(vault)
@@ -321,7 +288,7 @@ def test_anything_but_the_code_writes_nothing(
 
 
 def test_what_fails_a_check_stays_held_and_writes_nothing_while_the_batch_goes_on(
-    vault: Vault, folder: Path, owner: Callable[..., Owner]
+    vault: Vault, folder: Path, owner: Callable[..., AtConsole]
 ) -> None:
     ingest(vault, folder)
     # A recording imported before its hold arrived is in raw, uncut.
@@ -369,7 +336,7 @@ def test_what_fails_a_check_stays_held_and_writes_nothing_while_the_batch_goes_o
     assert set(releaselog.read(vault.root, "rec")) == {"rec-cut-01"}
 
 
-def test_a_keep_intake_drops_stays_held(vault: Vault, folder: Path, owner: Callable[..., Owner]) -> None:
+def test_a_keep_intake_drops_stays_held(vault: Vault, folder: Path, owner: Callable[..., AtConsole]) -> None:
     ingest(vault, folder)
     config = vault.root / "vault.yaml"
     config.write_text(
@@ -381,7 +348,7 @@ def test_a_keep_intake_drops_stays_held(vault: Vault, folder: Path, owner: Calla
 
 
 def test_a_hold_or_log_that_changes_while_the_owner_reads_stops_that_id(
-    vault: Vault, folder: Path, owner: Callable[..., Owner]
+    vault: Vault, folder: Path, owner: Callable[..., AtConsole]
 ) -> None:
     ingest(vault, folder)
 
@@ -398,7 +365,7 @@ def test_a_hold_or_log_that_changes_while_the_owner_reads_stops_that_id(
 
 
 def test_a_line_left_uncommitted_is_committed_and_a_rerun_only_takes_the_hold_off(
-    vault: Vault, folder: Path, owner: Callable[..., Owner]
+    vault: Vault, folder: Path, owner: Callable[..., AtConsole]
 ) -> None:
     ingest(vault, folder)
     # A crash after the line was written and before its commit: held and released on disk.
@@ -416,7 +383,7 @@ def test_a_line_left_uncommitted_is_committed_and_a_rerun_only_takes_the_hold_of
 
 
 def test_a_hold_brought_back_gets_one_question_and_no_new_line(
-    vault: Vault, folder: Path, owner: Callable[..., Owner], capsys: pytest.CaptureFixture[str]
+    vault: Vault, folder: Path, owner: Callable[..., AtConsole], capsys: pytest.CaptureFixture[str]
 ) -> None:
     ingest(vault, folder)
     owner("code")
@@ -434,7 +401,7 @@ def test_a_hold_brought_back_gets_one_question_and_no_new_line(
 
 
 def test_released_and_off_the_hold_with_nothing_staged_is_staged_without_a_question(
-    vault: Vault, folder: Path, owner: Callable[..., Owner]
+    vault: Vault, folder: Path, owner: Callable[..., AtConsole]
 ) -> None:
     ingest(vault, folder)
     # A crash after the hold's commit, before the records were staged.
@@ -463,20 +430,6 @@ def test_nothing_is_read_without_the_owner_at_a_console(
         releasing.release(vault, "rec", missing, [cut_01()])
 
 
-def test_the_null_device_a_pipe_or_no_stream_is_no_console() -> None:
-    with Path(os.devnull).open(encoding="utf-8") as nul:
-        assert not releasing._is_console(nul)  # pyright: ignore[reportPrivateUsage]
-    assert not releasing._is_console(io.StringIO())  # pyright: ignore[reportPrivateUsage]
-    assert not releasing._is_console(None)  # pyright: ignore[reportPrivateUsage]
-
-
-def test_with_a_console_on_both_sides_and_outside_claude_code_the_question_is_asked(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(releasing, "_is_console", lambda stream: True)
-    assert releasing._console_problem() is None  # pyright: ignore[reportPrivateUsage]
-
-
 @pytest.mark.parametrize(
     "case",
     [
@@ -485,7 +438,7 @@ def test_with_a_console_on_both_sides_and_outside_claude_code_the_question_is_as
     ],
 )
 def test_a_log_or_list_that_doesn_t_read_is_refused_before_it_is_committed(
-    vault: Vault, folder: Path, owner: Callable[..., Owner], case: tuple[str, str, str]
+    vault: Vault, folder: Path, owner: Callable[..., AtConsole], case: tuple[str, str, str]
 ) -> None:
     rel, broken, message = case
     ingest(vault, folder)
@@ -500,7 +453,9 @@ def test_a_log_or_list_that_doesn_t_read_is_refused_before_it_is_committed(
     assert person.prompts == []
 
 
-def test_a_disabled_source_stops_before_the_question(vault: Vault, folder: Path, owner: Callable[..., Owner]) -> None:
+def test_a_disabled_source_stops_before_the_question(
+    vault: Vault, folder: Path, owner: Callable[..., AtConsole]
+) -> None:
     ingest(vault, folder)
     path = vault.root / "vault.yaml"
     config = VaultConfig.load(path)
@@ -515,7 +470,7 @@ def test_a_disabled_source_stops_before_the_question(vault: Vault, folder: Path,
 
 
 def test_show_refuses_an_id_released_already_and_held_again(
-    vault: Vault, folder: Path, owner: Callable[..., Owner]
+    vault: Vault, folder: Path, owner: Callable[..., AtConsole]
 ) -> None:
     ingest(vault, folder)
     owner("code")
@@ -527,7 +482,7 @@ def test_show_refuses_an_id_released_already_and_held_again(
 
 
 def test_only_the_versions_the_owner_was_shown_are_classified_by_them(
-    vault: Vault, folder: Path, owner: Callable[..., Owner]
+    vault: Vault, folder: Path, owner: Callable[..., AtConsole]
 ) -> None:
     # A version of the transcript staged before its hold arrived, as on another machine: never on this screen.
     variant = RawRecord.model_validate(
@@ -564,7 +519,7 @@ def test_only_the_versions_the_owner_was_shown_are_classified_by_them(
     ],
 )
 def test_a_transcript_the_gate_won_t_stage_is_not_classified_and_the_release_goes_on(
-    vault: Vault, tmp_path: Path, owner: Callable[..., Owner], second: list[dict[str, Any]], keyword: str | None
+    vault: Vault, tmp_path: Path, owner: Callable[..., AtConsole], second: list[dict[str, Any]], keyword: str | None
 ) -> None:
     folder = tmp_path / "two"
     folder.mkdir()
@@ -591,7 +546,7 @@ def test_show_needs_a_folder(vault: Vault, folder: Path) -> None:
 
 
 def test_a_long_cut_shows_its_edges_and_a_count_and_a_dropped_record_is_named(
-    vault: Vault, folder: Path, owner: Callable[..., Owner], capsys: pytest.CaptureFixture[str]
+    vault: Vault, folder: Path, owner: Callable[..., AtConsole], capsys: pytest.CaptureFixture[str]
 ) -> None:
     ingest(vault, folder)
     config = vault.root / "vault.yaml"
@@ -607,17 +562,6 @@ def test_a_long_cut_shows_its_edges_and_a_count_and_a_dropped_record_is_named(
     assert "      - ... 2 more" in out
     assert "      - 1:00-1:10  Ada Example: Send it by Friday." in out
     assert "Supplier" not in out
-
-
-def test_the_end_of_input_stops_and_a_code_is_four_fresh_letters(monkeypatch: pytest.MonkeyPatch) -> None:
-    def no_more(prompt: str) -> str:
-        raise EOFError
-
-    monkeypatch.setattr("builtins.input", no_more)
-    assert releasing._ask("?") == "q"  # pyright: ignore[reportPrivateUsage]
-    codes = {releasing._code() for _ in range(20)}  # pyright: ignore[reportPrivateUsage]
-    assert all(re.fullmatch(r"[A-HJ-NP-Z]{4}", c) for c in codes)
-    assert len(codes) > 1
 
 
 def test_nothing_answers_the_question_for_the_owner() -> None:
@@ -707,7 +651,7 @@ def run(capsys: pytest.CaptureFixture[str], *args: str) -> tuple[int, str, str]:
 
 
 def test_list_prints_ids_only_and_marks_a_hold_brought_back(
-    vault: Vault, folder: Path, owner: Callable[..., Owner], capsys: pytest.CaptureFixture[str]
+    vault: Vault, folder: Path, owner: Callable[..., AtConsole], capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = str(vault.root)
     assert run(capsys, "hold", "list", "--vault", root)[1] == "nothing held\n"
@@ -752,7 +696,7 @@ def test_release_refuses_claude_code_s_shell_and_a_process_without_a_console_bef
 
 
 def test_release_with_a_piped_y_keeps_it_held_and_the_code_releases_it(
-    vault: Vault, folder: Path, owner: Callable[..., Owner], capsys: pytest.CaptureFixture[str]
+    vault: Vault, folder: Path, owner: Callable[..., AtConsole], capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = str(vault.root)
     assert main(["ingest", "rec", str(folder), "--vault", root]) == 0
@@ -788,7 +732,7 @@ def test_release_with_a_piped_y_keeps_it_held_and_the_code_releases_it(
 
 
 def test_release_takes_a_proposals_file_or_an_id_never_both(
-    vault: Vault, folder: Path, tmp_path: Path, owner: Callable[..., Owner], capsys: pytest.CaptureFixture[str]
+    vault: Vault, folder: Path, tmp_path: Path, owner: Callable[..., AtConsole], capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = str(vault.root)
     assert main(["ingest", "rec", str(folder), "--vault", root]) == 0

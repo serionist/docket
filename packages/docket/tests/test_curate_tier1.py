@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 import yaml
-from docket_testkit import copied, empty_vault, make_config, make_record
+from docket_testkit import commit_config, copied, empty_vault, make_config, make_record
 from docket_webkit import OURS, parse
 from staging_kit import signed_in
 from starlette.testclient import TestClient
@@ -111,6 +111,7 @@ def config(vault: Vault, **fields: Any) -> None:
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     data.update(fields)
     path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    commit_config(vault.root)
     vault.config = Vault.open(vault.root).config
 
 

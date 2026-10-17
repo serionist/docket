@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from docket_testkit import copy_vault, index_template, make_record
+from docket_testkit import commit_config, copy_vault, index_template, make_record
 
 from docket.cli import main
 from docket.index import build
@@ -54,6 +54,7 @@ def test_rebuild_update_and_status(vault: Vault, capsys: pytest.CaptureFixture[s
     (vault.root / "vault.yaml").write_text(
         (vault.root / "vault.yaml").read_text(encoding="utf-8").replace("  - hu\n", ""), encoding="utf-8"
     )
+    commit_config(vault.root)
     code, out = run(vault, capsys, "index", "status")
     assert code == 1 and "needs a rebuild: it was built with languages" in out
 
@@ -85,6 +86,7 @@ def test_search_prints_groups_hits_and_locators(vault: Vault, capsys: pytest.Cap
 def test_search_names_a_language_problem_after_a_rebuild(vault: Vault, capsys: pytest.CaptureFixture[str]) -> None:
     vault_yaml = vault.root / "vault.yaml"
     vault_yaml.write_text(vault_yaml.read_text(encoding="utf-8").replace("  - hu\n", "  - hu\n  - klingon\n"), "utf-8")
+    commit_config(vault.root)
     code, out = run(vault, capsys, "search", "pallet")
     assert code == 0 and "! vault.yaml: vault.yaml's language 'klingon' has no stemmer" in out
 

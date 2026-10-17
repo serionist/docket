@@ -132,8 +132,10 @@ def test_a_folder_vault_whose_host_lost_its_git_never_commits_into_the_repo_abov
     assert str(tmp_path.resolve()) in named
     assert git(tmp_path, "rev-parse", "HEAD") == before
     assert git(tmp_path, "ls-files").split() == ["outer.txt"]
-    # A refusal is never kept: once the outer repo tracks the vault, as for a vault moved there on purpose, it opens.
+    # A refusal is never kept: once the outer repo holds the vault, as for a vault moved there on purpose, it opens.
+    # Its vault.yaml committed there: the settings in force are read from HEAD (DR-0521).
     git(tmp_path, "add", "host/notes/vault/vault.yaml")
+    git(tmp_path, "commit", "-qm", "The vault moved here")
     assert Vault.open(vault.root).home.top == tmp_path.resolve()
 
 

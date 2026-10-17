@@ -13,6 +13,7 @@
 {% else %}
 <p class="lead">{{ view.lead }}</p>
 {% if view.done %}{{ notice('info', view.done) }}{% endif %}
+{% if view.waiting %}{{ notice('warn', view.waiting) }}{% endif %}
 {% if warning %}{{ notice('warn', warning) }}{% endif %}
 {{ notice('info', view.form) }}
 {% if view.unfilled %}
@@ -136,6 +137,7 @@
       {% else %}
       <p><span class="change-what">{{ 'Turn it off' if r.on else 'Turn it on' }}</span>{% if r.looser %} <span class="badge">lets more in</span>{% endif %}: {{ r.note }}.</p>
       {{ paste(r.command, 'the command that turns ' ~ r.name ~ (' off' if r.on else ' on')) }}
+      {% if r.looser %}<p class="meta">It is yours to confirm: run it in your own terminal, where it shows the change and asks you to type back a code.</p>{% endif %}
       {% endif %}
       {% if r.line %}<p class="meta">vault.yaml isn't as Docket writes it, so the command prints the line instead: {{ r.line }}.</p>{% endif %}
     </li>

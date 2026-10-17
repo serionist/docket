@@ -3,10 +3,11 @@ from __future__ import annotations
 import runpy
 import shutil
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from docket_testkit import copied, host_repo, make_config, make_record, sh
+from docket_testkit import AtConsole, copied, host_repo, make_config, make_record, sh
 
 from docket import __version__, userconfig
 from docket.cli import main
@@ -145,9 +146,10 @@ def test_the_vault_is_found_from_here_a_child_env_and_the_default(
 
 
 def test_source_new_takes_a_vault_found_in_the_config_or_the_environment_only_when_named(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    owner: Callable[..., AtConsole], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     # Project A's folder vault is the default; the user works in project B.
+    owner("code", "code", "code", "code")  # each loosening below is typed back at the console (DR-0517)
     (tmp_path / "a").mkdir()
     (tmp_path / "b").mkdir()
     a = host_repo(tmp_path / "a")

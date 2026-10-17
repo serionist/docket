@@ -489,6 +489,35 @@ def test_the_settings_page_in_a_browser(settings_service: tuple[int, str], tmp_p
     assert (found.sources["memo"].sensitivity, found.redaction.phone) == ("private", True)
 
 
+def test_the_settings_page_says_when_an_edit_isn_t_in_force(settings_service: tuple[int, str], tmp_path: Path) -> None:
+    """An edit of vault.yaml by hand that lets more in waits for its commit (DR-0521): the page says so at the top,
+    naming no value, and a loosening command is for the owner's own terminal (DR-0517)."""
+    port, token = settings_service
+    shots = Path(os.environ.get("DOCKET_TEST_SCREENSHOTS") or tmp_path)
+    shots.mkdir(parents=True, exist_ok=True)
+    path = tmp_path / "project" / "vault" / CONFIG_FILE
+    edited = VaultConfig.load(path)
+    edited.redaction.credentials = False
+    path.write_text(edited.dump(), encoding="utf-8", newline="\n")
+    link = client.call("POST", "/api/session", token=token, at=port)
+    assert link is not None
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel=None if BROWSER == "chromium" else BROWSER)
+        page = browser.new_page(viewport={"width": 1280, "height": 900})
+        base = f"http://127.0.0.1:{port}"
+        page.goto(f"{link.body['url']}&next=/settings")
+        page.wait_for_url(f"{base}/settings")
+        expect(page.locator(".notice").first).to_contain_text("vault.yaml has an edit that isn't in force")
+        expect(page.locator("main")).to_contain_text("run it in your own terminal")
+        expect(page.locator("main")).not_to_contain_text("Dora #2")
+        page.screenshot(path=str(shots / "settings-waiting.png"), full_page=True)
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.reload()
+        _fits(page, ".notice")
+        page.screenshot(path=str(shots / "settings-waiting-390.png"), full_page=True)
+        browser.close()
+
+
 def _add(page: Page, base: str, value: str, shot: Path) -> None:
     """A never-store value added through the page: the field, the question, the add, the notice."""
     page.click("#list-people summary")

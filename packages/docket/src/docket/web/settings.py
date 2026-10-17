@@ -34,7 +34,7 @@ from docket.index.query import Reach, reach
 from docket.models import report
 from docket.service.state import Service
 from docket.sources import runner
-from docket.vault import neverstore, redaction
+from docket.vault import inforce, neverstore, redaction
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.gate import Gate
 from docket.vault.neverstore import ListName
@@ -65,7 +65,7 @@ def gather(service: Service) -> Facts:
     vault = service.vault()
     data = (vault.root / CONFIG_FILE).read_bytes()
     text = data.decode("utf-8")
-    config = vault.config
+    config = vault.written
     folders_problem: str | None = None
     try:
         here = userconfig.folders().get(vault.root.resolve(), {})
@@ -74,11 +74,15 @@ def gather(service: Service) -> Facts:
     sources: list[SourceFacts] = []
     for name, entry in sorted(config.sources.items()):
         problem: str | None = None
-        if entry.folder is None:
+        if name not in vault.config.sources:
+            # Added by hand and not committed: the runner takes it once it is (DR-0521).
+            problem = "not in force until you commit vault.yaml"
+        elif entry.folder is None:
             try:
                 runner.find_mapper(vault, name)
             except DocketError as e:
-                problem = str(e)
+                # The page says once, at the top, that an edit isn't in force.
+                problem = str(e).removesuffix(inforce.note(True))
         folder = here.get(name)
         sources.append(SourceFacts(name, entry, problem, str(folder) if folder is not None else None))
     said, errors = report.service_lines(service.models.status().model_dump())
@@ -87,6 +91,7 @@ def gather(service: Service) -> Facts:
         machine=vault.machine,
         config=config,
         docket_form=config.written_by_docket(text),
+        waiting=vault.waiting,
         sources=sources,
         models=report.read(),
         config_path=userconfig.config_path(),
@@ -130,7 +135,7 @@ def _staged(service: Service, name: ListName, value: str) -> tuple[int, str, boo
     vault = service.vault()
     data = (vault.root / CONFIG_FILE).read_bytes()
     text = data.decode("utf-8")
-    config = vault.config
+    config = vault.written
     docket_form = config.written_by_docket(text)
     takes_in = edit_to_take_in(vault, config, text) if docket_form else False
     dropped = Gate(vault).would_drop(_with(config, name, value))
@@ -153,7 +158,7 @@ def _private_staged(service: Service, source: str) -> tuple[int, str, bool, bool
     vault = service.vault()
     data = (vault.root / CONFIG_FILE).read_bytes()
     text = data.decode("utf-8")
-    config = vault.config
+    config = vault.written
     entry = config.sources.get(source)
     if entry is None:
         raise DocketError(f"no source {source} in vault.yaml")
@@ -260,7 +265,7 @@ def router(service: Service) -> APIRouter:
         async def posted(form: QueryParams) -> Response:
             name, value = _list_name(form.get("list")), checked_value(form.get("value") or "")
             if form.get("confirmed") != "1":
-                if neverstore.holds(service.vault().config.never_store, name, value):
+                if neverstore.holds(service.vault().written.never_store, name, value):
                     return _done(name, 0)
                 return await confirm(request, name, value)
             shown = (form.get("shown") or "").strip()

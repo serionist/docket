@@ -1,0 +1,23 @@
+decisions:
+  - id: DR-0517
+    title: The CLI makes a vault.yaml change that loosens, or takes in an uncommitted edit that does, only after the owner types back a code at their own console
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#134"]
+    description: "settings.rewrite, vault.yaml's one writer, holds every change the CLI makes to loosens() (DR-0506), between the file as it stands, hand edits included, and the file after. A change that loosens is made only after the owner's yes at a console, asked as a release asks (DR-0202, DR-0518): refused when CLAUDECODE is set or without a console on stdin and stdout, before anything is written and whatever the file's form; then the change shown and a four-letter code, drawn fresh, typed back (DR-0519). Today that is docket redaction set <rule> off, for credentials, phone or a pattern; docket source new adding a source, or changing an entry already in vault.yaml whose folder is gone (a looser sensitivity, other tools, the mapper); and docket source new --folder adding a folder source or changing its folder. A command added later that writes through rewrite asks by default, since loosens() is an allowlist. A stricter change asks nothing. The same question covers the take-in (DR-0507): an edit of vault.yaml not committed yet, which a write commits on its own first, is weighed by loosens() between HEAD's vault.yaml and the file; one that loosens is taken in before a CLI write, a stricter one too, only on the owner's code at a console, and without a console the write is refused, as a page's write always is. One question covers both when the edit and the command's own change loosen. A HEAD with no vault.yaml, or one that doesn't read, stays refused at a console too: there is nothing to weigh the edit against. docket init, which writes a new vault's first vault.yaml with nothing stored and no gate yet, and docket vault convert, which moves where the vault lives rather than what it lets in and asks its own question, write vault.yaml outside rewrite and are not asked. No command takes a never-store value off (DR-0508): that is a hand edit (DR-0520)."
+    binds:
+      - via is cli or page and nothing else, and rewrite has no parameter that answers the question; a test pins its parameters.
+      - Outside vault/settings.py only Vault.init and convert write vault.yaml; test_settings_scan.py holds it over the whole package.
+      - A page's write keeps refusing an uncommitted edit that loosens; DR-0507's take-in line gains that a CLI write at the owner's console asks instead.
+      - "The setup skill gives the owner one docket source new at a time, each run in their own terminal before the next: a pasted block feeds its second line into the first one's question in conhost. No skill runs a loosening command, edits or commits vault.yaml to loosen, wraps a command in a console of its own or clears CLAUDECODE."
+      - The Settings page says to run each loosening command in your own terminal, as the Staging page says for a release.
+      - A one-way door on AGENTS.md's list, in the gate's loosening line beside the release's yes.
+    not_chosen:
+      - "A list of the loosening commands, each with its own check: a command added later would loosen unasked."
+      - "The check in cli.py around each command: a second list, and a Python caller of set_rule would skip it."
+      - "Sources added turned off and turned on at the console: a new command and DR-0506's list moved, to save one command per source at setup."
+      - "Asking in init and convert too: init has no gate yet to loosen, and convert lets no record in."
+      - "Keeping the take-in's refusal at a console too: the owner who made the edit has to commit it by hand to go on, when the same question would do."
+      - "A y/N question: a pipe or a pseudo-terminal answers it unread (DR-0202)."

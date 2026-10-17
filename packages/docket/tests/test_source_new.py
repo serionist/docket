@@ -6,10 +6,11 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from docket_testkit import git, host_repo, make_config, sh
+from docket_testkit import AtConsole, git, host_repo, make_config, sh
 
 from docket.cli import main
 from docket.errors import DocketError
@@ -49,8 +50,9 @@ def run_tests(folder: Path) -> subprocess.CompletedProcess[str]:
 
 
 def test_a_blank_source_is_written_where_the_runner_looks_and_registered(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    owner: Callable[..., AtConsole], tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    owner("code", "code", "code", "code")  # each loosening below is typed back at the console (DR-0517)
     where = tmp_path / "Árvíztűrő teszt"
     where.mkdir()
     top = host_repo(where)
@@ -82,8 +84,9 @@ def test_a_blank_source_is_written_where_the_runner_looks_and_registered(
 
 
 def test_the_blank_folder_passes_its_tests_and_ruff_and_a_run_stages_nothing(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    owner: Callable[..., AtConsole], tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    owner("code", "code", "code", "code")  # each loosening below is typed back at the console (DR-0517)
     top = host_repo(tmp_path)
     vault = folder_vault_in(top)
     assert main(["source", "new", "zebra-notes", "--vault", str(vault.root)]) == 0
@@ -113,8 +116,9 @@ def test_the_blank_folder_passes_its_tests_and_ruff_and_a_run_stages_nothing(
 
 
 def test_example_copies_the_plaud_reference_and_registers_it(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    owner: Callable[..., AtConsole], tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    owner("code", "code", "code", "code")  # each loosening below is typed back at the console (DR-0517)
     top = host_repo(tmp_path)
     vault = folder_vault_in(top)
     assert main(["source", "new", "plaud", "--example", "--vault", str(vault.root)]) == 0
@@ -132,7 +136,8 @@ def test_example_copies_the_plaud_reference_and_registers_it(
     assert tested.returncode == 0, tested.stdout + tested.stderr
 
 
-def test_a_nested_repo_of_its_own_commits_in_its_own_history(tmp_path: Path) -> None:
+def test_a_nested_repo_of_its_own_commits_in_its_own_history(owner: Callable[..., AtConsole], tmp_path: Path) -> None:
+    owner("code", "code", "code", "code")  # each loosening below is typed back at the console (DR-0517)
     project = tmp_path / "project"
     project.mkdir()
     sh(project, "git", "init", "-q", "-b", "main")
@@ -217,8 +222,9 @@ def test_a_linked_sources_folder_that_leads_elsewhere_is_refused(tmp_path: Path,
 
 
 def test_a_vault_yaml_with_the_user_s_own_lines_is_left_alone(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    owner: Callable[..., AtConsole], tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    owner("code", "code", "code", "code")  # each loosening below is typed back at the console (DR-0517)
     top = host_repo(tmp_path)
     vault = folder_vault_in(top)
     path = vault.root / "vault.yaml"
@@ -237,7 +243,8 @@ def test_a_vault_yaml_with_the_user_s_own_lines_is_left_alone(
     )
 
 
-def test_an_entry_already_there_keeps_what_the_flags_don_t_set(tmp_path: Path) -> None:
+def test_an_entry_already_there_keeps_what_the_flags_don_t_set(owner: Callable[..., AtConsole], tmp_path: Path) -> None:
+    owner("code", "code", "code", "code")  # each loosening below is typed back at the console (DR-0517)
     top = host_repo(tmp_path)
     config = make_config("folder")
     config.sources["zebra-notes"] = SourceConfig(sensitivity="private", tools=["get_note"], media_hosts=["a.example"])
@@ -249,7 +256,10 @@ def test_an_entry_already_there_keeps_what_the_flags_don_t_set(tmp_path: Path) -
     assert (calls.sensitivity, calls.tools) == ("work", ["list_calls"])
 
 
-def test_a_source_registered_as_it_stands_needs_no_commit(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_source_registered_as_it_stands_needs_no_commit(
+    owner: Callable[..., AtConsole], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    owner("code", "code", "code", "code")  # each loosening below is typed back at the console (DR-0517)
     top = host_repo(tmp_path)
     vault = folder_vault_in(top)
     assert main(["source", "new", "zebra-notes", "--vault", str(vault.root)]) == 0
@@ -264,10 +274,11 @@ def test_a_source_registered_as_it_stands_needs_no_commit(tmp_path: Path, capsys
 
 
 def test_a_source_already_as_it_stands_in_a_hand_edited_file_needs_no_paste(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    owner: Callable[..., AtConsole], tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The writer looks for no change before Docket's form: an entry already as `docket source new` would write it, in
     a vault.yaml with the user's own lines, is registered as it stands, with no commit and no block to paste again."""
+    owner("code", "code", "code", "code")  # each loosening below is typed back at the console (DR-0517)
     top = host_repo(tmp_path)
     vault = folder_vault_in(top)
     assert main(["source", "new", "zebra-notes", "--vault", str(vault.root)]) == 0
@@ -286,7 +297,10 @@ def test_a_source_already_as_it_stands_in_a_hand_edited_file_needs_no_paste(
     assert head(top) == before
 
 
-def test_a_vault_yaml_written_before_the_redaction_switches_is_still_docket_s_own(tmp_path: Path) -> None:
+def test_a_vault_yaml_written_before_the_redaction_switches_is_still_docket_s_own(
+    owner: Callable[..., AtConsole], tmp_path: Path
+) -> None:
+    owner("code", "code", "code", "code")  # each loosening below is typed back at the console (DR-0517)
     top = host_repo(tmp_path)
     vault = folder_vault_in(top)
     path = vault.root / "vault.yaml"
@@ -322,8 +336,9 @@ def test_a_write_that_fails_half_way_leaves_nothing(tmp_path: Path, monkeypatch:
 
 
 def test_a_commit_that_fails_takes_the_folder_and_the_entry_back(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    owner: Callable[..., AtConsole], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    owner("code", "code", "code", "code")  # each loosening below is typed back at the console (DR-0517)
     top = host_repo(tmp_path)
     vault = folder_vault_in(top)
     before = (vault.root / "vault.yaml").read_bytes()

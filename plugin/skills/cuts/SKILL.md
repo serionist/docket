@@ -64,6 +64,8 @@ docket hold release <source> --from <folder> --proposals <file> --vault <vault>
   code it shows.
 - Never run it yourself, pipe into it, wrap it in a console or pseudo-terminal of your own, or clear `CLAUDECODE` for
   it. Auto mode changes nothing here: prepare everything up to the command, then stop and hand it over.
+- The same holds for `vault.yaml`: never edit or commit it, or run a command, to let more in; give the owner the
+  line or the command.
 
 ## After
 

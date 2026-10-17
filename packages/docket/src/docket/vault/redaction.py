@@ -60,6 +60,8 @@ class Switched:
     commit: str | None = None
     by_hand: str | None = None
     notes: list[str] = field(default_factory=list[str])
+    # Not made: the owner didn't type the code back at the console.
+    declined: bool = False
 
 
 def by_hand(rule: str, on: bool, pattern: bool) -> str:
@@ -117,7 +119,9 @@ def set_rule(vault: Vault, rule: str, on: bool) -> Switched:
             updated = now.model_copy(update={rule: on})
         return config.model_copy(update={"redaction": updated})
 
-    done = settings.rewrite(vault, edit, f"Config: redaction {rule} {word(on)}", via="cli")
+    warned = [CREDENTIALS_OFF] if rule == CREDENTIALS and not on else []
+    done = settings.rewrite(vault, edit, f"Config: redaction {rule} {word(on)}", via="cli", warnings=warned)
+    result.declined = done.declined
     if done.by_hand:
         result.by_hand = by_hand(rule, on, pattern)
     result.changed, result.commit = done.changed, done.commit

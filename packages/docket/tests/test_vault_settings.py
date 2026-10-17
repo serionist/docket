@@ -8,13 +8,14 @@ from pathlib import Path
 
 import pytest
 import yaml
-from docket_testkit import empty_vault, git, make_config, sh
+from docket_testkit import AtConsole, empty_vault, git, make_config, sh
 from pydantic import Field
 
 from docket.cli import main
 from docket.errors import DocketError
 from docket.vault import settings
 from docket.vault.config import CONFIG_FILE, NeverStore, Owner, Redaction, RedactionPattern, SourceConfig, VaultConfig
+from docket.vault.inforce import effective
 from docket.vault.neverstore import ListName
 from docket.vault.settings import LooseningError, Rewritten, loosens
 from docket.vault.vault import Vault
@@ -102,7 +103,15 @@ CASES: list[tuple[str, Change, bool]] = [
     ("credentials turned off", rules(credentials=False), True),
     ("a pattern turned on", patterns(ON, OFF.model_copy(update={"enabled": True})), False),
     ("a pattern turned off", patterns(ON.model_copy(update={"enabled": False}), OFF), True),
-    ("a pattern added", patterns(ON, OFF, RedactionPattern(name="more", pattern="Y")), True),
+    ("a pattern added after the others", patterns(ON, OFF, RedactionPattern(name="more", pattern="Y")), False),
+    (
+        "a pattern added, turned off",
+        patterns(ON, OFF, RedactionPattern(name="more", pattern="Y", enabled=False)),
+        False,
+    ),
+    ("a pattern added before the others", patterns(RedactionPattern(name="more", pattern="Y"), ON, OFF), False),
+    ("a pattern added under a name it has", patterns(ON, OFF, RedactionPattern(name="code", pattern="Y")), False),
+    ("the patterns reordered", patterns(OFF, ON), False),
     ("a pattern removed", patterns(ON), True),
     ("a pattern renamed", patterns(ON.model_copy(update={"name": "tickets"}), OFF), True),
     ("a pattern's expression changed", patterns(ON.model_copy(update={"pattern": "T"}), OFF), True),
@@ -117,15 +126,19 @@ CASES: list[tuple[str, Change, bool]] = [
     ("a folder source turned off", source("documents", enabled=False), False),
     ("a source turned on", source("dormant", enabled=True), True),
     ("a tool added", source("calls", tools=["list_calls", "get_call"]), True),
-    ("a tool removed", source("calls", tools=[]), True),
+    ("a tool removed", source("calls", tools=[]), False),
+    ("a tool swapped", source("calls", tools=["get_call"]), True),
     ("the mapper changed", source("calls", mapper=".claude/skills/sources/calls/other.py"), True),
     ("a media host added", source("calls", media_hosts=["media.example", "cdn.example"]), True),
     ("the folder changed", source("documents", folder="~/Work"), True),
-    ("an exclude added", source("documents", exclude=["archive/*", "*.tmp"]), True),
+    ("an exclude added", source("documents", exclude=["archive/*", "*.tmp"]), False),
+    ("an exclude swapped", source("documents", exclude=["*.tmp"]), True),
     ("an exclude removed", source("documents", exclude=[]), True),
     ("a source added", sources(chat=SourceConfig(sensitivity="private")), True),
     ("a folder source added", sources(papers=SourceConfig(folder="papers")), True),
-    ("a source removed", sources(notes=None), True),
+    ("a source removed", sources(notes=None), False),
+    ("a source renamed", sources(notes=None, diary=SourceConfig(sensitivity="private")), True),
+    ("a person swapped", lists(people=["Dora Example"]), True),
     ("the owner's name changed", top(owner=BASE.owner.model_copy(update={"name": "Ben Sample"})), True),
     ("the time zone changed", top(owner=BASE.owner.model_copy(update={"time_zone": "UTC"})), True),
     ("the storage changed", top(storage="folder"), True),
@@ -138,6 +151,34 @@ CASES: list[tuple[str, Change, bool]] = [
 @pytest.mark.parametrize(("what", "change", "loosening"), CASES, ids=[c[0] for c in CASES])
 def test_only_the_stricter_changes_pass(what: str, change: Change, loosening: bool) -> None:
     assert loosens(BASE, change(BASE)) is loosening, what
+
+
+def test_in_force_is_head_with_only_what_keeps_more_out() -> None:
+    """The settings in force under an edit that mixes both kinds (DR-0521): every part that only keeps more out, and
+    HEAD's for the rest, so they are never looser than HEAD."""
+    more = RedactionPattern(name="more", pattern="Y")
+    file = both(
+        lists(people=["Dora Example"]),
+        rules(credentials=False, phone=True),
+        patterns(more, ON, OFF.model_copy(update={"enabled": True})),
+        source("calls", sensitivity="work", tools=["get_call"]),
+        source("memo", sensitivity="private"),
+        source("documents", exclude=["*.tmp"], folder="~/Work"),
+        sources(notes=None, chat=SourceConfig()),
+        top(primary_machine="other-box"),
+    )(BASE)
+    found = effective(BASE, file)
+    assert found.never_store.people == ["Dora Example", "Cleo Test"]
+    assert (found.redaction.credentials, found.redaction.phone) == (True, True)
+    assert found.redaction.patterns == [more, ON, OFF.model_copy(update={"enabled": True})]
+    assert (found.sources["calls"].sensitivity, found.sources["calls"].tools) == ("mixed", [])
+    assert found.sources["memo"].sensitivity == "private"
+    assert (found.sources["documents"].folder, found.sources["documents"].exclude) == ("docs", ["*.tmp", "archive/*"])
+    assert sorted(found.sources) == ["calls", "documents", "dormant", "memo"]
+    assert found.primary_machine == "test-box"
+    assert loosens(BASE, file)
+    assert not loosens(BASE, found)
+    assert effective(BASE, found) == found
 
 
 def test_turning_a_rule_on_from_off_passes_and_back_doesn_t() -> None:
@@ -192,6 +233,12 @@ LATER_CASES: list[tuple[str, Change, bool]] = [
     ("a person added, the later keys kept", lists(people=["Cleo Test", "Dora #2"]), False),
     ("the pattern turned on, its later key kept", patterns(TICKET.model_copy(update={"enabled": True})), False),
     ("a source made private, its later key kept", source("calls", sensitivity="private"), False),
+    ("a new pattern at the later key's default", patterns(TICKET, LaterPattern(name="more", pattern="Y")), False),
+    (
+        "a new pattern setting a later key",
+        patterns(TICKET, LaterPattern(name="more", pattern="Y", ignore_case=False)),
+        True,
+    ),
 ]
 
 
@@ -237,11 +284,13 @@ def test_a_page_s_loosening_is_refused_and_nothing_is_written(tmp_path: Path) ->
     assert sh(vault.root, "git", "rev-parse", "HEAD") == head
 
 
-def test_the_cli_may_loosen(tmp_path: Path) -> None:
+def test_the_cli_may_loosen(tmp_path: Path, owner: Callable[..., AtConsole]) -> None:
+    """At the owner's console, with the code typed back (DR-0517)."""
+    owner("code")
     vault = make_vault(tmp_path)
     done = settings.rewrite(vault, source("calls", sensitivity="work"), "Config: source calls work", via="cli")
     assert done.changed
-    assert last_message(vault) == "Config: source calls work"
+    assert last_message(vault) == "Config: source calls work\n\nconfirmed at the console"
 
 
 def test_no_change_writes_nothing(tmp_path: Path) -> None:
@@ -448,7 +497,9 @@ def test_an_uncommitted_edit_that_lets_more_in_is_never_taken_in(
     path.write_text(edited, encoding="utf-8", newline="\n")
     assert VaultConfig.load(path).written_by_docket(edited), what
     head = sh(vault.root, "git", "rev-parse", "HEAD")
-    with pytest.raises(settings.UncommittedLooseningError, match="edit that isn't committed and lets more in") as found:
+    with pytest.raises(
+        settings.UncommittedLooseningError, match="an edit that isn't in force until you commit it"
+    ) as found:
         settings.add_listed(vault, "people", "Dora Example", shown=shown(vault))
     assert "Dora" not in str(found.value)
     assert main(["redaction", "set", "phone", "on", "--vault", str(vault.root)]) == 2

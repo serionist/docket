@@ -15,10 +15,10 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 | `docket staging classify <ref> work\|private` | work makes it ready, `--cut 120-340` (characters) or `--cut 12:30-14:05` (a time) cuts a stretch; private drops it |
 | `docket staging promote` | writes every ready record to the raw log, cut and redacted, one run per source, and commits; a record on hold stays in staging |
 | `docket ingest <source> <folder>` | imports payloads fetched earlier through the source's mapper: the folder's `hold.txt` first, then its JSON files; every record goes to staging, nothing on hold; `--hold <file>` adds more ids to hold, `--final` tells the mapper not to wait for more, `--mapper-errors` prints the mapper's own errors |
-| `docket source new <name>` | writes a source's skill, mapper and tests into `.claude/skills/sources/<name>/` of the repo that holds the vault, from Docket's blank template, or `--example` for a reference source (Plaud), and adds the source to `vault.yaml` with `--sensitivity` and its `--tool`s; never over a folder that exists; `--folder <folder>` adds a folder source instead |
+| `docket source new <name>` | writes a source's skill, mapper and tests into `.claude/skills/sources/<name>/` of the repo that holds the vault, from Docket's blank template, or `--example` for a reference source (Plaud), and adds the source to `vault.yaml` with `--sensitivity` and its `--tool`s; never over a folder that exists; `--folder <folder>` adds a folder source instead; adding one asks at your own console, with a code typed back |
 | `docket scan [source]` | reads a folder source's folder, read-only, and stages each new or changed document's text; every folder source turned on without a name; `--accept-gone` when most files the vault held are missing on purpose |
 | `docket doc put <file or ->` | store a processed doc as its next rev, redacted first, saying on which lines; refused, with every problem and its line, when the frontmatter is wrong, an anchor doesn't resolve, the doc changed since the rev it carries, or it says something on the never-store keywords list (then only the lines are named) |
-| `docket doc redact` | redact the docs already stored with the settings as they are now, as their next revs in one commit; once after upgrading, and again after turning a rule on or adding a pattern or a keyword; `--dry-run` first; a doc it can't redact is named and left, with exit 1 |
+| `docket doc redact` | redact the docs already stored with the settings in force, as their next revs in one commit; once after upgrading, and again after turning a rule on or adding a pattern or a keyword; `--dry-run` first; a doc it can't redact is named and left, with exit 1 |
 | `docket doc read <locator>` | a doc, or a record and the doc lines that point at it; `--view raw` or `both` for the raw, `--around` for minutes, paragraphs or messages either side, `--rev` for an earlier revision |
 | `docket doc verify <doc>` | each line of a doc next to the raw its anchors point at; `--line` for chosen lines |
 | `docket search <query>` | hits grouped by recording or thread, each with its locator and the group's summary; `--since`, `--until`, `--source`, `--person`, `--entity`, `-k`; it asks the running service when it serves the vault, whose search brings the index up to date, and otherwise updates the index itself unless `--no-update` and searches by itself |
@@ -26,7 +26,7 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 | `docket index update` | index what changed since; it rebuilds when it has to |
 | `docket index status` | whether the index is there and current, its languages, counts, what is new, and its problems |
 | `docket import notes <folder>` | each markdown note in an existing folder becomes a legacy note that keeps its old path, so `doc read notes/x.md` or `notes/x.md@12:08` still finds it; the folder is only read; run it again to pick up changes; `--dry-run` first, `--as` for what old paths start with; says how many markers redaction added |
-| `docket redaction` | which redaction rules run; `docket redaction set <credentials\|phone\|pattern name> on\|off` changes one and commits it |
+| `docket redaction` | which redaction rules run; `docket redaction set <credentials\|phone\|pattern name> on\|off` changes one and commits it; turning one off asks at your own console, with a code typed back |
 
 A command finds its vault from `--vault`, `DOCKET_VAULT`, the working folder upward, a `vault/` folder in it, or the
 default the wizard recorded. A `<ref>` is a record's rid, or at least 6 characters of the key `staging list` shows.
@@ -57,7 +57,10 @@ locally, and your own git does the rest.
 
 ## The gate
 
-Every record reaches the raw log through the gate. It reads `vault.yaml` on every call, so an edit applies at once.
+Every record reaches the raw log through the gate. It reads the settings in force on every call: `vault.yaml` as
+committed, with what an edit not committed yet only tightens (a never-store value added, a rule turned on, a new
+pattern, a source made stricter, turned off or removed, an exclude added, a tool removed). The rest of an edit applies
+once you commit it, and `docket vault status` says when one waits (DR-0521).
 
 | `vault.yaml` | What it does |
 |---|---|
@@ -90,6 +93,23 @@ Every record reaches the raw log through the gate. It reads `vault.yaml` on ever
   folders and files.
 - A transcript is cut by time: each utterance the cut touches goes whole, and one `[cut]` takes its place. Any other
   text is cut by characters. A cut record keeps no payload.
+
+### Loosening, at your console
+
+A change that lets more in, or might, is yours to make: Docket's commands ask you for it at your own console (DR-0517 to
+DR-0520).
+
+| What | How |
+|---|---|
+| `docket redaction set <rule> off`, `docket source new` | each shows the change, path by path, never a never-store value, and asks you to type back a code |
+| any command, while `vault.yaml` holds an edit not committed yet that loosens | the same question, for the edit; it is committed on its own first |
+| an edit by hand | yours: what it only tightens applies at once, the rest once you commit it |
+
+- Refused in Claude Code's shell (`CLAUDECODE`), from a pipe or a redirect: run the command in your own terminal, in Git
+  Bash's own window through `winpty`. A no writes nothing.
+- The commit says `confirmed at the console` in its body.
+- No flag, variable or token skips the question, for your own scripts either: whatever a script of yours reads, an agent
+  running as you reads too. A script that must loosen edits `vault.yaml`, and you commit it.
 
 ## Sources and their mappers
 
@@ -570,8 +590,10 @@ on, a source made mixed or private, or turned off. Every other change it names.
 | Models | what `docket models status` says, the service's worker, the vectors; the commands to install, remove or restart |
 
 - A change that lets more in (a rule turned off, a never-store value taken off, a source made looser, turned on or
-  added, its tools, mapper or folder) is never made from a page: the page names the command or the line, for your
-  terminal or your editor, where Claude Code asks you first. What it lets in reaches git for good.
+  added, its tools, mapper or folder) is never made from a page: the page names the command, for your own
+  terminal, where it asks you to type back a code, or the line, for your editor, which applies once you commit it.
+  What it lets in reaches git for good.
+- While `vault.yaml` holds an edit that isn't in force, the page says so at the top.
 - A rule turned on, or a source made mixed or turned off, is one click; a source made private asks once more first,
   naming what waits from it in staging, which it drops. Turning a rule on names `docket doc redact` for the docs
   already stored. A click on a page older than `vault.yaml` writes nothing, and a click sent twice writes once.
