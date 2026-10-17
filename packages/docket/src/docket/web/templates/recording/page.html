@@ -40,7 +40,7 @@
 <div class="recording-columns">
   <section class="column summary-column" aria-labelledby="summary-title">
     <h2 id="summary-title">Summary</h2>
-    {% if view.docs|length > 1 %}
+    {% if view.docs|length > 1 or (view.docs and not view.docs[0].on) %}
     <nav aria-label="Docs on this recording">
       <ul class="chips">
         {% for d in view.docs %}

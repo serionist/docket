@@ -7,18 +7,22 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 import pytest
+from docket_testkit import make_record
 from docket_webkit import Element, a11y_problems, html_problems, parse, signed_in
 from recording_kit import CRANE, HELD, LABELS, LEGACY, MAIL, MINUTES, NOTE, OLD, POLISHED, RAW, recording_template
 from starlette.testclient import TestClient
 
+from docket.recall import DocLine, DocView
 from docket.service.app import ServiceApp
 from docket.service.writer import IndexUpdater
 from docket.vault.anchors import Anchor
+from docket.vault.vault import Vault
 from docket.web import recording
 from docket.web.recording_state import RecordingState, RecordingStateError
-from docket.web.recording_view import NO_AUDIO
+from docket.web.recording_view import NO_AUDIO, Facts, build
 from docket.web.templating import PAGE_CSP
 
 
@@ -166,6 +170,18 @@ def test_a_recording_with_no_summary_still_shows_its_transcript(client: TestClie
     assert len(tree.find_all("li", class_="segment")) == 2
 
 
+def test_a_recording_with_no_transcript_yet_says_so(client: TestClient, tmp_path: Path) -> None:
+    under = {"source": "plaud", "container": "plaud:rec-bare", "thread": "plaud:rec-bare", "author": None}
+    bare = make_record(rid="plaud:rec-bare", kind="recording", title="Late notes", text="", **under)
+    Vault.open(tmp_path / "vault").write_run("plaud", [bare])
+    tree = page(client, "/recording?rid=plaud:rec-bare")
+    assert tree.find("h1").text() == "Late notes"
+    assert tree.find("p", class_="eyebrow").text() == "recording plaud \N{MIDDLE DOT} 14 Oct 2026 11:30"
+    column = tree.find("section", class_="transcript-column")
+    assert column.find("p", class_="empty-note").text() == "No transcript of this recording is in the raw log yet."
+    assert not tree.find_all("li", class_="segment")
+
+
 def test_a_legacy_note_stands_in_for_a_summary(client: TestClient) -> None:
     summary = page(client, f"/recording?rid={OLD}").find("section", class_="summary-column")
     assert f"{LEGACY}, legacy-note, rev 1" in summary.text()
@@ -206,6 +222,7 @@ def test_a_rid_the_raw_log_doesn_t_hold_or_that_isn_t_a_recording(client: TestCl
         (f"rid={CRANE}&at=soon", "at is a time or a stretch"),
         (f"rid={CRANE}&at=03:00-02:00", "at is a time or a stretch"),
         (f"rid={CRANE}&doc=plaud:rec-crane", "doc is a doc's id"),
+        (f"rid={CRANE}&doc=not+a+doc", "doc is a doc's id"),
     ],
 )
 def test_a_value_the_url_can_t_hold_is_the_page_s_own_error(client: TestClient, query: str, named: str) -> None:
@@ -276,3 +293,38 @@ def test_the_url_reads_and_writes_one_canonical_form() -> None:
     assert RecordingState().url() == "/recording"
     with pytest.raises(RecordingStateError, match="at is a time"):
         RecordingState.read({"rid": CRANE, "at": "02:61"})
+
+
+def test_an_anchor_links_where_its_record_is_shown_else_to_search() -> None:
+    under = {"source": "calls", "container": "calls:rec-1", "thread": "calls:rec-1", "author": None}
+    call = make_record(rid="calls:rec-1", kind="recording", title="A call", text="", **under)
+    said = [{"start_ms": 0, "end_ms": 9000, "speaker": "Ada Example", "text": "Hello."}]
+    transcript = make_record(rid="calls:rec-1/t", kind="transcript", text="Ada Example: Hello.", segments=said, **under)
+    body = [
+        "- Short, with two covers. @00:01",
+        "- On the recording. [r:calls:rec-1@00:02]",
+        "- The whole transcript. [r:calls:rec-1/t]",
+        "- A paragraph of it. [r:calls:rec-1/t#1]",
+    ]
+    numbered = enumerate(["---", "id: recording-note:x", "---", *body], start=1)
+    doc = DocView(
+        id="recording-note:x", type="recording-note", rev=1, path="processed/x.md", by="claude-test",
+        covers=["calls:rec-1", "calls:rec-1/t"], supersedes=[], entities=[], superseded_by=[], text="",
+        lines=[DocLine(n=n, text=text) for n, text in numbered],
+    )  # fmt: skip
+    facts = Facts(
+        "calls:rec-1", ZoneInfo("Europe/Budapest"), record=call, recording=call, transcripts=(transcript,),
+        attached=doc.id, docs=(doc.id,), summary=doc,
+    )  # fmt: skip
+    view = build(facts, RecordingState("calls:rec-1", at=Anchor(None, "time", 2)))
+    assert view.summary is not None
+    assert [(a.text, a.url, a.title) for line in view.summary.lines for a in line.anchors] == [
+        # A short anchor on a doc covering two records points at neither.
+        ("@00:01", None, ""),
+        # A time on a recording without segments is placed on its transcript.
+        ("@00:02", "/recording?rid=calls:rec-1&at=00:02#at", "[r:calls:rec-1@00:02]: the transcript at this time"),
+        ("[r:calls:rec-1/t]", "/recording?rid=calls:rec-1", "[r:calls:rec-1/t]: the transcript"),
+        ("[r:calls:rec-1/t#1]", "/search?hit=r:calls:rec-1/t%231", "Open r:calls:rec-1/t#1 on the Search page"),
+    ]
+    assert [line.cited for line in view.summary.lines] == [False, True, False, False]
+    assert [s.at for s in view.transcripts[0].segments if s.mark] == ["00:00"]

@@ -319,5 +319,5 @@ def _anchor(page: _Shown, anchor: Anchor, covers: list[str]) -> tuple[AnchorView
     here = shown is not None and target.rid == shown.rid
     url = page.state.but(rid=page.state.rid if here else target.rid, at=at).link()
     text = format_anchor(None, "time", at.start, at.end) if here and at is not None else anchor.token
-    title = f"{anchor.token}: the transcript {'at this time' if at is not None else 'whole'}"
+    title = f"{anchor.token}: the transcript" + (" at this time" if at is not None else "")
     return AnchorView(text, url, title), here and at is not None and bool(_marks(page.segs, at) & page.marked)
