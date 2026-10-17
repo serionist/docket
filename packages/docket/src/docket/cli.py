@@ -40,7 +40,7 @@ from docket.sources.contract import Manifest
 from docket.sources.ingest import IngestReport, ingest_run
 from docket.sources.local import record as record_import_folder
 from docket.sources.runner import MapperFailedError
-from docket.vault import convert, curatelog, cuts, holds, inforce, redaction, releaselog
+from docket.vault import convert, curatelog, cuts, holds, inforce, redaction, releaselog, rendered
 from docket.vault.docstore import DocStore
 from docket.vault.entitystore import EntityStore, RefusedError, Written, load_changes
 from docket.vault.gate import Gate, Label
@@ -316,6 +316,21 @@ def ingest(
             typer.echo(e.stderr, err=True)
         raise
     _ingest_report(report)
+
+
+@app.command("render")
+def render_files(vault: VaultOption = None) -> None:
+    """Write the people directory and the glossary from the entities, at the paths vault.yaml's rendered names in the
+    repo that holds the vault. A file edited by hand is left as it is, a repo anyone can read gets none, and nothing is
+    committed: the files are yours to commit."""
+    found = find_vault(vault)
+    if not found.config.rendered:
+        say(f"nothing to render: vault.yaml names no file under rendered{inforce.note(found.waiting)}")
+        return
+    outcomes = rendered.render_all(found)
+    say_all([o.line for o in outcomes])
+    if any(o.state in ("edited", "refused") for o in outcomes):
+        raise typer.Exit(1)
 
 
 @app.command("scan")

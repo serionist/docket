@@ -35,7 +35,7 @@ from docket.vault.entities import load_entities
 from docket.vault.entitystore import EntityStore, Planned, Reject, Written
 from docket.vault.home import make_private
 from docket.vault.neverstore import fold as fold_listed
-from docket.vault.neverstore import listed, matches_text
+from docket.vault.neverstore import listed, matches_text, slug_listed, spelled
 from docket.vault.staging import write_replacing
 from docket.vault.vault import Vault
 
@@ -45,7 +45,6 @@ ID_LENGTH = 6
 WIDTH = 80
 HIDDEN = "(on a never-store list)"
 # The number a slug takes when another entity already has its name: rita-sample-2.
-SLUG_NUMBER = re.compile(r"-[0-9]+$")
 
 State = Literal["open", "accepted", "rejected", "done"]
 
@@ -415,17 +414,6 @@ def shown_key(key: str, lists: NeverStore) -> str:
     if colon and owner != "-" and slug_listed(owner, lists):
         owner = HIDDEN
     return f"{kind}:{owner}:{tail}" if colon else key
-
-
-def spelled(entity: str) -> str:
-    """The name an entity's id spells: its slug with a trailing -<n> taken off and its hyphens read as spaces, so
-    rita-sample-2, the second Rita Sample, spells Rita Sample."""
-    return SLUG_NUMBER.sub("", entity).replace("-", " ")
-
-
-def slug_listed(entity: str, lists: NeverStore) -> bool:
-    """Whether a never-store list holds an entity id as written or the name it spells."""
-    return any(listed(v, lists) is not None for v in (entity, spelled(entity)))
 
 
 def shown_entity(entity: str | None, lists: NeverStore) -> str | None:

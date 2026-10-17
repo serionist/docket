@@ -15,6 +15,11 @@ Unreleased in the same PR.
   anything staged, never-store, from a source now private or gone, or that a redaction rule would change. The
   README's "Through Voyage AI's API" says what leaves the machine and when. A vault that opts in can't be opened by an
   older Docket.
+- The people directory and the glossary rendered from the entities: name them in `vault.yaml` under `rendered`, each
+  with its kind (`people` or `glossary`) and its path in the repo that holds the vault, and commit it. Docket writes
+  them after each curate write and on `docket render`, and never commits them. A file edited by hand, or a hand-kept
+  one already at the path, is left as it is and reported; a repo anyone can read gets no file; a name a never-store list
+  holds is left out. Update every machine before you add the key: an older Docket refuses a `vault.yaml` that has it.
 - The Recording page, `/recording` in the web app: a recording's summary beside its transcript, each anchor a link
   that marks the lines it points at, with the recording and the line in the address. Search's transcript hits open
   there. No audio is stored yet, and the page says so.

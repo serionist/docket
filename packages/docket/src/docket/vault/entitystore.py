@@ -35,7 +35,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, Validation
 from pydantic_core import ErrorDetails
 
 from docket.errors import DocketError
-from docket.vault import curatelog
+from docket.vault import curatelog, rendered
 from docket.vault.curatelog import (
     AliasFields,
     By,
@@ -123,6 +123,17 @@ class Written:
     taken_in: tuple[str, ...] = ()
     already: int = 0
     only_logged: tuple[str, ...] = ()
+    # What the render after the write did with each file vault.yaml names, written, left or refused (DR-0554).
+    rendered: tuple[str, ...] = ()
+
+
+def _rendered(vault: Vault, written: Written) -> Written:
+    """A curate write, then, when it committed something, the files vault.yaml names rendered from the entities. It
+    runs once the write has let go of the vault's lock, so a remote's check never holds it, and a render that fails is
+    said in the result, never raised (DR-0554)."""
+    if not (written.commit or written.finished or written.taken_in) or not vault.config.rendered:
+        return written
+    return replace(written, rendered=tuple(rendered.safely(vault)))
 
 
 # -- the changes file ---------------------------------------------------------------------------------------------
@@ -470,6 +481,12 @@ class EntityStore:
     def apply(
         self, planned: Sequence[Planned], *, rejects: Sequence[Reject] = (), by: By = "user", via: Via = "cli"
     ) -> Written:
+        """`_apply`, then the files vault.yaml names rendered from the entities (DR-0554)."""
+        return _rendered(self.vault, self._apply(planned, rejects=rejects, by=by, via=via))
+
+    def _apply(
+        self, planned: Sequence[Planned], *, rejects: Sequence[Reject] = (), by: By = "user", via: Via = "cli"
+    ) -> Written:
         """Write a changes file's parts: all, each with its log line, in one commit, or none; and the keys an edit
         unticked, as rejections in the same commit."""
         problems = screen(self.vault, planned)
@@ -523,6 +540,10 @@ class EntityStore:
         return self.apply([], rejects=rejects, via=via)
 
     def lift(self, keys: Sequence[str], *, via: Via = "cli") -> Written:
+        """`_lift`, then the files vault.yaml names rendered from the entities (DR-0554)."""
+        return _rendered(self.vault, self._lift(keys, via=via))
+
+    def _lift(self, keys: Sequence[str], *, via: Via = "cli") -> Written:
         """Take keys off the stoplist, a line each, in one commit; refused whole when a key's text is on a never-store
         list, since the line would commit it again (DR-0464)."""
         lists = self.vault.config.never_store
@@ -539,6 +560,18 @@ class EntityStore:
             return Written(lines, self._write(lines, {}, _message(lines)), finished)
 
     def undo(
+        self,
+        op_ids: Sequence[str],
+        *,
+        via: Via = "cli",
+        round_id: str | None = None,
+        by: By = "user",
+        why: str | None = None,
+    ) -> Written:
+        """`_undo`, then the files vault.yaml names rendered from the entities (DR-0554)."""
+        return _rendered(self.vault, self._undo(op_ids, via=via, round_id=round_id, by=by, why=why))
+
+    def _undo(
         self,
         op_ids: Sequence[str],
         *,

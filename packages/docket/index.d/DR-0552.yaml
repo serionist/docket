@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0552
+    title: vault.yaml's rendered names each file Docket writes from the entities, by kind and path in the consuming repo
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#163"]
+    description: "rendered is an optional list in vault.yaml; each entry has kind (people or glossary) and path, relative to the consuming repo (the git repo that holds the vault's folder, as a mapper's path is), written with /, with no .., naming a .md file, and no path twice. After links are followed the file must stay in that repo and outside the vault. The key is written only when set, so schema_version stays 1 and a vault.yaml without it reads as before; an older Docket refuses one that has it, as it refused media_hosts (DR-0124). It is a later key under #134 with no special case: effective keeps HEAD's rendered, so an edit adding a file waits for its commit and a CLI change asks at the console."
+    not_chosen:
+      - "A path relative to the vault's folder: a vault of its own repo would need .. to reach the repo around it, which every other path in vault.yaml refuses."
+      - "Rendering into the vault: Docket would have to commit the file, or leave an untracked file in its own folder."

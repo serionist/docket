@@ -284,7 +284,8 @@ Inside, the layout is the same either way:
 
 ```
 vault/
-  vault.yaml                     the owner, time zone, languages, sources, primary machine, redaction, never-store
+  vault.yaml                     the owner, time zone, languages, sources, primary machine, redaction, never-store,
+                                 the files rendered from the entities
   staging/                       new records waiting for the gate                          -> never committed
   raw/<source>/<yyyy>/<mm>/<yyyy-mm-dd>T<hhmm>-<machine>.jsonl
                                  a file per sync run and 16 MiB, written once              -> plain git
@@ -737,7 +738,9 @@ No big-bang switch: each piece of an existing setup is replaced only after its r
    `notes/x.md@12:08` reads the recording a note covered at that time. Running it again picks up what changed in the
    folder; an edit made in the vault is kept until the note itself changes.
 3. Entities are seeded from the people directory and the glossary, then reviewed in a few curate rounds; after
-   that, those files are rendered from the entities.
+   that, those files are rendered from the entities: at the paths `vault.yaml`'s `rendered` names in the repo that
+   holds the vault, after each curate write and on `docket render`, written and never committed. A file edited by hand
+   is left and reported, a repo anyone can read gets none, and a never-store value is left out (DR-0552 to DR-0554).
 4. The ledger moves last, imported with its whole history; for a week both run in step, the old one read-only.
    Until the day pages exist, an existing setup's sync harvests through its own source skills into Docket and keeps
    reconciling into its own task list. Once the ledger has moved, each stream's status file is rendered from it, as
