@@ -1030,11 +1030,12 @@ decisions:
       - "Redaction on raw records at the gate only: a credential Claude copies into a note, or one in an old note, would reach the vault."
   - id: DR-0196
     title: A doc that says something on the never-store keywords list is refused
-    status: proposed
+    status: superseded
     at: "2026-10-15"
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#24"]
+    superseded_by: [DR-0523]
     description: "The screen runs on the text as it would be committed, after redaction, before any anchor is checked: every body line without its trailing anchors (a legacy note's lines, and free and skip lines, whole), the id's slug, entities, the slugs in supersedes, and old_paths. The type, covers, rev, by and import_hash aren't screened. The built-in rules' markers are left out, their words being Docket's own; a user pattern's marker is screened like any text, so a pattern named after a keyword refuses the docs it fires on, and the problem says the pattern needs another name. A match refuses the whole doc: each problem names a line (both lines when a keyword runs over a line break) or a frontmatter key and the list, carries no excerpt and never names the keyword; nothing is written, committed or logged."
     not_chosen:
       - "Redacting the keyword: its context stays, and the marker says something private was there."

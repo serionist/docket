@@ -20,7 +20,7 @@ from typing import Any, Literal
 import pytest
 from filelock import FileLock
 
-from docket.vault.config import NeverStore, Owner, SourceConfig, VaultConfig
+from docket.vault.config import NeverStore, Owner, RedactionPattern, SourceConfig, VaultConfig
 from docket.vault.records import RawRecord, version
 from docket.vault.vault import Vault, remove_tree
 
@@ -420,7 +420,12 @@ def git(cwd: Path, *args: str) -> str:
 
 
 def configure(
-    root: Path, *, credentials: bool | None = None, phone: bool | None = None, keywords: list[str] | None = None
+    root: Path,
+    *,
+    credentials: bool | None = None,
+    phone: bool | None = None,
+    keywords: list[str] | None = None,
+    patterns: list[RedactionPattern] | None = None,
 ) -> None:
     """A vault's redaction and never-store settings changed in its vault.yaml and committed, as the user would."""
     path = root / "vault.yaml"
@@ -431,6 +436,8 @@ def configure(
         config.redaction.phone = phone
     if keywords is not None:
         config.never_store.keywords = keywords
+    if patterns is not None:
+        config.redaction.patterns = patterns
     path.write_text(config.dump(), encoding="utf-8", newline="\n")
     git(root, "commit", "-qm", "Settings", "--", "vault.yaml")
 

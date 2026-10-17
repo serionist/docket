@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0523
+    title: A doc that says something on the never-store keywords list, as written or as it would be committed, is refused
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#24", "#146"]
+    supersedes: [DR-0196]
+    description: "The body is screened twice, before any anchor is checked: as written, before redaction, as intake screens a record, and as it would be committed, after redaction. A keyword inside a span a rule redacts (an address a pattern hides, a phone number, a credential) therefore refuses the doc, where screening only the redacted text let it vanish into the marker, so turning a rule on could let in a doc the lists refused. Both readings take every body line without its trailing anchors (a legacy note's lines, and free and skip lines, whole); the frontmatter's id slug, entities, the slugs in supersedes, and old_paths are screened as written, the frontmatter never being redacted. The type, covers, rev, by and import_hash aren't screened. The built-in rules' markers are left out both ways, their words being Docket's own, so a doc redacted before, its markers from an earlier put or pass, goes in again; a user pattern's marker is screened like any text, so a pattern named after a keyword refuses the docs it fires on, and the problem says the pattern needs another name. A line named both ways tells what the text as written says. A match refuses the whole doc: each problem names a line (both lines when a keyword runs over a line break) or a frontmatter key and the list, carries no excerpt and never names the keyword; nothing is written, committed or logged. The same holds for a hand edit taken in and for docket doc redact, which names a stored doc that says a keyword as written and leaves it, for the user to edit, where it redacted the span and committed the result before. Superseded DR-0196, which screened the redacted text alone."
+    not_chosen:
+      - "Redacting the keyword: its context stays, and the marker says something private was there."
+      - "Dropping the lines: a summary changes silently and its line numbers move."
+      - "The text as committed alone: a keyword a rule's marker swallows was stored, and the settings in force were looser than the committed ones (#134)."
+      - "docket doc redact redacting such a stored doc as before: the rev it writes hides that the doc says a listed word, which intake drops a record for; the user's edit settles it."
