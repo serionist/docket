@@ -107,21 +107,42 @@ def test_a_linked_worktree_is_unknown_and_git_answers(tmp_path: Path, monkeypatc
 
 
 @pytest.mark.parametrize(
-    "ref_text",
-    ["not a commit id\n", "ref: HEAD\n", "0123abcd\n"],
-    ids=["words", "a symref out of refs", "a short id"],
+    "ref_bytes",
+    [b"not a commit id\n", b"ref: HEAD\n", b"0123abcd\n", b"ref: refs/heads/main\n", b"\xff\xfe not text\n"],
+    ids=["words", "a symref out of refs", "a short id", "a symref to itself", "not utf-8"],
 )
-def test_a_ref_file_git_wouldn_t_write_is_unknown(tmp_path: Path, ref_text: str) -> None:
+def test_a_ref_file_git_wouldn_t_write_is_unknown(tmp_path: Path, ref_bytes: bytes) -> None:
     top = repo(tmp_path / "r")
     commit(top)
-    (top / ".git" / "refs" / "heads" / "main").write_text(ref_text, encoding="utf-8")
+    (top / ".git" / "refs" / "heads" / "main").write_bytes(ref_bytes)
     assert gitfiles.head_id(top / ".git") is UNKNOWN
+    assert repr(UNKNOWN) == "UNKNOWN"
+
+
+def test_a_ref_that_is_a_folder_is_unknown(tmp_path: Path) -> None:
+    top = repo(tmp_path / "r")
+    commit(top)
+    git(top, "branch", "topic/one")
+    (top / ".git" / "HEAD").write_text("ref: refs/heads/topic\n", encoding="utf-8")
+    assert answers(top) == ("refs/heads/topic", UNKNOWN)
+
+
+def test_an_unreadable_head_is_unknown(tmp_path: Path) -> None:
+    top = repo(tmp_path / "r")
+    commit(top)
+    (top / ".git" / "HEAD").write_bytes(b"ref: refs/heads/\xff\xfe\n")
+    assert answers(top) == (UNKNOWN, UNKNOWN)
 
 
 @pytest.mark.parametrize(
     "packed",
-    [b"# pack-refs with: peeled fully-peeled sorted \n0123 refs/heads/main\n", b"\xff\xfe not text\n", None],
-    ids=["a short id", "not utf-8", "a folder"],
+    [
+        b"# pack-refs with: peeled fully-peeled sorted \n0123 refs/heads/main\n",
+        b"# pack-refs with: peeled fully-peeled sorted \n" + b"a" * 40 + b" refs/heads/main\n^not-an-id\n",
+        b"\xff\xfe not text\n",
+        None,
+    ],
+    ids=["a short id", "a peeled line without an id", "not utf-8", "a folder"],
 )
 def test_an_unreadable_packed_refs_is_unknown(tmp_path: Path, packed: bytes | None) -> None:
     top = repo(tmp_path / "r")
