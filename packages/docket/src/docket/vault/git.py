@@ -4,6 +4,10 @@ blocks a commit.
 In a folder of the user's repo (the host), git runs from the vault's folder: pathspecs are relative to it, but some
 names git prints are relative to the host's top, and the index and its lock are the host's. In both modes Docket's
 commits, and sync's fetch and rebase, run no hooks; a push runs them (DR-0260, DR-0261).
+
+What the git dir's files hold is read from them, with no git call: whether HEAD is on a branch, HEAD's commit id
+(DR-0528). A question is asked once while its answer can't change (DR-0529), and git's identity once per Git, which an
+opened vault owns for one command or one call of the service (DR-0530).
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from pathlib import Path
 
 from docket.childproc import console_flags
 from docket.errors import DocketError
+from docket.vault import gitfiles
 from docket.vault.home import Home, make_private
 
 # A processed doc's rev is the commit whose message has this line, in its subject or its body (DR-0112).
@@ -52,6 +57,11 @@ class Git:
         self.fallback = fallback
         self.home = home
         self.prefix = home.prefix if home is not None else ""
+        self.git_dir = home.git_dir if home is not None else root / ".git"
+        # Asked once for this Git's life: one command, or one call of the service (DR-0530).
+        self._identity: bool | None = None
+        # HEAD's blobs by commit id and path: a commit's content never changes.
+        self._blobs: dict[tuple[str, str], str] = {}
 
     def run(
         self,
@@ -69,7 +79,7 @@ class Git:
         # remote, and a later push of the same branch wouldn't send it.
         if not hooks and self.home is not None:
             config += ["-c", f"core.hooksPath={_hooks_off(self.home).as_posix()}"]
-        if identity and self.fallback is not None and not self.has_identity():
+        if identity and self.fallback is not None and not self._has_identity_once():
             config += ["-c", f"user.name={self.fallback.name}", "-c", f"user.email={self.fallback.email}"]
         extra = dict(env or {})
         ceiling = self.home.ceiling if self.home is not None else None
@@ -123,6 +133,38 @@ class Git:
             found[key] = value.strip()
         return bool(found.get("user.name") and found.get("user.email"))
 
+    def _has_identity_once(self) -> bool:
+        if self._identity is None:
+            self._identity = self.has_identity()
+        return self._identity
+
+    def on_branch(self) -> bool:
+        """Whether HEAD names a branch rather than a commit (a detached HEAD): from HEAD's file, else from git."""
+        ref = gitfiles.head_ref(self.git_dir)
+        if isinstance(ref, gitfiles.Unknown):
+            return self.branch() != "HEAD"
+        return ref is not None
+
+    def head_id(self) -> str | None:
+        """HEAD's commit id, None before the first commit: from the git dir's files, else from git."""
+        found = gitfiles.head_id(self.git_dir)
+        if not isinstance(found, gitfiles.Unknown):
+            return found
+        proc = self.run("rev-parse", "--verify", "--quiet", "HEAD", check=False)
+        return proc.stdout.strip() or None if proc.returncode == 0 else None
+
+    def show_at_head(self, rel: str) -> str:
+        """A vault file's text at HEAD, empty when HEAD lacks it; kept by HEAD's commit id, whose content never
+        changes. `./` reads the vault's own path: in a folder of the user's repo, `HEAD:<rel>` is the repo's."""
+        head = gitfiles.head_id(self.git_dir)
+        key = (head, rel) if isinstance(head, str) else None
+        if key is not None and key in self._blobs:
+            return self._blobs[key]
+        text = self.run("show", f"HEAD:./{rel}", check=False).stdout
+        if key is not None:
+            self._blobs[key] = text
+        return text
+
     def init(self) -> None:
         self.run("init", "-q", "-b", "main")
 
@@ -155,7 +197,9 @@ class Git:
             if folder:
                 self.run("reset", "-q", *_PATHSPEC, check=False, stdin=spec, hooks=False)
             raise
-        return self.out("rev-parse", "HEAD").strip()
+        # The branch's ref file holds the new id the moment the commit returns (DR-0528).
+        found = self.head_id()
+        return found if found is not None else self.out("rev-parse", "HEAD").strip()
 
     def _vault_names(self, out: str) -> list[str]:
         """Names git printed from the repo's top, made relative to the vault."""
@@ -172,9 +216,33 @@ class Git:
         """Files under a path that are staged but not in HEAD: what a crash between add and commit leaves."""
         return self._vault_names(self.out("diff", "--cached", "--name-only", "--diff-filter=A", "-z", "--", under))
 
+    def not_in_head(self, under: str) -> list[str]:
+        """What `untracked(under, ignored_too=True)` and `staged_new(under)` list together, in one status call
+        (DR-0529): `??` and `!!` are the files git doesn't track, hidden or not, and `A` in the first column a file
+        staged but not in HEAD. A staged rename or copy names its source in the next field, which belongs to it. No
+        optional locks, so the status never rewrites the index."""
+        out = self.run(
+            "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=traditional", "--", under,
+            env={"GIT_OPTIONAL_LOCKS": "0"},
+        ).stdout  # fmt: skip
+        fields = out.split("\0")
+        found: list[str] = []
+        i = 0
+        while i < len(fields):
+            entry = fields[i]
+            i += 1
+            if len(entry) < 4:
+                continue
+            code, path = entry[:2], entry[3:]
+            if code[0] in "RC":
+                i += 1
+            if code in ("??", "!!") or code[0] == "A":
+                found.append(path)
+        return self._vault_names("\0".join(found))
+
     def changed_against_head(self, under: str) -> list[str]:
         """Tracked files under a path that differ from HEAD, staged or not, deletions included."""
-        if self.run("rev-parse", "--verify", "--quiet", "HEAD", check=False).returncode != 0:
+        if self.head_id() is None:
             return []
         return self._vault_names(self.out("diff", "--name-only", "-z", "HEAD", "--", under))
 

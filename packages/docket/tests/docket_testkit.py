@@ -27,7 +27,8 @@ from docket.vault.vault import Vault, remove_tree
 # The tests' global git config: empty but for git's own housekeeping after a commit, a fetch or a push (maintenance,
 # and gc --auto where a git still runs it), which never finds work worth doing in a test repo and, run in the
 # background, could repack a template while a test copies it (DR-0221).
-TEST_GITCONFIG = "[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n"
+# The files ref format pinned, so a git that defaults to reftable (Git 3.0) can't change which git calls a test sees.
+TEST_GITCONFIG = "[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n[init]\n\tdefaultRefFormat = files\n"
 
 # The fixture vault's records: a call over an hour long, a recording in a vendor's own shape, a chat thread, two
 # side messages, and a mail whose rid holds @, % and ].

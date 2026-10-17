@@ -32,6 +32,12 @@ from docket.vault.records import RawRecord
 
 log = logging.getLogger(__name__)
 
+
+class UnmergedError(DocketError):
+    """A commit refused for unmerged paths, before anything of Docket's was staged: a writer putting its files back
+    leaves git's index alone, so the user's conflict stays as it was."""
+
+
 # How long after a sync writes its marker git starts the rebase: seconds in practice.
 SYNC_REBASE_WINDOW_SECONDS = 60
 # How long a write waits for another Docket process to let go of the vault.
@@ -231,16 +237,18 @@ class Vault:
         return self.commit([], message) if result.path is not None else None
 
     def commit(self, paths: list[str], message: str) -> str | None:
-        """Commit locally. Run files left uncommitted by an interrupted run go in too; never a changed raw file."""
+        """Commit locally. Run files left uncommitted by an interrupted run go in too; never a changed raw file. The
+        unmerged paths are asked for right before the add, as close to the commit as the check can sit (DR-0528)."""
         with self.lock:
             self._recover()
-            return self.git.commit([*paths, *self.uncommitted_runs()], message)
+            everything = [*paths, *self.uncommitted_runs()]
+            self._refuse_unmerged()
+            return self.git.commit(everything, message)
 
     def uncommitted_runs(self) -> list[str]:
         """Run files not in HEAD: untracked, or staged by an add whose commit never came. One an ignore rule hides
         counts too, so its add fails loudly instead of the file staying out of git unseen."""
-        found = [*self.git.untracked("raw", ignored_too=True), *self.git.staged_new("raw")]
-        return sorted({p for p in found if RUN_FILE.match(Path(p).name)})
+        return sorted({p for p in self.git.not_in_head("raw") if RUN_FILE.match(Path(p).name)})
 
     def sync(self) -> SyncResult:
         if self.home.folder:
@@ -249,12 +257,14 @@ class Vault:
             return SyncResult(False, False, message)
         with self.lock:
             self._recover()
+            self._refuse_unmerged()
             return self.git.sync()
 
     @contextmanager
     def writing(self) -> Generator[None]:
         """The lock, then the recovery check, for a writer that reads what it is about to change: nothing is read
-        while a git operation is under way, and a rebase a killed sync left behind is undone first."""
+        while a git operation is under way, and a rebase a killed sync left behind is undone first. Unmerged paths are
+        asked for at each commit, right before its add."""
         with self.lock:
             self._recover()
             yield
@@ -262,7 +272,8 @@ class Vault:
     def _recover(self) -> None:
         """Before writing: undo a rebase a killed sync of ours left behind (its marker says so, and under the lock no
         sync of ours is running), and refuse to touch anything else git is in the middle of, which is the user's. In
-        a folder of the user's repo Docket never syncs, so nothing there is ever undone."""
+        a folder of the user's repo Docket never syncs, so nothing there is ever undone. Each check here reads files,
+        the branch's too, so it runs at every write and every commit (DR-0528)."""
         git_dir = self.home.git_dir
         repo = self.home.top
         state = next((git_dir / d for d in ("rebase-merge", "rebase-apply") if (git_dir / d).exists()), None)
@@ -279,14 +290,18 @@ class Vault:
         for head, what in (("MERGE_HEAD", "merge"), ("CHERRY_PICK_HEAD", "cherry-pick"), ("REVERT_HEAD", "revert")):
             if (git_dir / head).exists():
                 raise DocketError(f"a {what} is in progress in {repo}; finish or undo it before Docket writes")
-        if self.git.branch() == "HEAD":
+        if not self.git.on_branch():
             raise DocketError(f"{repo} isn't on a branch (a detached HEAD); check out a branch before Docket writes")
-        # A conflict a stash pop or a merge --squash left leaves no *_HEAD file, only unmerged paths; committing then
-        # would take in the conflict markers and mark the conflict resolved. Only the vault's own paths count: git's
-        # partial commit leaves a conflict in the user's files as it is.
+
+    def _refuse_unmerged(self) -> None:
+        """A conflict a stash pop or a merge --squash left leaves no *_HEAD file, only unmerged paths; committing then
+        would take in the conflict markers and mark the conflict resolved, since add and commit --only both resolve a
+        path they name. Only the vault's own paths count: git's partial commit leaves a conflict in the user's files as
+        it is. One plain ls-files -u, vault-wide: it takes no pathspec file, and a backlog of run files named on the
+        command line could pass Windows' limit."""
         unmerged = sorted({line.split("\t", 1)[-1] for line in self.git.out("ls-files", "-u").splitlines()})
         if unmerged:
-            raise DocketError(f"{', '.join(unmerged)} in {self.root} has a conflict; resolve it before Docket writes")
+            raise UnmergedError(f"{', '.join(unmerged)} in {self.root} has a conflict; resolve it before Docket writes")
 
     # -- checking ------------------------------------------------------------------------------------------------
 
