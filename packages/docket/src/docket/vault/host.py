@@ -19,12 +19,21 @@ from docket.vault.git import Git
 from docket.vault.vault import ignored
 
 Visibility = Literal["public", "unknown", "local"]
+# What an anonymous check found: readable by anyone, a sign-in asked for (as a private repo answers), the server not
+# reached, or a path on this machine.
+Probe = Literal["public", "sign-in", "unreachable", "local"]
 # How far back the history is read for other people's commits.
 COMMITTERS_LOOKBACK = 1000
 # Addresses that commit on everyone's behalf: GitHub's web merges, and bots.
 _NOT_PEOPLE = re.compile(r"^noreply@github\.com$|\[bot\]@")
 _SSH = re.compile(r"^ssh://(?:[^@/]+@)?(?P<host>[^/:]+)(?::\d+)?/(?P<path>.+)$")
 _SCP = re.compile(r"^(?:[\w.-]+@)?(?P<host>[\w.-]+):(?!//)(?P<path>.+)$")
+# What git prints when the server answered but wants a sign-in: a private repo answers so, or as not found.
+_SIGN_IN = re.compile(
+    r"authentication|could not read username|terminal prompts disabled|repository not found|"
+    r"repository '[^']*' not found|returned error: 40[134]|access denied|permission denied",
+    re.IGNORECASE,
+)
 
 
 def probe_url(url: str) -> str:
@@ -44,9 +53,22 @@ def is_local(url: str) -> bool:
 
 
 def remote_visibility(url: str) -> Visibility:
-    """Whether anyone can read a remote: an anonymous `git ls-remote` that works means the repo is public. It runs
-    outside any repo with an empty git config, so the user's own URL rewrites (insteadOf) and credentials never reach
-    it. Fails closed: anything that can't be checked anonymously is "unknown", and the user has to say it's private."""
+    """Whether anyone can read a remote, as `probe_remote` finds it. Fails closed: a remote that asks for a sign-in, or
+    that couldn't be reached, is "unknown", and the user has to say it's private."""
+    match probe_remote(url):
+        case "public":
+            return "public"
+        case "local":
+            return "local"
+        case _:
+            return "unknown"
+
+
+def probe_remote(url: str) -> Probe:
+    """What an anonymous `git ls-remote` finds: one that works means the repo is public; one the server refuses for
+    want of a sign-in is "sign-in", as a private repo answers; one that couldn't reach the server, timed out, or failed
+    some other way is "unreachable". It runs outside any repo with an empty git config, so the user's own URL rewrites
+    (insteadOf) and credentials never reach it."""
     if is_local(url):
         return "local"
     with tempfile.TemporaryDirectory(prefix="docket-probe-") as empty:
@@ -75,8 +97,10 @@ def remote_visibility(url: str) -> Visibility:
                 creationflags=console_flags(),
             )
         except subprocess.TimeoutExpired:
-            return "unknown"
-    return "public" if proc.returncode == 0 else "unknown"
+            return "unreachable"
+    if proc.returncode == 0:
+        return "public"
+    return "sign-in" if _SIGN_IN.search(proc.stderr or "") else "unreachable"
 
 
 def remote_urls(top: Path) -> list[str]:

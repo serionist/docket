@@ -45,14 +45,14 @@ rendered:
 | Glossary | a table, one row per active entity of any other type, sorted by type then name: Term (its first name in the owner's languages), Type, Other names, Spellings |
 | Cells | a `|` in a value written `\|`, line breaks as spaces; archived entities left out |
 | Stable | the same entities give the same bytes, so an unchanged set rewrites nothing |
-| Never-store | an entity whose id or a name a list holds now is left out whole; a listed alias, id or role is left out of its row, as Curate and `curate show` hide them |
+| Never-store | an entity whose id or a name a list holds now is left out whole, and so is a person the people list names by any of their names, aliases or contact ids; a keyword drops only the alias, id or role it is in, as Curate and `curate show` hide them |
 
 ### The rules (DR-0554)
 
 | Rule | What happens |
 |---|---|
-| Hand edit | the file is rewritten only when its first line is Docket's and the rest still hashes to it. Otherwise (a hand edit, or a hand-kept file already at that path) it is left as it is and reported: move the edit into the entities, then delete the file |
-| Public repo | before writing, each remote of the consuming repo is checked as setup checks a host's (`host.remote_visibility`); one anyone can read stops the file, reported. One that can't be checked anonymously doesn't stop it: the owner named the path in a committed `vault.yaml` or at the console |
+| Hand edit | the file is rewritten only when its first line is Docket's and the rest still hashes to it. Otherwise (a hand edit, a hand-kept file already at that path, or one that isn't UTF-8 text) it is left as it is and reported: move the edit into the entities, then delete the file. A folder at the path is refused |
+| Public repo | whenever a file Docket wrote sits at a path or one would be written, each remote of the consuming repo is probed anonymously, once per process while the answer is sure: one anyone can read stops the file and is reported even when nothing changes; one that asks for a sign-in, as a private repo does, doesn't stop it; one that couldn't be reached keeps the file unwritten this time and is asked again |
 | Never committed | the file is outside the vault, and Docket's commits hold only the vault's paths |
 | When | `docket render`, and after each curate write that committed something (apply, reject, lift, undo, a tier 1 round), once the store's write has let go of its lock. A Curate page decision holds the vault's lock around its own check and write, so its render runs under that lock; the remote check runs only when a file would change. A render that fails is reported and never fails the curate write |
 
@@ -110,4 +110,4 @@ All on the test kit's vaults, with invented people.
 
 ## Plan review
 
-Not reviewed: built on the coordinator's go-ahead for an S issue, with the decisions proposed for review in the PR.
+Not reviewed as a plan: built on the coordinator's go-ahead for an S issue. The code review of #168 at dabecef found three minors, folded in: M1 (a file that isn't UTF-8 is hand-kept, a folder at the path is refused, any render failure is a line), M2 (a person the people list names by any value is left out whole), M3 (the remotes are probed whenever a Docket file sits at a path, once per process, and a remote not reached keeps the file unwritten).

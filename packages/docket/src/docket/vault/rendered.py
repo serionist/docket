@@ -4,8 +4,9 @@ directory and the glossary, at the paths `vault.yaml`'s `rendered` names in the 
 Each is a markdown table. Its first line says it was rendered from the vault, names the last commit that changed an
 entity file, and holds a hash of the rest, so a hand edit is told apart from Docket's own text on any machine, and left
 as it is. The same entities give the same bytes, so an unchanged set rewrites nothing. A repo whose remote anyone can
-read gets no file. An entity whose id or name a never-store list holds now is left out, and so is a listed alias, id
-or role, as Curate and `docket curate show` hide them.
+read gets no file. An entity whose id or name a never-store list holds now is left out, and so is a person the people
+list names by any of their values; a keyword drops only the alias, id or role it is in, as Curate and `docket curate
+show` hide them.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import hashlib
 import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 from docket.errors import DocketError
@@ -21,7 +23,7 @@ from docket.vault.anchors import normalize_newlines
 from docket.vault.config import NeverStore
 from docket.vault.entities import Entity, load_entities
 from docket.vault.git import Git, toplevel
-from docket.vault.host import Visibility, remote_urls, remote_visibility
+from docket.vault.host import Probe, probe_remote, remote_urls
 from docket.vault.neverstore import listed, slug_listed
 from docket.vault.staging import write_replacing
 from docket.vault.vault import Vault
@@ -33,6 +35,8 @@ HEADER = re.compile(
 # The entity files, never the curate log beside them, so a logged rejection rewrites nothing.
 ENTITY_FILES = (":(glob)entities/*.yaml", ":(glob)entities/*/*.yaml")
 State = Literal["written", "unchanged", "edited", "refused"]
+# Each remote's answer, kept for the process once it is sure: one that couldn't be reached is asked again (DR-0554).
+_PROBED: dict[str, Probe] = {}
 
 
 @dataclass(frozen=True)
@@ -57,9 +61,11 @@ class Outcome:
         return f"refused    {self.path}: {self.why}"
 
 
-def render_all(vault: Vault, visibility: Callable[[str], Visibility] = remote_visibility) -> list[Outcome]:
+def render_all(vault: Vault, probe: Callable[[str], Probe] = probe_remote) -> list[Outcome]:
     """Every file `vault.yaml` names, rendered from the entities as they are in the vault's folder. The consuming
-    repo's remotes are checked only when a file would change, once for the call."""
+    repo's remotes are checked whenever a file Docket wrote sits at a path or one would be written, each once per
+    process while its answer is sure: a public one is reported even when nothing changes, and one that couldn't be
+    reached keeps a file from being written this time."""
     files = vault.config.rendered
     if not files:
         return []
@@ -73,7 +79,7 @@ def render_all(vault: Vault, visibility: Callable[[str], Visibility] = remote_vi
     texts = {"people": people, "glossary": glossary}
     languages = vault.config.owner.languages
     lists = vault.config.never_store
-    public: list[str] | None = None
+    remotes: dict[str, Probe] | None = None
     out: list[Outcome] = []
     for file in files:
         target = (repo / file.path).resolve()
@@ -81,19 +87,31 @@ def render_all(vault: Vault, visibility: Callable[[str], Visibility] = remote_vi
             why = f"it must stay in {repo} and outside the vault, after links are followed"
             out.append(Outcome(file.path, "refused", why))
             continue
-        text = with_header(commit.strip() or "none", texts[file.kind](entities, languages, lists))
-        existing = normalize_newlines(target.read_text(encoding="utf-8")) if target.is_file() else None
-        if existing == text:
-            out.append(Outcome(file.path, "unchanged"))
+        if target.is_dir():
+            out.append(Outcome(file.path, "refused", f"{file.path} is a folder"))
             continue
-        if existing is not None and not written_by_docket(existing):
+        try:
+            existing = _existing(target)
+        except OSError as e:
+            out.append(Outcome(file.path, "refused", f"it can't be read: {e.strerror or type(e).__name__}"))
+            continue
+        if existing is not None and (existing is _NOT_TEXT or not written_by_docket(existing)):
             out.append(Outcome(file.path, "edited"))
             continue
-        if public is None:
-            public = [url for url in remote_urls(repo) if visibility(url) == "public"]
+        if remotes is None:
+            remotes = {url: _probed(url, probe) for url in remote_urls(repo)}
+        public = [url for url, found in remotes.items() if found == "public"]
         if public:
             why = f"{public[0]} can be read without signing in; Docket renders nothing into a public repo"
             out.append(Outcome(file.path, "refused", why))
+            continue
+        text = with_header(commit.strip() or "none", texts[file.kind](entities, languages, lists))
+        if existing == text:
+            out.append(Outcome(file.path, "unchanged"))
+            continue
+        unreached = [url for url, found in remotes.items() if found == "unreachable"]
+        if unreached:
+            out.append(Outcome(file.path, "refused", f"couldn't check the remote {unreached[0]}; not written"))
             continue
         if not target.parent.is_dir():
             out.append(Outcome(file.path, "refused", f"its folder {target.parent} doesn't exist"))
@@ -101,6 +119,31 @@ def render_all(vault: Vault, visibility: Callable[[str], Visibility] = remote_vi
         write_replacing(vault.home, target, text, f"rendered-{file.kind}")
         out.append(Outcome(file.path, "written"))
     return out
+
+
+# A file at a path that isn't UTF-8 text: one kept by hand, never Docket's.
+_NOT_TEXT = "\x00not text"
+
+
+def _existing(target: Path) -> str | None:
+    """The file at a rendered path, LF-normalized; None when there is none, and `_NOT_TEXT` when it isn't UTF-8, as a
+    people.md a text editor saved as UTF-16 isn't."""
+    if not target.is_file():
+        return None
+    try:
+        return normalize_newlines(target.read_bytes().decode("utf-8"))
+    except UnicodeDecodeError:
+        return _NOT_TEXT
+
+
+def _probed(url: str, probe: Callable[[str], Probe]) -> Probe:
+    """A remote's answer, from this process's memory when it was sure."""
+    found = _PROBED.get(url)
+    if found is None:
+        found = probe(url)
+        if found != "unreachable":
+            _PROBED[url] = found
+    return found
 
 
 # -- the text ---------------------------------------------------------------------------------------------------------
@@ -137,6 +180,13 @@ def _hidden(entity: Entity, lists: NeverStore) -> bool:
     return slug_listed(entity.id, lists) or any(listed(name, lists) is not None for name in entity.names.values())
 
 
+def _named_person(entity: Entity, lists: NeverStore) -> bool:
+    """A person the people list names by any of their names, aliases or contact ids: the whole row goes, since the
+    rest of it would still say who they are. A keyword drops only the value it is in."""
+    values = [*entity.names.values(), *(a.text for a in entity.aliases), *(v for vs in entity.ids.values() for v in vs)]
+    return any(listed(v, lists) == "people" for v in values)
+
+
 def _kept(values: Iterable[str], lists: NeverStore) -> list[str]:
     return [v for v in values if listed(v, lists) is None]
 
@@ -158,7 +208,7 @@ def _first_name(entity: Entity, languages: list[str]) -> str:
 def people(entities: list[Entity], languages: list[str], lists: NeverStore) -> str:
     """The people directory: each active person a list doesn't hold, by name, with a name per owner language, role,
     chat and mail ids, and aliases."""
-    shown = [e for e in entities if e.type == "person" and not _hidden(e, lists)]
+    shown = [e for e in entities if e.type == "person" and not _hidden(e, lists) and not _named_person(e, lists)]
     shown.sort(key=lambda e: (_first_name(e, languages).casefold(), e.id))
     rows = [
         [
@@ -193,8 +243,11 @@ def rendered_lines(outcomes: list[Outcome]) -> list[str]:
 
 
 def safely(vault: Vault) -> list[str]:
-    """`render_all` after a curate write: a render that fails says so and never fails the write."""
+    """`render_all` after a curate write: a render that fails says so and never fails the write (DR-0554). Any other
+    error is named by its type only, so no value it carries reaches the write's result."""
     try:
         return rendered_lines(render_all(vault))
     except (DocketError, OSError) as e:
         return [f"render failed: {e}"]
+    except Exception as e:  # the write is committed: a render's failure is reported, never raised
+        return [f"render failed ({type(e).__name__})"]

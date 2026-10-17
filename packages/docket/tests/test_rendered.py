@@ -5,6 +5,7 @@ on a folder vault of the test kit's."""
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -12,11 +13,13 @@ from docket_testkit import entity_vault, folder_vault, git
 
 from docket.cli import main
 from docket.errors import DocketError
-from docket.vault import curatelog, rendered
-from docket.vault.config import CONFIG_FILE, RenderedFile, VaultConfig
+from docket.vault import curatelog, host, rendered
+from docket.vault.config import CONFIG_FILE, NeverStore, RenderedFile, VaultConfig
+from docket.vault.entities import load_entities
 from docket.vault.entitystore import EntityStore, load_changes
+from docket.vault.host import Probe
 from docket.vault.inforce import loosens
-from docket.vault.rendered import render_all, written_by_docket
+from docket.vault.rendered import people, render_all, written_by_docket
 from docket.vault.vault import Vault
 
 CHANGES = """\
@@ -66,6 +69,12 @@ def set_rendered(vault: Vault, *files: RenderedFile, commit: bool = True) -> Vau
     if commit:
         git(top(vault), "commit", "-qm", "Render the people", "--", f"{vault.home.prefix}{CONFIG_FILE}")
     return Vault.open(vault.root)
+
+
+@pytest.fixture(autouse=True)
+def fresh_probes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each test starts as a new process would: no remote's answer kept."""
+    monkeypatch.setattr(rendered, "_PROBED", {})
 
 
 @pytest.fixture
@@ -130,7 +139,7 @@ def test_a_hand_kept_file_at_the_path_is_never_overwritten(tmp_path: Path) -> No
 
 def test_a_repo_anyone_can_read_gets_no_file(tmp_path: Path) -> None:
     made = set_rendered(folder_vault(tmp_path), RenderedFile(kind="people", path="people.md"))
-    [outcome] = render_all(made, visibility=lambda url: "public")
+    [outcome] = render_all(made, probe=lambda url: "public")
     assert outcome.state == "refused"
     assert outcome.why.endswith("can be read without signing in; Docket renders nothing into a public repo")
     assert not (top(made) / "people.md").exists()
@@ -236,3 +245,118 @@ def test_a_vault_in_no_repo_and_a_path_named_twice_are_refused(
     twice = [{"kind": "people", "path": "people.md"}, {"kind": "glossary", "path": "people.md"}]
     with pytest.raises(ValueError, match=r"people.md is rendered twice"):
         VaultConfig.model_validate({**config.model_dump(mode="json"), "rendered": twice})
+
+
+# -- the review of #168: M1 to M3 --------------------------------------------------------------------------------------
+
+
+def test_a_file_that_isnt_utf8_is_hand_kept_and_never_fails_the_curate_write(tmp_path: Path) -> None:
+    made = folder_vault(tmp_path)
+    kept = top(made) / "people.md"
+    kept.write_bytes("# People\r\n\r\nKept by hand in Notepad.\r\n".encode("utf-16"))
+    made = set_rendered(made, RenderedFile(kind="people", path="people.md"))
+    changes = tmp_path / "changes.yaml"
+    changes.write_text(CHANGES, encoding="utf-8", newline="\n")
+    written = EntityStore(made).apply(load_changes(changes))
+    assert written.commit is not None
+    assert [line.split(":")[0] for line in written.rendered] == ["left       people.md"]
+    assert kept.read_bytes().startswith(b"\xff\xfe")
+
+
+def test_a_folder_at_the_path_is_refused(vault: Vault, capsys: pytest.CaptureFixture[str]) -> None:
+    (top(vault) / "dir.md").mkdir()
+    made = set_rendered(vault, RenderedFile(kind="people", path="dir.md"))
+    assert main(["render", "--vault", str(made.root)]) == 1
+    assert capsys.readouterr().out.splitlines() == ["refused    dir.md: dir.md is a folder"]
+
+
+def test_any_other_failure_is_a_line_never_raised(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken(_vault: Vault) -> list[rendered.Outcome]:
+        raise RuntimeError("a value never shown")
+
+    monkeypatch.setattr(rendered, "render_all", broken)
+    assert rendered.safely(vault) == ["render failed (RuntimeError)"]
+
+
+@pytest.mark.parametrize("listed_as", ["ben@example.invalid", "Benny", "Ben Sample <ben@example.invalid>"])
+def test_a_person_the_people_list_names_by_any_value_is_left_out_whole(vault: Vault, listed_as: str) -> None:
+    active = [e for e in load_entities(vault.root).entities if e.status == "active"]
+    text = people(active, ["en", "hu"], NeverStore(people=[listed_as]))
+    assert "Sample" not in text
+    assert "| Ada Example |" in text
+
+
+def test_a_keyword_drops_only_the_value_it_is_in(vault: Vault) -> None:
+    active = [e for e in load_entities(vault.root).entities if e.status == "active"]
+    text = people(active, ["en", "hu"], NeverStore(keywords=["Benny"]))
+    assert "| Ben Sample | Sample Ben |" in text
+    assert "Benny" not in text
+
+
+def test_a_public_remote_is_reported_even_when_nothing_changes(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A new process: the fixture's curate write asked the remote already.
+    monkeypatch.setattr(rendered, "_PROBED", {})
+    asked: list[str] = []
+
+    def public(url: str) -> Probe:
+        asked.append(url)
+        return "public"
+
+    outcomes = render_all(vault, probe=public)
+    assert [o.state for o in outcomes] == ["refused", "refused"]
+    assert outcomes[0].why.endswith("can be read without signing in; Docket renders nothing into a public repo")
+    render_all(vault, probe=public)
+    # Asked once in the process, for the one remote the host has.
+    assert len(asked) == 1
+
+
+def test_a_remote_that_couldn_t_be_checked_keeps_a_file_unwritten_this_time(tmp_path: Path) -> None:
+    made = set_rendered(folder_vault(tmp_path), RenderedFile(kind="people", path="people.md"))
+    asked: list[str] = []
+
+    def offline(url: str) -> Probe:
+        asked.append(url)
+        return "unreachable"
+
+    [outcome] = render_all(made, probe=offline)
+    assert (outcome.state, outcome.why.endswith("; not written")) == ("refused", True)
+    assert outcome.why.startswith("couldn't check the remote ")
+    assert not (top(made) / "people.md").exists()
+    render_all(made, probe=offline)
+    assert len(asked) == 2
+    assert [o.state for o in render_all(made, probe=lambda url: "sign-in")] == ["written"]
+
+
+@pytest.mark.parametrize(
+    ("stderr", "found"),
+    [
+        ("remote: Repository not found.\nfatal: repository 'https://example.invalid/a/b/' not found", "sign-in"),
+        ("fatal: could not read Username for 'https://example.invalid': terminal prompts disabled", "sign-in"),
+        ("fatal: Authentication failed for 'https://example.invalid/a/b/'", "sign-in"),
+        (
+            "fatal: unable to access 'https://example.invalid/a/b/': Could not resolve host: example.invalid",
+            "unreachable",
+        ),
+        (
+            "fatal: unable to access 'https://example.invalid/a/b/': Failed to connect to example.invalid port 443",
+            "unreachable",
+        ),
+    ],
+)
+def test_the_probe_tells_a_sign_in_from_a_server_not_reached(
+    monkeypatch: pytest.MonkeyPatch, stderr: str, found: str
+) -> None:
+    def answer(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess([], 128, "", stderr)
+
+    monkeypatch.setattr(host.subprocess, "run", answer)
+    assert host.probe_remote("https://example.invalid/a/b.git") == found
+    assert host.remote_visibility("https://example.invalid/a/b.git") == "unknown"
+
+
+def test_a_probe_that_times_out_is_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    def slow(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired("git", 30)
+
+    monkeypatch.setattr(host.subprocess, "run", slow)
+    assert host.probe_remote("https://example.invalid/a/b.git") == "unreachable"
