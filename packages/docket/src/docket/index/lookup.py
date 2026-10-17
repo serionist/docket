@@ -160,6 +160,11 @@ class ReadIndex:
         sql = "SELECT rid FROM records WHERE source = ? AND (rid = ? OR (rid >= ? AND rid < ?)) ORDER BY rid"
         return [str(r) for (r,) in self.conn.execute(sql, (source, rid, f"{rid}/", f"{rid}0"))]
 
+    def of_kind(self, source: str, kind: str) -> list[str]:
+        """A source's rids whose latest version is of this kind, newest first."""
+        sql = "SELECT rid FROM records WHERE source = ? AND kind = ? ORDER BY ts DESC, rid DESC"
+        return [str(r) for (r,) in self.conn.execute(sql, (source, kind))]
+
     def group(self, field: str, value: str, source: str) -> list[tuple[str, str]]:
         """The records of a source whose latest version has this thread or container, with their times to the
         millisecond, in `(ts, rid)` order."""

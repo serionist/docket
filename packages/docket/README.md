@@ -274,9 +274,30 @@ its record is in raw; the next `docket staging promote` stores it in `media/` in
 - `docket media host add <source> <host>` and `docket media folder add` let more in, so they ask at your console;
   `remove` writes at once.
 - Media follows its record: a version of it dropped (private, never-store, left out by a release) takes the media with
-  it, and a held recording, one released or cut with cuts, or one whose transcript named a never-store value never
-  gets media until Docket can cut audio (#157).
+  it, and a held recording, or one whose transcript named a never-store value, gets none.
 - A put needs this machine to have synced the source once: what the gate dropped is remembered per clone.
+
+### Cut recordings' audio
+
+A recording released with cuts, or whose transcript you cut by time, gets its audio cut the same way before it is
+encrypted (DR-0559 to DR-0562): each stretch becomes silence, 250 ms wider each side, so every time in the transcript
+still points at the same moment. It is stored as WebM Opus at 32 kbit/s, about 14 MB an hour; audio with nothing to
+cut is stored as it came.
+
+| Case | What happens |
+|---|---|
+| released with cuts, or a transcript cut by time | cut at the put, then stored with its record |
+| cut after its audio was put | the staged audio goes; the run's `media` line names the recording, and its media step puts it again, cut |
+| held | no audio until the release; then the next run puts it, cut |
+| a record cut by characters | no audio: there is no time to cut it at |
+| decided by hand before Docket kept which way | no audio until `docket media confirm-cuts <rid>`, in your own terminal, shows each decision against the versions cut by hand and you confirm they were cuts |
+
+- The cutting runs in a child process with a memory cap and 15 minutes; uncut audio is plain only in a folder of
+  Docket's private folder, removed when the put ends, or by the next gate call if the process died.
+- A put is refused when the audio and its transcript may not share a timeline: the transcript runs past the audio's
+  end, or the audio's first sound is more than 1.5 s from its first words. The put names the offset; nothing is
+  stored.
+- Each stored file's cuts are committed beside it in `state/media-cuts/<source>.jsonl`, times only.
 
 Keys never enter git. Each clone keeps its own, sealed in its git dir's Docket folder, with the seal in the system
 keychain. Where no keychain answers (a server, CI), `docket media keys init --store file` keeps the seal in a file

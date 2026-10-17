@@ -83,6 +83,8 @@ class Places(Protocol):
 
     def nested(self, rid: str, source: str) -> list[str]: ...
 
+    def of_kind(self, source: str, kind: str) -> list[str]: ...
+
 
 class _MovedError(Exception):
     """A line isn't what the index says is there: its file changed since the check."""
@@ -213,6 +215,16 @@ class RawLookup:
         if index is not None:
             return index.nested(rid, source)
         return sorted(other for other in self._source(source) if other == rid or other.startswith(f"{rid}/"))
+
+    def of_kind(self, source: str, kind: str) -> list[str]:
+        """A source's rids whose latest version is of this kind, newest first: its recordings, for the ones whose
+        audio can be put again cut (DR-0561). From a current index's rows, else from the loaded source."""
+        index = self._index(source)
+        if index is not None:
+            return index.of_kind(source, kind)
+        latest = [versions[-1] for versions in self._source(source).values()]
+        found = sorted((r for r in latest if r.kind == kind), key=lambda r: (r.ts, r.rid), reverse=True)
+        return [r.rid for r in found]
 
     def transcripts(self, rid: str) -> list[RawRecord]:
         """The transcripts under rid, by rid: where a time on a record without segments of its own lands (DR-0370)."""

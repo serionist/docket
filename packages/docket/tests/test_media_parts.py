@@ -79,9 +79,24 @@ def test_a_media_file_s_family_is_rid_nesting_only() -> None:
 
 def test_a_sidecar_holds_no_content_and_a_time_with_its_zone() -> None:
     sidecar = layout.Sidecar(rid="plaud:x", key="a" * 64, ext="mp3", bytes=3, put_at=datetime(2026, 10, 1, tzinfo=UTC))
-    assert set(sidecar.model_dump()) == {"schema_version", "rid", "key", "ext", "bytes", "put_at", "problem"}
+    assert set(sidecar.model_dump()) == {"schema_version", "rid", "key", "ext", "bytes", "put_at", "problem", "cuts"}
+    assert sidecar.schema_version == 2 and sidecar.ranges == ()
     with pytest.raises(ValueError, match="time zone"):
         layout.Sidecar(rid="plaud:x", key="a" * 64, ext="mp3", bytes=3, put_at=datetime(2026, 10, 1))
+    # Schema 2 keeps what the file was cut by; a schema 1 sidecar was cut by none (DR-0561).
+    at = datetime(2026, 10, 1, tzinfo=UTC)
+    cut = layout.Sidecar(
+        rid="plaud:x", key="a" * 64, ext="webm", bytes=3, put_at=at, cuts=[layout.Span(start=0, end=9)]
+    )
+    assert cut.ranges == ((0, 9),)
+    old = layout.Sidecar.model_validate_json(
+        cut.model_dump_json(exclude={"cuts"}).replace('"schema_version":2', '"schema_version":1')
+    )
+    assert old.schema_version == 1 and old.ranges == ()
+    with pytest.raises(ValueError, match="a schema 1 sidecar holds no cuts"):
+        layout.Sidecar(rid="plaud:x", key="a" * 64, ext="webm", bytes=3, put_at=at, schema_version=1, cuts=cut.cuts)
+    with pytest.raises(ValueError, match="a cut ends after it starts"):
+        layout.Span(start=5, end=5)
 
 
 # -- age -----------------------------------------------------------------------------------------------------------

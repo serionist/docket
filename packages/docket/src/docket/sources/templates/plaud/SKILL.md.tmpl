@@ -51,7 +51,7 @@ This file holds only what is Plaud's own.
 | List again | `list_files` once more after the last `get_note`: Plaud renames a recording when it writes its notes, and the newest listing wins |
 | By id | for a retry or waiting id: `get_file`, then its transcript and its notes as above; "not found" or an error means it is gone: skip it as `gone` |
 | Rate limits | `429 Too Many Requests`: pause and retry with growing pauses; still limited in the listing, stop without closing; on one recording, skip it as `rate-limited` |
-| Audio | only when the steps end with a media step: after the close, `get_file` for each recording the run staged, then `media_put(rid="plaud:<file id>", url=<the https link to its audio it gives>)`; a recording with no such link stays without audio, and a refusal is noted, not retried |
+| Audio | only when the steps end with a media step: after the close, `get_file` for each recording the run staged and each id the media line names, then `media_put(rid="plaud:<file id>", url=<the https link to its audio it gives>)`; a recording with no such link stays without audio, and a refusal is noted, not retried |
 
 A page of 100 utterances stays under the 50,000 characters past which Claude Code hands the hook a file note instead
 of the result; a larger `limit` makes long calls too large to keep.

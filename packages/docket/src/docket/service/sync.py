@@ -63,11 +63,13 @@ How this run goes:
 7. After closing this run: run_open(source, final=true), and fetch only the ids it gives, each by id."""
 
 # The step a run of a source with somewhere to take media from gains: after the close its records are staged, and
-# media follows its record (DR-0547). The source's skill says where its audio comes from.
+# media follows its record (DR-0547). The source's skill says where its audio comes from. The media line names the
+# cut recordings whose audio can now be put, cut (DR-0561).
 MEDIA_STEP = """
-{n}. Media: after closing, for each recording this run staged whose audio the skill says how to get, call
-   media_put(rid, url) with the https URL the source gave, or media_put(rid, path) with a file in a media folder. A
-   refusal says why (held, cut, a host not listed): note it and go on with the next."""
+{n}. Media: after closing, for each recording this run staged and each id the media line names, whose audio the
+   skill says how to get, call media_put(rid, url) with the https URL the source gave, or media_put(rid, path) with a
+   file in a media folder. Docket cuts what must be cut. A refusal says why (held, a host not listed): note it and go
+   on with the next."""
 
 FINAL_STEPS = """\
 How this final run goes:
@@ -107,6 +109,8 @@ class RunOpened(BaseModel):
     retry: list[Due]
     notes: list[str]
     steps: str
+    # The source's cut recordings whose audio can now be put, cut, by native id (DR-0561).
+    media: list[str] = Field(default_factory=list[str])
 
 
 class Skip(BaseModel):
@@ -384,6 +388,7 @@ async def run_open(
             retry=[Due(id=r.id, why=r.reason, since=r.since) for r in retry],
             notes=notes,
             steps=steps(final, run.id, vault.config.sources[source]),
+            media=Gate(vault).media_due(source),
         )
 
     opened = await service.writer.run(build)
@@ -420,6 +425,7 @@ def opened_text(opened: RunOpened) -> str:
         "waiting  " + _list([f"{d.id} ({d.why}, since {d.since})" for d in opened.waiting]),
         "retry    " + _list([f"{d.id} ({d.why}, since {d.since})" for d in opened.retry]),
         "notes    " + ("; ".join(opened.notes) if opened.notes else "none"),
+        f"media    {_list(opened.media)}",
         "",
         opened.steps,
     ]

@@ -8,6 +8,9 @@ terms:
   - term: anchor
     definition: "What ends a line of a processed doc and points at the raw it came from: @mm:ss in a doc covering one record, [r:<rid>@mm:ss], [r:<rid>#n] or [r:<rid>] across records."
     see: [packages/docket/src/docket/vault/anchors.py]
+  - term: audio cut
+    definition: "A stretch of a recording's audio made silent before it is encrypted: each range of the release's cuts and of a transcript's [cut] segments, widened 250 ms, so every transcript time still points at the same moment. The cut audio is stored as WebM Opus."
+    see: [packages/docket/src/docket/media/cutter.py]
   - term: autonomy grant
     definition: "The maintainer's word that an agent runs a piece of work to its merge without asking. Every choice it would have asked about is recorded: as a proposed decision, and in the PR's Decided without asking."
     see: [.claude/skills/start-work/SKILL.md]

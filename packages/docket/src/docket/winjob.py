@@ -1,5 +1,6 @@
-"""Windows job objects, for the documents' reader (DR-0485): the child caps its own memory in one, and the parent kills
-it through another.
+"""Windows job objects, for the children Docket reads untrusted files in, the documents' reader (DR-0485) and the
+audio cutter (DR-0559): the child caps its own memory in one, and the parent kills it through another. Also whether a
+process still runs, which `os.kill` can't ask on Windows: there it ends the process.
 
 A venv's `python.exe` on Windows is a launcher that starts the real interpreter as a process of its own, often before
 the parent can put the launcher in a job; so the memory cap is set by the interpreter itself, in a job it makes for
@@ -76,6 +77,11 @@ if sys.platform == "win32":  # pragma: no cover - Windows' own API; test_documen
     _kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
     _kernel32.CloseHandle.restype = wintypes.BOOL
     _kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    _kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    _kernel32.GetExitCodeProcess.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+    _QUERY_LIMITED = 0x1000
+    _STILL_ACTIVE = 259
+    _ACCESS_DENIED = 5
 
     def _failed(what: str) -> OSError:
         code = ctypes.get_last_error()
@@ -122,3 +128,16 @@ if sys.platform == "win32":  # pragma: no cover - Windows' own API; test_documen
 
     def close(handle: int) -> None:
         _kernel32.CloseHandle(handle)
+
+    def running(pid: int) -> bool:
+        """Whether a process with this pid runs now: one Windows won't open for us runs, and so is kept."""
+        process = _kernel32.OpenProcess(_QUERY_LIMITED, False, pid)
+        if not process:
+            return ctypes.get_last_error() == _ACCESS_DENIED
+        try:
+            code = wintypes.DWORD()
+            if not _kernel32.GetExitCodeProcess(process, ctypes.byref(code)):
+                return True
+            return code.value == _STILL_ACTIVE
+        finally:
+            _kernel32.CloseHandle(process)

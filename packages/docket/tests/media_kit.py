@@ -1,18 +1,23 @@
-"""What the media tests share: a vault with a Plaud-shaped call, a keychain in memory, audio-like bytes, and a local
-HTTPS server with a certificate made here for an invented host. Nothing reaches the network or the real keychain."""
+"""What the media tests share: a vault with a Plaud-shaped call, a keychain in memory, audio-like bytes, real audio
+made here (a tone, through the same FFmpeg Docket cuts with), and a local HTTPS server with a certificate made here
+for an invented host. Nothing reaches the network or the real keychain, and no real recording is used."""
 
 from __future__ import annotations
 
 import datetime as dt
 import http.server
+import io
+import math
 import os
 import ssl
 import threading
+from array import array
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -58,6 +63,75 @@ class Keychain:
 def audio(size: int = 4096, head: bytes = b"ID3\x04\x00") -> bytes:
     """Bytes that read as an mp3 by their first bytes; the rest is noise."""
     return head + os.urandom(size - len(head))
+
+
+# Each input format the tests make: the container and the encoder.
+FORMATS = {
+    "mp3": ("mp3", "libmp3lame"),
+    "m4a": ("ipod", "aac"),
+    "wav": ("wav", "pcm_s16le"),
+    "flac": ("flac", "flac"),
+    "opus": ("ogg", "libopus"),
+}
+RATE = 16_000
+
+
+def tone(seconds: float = 20.0, *, fmt: str = "mp3", start: float = 0.0) -> bytes:
+    """A 440 Hz tone at half scale, silent before `start` seconds, encoded as `fmt`: what the cut tests put."""
+    import av
+
+    container, codec = FORMATS[fmt]
+    out = io.BytesIO()
+    with av.open(out, "w", format=container) as written:
+        stream = cast(Any, written.add_stream(codec, rate=RATE, layout="mono"))
+        wants = stream.codec_context.codec.audio_formats
+        resampler = av.AudioResampler(format=wants[0].name if wants else "s16", layout="mono", rate=RATE)
+        total, first, at = int(seconds * RATE), int(start * RATE), 0
+        while at < total:
+            n = min(1024, total - at)
+            samples = array(
+                "h",
+                (int(16384 * math.sin(2 * math.pi * 440 * i / RATE)) if i >= first else 0 for i in range(at, at + n)),
+            )
+            frame = av.AudioFrame(format="s16", layout="mono", samples=n)
+            frame.sample_rate = RATE
+            plane = frame.planes[0]
+            plane.update(samples.tobytes() + bytes(plane.buffer_size - n * 2))
+            frame.pts, frame.time_base = at, Fraction(1, RATE)
+            for done in resampler.resample(frame):
+                for packet in stream.encode(done):
+                    written.mux(packet)
+            at += n
+        for done in resampler.resample(None):
+            for packet in stream.encode(done):
+                written.mux(packet)
+        for packet in stream.encode(None):
+            written.mux(packet)
+    return out.getvalue()
+
+
+def decoded(data: bytes) -> array[int]:
+    """Audio decoded to 48 kHz mono samples, in the test's own process: only for checking what was written."""
+    import av
+
+    out: array[int] = array("h")
+    with av.open(io.BytesIO(data), "r") as found:
+        stream = next(s for s in found.streams if s.type == "audio")
+        resampler = av.AudioResampler(format="s16", layout="mono", rate=48_000)
+        for packet in found.demux(stream):
+            for frame in cast(Any, packet).decode():
+                for done in resampler.resample(frame):
+                    out.frombytes(bytes(done.planes[0])[: done.samples * 2])
+        for done in resampler.resample(None):
+            out.frombytes(bytes(done.planes[0])[: done.samples * 2])
+    return out
+
+
+def dbfs(samples: array[int], start_ms: int, end_ms: int) -> float:
+    """The level of a stretch, in dB below full scale; -200 for digital silence."""
+    chunk = samples[start_ms * 48 : end_ms * 48]
+    rms = math.sqrt(math.sumprod(chunk, chunk) / max(1, len(chunk)))
+    return 20 * math.log10(rms / 32768) if rms else -200.0
 
 
 def call(

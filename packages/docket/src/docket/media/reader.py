@@ -4,9 +4,9 @@ can't be.
 | State | When |
 |---|---|
 | `ok` | the stored file and its key are here: `read` gives the bytes |
-| `not-fetched` | no media for the rid, staged or stored |
+| `not-fetched` | no media for the rid, staged or stored; a cut recording's is put, cut, at the next run |
 | `staged` | it waits at the gate with its record |
-| `held` | a hold covers the rid, or a release with cuts does |
+| `held` | a hold covers the rid |
 | `not-downloaded` | an LFS pointer is in place of the stored file |
 | `no-key` | the stored file is here, its key isn't, or this machine can't open the key's seal |
 
@@ -22,7 +22,7 @@ from typing import Literal
 from docket.errors import DocketError
 from docket.media import crypto, layout
 from docket.media.keystore import KeyStore
-from docket.vault import holds, releaselog
+from docket.vault import holds
 from docket.vault.records import owning_id
 from docket.vault.vault import Vault
 
@@ -49,11 +49,7 @@ def _stored(vault: Vault, rid: str) -> Path | None:
 
 def _held(vault: Vault, rid: str) -> bool:
     source = layout.source_of(rid)
-    if owning_id(rid, source, holds.read(vault.root, source)) is not None:
-        return True
-    granted = releaselog.read_all(vault.root).of(source)
-    native = owning_id(rid, source, frozenset(granted))
-    return native is not None and bool(granted[native].cuts)
+    return owning_id(rid, source, holds.read(vault.root, source)) is not None
 
 
 def state_of(vault: Vault, rid: str, keys: KeyStore | None = None) -> State:

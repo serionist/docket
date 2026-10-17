@@ -92,10 +92,22 @@ class Scan:
     unreadable: list[tuple[Path, str]] = field(default_factory=list[tuple[Path, str]])
 
 
+# What a hand decision was (DR-0561): a promotion with cuts, or a private classification. Lines written before Docket
+# kept this have none, and count as private for media.
+Kind = Literal["cut", "private"]
+
+
 @dataclass(frozen=True)
 class Decided:
     keys: frozenset[str]
     rids: frozenset[str]
+    # Each rid hash's keys, with the last kind written for each key, None where a line had none.
+    kinds: dict[str, dict[str, Kind | None]] = field(default_factory=dict[str, dict[str, "Kind | None"]])
+
+    def private(self, rid_digest: str) -> bool:
+        """Whether a rid's decisions include one that may have been a private classification: one so marked, or one
+        written before decisions said what they were."""
+        return any(kind != "cut" for kind in self.kinds.get(rid_digest, {}).values())
 
 
 def retry(op: Callable[[], object]) -> None:
@@ -182,6 +194,7 @@ class Staging:
         """The keys and rid hashes decided by hand; a torn last line (a crash mid-append) is skipped."""
         keys: set[str] = set()
         rids: set[str] = set()
+        kinds: dict[str, dict[str, Kind | None]] = {}
         try:
             lines = self.decided_file.read_text(encoding="utf-8").splitlines()
         except FileNotFoundError:
@@ -189,18 +202,26 @@ class Staging:
         for line in lines:
             try:
                 data: Any = json.loads(line)
-                keys.add(str(data["key"]))
-                rids.add(str(data["rid"]))
-            except (ValueError, KeyError, TypeError):
+                key, rid = str(data["key"]), str(data["rid"])
+                kind = data.get("kind")
+            except (ValueError, KeyError, TypeError, AttributeError):
                 continue
-        return Decided(frozenset(keys), frozenset(rids))
+            keys.add(key)
+            rids.add(rid)
+            kinds.setdefault(rid, {})[key] = kind if kind in ("cut", "private") else None
+        return Decided(frozenset(keys), frozenset(rids), kinds)
 
-    def remember(self, decided: list[tuple[str, str]]) -> None:
-        """Append (rid, key) pairs as hashes, and fsync, before the staged files they name are deleted."""
+    def remember(self, decided: list[tuple[str, str]], kind: Kind) -> None:
+        """Append (rid, key) pairs as hashes, with what each decision was, and fsync, before the staged files they name
+        are deleted."""
+        self.append_decided([(rid_hash(rid), key) for rid, key in decided], kind)
+
+    def append_decided(self, decided: list[tuple[str, str]], kind: Kind) -> None:
+        """Append (rid hash, key) pairs with their kind; the last kind written for a key is the one that counts."""
         if not decided:
             return
         self.dir.mkdir(parents=True, exist_ok=True)
-        lines = "".join(json.dumps({"rid": rid_hash(rid), "key": key}) + "\n" for rid, key in decided)
+        lines = "".join(json.dumps({"rid": digest, "key": key, "kind": kind}) + "\n" for digest, key in decided)
         with self.decided_file.open("a+b") as f:
             f.seek(0, os.SEEK_END)
             if f.tell() > 0:

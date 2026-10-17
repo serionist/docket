@@ -283,6 +283,17 @@ def test_by_place_every_question_has_the_loaded_answer_and_nothing_is_loaded(ind
         found.close()
 
 
+def test_a_source_s_recordings_come_newest_first_by_place_or_by_load(indexed: Vault) -> None:
+    placed, whole, found = two_routes(indexed)
+    try:
+        for source in ("plaud", "chat", "nosuch"):
+            assert placed.of_kind(source, "recording") == whole.of_kind(source, "recording")
+        assert placed.of_kind("plaud", "recording")
+        assert loaded(placed) == set()
+    finally:
+        found.close()
+
+
 def test_nested_rids_are_the_rid_and_those_under_it_exactly(indexed: Vault) -> None:
     near = ["plaud:near", "plaud:near/one", "plaud:near/one/two", "plaud:near0", "plaud:near-x", "plaud:NEAR/x"]
     records = [make_record(n, rid=rid, source="plaud", container=None, text=rid) for n, rid in enumerate(near)]

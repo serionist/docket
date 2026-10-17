@@ -26,7 +26,7 @@ from pathlib import Path, PurePosixPath
 from pydantic import ValidationError
 
 from docket.errors import DocketError
-from docket.media import crypto, layout
+from docket.media import crypto, cutter, layout
 from docket.media.keystore import KeyStore
 from docket.vault.home import Home, make_private
 from docket.vault.staging import STAGING, retry, rid_hash
@@ -115,12 +115,6 @@ def read_sidecar(path: Path) -> layout.Sidecar | None:
         return layout.Sidecar.model_validate_json(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, ValidationError):
         return None
-
-
-def rid_of(path: Path) -> str | None:
-    """The rid a sidecar names, or None when there is none that reads."""
-    sidecar = read_sidecar(path)
-    return sidecar.rid if sidecar is not None else None
 
 
 def key_of(path: Path) -> str | None:
@@ -247,7 +241,9 @@ def count_waiting(root: Path) -> int:
 
 def clear_temps(home: Home, *, now: float | None = None) -> int:
     """Remove the encrypted temp files a killed put left: those untouched for an hour. A put's download runs outside
-    the vault lock and writes its temp file as the bytes come, so one being written is never that old."""
+    the vault lock and writes its temp file as the bytes come, so one being written is never that old. A cut's plain
+    files go with their process's folder once that process no longer runs, whatever their age (DR-0559)."""
+    cutter.sweep(home)
     moment = time.time() if now is None else now
     stale: list[Path] = []
     found: list[Path] = list(home.tmp_dir.glob(f"{TEMP}*.tmp")) if home.tmp_dir.is_dir() else []
