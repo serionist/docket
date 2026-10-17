@@ -371,3 +371,22 @@ def test_a_file_that_can_t_be_read_is_refused(vault: Vault, monkeypatch: pytest.
         ("refused", "it can't be read: Permission denied"),
         ("refused", "it can't be read: Permission denied"),
     ]
+
+
+def test_both_later_keys_round_trip_and_neither_changes_a_vault_yaml(tmp_path: Path) -> None:
+    made = folder_vault(tmp_path)
+    plain = made.config
+    assert "rendered" not in plain.dump() and "api_provider" not in plain.dump()
+    both = plain.model_copy(
+        update={"api_provider": "voyage", "rendered": [RenderedFile(kind="people", path="people.md")]}
+    )
+    text = both.dump()
+    assert "api_provider: voyage" in text and "rendered:" in text
+    again = VaultConfig.parse(text, tmp_path / CONFIG_FILE)
+    assert again == both
+    assert again.dump() == text
+    assert both.written_by_docket(text)
+    # Each one alone, too.
+    for one in ({"api_provider": "voyage"}, {"rendered": both.rendered}):
+        alone = plain.model_copy(update=one)
+        assert VaultConfig.parse(alone.dump(), tmp_path / CONFIG_FILE) == alone

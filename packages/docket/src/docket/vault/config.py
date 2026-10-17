@@ -337,9 +337,9 @@ class VaultConfig(_Model):
         return _dump(self._written())
 
     def _written(self) -> dict[str, Any]:
-        """The settings as Docket writes them: `api_provider` and `rendered` only when set, as a source's `folder` is, so
-        a vault that uses neither keeps its vault.yaml byte for byte and opens on a Docket that doesn't know the keys
-        (DR-0537, DR-0552)."""
+        """The settings as Docket writes them: `api_provider` and `rendered` only when set, as a source's `folder` is,
+        so a vault that uses neither keeps its vault.yaml byte for byte and opens on a Docket that doesn't know the
+        keys (DR-0537, DR-0552)."""
         data = self.model_dump(mode="json")
         if data.get("api_provider") is None:
             data.pop("api_provider", None)
