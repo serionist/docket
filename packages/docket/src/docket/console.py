@@ -2,8 +2,9 @@
 (DR-0517, DR-0518): refused in Claude Code's shell and without a console on stdin and stdout, then a code drawn fresh
 and typed back.
 
-Nothing here takes an answer as a parameter, so a Python caller, a pipe or Claude Code's shell gets a refusal, not a
-yes. None of it stops a process running as the user on purpose: it makes the yes a deliberate act, which the skills
+The entry points that ask, `release()` and `settings.rewrite()`, take no answer as a parameter, so a Python caller, a
+pipe or Claude Code's shell gets a refusal, not a yes; `typed_back`'s `asker` is only the release's own name for
+`ask`. None of it stops a process running as the user on purpose: it makes the yes a deliberate act, which the skills
 forbid Claude. Callers use the module (`console.ask(...)`), so a test stands in for the owner in one place.
 """
 
