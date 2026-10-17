@@ -349,7 +349,7 @@ def test_the_probe_tells_a_sign_in_from_a_server_not_reached(
     def answer(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess([], 128, "", stderr)
 
-    monkeypatch.setattr(host.subprocess, "run", answer)
+    monkeypatch.setattr(subprocess, "run", answer)
     assert host.probe_remote("https://example.invalid/a/b.git") == found
     assert host.remote_visibility("https://example.invalid/a/b.git") == "unknown"
 
@@ -358,5 +358,16 @@ def test_a_probe_that_times_out_is_unreachable(monkeypatch: pytest.MonkeyPatch) 
     def slow(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         raise subprocess.TimeoutExpired("git", 30)
 
-    monkeypatch.setattr(host.subprocess, "run", slow)
+    monkeypatch.setattr(subprocess, "run", slow)
     assert host.probe_remote("https://example.invalid/a/b.git") == "unreachable"
+
+
+def test_a_file_that_can_t_be_read_is_refused(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
+    def locked(_target: Path) -> str | None:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(rendered, "_existing", locked)
+    assert [(o.state, o.why) for o in render_all(vault)] == [
+        ("refused", "it can't be read: Permission denied"),
+        ("refused", "it can't be read: Permission denied"),
+    ]
