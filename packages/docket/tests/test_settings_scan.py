@@ -228,7 +228,8 @@ def test_outside_the_writer_only_init_writes_vault_yaml_as_a_file() -> None:
 
 
 def test_only_the_release_and_the_writer_ask_at_the_console() -> None:
-    """No page, route or tool asks the owner's question or answers it (DR-0518)."""
+    """No page, route or tool asks the owner's question or answers it (DR-0518), and media keys leave the clone only
+    from the console's command (DR-0550)."""
     importers = set()
     for rel, module in _modules():
         for node in ast.walk(module):
@@ -242,7 +243,18 @@ def test_only_the_release_and_the_writer_ask_at_the_console() -> None:
                 importers.add(rel)
             if isinstance(node, ast.Import) and any(a.name == "docket.console" for a in node.names):
                 importers.add(rel)
-    assert importers == {"sources/release.py", "vault/settings.py", "models/api.py"}
+    assert importers == {"sources/release.py", "vault/settings.py", "models/api.py", "media/backup.py"}
+    exporters = {
+        rel
+        for rel, module in _modules()
+        for node in ast.walk(module)
+        if isinstance(node, ast.ImportFrom)
+        and (
+            node.module == "docket.media.backup"
+            or (node.module == "docket.media" and any(a.name == "backup" for a in node.names))
+        )
+    }
+    assert exporters == {"cli.py"}
     # The api provider's machine choice and key only refuse outside the owner's console (DR-0539): no code is asked.
     asked = {node.func.attr for rel, module in _modules() if rel == "models/api.py" for node in ast.walk(module)
              if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)

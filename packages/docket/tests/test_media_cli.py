@@ -52,6 +52,7 @@ def test_put_status_and_the_staging_commands(tmp_path: Path, capsys: pytest.Capt
     code, out = run(capsys, "media", "status", "--vault", root)
     assert out.splitlines()[1:] == [
         "keys     1",
+        "backup   1 key(s) no export holds; `docket media keys export <file>` in your own terminal",
         "waiting  0 file(s) in staging",
         "stored   1 file(s); 0 without a key here, 0 not downloaded",
     ]

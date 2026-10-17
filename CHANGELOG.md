@@ -31,6 +31,11 @@ Unreleased in the same PR.
   held recording, one cut or released with cuts, or one the gate dropped for a never-store value gets no media yet.
   Keys stay on this machine, in the system keychain or, by your choice, a private file; the Recording page says when
   the audio waits, isn't downloaded, or has no key here.
+- Media keys on a second machine, and their backup: `docket media keys export <file>` writes every key of a clone
+  into one file sealed with a passphrase it draws and shows once, and `docket media keys import <file>` adds them on
+  another machine; both only in your own terminal. The newest export is the backup, and `docket media status`,
+  `docket vault status` and the session start count the keys no export holds yet. A source with a media host or
+  folder gets a media step in each run, and the Plaud skill says how to turn its audio on.
 - The Recording page, `/recording` in the web app: a recording's summary beside its transcript, each anchor a link
   that marks the lines it points at, with the recording and the line in the address. Search's transcript hits open
   there. No audio is stored yet, and the page says so.

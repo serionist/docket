@@ -30,6 +30,7 @@ from docket.sources import local, runner
 from docket.sources.contract import TOKEN, Manifest, MapperRefusedError, Skipped, Window
 from docket.sources.runner import MapperFailedError
 from docket.vault import cursors, holds, inforce, releaselog
+from docket.vault.config import SourceConfig
 from docket.vault.gate import Gate
 from docket.vault.lock import LockBusyError
 from docket.vault.vault import Vault
@@ -60,6 +61,13 @@ How this run goes:
 6. Close: ingest(run, captures=<the highest n you saw>, skipped=[...]). Stopping without closing is safe: the run
    drops in 30 minutes and the next sync covers the window again.
 7. After closing this run: run_open(source, final=true), and fetch only the ids it gives, each by id."""
+
+# The step a run of a source with somewhere to take media from gains: after the close its records are staged, and
+# media follows its record (DR-0547). The source's skill says where its audio comes from.
+MEDIA_STEP = """
+{n}. Media: after closing, for each recording this run staged whose audio the skill says how to get, call
+   media_put(rid, url) with the https URL the source gave, or media_put(rid, path) with a file in a media folder. A
+   refusal says why (held, cut, a host not listed): note it and go on with the next."""
 
 FINAL_STEPS = """\
 How this final run goes:
@@ -375,11 +383,19 @@ async def run_open(
             waiting=[Due(id=w.id, why=w.for_, since=w.since) for w in waiting],
             retry=[Due(id=r.id, why=r.reason, since=r.since) for r in retry],
             notes=notes,
-            steps=(FINAL_STEPS if final else STEPS).format(run=run.id),
+            steps=steps(final, run.id, vault.config.sources[source]),
         )
 
     opened = await service.writer.run(build)
     return opened, opened_text(opened)
+
+
+def steps(final: bool, run: str, entry: SourceConfig) -> str:
+    """The run's steps; with a media host or folder for the source, the media step after the close."""
+    text = (FINAL_STEPS if final else STEPS).format(run=run)
+    if entry.media_hosts or entry.media_folders:
+        text += MEDIA_STEP.format(n=6 if final else 8)
+    return text
 
 
 def _list(values: Sequence[str]) -> str:

@@ -21,7 +21,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 
 import keyring
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -39,6 +39,8 @@ SERVICE = "docket"
 FOLDER = "media"
 STORE_FILE = "store.json"
 KEYS = "keys"
+# Key ids only, never a key: which keys an export holds.
+EXPORTED = "exported.json"
 INIT_FILE = "docket media keys init --store file"
 NO_KEYCHAIN = (
     "no keychain answers on this machine, so its media keys have nowhere to go; `docket media keys init --store "
@@ -194,8 +196,34 @@ class KeyStore:
         retry(lambda: path.unlink(missing_ok=True))
 
     def count(self) -> int:
+        return len(self.ids())
+
+    def ids(self) -> list[str]:
+        """Every key this clone holds, by id, without opening one."""
         folder = self.folder / KEYS
-        return len(list(folder.glob("*.age"))) if folder.is_dir() else 0
+        return sorted(p.stem for p in folder.glob("*.age")) if folder.is_dir() else []
+
+    # -- which keys an export holds (DR-0550) ------------------------------------------------------------------------
+
+    def exported(self) -> frozenset[str]:
+        """The ids of the keys an export made or read on this clone holds; a file that doesn't read holds none."""
+        try:
+            data: Any = json.loads((self.folder / EXPORTED).read_text(encoding="utf-8"))
+            ids: Any = data["ids"]
+        except (OSError, ValueError, KeyError, TypeError):
+            return frozenset()
+        if not isinstance(ids, list):
+            return frozenset()
+        return frozenset(i for i in cast(list[Any], ids) if isinstance(i, str))
+
+    def mark_exported(self, ids: list[str]) -> None:
+        held = sorted(self.exported() | set(ids))
+        self._write(self.folder / EXPORTED, json.dumps({"schema_version": 1, "ids": held}).encode("utf-8"))
+
+    def unbacked(self) -> int:
+        """How many of this clone's keys no export holds yet: lose the clone, and their media is gone."""
+        held = self.exported()
+        return sum(1 for key in self.ids() if key not in held)
 
     def _write(self, path: Path, data: bytes) -> None:
         """Through a temp file in Docket's private folder and a rename, so a crash leaves the old file or the new."""

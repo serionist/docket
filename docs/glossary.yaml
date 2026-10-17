@@ -93,6 +93,9 @@ terms:
   - term: media key
     definition: "The age identity one media file is encrypted to, and nothing else is: deleting it forgets the file. Its id is the sha256 of the file's age header. Kept sealed in the clone's private folder, never in git."
     see: [packages/docket/src/docket/media/keystore.py]
+  - term: media key export
+    definition: "One file holding every media key of a clone, sealed with age's passphrase mode under a passphrase Docket draws and shows once: how a second machine gets the keys, and the backup. Its format is pinned by schema_version; a later Docket reads every earlier one."
+    see: [packages/docket/src/docket/media/backup.py]
   - term: mention
     definition: "A chunk naming an entity: by an alias in its text, its speaker or author, or its doc's entities. Mentions lift search results; they never filter them."
     see: [packages/docket/src/docket/index/matching.py]

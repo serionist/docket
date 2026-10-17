@@ -27,6 +27,7 @@ from docket.imports import notes
 from docket.index import flags as index_flags
 from docket.index.build import db_path
 from docket.index.embedpass import fill
+from docket.media import backup as media_backup
 from docket.media import sources as media_sources
 from docket.media.keystore import KeyStore
 from docket.media.put import drop_folder as media_drop_folder
@@ -286,6 +287,11 @@ def vault_status(vault: VaultOption = None) -> None:
         typer.echo(f"records in more than one run (two machines overlapped): {s.seen_in_several_runs}")
     if s.uncommitted_runs:
         typer.echo(f"uncommitted run files: {len(s.uncommitted_runs)} (the next commit takes them)")
+    unbacked = KeyStore(found.home).unbacked()
+    if unbacked:
+        typer.echo(
+            f"media    {unbacked} key(s) no export holds; `docket media keys export <file>` in your own terminal"
+        )
     typer.echo(f"last     {s.last_commit or 'no commit yet'}")
 
 
@@ -953,6 +959,31 @@ def media_folder_add(source: SourceArgument, folder: FolderArgument, vault: Vaul
 def media_folder_remove(source: SourceArgument, folder: FolderArgument, vault: VaultOption = None) -> None:
     """Stop taking a source's media from a folder: written at once."""
     _media_change(vault, source, "media_folders", folder, add=False)
+
+
+@media_keys_app.command("export")
+def media_keys_export(
+    target: Annotated[Path, typer.Argument(help="A new file, where you keep backups: never written over.")],
+    vault: VaultOption = None,
+) -> None:
+    """Write every media key of this clone into one file, sealed with a passphrase shown once: the backup, and how a
+    second machine gets the keys. Only at your own console; keep the file and the passphrase apart."""
+    found = find_vault(vault)
+    done = media_backup.export(found, target)
+    if done.kept:
+        say(f"keys     {done.keys} exported to {target}; `docket media keys import` reads it on another machine")
+    else:
+        say("keys     not exported: the passphrase wasn't confirmed")
+
+
+@media_keys_app.command("import")
+def media_keys_import(
+    source: Annotated[Path, typer.Argument(help="A file `docket media keys export` wrote.")],
+    vault: VaultOption = None,
+) -> None:
+    """Add the media keys an export holds and this clone lacks, after its passphrase. Only at your own console."""
+    done = media_backup.import_keys(find_vault(vault), source)
+    say(f"keys     {done.added} added, {done.had} held already")
 
 
 @media_keys_app.command("init")

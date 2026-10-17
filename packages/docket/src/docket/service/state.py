@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from docket import __version__, index, userconfig
 from docket.errors import DocketError
 from docket.index import IndexStatus
+from docket.media.keystore import KeyStore
 from docket.service.history import RunHistory
 from docket.service.models import ModelsKeeper, ModelsStatus
 from docket.service.runs import Runs
@@ -50,6 +51,8 @@ class Status(BaseModel):
     store: str
     index: IndexStatus | None = None
     models: ModelsStatus = ModelsStatus()
+    # Media keys this clone holds that no export does (DR-0550): the session start asks for a backup.
+    media_unbacked: int = 0
 
 
 @dataclass(frozen=True)
@@ -114,6 +117,7 @@ class Service:
             store=self.settings.store,
             index=found,
             models=self.models.status(),
+            media_unbacked=KeyStore(vault.home).unbacked() if vault is not None else 0,
         )
 
     @staticmethod
