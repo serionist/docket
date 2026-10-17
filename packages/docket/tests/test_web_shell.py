@@ -79,14 +79,15 @@ def test_the_navigation_has_a_slot_for_every_page_and_links_the_built_ones(clien
     assert [li.text() for li in nav.find_all("li", class_="nav-later")] == ["later"] * waiting == ["later"] * 2
     assert all(li.attrs["aria-hidden"] == "true" for li in nav.find_all("li", class_="nav-later"))
     assert not any(ch.isdigit() for s in slots for ch in "".join(c for c in s.children if isinstance(c, str)))
-    recording = next(s for s in slots if s.text().startswith("Recording"))
-    assert "arrives in phase 2" in recording.text()
+    briefs = next(s for s in slots if s.text().startswith("Briefs"))
+    assert "arrives in phase 2" in briefs.text()
     assert (
-        recording.attrs["title"]
-        == "Recording: the summary next to the transcript, both transcripts; arrives in phase 2"
+        briefs.attrs["title"]
+        == "Briefs: per person, project and topic; the decision log per stream; arrives in phase 2"
     )
+    # Built pages come first in their group, so its one "later" label precedes only what is to come.
     finding = nav.find_all("ul", class_="nav-group")[1]
-    assert [c.text() for c in finding.find_all("li")][:2] == ["Search", "later"]
+    assert [c.text() for c in finding.find_all("li")][:3] == ["Search", "Recording", "later"]
 
 
 @pytest.mark.parametrize(
@@ -103,6 +104,8 @@ def test_the_navigation_has_a_slot_for_every_page_and_links_the_built_ones(clien
         "/curate",
         "/curate/panel",
         "/settings",
+        "/recording",
+        "/recording?rid=calls:rec-0100",
     ],
 )
 def test_every_page_and_fragment_carries_the_page_csp_and_no_store(client: TestClient, path: str) -> None:

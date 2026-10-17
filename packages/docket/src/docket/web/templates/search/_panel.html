@@ -9,9 +9,10 @@
   {% if panel.mode == "error" %}
   {{ notice('error', panel.error) }}
   {% else %}
-  {% if panel.verify or panel.unit %}
+  {% if panel.verify or panel.unit or panel.recording %}
   <div class="panel-tools">
     {% if panel.verify %}<a class="button" data-key="v" {{ swap(panel.verify, '#panel') }}>{{ icon('verify') }}{{ panel.verify_label }}</a>{% endif %}
+    {% if panel.recording %}<a class="button" href="{{ panel.recording }}">{{ icon('recording') }}On the Recording page</a>{% endif %}
     {% if panel.unit %}
     <span class="around" role="group" aria-label="Raw around the hit">
       {% if panel.less %}<a class="icon-button" data-key="[" {{ swap(panel.less, '#panel') }} title="Less around">{{ icon('less') }}<span class="visually-hidden">Less around</span></a>{% endif %}

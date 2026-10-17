@@ -36,6 +36,14 @@ PAGES = [
     "/settings",
     "/settings?show=lists",
     "/settings?show=nope",
+    "/recording",
+    "/recording?rid=calls:rec-0100",
+    f"/recording?rid=calls:rec-0100&at={quote('01:50-03:20')}",
+    "/recording?rid=calls:rec-0100-second&doc=recording-note:2026-10-07-supplier-call",
+    "/recording?rid=calls:rec-0101",
+    "/recording?rid=calls:rec-9999",
+    f"/recording?rid={quote('mail:<offer-1@northwind.example>')}",
+    "/recording?rid=not+a+rid",
 ]
 FRAGMENTS = [
     "/search/results?query=pallet+labels",

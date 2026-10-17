@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0545
+    title: The Recording page puts the summary beside one transcript, links each anchor to the lines it marks, and says why there is no audio from a closed list
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#159"]
+    description: "A rid is a recording, a transcript (read with the recording it is under, as DR-0391 reads one) or any record with segments; anything else says what it is and links to it on the Search page. The summary is the doc search attaches to the recording (minutes, then a recording note), else a legacy note covering it; the other docs with lines on it, and its legacy notes, are links that switch doc. One transcript column: the one the rid names, else the first the summary covers, else the recording's own segments, then the transcripts under it by rid; the others are links. An anchor on that transcript, or a time on a recording without segments placed on it (DR-0370), shows as its time and opens the page at it; an anchor on another transcript of the recording opens that one; any other anchor, and a paragraph, opens on the Search page. A summary line is marked when its anchor marks a line at marks. Where a player goes, the page says why it plays nothing, from a closed list with a sentence each; today only not-fetched, No audio stored yet. A held rid shows only that it is held and where its hold is listed."
+    binds:
+      - The transcripts are a list rendered as columns, so a second transcript is a second column; storing media adds its reasons to the list, such as no key on this machine and held, each with its sentence and its test.
+      - Nothing of a held recording is read or shown.
+    not_chosen:
+      - "Every transcript side by side now: two transcripts aligned by time, with a cut stretch shown in both, come with the second transcript."
+      - "Summary lines with no anchor on the transcript shown left without links: a line pointing at a mail or another record is still one click from its raw, on Search."

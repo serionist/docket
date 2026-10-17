@@ -63,6 +63,20 @@ def test_a_transcript_hit_puts_its_summary_next_to_its_raw(client: TestClient) -
     assert tree.find("a", data_key="v").text() == "Verify the summary"
 
 
+def test_a_recording_hit_links_to_the_recording_page_and_another_hit_doesn_t(
+    client: TestClient, tmp_path: Path
+) -> None:
+    tree = parse(panel(client, CALL))
+    link = next(a for a in tree.find_all("a", class_="button") if "On the Recording page" in a.text())
+    assert link.attrs["href"] == "/recording?rid=calls:rec-0100&at=01:50-03:20#at"
+    assert "hx-get" not in link.attrs
+    assert not [a for a in parse(panel(client, OFFER)).find_all("a") if "Recording page" in a.text()]
+    # A recording kept without segments of its own, as Plaud's mapper keeps one, opens there whole.
+    Vault.open(tmp_path / "vault").write_run("plaud", plaud_records("transaction_polish"))
+    whole = parse(panel(client, f"r:{PLAUD}"))
+    assert [a.attrs["href"] for a in whole.find_all("a") if "Recording page" in a.text()] == [f"/recording?rid={PLAUD}"]
+
+
 def test_around_widens_the_raw(client: TestClient) -> None:
     def count(around: int) -> int:
         return len(parse(panel(client, CALL, f"&around={around}")).find_all("li", class_="segment"))

@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% from "macros.html" import notice, locator, copy %}
+{# The Recording page: every link here is a plain link, so the page works the same without JavaScript (DR-0544). #}
+{% block main %}
+<div class="recording">
+{% if problem %}
+<h1>Recording</h1>
+{{ notice('error', problem) }}
+{% elif view.mode == "start" %}
+<header class="recording-head">
+  <h1>Recording</h1>
+</header>
+<div class="empty start">
+  <h2>Open a recording</h2>
+  <p>A transcript hit on the Search page links here. So does a recording's rid or locator:</p>
+  <form class="recording-open" action="/recording" method="get">
+    <label for="rid">Rid or locator</label>
+    <input id="rid" name="rid" type="text" autocomplete="off" spellcheck="false" placeholder="r:calls:rec-0100@02:30">
+    <button type="submit" class="button primary">Open</button>
+  </form>
+</div>
+{% elif view.mode != "recording" %}
+<header class="recording-head">
+  <p class="eyebrow"><span class="kind">{{ icon('recording') }}recording</span></p>
+  <h1 dir="auto">{{ view.title }}</h1>
+</header>
+{{ notice('info' if view.mode == 'held' else 'error', view.message) }}
+{% if view.link %}<p><a class="button" href="{{ view.link }}">{{ view.link_label }}</a></p>{% endif %}
+{% else %}
+<header class="recording-head">
+  <p class="eyebrow"><span class="kind">{{ icon('recording') }}recording</span><span class="meta">{{ view.meta }}</span></p>
+  <h1 dir="auto">{{ view.title }}</h1>
+  <p class="recording-locator">{{ locator(view.locator) }}{{ copy(view.locator) }}</p>
+</header>
+<section class="audio" aria-labelledby="audio-title" data-why="{{ view.audio.why }}">
+  <h2 id="audio-title" class="visually-hidden">Audio</h2>
+  {{ notice('info', view.audio.message) }}
+</section>
+{% for p in view.problems %}{{ notice('warn', p) }}{% endfor %}
+<div class="recording-columns">
+  <section class="column summary-column" aria-labelledby="summary-title">
+    <h2 id="summary-title">Summary</h2>
+    {% if view.docs|length > 1 or (view.docs and not view.docs[0].on) %}
+    <nav aria-label="Docs on this recording">
+      <ul class="chips">
+        {% for d in view.docs %}
+        <li><a class="chip doc-chip{% if d.on %} on{% endif %}" href="{{ d.url }}"{% if d.on %} aria-current="true"{% endif %}>{{ d.id }}</a></li>
+        {% endfor %}
+      </ul>
+    </nav>
+    {% endif %}
+    {% if view.summary %}
+    <p class="meta">{{ view.summary.id }}, {{ view.summary.type }}, rev {{ view.summary.rev }}</p>
+    {% if view.note %}<p class="meta">{{ view.note }}</p>{% endif %}
+    <div class="doc">
+      {% for l in view.summary.lines %}
+      <div class="line {{ l.style }}{% if l.cited %} cited{% endif %}" data-line="{{ l.n }}">
+        <span class="n" aria-hidden="true">{{ l.n }}</span>
+        <span class="body" dir="auto">{{ l.body }}{% if l.cited %}<span class="visually-hidden"> (points at the marked lines)</span>{% endif %}</span>
+        {% for a in l.anchors %}
+        {% if a.url %}<a class="anchor" href="{{ a.url }}" title="{{ a.title }}">{{ a.text }}</a>{% else %}<span class="anchor">{{ a.text }}</span>{% endif %}
+        {% endfor %}
+      </div>
+      {% endfor %}
+    </div>
+    {% elif view.no_summary %}
+    <p class="empty-note">{{ view.no_summary }}</p>
+    {% endif %}
+  </section>
+  {# One column per transcript, in the order the facts give them: a second engine's transcript is a second column. #}
+  {% for t in view.transcripts %}
+  <section class="column transcript-column" aria-labelledby="transcript-title-{{ loop.index }}">
+    <h2 id="transcript-title-{{ loop.index }}">Transcript</h2>
+    <p class="meta">{{ t.meta }}</p>
+    {% if loop.first and view.others %}
+    <p class="meta">Also transcribed: {% for o in view.others %}<a href="{{ o.url }}">{{ locator(o.rid) }}</a>{{ ', ' if not loop.last }}{% endfor %}</p>
+    {% endif %}
+    {% if t.problem %}{{ notice('warn', t.problem) }}{% endif %}
+    <ol class="segments">
+      {% for seg in t.segments %}
+      <li class="segment{% if seg.mark %} mark{% endif %}"{% if seg.target %} id="at"{% endif %}>
+        <a class="time" href="{{ seg.url }}" title="Link to this line">{{ seg.at }}</a>
+        <span class="speaker" dir="auto">{{ seg.speaker }}</span>
+        <span class="text" dir="auto">{% if seg.mark %}<mark>{{ seg.text }}</mark>{% else %}{{ seg.text }}{% endif %}</span>
+      </li>
+      {% endfor %}
+    </ol>
+  </section>
+  {% else %}
+  <section class="column transcript-column" aria-labelledby="transcript-title-1">
+    <h2 id="transcript-title-1">Transcript</h2>
+    <p class="empty-note">{{ view.no_transcript }}</p>
+  </section>
+  {% endfor %}
+</div>
+{% endif %}
+</div>
+{% endblock %}

@@ -829,11 +829,12 @@ decisions:
       - "Counts over the whole index: a query more per facet."
   - id: DR-0176
     title: The navigation shows every page of the design by phase
-    status: proposed
+    status: superseded
     at: "2026-10-15"
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#9"]
+    superseded_by: [DR-0546]
     description: "Twelve slots in three groups, by use: the day (Today, Queue, Ledger, Meetings, Outbox), finding (Search, Briefs, Recording) and keeping (Staging, Curate, Sync, Settings). A built page is a link; the others are dimmed text after one muted later label per group, with no number beside them, which would read as a count; each one's phase and the design's line about it are in its tooltip and its screen-reader text. / goes to /search until Today exists."
     not_chosen:
       - "Built pages only: the app's shape stays hidden until phase 3."

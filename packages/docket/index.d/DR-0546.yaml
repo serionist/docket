@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0546
+    title: The navigation shows every page of the design by phase, the built ones first in their group
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#9", "#159"]
+    supersedes: [DR-0176]
+    description: "Twelve slots in three groups, by use: the day (Today, Queue, Ledger, Meetings, Outbox), finding (Search, Recording, Briefs) and keeping (Staging, Curate, Sync, Settings). In a group the built pages come first, in the design's order, then one muted later label and the pages to come. A built page is a link; the others are dimmed text with no number beside them, which would read as a count; each one's phase and the design's line about it are in its tooltip and its screen-reader text. / goes to /search until Today exists. Restates DR-0176, whose finding group put Briefs before Recording, so a built Recording would have sat after the later label."
+    not_chosen:
+      - "Built pages only: the app's shape stays hidden until phase 3."
+      - "A placeholder page per slot: routes that only say later."
+      - "The design's order kept, with a later label before each page to come: a built page between two of them reads as one of them."

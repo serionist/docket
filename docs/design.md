@@ -624,7 +624,7 @@ change lands on whoever uses that vendor, while the core still checks every rid 
 Every page has the actions that belong on it. An action runs in the service, runs Claude headless, or hands the job
 to Claude Code with the command ready to paste.
 
-How it is built (DR-0170 to DR-0176):
+How it is built (DR-0170 to DR-0175, DR-0546):
 
 - Pages rendered by the service with Jinja2, parts of them swapped by htmx; every state is a URL that renders without
   JavaScript, and the navigation shows every page above with its phase.
@@ -660,6 +660,10 @@ How it is built (DR-0170 to DR-0176):
   answers a view naming the staged records it drops and what already stored holds it, the second adds it if
   `vault.yaml` is still the file the view counted; the value travels in the posts' bodies only (DR-0507 to DR-0509).
   The Claude API key and a spend cap come with the features they set.
+- The Recording page puts a recording's summary beside its transcript, each anchor a link that marks the lines it
+  points at (DR-0545). Its URL holds `rid`, `doc` and `at`; its links are plain links that land on the marked line,
+  so it works without JavaScript, and Search's transcript hits link to it (DR-0544). With no audio it says why; the
+  player and the second transcript's column come with media (#42) and Whisper (#158).
 
 ## 11. Claude first
 
