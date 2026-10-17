@@ -238,7 +238,8 @@ Built on c25f330, with #134 in. The plan's assumptions held: `effective()` start
 | Planned | Built | Why |
 |---|---|---|
 | `VoyageRunner` in `models/api.py` | the runner, `send`, the key store and the usage in `models/voyage.py`; `models/api.py` holds the commands' logic: `choose`, `keep_key`, `allow`, `status` | the provider and the locks apart |
-| the screen reads `inforce.load` | `Vault.open(root).config` | `inforce.load` has one caller each in `Vault` and `Gate`, which #134's scan pins (DR-0521) |
+| the screen reads `inforce.load` on each check | `inforce.load` once per search and once per batch of the pass, kept in a context variable every check inside reads (the vector stage's thread runs in the search's context), never inside the rerank's deadline; #134's scan pins `inforce.load` to `Vault`, `Gate` and now `Screen` | after code review: opening the whole vault on each check cost five opens a search, two inside the rerank's 0.75 s, each a git call on a folder vault; `inforce.load` makes none while HEAD stays (DR-0521) |
+| `send` maps HTTP errors, timeouts and unreachable hosts | also `http.client.HTTPException` (an answer cut short, a garbled status line), in `send` and for any transport the runner is given | after code review: one escaped `send` and the runner, so a search raised instead of keeping its order, and the pass died instead of backing off |
 | the redactor over the input, the title alone and the text alone | also over each of the chunk's records, field by field, as intake redacts (`Redactor.record`) | a record chunk's text starts with its title, so a pattern anchored on the record's text never meets the chunk's text alone |
 | `fill(..., screen=...)` | `fill` finds the screen on the models (`models.guard`), so callers and test doubles keep their signature; an API pass moves past what it held back with a cursor, a local pass reads from the start as before | the local pass's "the index kept changing" stop depends on reading the same rows again |
 | the full screen when the fingerprint moves, from the first batch | also at the start of every pass, new chunks or none | a pass with nothing new to embed left the table's fingerprint stale, and the reranker skipped for good; the source test caught it |
@@ -380,3 +381,11 @@ by the lead.
 | V1a, minor | a covered record's source came from reading it, and a record that couldn't be read fell back to the doc's text | the source is the rid's `source:` prefix; a covered record that can't be read holds the chunk back; the text alone only for a doc that covers no record |
 | note 1 | where the rerank's current fingerprint comes from | computed from the settings in force on each search, never kept in the service's keeper; the source test reranks right after its change |
 | note 2 | turning a source off | the README says it pauses capture and leaves its stored records going to the provider; private keeps them here |
+
+Code review, round 1, at a726c12: nothing major; the screen, the three locks, the key, the cap and the door held. Two
+minors, fixed as the table above says, each with a test that fails without it:
+
+| Finding | What | Fixed |
+|---|---|---|
+| W1, minor | `http.client.HTTPException` escaped `send` and the runner | caught as "Voyage couldn't be reached"; a fake transport raising `IncompleteRead` keeps the search's order and backs the pass off, and a local server's answer cut short says the same |
+| W2, minor | the screen opened the vault on every check, five times a search, two inside the rerank's deadline | the settings in force read once per search and per batch with `inforce.load`, pinned in #134's scan; a test holds a search to one read and none inside the rerank |

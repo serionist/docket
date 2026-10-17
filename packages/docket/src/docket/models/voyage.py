@@ -9,6 +9,7 @@ text (DR-0539).
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import ssl
@@ -87,7 +88,8 @@ def send(path: str, body: dict[str, Any], key: str, timeout: float) -> dict[str,
         # The answer's body is never read: it can quote the request.
         e.close()
         raise ApiError(f"Voyage answered {e.code}", e.code) from None
-    except (TimeoutError, urllib.error.URLError, OSError) as e:
+    except (TimeoutError, urllib.error.URLError, OSError, http.client.HTTPException) as e:
+        # An answer cut short or garbled (IncompleteRead, BadStatusLine) is no answer, as a dropped connection is.
         late = isinstance(e, TimeoutError) or isinstance(getattr(e, "reason", None), TimeoutError)
         raise ApiError("Voyage didn't answer in time" if late else "Voyage couldn't be reached", timeout=late) from None
     except ValueError:
@@ -330,6 +332,9 @@ class VoyageRunner:
                 self._refused = key
                 raise ApiError(REFUSED, e.status) from None
             raise
+        except (OSError, http.client.HTTPException):
+            # Whatever a transport lets through is no answer: search keeps its order and the pass backs off.
+            raise ApiError("Voyage couldn't be reached") from None
         usage: Any = answer.get("usage")
         tokens: object = cast(dict[str, Any], usage).get("total_tokens") if isinstance(usage, dict) else None
         if isinstance(tokens, int):

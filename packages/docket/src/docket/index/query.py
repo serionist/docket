@@ -24,6 +24,8 @@ The parameters follow the design's MCP `search` tool, which the service (#8) map
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import functools
 import json
 import re
@@ -867,7 +869,9 @@ class _VectorStage:
         self.table = vectors.table_of(models.embedder)
         self.found: list[tuple[int, str]] = []
         self.why: str | None = None
-        self._thread = threading.Thread(target=self._run, args=(models, db, text, filters), daemon=True)
+        # In the search's context, so an API provider's checks see the settings the search read (DR-0538).
+        context = contextvars.copy_context()
+        self._thread = threading.Thread(target=context.run, args=(self._run, models, db, text, filters), daemon=True)
         self._thread.start()
 
     def _run(self, models: vectors.QueryVectors, db: Path, text: str, filters: tuple[str, list[object]]) -> None:
@@ -1064,12 +1068,16 @@ def search(
     if not 1 <= k <= MAX_K:
         raise DocketError(f"k is from 1 to {MAX_K}")
     conn = open_index(vault)
+    guard = screening.of(models)
     try:
         s = _Search(conn, vault, languages_of(vault))
-        return _run(
-            s, query, people=people, entities=entities, sources=sources, since=since, until=until, k=k, now=now,
-            models=models, rerank_budget=rerank_budget,
-        )  # fmt: skip
+        # An API provider's checks read the settings in force once for the whole search, before the rerank's
+        # deadline starts (DR-0538).
+        with guard.reading() if guard is not None else contextlib.nullcontext():
+            return _run(
+                s, query, people=people, entities=entities, sources=sources, since=since, until=until, k=k, now=now,
+                models=models, rerank_budget=rerank_budget,
+            )  # fmt: skip
     finally:
         conn.close()
 

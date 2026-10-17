@@ -264,5 +264,11 @@ def _attribute_calls(owner: str, name: str) -> set[tuple[str, str]]:
 
 def test_the_vault_and_the_gate_read_the_settings_in_force_through_one_loader() -> None:
     """What the jobs obey comes from inforce.load alone (DR-0521): Vault.open's config, and the gate's on every call."""
-    assert _attribute_calls("inforce", "load") == {("vault/vault.py", "Vault"), ("vault/gate.py", "Gate")}
+    # And the API provider's screen (DR-0538): the same settings in force, read once per search or batch with no git
+    # call while HEAD stays, where opening the whole vault five times a search cost a git call each on a folder vault.
+    assert _attribute_calls("inforce", "load") == {
+        ("vault/vault.py", "Vault"),
+        ("vault/gate.py", "Gate"),
+        ("index/screen.py", "Screen"),
+    }
     assert {c for c in _calls("effective") if c[0] != "vault/inforce.py"} == set()

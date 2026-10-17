@@ -7,6 +7,7 @@ left the machine.
 
 from __future__ import annotations
 
+import http.client
 import http.server
 import ssl
 import threading
@@ -32,6 +33,7 @@ from docket.models.catalogue import VOYAGE_4
 from docket.models.client import PAST_BUDGET, Skip, WorkerError
 from docket.models.provider import Models, Off
 from docket.models.runtime import open_models
+from docket.vault import inforce
 from docket.vault.config import RedactionPattern, SourceConfig, VaultConfig
 from docket.vault.gate import Gate
 from docket.vault.records import RawRecord
@@ -379,6 +381,14 @@ def test_a_redirect_or_an_error_says_only_its_status(monkeypatch: pytest.MonkeyP
                 self.send_header("Location", "/v1/elsewhere")
                 self.end_headers()
                 return
+            if self.path.endswith("/short"):
+                # An answer cut short: the length promises more than comes, so the read fails with IncompleteRead.
+                self.send_response(200)
+                self.send_header("Content-Length", "100")
+                self.end_headers()
+                self.wfile.write(b'{"data"')
+                self.close_connection = True
+                return
             if self.path.endswith("/slow"):
                 time.sleep(1.0)
             body = answers.get(self.path, b"SECRETBODY of the answer")
@@ -402,6 +412,9 @@ def test_a_redirect_or_an_error_says_only_its_status(monkeypatch: pytest.MonkeyP
         for path, why in (("/list", "wasn't what Docket asked for"), ("/text", "didn't read as JSON")):
             with pytest.raises(voyage.ApiError, match=why):
                 REAL_SEND(path, {}, FAKE_KEY, 5.0)
+        with pytest.raises(voyage.ApiError) as short:
+            REAL_SEND("/short", {}, FAKE_KEY, 5.0)
+        assert short.value.why == "Voyage couldn't be reached" and not short.value.timeout
         with pytest.raises(voyage.ApiError) as late:
             REAL_SEND("/slow", {}, FAKE_KEY, 0.2)
         assert late.value.timeout and late.value.why == "Voyage didn't answer in time"
@@ -491,3 +504,68 @@ def test_vectors_that_aren_t_what_was_asked_are_refused(answer: dict[str, Any], 
 def test_scores_that_aren_t_what_was_asked_are_refused(answer: dict[str, Any], why: str) -> None:
     with pytest.raises(voyage.ApiError, match=why):
         voyage._scores(answer, 2)  # pyright: ignore[reportPrivateUsage]
+
+
+def test_an_answer_cut_short_keeps_the_search_and_backs_the_pass_off(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = with_voyage(monkeypatch)
+    vault = allow_api(vault)
+    models = api(vault)
+    fill(vault, models)
+    cut: list[str] = []
+
+    def short(path: str, body: dict[str, Any], key: str, timeout: float) -> dict[str, Any]:
+        if path in cut:
+            raise http.client.IncompleteRead(b"{")
+        return fake(path, body, key, timeout)
+
+    monkeypatch.setattr(voyage, "send", short)
+    cut.append("/rerank")
+    result = index.search(vault, "pallet delivery", models=models)
+    assert result.groups and result.rerank.state == "skipped" and result.rerank.why == "Voyage couldn't be reached"
+    cut.append("/embeddings")
+    assert models.query_vector("pallet") == "Voyage couldn't be reached"
+    vault = add(vault, "chat", [message(81, "zebrashort pallet")])
+    slept: list[float] = []
+    monkeypatch.setattr(models.worker, "_sleep", slept.append)
+    report = fill(vault, models)
+    assert report.why == f"Voyage couldn't be reached, {voyage.TRIES} times; the pass stops until the next one"
+    assert len(slept) == voyage.TRIES
+
+
+def test_a_search_reads_the_settings_once_and_never_inside_the_rerank(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with_voyage(monkeypatch)
+    vault = allow_api(vault)
+    models = api(vault)
+    fill(vault, models)
+    opened: list[str] = []
+    real_open, real_load = Vault.open.__func__, inforce.load  # pyright: ignore[reportFunctionMemberAccess]
+
+    def counting_open(cls: type[Vault], *args: Any, **kwargs: Any) -> Vault:
+        opened.append("open")
+        return real_open(cls, *args, **kwargs)
+
+    def counting_load(*args: Any, **kwargs: Any) -> inforce.Settings:
+        opened.append("load")
+        return real_load(*args, **kwargs)
+
+    in_rerank: list[str] = []
+    real_rerank = Models.rerank
+
+    def rerank(self: Models, query: str, texts: Any, budget: float | None) -> list[float] | str:
+        before = len(opened)
+        try:
+            return real_rerank(self, query, texts, budget)
+        finally:
+            in_rerank.extend(opened[before:])
+
+    monkeypatch.setattr(Vault, "open", classmethod(counting_open))
+    monkeypatch.setattr(inforce, "load", counting_load)
+    monkeypatch.setattr(Models, "rerank", rerank)
+    result = index.search(vault, "pallet delivery", models=models)
+    assert result.models.state == "on" and result.rerank.state == "on"
+    assert opened.count("open") <= 1 and opened.count("load") == 1
+    assert in_rerank == []

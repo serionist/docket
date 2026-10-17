@@ -14,6 +14,7 @@ back gets no vector, not even one another chunk's input shares, and the pass mov
 
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -142,48 +143,52 @@ def fill(
         # Settings that moved since the table's vectors passed are screened again first, new chunks or none.
         _settle(vault, db, table, screen)
     while not stop():
-        conn = read_connection(db)
-        try:
-            batch, have = _missing(conn, table, rows, after)
-            if batch and screen is not None and lookup is not None:
-                after = batch[-1].chunk
-                kept = _screened(vault, conn, table, screen=screen, batch=batch, lookup=lookup)
-                report.held += len(batch) - len(kept)
-                if not kept:
-                    continue
-                batch = kept
-        except sqlite3.OperationalError:
-            report.why = _stopped(conn, table)
-            break
-        finally:
-            conn.close()
-        if not batch:
-            break
-        new = sorted({r.input for r in batch if r.hash not in have})
-        try:
-            made = models.passage_vectors(new)
-        except WorkerError as e:
-            report.why = str(e)
-            break
-        vecs = {**have, **{input_hash(text): vec for text, vec in zip(new, made, strict=True)}}
-        with index_lock(vault):
-            conn = write_connection(db)
+        with contextlib.ExitStack() as scope:
+            if screen is not None:
+                # One read of the settings in force for the batch's screen and its request (DR-0538).
+                scope.enter_context(screen.reading())
+            conn = read_connection(db)
             try:
-                written = _write(conn, table, batch, vecs)
+                batch, have = _missing(conn, table, rows, after)
+                if batch and screen is not None and lookup is not None:
+                    after = batch[-1].chunk
+                    kept = _screened(vault, conn, table, screen=screen, batch=batch, lookup=lookup)
+                    report.held += len(batch) - len(kept)
+                    if not kept:
+                        continue
+                    batch = kept
             except sqlite3.OperationalError:
                 report.why = _stopped(conn, table)
                 break
             finally:
                 conn.close()
-        report.embedded += len(new)
-        report.copied += sum(1 for r in batch if r.hash in have)
-        # A batch the index changed under twice running is left for the next pass.
-        idle = idle + 1 if written == 0 else 0
-        if idle >= 2:
-            report.why = "the index kept changing under the pass; the next one goes on"
-            break
-        if progress is not None:
-            progress(*_coverage(db, table))
+            if not batch:
+                break
+            new = sorted({r.input for r in batch if r.hash not in have})
+            try:
+                made = models.passage_vectors(new)
+            except WorkerError as e:
+                report.why = str(e)
+                break
+            vecs = {**have, **{input_hash(text): vec for text, vec in zip(new, made, strict=True)}}
+            with index_lock(vault):
+                conn = write_connection(db)
+                try:
+                    written = _write(conn, table, batch, vecs)
+                except sqlite3.OperationalError:
+                    report.why = _stopped(conn, table)
+                    break
+                finally:
+                    conn.close()
+            report.embedded += len(new)
+            report.copied += sum(1 for r in batch if r.hash in have)
+            # A batch the index changed under twice running is left for the next pass.
+            idle = idle + 1 if written == 0 else 0
+            if idle >= 2:
+                report.why = "the index kept changing under the pass; the next one goes on"
+                break
+            if progress is not None:
+                progress(*_coverage(db, table))
     report.have, report.total = _coverage(db, table)
     if report.why is None and not stop() and report.have + report.held == report.total:
         report.dropped = _drop_others(vault, table)

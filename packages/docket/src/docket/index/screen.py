@@ -18,12 +18,15 @@ anything is sent, under the vault's settings in force (#134), read again on ever
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import sqlite3
-from collections.abc import Iterable, Sequence
+from collections.abc import Generator, Iterable, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass
 from itertools import pairwise
+from pathlib import Path
 from typing import cast
 
 from pydantic import ValidationError
@@ -31,7 +34,7 @@ from pydantic import ValidationError
 from docket.errors import DocketError
 from docket.index import vectors
 from docket.index.vectors import VecTable
-from docket.vault import neverstore
+from docket.vault import inforce, neverstore
 from docket.vault.config import VaultConfig
 from docket.vault.redact import Redactor
 from docket.vault.spans import RawLookup
@@ -40,6 +43,11 @@ from docket.vault.vault import Vault
 HELD_QUERY = "the query names something the vault's settings keep on this machine, so it isn't sent to the API"
 STALE = "the vault's settings changed since its chunks were checked, so the reranker waits for the next embedding pass"
 UNREADABLE = "the vault's settings can't be read, so nothing is sent to the API"
+
+
+# The settings in force as one search or one batch read them, for every check it makes: a search asks about five
+# times, two of them inside the rerank's deadline, and each read would open vault.yaml again.
+_READ: ContextVar[tuple[Path, VaultConfig] | None] = ContextVar("docket_screen_settings", default=None)
 
 
 def not_allowed(provider: str) -> str:
@@ -79,8 +87,28 @@ class Screen:
         self.table = table
 
     def settings(self) -> VaultConfig:
-        """The settings in force now, through the vault's own loader (DR-0521)."""
-        return Vault.open(self.root).config
+        """The settings in force: as the search or the batch around this call read them, else read now. Read as
+        `Vault.open` reads them (DR-0521), without opening the rest of the vault, and with no git call while HEAD
+        stays."""
+        held = _READ.get()
+        if held is not None and held[0] == self.root:
+            return held[1]
+        return inforce.load(self.root, self.home).in_force
+
+    @contextlib.contextmanager
+    def reading(self) -> Generator[VaultConfig | None]:
+        """Read the settings in force once for every check inside: a search's, or a batch's of the embedding pass.
+        Settings that don't read leave every check inside to say so."""
+        try:
+            config = inforce.load(self.root, self.home).in_force
+        except (DocketError, OSError):
+            yield None
+            return
+        token = _READ.set((self.root, config))
+        try:
+            yield config
+        finally:
+            _READ.reset(token)
 
     def allowed(self) -> str | None:
         """Why the vault doesn't let its text go to the provider now, or None (DR-0537)."""
