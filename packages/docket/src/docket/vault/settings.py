@@ -400,19 +400,17 @@ def _walk(path: str, old: Any, new: Any, out: list[str]) -> None:
                 _walk(sub, olds[key], news[key], out)
         return
     if _maps(old) and _maps(new):
-        olds_l, news_l = cast(list[dict[str, Any]], old), cast(list[dict[str, Any]], new)
-        for n in range(max(len(olds_l), len(news_l))):
-            one = olds_l[n] if n < len(olds_l) else None
-            two = news_l[n] if n < len(news_l) else None
-            named = one is not None and two is not None and one.get("name") == two.get("name") and one.get("name")
-            sub = f"{path}[{named}]" if named else f"{path}[{n}]"
-            if two is None:
-                out.append(f"{sub}: removed")
-            elif one is None:
+        olds_k, news_k = _by_name(cast(list[dict[str, Any]], old)), _by_name(cast(list[dict[str, Any]], new))
+        # Each entry by its name, as the settings in force match patterns (DR-0521): a reorder alone says nothing.
+        for key, two in news_k.items():
+            one = olds_k.pop(key, None)
+            sub = f"{path}[{_label(key)}]"
+            if one is None:
                 out.append(f"{sub}: added")
                 _leaves(sub, two, out)
             else:
                 _walk(sub, one, two, out)
+        out += [f"{path}[{_label(key)}]: removed" for key in olds_k]
         return
     if old != new:
         out.append(f"{path}: {_shown(old)} -> {_shown(new)}")
@@ -420,6 +418,23 @@ def _walk(path: str, old: Any, new: Any, out: list[str]) -> None:
 
 def _maps(value: Any) -> bool:
     return isinstance(value, list) and all(isinstance(item, dict) for item in cast(list[Any], value))
+
+
+def _by_name(entries: list[dict[str, Any]]) -> dict[tuple[str, int], dict[str, Any]]:
+    """Each entry by its name and which of that name it is, in order; one without a name by its place."""
+    seen: dict[str, int] = {}
+    out: dict[tuple[str, int], dict[str, Any]] = {}
+    for n, entry in enumerate(entries):
+        name = str(entry.get("name", f"#{n}"))
+        k = seen.get(name, 0)
+        seen[name] = k + 1
+        out[(name, k)] = entry
+    return out
+
+
+def _label(key: tuple[str, int]) -> str:
+    name, k = key
+    return name if k == 0 else f"{name} {k + 1}"
 
 
 def _leaves(path: str, value: Any, out: list[str]) -> None:

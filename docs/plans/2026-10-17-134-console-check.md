@@ -409,6 +409,9 @@ Departures from the plan above, each small.
 | `Vault.init` files the text it commits in the cache, so a `vault.yaml` write asks git nothing about HEAD | a miss at the first read | #132's plan left that one call for this cache to answer |
 | `refuse_unmerged()` before the question, as the release does since #132 | a conflict found at the commit | a conflict refuses before the owner types a code (DR-0528) |
 | each test template's vaults read once before its manifest is taken | the manifest ignoring the cache | opening a template must write nothing into it, and a read once at build makes every later read a hit |
+| "already" and "registered as it stands" say the edit waits when vault.yaml holds the value by hand and HEAD doesn't, with nothing taken in (code review, K1) | the bare line | the value is the file's, not in force until committed |
+| `docket source new` reads an entry already there from the file as written | the settings in force | the command changes the file; a source added by hand is the file's entry, kept, not a new one |
+| the screen pairs patterns by name and which of that name it is, as `effective()` does (code review, K2) | by place | a reorder read as renames and swapped expressions |
 | outside the writer only `Vault.init` writes `vault.yaml` as a file, held by a scan over the whole package | `Vault.init` and convert | convert writes it into git's tree, not as a file |
 
 ## Plan review

@@ -359,11 +359,11 @@ def test_the_screen_names_each_entry_added_or_removed_and_never_a_never_store_va
         "sources.notes: removed",
         "never_store.domains: added",
         "  never_store.domains: 1 added",
-        "redaction.patterns[1]: removed",
+        "redaction.patterns[x]: removed",
     ]
     back = settings.changes(after, before)
-    assert "redaction.patterns[1]: added" in back
-    assert "  redaction.patterns[1].name: x" in back
+    assert "redaction.patterns[x]: added" in back
+    assert "  redaction.patterns[x].name: x" in back
 
 
 def test_head_s_vault_yaml_gone_while_the_owner_reads_writes_nothing(
@@ -392,3 +392,56 @@ def test_a_no_at_a_folder_source_leaves_vault_yaml_as_it_was(
     assert main(["source", "new", "papers", "--folder", "papers", "--vault", str(vault.root)]) == 1
     assert "source   papers not added: the code wasn't typed back" in capsys.readouterr().out
     assert text(vault) == before
+
+
+def test_the_screen_matches_patterns_by_name_so_a_reorder_says_nothing() -> None:
+    """The screen pairs patterns as the settings in force do (DR-0521): by name, not by place."""
+    tck, acct = RedactionPattern(name="tck", pattern="TCK"), RedactionPattern(name="acct", pattern=r"ACCT-\d+")
+    before = make_config()
+    before.redaction = Redaction(patterns=[tck, acct])
+    after = before.model_copy(
+        update={"redaction": Redaction(patterns=[acct, tck.model_copy(update={"enabled": False})])}
+    )
+    assert settings.changes(before, after) == ["redaction.patterns[tck].enabled: true -> false"]
+    twice = before.model_copy(update={"redaction": Redaction(patterns=[tck, acct, tck])})
+    assert settings.changes(before, twice) == [
+        "redaction.patterns[tck 2]: added",
+        "  redaction.patterns[tck 2].name: tck",
+        "  redaction.patterns[tck 2].pattern: TCK",
+        "  redaction.patterns[tck 2].enabled: true",
+    ]
+
+
+def test_already_so_by_a_hand_edit_not_in_force_says_it_waits(vault: Vault, capsys: pytest.CaptureFixture[str]) -> None:
+    """The file holds the value by hand, HEAD doesn't: nothing to write, and the line says the edit waits for its
+    commit, as the gate's refusals do."""
+    on = VaultConfig.load(vault.root / CONFIG_FILE)
+    on.redaction.phone = True
+    (vault.root / CONFIG_FILE).write_text(on.dump(), encoding="utf-8", newline="\n")
+    git(vault.root, "commit", "-qm", "phone on", "--", CONFIG_FILE)
+    by_hand(vault, phone(False))
+    assert main(["redaction", "set", "phone", "off", "--vault", str(vault.root)]) == 0
+    out = capsys.readouterr().out
+    assert "redact   phone is off already; vault.yaml has an edit that isn't in force until you commit it" in out
+    by_hand(vault, phone(True))
+    assert main(["redaction", "set", "phone", "on", "--vault", str(vault.root)]) == 0
+    assert capsys.readouterr().out == "redact   phone is on already\n"
+
+
+def test_a_source_registered_as_it_stands_by_a_hand_edit_says_it_waits(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    vault = project_vault(tmp_path)
+    mapper = ".claude/skills/sources/diary/mapper.py"
+    by_hand(
+        vault,
+        lambda c: c.model_copy(
+            update={"sources": {**c.sources, "diary": SourceConfig(sensitivity="private", mapper=mapper)}}
+        ),
+    )
+    at = head(vault)
+    assert main(["source", "new", "diary", "--vault", str(vault.root)]) == 0
+    out = capsys.readouterr().out
+    assert "source   diary in vault.yaml: private, mapper " in out
+    assert "tools none yet; vault.yaml has an edit that isn't in force until you commit it" in out
+    assert head(vault) == at

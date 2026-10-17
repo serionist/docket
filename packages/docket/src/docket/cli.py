@@ -429,7 +429,7 @@ def source_new(
             say(f"source   {name} not added: the code wasn't typed back, so vault.yaml is as it was")
             raise typer.Exit(1)
         if added.registered:
-            commit = f", committed {added.commit[:12]}" if added.commit else ""
+            commit = f", committed {added.commit[:12]}" if added.commit else inforce.note(found.waiting)
             say(f"source   {name} in vault.yaml: a folder source, folder {added.entry.folder}{commit}")
         else:
             say("source   vault.yaml has comments or a layout of your own, so it is left as it is; add under sources:")
@@ -449,7 +449,7 @@ def source_new(
     entry = made.entry
     tools = ", ".join(entry.tools) or "none yet"
     if made.registered:
-        commit = f", committed {made.commit[:12]}" if made.commit else ""
+        commit = f", committed {made.commit[:12]}" if made.commit else inforce.note(found.waiting)
         say(f"source   {name} in vault.yaml: {entry.sensitivity}, mapper {entry.mapper}, tools {tools}{commit}")
     else:
         say("source   vault.yaml has comments or a layout of your own, so it is left as it is; add under sources:")
@@ -554,7 +554,8 @@ def redaction_set(
     if state not in ("on", "off"):
         raise DocketError(f"the setting is on or off, not {state!r}")
     named: Path | None = vault if vault is not None else ctx.obj
-    done = redaction.set_rule(find_vault(named), rule, state == "on")
+    found = find_vault(named)
+    done = redaction.set_rule(found, rule, state == "on")
     if done.declined:
         say(f"redact   {rule} not changed: the code wasn't typed back")
         raise typer.Exit(1)
@@ -563,7 +564,8 @@ def redaction_set(
     elif done.changed:
         say(f"redact   {rule} {state}" + (f", committed {done.commit[:12]}" if done.commit else ""))
     else:
-        say(f"redact   {rule} is {state} already")
+        # As vault.yaml has it: an edit by hand not committed yet may have set it, and it isn't in force until then.
+        say(f"redact   {rule} is {state} already{inforce.note(found.waiting)}")
     for note in done.notes:
         say(f"note     {note}")
     if done.by_hand is not None:

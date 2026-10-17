@@ -98,7 +98,7 @@ def new_source(
         raise DocketError(f"no reference source named {name}; --example copies one of: {', '.join(sorted(REFERENCES))}")
     if folder.exists() or folder.is_symlink():
         raise DocketError(f"{folder} already exists; a source's folder is never written over")
-    entry = _entry(name, vault.config.sources.get(name), reference, sensitivity, tools or [])
+    entry = _entry(name, vault.written.sources.get(name), reference, sensitivity, tools or [])
     files = template_files(name if example else BLANK)
     if not example:
         files = {rel: data.decode("utf-8").replace(PLACEHOLDER, name).encode("utf-8") for rel, data in files.items()}
@@ -129,7 +129,7 @@ def new_folder_source(vault: Vault, name: str, given: Path) -> NewFolderSource:
     problem = source_name_problem(name)
     if problem is not None:
         raise DocketError(problem)
-    existing = vault.config.sources.get(name)
+    existing = vault.written.sources.get(name)
     if existing is not None and existing.folder is None and (existing.mapper or existing.tools):
         raise DocketError(f"source {name} in vault.yaml has a mapper or tools; a folder source is a source of its own")
     folder = written_folder(vault, given)
