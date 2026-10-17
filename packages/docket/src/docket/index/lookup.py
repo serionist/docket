@@ -153,6 +153,13 @@ class ReadIndex:
             sql, args = sql + " AND kind = ?", (*args, kind)
         return [str(r) for (r,) in self.conn.execute(sql + " ORDER BY rid", args)]
 
+    def nested(self, rid: str, source: str) -> list[str]:
+        """The rid and the source's rids nested under `<rid>/`, by rid: a media file's records (DR-0547). Every rid
+        under `<rid>/` sorts from it to before `<rid>0`, since `0` follows `/`: a range on the rid's key, exact in case
+        where LIKE isn't."""
+        sql = "SELECT rid FROM records WHERE source = ? AND (rid = ? OR (rid >= ? AND rid < ?)) ORDER BY rid"
+        return [str(r) for (r,) in self.conn.execute(sql, (source, rid, f"{rid}/", f"{rid}0"))]
+
     def group(self, field: str, value: str, source: str) -> list[tuple[str, str]]:
         """The records of a source whose latest version has this thread or container, with their times to the
         millisecond, in `(ts, rid)` order."""

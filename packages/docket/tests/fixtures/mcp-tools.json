@@ -272,5 +272,47 @@
       "idempotent_hint": false,
       "open_world_hint": false
     }
+  },
+  {
+    "name": "media_put",
+    "input_schema": {
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rid": {
+          "type": "string"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "rid"
+      ],
+      "type": "object"
+    },
+    "annotations": {
+      "read_only_hint": false,
+      "destructive_hint": false,
+      "idempotent_hint": true,
+      "open_world_hint": true
+    }
   }
 ]

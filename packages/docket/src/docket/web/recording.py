@@ -17,6 +17,7 @@ from starlette.responses import Response
 
 from docket import index, recall
 from docket.errors import DocketError
+from docket.media import reader
 from docket.recall import DocView
 from docket.service.state import Service
 from docket.service.writer import IndexBuildingError
@@ -26,7 +27,7 @@ from docket.vault.spans import is_transcript
 from docket.vault.vault import Vault
 from docket.web import templating
 from docket.web.recording_state import RecordingState, RecordingStateError
-from docket.web.recording_view import Facts, RecordingView, build, is_recording
+from docket.web.recording_view import Facts, NoAudio, RecordingView, build, is_recording
 from docket.web.shell import shell
 
 
@@ -79,7 +80,23 @@ def gather(vault: Vault, state: RecordingState) -> Facts:
         legacy=legacy,
         summary=summary,
         problems=tuple(problems),
+        audio=_audio(vault, recording.rid),
     )
+
+
+# The media reader's state, as the page says it: `ok` is stored, and plays once the page has a player.
+AUDIO: dict[reader.State, NoAudio] = {
+    "ok": "stored",
+    "not-fetched": "not-fetched",
+    "staged": "staged",
+    "held": "held",
+    "not-downloaded": "not-downloaded",
+    "no-key": "no-key",
+}
+
+
+def _audio(vault: Vault, rid: str) -> NoAudio:
+    return AUDIO[reader.state_of(vault, rid)]
 
 
 def _page(

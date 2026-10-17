@@ -112,11 +112,12 @@ def test_the_writer_s_general_entry_is_called_only_by_the_cli_s_two_writers_and_
         ("vault/settings.py", "rule_on"),
         ("vault/settings.py", "stricter"),
         ("vault/settings.py", "turn_off"),
+        ("media/sources.py", "set_media_list"),
     }
 
 
 def test_the_writers_that_can_loosen_are_called_only_by_the_command_line() -> None:
-    for name in ("set_rule", "new_source", "new_folder_source"):
+    for name in ("set_rule", "new_source", "new_folder_source", "set_media_list"):
         assert {rel for rel, _ in _calls(name)} == {"cli.py"}, name
     # `docket models allow`: the api provider's opt-in (DR-0537), whose every change loosens.
     assert _attribute_calls("api_models", "allow") == {("cli.py", "models_allow")}
@@ -134,6 +135,8 @@ def test_pages_and_the_service_import_only_what_pages_may_use() -> None:
                 assert not (node.module == "docket.vault" and "settings" in names), rel
                 assert not (node.module == "docket.sources" and "scaffold" in names), rel
                 assert node.module != "docket.sources.scaffold", rel
+                assert node.module != "docket.media.sources", rel
+                assert not (node.module == "docket.media" and "sources" in names), rel
                 assert not (node.module == "docket.vault.redaction" and "set_rule" in names), rel
                 assert not (node.module == "docket.vault.config" and "write_config" in names), rel
             if isinstance(node, ast.Import):

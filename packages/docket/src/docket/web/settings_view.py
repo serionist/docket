@@ -326,6 +326,8 @@ def _source(facts: SourceFacts) -> SourceView:
         shown.append(("Mapper", entry.mapper or "none"))
         if entry.media_hosts:
             shown.append(("Media hosts", ", ".join(entry.media_hosts)))
+        if entry.media_folders:
+            shown.append(("Media folders", ", ".join(entry.media_folders)))
     changes: list[Change] = []
     if entry.folder is None:
         for level in sorted(RANK, key=lambda v: -RANK[v]):

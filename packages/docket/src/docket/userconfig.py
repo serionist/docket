@@ -152,6 +152,18 @@ def set_service(
     return service()
 
 
+def media_max_bytes(default: int) -> int:
+    """`media.max_bytes`: the largest media file `media_put` takes on this machine (DR-0548), `default` when unset. A
+    value of another kind is refused, as the service's keys are."""
+    raw: Any = load().get("media")
+    value: Any = cast(dict[str, Any], raw).get("max_bytes") if isinstance(raw, dict) else None
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise DocketError(f"{config_path()}: media.max_bytes must be a whole number of bytes")
+    return value
+
+
 def curate_questions() -> Path | None:
     """`curate.questions`: the question file a curate round measures before and after (DR-0475), or None when unset.
     A value of another kind is refused, as the service's keys are."""

@@ -81,6 +81,8 @@ class Places(Protocol):
 
     def group(self, field: str, value: str, source: str) -> list[tuple[str, str]]: ...
 
+    def nested(self, rid: str, source: str) -> list[str]: ...
+
 
 class _MovedError(Exception):
     """A line isn't what the index says is there: its file changed since the check."""
@@ -199,6 +201,18 @@ class RawLookup:
             else:
                 return _under(latest, rid, kind)
         return _under((v[-1] for other, v in self._source(source).items() if other != rid), rid, kind)
+
+    def nested(self, rid: str) -> list[str]:
+        """The rid and the rids nested under `<rid>/` that the raw log holds, by rid: a media file's records
+        (DR-0547). From a current index's rows by prefix, else from the loaded source."""
+        m = RID.match(rid)
+        if m is None:
+            return []
+        source = m.group(1)
+        index = self._index(source)
+        if index is not None:
+            return index.nested(rid, source)
+        return sorted(other for other in self._source(source) if other == rid or other.startswith(f"{rid}/"))
 
     def transcripts(self, rid: str) -> list[RawRecord]:
         """The transcripts under rid, by rid: where a time on a record without segments of its own lands (DR-0370)."""

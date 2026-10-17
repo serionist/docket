@@ -131,8 +131,14 @@ def test_the_dry_run_changes_nothing(tmp_path: Path) -> None:
 def test_the_vault_becomes_a_folder_with_its_history(tmp_path: Path) -> None:
     top, root = nested(tmp_path)
     work = users_work(top)
+    # The clone's media keys, sealed in its private folder: they move with the vault (DR-0549).
+    keys = root / ".git" / "docket" / "media" / "keys"
+    keys.mkdir(parents=True)
+    (keys / f"{'a' * 64}.age").write_bytes(b"a sealed key")
     script = run(root)
     vault = check_converted(top, root)
+    moved = top / ".git" / "docket" / "notes" / "vault" / "media" / "keys" / f"{'a' * 64}.age"
+    assert moved.read_bytes() == b"a sealed key"
     # The merge adds nothing of its own: outside the vault it is its first parent, inside its second.
     assert git(top, "diff", "HEAD^1", "HEAD", "--", ".", ":!notes/vault") == ""
     assert git(top, "diff", "HEAD^2", "HEAD", "--", "notes/vault") == ""

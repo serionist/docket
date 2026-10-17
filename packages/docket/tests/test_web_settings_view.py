@@ -67,7 +67,7 @@ def test_each_source_s_changes_come_stricter_first_each_with_its_line() -> None:
     config.sources = {
         "memo": SourceConfig(),
         "notes": SourceConfig(sensitivity="private"),
-        "dormant": SourceConfig(enabled=False, media_hosts=["media.example"]),
+        "dormant": SourceConfig(enabled=False, media_hosts=["media.example"], media_folders=["~/Downloads"]),
         "documents": SourceConfig(folder="docs"),
     }
     sources = {s.name: s for s in view(config, *[SourceFacts(n, e) for n, e in config.sources.items()]).sources}
@@ -88,6 +88,7 @@ def test_each_source_s_changes_come_stricter_first_each_with_its_line() -> None:
     dormant = sources["dormant"]
     assert [(c.what, c.line, c.looser) for c in dormant.changes][-1] == ("Turn it on", "enabled: true", True)
     assert ("Media hosts", "media.example") in dormant.facts
+    assert ("Media folders", "~/Downloads") in dormant.facts
     assert ("Tools", "none: nothing syncs live") in dormant.facts
     documents = sources["documents"]
     assert [c.what for c in documents.changes] == ["Turn it off"]

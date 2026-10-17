@@ -91,6 +91,9 @@ class SourceConfig(_Model):
     tools: list[str] = Field(default_factory=list[str])
     # The hosts media_put may fetch this source's media from, over https.
     media_hosts: list[str] = Field(default_factory=list[str])
+    # The folders media_put may take this source's media from (DR-0548): relative to the consuming repo or under ~/,
+    # as a folder source's folder is written. Written only when set.
+    media_folders: list[str] = Field(default_factory=list[str])
     # A folder source (DR-0481): the folder docket scan reads, relative to the consuming repo or under ~/, and fnmatch
     # patterns on the paths inside it to leave out. Written only when set, so a vault.yaml without folder sources
     # reads as before on an older Docket.
@@ -124,6 +127,15 @@ class SourceConfig(_Model):
         for host in value:
             if not HOST.match(host):
                 raise ValueError(f"{host!r} isn't a host name: lowercase, with no scheme, port or path")
+        return value
+
+    @field_validator("media_folders")
+    @classmethod
+    def _media_folders(cls, value: list[str]) -> list[str]:
+        for folder in value:
+            problem = folder_problem(folder)
+            if problem is not None:
+                raise ValueError(problem)
         return value
 
     @field_validator("folder")
@@ -162,12 +174,15 @@ class SourceConfig(_Model):
 
     @model_serializer(mode="wrap")
     def _dump(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
-        """`folder` and `exclude` only when set: an older Docket refuses keys it doesn't know (DR-0021)."""
+        """`folder`, `exclude` and `media_folders` only when set: an older Docket refuses keys it doesn't know
+        (DR-0021)."""
         data: dict[str, Any] = handler(self)
         if self.folder is None:
             data.pop("folder", None)
         if not self.exclude:
             data.pop("exclude", None)
+        if not self.media_folders:
+            data.pop("media_folders", None)
         return data
 
 

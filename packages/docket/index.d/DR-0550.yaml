@@ -1,0 +1,13 @@
+decisions:
+  - id: DR-0550
+    title: A second machine gets media keys from an export the owner makes and moves, at their own console
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#42"]
+    description: "docket media keys export <file> and import <file> run only at the owner's console (refused in Claude Code's shell, a pipe or a redirect). Export draws a passphrase of 24 letters, shows it once, and writes every key of the clone into one file sealed with age's scrypt passphrase mode: schema_version 1, and each key's id, identity, path and time. Import asks for the passphrase and adds the keys it lacks, counting those it has. The export is the backup; the newest holds every key. Where it goes is the owner's choice at each export; the README names a password manager, a USB stick and a synced folder. docket media status, docket vault status and the session-start dashboard count keys no export has held, from a list of key ids in the private folder. A key reaches every clone that imported an export, so forget, when it comes, must reach those clones too, by key id, never by a key in git."
+    binds: [A later Docket reads every earlier bundle's schema_version.]
+    not_chosen:
+      - "Machines syncing keys over the network: both online at once, and a new listening surface."
+      - "A passphrase the owner types: drawn letters are stronger, and Claude never sees them."

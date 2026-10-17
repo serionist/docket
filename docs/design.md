@@ -321,8 +321,10 @@ vault/
 - `docket vault convert` turns a nested repo of its own into a folder of the repo around it: its history rewritten
   under the vault's path and merged in one commit, after a dry run and the user's yes, its old `.git` kept as a
   backup. A crash at any step is finished by running it again.
-- Media is encrypted, one key per file (age), the keys in the keychain plus an exported backup. Deleting a key is
-  what makes forgetting real.
+- Media is encrypted, one key per file (age), the keys sealed in each clone's Docket folder with the seal in the
+  keychain, plus an exported backup (DR-0549, DR-0550). Deleting a key is what makes forgetting real. A media file
+  waits in `staging/_media/` beside its record and is stored as `media/<source>/<yyyy>/<mm>/<rid hash>.<ext>.age`
+  once its record is in raw (DR-0547).
 - The database isn't committed. It rebuilds from what's committed; a test checks that two rebuilds give the same
   database (vectors aside).
 
@@ -600,10 +602,13 @@ change lands on whoever uses that vendor, while the core still checks every rid 
   by its path, the list of sources coming from `vault.yaml` (DR-0168).
 - Plaud is the reference source, under `examples/sources/plaud` and tested in CI: an example to copy, not a
   dependency. The wheel carries a byte-identical copy for `--example` (DR-0167).
-- Audio is handed over by path or URL, and the service fetches it only within limits:
-  - a path under a folder `vault.yaml` names (a downloads folder) or the plugin's own drop folder;
-  - a URL over https, to a host `vault.yaml` lists for that source, never a private, loopback or link-local address;
-  - a few redirects at most, each checked again, and a size cap.
+- Audio is handed over by path or URL, and the service fetches it only within limits (DR-0548):
+  - a path under a folder `vault.yaml` names for the source (`media_folders`) or Docket's own drop folder;
+  - a URL over https, to a host `vault.yaml` lists for that source, every address it resolves to public and none an
+    IPv6 form of an IPv4 one, the connection made to a checked address;
+  - 3 redirects at most, each checked again, no compression, and a size cap.
+- Media passes the gate's checks at the put, again after the fetch, at every sweep and at promotion, and goes with any
+  drop of a version of its record (DR-0547).
 - Every record goes through the staging gate; a source's sensitivity is in `vault.yaml`.
 - Hold lists keep records out that must not be staged yet, such as backfilled recordings with stretches the owner
   left out: `state/holds/<source>.txt`, ids only, read on every ingest and by the gate, failing closed (DR-0121,

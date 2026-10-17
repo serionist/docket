@@ -380,6 +380,10 @@ def _finish(where: Where, state: State) -> None:
     target = where.private / "machine"
     if machine.is_file() and not target.exists():
         shutil.copy2(machine, target)
+    # The media keys go with the vault, or every media file it stored would stay sealed for good (DR-0549).
+    keys = where.backup / "docket" / "media"
+    if keys.is_dir() and not (where.private / "media").exists():
+        shutil.copytree(keys, where.private / "media")
     top = Git(where.top)
     for ref in (SOURCE_REF, REWRITTEN_REF):
         top.run("update-ref", "-d", ref, check=False)

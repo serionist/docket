@@ -27,6 +27,12 @@ from docket.imports import notes
 from docket.index import flags as index_flags
 from docket.index.build import db_path
 from docket.index.embedpass import fill
+from docket.media import sources as media_sources
+from docket.media.keystore import KeyStore
+from docket.media.put import drop_folder as media_drop_folder
+from docket.media.put import put as media_put_run
+from docket.media.sources import Field as MediaField
+from docket.media.status import lines as media_status_lines
 from docket.models.client import Worker
 from docket.models.provider import Models, Off
 from docket.models.runtime import open_models
@@ -101,6 +107,17 @@ curate_app = typer.Typer(
     help="Entities and aliases: changes from a file, undo, and the log of every change.", no_args_is_help=True
 )
 app.add_typer(curate_app, name="curate")
+media_app = typer.Typer(
+    help="Media: a record's audio or file, encrypted with a key of its own, stored through the gate.",
+    no_args_is_help=True,
+)
+app.add_typer(media_app, name="media")
+media_host_app = typer.Typer(help="The hosts a source's media may be fetched from, over https.", no_args_is_help=True)
+media_app.add_typer(media_host_app, name="host")
+media_folder_app = typer.Typer(help="The folders a source's media may be taken from.", no_args_is_help=True)
+media_app.add_typer(media_folder_app, name="folder")
+media_keys_app = typer.Typer(help="This clone's media keys: where their seal lives.", no_args_is_help=True)
+media_app.add_typer(media_keys_app, name="keys")
 
 # How often the embedding pass says how far it got.
 PROGRESS_SECONDS = 10.0
@@ -640,6 +657,9 @@ def vault_convert(
 
 RefArgument = Annotated[str, typer.Argument(help="A rid, or at least 6 characters of a key from `staging list`.")]
 SourceOption = Annotated[str | None, typer.Option("--source", help="Only this source.")]
+SourceArgument = Annotated[str, typer.Argument(help="The source, as vault.yaml names it.")]
+HostArgument = Annotated[str, typer.Argument(help="A host name, such as media.example.com.")]
+FolderArgument = Annotated[str, typer.Argument(help="A folder under ~/ or in the repo, such as ~/Downloads.")]
 
 
 @staging_app.command("list")
@@ -656,6 +676,8 @@ def staging_list(
         typer.echo(f"unreadable    {path}: {message}")
     counts = listing.counts()
     typer.echo(f"{counts['pending']} pending, {counts['ready']} ready" if listing.entries else "nothing waits")
+    if listing.media:
+        typer.echo(f"{listing.media} media file(s) wait with their records")
 
 
 @staging_app.command("show")
@@ -731,7 +753,13 @@ def staging_promote(source: SourceOption = None, vault: VaultOption = None) -> N
         typer.echo("dropped   " + ", ".join(f"{reason} {n}" for reason, n in sorted(result.dropped.items())))
     if result.on_hold:
         typer.echo(f"on hold   {result.on_hold} (left in staging until the hold is released)")
-    if not result.runs and not result.held and not result.on_hold:
+    for media in result.media:
+        typer.echo(f"media     {media.source}: {media.stored} file(s) stored in media/")
+    for problem in dict.fromkeys(result.media_held):
+        typer.echo(f"media     waits: {problem}")
+    if result.media_dropped:
+        typer.echo(f"media     {result.media_dropped} file(s) deleted, failing their checks")
+    if not result.runs and not result.held and not result.on_hold and not result.media:
         typer.echo("nothing ready")
 
 
@@ -843,6 +871,87 @@ def doc_redact(
         say("index    rebuilt here; on another machine, run docket index rebuild after it pulls")
     if report.left:
         raise typer.Exit(1)
+
+
+@media_app.command("put")
+def media_put(
+    rid: Annotated[str, typer.Argument(help="The record the media belongs to, staged or in raw.")],
+    where: Annotated[str, typer.Argument(metavar="PATH-OR-URL", help="A file, or an https URL.")],
+    vault: VaultOption = None,
+) -> None:
+    """Stage a record's audio or file: fetched within the limits, encrypted with a key of its own as it is read, and
+    stored in media/ once its record is in raw. A path is taken from a media folder of the source or Docket's drop
+    folder; a URL only over https from one of its media hosts."""
+    found = find_vault(vault)
+    is_url = "://" in where
+    stored = media_put_run(found, rid, path=None if is_url else where, url=where if is_url else None)
+    say(stored.line)
+
+
+@media_app.command("status")
+def media_status(vault: VaultOption = None) -> None:
+    """This clone's key store, how many keys it holds, and the media waiting and stored."""
+    say_all(media_status_lines(find_vault(vault)))
+
+
+@media_app.command("drop")
+def media_drop() -> None:
+    """Print Docket's drop folder: a file put from it is deleted once stored. It is made on first use."""
+    folder = media_drop_folder()
+    folder.mkdir(parents=True, exist_ok=True)
+    say(str(folder))
+
+
+def _media_change(vault: Path | None, source: str, field: MediaField, value: str, *, add: bool) -> None:
+    found = find_vault(vault)
+    done = media_sources.set_media_list(found, source, field, value, add=add)
+    word = media_sources.WORDS[field]
+    if done.declined:
+        say(f"media    {word} not changed: the code wasn't typed back")
+    elif done.by_hand:
+        say(f"media    vault.yaml has a layout of your own; change sources.{source}.{field} there, then commit it")
+    elif done.changed:
+        say(f"media    {word} {value} {'added to' if add else 'removed from'} {source}")
+    else:
+        say(f"media    {source} {'has' if add else 'has no'} {word} {value} already")
+
+
+@media_host_app.command("add")
+def media_host_add(source: SourceArgument, host: HostArgument, vault: VaultOption = None) -> None:
+    """Let a source's media be fetched from a host. It lets more in, so it asks at your own console first."""
+    _media_change(vault, source, "media_hosts", host, add=True)
+
+
+@media_host_app.command("remove")
+def media_host_remove(source: SourceArgument, host: HostArgument, vault: VaultOption = None) -> None:
+    """Stop fetching a source's media from a host: written at once."""
+    _media_change(vault, source, "media_hosts", host, add=False)
+
+
+@media_folder_app.command("add")
+def media_folder_add(source: SourceArgument, folder: FolderArgument, vault: VaultOption = None) -> None:
+    """Let a source's media be taken from a folder. It lets more in, so it asks at your own console first."""
+    _media_change(vault, source, "media_folders", folder, add=True)
+
+
+@media_folder_app.command("remove")
+def media_folder_remove(source: SourceArgument, folder: FolderArgument, vault: VaultOption = None) -> None:
+    """Stop taking a source's media from a folder: written at once."""
+    _media_change(vault, source, "media_folders", folder, add=False)
+
+
+@media_keys_app.command("init")
+def media_keys_init(
+    store: Annotated[str, typer.Option("--store", help="keyring (the default) or file.")] = "keyring",
+    vault: VaultOption = None,
+) -> None:
+    """Make this clone's media key store: its seal in the system keychain, or, on a machine without one, in a file only
+    you can read in Docket's own folder. A clone that has one keeps it."""
+    if store not in ("keyring", "file"):
+        raise DocketError(f"--store is keyring or file, not {store!r}")
+    found = find_vault(vault)
+    info = KeyStore(found.home).init("keyring" if store == "keyring" else "file")
+    say(f"keys     {'the system keychain' if info.store == 'keyring' else 'a file only you can read'}, store {info.id}")
 
 
 @curate_app.command("add")
