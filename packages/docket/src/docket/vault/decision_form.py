@@ -40,6 +40,9 @@ LINKS_EDIT = "changes the decision's status or links, which only the Briefs page
 TITLE_EDIT = "takes Proposed: from the title of a decision only the Briefs page confirms"
 FINAL_EDIT = "changes a decision that is {status}, which is final: a change is a new decision that replaces it"
 NAMES_SOMEONE = "an id here names someone a never-store list holds; leave them out"
+DECISIONS_EDIT = "is a Decisions line that doesn't read as a current decision's title with its cite"
+# What `read` and a search hit say beside a brief's Decisions line that cites no confirmed decision.
+NOT_A_DECISION = "not a confirmed decision"
 _ID = re.compile(r"^decision:\d{4}-\d{2}-\d{2}-[a-z0-9]+(?:-[a-z0-9]+)*$")
 _TITLE = re.compile(r"^ {0,3}# +(\S.*?)[ \t]*$")
 _HEADING = re.compile(r"^ {0,3}(#{1,2})(?:[ \t]+(.*?))?[ \t]*$")
@@ -270,6 +273,16 @@ def _again(doc: ProcessedDoc, decisions: list[ProcessedDoc]) -> str | None:
     return None
 
 
+def says_someone(text: str, shapes: NeverStore, lists: NeverStore) -> bool:
+    """Whether a text says a never-store keyword, or names a listed person by the people screen briefs use."""
+    return matches_text(text, lists) or brief_form.names(text, shapes, lists) is not None
+
+
+def id_says_someone(doc_id: str, shapes: NeverStore, lists: NeverStore) -> bool:
+    """Whether a doc's id, its words read as a phrase, says a keyword or names a listed person."""
+    return says_someone(doc_id.partition(":")[2].replace("-", " "), shapes, lists)
+
+
 def _names_someone(doc: ProcessedDoc, shapes: NeverStore) -> bool:
     """Whether the decision's own id, or one it replaces or contradicts, names a listed person: its words, read as a
     phrase."""
@@ -375,6 +388,16 @@ def brief_problems(doc: ProcessedDoc, standing: dict[str, Standing]) -> list[Doc
             message = "a Decisions line reads exactly as its decision's title, the words the decisions tool gives"
             problems.append(DocProblem(n, message, ""))
     return problems
+
+
+def brief_stops(edited_doc: ProcessedDoc, last: str | None, standing: dict[str, Standing]) -> list[int]:
+    """The lines a hand edit to a brief adds or changes under `## Decisions` that a put would refuse (DR-0565): the
+    take-in and the redact pass leave the edit on disk. A line its last commit already held stays, so redacting a
+    brief stored before #162 is never held up; the page marks such a line instead."""
+    committed = committed_doc(last)
+    held = {line for _, line in decisions_lines(committed)} if committed is not None else set[str]()
+    lines = dict(edited_doc.lines())
+    return [p.line for p in brief_problems(edited_doc, standing) if p.line is not None and lines[p.line] not in held]
 
 
 def unconfirmed(doc: ProcessedDoc, standing: dict[str, Standing]) -> set[int]:

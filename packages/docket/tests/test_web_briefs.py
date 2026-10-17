@@ -371,7 +371,7 @@ def test_a_decisions_line_from_before_the_log_is_marked_and_the_brief_stale(clie
     git(root, "commit", "-qm", f"Doc: {HARBOUR} rev 2")
     n = line_of(tmp_path, HARBOUR, "- A new printer was decided.")
     tree = page(client, f"/briefs?brief={HARBOUR}")
-    assert lines(tree)[n].find("span", class_="flag").text() == "not a confirmed decision"
+    assert [s.text() for s in lines(tree)[n].find_all("span", class_="flag")] == ["not a confirmed decision"]
     assert "a Decisions line cites no confirmed decision" in tree.find("main").text()
     listed = {r.find("a").text(): r for r in page(client, "/briefs").find_all("li", class_="brief-row")}
     assert listed["Harbour site"].attrs["data-state"] == "stale"

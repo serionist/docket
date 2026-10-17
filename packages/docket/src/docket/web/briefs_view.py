@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 from docket.briefs import BriefsReport, BriefState
 from docket.recall import DocLine, DocView, VerifiedLine
 from docket.vault.anchors import Anchor, format_anchor, trailing_anchors
-from docket.vault.decision_form import NOT_CONFIRMED
+from docket.vault.decision_form import NOT_A_DECISION, NOT_CONFIRMED
 from docket.vault.spans import Span
 from docket.web.briefs_state import ORPHANED, TYPES, BriefsState
 from docket.web.panel import SpanView, Style, anchored_rid, frontmatter_end, line_parts, span_view
@@ -282,7 +282,8 @@ def _brief(facts: Facts, state: BriefsState, found: BriefState, doc: DocView) ->
 
 
 def _line(line: DocLine, doc: DocView, facts: Facts, state: BriefsState) -> BriefLine:
-    n, text, flagged = line.n, line.text, bool(line.flags)
+    # The page marks a Decisions line no confirmed decision backs on its own; any other flag is a cited line's.
+    n, text, flagged = line.n, line.text, any(f != NOT_A_DECISION for f in line.flags)
     if n in facts.hidden_lines:
         return BriefLine(n, HIDDEN_LINE, "text", None, [], [], flagged=False, hidden=True, open=state.line == n)
     style, body, anchors = line_parts(text)

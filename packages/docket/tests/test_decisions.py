@@ -543,3 +543,57 @@ def test_the_report_says_flagged_lines_and_an_edit_on_disk() -> None:
         "           1 line(s) cite lines that changed",
         f"           {EDITED}",
     ]
+
+
+# -- the review's side doors ------------------------------------------------------------------------------------------
+
+STOP = "is a Decisions line that doesn't read as a current decision's title with its cite"
+
+
+def test_a_decisions_line_added_by_hand_is_never_taken_in(vault: Vault) -> None:
+    recall.doc_put(vault, brief(vault, "fleet-management", "Fleet management", []))
+    path = DocStore(vault).file("brief:fleet-management")
+    edited = path.read_text(encoding="utf-8") + f"- The dashboard ships before the pilot. {cite(vault, NOTE, TEN)}\n"
+    path.write_text(edited, encoding="utf-8", newline="\n")
+    head = git(vault.root, "rev-parse", "HEAD")
+    again = brief(vault, "fleet-management", "Fleet management", []).replace("type: brief", "type: brief\nrev: 1")
+    assert any(STOP in p for p in refused(vault, again))
+    assert any(STOP in left for left in DocStore(vault).redact_all().left)
+    assert (git(vault.root, "rev-parse", "HEAD"), path.read_text(encoding="utf-8")) == (head, edited)
+
+
+def test_read_and_search_mark_a_decisions_line_no_confirmed_decision_backs(vault: Vault) -> None:
+    text = brief(
+        vault,
+        "fleet-management",
+        "Fleet management",
+        ["- Decided by mail, zanzibar. [r:mail:<offer-1@northwind.example>#2]"],
+    )
+    path = vault.root / "processed" / "brief" / "fleet-management.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text.replace("covers: []", "covers: [mail:<offer-1@northwind.example>]"), encoding="utf-8")
+    git(vault.root, "add", "--", str(path))
+    git(vault.root, "commit", "-qm", "Doc: brief:fleet-management rev 1")
+    shown = recall.read(vault, "brief:fleet-management").doc
+    assert shown is not None
+    [marked] = [line for line in shown.lines if "zanzibar" in line.text]
+    assert marked.flags == ["not a confirmed decision"]
+    assert "        ! not a confirmed decision" in render.read(recall.read(vault, "brief:fleet-management"))
+    index_update(vault)
+    [hit] = [h for g in search(vault, "zanzibar").groups for h in g.hits if h.doc == "brief:fleet-management"]
+    assert hit.marks == ["not a confirmed decision"]
+    # A redact pass doesn't hold up a brief stored before the log: its line was there already.
+    assert DocStore(vault).redact_all().left == []
+
+
+def test_the_report_hides_a_decision_whose_title_or_link_names_someone_listed_later(vault: Vault) -> None:
+    recall.doc_put(
+        vault, decision(FIRST, "Proposed: Dora Minta runs the charging queue", [f"- Said. {cite(vault, NOTE, TEN)}"])
+    )
+    propose(vault, "decision:2026-10-13-vera-plan", "Proposed: the plan holds")
+    decide(vault, "decision:2026-10-13-vera-plan", "confirmed")
+    propose(vault, LATER, "Proposed: the pilot comes first", head=["contradicts: [decision:2026-10-13-vera-plan]"])
+    assert len(decisions.report(vault).decisions) == 3
+    listed = set_lists(vault, people=["Dóra Minta", "Vera Plan"])
+    found = decisions.report(listed)
+    assert (found.decisions, found.hidden) == ([], 3)

@@ -50,6 +50,7 @@ from docket.models import config as models_config
 from docket.models.provider import Off
 from docket.plaintext import fold, words
 from docket.vault import decision_form, legacy
+from docket.vault.anchors import trailing_anchors
 from docket.vault.entities import entity_files, load_entities
 from docket.vault.processed import ProcessedDoc, doc_path, parse_doc
 from docket.vault.rawlog import RunFile, parse_run_file
@@ -365,7 +366,7 @@ class Indexer:
         if row is not None and row[0] is not None:
             doc = row[0]
             self.drop_owner(f"d {doc}")
-            for table in ("doc_covers", "doc_anchors", "old_paths", "derived_from", "doc_lines"):
+            for table in ("doc_covers", "doc_anchors", "old_paths", "derived_from", "doc_lines", "decision_lines"):
                 self.conn.execute(f"DELETE FROM {table} WHERE doc = ?", (doc,))  # noqa: S608 - fixed table names
             self.conn.execute("DELETE FROM docs WHERE id = ?", (doc,))
         self.conn.execute("DELETE FROM doc_files WHERE path = ?", (rel,))
@@ -389,11 +390,11 @@ class Indexer:
             doc_id = meta.id
             chunks, anchors = doc_chunks(doc, self._info, self.tz)
             self.conn.execute(
-                "INSERT INTO docs (id, type, rev, path, title, by, supersedes, superseded_by, entities) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)",
+                "INSERT INTO docs (id, type, rev, path, title, by, supersedes, superseded_by, entities, status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
                 (
                     meta.id, meta.type, meta.rev, rel, doc_title(doc), meta.by, json.dumps(meta.supersedes),
-                    json.dumps(meta.entities),
+                    json.dumps(meta.entities), meta.status,
                 ),
             )  # fmt: skip
             self.conn.executemany(
@@ -411,6 +412,14 @@ class Indexer:
                 "INSERT INTO derived_from (doc, line, ordinal, src, rev, src_line, hash) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 flags.ref_rows(doc),
             )
+            if meta.type == "brief":
+                self.conn.executemany(
+                    "INSERT INTO decision_lines (doc, line, cites) VALUES (?, ?, ?)",
+                    [
+                        (meta.id, n, json.dumps(sorted({r.doc for r in trailing_anchors(line).refs})))
+                        for n, line in decision_form.decisions_lines(doc)
+                    ],
+                )
             self.conn.executemany(
                 "INSERT OR IGNORE INTO doc_lines (doc, hash, line) VALUES (?, ?, ?)",
                 [(meta.id, found, n) for n, found in sorted(doc.citable().items())],

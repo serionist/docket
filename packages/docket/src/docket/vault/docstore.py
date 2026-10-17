@@ -579,10 +579,15 @@ class DocStore:
     def _hand_edit(self, edited: ProcessedDoc, text: str, last: str | None) -> derived.HandEdit:
         """A hand edit as `derived.hand_edit` reads it, and for a brief or a decision its own stops too: one that names
         a listed person stays on disk, as one that says a keyword does (DR-0558), and so does one that changes a
-        decision's status or links, or a confirmed or rejected decision at all (DR-0564)."""
+        decision's status or links, or a confirmed or rejected decision at all (DR-0564), or one that adds a brief's
+        Decisions line no current decision backs (DR-0565)."""
         edit = derived.hand_edit(edited.meta.type, text, last, self.redactor, self.lists)
         if edited.meta.type == "brief":
-            found = {p.line or 2: brief_form.NAMES_LISTED for p in brief_form.screen(edited, self.root, self.lists)}
+            # A Decisions line the edit adds or changes is held to what a put holds it to (DR-0565); a line that also
+            # names a listed person says that instead.
+            standing = decision_form.standings(self.decisions())
+            found = dict.fromkeys(decision_form.brief_stops(edited, last, standing), decision_form.DECISIONS_EDIT)
+            found |= {p.line or 2: brief_form.NAMES_LISTED for p in brief_form.screen(edited, self.root, self.lists)}
         elif edited.meta.type == "decision":
             found = dict(decision_form.hand_stops(edited, text, last, self.root, self.lists))
         else:

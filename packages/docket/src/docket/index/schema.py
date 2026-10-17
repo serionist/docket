@@ -24,7 +24,9 @@ from docket.index.text import snowball_version
 # source's folder are problems (DR-0446).
 # 8: an author written Name <id> mentions the entity whose ids for the record's source hold the id (DR-0471).
 # 9: derived_from and doc_lines, what each line cites and every doc's citable lines (DR-0542).
-SCHEMA_VERSION = 9
+# 10: a decision's status in docs, and decision_lines, the decisions each of a brief's Decisions lines cites, so
+# a search hit marks one that cites no confirmed decision (DR-0565).
+SCHEMA_VERSION = 10
 TOKENIZER = "unicode61 remove_diacritics 2"
 # remove_diacritics 2 came in SQLite 3.27.
 MIN_SQLITE = (3, 27, 0)
@@ -59,7 +61,7 @@ CREATE INDEX chunks_rid ON chunks (rid);
 CREATE INDEX chunks_doc ON chunks (doc);
 CREATE TABLE docs (
   id TEXT PRIMARY KEY, type TEXT NOT NULL, rev INTEGER NOT NULL, path TEXT NOT NULL, title TEXT NOT NULL,
-  by TEXT NOT NULL, supersedes TEXT NOT NULL, superseded_by TEXT, entities TEXT NOT NULL
+  by TEXT NOT NULL, supersedes TEXT NOT NULL, superseded_by TEXT, entities TEXT NOT NULL, status TEXT
 ) WITHOUT ROWID;
 CREATE TABLE doc_files (path TEXT PRIMARY KEY, sha256 TEXT NOT NULL, doc TEXT) WITHOUT ROWID;
 CREATE TABLE doc_covers (doc TEXT NOT NULL, rid TEXT NOT NULL, PRIMARY KEY (doc, rid)) WITHOUT ROWID;
@@ -79,6 +81,8 @@ CREATE TABLE derived_from (
 ) WITHOUT ROWID;
 CREATE INDEX derived_from_src ON derived_from (src);
 CREATE TABLE doc_lines (doc TEXT NOT NULL, hash TEXT NOT NULL, line INTEGER NOT NULL, PRIMARY KEY (doc, hash, line))
+  WITHOUT ROWID;
+CREATE TABLE decision_lines (doc TEXT NOT NULL, line INTEGER NOT NULL, cites TEXT NOT NULL, PRIMARY KEY (doc, line))
   WITHOUT ROWID;
 CREATE TABLE entities (
   id TEXT PRIMARY KEY, type TEXT NOT NULL, path TEXT NOT NULL, names TEXT NOT NULL, status TEXT NOT NULL, role TEXT,

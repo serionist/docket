@@ -63,15 +63,28 @@ def report(
     store = DocStore(vault)
     docs = store.decisions()
     standing = decision_form.standings(docs)
-    by_id = {e.id: e for e in load_entities(vault.root).entities}
+    known = load_entities(vault.root).entities
+    by_id = {e.id: e for e in known}
     lists = vault.config.never_store
+    shapes = brief_form.phrases(known, lists)
     wanted = set(entities) if entities is not None else None
+    contradicted: dict[str, list[str]] = {}
+    for doc in sorted(docs, key=lambda d: d.meta.id):
+        for target in doc.meta.contradicts:
+            contradicted.setdefault(target, []).append(doc.meta.id)
     out = DecisionsReport()
     shown: list[ProcessedDoc] = []
     for doc in sorted(docs, key=lambda d: d.meta.id, reverse=True):
-        meta = doc.meta
+        meta, now = doc.meta, standing[doc.meta.id]
         named = [by_id[e] for e in (meta.subject or "", *meta.entities) if e in by_id]
-        if slug_listed(meta.subject or "", lists) or any(brief_form.held(e, lists) for e in named):
+        links = (meta.id, *meta.replaces, *meta.contradicts, *meta.supersedes, *contradicted.get(meta.id, []))
+        if (
+            slug_listed(meta.subject or "", lists)
+            or any(brief_form.held(e, lists) for e in named)
+            or decision_form.says_someone(now.title, shapes, lists)
+            or any(decision_form.id_says_someone(i, shapes, lists) for i in (*links, now.superseded_by or "") if i)
+        ):
+            # A never-store list holds its subject, or its title or an id it shows names someone (DR-0558).
             out.hidden += 1
             continue
         if (wanted is None or meta.subject in wanted) and (status is None or standing[meta.id].status == status):
@@ -83,10 +96,6 @@ def report(
     histories = store.histories([d.meta.id for d in shown])
     commits = {d.meta.id: histories[d.meta.id][0][1] for d in shown if histories.get(d.meta.id)}
     times = commit_times(Git(vault.root, home=vault.home), sorted(set(commits.values())))
-    contradicted: dict[str, list[str]] = {}
-    for doc in sorted(docs, key=lambda d: d.meta.id):
-        for target in doc.meta.contradicts:
-            contradicted.setdefault(target, []).append(doc.meta.id)
     conn = open_index(vault)
     try:
         found = [f for f in flags.from_index(conn) if f.flagged]

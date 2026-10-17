@@ -34,7 +34,7 @@ from docket.index import flags, lookup
 from docket.index import update as index_update
 from docket.index.build import open_index
 from docket.index.lookup import ReadIndex
-from docket.vault import legacy
+from docket.vault import decision_form, legacy
 from docket.vault.anchors import (
     Anchor,
     AnchorError,
@@ -476,6 +476,10 @@ def _marks(call: _Call, doc: ProcessedDoc) -> dict[int, list[str]]:
             marks.setdefault(found.line, []).append(found.message)
     for n, said in _damage(call, doc).items():
         marks.setdefault(n, []).extend(said)
+    if doc.meta.type == "brief":
+        # A Decisions line that cites no confirmed decision, as the page marks it (DR-0565).
+        for n in decision_form.unconfirmed(doc, decision_form.standings(call.store.decisions())):
+            marks.setdefault(n, []).append(decision_form.NOT_A_DECISION)
     return marks
 
 

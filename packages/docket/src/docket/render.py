@@ -194,6 +194,7 @@ def search(result: SearchResult, tz: ZoneInfo) -> list[str]:
             place = f"  {hit.place}" if hit.place else ""
             lines.append(f"  {hit.rank:>3}. {hit.locator}{doc_lines}{place}{at}{f'  {who}' if who else ''}")
             lines.append(f"       {hit.snippet}")
+            lines += [f"       ! {mark}" for mark in hit.marks]
             lines += [f"       -> {anchor}" for anchor in hit.anchors]
             if hit.also:
                 lines.append(f"       also {', '.join(hit.also)}")

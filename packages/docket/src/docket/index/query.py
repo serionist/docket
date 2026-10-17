@@ -66,6 +66,7 @@ from docket.models.provider import RERANK_SECONDS, Off
 from docket.plaintext import WORD, fold, words
 from docket.vault import neverstore
 from docket.vault.config import NeverStore
+from docket.vault.decision_form import NOT_A_DECISION
 from docket.vault.vault import Vault
 
 CANDIDATES = 200
@@ -157,6 +158,8 @@ class Hit(BaseModel):
     also: list[str] = []
     # Where a document's hit sits in its file: `page 3`, `slide 4`, `Costs!41:80` (DR-0483).
     place: str | None = None
+    # What the hit's lines say of themselves: a brief's Decisions line that cites no confirmed decision (DR-0565).
+    marks: list[str] = []
 
 
 class Group(BaseModel):
@@ -1053,6 +1056,27 @@ def _iso(value: datetime) -> str:
     return f"{at:%Y-%m-%dT%H:%M:%S}.{at.microsecond // 1000:03d}Z"
 
 
+def _unconfirmed(conn: sqlite3.Connection, briefs: set[str]) -> dict[str, set[int]]:
+    """Each brief's Decisions lines that cite no confirmed decision, by brief."""
+    if not briefs:
+        return {}
+    confirmed = {r[0] for r in conn.execute("SELECT id FROM docs WHERE type = 'decision' AND status = 'confirmed'")}
+    out: dict[str, set[int]] = {}
+    marks = ", ".join("?" * len(briefs))
+    query = f"SELECT doc, line, cites FROM decision_lines WHERE doc IN ({marks})"  # noqa: S608 - placeholders only
+    for doc, line, cites in conn.execute(query, sorted(briefs)):
+        if not set(json.loads(cites)) & confirmed:
+            out.setdefault(doc, set()).add(line)
+    return out
+
+
+def _marked(row: _Row, unconfirmed: dict[str, set[int]]) -> bool:
+    lines = unconfirmed.get(row.doc or "", set())
+    return (
+        row.line_from is not None and row.line_to is not None and any(row.line_from <= n <= row.line_to for n in lines)
+    )
+
+
 def search(
     vault: Vault,
     query: str,
@@ -1216,6 +1240,7 @@ def _run(
     replaced = {
         r[0] for r in s.conn.execute("SELECT id FROM docs WHERE type = 'decision' AND superseded_by IS NOT NULL")
     }
+    unconfirmed = _unconfirmed(s.conn, {row.doc for row in kept if row.doc and row.doc.startswith("brief:")})
     by_group: dict[str, list[_Row]] = {}
     for row in kept:
         by_group.setdefault(row.grp, []).append(row)
@@ -1242,6 +1267,7 @@ def _run(
                     anchors=row.anchors,
                     also=row.also,
                     place=s.place(row),
+                    marks=[NOT_A_DECISION] if _marked(row, unconfirmed) else [],
                 )
             )
         result.groups.append(group)
