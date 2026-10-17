@@ -71,7 +71,9 @@ def test_a_held_recording_s_audio_waits(tmp_path: Path) -> None:
     assert reader.state_of(vault, CALL) == "held"
 
 
-@pytest.mark.parametrize("state", ["not-fetched", "staged", "held", "recut", "not-downloaded", "no-key", "stored"])
+@pytest.mark.parametrize(
+    "state", ["not-fetched", "staged", "held", "recut", "cut-by-characters", "not-downloaded", "no-key", "stored"]
+)
 def test_the_recording_page_says_why_it_plays_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str
 ) -> None:

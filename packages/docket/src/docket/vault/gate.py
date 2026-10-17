@@ -514,9 +514,12 @@ class Gate:
         loose = sorted({*untracked, *(p for p in changed if (root / p).exists())})
         removed = [p for p in changed if not (root / p).exists()]
         lfs: Lfs | None = None
-        # A sidecar left beside a file a commit already took, by a crash before its deletion: only the sidecar goes.
+        # A sidecar left beside a file a commit already took, by a crash before its deletion: only the sidecar goes,
+        # with the keys of the files it replaced once HEAD holds its file (#169's rule; DR-0562).
         for sidecar, rid in swept.leftover:
-            if not set(media_staged.rel(root, media_layout.stored_files(root, rid))) & set(loose):
+            stored = media_layout.stored_files(root, rid)
+            if not set(media_staged.rel(root, stored)) & set(loose):
+                self._forget_replaced(sidecar, stored)
                 sidecar.unlink(missing_ok=True)
         # Per source: each file to commit, where it goes back to on a failed commit, its sidecar and what it replaces.
         groups: dict[str, list[_Storing]] = {}
@@ -537,7 +540,7 @@ class Gate:
                 continue
             stem = f"{path.name.split('.', 1)[0]}."
             gone = tuple(p for p in removed if Path(p).name.startswith(stem))
-            groups.setdefault(source, []).append(_Storing(path, None, sidecar, gone))
+            groups.setdefault(source, []).append(_Storing(path, None, sidecar, gone, tuple(found.replaces_keys)))
         for item in swept.waiting:
             versions = screen.raw.versions(item.sidecar.rid)
             if not versions:
@@ -556,6 +559,13 @@ class Gate:
             # is read now and deleted once the replacement is committed; until then HEAD still holds the file.
             old = media_layout.stored_files(root, item.sidecar.rid)
             old_keys = tuple(k for k in (media_staged.key_of(p) for p in old) if k is not None)
+            if old_keys:
+                # Before the swap: whichever promotion sees the replacement committed deletes them, even after a crash.
+                media_staged.write_sidecar(
+                    self.vault.home,
+                    item.sidecar_path,
+                    item.sidecar.model_copy(update={"replaces_keys": list(old_keys)}),
+                )
             for path in old:
                 if path != target:
                     retry(lambda path=path: path.unlink(missing_ok=True))
@@ -564,6 +574,18 @@ class Gate:
                 _Storing(target, item.path, item.sidecar_path, tuple(media_staged.rel(root, old)), old_keys)
             )
         return groups
+
+    def _forget_replaced(self, sidecar: Path, stored: list[Path]) -> None:
+        """The keys a committed replacement's sidecar names, deleted once the stored file is that replacement: what a
+        swap that landed and then raised left to do."""
+        found = media_staged.read_sidecar(sidecar)
+        if found is None or not found.replaces_keys or len(stored) != 1:
+            return
+        if media_staged.key_of(stored[0]) != found.key:
+            return
+        for key in found.replaces_keys:
+            if key != found.key:
+                self.keys.delete(key)
 
     def _promote_source(self, name: str, items: list[tuple[Entry, RawRecord]]) -> SourceRun:
         run = self.vault.rawlog.write_run(name, [final for _, final in items])
@@ -769,10 +791,12 @@ def _cut_rids(scan: Scan) -> set[str]:
     return {e.staged.record.rid for e in scan.entries if e.staged.cuts}
 
 
-def _cuts_of(target: Path, sidecar: Path) -> tuple[str, list[media_layout.Span]]:
-    """A stored file's rid hash, from its name, and the ranges its sidecar says it was cut by."""
+def _cuts_of(target: Path, sidecar: Path) -> tuple[str, str, list[media_layout.Span]]:
+    """A stored file's rid hash, from its name; its key id, from its header; and the ranges its sidecar says it was cut
+    by (DR-0562)."""
     found = media_staged.read_sidecar(sidecar)
-    return target.name.split(".", 1)[0], list(found.cuts) if found is not None else []
+    key = media_staged.key_of(target) or (found.key if found is not None else "")
+    return target.name.split(".", 1)[0], key, list(found.cuts) if found is not None else []
 
 
 def _resolve(ref: str, entries: list[Entry]) -> Entry:

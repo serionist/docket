@@ -291,7 +291,7 @@ cut is stored as it came.
 | cut after its audio was put | the staged audio goes; the run's `media` line names the recording, and its media step puts it again, cut |
 | cut after its audio was stored | the stored file isn't played (`recut`); the run names it, and the new file takes its place, the old one's key deleted here once the new one is committed |
 | held | no audio until the release, and a stored file isn't played; then the next run puts it, cut |
-| a record cut by characters | no audio: there is no time to cut it at |
+| a record cut by characters | no audio, and a stored file stays unplayed: no cut of the audio can match; the Recording page and `docket media status` say so |
 | decided by hand before Docket kept which way | no audio until `docket media confirm-cuts <rid>`, in your own terminal, shows each decision against the versions cut by hand and you confirm they were cuts |
 
 - The cutting runs in a child process with a memory cap and 15 minutes; uncut audio is plain only in a folder of
@@ -299,7 +299,8 @@ cut is stored as it came.
 - A put is refused when the audio and its transcript may not share a timeline: the transcript runs past the audio's
   end, or the audio's first sound is more than 1.5 s from its first words. The put names the offset; nothing is
   stored.
-- Each stored file's cuts are committed beside it in `state/media-cuts/<source>.jsonl`, times only.
+- Each stored file's cuts are committed beside it in `state/media-cuts/<source>.jsonl`, times and its key id
+  only, so another machine's line never vouches for this machine's file.
 
 Keys never enter git. Each clone keeps its own, sealed in its git dir's Docket folder, with the seal in the system
 keychain. Where no keychain answers (a server, CI), `docket media keys init --store file` keeps the seal in a file

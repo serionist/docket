@@ -10,10 +10,13 @@ and any extension, so nothing computes a month to find a file. The extension com
 recording's is `webm` (DR-0560).
 
 The sidecar's schema 2 adds the ranges the file was cut by (DR-0561); a schema 1 sidecar reads as cut by none.
+Schema 3 adds the key ids of the stored files a replacement takes over, written before the swap, so whichever
+promotion sees the replacement committed deletes them (DR-0562).
 """
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -25,9 +28,11 @@ from docket.vault.records import source_name_problem
 from docket.vault.staging import STAGING, rid_hash
 
 STAGED = "_media"
+# A key's id: the sha256 of its file's age header (DR-0549).
+KEY = re.compile(r"^[0-9a-f]{64}$")
 STORED = "media"
 SUFFIX = ".age"
-SIDECAR_VERSION = 2
+SIDECAR_VERSION = 3
 # The types `media_put` knows by their first bytes: what the extension and a served type say, nothing more.
 AUDIO = frozenset({"mp3", "m4a", "ogg", "opus", "wav", "flac", "webm", "aac"})
 TYPES = {
@@ -69,7 +74,7 @@ class Sidecar(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[1, 2] = SIDECAR_VERSION
+    schema_version: Literal[1, 2, 3] = SIDECAR_VERSION
     rid: str
     key: str
     ext: str
@@ -77,6 +82,7 @@ class Sidecar(BaseModel):
     put_at: datetime
     problem: str | None = None
     cuts: list[Span] = Field(default_factory=list[Span])
+    replaces_keys: list[str] = Field(default_factory=list[str])
 
     @property
     def ranges(self) -> tuple[tuple[int, int], ...]:
@@ -86,6 +92,10 @@ class Sidecar(BaseModel):
     def _version(self) -> Sidecar:
         if self.schema_version == 1 and self.cuts:
             raise ValueError("a schema 1 sidecar holds no cuts")
+        if self.schema_version < 3 and self.replaces_keys:
+            raise ValueError("only a schema 3 sidecar names the keys it replaces")
+        if any(KEY.match(k) is None for k in self.replaces_keys):
+            raise ValueError("a key id is 64 hex")
         return self
 
     @field_validator("put_at")

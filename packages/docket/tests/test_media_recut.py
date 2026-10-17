@@ -16,6 +16,7 @@ from docket.media import cutlog, layout, reader
 from docket.media import put as media
 from docket.media import staged as media_staged
 from docket.media.keystore import KeyStore
+from docket.media.status import lines as status_lines
 from docket.vault import holds, releaselog
 from docket.vault.cuts import Cut
 from docket.vault.gate import Gate
@@ -99,7 +100,8 @@ def test_a_stored_file_cut_by_less_than_now_is_replaced_in_place_and_its_key_goe
     samples = decoded(found.data)
     assert dbfs(samples, 1780, 4220) < -60 and dbfs(samples, 11_780, 13_220) < -60
     assert dbfs(samples, 6000, 9000) > -15
-    assert cutlog.logged(vault.root, "plaud")[rid_hash(CALL)] == ((2000, 4000), (12_000, 13_000))
+    lines = cutlog.logged(vault.root, "plaud")
+    assert cutlog.cut_by(lines, rid_hash(CALL), stored(vault)) == ((2000, 4000), (12_000, 13_000))
     assert Gate(vault).media_due("plaud") == []
     with pytest.raises(DocketError, match="stored already"):
         put(vault)
@@ -169,7 +171,9 @@ def test_a_swap_whose_commit_doesn_t_land_puts_both_files_back(tmp_path: Path, m
     assert old_key is not None and not KeyStore(vault.home).has(old_key)
 
 
-def test_a_swap_that_lands_and_then_raises_keeps_the_old_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_swap_that_lands_and_then_raises_keeps_the_old_key_until_the_next_promotion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     vault = released_and_stored(tmp_path)
     old_key = media_staged.key_of(stored(vault))
     release(vault, (12_000, 13_000))
@@ -188,13 +192,53 @@ def test_a_swap_that_lands_and_then_raises_keeps_the_old_key(tmp_path: Path, mon
     monkeypatch.setattr(Vault, "commit", real)
     assert reader.state_of(vault, CALL) == "ok", "the replacement is what HEAD holds"
     assert old_key is not None and KeyStore(vault.home).has(old_key), "kept: Docket can't tell the commit landed"
+    # The next promotion sees HEAD hold the replacement its sidecar names, and deletes the keys it replaced.
     assert not Gate(vault).promote().media
     assert not layout.sidecar_path(vault.root, CALL).exists()
+    assert not KeyStore(vault.home).has(old_key)
+    assert reader.state_of(vault, CALL) == "ok"
+
+
+def test_a_swap_git_can_t_place_is_committed_next_time_and_its_old_key_goes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from docket.vault.git import Git
+
+    vault = released_and_stored(tmp_path)
+    old_key = media_staged.key_of(stored(vault))
+    release(vault, (12_000, 13_000))
+    put(vault)
+    real, asked = Vault.commit, Git.head_id
+
+    def broken(self: Git) -> str | None:
+        raise DocketError("git rev-parse: broken")
+
+    def fails(self: Vault, paths: list[str], message: str) -> str | None:
+        if message.startswith("Media:"):
+            monkeypatch.setattr(Git, "head_id", broken)
+            raise DocketError("git refused")
+        return real(self, paths, message)
+
+    monkeypatch.setattr(Vault, "commit", fails)
+    with pytest.raises(DocketError, match="git refused"):
+        Gate(vault).promote()
+    monkeypatch.setattr(Vault, "commit", real)
+    monkeypatch.setattr(Git, "head_id", asked)
+    assert old_key is not None and KeyStore(vault.home).has(old_key)
+    assert [m.stored for m in Gate(vault).promote().media] == [1]
+    assert not KeyStore(vault.home).has(old_key)
+    assert reader.state_of(vault, CALL) == "ok"
 
 
 def _swap_by_hand(vault: Vault) -> Path:
-    """What a crash between the swap's moves and its commit leaves: the replacement where it goes, the old file gone,
-    the sidecar still in staging."""
+    """What a crash between the swap's moves and its commit leaves: the sidecar naming the keys it replaces, the
+    replacement where it goes, the old file gone, the sidecar still in staging."""
+    sidecar = media_staged.read_sidecar(layout.sidecar_path(vault.root, CALL))
+    assert sidecar is not None
+    old = [k for k in (media_staged.key_of(p) for p in layout.stored_files(vault.root, CALL)) if k]
+    media_staged.write_sidecar(
+        vault.home, layout.sidecar_path(vault.root, CALL), sidecar.model_copy(update={"replaces_keys": old})
+    )
     [file] = layout.staged_files(vault.root, CALL)
     versions = vault.rawlog.read(CALL)
     target = layout.stored_path(vault.root, CALL, versions[-1].ts, "webm")
@@ -215,7 +259,7 @@ def test_a_crash_mid_swap_is_committed_by_the_next_promotion(tmp_path: Path) -> 
     assert [m.stored for m in Gate(vault).promote().media] == [1]
     assert in_head(vault) == [target.relative_to(vault.root).as_posix()]
     assert git(vault.root, "status", "--porcelain", "media") == ""
-    assert old_key is not None and KeyStore(vault.home).has(old_key), "unknown after a crash: kept"
+    assert old_key is not None and not KeyStore(vault.home).has(old_key), "named in the sidecar before the crash"
     assert reader.state_of(vault, CALL) == "ok"
     # At a new name: the old file's removal goes in the same commit.
     other = media_vault(tmp_path / "other")
@@ -236,6 +280,73 @@ def test_a_record_cut_by_characters_leaves_its_stored_file_unplayed(tmp_path: Pa
     Gate(vault).stage([note])
     Gate(vault).classify(f"{CALL}/note", "work", [Cut(start=0, end=4)])
     in_raw(vault)
-    assert reader.state_of(vault, CALL) == "recut"
+    assert reader.state_of(vault, CALL) == "cut-by-characters"
     assert Gate(vault).media_due("plaud") == []
-    assert not reader.recut(vault, "plaud:nothing")
+    out = "\n".join(status_lines(vault))
+    assert "1 unplayed: a record of each was cut by characters, so its audio can't be cut to match" in out
+    assert reader.cuts_of(vault, "plaud:nothing", stored(vault)) == "ok"
+
+
+def test_a_staged_hand_cut_stops_a_stored_file_at_once(tmp_path: Path) -> None:
+    """The cut needn't reach raw first: the reader reckons staged versions' cuts, as the screen does."""
+    vault = media_vault(tmp_path)
+    put(vault, audio(3000))
+    in_raw(vault)
+    assert reader.state_of(vault, CALL) == "ok"
+    Gate(vault).stage([r for r in call(text="The crane passed its load test, twice.") if r.rid == POLISHED])
+    Gate(vault).classify(POLISHED, "work", [Cut(start=2000, end=3000, unit="ms")])
+    assert reader.state_of(vault, CALL) == "recut"
+    assert "1 waiting for a new cut" in "\n".join(status_lines(vault))
+    # Staged cuts that don't fit their transcript leave the file waiting too.
+    staging = Staging(vault.root, vault.home)
+    [entry] = [e for e in staging.scan().entries if e.staged.record.rid == POLISHED]
+    staging.write(entry.staged.model_copy(update={"cuts": [Cut(start=60_000, end=70_000, unit="ms")]}))
+    assert reader.state_of(vault, CALL) == "recut"
+
+
+def test_two_machines_lines_never_vouch_for_each_other_s_file(tmp_path: Path) -> None:
+    """The file kept is the one cut by less; another machine's later line, for its own file, says more. Only the line
+    for the kept file's key counts, and a line with no key matches nothing."""
+    vault = released_and_stored(tmp_path)
+    kept = stored(vault)
+    cutlog.append(
+        vault.home,
+        vault.root,
+        "plaud",
+        [(rid_hash(CALL), "e" * 64, [layout.Span(start=2000, end=4000), layout.Span(start=12_000, end=13_000)])],
+        "other-box",
+    )
+    release(vault, (12_000, 13_000))
+    assert reader.state_of(vault, CALL) == "recut"
+    assert Gate(vault).media_due("plaud") == ["rec-a"]
+    lines = cutlog.logged(vault.root, "plaud")
+    assert cutlog.cut_by(lines, rid_hash(CALL), kept) == ((2000, 4000),)
+    assert cutlog.cut_by(lines, rid_hash(CALL), None) == ()
+    # A schema 1 line, from before lines named keys: it matches no file, so the stored file reads as cut by none.
+    path = cutlog.log_path(vault.root, "plaud")
+    old = cutlog.Line(schema_version=1, rid=rid_hash(CALL), cuts=[layout.Span(start=0, end=99_000)], at=AT, machine="m")
+    path.write_text(old.model_dump_json() + "\n", encoding="utf-8")
+    assert cutlog.logged(vault.root, "plaud") == {}
+    assert reader.state_of(vault, CALL) == "recut"
+
+
+def test_a_leftover_sidecar_deletes_replaced_keys_only_beside_its_own_file(tmp_path: Path) -> None:
+    """A sidecar left in staging names keys to delete, but the stored file isn't the one it describes: nothing goes."""
+    vault = released_and_stored(tmp_path)
+    kept = media_staged.key_of(stored(vault))
+    assert kept is not None
+    sidecar = layout.Sidecar(
+        rid=CALL, key="a" * 64, ext="webm", bytes=3, put_at=AT, replaces_keys=[kept], cuts=[layout.Span(start=0, end=1)]
+    )
+    media_staged.write_sidecar(vault.home, layout.sidecar_path(vault.root, CALL), sidecar)
+    assert not Gate(vault).promote().media
+    assert not layout.sidecar_path(vault.root, CALL).exists()
+    assert KeyStore(vault.home).has(kept)
+    assert reader.state_of(vault, CALL) == "ok"
+
+
+def test_media_status_counts_only_stored_files_it_can_name(tmp_path: Path) -> None:
+    vault = released_and_stored(tmp_path)
+    stray = stored(vault).with_name(f"{'0' * 32}.mp3.age")
+    stray.write_bytes(stored(vault).read_bytes())  # an age file, of no record the raw log holds
+    assert "stored   2 file(s)" in "\n".join(status_lines(vault))

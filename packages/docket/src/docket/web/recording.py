@@ -92,6 +92,7 @@ AUDIO: dict[reader.State, NoAudio] = {
     "staged": "staged",
     "held": "held",
     "recut": "recut",
+    "cut-by-characters": "cut-by-characters",
     "not-downloaded": "not-downloaded",
     "no-key": "no-key",
 }

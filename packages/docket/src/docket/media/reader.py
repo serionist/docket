@@ -8,6 +8,7 @@ can't be.
 | `staged` | it waits at the gate with its record |
 | `held` | a hold covers the rid, stored or not |
 | `recut` | the stored file was cut by less than its family needs now: not played; the next run puts it again |
+| `cut-by-characters` | a record of its family was cut by characters: no cut of the audio can match it |
 | `not-downloaded` | an LFS pointer is in place of the stored file |
 | `no-key` | the stored file is here, its key isn't, or this machine can't open the key's seal |
 
@@ -27,10 +28,12 @@ from docket.media.keystore import KeyStore
 from docket.vault import holds, releaselog
 from docket.vault.records import owning_id
 from docket.vault.spans import RawLookup
-from docket.vault.staging import rid_hash
+from docket.vault.staging import Staging, rid_hash
 from docket.vault.vault import Vault
 
-State = Literal["ok", "not-fetched", "staged", "held", "recut", "not-downloaded", "no-key"]
+State = Literal["ok", "not-fetched", "staged", "held", "recut", "cut-by-characters", "not-downloaded", "no-key"]
+# What a stored file's cuts say against its family's: enough, too few, or none can be enough.
+Cuts = Literal["ok", "recut", "cut-by-characters"]
 
 
 @dataclass(frozen=True)
@@ -56,21 +59,26 @@ def _held(vault: Vault, rid: str) -> bool:
     return owning_id(rid, source, holds.read(vault.root, source)) is not None
 
 
-def recut(vault: Vault, rid: str, raw: RawLookup | None = None) -> bool:
-    """Whether a rid's stored file was cut by less than its family needs now: the release's cuts and the `[cut]`
-    segments of its transcripts in raw, against its line in the cut log (DR-0562). A record cut by characters has no
-    time to cut at, so its stored file isn't played either."""
+def cuts_of(vault: Vault, rid: str, path: Path, raw: RawLookup | None = None) -> Cuts:
+    """Whether the rid's stored file at `path` was cut by what its family needs now: the release's cuts and the
+    `[cut]` segments of its transcripts, staged ones with their cuts made, against the cut log's line for the file's
+    key (DR-0562), as the screen reckons them. A record cut by characters has no time to cut at, so no put can match
+    it, and staged cuts that don't fit yet leave the file waiting too."""
     lookup = raw or RawLookup(vault.root)
-    records = [r for other in lookup.nested(rid) for r in lookup.versions(other)]
-    if not records:
-        return False
-    if any(cut_ranges.by_characters(r) for r in records):
-        return True
-    latest = (lookup.versions(rid) or records)[-1]
-    release = releaselog.read_all(vault.root).covering(latest)
-    needed = cut_ranges.needed(records, [(c.start, c.end) for c in release.cuts] if release is not None else [])
-    logged = cutlog.logged(vault.root, layout.source_of(rid)).get(rid_hash(rid), ())
-    return not cut_ranges.covers(logged, needed.ranges)
+    in_raw = [r for other in lookup.nested(rid) for r in lookup.versions(other)]
+    staged = [e for e in Staging(vault.root, vault.home).scan().entries if layout.in_family(rid, e.staged.record.rid)]
+    made = cut_ranges.made(staged, in_raw)
+    if made == "characters":
+        return "cut-by-characters"
+    if made == "unfit":
+        return "recut"
+    if not made:
+        return "ok"
+    own = [r for r in made if r.rid == rid]
+    release = releaselog.read_all(vault.root).covering((own or made)[-1])
+    needed = cut_ranges.needed(made, [(c.start, c.end) for c in release.cuts] if release is not None else [])
+    logged = cutlog.cut_by(cutlog.logged(vault.root, layout.source_of(rid)), rid_hash(rid), path)
+    return "ok" if cut_ranges.covers(logged, needed.ranges) else "recut"
 
 
 def state_of(vault: Vault, rid: str, keys: KeyStore | None = None, raw: RawLookup | None = None) -> State:
@@ -80,8 +88,9 @@ def state_of(vault: Vault, rid: str, keys: KeyStore | None = None, raw: RawLooku
     if path is not None:
         if _held(vault, rid):
             return "held"
-        if recut(vault, rid, raw):
-            return "recut"
+        cut = cuts_of(vault, rid, path, raw)
+        if cut != "ok":
+            return cut
         if crypto.is_pointer(path):
             return "not-downloaded"
         store = keys or KeyStore(vault.home)
