@@ -169,6 +169,7 @@ def test_the_keychain_holds_the_seal_and_keys_are_added_without_it(tmp_path: Pat
     key = again.get("a" * 64)
     assert key is not None and key.identity == secret and key.path.endswith("x.mp3.age")
     assert again.get("b" * 64) is None
+    assert again.get("a" * 64) == key, "the seal, read once, is kept for the next key"
     # The keychain gone: nothing opens, and nothing is said but None.
     assert KeyStore(store.home, Keychain(fails=True)).get("a" * 64) is None
     assert KeyStore(store.home, Keychain()).get("a" * 64) is None

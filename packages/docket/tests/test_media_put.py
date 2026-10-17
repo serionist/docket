@@ -16,6 +16,7 @@ from docket.media import crypto, layout, reader
 from docket.media import put as media
 from docket.media.keystore import KeyStore
 from docket.vault import holds, releaselog
+from docket.vault.gate import Gate
 from docket.vault.releaselog import LoggedCut, Release
 from docket.vault.vault import Vault
 
@@ -174,3 +175,40 @@ def test_media_stored_already_isn_t_put_again(tmp_path: Path) -> None:
     with pytest.raises(DocketError, match="media for plaud:rec-a is stored already"):
         media.put(vault, CALL, path=str(drop / "b"))
     assert os.environ["DOCKET_STATE_DIR"] in str(drop)
+
+
+def test_a_body_over_the_cap_stops_the_encryption_and_leaves_nothing(tmp_path: Path) -> None:
+    vault = media_vault(tmp_path)
+    with https_server(tmp_path, audio(1000)) as server:
+        server.routes["/stream"] = (200, {"X-No-Length": "1"}, audio(300_000))
+        with pytest.raises(DocketError, match="over the cap of 0 MiB"):
+            media.put(vault, CALL, url=server.url("/stream"), fetcher=server.fetcher(max_bytes=100_000))
+    assert not list(vault.home.tmp_dir.glob("media-*.tmp"))
+    assert not staged(vault)
+
+
+def test_a_source_the_vault_doesn_t_hold_fetches_nothing(tmp_path: Path) -> None:
+    vault = media_vault(tmp_path)
+    with pytest.raises(DocketError, match=r"source mail isn't in vault.yaml in force"):
+        media.fetch(vault, "mail:x", path="x", url=None)
+
+
+def test_the_cap_is_a_setting_of_this_machine(tmp_path: Path) -> None:
+    config = Path(os.environ["DOCKET_CONFIG_DIR"]) / "config.yaml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    assert media.limits().max_bytes == 512 * 1024 * 1024
+    config.write_text("media:\n  max_bytes: 2048\n", encoding="utf-8")
+    assert media.limits().max_bytes == 2048
+    config.write_text("media:\n  max_bytes: lots\n", encoding="utf-8")
+    with pytest.raises(DocketError, match=r"media.max_bytes must be a whole number of bytes"):
+        media.limits()
+
+
+def test_media_waits_while_its_record_waits_to_be_classified(tmp_path: Path) -> None:
+    vault = media_vault(tmp_path, sensitivity="mixed")
+    drop = media.drop_folder()
+    drop.mkdir(parents=True)
+    (drop / "a").write_bytes(audio())
+    media.put(vault, CALL, path=str(drop / "a"))
+    assert not Gate(vault).promote().media
+    assert staged(vault)
