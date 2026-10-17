@@ -128,8 +128,8 @@ def remember(home: Home, commit: str, text: str) -> None:
 
 def effective(committed: VaultConfig, file: VaultConfig) -> VaultConfig:
     """`committed` with every part of `file` that only keeps more out: values added to a never-store list, a rule
-    turned on, a new pattern run after the others, a source made stricter or turned off, an exclude entry added, a tool
-    removed, a source removed. Never looser than `committed`, whatever `file` holds."""
+    turned on, a new pattern, a source made stricter or turned off, an exclude entry added, a tool removed, a source
+    removed. Never looser than `committed`, whatever `file` holds."""
     return committed.model_copy(
         update={
             "never_store": _lists(committed.never_store, file.never_store),
@@ -158,7 +158,8 @@ def _lists(before: NeverStore, after: NeverStore) -> NeverStore:
 
 def _redaction(before: Redaction, after: Redaction) -> Redaction:
     """Credentials and phone on if either has them on; each of `before`'s patterns turned on where `after` turned it on
-    and changed nothing else of it; then `after`'s new patterns. A rule only puts markers in."""
+    and changed nothing else of it; `after`'s new patterns. Every rule reads the text as given and their spans merge
+    (DR-0525), so a rule turned on or added only ever redacts more, wherever it stands."""
     return before.model_copy(
         update={
             "credentials": before.credentials or after.credentials,
@@ -169,19 +170,32 @@ def _redaction(before: Redaction, after: Redaction) -> Redaction:
 
 
 def _patterns(before: list[RedactionPattern], after: list[RedactionPattern]) -> list[RedactionPattern]:
-    """`before`'s patterns in their places, matched by position to `after`'s patterns under names `before` has, each
-    taken where it is only turned on; then each of `after`'s patterns under a name `before` doesn't have, when it sets
-    nothing beyond its name, pattern and enabled. Each rule reads only the text between markers, so one that runs last
-    only adds markers; run before an existing pattern it could split that pattern's match, so where `after` puts it
-    waits for the commit, as does a new pattern carrying any other key."""
-    names = {p.name for p in before}
-    kept = [p for p in after if p.name in names]
+    """`after`'s patterns in its order, each of `before`'s matched by its name and which of that name it is: taken as
+    `after` has it where it is only turned on or kept, else as `before` has it; a new one taken when it sets nothing
+    beyond its name, pattern and enabled, so one carrying a key a later schema adds waits whole. Then `before`'s that
+    `after` dropped or renamed, which stay until the commit."""
+    old = _by_name(before)
     out: list[RedactionPattern] = []
-    for n, old in enumerate(before):
-        new = kept[n] if n < len(kept) else None
-        turned_on = new is not None and new.enabled and new.model_copy(update={"enabled": old.enabled}) == old
-        out.append(new if turned_on and new is not None else old)
-    out += [p for p in after if p.name not in names and p == type(p)(name=p.name, pattern=p.pattern, enabled=p.enabled)]
+    for key, new in _by_name(after).items():
+        was = old.pop(key, None)
+        if was is None:
+            if new == type(new)(name=new.name, pattern=new.pattern, enabled=new.enabled):
+                out.append(new)
+        elif new.enabled >= was.enabled and new.model_copy(update={"enabled": was.enabled}) == was:
+            out.append(new)
+        else:
+            out.append(was)
+    return [*out, *old.values()]
+
+
+def _by_name(patterns: list[RedactionPattern]) -> dict[tuple[str, int], RedactionPattern]:
+    """Each pattern by its name and which of that name it is, in order: two patterns may share a name."""
+    seen: dict[str, int] = {}
+    out: dict[tuple[str, int], RedactionPattern] = {}
+    for pattern in patterns:
+        n = seen.get(pattern.name, 0)
+        seen[pattern.name] = n + 1
+        out[(pattern.name, n)] = pattern
     return out
 
 

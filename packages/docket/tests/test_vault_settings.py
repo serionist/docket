@@ -109,8 +109,9 @@ CASES: list[tuple[str, Change, bool]] = [
         patterns(ON, OFF, RedactionPattern(name="more", pattern="Y", enabled=False)),
         False,
     ),
-    ("a pattern added before the others", patterns(RedactionPattern(name="more", pattern="Y"), ON, OFF), True),
-    ("a pattern added under a name it has", patterns(ON, OFF, RedactionPattern(name="code", pattern="Y")), True),
+    ("a pattern added before the others", patterns(RedactionPattern(name="more", pattern="Y"), ON, OFF), False),
+    ("a pattern added under a name it has", patterns(ON, OFF, RedactionPattern(name="code", pattern="Y")), False),
+    ("the patterns reordered", patterns(OFF, ON), False),
     ("a pattern removed", patterns(ON), True),
     ("a pattern renamed", patterns(ON.model_copy(update={"name": "tickets"}), OFF), True),
     ("a pattern's expression changed", patterns(ON.model_copy(update={"pattern": "T"}), OFF), True),
@@ -169,7 +170,7 @@ def test_in_force_is_head_with_only_what_keeps_more_out() -> None:
     found = effective(BASE, file)
     assert found.never_store.people == ["Dora Example", "Cleo Test"]
     assert (found.redaction.credentials, found.redaction.phone) == (True, True)
-    assert found.redaction.patterns == [ON, OFF.model_copy(update={"enabled": True}), more]
+    assert found.redaction.patterns == [more, ON, OFF.model_copy(update={"enabled": True})]
     assert (found.sources["calls"].sensitivity, found.sources["calls"].tools) == ("mixed", [])
     assert found.sources["memo"].sensitivity == "private"
     assert (found.sources["documents"].folder, found.sources["documents"].exclude) == ("docs", ["*.tmp", "archive/*"])
