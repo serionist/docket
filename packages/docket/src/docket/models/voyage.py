@@ -320,7 +320,7 @@ class VoyageRunner:
 
     def _send(self, path: str, body: dict[str, Any], timeout: float) -> dict[str, Any]:
         key = self._key
-        if key is None:
+        if key is None:  # pragma: no cover - every caller asks `why` first, which reads the key or says there is none
             raise ApiError(NO_KEY)
         transport = self._transport if self._transport is not None else send
         try:

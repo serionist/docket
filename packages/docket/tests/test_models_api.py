@@ -10,6 +10,7 @@ from __future__ import annotations
 import http.server
 import ssl
 import threading
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,9 +25,11 @@ from docket.errors import DocketError
 from docket.index import query as query_module
 from docket.index import screen as screening
 from docket.index import vectors
-from docket.index.build import open_index
+from docket.index.build import db_path, open_index, write_connection
 from docket.index.embedpass import fill
 from docket.models import voyage
+from docket.models.catalogue import VOYAGE_4
+from docket.models.client import PAST_BUDGET, Skip, WorkerError
 from docket.models.provider import Models, Off
 from docket.models.runtime import open_models
 from docket.vault.config import RedactionPattern, SourceConfig, VaultConfig
@@ -198,8 +201,33 @@ def test_a_record_that_cant_be_read_holds_its_chunk_and_a_doc_covering_none_is_r
         rows = [
             screening.Row(1, None, "a call about pallets", "a call about pallets", ("calls:missing-0001",), None),
             screening.Row(2, None, "a legacy note on pallets", "a legacy note on pallets", (), None),
+            screening.Row(3, None, "a legacy note on zebrakept", "a legacy note on zebrakept", (), None),
+            screening.Row(4, None, "a message on pallets", "a message on pallets", ("mail:Z71/1.0",), None),
         ]
-        assert screen.held(db, rows, vault.config, lookup) == {1}
+        config = vault.config.model_copy(update={"never_store": vault.config.never_store.model_copy(
+            update={"keywords": ["zebrakept"]})})  # fmt: skip
+        # A run file that doesn't parse here: its records can't be checked, so their chunks stay.
+        broken = vault.root / "raw" / "mail" / "2026" / "10" / "2026-10-15T0900-test-box.jsonl"
+        broken.parent.mkdir(parents=True, exist_ok=True)
+        broken.write_text("not a record\n", encoding="utf-8")
+        assert screen.held(db, rows, config, lookup) == {1, 3, 4}
+    finally:
+        db.close()
+
+
+def test_settings_that_dont_read_send_nothing(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
+    with_voyage(monkeypatch)
+    vault = allow_api(vault)
+    screen = screening.Screen(vault, "voyage", vectors.table_of(api(vault).embedder))
+    (vault.root / "vault.yaml").write_text("owner: [not, a, map\n", encoding="utf-8")
+    db = write_connection(db_path(vault))
+    try:
+        assert screen.allowed() == screening.UNREADABLE
+        assert screen.query("pallet") == screening.UNREADABLE
+        assert screen.sendable(db, [1, 2]) == screening.UNREADABLE
+        table = vectors.table_of(VOYAGE_4)
+        db.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (vectors.META + table.key, "{not json"))
+        assert vectors.screened(db, table) is None
     finally:
         db.close()
 
@@ -341,6 +369,8 @@ def test_the_pass_backs_off_and_stops_at_the_cap(vault: Vault, monkeypatch: pyte
 def test_a_redirect_or_an_error_says_only_its_status(monkeypatch: pytest.MonkeyPatch) -> None:
     hits: list[str] = []
 
+    answers = {"/v1/ok": b'{"data": []}', "/v1/list": b"[1, 2]", "/v1/text": b"not json"}
+
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_POST(self) -> None:
             hits.append(self.path)
@@ -349,8 +379,10 @@ def test_a_redirect_or_an_error_says_only_its_status(monkeypatch: pytest.MonkeyP
                 self.send_header("Location", "/v1/elsewhere")
                 self.end_headers()
                 return
-            body = b"SECRETBODY of the answer"
-            self.send_response(500)
+            if self.path.endswith("/slow"):
+                time.sleep(1.0)
+            body = answers.get(self.path, b"SECRETBODY of the answer")
+            self.send_response(200 if self.path in answers or self.path.endswith("/slow") else 500)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -366,9 +398,19 @@ def test_a_redirect_or_an_error_says_only_its_status(monkeypatch: pytest.MonkeyP
             assert (raised.value.status, raised.value.why) == (status, f"Voyage answered {status}")
             assert "SECRETBODY" not in str(raised.value) and "request's own text" not in str(raised.value)
         assert hits == ["/v1/redirect", "/v1/fail"]
+        assert REAL_SEND("/ok", {}, FAKE_KEY, 5.0) == {"data": []}
+        for path, why in (("/list", "wasn't what Docket asked for"), ("/text", "didn't read as JSON")):
+            with pytest.raises(voyage.ApiError, match=why):
+                REAL_SEND(path, {}, FAKE_KEY, 5.0)
+        with pytest.raises(voyage.ApiError) as late:
+            REAL_SEND("/slow", {}, FAKE_KEY, 0.2)
+        assert late.value.timeout and late.value.why == "Voyage didn't answer in time"
     finally:
         server.shutdown()
         server.server_close()
+    # Nothing listens there now.
+    with pytest.raises(voyage.ApiError, match="couldn't be reached"):
+        REAL_SEND("/ok", {}, FAKE_KEY, 30.0)
 
 
 def test_the_trust_store_holds_certificates() -> None:
@@ -388,4 +430,64 @@ def test_the_key_lives_only_in_the_keychain(monkeypatch: pytest.MonkeyPatch, tmp
     # The failing backend conftest sets: no keychain, no key, and nowhere else to put it.
     with pytest.raises(DocketError, match="no keychain Docket can keep the Voyage key in"):
         voyage.KeyStore().store(FAKE_KEY)
+    with pytest.raises(DocketError, match="no keychain Docket can keep the Voyage key in"):
+        voyage.KeyStore().forget()
     assert voyage.KeyStore().read() is None
+
+    class Forgetful(MemoryKeyring):
+        def set_password(self, service: str, username: str, password: str) -> None:
+            super().set_password(service, username, password[::-1])
+
+    with pytest.raises(DocketError, match="no keychain Docket can keep the Voyage key in"):
+        voyage.KeyStore(cast(voyage.Keychain, Forgetful())).store(FAKE_KEY)
+
+
+def test_the_runner_says_why_in_fixed_words(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = with_voyage(monkeypatch, reranker=False)
+    vault = allow_api(vault)
+    models = api(vault)
+    runner = models.worker
+    assert runner.ensure() and runner.up
+    runner.stop()
+    fake.fail["/embeddings"] = [503]
+    assert models.query_vector("pallet") == "Voyage answered 503"
+    fake.fail["/embeddings"] = [400]
+    with pytest.raises(WorkerError, match="Voyage answered 400"):
+        runner.batch(["a text"])
+    assert runner.rerank("pallet", ["a", "b"], None) == Skip("no reranker is chosen for the api provider")
+    with_voyage(monkeypatch)
+    models = api(vault)
+    assert models.worker.rerank("pallet", ["a", "b"], 0.0) == Skip(PAST_BUDGET, budget=True)
+    vault = commit_config(vault, lambda c: setattr(c, "api_provider", None))
+    assert models.worker.rerank("pallet", ["a", "b"], None) == Skip(screening.not_allowed("voyage"))
+    usage = voyage.Usage(Path(str(vault.root.parent / "usage.json")))
+    usage.add(0)
+    assert not usage.path.exists() and usage.spent() == 0
+
+
+@pytest.mark.parametrize(
+    ("answer", "count", "why"),
+    [
+        ({"data": "x"}, 1, "another number of vectors"),
+        ({"data": [1]}, 1, "wasn't what Docket asked for"),
+        ({"data": [{"index": 3, "embedding": [0.0]}]}, 1, "wasn't what Docket asked for"),
+        ({"data": [{"index": 0, "embedding": [0.0]}]}, 1, "vectors of another size"),
+        ({"data": [{"index": 0, "embedding": [0.0, 0.0]}, {"index": 0, "embedding": [0.0, 0.0]}]}, 2, "without its"),
+    ],
+)
+def test_vectors_that_aren_t_what_was_asked_are_refused(answer: dict[str, Any], count: int, why: str) -> None:
+    with pytest.raises(voyage.ApiError, match=why):
+        voyage._vectors(answer, count, 2)  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.parametrize(
+    ("answer", "why"),
+    [
+        ({"data": "x"}, "wasn't what Docket asked for"),
+        ({"data": [{"index": 5, "relevance_score": 0.1}]}, "wasn't what Docket asked for"),
+        ({"data": [{"index": 0, "relevance_score": 0.1}]}, "left a document without its score"),
+    ],
+)
+def test_scores_that_aren_t_what_was_asked_are_refused(answer: dict[str, Any], why: str) -> None:
+    with pytest.raises(voyage.ApiError, match=why):
+        voyage._scores(answer, 2)  # pyright: ignore[reportPrivateUsage]

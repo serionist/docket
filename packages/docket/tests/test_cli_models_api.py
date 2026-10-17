@@ -8,10 +8,11 @@ from pathlib import Path
 
 import keyring
 import pytest
-from docket_testkit import AtConsole, empty_vault, make_config, sh
+import typer
+from docket_testkit import AtConsole, empty_vault, git, make_config, sh
 from models_kit import FAKE_KEY, MemoryKeyring
 
-from docket import userconfig
+from docket import cli, userconfig
 from docket.cli import main
 from docket.models import config, voyage
 from docket.models.provider import Off
@@ -93,3 +94,56 @@ def test_choosing_the_api_and_keeping_its_key_ask_at_the_console(
     monkeypatch.setenv("CLAUDECODE", "1")
     code, out, _ = run(capsys, "models", "key", "voyage", "--forget")
     assert code == 0 and "forgotten" in out and chain.kept == {}
+
+
+def test_the_commands_refuse_what_they_can_t_do(
+    vault: Vault, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, owner: Callable[..., AtConsole]
+) -> None:
+    keyring.set_keyring(MemoryKeyring())
+    code, _, err = run(capsys, "models", "key", "none")
+    assert code != 0 and "give the provider whose key this is" in err
+    owner()
+    monkeypatch.setattr(getpass, "getpass", lambda prompt="": "   ")
+    code, _, err = run(capsys, "models", "key", "voyage")
+    assert code != 0 and "no key given" in err
+    root = str(vault.root)
+    owner("n")
+    code, out, _ = run(capsys, "models", "allow", "voyage", "--vault", root)
+    assert code == 1 and "not changed: the code wasn't typed back" in out
+    owner("code")
+    assert run(capsys, "models", "allow", "voyage", "--vault", root)[0] == 0
+    code, out, _ = run(capsys, "models", "allow", "voyage", "--vault", root)
+    assert code == 0 and "this vault allows voyage already" in out
+    path = vault.root / "vault.yaml"
+    path.write_text(path.read_text(encoding="utf-8") + "# mine\n", encoding="utf-8", newline="\n")
+    git(vault.root, "commit", "-qm", "My comment", "--", "vault.yaml")
+    owner("code")
+    code, out, _ = run(capsys, "models", "allow", "none", "--vault", root)
+    assert code == 1 and "set it there: no api_provider line" in out
+
+
+def test_status_and_check_for_the_api(
+    vault: Vault, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, owner: Callable[..., AtConsole]
+) -> None:
+    from models_kit import with_voyage
+
+    fake = with_voyage(monkeypatch, key=False)
+    root = str(vault.root)
+    code, out, _ = run(capsys, "models", "status", "--vault", root)
+    assert "key        ! none: docket models key voyage" in out
+    assert "vault      ! doesn't allow sending its text" in out
+    code, out, _ = run(capsys, "models", "status", "--check", "--vault", root)
+    assert code == 1 and "doesn't allow sending its text to voyage" in out
+    owner("code")
+    run(capsys, "models", "allow", "voyage", "--vault", root)
+    keyring.get_keyring().set_password(voyage.KEY_SERVICE, voyage.KEY_USER, FAKE_KEY)
+    code, out, _ = run(capsys, "models", "status", "--check", "--vault", root)
+    assert code == 0 and "vault      allows voyage" in out and "api        up: voyage-4, 512 dims" in out
+    assert fake.paths() == ["/embeddings"]
+    elsewhere = vault.root.parent / "not-a-vault"
+    elsewhere.mkdir()
+    code, out, err = run(capsys, "models", "status", "--check", "--vault", str(elsewhere))
+    assert code != 0 and "vault      " not in out and "no vault at or above" in err
+    with pytest.raises(typer.Exit):
+        cli._check_api(None)  # pyright: ignore[reportPrivateUsage]
+    assert "the api provider opens for a vault" in capsys.readouterr().out

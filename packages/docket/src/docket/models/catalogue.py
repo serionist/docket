@@ -36,8 +36,6 @@ class Embedding(Protocol):
     @property
     def key(self) -> str: ...
 
-    def passage(self, title: str | None, text: str) -> str: ...
-
     def query(self, text: str) -> str: ...
 
 
@@ -228,13 +226,6 @@ class ApiEmbedder:
     @property
     def key(self) -> str:
         return f"{self.name.replace('-', '_').replace('.', '_')}_{self.revision[:8]}"
-
-    @property
-    def table(self) -> str:
-        return f"chunk_vec_{self.key}"
-
-    def passage(self, title: str | None, text: str) -> str:
-        return passage_input(self.passage_prefix, title, text)
 
     def query(self, text: str) -> str:
         return f"{self.query_prefix}{text}"

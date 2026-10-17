@@ -90,9 +90,6 @@ class Screen:
             return UNREADABLE
         return None if config.api_provider == self.provider else not_allowed(self.provider)
 
-    def fingerprint(self) -> str:
-        return fingerprint(self.settings())
-
     def query(self, text: str) -> str | None:
         """Why a query stays on this machine, never naming what matched; None when it may go."""
         try:

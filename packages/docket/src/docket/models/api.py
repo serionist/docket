@@ -44,10 +44,8 @@ def choose(*, reranker: bool = True, monthly: int | None = None) -> config.ApiCh
     at_console(CHOOSING)
     now = config.read()
     tokens = monthly if monthly is not None else now.monthly_tokens if isinstance(now, config.ApiChoice) else None
-    config.write_api(VOYAGE_4, VOYAGE_RERANK if reranker else None, tokens or config.DEFAULT_MONTHLY_TOKENS)
-    chosen = config.read()
-    if not isinstance(chosen, config.ApiChoice):
-        raise DocketError("the models block didn't read back as the api provider; check your config")
+    chosen = config.ApiChoice(VOYAGE_4, VOYAGE_RERANK if reranker else None, tokens or config.DEFAULT_MONTHLY_TOKENS)
+    config.write_api(chosen.embedder, chosen.reranker, chosen.monthly_tokens)
     return chosen
 
 
