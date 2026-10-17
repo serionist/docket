@@ -33,7 +33,7 @@ from docket.plaintext import printable
 from docket.service import client
 from docket.service.platforms import Installer
 from docket.service.token import Tokens
-from docket.service.writer import UPDATE_WAIT_SECONDS
+from docket.service.writer import BUILDING, UPDATE_WAIT_SECONDS
 from docket.sources import release, scaffold
 from docket.sources.contract import Manifest
 from docket.sources.ingest import IngestReport, ingest_run
@@ -1131,7 +1131,8 @@ def search_command(
 def _service_search(vault: Vault, asked: dict[str, Any]) -> index.SearchResult | None:
     """The running service's answer, when it serves this vault, answers with this machine's token and searches with
     the embedder this command would (DR-0533): it keeps its worker and its reranker loaded. None for anything else, a
-    refusal included, and the command searches by itself as before, so an error reads as it always did."""
+    refusal included, and the command searches by itself as before, so an error reads as it always did. A service
+    still building the index after its wait is said, since the command's own update then waits for that build."""
     token = _service_token(vault)
     if token is None:
         return None
@@ -1142,6 +1143,8 @@ def _service_search(vault: Vault, asked: dict[str, Any]) -> index.SearchResult |
     given = {key: value for key, value in asked.items() if value is not None}
     path = f"/api/search?{urlencode(given, doseq=True)}"
     answer = client.call("GET", path, token=token, at=at, timeout=SERVICE_SEARCH_SECONDS)
+    if answer is not None and answer.body.get("error") == BUILDING:
+        say("(the service is building the index; searching when it's done)")
     if answer is None or answer.status != 200:
         return None
     try:

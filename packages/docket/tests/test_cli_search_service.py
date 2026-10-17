@@ -23,6 +23,7 @@ from docket.models import runtime
 from docket.models.client import Worker
 from docket.service import client, server
 from docket.service.token import Tokens
+from docket.service.writer import BUILDING
 from docket.vault.vault import Vault
 
 # What a search can print: a rebuild line aside, groups and summaries, an alias, time words and a name nobody has, a
@@ -204,14 +205,10 @@ class Fake:
         (client.Answer(200, {"state": "down", "model": "fake"}), None, ["/api/models"]),
         (client.Answer(401, {}), None, ["/api/models"]),
         (client.Answer(200, OFF), None, ["/api/models", "/api/search"]),
-        (
-            client.Answer(200, OFF),
-            client.Answer(400, {"error": "the index is being built; try again in a minute"}),
-            ["/api/models", "/api/search"],
-        ),
+        (client.Answer(200, OFF), client.Answer(400, {"error": "k is from 1 to 100"}), ["/api/models", "/api/search"]),
         (client.Answer(200, OFF), client.Answer(200, {"groups": "not a list"}), ["/api/models", "/api/search"]),
     ],
-    ids=["another embedder", "worker down", "refused", "no answer in time", "index building", "not a result"],
+    ids=["another embedder", "worker down", "refused", "no answer in time", "a refusal", "not a result"],
 )
 def test_any_answer_but_a_result_leaves_the_search_to_the_command(
     vault: Vault,
@@ -226,6 +223,17 @@ def test_any_answer_but_a_result_leaves_the_search_to_the_command(
     expected = run(vault, capsys, "search", "Nortwin")
     fake = Fake(monkeypatch, vault, models, search)
     assert run(vault, capsys, "search", "Nortwin") == expected and fake.asked == asked
+
+
+def test_a_service_still_building_the_index_is_said_before_the_command_searches_by_itself(
+    vault: Vault, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run(vault, capsys, "index", "update")
+    code, out, err = run(vault, capsys, "search", "Nortwin")
+    # Past its wait the service answers that it is building; the command's own update then waits for that build.
+    Fake(monkeypatch, vault, client.Answer(200, OFF), client.Answer(400, {"error": BUILDING}))
+    said = "(the service is building the index; searching when it's done)\n"
+    assert run(vault, capsys, "search", "Nortwin") == (code, said + out, err)
 
 
 def test_the_search_goes_to_the_service_with_every_flag_as_given(

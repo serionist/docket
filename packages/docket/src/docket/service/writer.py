@@ -22,6 +22,8 @@ log = logging.getLogger(__name__)
 # How long a search waits for its index update before it says the index is being built (a first build of a large
 # vault takes minutes).
 UPDATE_WAIT_SECONDS = 30.0
+# What a search past that wait answers; `docket search` reads it to say why it searches by itself.
+BUILDING = "the index is being built; try again in a minute"
 
 
 class IndexBuildingError(DocketError):
@@ -67,7 +69,7 @@ class IndexUpdater:
         try:
             await asyncio.wait_for(asyncio.shield(waiting), self.wait_seconds)
         except TimeoutError:
-            raise IndexBuildingError("the index is being built; try again in a minute") from None
+            raise IndexBuildingError(BUILDING) from None
 
     async def idle(self) -> None:
         """Wait until no update runs or waits to run: for a clean stop, and for tests."""
