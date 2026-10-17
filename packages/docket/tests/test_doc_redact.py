@@ -97,24 +97,24 @@ def test_a_dry_run_writes_nothing(vault: Vault, capsys: pytest.CaptureFixture[st
 
 def test_what_it_can_t_redact_is_left_and_named(vault: Vault, capsys: pytest.CaptureFixture[str]) -> None:
     configure(vault.root, keywords=["dora example"])
-    recall.doc_put(Vault.open(vault.root), note("brief:ben-sample", lines=["- Ben works with Cleo. @12:08"]))
-    brief = vault.root / "processed" / "brief" / "ben-sample.md"
-    brief.write_text(brief.read_text(encoding="utf-8").replace("Cleo.", "Dora Example."), encoding="utf-8")
+    recall.doc_put(Vault.open(vault.root), note("digest:ben-sample", lines=["- Ben works with Cleo. @12:08"]))
+    digest = vault.root / "processed" / "digest" / "ben-sample.md"
+    digest.write_text(digest.read_text(encoding="utf-8").replace("Cleo.", "Dora Example."), encoding="utf-8")
     git(vault.root, "commit", "-qam", "my edit, committed by hand")
-    broken = vault.root / "processed" / "brief" / "broken.md"
+    broken = vault.root / "processed" / "digest" / "broken.md"
     broken.write_text("no frontmatter here\n", encoding="utf-8")
-    misplaced = vault.root / "processed" / "brief" / "elsewhere.md"
-    misplaced.write_text(brief.read_text(encoding="utf-8"), encoding="utf-8")
+    misplaced = vault.root / "processed" / "digest" / "elsewhere.md"
+    misplaced.write_text(digest.read_text(encoding="utf-8"), encoding="utf-8")
     before = subjects(vault)
     assert redact(vault) == 1
     out = capsys.readouterr().out
     assert "left      3 problem(s); each file is left as it is:" in out
-    assert "          processed/brief/ben-sample.md: line 14 says something on the never-store keywords list" in out
-    assert "          processed/brief/broken.md: it doesn't parse as a doc; fix it" in out
-    assert "processed/brief/elsewhere.md: its id brief:ben-sample belongs at processed/brief/ben-sample.md" in out
+    assert "          processed/digest/ben-sample.md: line 14 says something on the never-store keywords list" in out
+    assert "          processed/digest/broken.md: it doesn't parse as a doc; fix it" in out
+    assert "processed/digest/elsewhere.md: its id digest:ben-sample belongs at processed/digest/ben-sample.md" in out
     assert "dora" not in out.lower().replace("dora example.", "")
     assert subjects(vault)[1:] == before
-    assert "Dora Example." in at_head(vault, "processed/brief/ben-sample.md")
+    assert "Dora Example." in at_head(vault, "processed/digest/ben-sample.md")
 
 
 @pytest.mark.parametrize(
@@ -198,14 +198,14 @@ def test_the_index_is_rebuilt_and_the_secret_is_found_no_more(vault: Vault, caps
 def test_turning_phone_on_then_a_pass_redacts_the_numbers_stored_before(
     vault: Vault, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    recall.doc_put(vault, note("brief:cleo-test", lines=[f"- Cleo is on {PHONE}. @12:08"]))
+    recall.doc_put(vault, note("digest:cleo-test", lines=[f"- Cleo is on {PHONE}. @12:08"]))
     redact(vault)
     capsys.readouterr()
     assert main(["redaction", "set", "phone", "on", "--vault", str(vault.root)]) == 0
     capsys.readouterr()
     assert redact(vault) == 0
     assert capsys.readouterr().out.startswith("redacted  1 doc: 1 phone")
-    assert PHONE not in at_head(vault, "processed/brief/cleo-test.md")
+    assert PHONE not in at_head(vault, "processed/digest/cleo-test.md")
 
 
 EMAIL = RedactionPattern(name="email", pattern=r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
@@ -225,9 +225,9 @@ def test_a_keyword_inside_what_a_rule_now_redacts_leaves_the_doc_as_it_is(
 ) -> None:
     # Put while the rule was off and the list didn't hold the keyword; then both change.
     configure(vault.root, credentials=False)
-    recall.doc_put(Vault.open(vault.root), note("brief:dora", lines=[f"- {said} @12:08"]))
+    recall.doc_put(Vault.open(vault.root), note("digest:dora", lines=[f"- {said} @12:08"]))
     configure(vault.root, keywords=[keyword], **rule)
-    rel = "processed/brief/dora.md"
+    rel = "processed/digest/dora.md"
     committed = at_head(vault, rel)
     assert redact(vault) == 1
     out = capsys.readouterr().out

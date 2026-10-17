@@ -24,7 +24,7 @@ from docket.vault.config import NeverStore
 from docket.vault.entities import Entity, load_entities
 from docket.vault.git import Git, toplevel
 from docket.vault.host import Probe, probe_remote, remote_urls
-from docket.vault.neverstore import listed, slug_listed
+from docket.vault.neverstore import listed, person_listed, slug_listed
 from docket.vault.staging import write_replacing
 from docket.vault.vault import Vault
 
@@ -180,13 +180,6 @@ def _hidden(entity: Entity, lists: NeverStore) -> bool:
     return slug_listed(entity.id, lists) or any(listed(name, lists) is not None for name in entity.names.values())
 
 
-def _named_person(entity: Entity, lists: NeverStore) -> bool:
-    """A person the people list names by any of their names, aliases or contact ids: the whole row goes, since the
-    rest of it would still say who they are. A keyword drops only the value it is in."""
-    values = [*entity.names.values(), *(a.text for a in entity.aliases), *(v for vs in entity.ids.values() for v in vs)]
-    return any(listed(v, lists) == "people" for v in values)
-
-
 def _kept(values: Iterable[str], lists: NeverStore) -> list[str]:
     return [v for v in values if listed(v, lists) is None]
 
@@ -208,7 +201,8 @@ def _first_name(entity: Entity, languages: list[str]) -> str:
 def people(entities: list[Entity], languages: list[str], lists: NeverStore) -> str:
     """The people directory: each active person a list doesn't hold, by name, with a name per owner language, role,
     chat and mail ids, and aliases."""
-    shown = [e for e in entities if e.type == "person" and not _hidden(e, lists) and not _named_person(e, lists)]
+    # A person the people list names by any value loses the whole row, since the rest would still say who they are.
+    shown = [e for e in entities if e.type == "person" and not _hidden(e, lists) and not person_listed(e, lists)]
     shown.sort(key=lambda e: (_first_name(e, languages).casefold(), e.id))
     rows = [
         [

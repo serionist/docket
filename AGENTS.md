@@ -123,8 +123,9 @@ agrees in the issue or, under an autonomy grant, with its decision recorded as p
   `folder` and `exclude` (DR-0481) and `media_folders` (DR-0548) among them;
 - the question file `docket eval` reads, which users keep outside the repo (DR-0290);
 - the MCP tools' names and parameters: `search`, `read`, `verify` and `doc_put` (DR-0150), `run_open` and `ingest`
-  (DR-0241), `media_put` (DR-0547), and the plugin's server key `docket` that prefixes them (DR-0160);
-- the plugin's skill and hook names: `recall`, `setup`, `cuts` (DR-0207), `curate` (DR-0472), the SessionStart
+  (DR-0241), `media_put` (DR-0547), `briefs` (DR-0556), and the plugin's server key `docket` that prefixes them
+  (DR-0160);
+- the plugin's skill and hook names: `recall`, `setup`, `cuts` (DR-0207), `curate` (DR-0472), `brief` (DR-0555), the SessionStart
   hook running `docket hook session-start` (DR-0161), and the PostToolUse hook running `docket hook post-tool-use`
   for `mcp__.*`, with its line prefixes (DR-0242);
 - the release's yes: only the owner releases a held recording, at their own console, by typing back a code, and no

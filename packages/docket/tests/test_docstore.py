@@ -111,7 +111,7 @@ def test_a_doc_is_written_at_rev_1_and_committed(routed: Vault) -> None:
         (note(lines=["- @12:08 the price came first"]), "anchors go at the very end"),
         (note(covers=[REC, MAIL], lines=["- which one? @12:08"]), "@12:08 needs a doc covering one record"),
         (note(rev="3"), "there is no recording-note:2026-10-14-supplier-call yet; leave rev out"),
-        (note(supersedes="brief:nobody"), "supersedes: brief:nobody doesn't exist"),
+        (note(supersedes="digest:nobody"), "supersedes: digest:nobody doesn't exist"),
         (note(lines=["- a reserved form [zz:digest-1]"]), "an anchor this Docket doesn't read"),
         (note(lines=["- not a time [r:calls:rec-0042@1:60]"]), "if @1:60 is meant as a position, it isn't one"),
     ],
@@ -154,7 +154,7 @@ def test_a_changed_doc_is_the_next_rev_and_history_keeps_the_last(vault: Vault) 
     with pytest.raises(DocketError, match="has no rev 3; its revs: 1, 2"):
         store.at_rev(NOTE_ID, 3)
     with pytest.raises(DocketError, match="no rev 1; its revs: none"):
-        store.at_rev("brief:nobody", 1)
+        store.at_rev("digest:nobody", 1)
 
 
 def test_a_stale_rev_is_refused(vault: Vault) -> None:
@@ -197,17 +197,17 @@ def test_supersedes_must_not_make_a_cycle(vault: Vault) -> None:
 
 
 def test_a_diamond_of_supersedes_is_fine(vault: Vault) -> None:
-    recall.doc_put(vault, note("brief:c"))
-    recall.doc_put(vault, note("brief:b", supersedes="brief:c"))
-    recall.doc_put(vault, note("brief:x", supersedes="[brief:b, brief:c]"))
-    assert recall.doc_put(vault, note("brief:y", supersedes="brief:x")).rev == 1
+    recall.doc_put(vault, note("digest:c"))
+    recall.doc_put(vault, note("digest:b", supersedes="digest:c"))
+    recall.doc_put(vault, note("digest:x", supersedes="[digest:b, digest:c]"))
+    assert recall.doc_put(vault, note("digest:y", supersedes="digest:x")).rev == 1
 
 
 def test_a_superseded_doc_that_doesnt_parse_ends_the_chain(vault: Vault) -> None:
-    broken = vault.root / "processed" / "brief" / "broken.md"
+    broken = vault.root / "processed" / "digest" / "broken.md"
     broken.parent.mkdir(parents=True)
-    broken.write_bytes(b"---\nid: brief:broken\nby: \xe9\n---\n")
-    assert recall.doc_put(vault, note("brief:new", supersedes="brief:broken")).rev == 1
+    broken.write_bytes(b"---\nid: digest:broken\nby: \xe9\n---\n")
+    assert recall.doc_put(vault, note("digest:new", supersedes="digest:broken")).rev == 1
 
 
 def test_a_put_during_a_user_s_merge_is_refused_and_touches_nothing(vault: Vault) -> None:
@@ -275,13 +275,13 @@ def test_a_hand_edit_without_a_rev_line_gets_one(vault: Vault) -> None:
 
 
 def test_a_hand_made_file_counts_as_rev_1(vault: Vault) -> None:
-    path = vault.root / "processed" / "brief" / "ben-sample.md"
+    path = vault.root / "processed" / "digest" / "ben-sample.md"
     path.parent.mkdir(parents=True)
     # A quoted key is still YAML; with no `type:` line to follow, the rev line goes first.
-    path.write_text('---\nid: brief:ben-sample\n"type": brief\nby: Ada\n---\nNotes about Ben.\n', encoding="utf-8")
-    brief = note("brief:ben-sample", lines=["- Ben works with Cleo. @12:08"])
-    assert any("is at rev 1 now" in p for p in refused(vault, brief))
-    assert path.read_text(encoding="utf-8").startswith("---\nrev: 1\nid: brief:ben-sample\n")
+    path.write_text('---\nid: digest:ben-sample\n"type": digest\nby: Ada\n---\nNotes about Ben.\n', encoding="utf-8")
+    digest = note("digest:ben-sample", lines=["- Ben works with Cleo. @12:08"])
+    assert any("is at rev 1 now" in p for p in refused(vault, digest))
+    assert path.read_text(encoding="utf-8").startswith("---\nrev: 1\nid: digest:ben-sample\n")
 
 
 def hand_commit(vault: Vault, message: str) -> None:
@@ -328,8 +328,8 @@ def test_a_failed_commit_leaves_the_old_bytes_and_nothing_staged(vault: Vault, m
     assert (vault.root / NOTE_PATH).read_bytes() == before
     assert staged(vault) == ""
     with pytest.raises(DocketError, match="a hook said no"):
-        recall.doc_put(vault, note("brief:ben-sample"))
-    assert not (vault.root / "processed" / "brief" / "ben-sample.md").exists()
+        recall.doc_put(vault, note("digest:ben-sample"))
+    assert not (vault.root / "processed" / "digest" / "ben-sample.md").exists()
     assert staged(vault) == ""
 
 
@@ -396,23 +396,23 @@ def test_reading_docs_skips_what_doesn_t_parse_or_sits_in_the_wrong_place(
 ) -> None:
     recall.doc_put(vault, note())
     store = DocStore(vault)
-    broken = vault.root / "processed" / "brief" / "broken.md"
+    broken = vault.root / "processed" / "digest" / "broken.md"
     broken.parent.mkdir(parents=True)
     broken.write_text("no frontmatter\n", encoding="utf-8")
-    (vault.root / "processed" / "brief" / "latin.md").write_bytes(b"---\nid: brief:latin\nby: \xe9\n---\n")
-    misplaced = vault.root / "processed" / "brief" / "elsewhere.md"
-    misplaced.write_text("---\nid: brief:ben\ntype: brief\ncovers: [calls:a]\nby: x\n---\n", encoding="utf-8")
+    (vault.root / "processed" / "digest" / "latin.md").write_bytes(b"---\nid: digest:latin\nby: \xe9\n---\n")
+    misplaced = vault.root / "processed" / "digest" / "elsewhere.md"
+    misplaced.write_text("---\nid: digest:ben\ntype: digest\ncovers: [calls:a]\nby: x\n---\n", encoding="utf-8")
     caplog.set_level(logging.WARNING)
     assert [d.meta.id for d in store.all()] == [NOTE_ID]
     assert "broken.md" in caplog.text
     assert "latin.md isn't UTF-8" in caplog.text
-    assert "belongs at processed/brief/ben.md" in caplog.text
+    assert "belongs at processed/digest/ben.md" in caplog.text
     with pytest.raises(DocketError, match="isn't UTF-8"):
-        store.get("brief:latin")
-    assert store.get("brief:nobody") is None
+        store.get("digest:latin")
+    assert store.get("digest:nobody") is None
     caplog.clear()
-    assert store.at_paths([vault.root / "processed" / "brief" / "gone.md", vault.root / NOTE_PATH]) == store.all()
-    assert "skipping processed/brief/gone.md:" in caplog.text
+    assert store.at_paths([vault.root / "processed" / "digest" / "gone.md", vault.root / NOTE_PATH]) == store.all()
+    assert "skipping processed/digest/gone.md:" in caplog.text
 
 
 def test_a_vault_with_no_processed_folder_has_no_docs(vault: Vault) -> None:
@@ -496,7 +496,7 @@ def test_two_machines_that_wrote_the_same_rev_dont_rebase(vault: Vault, tmp_path
         return [f"- Point {n}, corrected {where}. @12:08" if i == n else line for i, line in enumerate(lines, start=1)]
 
     # Different revs of different docs rebase as before.
-    recall.doc_put(other, note("brief:ben-sample"))
+    recall.doc_put(other, note("digest:ben-sample"))
     recall.doc_put(vault, note(rev="1", lines=edited(2, "here")))
     sh(vault.root, "git", "push", "-q", "origin", "main")
     assert other.sync().rebased

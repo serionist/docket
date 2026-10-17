@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 import typer
 from pydantic import ValidationError
 
-from docket import __version__, index, questions, recall, render, userconfig
+from docket import __version__, briefs, index, questions, recall, render, userconfig
 from docket.curate import batch as curate
 from docket.documents import scan as documents_scan
 from docket.errors import DocketError
@@ -70,6 +70,8 @@ staging_app = typer.Typer(help="Records waiting for the gate: list, show, classi
 app.add_typer(staging_app, name="staging")
 doc_app = typer.Typer(help="Processed docs: put one with its anchors, read it, verify it.", no_args_is_help=True)
 app.add_typer(doc_app, name="doc")
+brief_app = typer.Typer(help="Briefs: which are stale, and why.", no_args_is_help=True)
+app.add_typer(brief_app, name="brief")
 index_app = typer.Typer(help="The index: built from the vault on this machine, for search.", no_args_is_help=True)
 app.add_typer(index_app, name="index")
 service_app = typer.Typer(
@@ -798,6 +800,19 @@ def say(text: str) -> None:
 def say_all(lines: list[str]) -> None:
     for line in lines:
         say(line)
+
+
+@brief_app.command("stale")
+def brief_stale(
+    entity: Annotated[
+        list[str] | None, typer.Option("--entity", help="Only this entity's brief; again for more.")
+    ] = None,
+    vault: VaultOption = None,
+) -> None:
+    """The briefs whose entity has records their last rev hadn't seen, or a line that cites a line that changed; the
+    orphans; and with --entity, each one's state, or that it has no brief yet. The /docket:brief skill rebuilds them."""
+    found = find_vault(vault)
+    say_all(render.briefs(briefs.report(found, entity, stale_only=entity is None)))
 
 
 @doc_app.command("put")

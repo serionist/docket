@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0556
+    title: A brief is stale when its entity's records sit in run files its last rev's tree lacks, or a line is flagged
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#161"]
+    description: "A brief is stale when records that mention its entity (the index's mentions, authors and speakers included, DR-0471) sit in run files the tree of its last rev's commit doesn't hold, or when one of its lines is flagged (DR-0542). The rev commit is found as history() finds it, with #132's merge guard; the tree is git ls-tree -r --name-only <commit> -- raw/, once per commit, run with GIT_NO_LAZY_FETCH=1 so it never fetches. No clock is compared, so a record written on another machine before the brief and pulled after it still counts. A brief whose commit or tree isn't on this clone is stale with the fixed reason its history isn't here, never current. A brief whose entity is gone is orphaned, and names the one entity that holds its name now (its title, or the name its id spells, among that entity's names and aliases) when exactly one does. docket brief stale [--entity] prints it, and the read-only MCP tool briefs(entities, stale_only) answers it: per brief id, entity, name, type, rev, rev_time, new (count and the newest five rids), flagged, orphaned, state and why; for the whole, hidden and missing. The index is brought up to date first. A final sync run's steps say to name the stale briefs once and rebuild them only when the user asks."
+    binds:
+      - The MCP tool's name briefs and its parameters entities and stale_only are a door (DR-0150).
+    not_chosen:
+      - "The run file's UTC time against the rev's commit time: clocks differ across machines, and a record pulled after the brief would be missed."
+      - "A watermark in the brief's frontmatter: a key every brief would carry, and a writer could leave it wrong."

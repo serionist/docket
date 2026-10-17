@@ -18,6 +18,7 @@ from docket.media.put import drop_folder
 from docket.service.app import create_app
 from docket.service.state import Service, Settings
 from docket.service.tools import create_mcp
+from docket.vault.docstore import DocStore
 
 TOKEN = "t0ken-for-tests-only"  # noqa: S105 - an invented token
 PORT = 8741
@@ -96,6 +97,7 @@ def test_the_tools_names_parameters_and_annotations_match_the_golden_file(servic
         "search": True,
         "read": True,
         "verify": True,
+        "briefs": True,
         "doc_put": True,
         "run_open": True,
         "ingest": True,
@@ -254,3 +256,32 @@ def test_media_put_stages_a_record_s_file_and_refuses_what_the_gate_keeps_out(tm
         assert unlisted.is_error and "isn't one of the source's media hosts" in text_of(unlisted)
     finally:
         found.writer.close()
+
+
+def test_briefs_answers_each_brief_s_fields(service: Service) -> None:
+    note = DocStore(service.vault()).get("recording-note:2026-10-07-supplier-call")
+    assert note is not None
+    n = next(n for n, line in note.lines() if line.startswith("- The consultant asks ten million"))
+    text = (
+        "---\nid: brief:ben-sample\ntype: brief\ncovers: []\nby: claude-test, brief 2026-10-17\n"
+        "entities: [ben-sample]\n"
+        f"---\n\n# Ben Sample\n\n## What changed\n\n- Above the budget. [d:{note.meta.id}@{note.meta.rev}#{n}]\n\n"
+        "## Last conversations\n\n## Decisions\n"
+    )
+    put = call(service, "doc_put", {"text": text})
+    assert not put.is_error, text_of(put)
+    result = call(service, "briefs", {"stale_only": False})
+    assert not result.is_error, text_of(result)
+    data = result.structured_content
+    assert data is not None
+    assert set(data) == {"briefs", "hidden", "missing"}
+    [one] = data["briefs"]
+    fields = {"id", "entity", "name", "type", "rev", "rev_time", "new", "flagged", "orphaned", "state", "why"}
+    assert set(one) == fields
+    assert set(one["new"]) == {"count", "newest"}
+    assert (one["id"], one["entity"], one["name"], one["type"], one["rev"]) == (
+        "brief:ben-sample", "ben-sample", "Ben Sample", "person", 1,
+    )  # fmt: skip
+    assert (one["state"], one["flagged"], one["orphaned"], one["why"], data["hidden"]) == ("current", 0, None, None, 0)
+    assert "current   brief:ben-sample  Ben Sample (person), rev 1" in text_of(result)
+    assert call(service, "briefs", {}).structured_content == {"briefs": [], "hidden": 0, "missing": []}

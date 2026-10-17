@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 
 from docket.documents import records as documents
 from docket.errors import DocketError
-from docket.vault import derived
+from docket.vault import brief_form, derived
 from docket.vault.anchors import format_ref, normalize_newlines, trailing_anchors
 from docket.vault.git import DOC_LINE
 from docket.vault.home import make_private
@@ -254,6 +254,10 @@ class DocStore:
         doc, redacted = derived.check(doc, head[1 : doc.head_lines - 1], self.redactor, self.lists)
         doc, pinned, problems = self._pin_doc(doc)
         notes: list[str] = []
+        if doc.meta.type == "brief":
+            # A brief's form and its never-store screen (DR-0555, DR-0558); a section the form doesn't name is a note.
+            found, notes = brief_form.check(doc, self.root, self.lists)
+            problems += found
         # Closed before the lock: the write never holds the index or waits behind its update (DR-0516).
         with raw() if raw is not None else nullcontext(RawLookup(self.root)) as lookup:
             problems += self._against_raw(doc, head, lookup, notes)
@@ -347,6 +351,8 @@ class DocStore:
                         raise DocRefusedError([DocProblem(None, "the frontmatter can't be written back")])
                     doc, redacted = derived.check(doc, head[1 : doc.head_lines - 1], self.redactor, self.lists)
                     doc, _, problems = self._pin_doc(doc)
+                    if doc.meta.type == "brief":
+                        problems += brief_form.check(doc, self.root, self.lists)[0]
                     problems += self._against_raw(doc, head, lookup)
                 except DocRefusedError as e:
                     out[i] = e
@@ -476,7 +482,7 @@ class DocStore:
         except DocRefusedError:
             message = f"{rel} was edited by hand and its frontmatter no longer parses; fix it or check it out again"
             raise DocRefusedError([DocProblem(None, message)]) from None
-        edit = derived.hand_edit(edited.meta.type, on_disk, last, self.redactor, self.lists)
+        edit = self._hand_edit(edited, on_disk, last)
         if edit.stops:
             raise DocRefusedError(
                 [
@@ -508,6 +514,15 @@ class DocStore:
         if self._known is not None:
             self._known.pop(doc_id, None)
         return rev, text
+
+    def _hand_edit(self, edited: ProcessedDoc, text: str, last: str | None) -> derived.HandEdit:
+        """A hand edit as `derived.hand_edit` reads it, and for a brief its never-store checks too (DR-0558): an edit
+        that names a listed person stays on disk, as one that says a keyword does."""
+        edit = derived.hand_edit(edited.meta.type, text, last, self.redactor, self.lists)
+        if edited.meta.type != "brief":
+            return edit
+        found = {p.line or 2: brief_form.NAMES_LISTED for p in brief_form.screen(edited, self.root, self.lists)}
+        return replace(edit, stops=sorted({**found, **dict(edit.stops)}.items()))
 
     # -- refs ------------------------------------------------------------------------------------------------------
 
@@ -623,7 +638,7 @@ class DocStore:
                 history = self.history(meta.id)
                 last = normalize_newlines(self._blob(history[0][1], meta.id)) if history else None
                 stored = max((n for n, _ in history), default=0)
-                edit = derived.hand_edit(meta.type, text, last, self.redactor, self.lists)
+                edit = self._hand_edit(doc, text, last)
                 if edit.stops:
                     report.left += [f"{rel}: line {n} {what}" for n, what in edit.stops]
                     continue

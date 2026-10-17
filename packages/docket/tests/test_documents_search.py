@@ -104,7 +104,7 @@ def test_rows_41_to_80_read_as_the_anchor_says(library: tuple[Vault, Path]) -> N
 def test_a_file_that_went_is_read_verified_and_cited_from_its_last_text(routed: tuple[Vault, Path]) -> None:
     vault, work = routed
     page = f"{rid(REVIEW)}/page2"
-    doc = note("brief:q3-review", covers=[page], lines=[f"- The gearbox overheated. {format_anchor(page, 'part', 1)}"])
+    doc = note("digest:q3-review", covers=[page], lines=[f"- The gearbox overheated. {format_anchor(page, 'part', 1)}"])
     assert recall.doc_put(vault, doc).notes == []
     (work / "reports" / "q3 review.pdf").rename(work / "q3 final.pdf")
     cycle(vault)
@@ -114,14 +114,14 @@ def test_a_file_that_went_is_read_verified_and_cited_from_its_last_text(routed: 
     assert read.spans[1].note is not None and "the latest says: Not read from the file" in read.spans[1].note
     shown = render.read(read)
     assert any(line.startswith("  (the last version with text") for line in shown)
-    checked = recall.verify(vault, "brief:q3-review")
+    checked = recall.verify(vault, "digest:q3-review")
     span = checked.lines[0].spans[0]
     assert (span.problem, span.text) == (None, "the gearbox overheated twice")
     assert checked.lines[0].problems == []
     moved = rid("q3 final.pdf")
     whole = recall.read(vault, f"r:{rid(REVIEW)}", view="raw")
     assert whole.spans[1].note is not None and f"It moved to {moved}." in whole.spans[1].note
-    again = doc.replace("overheated.", "overheated, twice.").replace("type: brief", "type: brief\nrev: 1")
+    again = doc.replace("overheated.", "overheated, twice.").replace("type: digest", "type: digest\nrev: 1")
     result = recall.doc_put(vault, again)
     assert (result.rev, len(result.notes)) == (2, 1)
     assert result.notes[0].startswith(f"{page}: the last version with text")
@@ -202,16 +202,16 @@ def test_a_file_that_turns_protected_is_verified_and_cited_from_its_last_text(
     put(work, "plan.docx", docx(wp("one") + wp("two") + wp("three")))
     cycle(vault)
     plan = rid("plan.docx")
-    doc = note("brief:plan", covers=[plan], lines=[f"- Three. {format_anchor(plan, 'part', 3)}"])
+    doc = note("digest:plan", covers=[plan], lines=[f"- Three. {format_anchor(plan, 'part', 3)}"])
     recall.doc_put(vault, doc)
     # A sensitivity label wraps the docx in an OLE container: the file is now one Docket can't read.
     put(work, "plan.docx", OLE + bytes(4096), mtime=1_792_000_000)
     cycle(vault)
-    checked = recall.verify(vault, "brief:plan")
+    checked = recall.verify(vault, "digest:plan")
     span = checked.lines[0].spans[0]
     assert (span.problem, span.text) == (None, "three")
     assert span.note is not None and "the latest says: Not read: protected" in span.note
-    again = doc.replace("Three.", "Three, still.").replace("type: brief", "type: brief\nrev: 1")
+    again = doc.replace("Three.", "Three, still.").replace("type: digest", "type: digest\nrev: 1")
     result = recall.doc_put(vault, again)
     assert (result.rev, len(result.notes)) == (2, 1)
     read = recall.read(vault, f"r:{plan}", view="raw")
@@ -239,5 +239,5 @@ def test_doc_put_reads_a_covered_source_s_raw_once(
         return real(self, source)
 
     monkeypatch.setattr(spans.RawLookup, "_source", counting)
-    recall.doc_put(vault, note("brief:q3", covers=[page], lines=[f"- Hot. {format_anchor(page, 'part', 1)}"]))
+    recall.doc_put(vault, note("digest:q3", covers=[page], lines=[f"- Hot. {format_anchor(page, 'part', 1)}"]))
     assert loads == ([] if index == "current" else [SOURCE])

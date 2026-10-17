@@ -13,7 +13,8 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel
 
-from docket import index, recall, render
+from docket import briefs, index, recall, render
+from docket.briefs import BriefsReport
 from docket.index import SearchResult
 from docket.media import put as media
 from docket.media.keystore import KeyStore
@@ -72,6 +73,19 @@ async def verify(
         result = recall.verify(service.vault(), doc, lines=list(lines) if lines else None, window=window)
         return result, render.text(render.verify(result))
 
+    return await asyncio.to_thread(run)
+
+
+async def brief_states(
+    service: Service, entities: list[str] | None = None, stale_only: bool = True
+) -> tuple[BriefsReport, str]:
+    """The briefs' states, read-only, after the index is brought up to date (DR-0556)."""
+
+    def run() -> tuple[BriefsReport, str]:
+        found = briefs.report(service.vault(), entities, stale_only=stale_only, update=False)
+        return found, render.text(render.briefs(found))
+
+    await service.updater.fresh()
     return await asyncio.to_thread(run)
 
 

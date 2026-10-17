@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 import yaml
-from docket_testkit import index_config, template_with
+from docket_testkit import files_in, index_config, template_with
 
 from docket.vault.records import RawRecord
 from docket.vault.vault import Vault
@@ -168,7 +168,7 @@ def build_eval_vault(root: Path) -> Vault:
     for source, records in sorted(eval_records().items()):
         vault.write_run(source, records, datetime(2026, 10, 14, 7, 0, tzinfo=UTC))
     shutil.copytree(EVAL_FIXTURE / "entities", vault.root / "entities", dirs_exist_ok=True)
-    vault.commit(["entities"], "Entities")
+    vault.commit(files_in(vault, "entities"), "Entities")
     docs = [p.read_text(encoding="utf-8") for p in sorted((EVAL_FIXTURE / "docs").glob("*.md"))]
     stored = DocStore(vault).put_many(docs, "Eval vault docs")
     assert all(isinstance(r, PutResult) for r in stored), stored

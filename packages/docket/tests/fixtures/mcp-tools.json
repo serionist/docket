@@ -148,6 +148,36 @@
     }
   },
   {
+    "name": "briefs",
+    "input_schema": {
+      "properties": {
+        "entities": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "stale_only": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "annotations": {
+      "read_only_hint": true,
+      "open_world_hint": false
+    }
+  },
+  {
     "name": "doc_put",
     "input_schema": {
       "properties": {

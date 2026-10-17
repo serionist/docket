@@ -9,13 +9,16 @@ from __future__ import annotations
 import html
 import re
 import unicodedata
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from functools import lru_cache
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 from urllib.parse import unquote
 
 from docket.vault.config import NeverStore
 from docket.vault.records import RawRecord
+
+if TYPE_CHECKING:
+    from docket.vault.entities import Entity
 
 ListName = Literal["people", "containers", "keywords"]
 
@@ -28,6 +31,8 @@ _PERCENT_U = re.compile(r"%u([0-9a-fA-F]{4})")
 _BACKSLASH_U = re.compile(r"\\u([0-9a-fA-F]{4})")
 # A second entity of one name ends its id in -<n>: rita-sample-2.
 _SLUG_NUMBER = re.compile(r"-[0-9]+$")
+# An address written in angle brackets after a name: `Ben Sample <ben@example.invalid>`.
+_BRACKETED = re.compile(r"<[^<>]*>")
 # Decoding stops when a round changes nothing; a link wrapped more often than this is beyond any mail client seen.
 DECODE_ROUNDS = 4
 
@@ -162,6 +167,19 @@ def _orders(value: str) -> list[str]:
     return [" ".join(words), *([f"{words[1]} {words[0]}"] if len(words) == 2 else [])]
 
 
+def person_phrases(lists: NeverStore, known: Iterable[str] = ()) -> list[str]:
+    """The phrases that name someone on the people list in a text, to read as keywords (DR-0558): each value without
+    its `<address>` and each address in it, as `_forms` reads a value, and each name in both word orders, as `_orders`
+    does; with them, `known`, the names and aliases the store holds for a listed entity, read the same way."""
+    out: set[str] = set()
+    for value in (*lists.people, *known):
+        out.update(fold(a) for a in _ADDRESS.findall(value))
+        name = _ADDRESS.sub(" ", _BRACKETED.sub(" ", value))
+        if _words(name).strip():
+            out.update(_orders(name))
+    return sorted(out)
+
+
 def listed(value: str, lists: NeverStore) -> ListName | None:
     """The list a value an entity holds (a name, an alias, an id, a role, a note) is on, or None. The people list
     is held to it as to a record's author, and by its words in both orders; the keywords list, as text, in both orders
@@ -181,6 +199,14 @@ def spelled(entity: str) -> str:
 def slug_listed(entity: str, lists: NeverStore) -> bool:
     """Whether a never-store list holds an entity id as written or the name it spells."""
     return any(listed(v, lists) is not None for v in (entity, spelled(entity)))
+
+
+def person_listed(entity: Entity, lists: NeverStore) -> bool:
+    """Whether the people list names an entity by any of its names, aliases or contact ids: listed by an address
+    alone or by a nickname, it is still that person. The people page drops their whole row and a brief is never
+    written for them (DR-0558)."""
+    values = [*entity.names.values(), *(a.text for a in entity.aliases), *(v for vs in entity.ids.values() for v in vs)]
+    return any(listed(v, lists) == "people" for v in values)
 
 
 def match(record: RawRecord, lists: NeverStore) -> ListName | None:
