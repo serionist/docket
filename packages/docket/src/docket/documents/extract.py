@@ -31,10 +31,8 @@ from typing import IO, Any, Literal, cast
 
 from pydantic import TypeAdapter, ValidationError
 
+from docket import childproc
 from docket.childproc import GROUPS, child_env, stop
-
-# On every system, though only Windows uses it: its own body is Windows' alone.
-from docket.documents import winjob
 from docket.documents.limits import MIB
 from docket.documents.parts import Extracted, Part, format_of
 from docket.errors import DocketError
@@ -42,6 +40,8 @@ from docket.errors import DocketError
 TIME_LIMIT = 120.0
 HELLO_SECONDS = 30.0
 STOP_SECONDS = 5.0
+# Where the system enforces a memory cap the child sets on itself; macOS enforces none.
+CAPPED = childproc.CAPPED
 FILES_PER_CHILD = 100
 MEMORY = 2 * 1024 * MIB
 # A line holds at most a part's 1 MiB of text, escaped; a file's lines at most its 4 MiB, a few times over.
@@ -51,8 +51,6 @@ STDERR_KEEP = 64 * 1024
 CHILD = ("-I", "-X", "utf8", "-m", "docket.documents.child")
 # The service runs under pythonw on Windows: a console child would flash a window for every start.
 NO_WINDOW: int = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-# Where the system enforces a memory cap the child sets on itself; macOS enforces none.
-CAPPED = sys.platform in ("linux", "win32")
 
 _PART = TypeAdapter(Part)
 _EXTRACTED = TypeAdapter(Extracted)
@@ -307,31 +305,10 @@ def _read(pipe: IO[bytes], answers: queue.Queue[dict[str, Any] | None]) -> None:
 
 # -- the memory cap on Windows: a job object --------------------------------------------------------------------------
 
-if sys.platform == "win32":  # pragma: no cover - Windows' own API; test_documents_extract runs it there
 
-    def _job(pid: int, memory: int) -> int | None:
-        """A job that kills the child when its handle closes, with the child in it, so a stop takes the interpreter a
-        venv's launcher started too; its memory cap holds only where it caught the interpreter, which caps itself."""
-        try:
-            job = winjob.create(winjob.PROCESS_MEMORY | winjob.KILL_ON_CLOSE, memory)
-        except OSError as e:
-            raise DocketError(f"Windows refused the documents' reader a job object ({e.errno})") from None
-        try:
-            winjob.assign(job, pid)
-        except OSError as e:
-            winjob.close(job)
-            raise DocketError(f"Windows refused the documents' reader its job ({e.errno})") from None
-        return job
+def _job(pid: int, memory: int) -> int | None:
+    return childproc.job(pid, memory, "the documents' reader")
 
-    def _close_job(job: int | None) -> None:
-        if job:
-            winjob.close(job)
 
-else:  # pragma: no cover - one of the two runs on each system
-
-    def _job(pid: int, memory: int) -> int | None:
-        """No job objects here: the child caps its own memory on Linux, and macOS has none it enforces."""
-        return None
-
-    def _close_job(job: int | None) -> None:
-        """Nothing to close where there are no job objects."""
+def _close_job(job: int | None) -> None:
+    childproc.close_job(job)

@@ -608,7 +608,9 @@ change lands on whoever uses that vendor, while the core still checks every rid 
     IPv6 form of an IPv4 one, the connection made to a checked address;
   - 3 redirects at most, each checked again, no compression, and a size cap.
 - Media passes the gate's checks at the put, again after the fetch, at every sweep and at promotion, and goes with any
-  drop of a version of its record (DR-0547).
+  drop of a version of its record (DR-0547). A release's cuts and a transcript cut by time are cut out of the audio,
+  as silence, before it is encrypted, in a child process with limits; each stored file's cuts are committed beside it
+  (DR-0559 to DR-0562).
 - Every record goes through the staging gate; a source's sensitivity is in `vault.yaml`.
 - Hold lists keep records out that must not be staged yet, such as backfilled recordings with stretches the owner
   left out: `state/holds/<source>.txt`, ids only, read on every ingest and by the gate, failing closed (DR-0121,

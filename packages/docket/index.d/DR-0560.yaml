@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0560
+    title: A cut stretch becomes digital silence, padded 250 ms, checked against the transcript's timeline, stored as WebM Opus
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#157"]
+    description: "The child decodes a frame at a time through av.AudioResampler to 48 kHz mono s16, sets the samples of each range to zero, and encodes as it goes: libopus in WebM, application voip, VBR at 32 kbit/s, 20 ms frames, with Cues, since the output is a seekable temp file. Nothing is removed, so every transcript time points at the same moment. Each range is widened 250 ms either side, from 0, and ranges that then touch are made one. FFmpeg trims an MP3's encoder delay from its LAME header, so sample 0 is the recording's start. When the media's family has a transcript, two checks fail closed and name the offset: its last segment must end before the audio does, give or take 1 s; and the audio's first sound, the first 50 ms window above -45 dBFS of the uncut audio, must fall within 1.5 s of its first segment's start, and audio silent throughout is refused. The put's line names how many stretches were cut, the input's codec, rate, channels and bit rate, and the onset, so the first real recording shows what its source sends. Audio with no ranges is stored as it came; a cut recording's stored file is <rid hash>.webm.age under DR-0547's paths. Placement counts decoded samples from the first one, never the input's timestamps: consistent for an MP3, whose frames are counted; a source whose timestamps have gaps would need its own check."
+    not_chosen:
+      - "FLAC: 40 to 60 MB an hour at 16 kHz, three or four times an MP3 of speech, in LFS for good."
+      - "Ogg Opus: Safari plays it only since 18.4, with a wrong duration on long files (WebKit bug 293310)."
+      - "Removing the stretches: every later transcript time would point elsewhere."
+      - "The end check alone: it catches audio shorter than its transcript, not audio shifted later with room at the end."

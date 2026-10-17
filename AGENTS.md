@@ -118,7 +118,8 @@ agrees in the issue or, under an autonomy grant, with its decision recorded as p
   legacy note's old paths and import hash (DR-0130), old paths as locators (DR-0131), each machine's cursor file
   (DR-0245), the curate log's path, lines and keys (DR-0460, DR-0461), a folder source's rids, `<source>:<12 hex>`
   with `/page<n>`, `/slide<n>` and `/sheet<n>` under them (DR-0482), media's paths, staged and stored, and
-  its sidecar and withheld marks (DR-0547);
+  its sidecar and withheld marks (DR-0547), the sidecar's cuts and `_decided.jsonl`'s kinds (DR-0561), the media cut
+  log (DR-0562);
 - a source's mapper interface (DR-0119), and the names and keys of a source in `vault.yaml` (DR-0124, DR-0125),
   `folder` and `exclude` (DR-0481) and `media_folders` (DR-0548) among them;
 - the question file `docket eval` reads, which users keep outside the repo (DR-0290);

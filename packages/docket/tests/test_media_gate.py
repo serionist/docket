@@ -23,7 +23,6 @@ from docket.media.keystore import KeyStore
 from docket.vault import gate as gate_module
 from docket.vault import holds, releaselog
 from docket.vault.config import CONFIG_FILE, VaultConfig
-from docket.vault.cuts import Cut
 from docket.vault.gate import Gate
 from docket.vault.git import Git
 from docket.vault.host import Lfs
@@ -137,17 +136,6 @@ def test_a_hold_or_a_hand_cut_arriving_after_the_put_deletes_the_media(tmp_path:
     holds.add(vault, "plaud", ["rec-a"])
     Gate(vault).list()
     nothing_left(vault)
-
-
-def test_a_cut_by_hand_keeps_the_audio_out(tmp_path: Path) -> None:
-    vault = media_vault(tmp_path)
-    put(vault)
-    Gate(vault).classify(POLISHED, "work", [Cut(start=0, end=5000, unit="ms")])
-    Gate(vault).list()
-    nothing_left(vault)
-    in_raw(vault)
-    with pytest.raises(DocketError, match="cut or decided private by hand"):
-        put(vault)
 
 
 def test_a_release_that_leaves_the_record_out_takes_its_media(tmp_path: Path) -> None:

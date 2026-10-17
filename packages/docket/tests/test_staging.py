@@ -110,12 +110,12 @@ def test_temp_files_a_crash_left_are_cleared(store: Staging) -> None:
 
 
 def test_the_decided_memory_keeps_hashes_and_survives_a_torn_line(store: Staging) -> None:
-    store.remember([])
+    store.remember([], "cut")
     assert not store.decided_file.exists()
-    store.remember([("chat:one", "k1")])
+    store.remember([("chat:one", "k1")], "private")
     with store.decided_file.open("ab") as f:
         f.write(b'{"rid": "torn')
-    store.remember([("chat:two", "k2")])
+    store.remember([("chat:two", "k2")], "cut")
     text = store.decided_file.read_text(encoding="utf-8")
     assert "chat:one" not in text
     assert text.endswith("\n")
@@ -124,3 +124,21 @@ def test_the_decided_memory_keeps_hashes_and_survives_a_torn_line(store: Staging
     assert decided.rids == frozenset({rid_hash("chat:one"), rid_hash("chat:two")})
     store.decided_file.write_text('{"rid": "x"}\n[1]\n', encoding="utf-8")
     assert store.decided().keys == frozenset()
+
+
+def test_each_decision_says_what_it_was_and_the_last_kind_for_a_key_counts(store: Staging) -> None:
+    """DR-0561: a line written before decisions said what they were counts as private for media."""
+    one, two = rid_hash("plaud:one"), rid_hash("plaud:two")
+    store.decided_file.parent.mkdir(parents=True, exist_ok=True)
+    store.decided_file.write_text(f'{{"rid": "{one}", "key": "k0"}}\n', encoding="utf-8")
+    store.remember([("plaud:two", "k2")], "cut")
+    decided = store.decided()
+    assert decided.kinds == {one: {"k0": None}, two: {"k2": "cut"}}
+    assert decided.private(one) and not decided.private(two) and not decided.private(rid_hash("plaud:none"))
+    store.append_decided([(one, "k0")], "cut")
+    store.remember([("plaud:two", "k3")], "private")
+    decided = store.decided()
+    assert not decided.private(one)
+    assert decided.private(two)
+    store.decided_file.write_text(f'{{"rid": "{one}", "key": "k0", "kind": "odd"}}\n', encoding="utf-8")
+    assert store.decided().kinds == {one: {"k0": None}}

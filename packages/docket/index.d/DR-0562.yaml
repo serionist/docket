@@ -1,0 +1,13 @@
+decisions:
+  - id: DR-0562
+    title: Each stored media file's cuts are committed with it, in state/media-cuts/<source>.jsonl
+    status: proposed
+    at: "2026-10-17"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#157"]
+    description: "Each media commit appends to state/media-cuts/<source>.jsonl, in the same commit, one line per file it stores: schema_version 1, the rid's 32-hex hash, cuts (start and end in milliseconds, none for audio stored as it was put), at (UTC) and machine. Times and hashes only, never content, as the release log. It merges by union through the vault's *.jsonl merge=union, is written through a temp file in Docket's private folder and a rename, never through a link, and a line that doesn't read stops its reader, named by its number. A media commit that is known not to have landed puts the log back as it was. A file stored without a line counts as cut by none. #157's second part reads it: a stored file whose family's ranges outgrow its line, or that a hold covers, is not played, the run names it, a put beside it is allowed, and the new file's commit removes the old one and deletes its key on this clone."
+    binds: [Changing a line's shape needs a new schema_version and a reader for every earlier one.]
+    not_chosen:
+      - "The cuts inside the encrypted file: the gate couldn't read them without the key."
+      - "Working out a stored file's cuts from the state at its commit: the release logs and raw at that commit would have to be read again from history."

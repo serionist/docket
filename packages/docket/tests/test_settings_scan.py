@@ -243,7 +243,13 @@ def test_only_the_release_and_the_writer_ask_at_the_console() -> None:
                 importers.add(rel)
             if isinstance(node, ast.Import) and any(a.name == "docket.console" for a in node.names):
                 importers.add(rel)
-    assert importers == {"sources/release.py", "vault/settings.py", "models/api.py", "media/backup.py"}
+    assert importers == {
+        "sources/release.py",
+        "vault/settings.py",
+        "models/api.py",
+        "media/backup.py",
+        "media/confirm.py",
+    }
     exporters = {
         rel
         for rel, module in _modules()

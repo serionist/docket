@@ -4,7 +4,6 @@ in media/ when the record is in raw, and every refusal before the fetch and afte
 from __future__ import annotations
 
 import os
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -15,9 +14,8 @@ from docket.errors import DocketError
 from docket.media import crypto, layout, reader
 from docket.media import put as media
 from docket.media.keystore import KeyStore
-from docket.vault import holds, releaselog
+from docket.vault import holds
 from docket.vault.gate import Gate
-from docket.vault.releaselog import LoggedCut, Release
 from docket.vault.vault import Vault
 
 
@@ -134,16 +132,6 @@ def test_a_held_or_released_recording_s_media_is_refused(tmp_path: Path) -> None
     vault = media_vault(tmp_path)
     holds.add(vault, "plaud", ["rec-a"])
     with pytest.raises(DocketError, match="on hold"):
-        media.put(vault, CALL, url=f"https://{HOST}/a")
-    assert reader.state_of(vault, CALL) == "held"
-
-
-def test_a_release_s_cuts_refuse_the_audio_until_it_can_be_cut(tmp_path: Path) -> None:
-    vault = media_vault(tmp_path)
-    in_raw(vault)
-    at = datetime(2026, 10, 15, 9, 0, tzinfo=UTC)
-    releaselog.add(vault, "plaud", Release(id="rec-a", cuts=[LoggedCut(start=0, end=1000)], at=at, machine="test-box"))
-    with pytest.raises(DocketError, match="released with cuts"):
         media.put(vault, CALL, url=f"https://{HOST}/a")
     assert reader.state_of(vault, CALL) == "held"
 

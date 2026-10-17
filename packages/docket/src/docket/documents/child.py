@@ -29,32 +29,9 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, BinaryIO, TextIO, cast
 
+from docket.childproc import limit_memory
 from docket.documents.limits import LIMITS, Limits, NotReadError, mib
 from docket.documents.parts import Format
-
-if sys.platform == "linux":  # pragma: no cover - one of the three runs on each system; test_documents_extract runs them
-    import resource
-
-    def limit_memory(cap: int) -> int | None:
-        """The child's address space capped, as Linux lets a process cap its own; the cap it got."""
-        resource.setrlimit(resource.RLIMIT_AS, (cap, cap))
-        return resource.getrlimit(resource.RLIMIT_AS)[0]
-
-elif sys.platform == "win32":  # pragma: no cover
-    from docket.documents import winjob
-
-    def limit_memory(cap: int) -> int | None:
-        """The interpreter in a job of its own that caps its committed memory, and the cap its innermost job holds.
-        The job's handle stays open for the process's life."""
-        job = winjob.create(winjob.PROCESS_MEMORY, cap)
-        winjob.assign(job)
-        return winjob.own_memory_limit()
-
-else:  # pragma: no cover
-
-    def limit_memory(cap: int) -> int | None:
-        """No cap macOS enforces: the child has the time limit and the size caps only."""
-        return None
 
 
 def keep_out(modules: dict[str, Any] | None = None) -> None:

@@ -6,7 +6,10 @@
 | stored | `media/<source>/<yyyy>/<mm>/<rid hash>.<ext>.age`, the month fixed at the promotion that stored it |
 
 The rid hash is staging's: 32 hex of sha256. Stored media is found by `media/<source>/*/*/<rid hash>.*.age`, any month
-and any extension, so nothing computes a month to find a file. The extension comes from the file's first bytes.
+and any extension, so nothing computes a month to find a file. The extension comes from the file's first bytes: a cut
+recording's is `webm` (DR-0560).
+
+The sidecar's schema 2 adds the ranges the file was cut by (DR-0561); a schema 1 sidecar reads as cut by none.
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from docket.errors import DocketError
 from docket.vault.records import source_name_problem
@@ -24,7 +27,7 @@ from docket.vault.staging import STAGING, rid_hash
 STAGED = "_media"
 STORED = "media"
 SUFFIX = ".age"
-SIDECAR_VERSION = 1
+SIDECAR_VERSION = 2
 # The types `media_put` knows by their first bytes: what the extension and a served type say, nothing more.
 AUDIO = frozenset({"mp3", "m4a", "ogg", "opus", "wav", "flac", "webm", "aac"})
 TYPES = {
@@ -45,19 +48,45 @@ TYPES = {
 HEAD = 64
 
 
+class Span(BaseModel):
+    """A stretch silenced, in milliseconds on the recording's timeline, as the transcript or the release has it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    start: int = Field(ge=0)
+    end: int
+
+    @model_validator(mode="after")
+    def _ordered(self) -> Span:
+        if self.end <= self.start:
+            raise ValueError("a cut ends after it starts")
+        return self
+
+
 class Sidecar(BaseModel):
-    """What staging keeps beside a waiting media file: its rid, which the hash can't give back, and its key's id. No
-    content."""
+    """What staging keeps beside a waiting media file: its rid, which the hash can't give back, its key's id, and the
+    ranges it was cut by. No content."""
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[1] = SIDECAR_VERSION
+    schema_version: Literal[1, 2] = SIDECAR_VERSION
     rid: str
     key: str
     ext: str
     bytes: int
     put_at: datetime
     problem: str | None = None
+    cuts: list[Span] = Field(default_factory=list[Span])
+
+    @property
+    def ranges(self) -> tuple[tuple[int, int], ...]:
+        return tuple((c.start, c.end) for c in self.cuts)
+
+    @model_validator(mode="after")
+    def _version(self) -> Sidecar:
+        if self.schema_version == 1 and self.cuts:
+            raise ValueError("a schema 1 sidecar holds no cuts")
+        return self
 
     @field_validator("put_at")
     @classmethod

@@ -27,9 +27,10 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from docket.errors import DocketError
+from docket.media import cutlog
 from docket.media import layout as media_layout
 from docket.media import staged as media_staged
 from docket.media.keystore import KeyStore
@@ -45,6 +46,9 @@ from docket.vault.spans import RawLookup
 from docket.vault.staging import Classifier, Decided, Entry, Scan, Staged, Staging, State, key_of, rid_hash
 from docket.vault.vault import Vault
 
+if TYPE_CHECKING:  # the ranges module reaches the vault package, which imports the gate
+    from docket.media.ranges import Needed
+
 log = logging.getLogger(__name__)
 
 Label = Literal["work", "private"]
@@ -55,6 +59,9 @@ Why = Literal["on-hold", "held-back", "released", "by-hand", "mixed", "work", "c
 MIN_KEY_PREFIX = 6
 # Each staged record's time is after the one before (DR-0488), even when the clock hasn't moved: Windows' moves every
 # 15.6 ms.
+# How many recordings a run's media line names, and how many of the newest it looks through (DR-0561).
+DUE = 20
+DUE_LOOK = 200
 TICK = timedelta(microseconds=1)
 
 
@@ -258,7 +265,7 @@ class Gate:
                         "it is still staged and goes again at the next promotion), then classify it again"
                     )
                 self._drop_media(rid, withhold=True)
-                self.staging.remember([(rid, entry.key)])
+                self.staging.remember([(rid, entry.key)], "private")
                 self.staging.delete(entry.path)
                 log.info("gate: one record classified private and dropped")
                 return None
@@ -325,6 +332,43 @@ class Gate:
             with self._screen(config) as screen:
                 return screen.why(rid)
 
+    def media_plan(self, rid: str) -> Needed | str:
+        """The ranges a put of media for a rid must cut, or why it can't be staged now: after a sweep, under the lock
+        (DR-0561)."""
+        with self.vault.lock:
+            config = self._config()
+            self._sweep(config)
+            with self._screen(config) as screen:
+                return screen.plan(rid)
+
+    def media_due(self, source: str, *, limit: int = DUE, look: int = DUE_LOOK) -> list[str]:
+        """The source's recordings, staged or in raw and newest first, that have no media and must be cut, with every
+        check passing: what the next run's media step puts again, cut (DR-0561). Native ids, at most `limit`, from the
+        newest `look` recordings."""
+        with self.vault.lock:
+            config = self._config()
+            self._sweep(config)
+            entry = config.sources.get(source)
+            if entry is None or not (entry.media_hosts or entry.media_folders):
+                return []
+            root = self.vault.root
+            with self._screen(config) as screen:
+                staged = [
+                    e.staged.record.rid
+                    for e in screen.staged
+                    if e.staged.record.source == source and e.staged.record.kind == "recording"
+                ]
+                due: list[str] = []
+                for rid in list(dict.fromkeys([*staged, *screen.raw.of_kind(source, "recording")]))[:look]:
+                    if media_layout.staged_files(root, rid) or media_layout.stored_files(root, rid):
+                        continue
+                    found = screen.plan(rid)
+                    if not isinstance(found, str) and found.ranges:
+                        due.append(rid.partition(":")[2])
+                    if len(due) == limit:
+                        break
+                return due
+
     # -- inside the gate -------------------------------------------------------------------------------------------
 
     def _drop_media(self, rid: str, *, withhold: bool) -> None:
@@ -366,7 +410,9 @@ class Gate:
         if not swept.waiting:
             return swept
         with self._screen(config) as screen:
-            failing = {w.sidecar.rid for w in swept.waiting if screen.why(w.sidecar.rid) is not None}
+            failing = {
+                w.sidecar.rid for w in swept.waiting if screen.why(w.sidecar.rid, applied=w.sidecar.ranges) is not None
+            }
         for rid in sorted(failing):
             self._media_dropped += media_staged.delete(self.vault.root, self.keys, rid, self.vault.git.in_head)
         kept = [w for w in swept.waiting if w.sidecar.rid not in failing]
@@ -386,32 +432,41 @@ class Gate:
             groups = self._media_groups(swept, screen, result)
         for source in sorted(groups):
             moved = groups[source]
+            # What each file was cut by, committed with it (DR-0562).
+            before = cutlog.append(
+                self.vault.home, self.vault.root, source, [_cuts_of(t, s) for t, _, s in moved], self.vault.machine
+            )
             try:
                 commit = self.vault.commit(
-                    media_staged.rel(self.vault.root, (target for target, _, _ in moved)),
+                    [*media_staged.rel(self.vault.root, (target for target, _, _ in moved)), cutlog.rel(source)],
                     f"Media: {source}, {len(moved)} file(s) from {self.vault.machine}",
                 )
             except BaseException:
-                self._move_back(moved)
+                if self._move_back(moved):
+                    cutlog.put_back(self.vault.root, source, before)
                 raise
             for _, _, sidecar in moved:
                 sidecar.unlink(missing_ok=True)
             result.media.append(MediaRun(source, len(moved), commit))
         result.media_dropped = self._media_dropped
 
-    def _move_back(self, moved: list[tuple[Path, Path | None, Path]]) -> None:
+    def _move_back(self, moved: list[tuple[Path, Path | None, Path]]) -> bool:
         """After a media commit that raised: back to staging each file moved for it that HEAD doesn't hold. One that
         landed and then raised (Ctrl+C after git finished) leaves its files where HEAD has them, and their sidecars
         go at the next promotion. When git can't say, every file stays, and the next promotion commits it from
-        media/ as a crash's leftover."""
+        media/ as a crash's leftover. Whether the commit is known not to have landed."""
         root = self.vault.root
         try:
             loose = set(self.vault.git.not_in_head(media_layout.STORED))
         except DocketError:
-            return
+            return False
+        landed = False
         for target, back, _ in moved:
-            if back is not None and target.relative_to(root).as_posix() in loose:
+            if target.relative_to(root).as_posix() not in loose:
+                landed = True
+            elif back is not None:
                 media_staged.move(target, back)
+        return not landed
 
     def _media_groups(
         self, swept: media_staged.Swept, screen: Screen, result: PromoteResult
@@ -432,11 +487,12 @@ class Gate:
             parts = Path(name).parts
             source = parts[1] if len(parts) > 2 else ""
             sidecar = media_layout.staged_dir(root, source) / f"{path.name.split('.', 1)[0]}.json"
-            rid = media_staged.rid_of(sidecar) if source else None
-            if rid is None:
+            found = media_staged.read_sidecar(sidecar) if source else None
+            if found is None:
                 result.media_held.append(f"{name} has no sidecar in staging, so it isn't committed")
                 continue
-            if screen.why(rid, committing=True) is not None:
+            rid = found.rid
+            if screen.why(rid, committing=True, applied=found.ranges) is not None:
                 media_staged.forget_loose(root, self.keys, path, rid, self.vault.git.in_head)
                 media_staged.delete(root, self.keys, rid, self.vault.git.in_head)
                 self._media_dropped += 1
@@ -469,7 +525,7 @@ class Gate:
         # Committed even when nothing new was written: a crash between an earlier write and its commit left the run
         # file behind, and its staged files must not go before it is committed.
         commit = self.vault.commit([], f"Raw: {name}, {what} from {self.vault.machine}")
-        self.staging.remember([(e.staged.record.rid, e.key) for e, _ in items if e.staged.cuts])
+        self.staging.remember([(e.staged.record.rid, e.key) for e, _ in items if e.staged.cuts], "cut")
         for entry, _ in items:
             self.staging.delete(entry.path)
         redactions = sum((markers(final) for _, final in items), Counter[str]())
@@ -664,6 +720,12 @@ class Gate:
 
 def _cut_rids(scan: Scan) -> set[str]:
     return {e.staged.record.rid for e in scan.entries if e.staged.cuts}
+
+
+def _cuts_of(target: Path, sidecar: Path) -> tuple[str, list[media_layout.Span]]:
+    """A stored file's rid hash, from its name, and the ranges its sidecar says it was cut by."""
+    found = media_staged.read_sidecar(sidecar)
+    return target.name.split(".", 1)[0], list(found.cuts) if found is not None else []
 
 
 def _resolve(ref: str, entries: list[Entry]) -> Entry:

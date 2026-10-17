@@ -109,8 +109,8 @@ async def media_put(service: Service, rid: str, *, path: str | None, url: str | 
     """The checks and the staging on the writer, one at a time with every other write; the download beside it, so a
     slow host never holds the queue (DR-0547)."""
     keys = KeyStore(service.vault().home)
-    await service.writer.run(lambda: media.check(service.vault(), rid, keys))
-    fetched = await asyncio.to_thread(lambda: media.fetch(service.vault(), rid, path=path, url=url))
+    needed = await service.writer.run(lambda: media.check(service.vault(), rid, keys))
+    fetched = await asyncio.to_thread(lambda: media.fetch(service.vault(), rid, path=path, url=url, needed=needed))
     try:
         stored = await service.writer.run(lambda: media.finish(service.vault(), fetched, keys))
     finally:

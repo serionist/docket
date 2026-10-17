@@ -1,6 +1,7 @@
 """The four checks a media file passes at the put, before the fetch and again after it, at every sweep and at
-promotion, under the settings in force then (DR-0547). Each reads only what is durable: vault.yaml in force, the raw
-log, staging's files, its `decided` keys and its withheld marks, the hold lists and the release logs.
+promotion, under the settings in force then (DR-0547), and the ranges it must be cut by (DR-0561). Each reads only
+what is durable: vault.yaml in force, the raw log, staging's files, its `decided` keys and their kinds, its withheld
+marks, the hold lists and the release logs.
 
 A media file's records are its rid's record and every record nested under `<rid>/`: Plaud's audio sits on the
 recording, and what was said, and cut, is in the transcript under it. Thread and container stay out.
@@ -9,23 +10,28 @@ recording, and what was said, and cut, is in the transcript under it. Thread and
 |---|---|
 | its record | no version of the rid is staged or in raw |
 | its source and text | the source isn't in force, is off or private; a record of it matches a never-store value |
-| the owner's decisions | the rid is withheld; a record of it was decided by hand, staged with cuts or is in raw cut |
-| holds and releases | a hold covers its record; a release with cuts does; a release leaves a record of it out |
+| the owner's decisions | withheld; classified private, or decided before kinds were kept; cut by characters |
+| holds and releases | a hold covers its record; a release leaves a record of it out |
 | one file per rid | media for the rid is already in `media/` |
 
-The reasons go to the owner at a put; the gate only counts them.
+A release's cuts and a transcript cut by time no longer refuse: they are the ranges the audio is cut by. Staged media
+must have been cut by every range its family needs now, else it goes, and is put again. The reasons go to the owner at
+a put; the gate only counts them.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from docket.errors import DocketError
 from docket.media import layout
+from docket.media import ranges as cut_ranges
+from docket.media.ranges import Needed, Range
+from docket.vault import cuts as cutting
 from docket.vault import neverstore
 from docket.vault.config import VaultConfig
-from docket.vault.cuts import CUT_MARKER
 from docket.vault.holds import Holds
 from docket.vault.records import RawRecord
 from docket.vault.releaselog import Releases
@@ -48,9 +54,19 @@ class Screen:
     left_out: Callable[[RawRecord], bool]
     _nested: dict[str, list[str]] = field(default_factory=dict[str, list[str]])
 
-    def why(self, rid: str, *, committing: bool = False) -> str | None:
+    def why(self, rid: str, *, committing: bool = False, applied: Sequence[Range] | None = None) -> str | None:
         """Why media for a rid can't be staged or stored now, or None when every check passes. `committing` is for a
-        file a crash left in media/ uncommitted: it is the stored file the last check would find."""
+        file a crash left in media/ uncommitted: it is the stored file the last check would find. `applied` is what
+        a staged file was cut by, which must hold every range its family needs now."""
+        found = self.plan(rid, committing=committing)
+        if isinstance(found, str):
+            return found
+        if applied is not None and not cut_ranges.covers(applied, found.ranges):
+            return f"{rid} has cuts its media wasn't cut by; it is put again, cut, at the next run"
+        return None
+
+    def plan(self, rid: str, *, committing: bool = False) -> Needed | str:
+        """The ranges a rid's media must be cut by, or why it can't be staged or stored now."""
         own = [e.staged.record for e in self.staged if e.staged.record.rid == rid]
         raw_own = self.raw.versions(rid)
         if not own and not raw_own:
@@ -70,30 +86,46 @@ class Screen:
             return f"a record of {rid} matches a never-store value"
         if rid_hash(rid) in self.withheld:
             return f"a version of {rid} or a record under it was dropped for a never-store value or as private"
-        rids = {rid, *(record.rid for record in records)}
-        cut = any(e.staged.cuts for e in staged) or any(_is_cut(r) for r in raw)
-        if cut or any(rid_hash(other) in self.decided.rids for other in rids):
+        if any(self.decided.private(rid_hash(other)) for other in {rid, *(record.rid for record in records)}):
             return (
-                f"{rid} or a record under it was cut or decided private by hand; its audio waits until Docket can "
-                "cut it the same way"
+                f"{rid} or a record under it was classified private by hand, or decided before Docket kept which "
+                f"each decision was; if each was a cut, `docket media confirm-cuts {rid}` in your own terminal"
             )
         latest = (own or raw_own)[-1]
         if self.holds.covers(latest):
             return f"{rid} is on hold: its media waits until the hold is released"
-        release = self.releases.covering(latest)
-        if release is not None and release.cuts:
-            return f"{rid} was released with cuts: its audio waits until Docket can cut it the same way"
         if any(self.left_out(record) for record in records):
             return f"a release leaves a record of {rid} out"
+        made = self._made(rid, staged, raw)
+        if isinstance(made, str):
+            return made
+        release = self.releases.covering(latest)
+        needed = cut_ranges.needed(made, [(c.start, c.end) for c in release.cuts] if release is not None else [])
         if not committing and layout.stored_files(self.root, rid):
             return f"media for {rid} is stored already"
-        return None
+        return needed
+
+    def _made(self, rid: str, staged: list[Entry], raw: list[RawRecord]) -> list[RawRecord] | str:
+        """The family's records with their staged cuts made, as promotion will make them; or why there is no time to
+        cut the audio at."""
+        characters = f"{rid} or a record under it was cut by characters, so there is no time to cut its audio at"
+        made: list[RawRecord] = []
+        for entry in staged:
+            record = entry.staged.record
+            if cut_ranges.by_characters(record) or any(c.unit == "char" for c in entry.staged.cuts):
+                return characters
+            if entry.staged.cuts:
+                try:
+                    record = cutting.apply(record, list(entry.staged.cuts))
+                except DocketError:
+                    # A cut promotion would hold, so its times aren't settled yet.
+                    return f"{rid}'s staged cuts don't fit its transcript, so there is no time to cut its audio at yet"
+            made.append(record)
+        if any(cut_ranges.by_characters(record) for record in raw):
+            return characters
+        return [*made, *raw]
 
     def _family_in_raw(self, rid: str) -> list[str]:
         if rid not in self._nested:
             self._nested[rid] = self.raw.nested(rid)
         return self._nested[rid]
-
-
-def _is_cut(record: RawRecord) -> bool:
-    return record.fidelity == "cut" or CUT_MARKER in record.text

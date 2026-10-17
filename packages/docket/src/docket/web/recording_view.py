@@ -35,9 +35,10 @@ Mode = Literal["start", "recording", "held", "missing", "other"]
 # `stored` while the page has no player. A closed list, so every reason has its words and its test.
 NoAudio = Literal["not-fetched", "staged", "held", "not-downloaded", "no-key", "stored"]
 NO_AUDIO: dict[NoAudio, str] = {
-    "not-fetched": "No audio stored yet: none has been put for this recording.",
+    "not-fetched": "No audio stored yet: none has been put for this recording. A cut recording's audio is put "
+    "again, cut, at its source's next run.",
     "staged": "The audio waits at the gate with its record, and is stored at the next promotion.",
-    "held": "The audio waits with the recording's hold, or until Docket can cut it as its transcript was cut.",
+    "held": "The audio waits with the recording's hold: once it is released, the next run puts it, cut.",
     "not-downloaded": "The audio is stored but not downloaded to this machine: git lfs pull fetches it.",
     "no-key": "The audio is stored, but this machine has no key to open it.",
     "stored": "The audio is stored here; playing it from this page comes next.",

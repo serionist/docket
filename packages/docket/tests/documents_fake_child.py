@@ -72,7 +72,7 @@ def main() -> None:
         say(json.dumps({"ready": False}))
         time.sleep(60)
     # The real child's own cap, as the real child sets it before its hello; "uncapped" says ready without one.
-    from docket.documents.child import limit_memory
+    from docket.childproc import limit_memory
 
     got = None if mode == "uncapped" else limit_memory(memory)
     say(json.dumps({"ready": True, "pid": os.getpid(), "memory": got}))
