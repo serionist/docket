@@ -234,9 +234,11 @@ def test_a_brief_a_list_now_holds_is_hidden_and_counted(client: TestClient, tmp_
     main = hidden.find("main").text()
     assert "Ben" not in main
     assert "ben-sample" not in main
-    # A listed person's id opens nothing either, brief or no brief.
-    list_more(tmp_path, people=["ben@northwind.example", "Vera Nobody"])
-    assert page(client, "/briefs?brief=brief:vera-nobody").find("h1").text() == "A hidden brief"
+    # A listed person opens nothing either, brief or no brief: by the name an id spells, or by a contact id.
+    list_more(tmp_path, people=["ben@northwind.example", "Vera Nobody", "U0CLEO"])
+    for nobody in ("brief:vera-nobody", "brief:cleo-test"):
+        assert page(client, f"/briefs?brief={nobody}").find("h1").text() == "A hidden brief"
+    assert "cleo" not in page(client, "/briefs?brief=brief:cleo-test").find("main").text().casefold()
 
 
 def test_a_line_a_list_now_names_is_hidden_and_opens_nothing(client: TestClient, tmp_path: Path) -> None:

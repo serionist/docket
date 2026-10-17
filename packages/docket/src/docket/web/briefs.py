@@ -21,6 +21,7 @@ from docket.errors import DocketError
 from docket.service.state import Service
 from docket.service.writer import IndexBuildingError
 from docket.vault import brief_form
+from docket.vault.entities import load_entities
 from docket.vault.neverstore import slug_listed
 from docket.vault.vault import Vault
 from docket.web import templating
@@ -40,8 +41,13 @@ def gather(vault: Vault, state: BriefsState, now: datetime) -> Facts:
     report = briefs.report(vault, [entity], stale_only=False, update=False)
     found = next((b for b in report.briefs if b.id == state.brief), None)
     if found is None:
-        # A brief a list holds answers hidden whether or not it exists, so the page tells nothing of either.
-        return Facts(now, tz, report, hidden=bool(report.hidden) or slug_listed(entity, lists))
+        # A brief a list holds answers hidden whether or not it exists, so the page tells nothing of either: by its
+        # id, or by its entity as doc_put holds it, a contact id or a nickname included.
+        held = next((e for e in load_entities(vault.root).entities if e.id == entity), None)
+        hidden = (
+            bool(report.hidden) or slug_listed(entity, lists) or (held is not None and brief_form.held(held, lists))
+        )
+        return Facts(now, tz, report, hidden=hidden)
     doc = recall.read(vault, state.brief).doc
     if doc is None:  # pragma: no cover - a doc id always reads as a doc, or raises
         raise DocketError(f"no doc {state.brief}")
