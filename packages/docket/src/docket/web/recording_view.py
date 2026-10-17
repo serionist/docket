@@ -33,12 +33,16 @@ Mode = Literal["start", "recording", "held", "missing", "other"]
 
 # Why there is no audio to play, each with the sentence the page says: the media reader's states (DR-0551), and
 # `stored` while the page has no player. A closed list, so every reason has its words and its test.
-NoAudio = Literal["not-fetched", "staged", "held", "recut", "cut-by-characters", "not-downloaded", "no-key", "stored"]
+NoAudio = Literal[
+    "not-fetched", "staged", "held", "withheld", "recut", "cut-by-characters", "not-downloaded", "no-key", "stored"
+]
 NO_AUDIO: dict[NoAudio, str] = {
     "not-fetched": "No audio stored yet: none has been put for this recording. A cut recording's audio is put "
     "again, cut, at its source's next run.",
     "staged": "The audio waits at the gate with its record, and is stored at the next promotion.",
     "held": "The audio waits with the recording's hold: once it is released, the next run puts it, cut.",
+    "withheld": "The audio isn't played: a record of this recording was dropped for a never-store value or as "
+    "private, or its source's settings keep it out.",
     "recut": "The audio was cut before this recording's latest cuts, so it isn't played; the next run puts it again, "
     "cut.",
     "cut-by-characters": "A record of it was cut by characters, so its audio can't be cut to match; it stays unplayed.",

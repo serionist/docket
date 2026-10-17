@@ -7,6 +7,7 @@ can't be.
 | `not-fetched` | no media for the rid, staged or stored; a cut recording's is put, cut, at the next run |
 | `staged` | it waits at the gate with its record |
 | `held` | a hold covers the rid, stored or not |
+| `withheld` | media's screen keeps its family out: never-store, a private decision, the source private (DR-0570) |
 | `recut` | the stored file was cut by less than its family needs now: not played; the next run puts it again |
 | `cut-by-characters` | a record of its family was cut by characters: no cut of the audio can match it |
 | `not-downloaded` | an LFS pointer is in place of the stored file |
@@ -17,6 +18,7 @@ can't be.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -24,14 +26,18 @@ from typing import Literal
 from docket.errors import DocketError
 from docket.media import crypto, cutlog, layout
 from docket.media import ranges as cut_ranges
+from docket.media import staged as media_staged
 from docket.media.keystore import KeyStore
+from docket.media.screen import refusal
 from docket.vault import holds, releaselog
 from docket.vault.records import owning_id
 from docket.vault.spans import RawLookup
-from docket.vault.staging import Staging, rid_hash
+from docket.vault.staging import Entry, Staging, rid_hash
 from docket.vault.vault import Vault
 
-State = Literal["ok", "not-fetched", "staged", "held", "recut", "cut-by-characters", "not-downloaded", "no-key"]
+State = Literal[
+    "ok", "not-fetched", "staged", "held", "withheld", "recut", "cut-by-characters", "not-downloaded", "no-key"
+]
 # What a stored file's cuts say against its family's: enough, too few, or none can be enough.
 Cuts = Literal["ok", "recut", "cut-by-characters"]
 
@@ -59,15 +65,18 @@ def _held(vault: Vault, rid: str) -> bool:
     return owning_id(rid, source, holds.read(vault.root, source)) is not None
 
 
-def cuts_of(vault: Vault, rid: str, path: Path, raw: RawLookup | None = None) -> Cuts:
+def cuts_of(
+    vault: Vault, rid: str, path: Path, raw: RawLookup | None = None, staged: Sequence[Entry] | None = None
+) -> Cuts:
     """Whether the rid's stored file at `path` was cut by what its family needs now: the release's cuts and the
     `[cut]` segments of its transcripts, staged ones with their cuts made, against the cut log's line for the file's
     key (DR-0562), as the screen reckons them. A record cut by characters has no time to cut at, so no put can match
     it, and staged cuts that don't fit yet leave the file waiting too."""
     lookup = raw or RawLookup(vault.root)
     in_raw = [r for other in lookup.nested(rid) for r in lookup.versions(other)]
-    staged = [e for e in Staging(vault.root, vault.home).scan().entries if layout.in_family(rid, e.staged.record.rid)]
-    made = cut_ranges.made(staged, in_raw)
+    entries = Staging(vault.root, vault.home).scan().entries if staged is None else staged
+    family = [e for e in entries if layout.in_family(rid, e.staged.record.rid)]
+    made = cut_ranges.made(family, in_raw)
     if made == "characters":
         return "cut-by-characters"
     if made == "unfit":
@@ -88,7 +97,12 @@ def state_of(vault: Vault, rid: str, keys: KeyStore | None = None, raw: RawLooku
     if path is not None:
         if _held(vault, rid):
             return "held"
-        cut = cuts_of(vault, rid, path, raw)
+        lookup = raw or RawLookup(vault.root)
+        staging = Staging(vault.root, vault.home)
+        entries = staging.scan().entries
+        if _kept_out(vault, rid, lookup, staging, entries):
+            return "withheld"
+        cut = cuts_of(vault, rid, path, lookup, entries)
         if cut != "ok":
             return cut
         if crypto.is_pointer(path):
@@ -98,6 +112,16 @@ def state_of(vault: Vault, rid: str, keys: KeyStore | None = None, raw: RawLooku
     if layout.staged_files(vault.root, rid):
         return "staged"
     return "held" if _held(vault, rid) else "not-fetched"
+
+
+def _kept_out(vault: Vault, rid: str, lookup: RawLookup, staging: Staging, entries: Sequence[Entry]) -> bool:
+    """Whether media's screen keeps all of the rid's family out now (DR-0570): as a Whisper transcript that heard a
+    never-store word withholds its recording, the stored audio stops playing too. A source only off still plays. The
+    raw is read at its places through the lookup, as `cuts_of` reads it."""
+    staged = [e.staged.record for e in entries if layout.in_family(rid, e.staged.record.rid)]
+    records = [*staged, *(r for other in lookup.nested(rid) for r in lookup.versions(other))]
+    found = refusal(rid, vault.config, records, staging.decided(), media_staged.read_withheld(vault.root))
+    return found is not None and found[0] != "off"
 
 
 def read(vault: Vault, rid: str, keys: KeyStore | None = None, raw: RawLookup | None = None) -> Media:

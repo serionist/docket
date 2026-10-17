@@ -292,6 +292,7 @@ cut is stored as it came.
 | cut after its audio was stored | the stored file isn't played (`recut`); the run names it, and the new file takes its place, the old one's key deleted here once the new one is committed |
 | held | no audio until the release, and a stored file isn't played; then the next run puts it, cut |
 | a record cut by characters | no audio, and a stored file stays unplayed: no cut of the audio can match; the Recording page and `docket media status` say so |
+| a version dropped for a never-store value or as private, its own transcript's or Whisper's | a stored file isn't played (`withheld`); a source only turned off still plays |
 | decided by hand before Docket kept which way | no audio until `docket media confirm-cuts <rid>`, in your own terminal, shows each decision against the versions cut by hand and you confirm they were cuts |
 
 - The cutting runs in a child process with a memory cap and 15 minutes; uncut audio is plain only in a folder of
@@ -477,8 +478,10 @@ it.
   transcript is staged: a hold, a never-store match or a new cut that came meanwhile stages nothing. Cut stretches
   read `[cut]`.
 - The transcript carries the recording's people, its recipients and the recorder's speakers, so a never-store name
-  drops it as it drops the recorder's. A Hungarian recording gets its people's and projects' names as a prompt, less
-  any a never-store list or a redaction rule holds.
+  drops it as it drops the recorder's. A never-store word Whisper hears drops it too, and from then on the stored
+  audio isn't played.
+- A Hungarian recording gets its people's and projects' names as a prompt. An entity a never-store list holds by any
+  of its names, aliases or ids stays out whole, and so does a name a redaction rule would change.
 - Nothing leaves the machine: the worker runs offline, and the prompt and the transcript are never logged. The choice
   is this machine's, in your config's `speech:` section.
 

@@ -1,10 +1,11 @@
 """The vocabulary prompt a Hungarian recording gets (DR-0569): the names Whisper should spell as the vault does.
 
 The names are the family's people (its author, recipients and speakers) resolved to entities, those people's related
-projects, and the entities a record of the family names, by their names and `asr` aliases. Each is screened first: one a
-never-store list holds, or one the redaction rules would change, is left out, since Whisper can repeat a prompt's words,
-and a never-store value in the transcript would drop it and withhold the recording's family. Up to 40 names; the prompt
-goes only to the local worker and is never logged.
+projects, and the entities a record of the family names, by their names and `asr` aliases. Each is screened first: an
+entity a never-store list holds by any of its names, aliases, contact ids or its id is left out whole, as briefs and the
+people page leave it out (DR-0558), and so is a single form the redaction rules would change, since Whisper can repeat a
+prompt's words, and a never-store value in the transcript would drop it and withhold the recording's family. Up to 40
+names; the prompt goes only to the local worker and is never logged.
 """
 
 from __future__ import annotations
@@ -50,13 +51,14 @@ def vocabulary(
     related = {i for e in chosen for i in e.related.get("project", ())}
     chosen += [e for e in known if e.id in related and e.type == "project"]
     chosen += [e for e in known if any(_says(said, f) for f in _forms(e, asr=False))]
+    chosen = [e for e in chosen if not _listed(e, config)]
     redactor = Redactor.from_config(config.redaction)
     names: list[str] = []
     seen: set[str] = set()
     for entity in chosen:
         for form in _forms(entity):
             key = neverstore.fold(form)
-            if key in seen or not _fits(form, config, redactor):
+            if key in seen or not _fits(form, redactor):
                 continue
             seen.add(key)
             names.append(form.strip())
@@ -66,9 +68,18 @@ def vocabulary(
     return f"{lead} {', '.join(names)}." if names else None
 
 
-def _fits(name: str, config: VaultConfig, redactor: Redactor) -> bool:
-    """Whether a name may go in: no never-store list holds it, and redaction leaves it as it is."""
+def _listed(entity: Entity, config: VaultConfig) -> bool:
+    """Whether a never-store list holds an entity by any of its names, aliases or contact ids, or by its id: every
+    form of it stays out then, the unlisted nickname too."""
     lists = config.never_store
-    if neverstore.listed(name, lists) is not None or neverstore.matches_text(name, lists):
-        return False
+    values = [*entity.names.values(), *(a.text for a in entity.aliases), *(v for vs in entity.ids.values() for v in vs)]
+    return (
+        neverstore.person_listed(entity, lists)
+        or neverstore.slug_listed(entity.id, lists)
+        or any(neverstore.listed(v, lists) is not None for v in values)
+    )
+
+
+def _fits(name: str, redactor: Redactor) -> bool:
+    """Whether a name of an entity no list holds may go in: redaction leaves it as it is."""
     return redactor.text(name) == name

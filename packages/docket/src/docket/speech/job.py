@@ -52,6 +52,7 @@ WHY: dict[reader.State, str] = {
     "not-fetched": "no audio is stored for it",
     "staged": "its audio waits at the gate; it is stored at the next promotion",
     "held": "a hold covers it",
+    "withheld": "nothing of its family may be kept now",
     "recut": "its stored audio was cut before its family's latest cuts; the next run puts it again, cut",
     "cut-by-characters": "a record of it was cut by characters, so its audio can't be cut to match",
     "not-downloaded": "its stored audio isn't downloaded to this machine; git lfs pull fetches it",

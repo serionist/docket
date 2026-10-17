@@ -67,6 +67,19 @@ def test_the_prompt_holds_the_family_s_people_their_projects_and_the_names_its_r
     assert found == "Résztvevők és témák: Ada Example, Ádá, Ben Sample, Crane Works, Dóra Minta, Dóri."
 
 
+def test_an_entity_a_list_holds_by_one_name_is_left_out_with_every_other_form() -> None:
+    config = make_config()
+    # Dóra is listed by her name alone, and the second Ben by his id; their unlisted nickname, asr alias and name
+    # stay out with it.
+    config.never_store = NeverStore(people=["Dóra Minta", "Ben Other"])
+    ben = entity("ben-other", "Benedek", aliases=(Alias("Bence", "asr"),))
+    records = [*family(), make_record(rid="plaud:rec-a/notes", source="plaud", kind="note", text="Benedek joins.")]
+    found = prompt.vocabulary("hu", records, [*ENTITIES, ben], config)
+    assert found is not None
+    assert "Dóri" not in found and "Dóra" not in found and "Bence" not in found and "Benedek" not in found
+    assert "Ada Example" in found
+
+
 def test_only_hungarian_gets_a_prompt_and_none_without_a_name() -> None:
     config = make_config()
     assert prompt.vocabulary("en", family(), ENTITIES, config) is None

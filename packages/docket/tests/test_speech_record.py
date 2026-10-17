@@ -329,6 +329,26 @@ def test_what_the_gate_does_with_it_is_said(tmp_path: Path) -> None:
     assert not done.staged and done.line == f"{WHISPER}: the gate dropped it (never-store); nothing staged"
 
 
+def test_a_never_store_word_whisper_hears_stops_the_stored_audio_playing(tmp_path: Path) -> None:
+    vault = stored_vault(tmp_path)
+    change_config(vault, lambda c: c.never_store.keywords.append("Zephyrine"))
+    done = transcribe(vault, tmp_path, segments=[[500, 4000, "Ask Zephyrine."]])
+    assert not done.staged and done.line.endswith("the gate dropped it (never-store); nothing staged")
+    # The recorder's transcript missed the word, so only the drop's withheld mark says it: the audio stops too.
+    assert reader.state_of(vault, CALL) == "withheld"
+    assert reader.read(vault, CALL).data is None
+    with pytest.raises(DocketError, match="dropped for a never-store value or as private"):
+        transcribe(vault, tmp_path, NEWER)
+
+
+def test_a_source_only_turned_off_still_plays_and_a_private_one_doesn_t(tmp_path: Path) -> None:
+    vault = stored_vault(tmp_path)
+    change_config(vault, lambda c: setattr(c.sources["plaud"], "enabled", False))
+    assert reader.state_of(Vault.open(vault.root), CALL) == "ok"
+    change_config(vault, lambda c: setattr(c.sources["plaud"], "sensitivity", "private"))
+    assert reader.state_of(Vault.open(vault.root), CALL) == "withheld"
+
+
 def test_one_transcription_at_a_time_on_a_machine() -> None:
     state = userconfig.state_dir()
     with job.machine_lock(wait=False):

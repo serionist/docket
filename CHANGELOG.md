@@ -13,7 +13,8 @@ Unreleased in the same PR.
   transcript of its own, staged at the gate beside the recorder's. On an NVIDIA GPU it installs NVIDIA's cuBLAS under
   NVIDIA's terms and needs about 4.5 GB of the GPU's memory; on a CPU an hour of audio takes about an hour. Only audio
   stored and cut by everything its records need is transcribed, cut stretches come back as `[cut]`, and the transcript
-  carries the recording's people, so a never-store name drops it as it drops the recorder's. Off until you install it.
+  carries the recording's people, so a never-store name drops it as it drops the recorder's. A never-store word
+  Whisper hears drops it too, and the stored audio stops playing. Off until you install it.
 - Decisions on the Briefs page: a project's, topic's or stream's decisions newest first, what waits for you
   beside any decision it contradicts, and the buttons that confirm or reject it. Your click is the only way a
   decision becomes confirmed or rejected; a page left open while something changed writes nothing and shows

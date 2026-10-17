@@ -12,6 +12,7 @@ from docket_webkit import OURS, PORT, TOKEN, parse
 from media_kit import CALL, audio, in_raw, media_vault
 from starlette.testclient import TestClient
 
+from docket import index, recall
 from docket.errors import DocketError
 from docket.media import crypto, layout, reader
 from docket.media import put as media
@@ -20,6 +21,7 @@ from docket.service.app import create_app
 from docket.service.sessions import COOKIE, Sessions
 from docket.service.state import Settings
 from docket.vault import holds
+from docket.vault.spans import RawLookup
 from docket.vault.vault import Vault
 from docket.web import recording as recording_page
 from docket.web.recording_view import NO_AUDIO
@@ -65,6 +67,26 @@ def test_each_state_and_the_bytes_when_they_can_be_read(tmp_path: Path) -> None:
         reader.state_of(vault, CALL)
 
 
+def test_the_page_s_state_reads_raw_at_its_places(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The family's checks on each Recording page load read the index's places, never the whole source (#169)."""
+    vault = media_vault(tmp_path)
+    in_raw(vault)
+    put(vault)
+    in_raw(vault)
+    index.update(vault)
+    loads: list[str] = []
+    real = RawLookup._source  # pyright: ignore[reportPrivateUsage]
+
+    def counted(self: RawLookup, source: str) -> object:
+        loads.append(source)
+        return real(self, source)
+
+    monkeypatch.setattr(RawLookup, "_source", counted)
+    with recall.raw_lookup(vault) as lookup:
+        assert reader.state_of(vault, CALL, raw=lookup) == "ok"
+    assert loads == []
+
+
 def test_a_held_recording_s_audio_waits(tmp_path: Path) -> None:
     vault = media_vault(tmp_path)
     holds.add(vault, "plaud", ["rec-a"])
@@ -72,7 +94,8 @@ def test_a_held_recording_s_audio_waits(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "state", ["not-fetched", "staged", "held", "recut", "cut-by-characters", "not-downloaded", "no-key", "stored"]
+    "state",
+    ["not-fetched", "staged", "held", "withheld", "recut", "cut-by-characters", "not-downloaded", "no-key", "stored"],
 )
 def test_the_recording_page_says_why_it_plays_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str
