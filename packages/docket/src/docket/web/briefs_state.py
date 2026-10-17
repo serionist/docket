@@ -5,9 +5,11 @@
 | `brief` | a brief's id, `brief:<entity id>` | none: the list |
 | `line` | a line of that brief, by its number in the file | none: no line open |
 | `type` | an entity type, or `orphaned`: the list shows only those briefs | none: every brief |
+| `done` | what the last click on a decision did: one of the picks | none |
 
-One canonical form: this order, defaults left out. Unknown parameters are ignored, so an old bookmark still opens; the
-parameters only gain optional ones whose default keeps today's meaning. `line` is read only with a brief, and `type`
+One canonical form: this order, defaults left out; `done` is said once, and no link on the page carries it. Unknown
+parameters are ignored, so an old bookmark still opens; the parameters only gain optional ones whose default keeps
+today's meaning. `line` is read only with a brief, and `type`
 stays beside one so the way back to the list keeps it. A link that sets `line` ends in `#raw`, the id of the part
 that shows the line's raw, so the browser scrolls to it without JavaScript.
 """
@@ -21,6 +23,7 @@ from urllib.parse import urlencode
 from starlette.datastructures import QueryParams
 
 from docket.errors import DocketError
+from docket.vault.decision_form import PICKS
 from docket.vault.entities import ENTITY_TYPES
 from docket.vault.processed import id_problem
 
@@ -57,11 +60,18 @@ def _type(given: str) -> str:
     return given
 
 
+def _done(given: str) -> str:
+    if given not in PICKS:
+        raise BriefsStateError(f"done is what a click did: {', '.join(PICKS)}, not {given!r}")
+    return given
+
+
 @dataclass(frozen=True)
 class BriefsState:
     brief: str | None = None
     line: int | None = None
     type: str | None = None
+    done: str | None = None
 
     @staticmethod
     def read(params: QueryParams | Mapping[str, str]) -> BriefsState:
@@ -69,13 +79,16 @@ class BriefsState:
         brief = (params.get("brief") or "").strip()
         line = (params.get("line") or "").strip()
         kind = (params.get("type") or "").strip()
+        done = (params.get("done") or "").strip()
         found = _brief(brief) if brief else None
-        return BriefsState(found, _line(line) if line and found else None, _type(kind) if kind else None)
+        line_n = _line(line) if line and found else None
+        return BriefsState(found, line_n, _type(kind) if kind else None, _done(done) if done else None)
 
     def url(self) -> str:
         """This state's canonical URL."""
         line = str(self.line) if self.line is not None else None
-        pairs = [(name, v) for name, v in (("brief", self.brief), ("line", line), ("type", self.type)) if v]
+        named = (("brief", self.brief), ("line", line), ("type", self.type), ("done", self.done))
+        pairs = [(name, v) for name, v in named if v]
         query = urlencode(pairs, safe=URL_SAFE)
         return f"{PATH}?{query}" if query else PATH
 

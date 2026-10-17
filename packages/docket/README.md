@@ -677,17 +677,21 @@ Sync, Staging, Curate and Settings; the navigation shows the pages still to come
 
 ### The Briefs page
 
-`/briefs` lists the briefs, and opens one beside the raw its lines cite (DR-0557). It only reads: the `brief` skill
-writes briefs when you ask Claude.
+`/briefs` lists the briefs, and opens one beside the raw its lines cite (DR-0557). The `brief` skill writes briefs
+when you ask Claude; the page's one write is your click on a decision (DR-0566).
 
 | Part | Shows |
 |---|---|
 | The list | the briefs by entity type: each one's state (stale, current or orphaned), rev, how long since, flagged lines and new records; an orphan with the entity that holds its name now |
 | A brief | its lines, a flagged one marked, each line that cites something a link; its anchors open the Recording page at their time, or the Search page |
 | A line | the raw it cites, and the doc lines it was built from as they read now, with their own raw |
+| Decisions | for a project, topic or stream: what waits for you, each beside a decision it contradicts, with its buttons; then what is decided, newest first, what it replaced folded under it; then what you rejected |
 
 - Its URL holds `brief` (`brief:<entity id>`), `line` and `type` (an entity type, or `orphaned`). A link that sets
   `line` lands on its raw, without JavaScript.
+- A decision's buttons: Confirm or Reject; for one that contradicts a decision, the new one replaces it, the old
+  one stands, or not a contradiction. Each is a plain form post: the page as it was when you clicked is what
+  counts, so a decision that changed since, or one whose earlier decision was replaced meanwhile, writes nothing.
 - A brief whose entity a never-store list now holds shows only that it is hidden, and is counted on the list; a
   line a list now names shows only that it is hidden, and opens nothing.
 - Keys: `?`.

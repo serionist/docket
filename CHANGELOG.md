@@ -8,9 +8,13 @@ Unreleased in the same PR.
 
 ### Added
 
+- Decisions on the Briefs page: a project's, topic's or stream's decisions newest first, what waits for you
+  beside any decision it contradicts, and the buttons that confirm or reject it. Your click is the only way a
+  decision becomes confirmed or rejected; a page left open while something changed writes nothing and shows
+  the decision as it stands.
 - The decision log: a doc per decision on a project, topic or stream, proposed by the plugin's `decision` skill
-  when you ask and confirmed or rejected only by you; the Briefs page's buttons come next. `docket decision
-  list` and the `decisions` tool say where each stands. A proposed decision never reads as decided, a brief's
+  when you ask and confirmed or rejected only by you, with a click on the Briefs page. `docket decision list`
+  and the `decisions` tool say where each stands. A proposed decision never reads as decided, a brief's
   Decisions cite confirmed decisions only, and a decision another replaced or contradicted keeps its text and
   links both ways. A decision confirmed or rejected is final: a change is a new decision that replaces it.
 - Briefs: a doc per person, project, customer or topic, `brief:<entity id>`, with what changed, the last

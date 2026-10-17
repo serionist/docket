@@ -134,24 +134,67 @@ def as_committed(on_disk: ProcessedDoc, committed: ProcessedDoc | None) -> Proce
         "contradicts": list(last.contradicts) if last is not None else [],
     }
     meta = on_disk.meta
-    titled = _titled(on_disk)
+    titled = _titled(on_disk, "proposed")
     if all(getattr(meta, key) == value for key, value in links.items()) and titled is on_disk:
         return on_disk
     return parse_doc(replace(titled, meta=meta.model_copy(update=links)).render(), lenient=True)
 
 
-def _titled(doc: ProcessedDoc) -> ProcessedDoc:
-    """The doc with its title saying Proposed: before the decision."""
+def _titled(doc: ProcessedDoc, status: str) -> ProcessedDoc:
+    """The doc with its title saying what its status says before the decision: Proposed:, Rejected:, or nothing."""
     found = heading(doc)
     if found is None:
         return doc
-    wanted = PREFIX["proposed"] + bare(found[1])
+    wanted = PREFIX.get(status, "") + bare(found[1])
     if found[1] == wanted:
         return doc
     lines = doc.body.split("\n")
     at = found[0] - doc.head_lines - 1
     lines[at] = lines[at].replace(found[1], wanted, 1)
     return replace(doc, body="\n".join(lines))
+
+
+# -- the user's click ----------------------------------------------------------------------------------------------
+
+# What the Briefs page buttons ask for: a candidate is confirmed or rejected; one that contradicts a decision takes one
+# of three picks instead, the new one replacing it, the old one standing, or not a contradiction (DR-0566).
+PICKS = ("confirm", "reject", "replace", "stand", "unrelated")
+CONFIRMING = ("confirm", "replace", "unrelated")
+THREE = ("replace", "stand", "unrelated")
+
+
+class MovedError(DocketError):
+    """The decision, or a decision it names, moved since the page showed it: nothing is written (409)."""
+
+
+def pick_problem(doc: ProcessedDoc, pick: str) -> str | None:
+    """What makes a pick wrong for this candidate: a plain confirm of one that contradicts a decision, or one of the
+    three picks for one that contradicts none."""
+    if pick not in PICKS:
+        return f"pick is {', '.join(PICKS)}, not {pick!r}"
+    if pick == "confirm" and doc.meta.contradicts:
+        return "a candidate that contradicts a decision takes one of three picks: replace, stand or unrelated"
+    if pick in THREE and not doc.meta.contradicts:
+        return f"{pick} is a pick for a candidate that contradicts a decision; this one contradicts none"
+    return None
+
+
+def status_rev(doc: ProcessedDoc, pick: str, by: str) -> str:
+    """The candidate's next rev as the user's click writes it (DR-0564): confirmed, its `replaces` moved into
+    `supersedes`, and with replace its `contradicts` too; or rejected, its links kept as the record of what it said.
+    Its title says Rejected: or nothing. Only `DocStore.decide` writes it."""
+    meta = doc.meta
+    status = "confirmed" if pick in CONFIRMING else "rejected"
+    supersedes = [*meta.replaces, *(meta.contradicts if pick == "replace" else [])] if status == "confirmed" else []
+    links = {
+        "status": status,
+        "supersedes": supersedes,
+        "replaces": [] if status == "confirmed" else list(meta.replaces),
+        "contradicts": [] if status == "confirmed" else list(meta.contradicts),
+        "by": by,
+        "rev": meta.rev + 1,
+    }
+    return replace(_titled(doc, status), meta=meta.model_copy(update=links)).render()
 
 
 def edited(on_disk: str, committed: str | None) -> bool:

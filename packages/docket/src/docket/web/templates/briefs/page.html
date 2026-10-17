@@ -5,8 +5,85 @@
 {{ span(r.span) }}
 {% if r.link %}<p class="raw-link"><a href="{{ r.link.url }}" title="{{ r.link.title }}">{{ r.link.text }}</a></p>{% endif %}
 {% endmacro %}
+{% macro decision_line(l) %}
+<li class="decision-line {{ l.style }}{% if l.hidden %} hidden-line{% endif %}">
+  <span class="body" dir="auto">{{ l.body }}</span>
+  {% if l.anchors or l.refs %}
+  <span class="cites">
+    {% for a in l.anchors %}{% if a.url %}<a class="anchor" href="{{ a.url }}" title="{{ a.title }}">{{ a.text }}</a>{% else %}<span class="anchor">{{ a.text }}</span>{% endif %} {% endfor %}
+    {% for r in l.refs %}<a class="anchor ref" href="{{ r.url }}" title="{{ r.title }}">{{ r.text }}</a> {% endfor %}
+  </span>
+  {% endif %}
+</li>
+{% endmacro %}
+{% macro decision(c, brief, kind) %}
+<article class="decision" data-standing="{{ c.standing }}">
+  <header class="decision-head">
+    <span class="badge state {{ c.standing }}">{{ c.standing }}</span>
+    <h4 dir="auto">{{ c.title }}</h4>
+  </header>
+  <p class="meta">said {{ c.said }} · rev {{ c.rev }} · {{ c.by }} · <a href="{{ c.verify }}">Verify on the Search page</a></p>
+  {% if c.note %}{{ notice('warn', c.note) }}{% endif %}
+  {% if c.lines %}<ul class="decision-lines">{% for l in c.lines %}{{ decision_line(l) }}{% endfor %}</ul>{% endif %}
+  {% if c.picks %}
+  <form class="decision-picks" method="post" action="/briefs/decision">
+    <input type="hidden" name="decision" value="{{ c.id }}">
+    <input type="hidden" name="rev" value="{{ c.rev }}">
+    <input type="hidden" name="brief" value="{{ brief }}">
+    {% if kind %}<input type="hidden" name="type" value="{{ kind }}">{% endif %}
+    {% for p in c.picks %}<button type="submit" class="button{% if p.primary %} primary{% endif %}" name="pick" value="{{ p.value }}">{{ p.label }}</button>{% endfor %}
+  </form>
+  {% endif %}
+  {% if c.folded %}
+  <details class="folded">
+    <summary>It replaced {{ c.folded|length }} earlier decision{{ '' if c.folded|length == 1 else 's' }}</summary>
+    {% for f in c.folded %}{{ decision(f, brief, kind) }}{% endfor %}
+  </details>
+  {% endif %}
+  {% if c.contradicted %}
+  <details class="folded">
+    <summary>Contradicted {{ c.contradicted|length }} time{{ '' if c.contradicted|length == 1 else 's' }}; it stands</summary>
+    {% for f in c.contradicted %}{{ decision(f, brief, kind) }}{% endfor %}
+  </details>
+  {% endif %}
+</article>
+{% endmacro %}
+{% macro decisions_part(d, brief, kind) %}
+<section class="decisions" aria-labelledby="decisions-title">
+  <h2 id="decisions-title">Decisions</h2>
+  {% if d.hidden_note %}{{ notice('info', d.hidden_note) }}{% endif %}
+  {% if d.empty %}<p class="empty-note">{{ d.empty }}</p>{% endif %}
+  {% if d.waiting %}
+  <h3>Waiting for you</h3>
+  <p class="meta">Only your click here confirms or rejects one. A proposed decision isn't decided.</p>
+  {% for c in d.waiting %}
+  <div class="waiting{% if c.against %} paired{% endif %}">
+    {{ decision(c, brief, kind) }}
+    {% if c.against %}
+    <div class="against">
+      <p class="meta">{{ 'It contradicts' if c.picks|length == 3 else 'It would replace' }}</p>
+      {% for a in c.against %}{{ decision(a, brief, kind) }}{% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% endif %}
+  {% if d.current %}
+  <h3>Decided</h3>
+  {% for c in d.current %}{{ decision(c, brief, kind) }}{% endfor %}
+  {% endif %}
+  {% if d.rejected %}
+  <details class="folded">
+    <summary>Rejected: {{ d.rejected|length }}</summary>
+    {% for c in d.rejected %}{{ decision(c, brief, kind) }}{% endfor %}
+  </details>
+  {% endif %}
+</section>
+{% endmacro %}
 {% block main %}
 <div class="briefs">
+{% if done %}{{ notice('info', done) }}{% endif %}
+{% if warning %}{{ notice('warn', warning) }}{% endif %}
 {% if problem %}
 <h1>Briefs</h1>
 {{ notice('error', problem) }}
@@ -16,6 +93,12 @@
   {% if view.summary %}<p class="meta">{{ view.summary }}</p>{% endif %}
 </header>
 {% if view.hidden_note %}{{ notice('info', view.hidden_note) }}{% endif %}
+{% if view.waiting %}
+<section class="waiting-list" aria-labelledby="waiting-title">
+  <h2 id="waiting-title">Decisions waiting for you</h2>
+  <ul>{% for w in view.waiting %}<li><a href="{{ w.url }}" dir="auto">{{ w.text }}</a></li>{% endfor %}</ul>
+</section>
+{% endif %}
 {% if view.types %}
 <nav aria-label="Entity types">
   <ul class="chips">
@@ -46,6 +129,14 @@
   </ul>
 </section>
 {% endfor %}
+{% elif view.mode == "entity" %}
+<header class="briefs-head">
+  <p class="eyebrow"><span class="kind">{{ icon('doc') }}decisions</span></p>
+  <h1 dir="auto">{{ view.title }}</h1>
+  <p class="briefs-locator"><a href="{{ view.back }}">All briefs</a></p>
+</header>
+<p class="empty-note">{{ view.message }}</p>
+{% if view.decisions %}{{ decisions_part(view.decisions, state.brief, state.type) }}{% endif %}
 {% elif view.mode != "brief" %}
 <header class="briefs-head">
   <p class="eyebrow"><span class="kind">{{ icon('doc') }}brief</span></p>
@@ -103,6 +194,7 @@
     {% endif %}
   </section>
 </div>
+{% if view.decisions %}{{ decisions_part(view.decisions, state.brief, state.type) }}{% endif %}
 {% endif %}
 </div>
 {% endblock %}

@@ -133,7 +133,7 @@ def _title(doc: ProcessedDoc) -> str | None:
     return next((line[2:].strip() for _, line in doc.lines() if line.startswith("# ")), None)
 
 
-def _name(entity: Entity, languages: list[str]) -> str:
+def entity_name(entity: Entity, languages: list[str]) -> str:
     first = next((entity.names[lang] for lang in languages if lang in entity.names), None)
     return first or entity.names[min(entity.names)]
 
@@ -212,7 +212,7 @@ class _Reader:
         base = BriefState(
             id=doc.meta.id,
             entity=entity_id,
-            name=_name(entity, self.languages) if entity is not None else (_title(doc) or entity_id),
+            name=entity_name(entity, self.languages) if entity is not None else (_title(doc) or entity_id),
             type=entity.type if entity is not None else "",
             rev=doc.meta.rev,
             rev_time=self.times.get(commit) if commit is not None else None,
