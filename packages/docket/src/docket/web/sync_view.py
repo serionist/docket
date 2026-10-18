@@ -153,6 +153,8 @@ class SourceFacts:
     final: cursors.Handover = field(default_factory=cursors.Handover)
     # A folder source: Docket reads its folder itself with docket scan, never in a sync (DR-0480).
     folder: bool = False
+    # Its lookback_days in vault.yaml, which the window takes over a cursor's own (DR-0607); None when unset.
+    lookback_days: int | None = None
 
 
 @dataclass(frozen=True)
@@ -608,7 +610,9 @@ def _entry(entry: cursors.Retry | cursors.Waiting, today: date, due: frozenset[s
     return Entry(entry.id, entry.for_, entry.since, f"{age} days", None, entry.id in due)
 
 
-def _row(machine: str, cursor: cursors.Cursor, facts: Facts, this: bool, due: frozenset[str]) -> MachineRow:
+def _row(
+    machine: str, cursor: cursors.Cursor, facts: Facts, this: bool, due: frozenset[str], *, setting: int | None
+) -> MachineRow:
     today = facts.now.date()
     retry = sorted((_entry(e, today, due) for e in cursor.retry.values()), key=lambda e: (e.since, e.id))
     waiting = sorted((_entry(e, today, due) for e in cursor.waiting.values()), key=lambda e: (e.since, e.id))
@@ -622,7 +626,7 @@ def _row(machine: str, cursor: cursors.Cursor, facts: Facts, this: bool, due: fr
         this=this,
         mark=cursor.mark,
         mark_age=ago(cursor.mark, facts.now) if cursor.mark is not None else "",
-        lookback=cursor.lookback_days,
+        lookback=cursors.lookback(cursor, setting),
         retry=retry[:SHOWN],
         waiting=waiting[:SHOWN],
         more=more,
@@ -634,17 +638,19 @@ def _row(machine: str, cursor: cursors.Cursor, facts: Facts, this: bool, due: fr
 def cursor_blocks(facts: Facts, names: list[str]) -> list[CursorBlock]:
     blocks: list[CursorBlock] = []
     finals = {s.name: frozenset({*s.final.retry, *s.final.waiting}) for s in facts.sources}
+    settings = {s.name: s.lookback_days for s in facts.sources}
     for source in names:
         due = finals.get(source, frozenset[str]())
+        setting = settings.get(source)
         rows: list[MachineRow] = []
         own = facts.own.get(source)
         if own is not None:
-            rows.append(_row(facts.machine, own, facts, this=True, due=due))
+            rows.append(_row(facts.machine, own, facts, this=True, due=due, setting=setting))
         others = {m: c[source] for m, c in sorted(facts.others.items()) if source in c}
-        rows.extend(_row(m, c, facts, this=False, due=due) for m, c in others.items())
+        rows.extend(_row(m, c, facts, this=False, due=due, setting=setting) for m, c in others.items())
         window: cursors.Window | None = None
         if facts.own_problem is None:
-            window = cursors.window(own, others, facts.now)
+            window = cursors.window(own, others, facts.now, lookback_days=setting)
         blocks.append(
             CursorBlock(
                 source=source,

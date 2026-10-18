@@ -8,6 +8,10 @@ Unreleased in the same PR.
 
 ### Added
 
+- `sources.<name>.lookback_days` in `vault.yaml`, 0 to 30, sets how many days before the last sync a live run reads
+  back: `1` suits chat and mail, where a week back opens every chat active that week on every run. Unset keeps 7, the
+  cursor file's own. `docket source new --lookback-days` writes it. Update Docket on every machine before you set it:
+  an older one refuses the key.
 - `docket forget <rid>...`, `--never-store` or `--held` takes records out of the vault for good, on every clone: their
   lines, the doc lines built on them, their audio and its keys. Without `--now` it only counts what it would take;
   `--now` runs in your own terminal, on your OS prompt or a code typed back. The text stays in your repo's history:

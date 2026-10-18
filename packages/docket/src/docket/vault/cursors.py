@@ -6,10 +6,10 @@ and times only, never a title. This machine's file fails closed: a bad line, an 
 conflict's marker or a link refuses every run, named by file and line number. Another machine's file that doesn't read
 is left out with a note, since its marks only ever shorten a window.
 
-The rules a run follows (DR-0246, DR-0247):
+The rules a run follows (DR-0607, DR-0247):
 
-- a run's window starts at the latest mark of any machine (a mark from a clock ahead of this one left out), less this
-  machine's lookback, and ends when the run opened;
+- a run's window starts at the latest mark of any machine (a mark from a clock ahead of this one left out), less the
+  source's lookback, vault.yaml's `lookback_days` when set and else this machine's, and ends when the run opened;
 - a whole close that kept a capture, and whose window started no later than that, moves the mark to its open time; a
   final close never does;
 - a close updates the retry and waiting sets by the tables in the plan, and expires what has waited too long.
@@ -357,9 +357,23 @@ class Window:
     notes: list[str]
 
 
-def window(own: Cursor | None, others: dict[str, Cursor], now: datetime, since: datetime | None = None) -> Window:
-    """The furthest mark any machine reached, a mark ahead of this machine's clock left out, less this machine's
-    lookback, to now; `since` starts it elsewhere."""
+def lookback(cursor: Cursor | None, setting: int | None) -> int:
+    """A source's lookback in days: its `lookback_days` in vault.yaml when set (DR-0606), else the cursor's."""
+    if setting is not None:
+        return setting
+    return cursor.lookback_days if cursor is not None else LOOKBACK_DAYS
+
+
+def window(
+    own: Cursor | None,
+    others: dict[str, Cursor],
+    now: datetime,
+    since: datetime | None = None,
+    *,
+    lookback_days: int | None = None,
+) -> Window:
+    """The furthest mark any machine reached, a mark ahead of this machine's clock left out, less the source's lookback
+    (`lookback_days`, vault.yaml's, else this machine's cursor's), to now; `since` starts it elsewhere (DR-0607)."""
     notes: list[str] = []
     marks: list[datetime] = []
     named = {"this machine": own} if own is not None else {}
@@ -370,8 +384,7 @@ def window(own: Cursor | None, others: dict[str, Cursor], now: datetime, since: 
             notes.append(f"the mark of {machine} is ahead of this machine's clock, so it is left out")
             continue
         marks.append(cursor.mark)
-    lookback = timedelta(days=own.lookback_days if own is not None else LOOKBACK_DAYS)
-    start = (max(marks) if marks else now) - lookback
+    start = (max(marks) if marks else now) - timedelta(days=lookback(own, lookback_days))
     return Window(since=since if since is not None else start, until=now, default_since=start, notes=notes)
 
 
@@ -466,7 +479,7 @@ class Closed:
 
 def close(old: Cursor | None, facts: Close, today: date) -> Closed:
     """This machine's cursor after a whole close, by the retry and waiting tables (DR-0247) and the mark's rule
-    (DR-0246)."""
+    (DR-0607)."""
     base = old or Cursor()
     skipped = {i: reason for i, reason in facts.skipped if i is not None and i not in facts.held and writable(i)}
     reported = {i: what for i, what in facts.waiting if i not in facts.held and writable(i)}

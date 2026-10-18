@@ -57,7 +57,16 @@ def gather(service: Service) -> Facts:
                 refused = str(e)
         folder = config.folder is not None
         sources.append(
-            SourceFacts(name, enabled=enabled, live=live, refused=refused, owed=owed, final=final, folder=folder)
+            SourceFacts(
+                name,
+                enabled=enabled,
+                live=live,
+                refused=refused,
+                owed=owed,
+                final=final,
+                folder=folder,
+                lookback_days=config.lookback_days,
+            )
         )
     return Facts(
         now=now,

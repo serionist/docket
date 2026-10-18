@@ -58,6 +58,23 @@ def test_a_source_s_mapper_tools_and_media_folders_round_trip(tmp_path: Path) ->
     assert "media_folders" not in make_config().dump()
 
 
+@pytest.mark.parametrize("days", [0, 1, 30])
+def test_a_source_s_lookback_round_trips_and_is_written_only_when_set(tmp_path: Path, days: int) -> None:
+    config = make_config()
+    config.sources["chat"] = SourceConfig(tools=["list_chats"], lookback_days=days)
+    path = tmp_path / "vault.yaml"
+    path.write_text(config.dump(), encoding="utf-8")
+    assert f"    lookback_days: {days}\n" in config.dump()
+    assert VaultConfig.load(path) == config
+    assert "lookback_days" not in make_config().dump()
+
+
+@pytest.mark.parametrize("value", [-1, 31, "7", 1.5, True])
+def test_a_lookback_that_isn_t_a_whole_number_of_days_from_0_to_30_is_refused(value: object) -> None:
+    with pytest.raises(ValidationError, match="lookback_days"):
+        SourceConfig.model_validate({"lookback_days": value})
+
+
 def test_media_hosts_from_before_any_https_host_is_read_and_ignored(tmp_path: Path) -> None:
     """A source's old `media_hosts`, any list, reads as if it weren't there, and Docket never writes it; a file Docket
     wrote while it had one is still in Docket's form (DR-0604)."""

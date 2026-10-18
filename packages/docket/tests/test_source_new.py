@@ -156,6 +156,7 @@ def test_a_nested_repo_of_its_own_commits_in_its_own_history(owner: Callable[...
         (["zebra-notes", "--example"], "no reference source named zebra-notes; --example copies one of: plaud"),
         (["zebra-notes", "--sensitivity", "secret"], "--sensitivity is work, mixed or private, not 'secret'"),
         (["zebra-notes", "--tool", "mcp__plaud__list_files"], "isn't a tool's own name"),
+        (["zebra-notes", "--lookback-days", "31"], "not in the range"),
     ],
 )  # fmt: skip
 def test_a_bad_request_is_refused_and_writes_nothing(
@@ -245,14 +246,31 @@ def test_a_vault_yaml_with_the_user_s_own_lines_gets_the_entry_where_docket_can_
 def test_an_entry_already_there_keeps_what_the_flags_don_t_set(owner: Callable[..., AtConsole], tmp_path: Path) -> None:
     top = host_repo(tmp_path)
     config = make_config("folder")
-    config.sources["zebra-notes"] = SourceConfig(sensitivity="private", tools=["get_note"], media_folders=["~/Notes"])
+    config.sources["zebra-notes"] = SourceConfig(
+        sensitivity="private", tools=["get_note"], media_folders=["~/Notes"], lookback_days=2
+    )
     vault = Vault.init(top / "vault", config, "test-box")
     kept = scaffold.new_source(vault, "zebra-notes").entry
     assert (kept.sensitivity, kept.tools, kept.media_folders) == ("private", ["get_note"], ["~/Notes"])
-    assert kept.mapper == ".claude/skills/sources/zebra-notes/mapper.py"
+    assert (kept.mapper, kept.lookback_days) == (".claude/skills/sources/zebra-notes/mapper.py", 2)
     assert VaultConfig.load(vault.root / "vault.yaml").sources["zebra-notes"].media_folders == ["~/Notes"]
     calls = scaffold.new_source(Vault.open(vault.root), "calls", sensitivity="work", tools=["list_calls"]).entry
-    assert (calls.sensitivity, calls.tools) == ("work", ["list_calls"])
+    assert (calls.sensitivity, calls.tools, calls.lookback_days) == ("work", ["list_calls"], None)
+
+
+def test_lookback_days_is_written_only_when_asked(
+    owner: Callable[..., AtConsole], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    top = host_repo(tmp_path)
+    vault = folder_vault_in(top)
+    args = ["source", "new", "zebra-chat", "--tool", "list_chats", "--lookback-days", "1", "--vault", str(vault.root)]
+    assert main(args) == 0
+    assert "tools list_chats, lookback_days 1, committed " in capsys.readouterr().out
+    assert VaultConfig.load(vault.root / "vault.yaml").sources["zebra-chat"].lookback_days == 1
+    assert main(["source", "new", "zebra-notes", "--vault", str(vault.root)]) == 0
+    [said] = [line for line in capsys.readouterr().out.splitlines() if line.startswith("source   zebra-notes")]
+    assert "lookback" not in said
+    assert "lookback_days" not in (vault.root / "vault.yaml").read_text(encoding="utf-8").split("zebra-notes:", 1)[1]
 
 
 def test_a_source_registered_as_it_stands_needs_no_commit(

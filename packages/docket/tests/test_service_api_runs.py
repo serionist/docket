@@ -144,6 +144,24 @@ def test_a_whole_run_stages_its_records_and_commits_the_moved_mark(client: TestC
     assert second["kept"] == ["a1", "b1"]
 
 
+def _at(text: str) -> datetime:
+    return datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
+def test_a_source_with_a_day_s_lookback_gets_a_one_day_window(client: TestClient, vault: Vault) -> None:
+    set_config(vault, lambda c: setattr(c.sources["memo"], "lookback_days", 1))
+    opened = Session(client).open()
+    assert _at(opened["until"]) - _at(opened["since"]) == timedelta(days=1)
+
+
+def test_a_cursor_s_own_lookback_still_reads_and_vault_yaml_s_wins_over_it(client: TestClient, vault: Vault) -> None:
+    mark = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=2)
+    write_cursor(vault, cursors.Cursor(mark=mark, lookback_days=3))
+    assert _at(Session(client).open()["since"]) == mark - timedelta(days=3)
+    set_config(vault, lambda c: setattr(c.sources["memo"], "lookback_days", 1))
+    assert _at(Session(client).open()["since"]) == mark - timedelta(days=1)
+
+
 def test_after_two_whole_runs_a_third_owes_nothing(client: TestClient, vault: Vault) -> None:
     a, b = memo("a2"), memo("b2")
     first = Session(client)

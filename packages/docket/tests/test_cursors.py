@@ -1,4 +1,4 @@
-"""Each machine's cursor file (DR-0245) and the rules a run follows (DR-0246, DR-0247), on invented ids and times."""
+"""Each machine's cursor file (DR-0245) and the rules a run follows (DR-0607, DR-0247), on invented ids and times."""
 
 from __future__ import annotations
 
@@ -250,6 +250,14 @@ def test_the_window_starts_at_the_furthest_mark_less_this_machines_lookback() ->
     assert found.until == NOW
     assert found.default_since == found.since
     assert found.notes == []
+
+
+def test_vault_yaml_s_lookback_wins_over_the_cursor_s_and_zero_starts_at_the_mark() -> None:
+    own = Cursor(mark=NOW - timedelta(days=3), lookback_days=2)
+    assert cursors.window(own, {}, NOW, lookback_days=1).since == NOW - timedelta(days=4)
+    assert cursors.window(own, {}, NOW, lookback_days=0).since == NOW - timedelta(days=3)
+    assert cursors.window(None, {}, NOW, lookback_days=1).since == NOW - timedelta(days=1)
+    assert cursors.window(own, {}, NOW).since == NOW - timedelta(days=5)
 
 
 def test_with_no_mark_the_window_is_the_lookback_from_now_and_since_starts_it_elsewhere() -> None:

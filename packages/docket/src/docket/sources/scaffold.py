@@ -89,6 +89,7 @@ def new_source(
     example: bool = False,
     sensitivity: Sensitivity | None = None,
     tools: list[str] | None = None,
+    lookback_days: int | None = None,
 ) -> NewSource:
     repo = consuming_repo(vault.root)
     # Checks the name first (DR-0125), then the folder after links.
@@ -98,7 +99,9 @@ def new_source(
         raise DocketError(f"no reference source named {name}; --example copies one of: {', '.join(sorted(REFERENCES))}")
     if folder.exists() or folder.is_symlink():
         raise DocketError(f"{folder} already exists; a source's folder is never written over")
-    entry = _entry(name, vault.written.sources.get(name), reference, sensitivity, tools or [])
+    entry = _entry(
+        name, vault.written.sources.get(name), reference, sensitivity, tools or [], lookback_days=lookback_days
+    )
     files = template_files(name if example else BLANK)
     if not example:
         files = {rel: data.decode("utf-8").replace(PLACEHOLDER, name).encode("utf-8") for rel, data in files.items()}
@@ -177,12 +180,16 @@ def _entry(
     reference: Reference | None,
     sensitivity: Sensitivity | None,
     tools: list[str],
+    *,
+    lookback_days: int | None,
 ) -> SourceConfig:
     """The source's entry: what the flags give, else what vault.yaml already has, else the reference's, else Docket's
-    guess for a source it knows; its media folders as vault.yaml has them. Checked here, before anything is written."""
+    guess for a source it knows; its media folders as vault.yaml has them, and its lookback unless the flag gives one.
+    Checked here, before anything is written."""
     kept_level = existing.sensitivity if existing is not None else None
     level = sensitivity or kept_level or (reference.sensitivity if reference else KNOWN_SOURCES.get(name, "mixed"))
     kept_tools = existing.tools if existing is not None else []
+    kept_lookback = existing.lookback_days if existing is not None else None
     try:
         return SourceConfig(
             enabled=existing.enabled if existing is not None else True,
@@ -190,6 +197,7 @@ def _entry(
             mapper="/".join([*SKILLS, name, "mapper.py"]),
             tools=tools or kept_tools or list(reference.tools if reference else ()),
             media_folders=existing.media_folders if existing is not None else [],
+            lookback_days=kept_lookback if lookback_days is None else lookback_days,
         )
     except ValidationError as e:
         raise DocketError(f"source {name}: " + "; ".join(str(err["msg"]) for err in e.errors())) from None
