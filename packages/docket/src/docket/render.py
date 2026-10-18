@@ -18,6 +18,7 @@ from docket.index import SearchResult
 from docket.plaintext import printable
 from docket.questions import EvalReport, Score
 from docket.recall import ReadResult, StaleReport, VerifyResult
+from docket.reconcile.spots import Listing, SpotsReport
 from docket.vault.anchors import format_time
 from docket.vault.curatelog import Line
 from docket.vault.docstore import PutResult, RedactReport
@@ -433,4 +434,52 @@ def briefs(found: BriefsReport) -> list[str]:
     if found.hidden:
         lines.append(f"hidden    {found.hidden} brief(s) whose entity a never-store list holds")
     lines += [f"no brief  {entity}" for entity in found.missing]
+    return lines
+
+
+def spots(found: SpotsReport) -> list[str]:
+    """What `docket reconcile spots` says: the pair and its fixes doc, the meeting's people, then each spot with the
+    recorder's line and Whisper's words for it, the fix lines, and what was left out, counted."""
+    doc = f"{found.doc.id}, rev {found.doc.rev}" if found.doc.rev is not None else f"{found.doc.id}, none yet"
+    lines = [f"{found.rid}: {found.transcript} beside {found.whisper}", f"doc        {doc}"]
+    if found.why is not None:
+        return [*lines, f"no spots   {found.why}"]
+    for i, person in enumerate(found.people):
+        aliases = ", ".join(f"{a.text} (asr)" if a.asr else a.text for a in person.aliases)
+        said = f"{person.id} ({person.type}) {person.name}" + (f"; {aliases}" if aliases else "")
+        lines.append(f"{'people' if i == 0 else '':<10} {said}")
+    for spot in found.spots:
+        head = f'{spot.kind:<10} {spot.id}  "{spot.left}" / "{spot.right}"'
+        head += f"  near {', '.join(spot.near)}" if spot.near else ""
+        head += f"  settled; turned down: {', '.join(spot.rejected)}" if spot.rejected else ""
+        lines += [
+            head,
+            f"           {spot.recorder_anchor} {spot.speaker or '?'}: {spot.line}",
+            f"           {spot.whisper_anchor} Whisper: {spot.heard}",
+        ]
+    for fix in found.fixes:
+        said = f'"{fix.left}" / "{fix.right}" -> "{fix.chosen}"' if fix.left is not None else "its texts not shown"
+        lines.append(f"fix        line {fix.n} {fix.state}: {said}" + (f"; {fix.why}" if fix.why else ""))
+    if not found.spots:
+        lines.append("no spots   the two transcripts agree, or every spot is decided")
+    out = found.left_out
+    capped = ", ".join(f"{n} {kind}" for kind, n in out.cap.items() if n)
+    parts = [f"{sum(out.cap.values())} past the cap ({capped})"] if capped else []
+    parts += [f"{out.heard_differently} heard differently"] if out.heard_differently else []
+    parts += [f"{out.never_store} near a never-store value"] if out.never_store else []
+    return lines + ([f"left out   {'; '.join(parts)}"] if parts else [])
+
+
+def reconcile(found: Listing, tz: ZoneInfo) -> list[str]:
+    """What `docket reconcile list` says: each recording waiting, newest first, with its counts; then how many the
+    screen kept out."""
+    lines: list[str] = []
+    for one in found.recordings:
+        lines.append(f"{one.rid}  {one.ts.astimezone(tz):%Y-%m-%d %H:%M}" + (f"  {one.title}" if one.title else ""))
+        counts = ", ".join(f"{n} {kind}" for kind, n in one.spots.items() if n) or "none"
+        lines.append(f"           spots: {counts}" + (f"; {one.waiting} fix(es) wait for you" if one.waiting else ""))
+    if not found.recordings:
+        lines.append("nothing to reconcile: no recording here has spots no fix decides")
+    if found.hidden:
+        lines.append(f"hidden     {found.hidden} recording(s) a never-store list or your decisions keep out")
     return lines

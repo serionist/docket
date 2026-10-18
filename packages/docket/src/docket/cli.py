@@ -39,6 +39,7 @@ from docket.models.client import Worker
 from docket.models.provider import Models, Off
 from docket.models.runtime import open_models
 from docket.plaintext import printable
+from docket.reconcile import spots
 from docket.service import client
 from docket.service.platforms import Installer
 from docket.service.token import Tokens
@@ -124,6 +125,11 @@ media_folder_app = typer.Typer(help="The folders a source's media may be taken f
 media_app.add_typer(media_folder_app, name="folder")
 media_keys_app = typer.Typer(help="This clone's media keys: where their seal lives.", no_args_is_help=True)
 media_app.add_typer(media_keys_app, name="keys")
+reconcile_app = typer.Typer(
+    help="Transcripts: where a recording's transcript and Whisper's disagree, for Claude to decide in context.",
+    no_args_is_help=True,
+)
+app.add_typer(reconcile_app, name="reconcile")
 
 # How often the embedding pass says how far it got.
 PROGRESS_SECONDS = 10.0
@@ -1884,6 +1890,31 @@ def transcribe(
     say(done.line)
     if not done.staged:
         raise typer.Exit(1)
+
+
+@reconcile_app.command("spots")
+def reconcile_spots(
+    rid: Annotated[str, typer.Argument(help="A recording's rid, or either of its transcripts'.")],
+    as_json: Annotated[bool, typer.Option("--json", help="Every field, as JSON.")] = False,
+    vault: VaultOption = None,
+) -> None:
+    """Where a recording's transcript and Whisper's disagree on a name, a number or a word: at most 40 spots, names
+    and numbers first, none in a cut stretch or naming someone a never-store list holds. Worked out from raw on the
+    machine that ingests the recording's source; writes nothing."""
+    found = spots.report(find_vault(vault), rid)
+    if as_json:
+        # ASCII only: a transcript's text can't put a terminal code on the screen.
+        typer.echo(json.dumps(found.model_dump(mode="json"), indent=2))
+    else:
+        say_all(render.spots(found))
+
+
+@reconcile_app.command("list")
+def reconcile_list(vault: VaultOption = None) -> None:
+    """The recordings to reconcile: at most 10 of the newest 30 with both transcripts, from the sources this machine
+    ingests, with spots no fix decides; and how many a never-store list or your decisions keep out. Writes nothing."""
+    found = find_vault(vault)
+    say_all(render.reconcile(spots.listing(found), ZoneInfo(found.config.owner.time_zone)))
 
 
 @hook_app.command("session-start")
