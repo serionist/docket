@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0614
+    title: Undo is an op naming one op of the same item; the fold leaves an undone op out, and an undone undo puts it back
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#198"]
+    description: "undo carries of, the id of an op on the same item. The fold first checks every undo's target in order, so an undo of an op that isn't an earlier one of its item, of a renumber, or of such a bad undo is named and left out even when a later undo undid it; then it reads the undos from the latest back, each leaving out the op it names unless it is undone itself, then replays the rest in order: undoing an edit keeps every later one, and undoing an undo is a redo. An undone add hides the item and its ops. A renumber can't be undone. The writer's undo also undoes, in the same write, the ops of the same kind on the same item that the undone op had left with nothing to do, done and drop counting as one kind, such as another machine's close of either kind, so that one doesn't take over once the first is gone. A write is undone whole by one undo per op of its batch, in one write. The sync's ops undo like anyone's, which is what lets the sync write straight into the ledger. The log shows an undone op marked, and the undo's own line."
+    binds:
+      - Every undo's target is checked before any undo is applied; an undo naming another item's op, a later op, a renumber or a bad undo is a problem and is left out.
+    not_chosen:
+      - "An inverse op carrying the old values, as the curate log's undo: the fold would need the state the op met, and the inverse of a field edit would also undo a later edit of that field."
+      - "A snapshot restore, the tasks app's undo: it brings back only state, triage, until and closed."

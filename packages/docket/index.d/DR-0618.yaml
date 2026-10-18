@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0618
+    title: An op's text passes the gate's rules for derived text before it is written
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#198"]
+    description: "title, who, note, notes, description, outcome and a material's label go through vault.yaml's redaction rules, a match written as its marker, and through the never-store lists: a keyword in the text, or who naming someone on the people list, refuses the whole write, naming the op and the field and never the value, as a doc is held (DR-0195). Only those are text. Every other value can't hold a marker: a source and a material's ref are locators, which a marker would stop finding their thing, and a kind, a stream, a verdict or a day would stop being one. Each is checked against the redaction rules, credentials and the owner's own patterns among them, and a match, such as a URL with a token= query, a user:password@ host or a pattern that matches a stream, refuses the whole write with the ledger's own refusal, as a put refuses a doc whose by matches (DR-0195). The import (#202) goes through the same writer, so the old ledger's text gets the same rules."
+    binds:
+      - Every op goes through one writer, ledger/store.py; a scan holds it.
+      - A redaction rule's match in a source, a ref, a kind, a stream, a verdict or a day refuses the write; only the text fields hold markers.
+    not_chosen:
+      - "Text as given: the ledger quotes chats and mail, and would be the one place a credential got past the gate."
+      - "A marker inside a source or a ref: the locator would no longer find its record or file."

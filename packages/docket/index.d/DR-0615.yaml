@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0615
+    title: "Archive is an op on a closed item: it leaves the day's lists and keeps its history; nothing moves"
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#198"]
+    description: "With every op kept, archiving moves nothing. archive sets a flag on a done or dropped item: it leaves Today, the Queue and the Ledger page's default lists, while search, docket ledger show, the history and its counts keep it. Reopening clears it, and so does undoing the archive. The fold never reads the clock, so the 14 days todo.py waits are the writer's: the sync (#210) writes archive ops in its batch, by sync, for items closed 14 days or more, and skips an item whose archive was undone, so it doesn't archive again what the owner brought back; the scheduler does the same later. During the week in step the mirror puts archived items in _archive/actions-<yyyy>.yaml by their closed year, as todo.py does."
+    binds:
+      - Nothing in the fold depends on today's date.
+      - The sync's archive skips an item whose archive was undone.
+    not_chosen:
+      - "Archived items in other files: the fold would read two places, and a reopen would move lines written once."
+      - "Archiving by age in the fold: a rebuild on another day would give another ledger."
