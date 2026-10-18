@@ -46,8 +46,9 @@ In `Gate.promote`, between building the groups and writing the runs:
   stretch until they classified it. No classifier value fits it, and staging adds no check and no crash safety. Only a
   cut of a version already in raw, or of a staged one promoted in the same call, goes in this way; nothing new from a
   source does.
-- The code: `speech/follow.py` (new: the families, the checks, the ranges, the versions, over the screen),
-  `cuts.place` (the cut, shared with `speech/job._record`), and the gate's `_follow`.
+- The code: `speech/follow.py` (new: the families, the ranges and the versions, from the gate's cut scan and staging,
+  in memory), `cuts.place` (the cut, shared with `speech/job._record`), and the gate's `_follow`, which reads a Whisper
+  transcript from raw only when its family has a range it doesn't hold.
 
 ### Which families, which ranges
 
@@ -77,7 +78,7 @@ doesn't fit yet, adds nothing instead of refusing, so the times known are cut.
 
 | Part | Rule |
 |---|---|
-| segments | every segment of the Whisper transcript's latest version (or of the staged one) that overlaps a range goes, `[cut]` ones included, a range it doesn't hold yet padded by `cutter.PAD_MS` each side; a `[cut]` segment sits at each range, unpadded, merged |
+| segments | every segment of the Whisper transcript's latest version (or of the staged one) that overlaps a range goes, `[cut]` ones included, each end of a range that lies outside the version's own `[cut]` segments padded by `cutter.PAD_MS`; a `[cut]` segment sits at each range, unpadded, merged |
 | text | rendered from the segments |
 | everything else | kept from the version it cuts: `via` still names the stored file it was heard from, `engine`, `lang`, `to`, `ts`, `fetched` |
 | redaction | the rules in force, as for every promoted record |
@@ -85,9 +86,9 @@ doesn't fit yet, adds nothing instead of refusing, so the times known are cut.
 
 - The pad: the audio is silenced 250 ms beyond each range (DR-0560). A version heard from audio that still held a new
   stretch can carry words said inside it in the segment just after it, so that segment goes when it overlaps the
-  padded range. A range the version's own `[cut]` segments hold already was silent in the audio it was heard from, or
-  was padded when it was followed, so it isn't padded again: a fresh transcript is never cut further, and placing
-  twice gives what placing once does.
+  padded range. Each end is judged on its own: an end inside the version's own `[cut]` segments was silent in the audio
+  it was heard from, or was padded when it was followed, so it isn't padded again. A range that grew on one side is
+  padded on that side only, a fresh transcript is never cut further, and placing twice gives what placing once does.
 - The marks sit at the ranges, as `_record` places them (#158's build), not widened over Whisper's own segments as
   `cuts.cut_segments` widens them. Every transcript's `[cut]` segments widen the audio's cut (DR-0561), so a widened
   or padded mark would silence audio the owner never cut and send it to be put again. A range after Whisper's last
@@ -139,15 +140,17 @@ A version that only removes text already in raw is the safe side, so only what w
 
 | Part | What it reads |
 |---|---|
-| the cut scan | nothing new: `_refresh_cuts` reads every run file's lines on every gate call already, and gives the rids with a `[cut]` in raw |
-| the families | each such rid's owners, from the rid alone, for the sources this clone runs; then `raw.has(<owner>/whisper)`, one index row each |
-| the comparison | only for a family with a Whisper transcript: the family's versions and the Whisper's latest at the index's places (DR-0446), the ranges, and `cuts.place` in memory |
+| the cut scan | no file it doesn't read already: `_refresh_cuts` reads every run file's lines on every gate call and parses each line with a `[cut]`; it now keeps each rid's `[cut]` spans, and parses each machine transcript's line too (by its `via`, a substring test) to keep its latest marks |
+| the families | each cut rid's owners, from the rid alone, for the sources this clone runs, with a machine transcript the scan saw |
+| the check | in memory: the scan's spans, the release's cuts and staging's cuts against the Whisper transcript's latest marks; a family whose marks hold every range is passed over without a read |
+| the read | only for a family with a range not held: its Whisper transcript's latest version at the index's places (DR-0446), then `cuts.place` |
 
-- Families with a cut are the released and hand-cut recordings; Whisper transcripts exist only beside stored audio,
-  since 17 Oct, so the comparison runs for a handful now and at most once per recording with stored audio.
-- The screen is opened only when such a rid, or a trigger in the promotion, is there, and is closed before any write.
-- With the index stale for the source (after a pull, before the service's next update), the screen reads the source's
-  run files once for that promotion, as it does for media.
+- Families with a cut are the released and hand-cut recordings, and backfill releases add many; each costs a few set
+  operations, not a read. A read happens once per new cut, since the version it writes holds the range from then on.
+- The index is opened only when a family has a range not held, and closed before any write. With it stale for the
+  source (after a pull, before the service's next update), that read loads the source's run files once, as media's
+  screen does.
+- A machine transcript's latest marks are its latest line's, by run order, whether that line holds a `[cut]` or not.
 
 ### Due again (DR-0592)
 
@@ -170,7 +173,7 @@ by itself.
 |---|---|---|
 | `Gate.promote` | the apply, first | one call, `_follow`, after the groups and before the runs |
 | `Gate._promote_source` | unchanged | takes `extra` |
-| `_refresh_cuts` | skips listed lines | reads its rids, unchanged |
+| `_refresh_cuts` | skips listed lines; run file caches by size and time | keeps the spans and marks it parses, through `follow.Seen.add`: a conflict there is a few lines |
 | `stage`, `_sweep`, `RawLog`, `RawLookup` | skip and drop listed records | read only |
 | `media/screen.py`, `media/reader.py` | refuse a listed rid's media; the state `forgotten` | read only |
 | `speech/job.py` | `WHY` gains `forgotten` | `_record` through `cuts.place` |
@@ -196,11 +199,11 @@ a clone that runs its source.
 
 ## Steps
 
-1. `cuts.place(record, ranges, pad)`, and `_record` through it with no pad. `test_cuts.py`: overlap as `cuts.py` reads
-   it, the pad on a range not held yet only, a mark past the last segment, marks merged and unpadded, `[cut]`
-   segments replaced, placing twice. `test_speech_record.py` runs unchanged.
-2. `speech/follow.py`: the families, the checks, the ranges, the version. `test_whisper_follow.py`, over a screen built
-   from invented records.
+1. `cuts.place(segments, ranges, pad)`, and `_record` through it with no pad. `test_cuts.py`: overlap as `cuts.py`
+   reads it, the pad on an end outside the held marks only, a mark past the last segment, marks merged and unpadded,
+   `[cut]` segments replaced, placing twice. `test_speech_record.py` runs unchanged.
+2. `speech/follow.py`: what the scan keeps (`Seen`), the families, the ranges, the version.
+   `test_whisper_follow.py`, on invented records.
 3. The gate: `_follow`, `_promote_source`'s `extra`, the count in the log line (no rid). `test_whisper_follow.py` end
    to end (Tests, below). gate.py's first line cites DR-0596 already, in this plan's commit, since `docs check`
    refuses a cite of a superseded entry.
@@ -215,6 +218,8 @@ Invented data only: `docket_testkit` and `media_kit` records, a tone made at tes
 |---|---|
 | a later version cuts 31:05 to 31:40 | one Whisper version in the same run file and commit as the recorder's; no segment of it overlaps the range, `[cut]` sits there; after an index update a search for a word said there finds neither transcript |
 | the pad | a Whisper segment starting 100 ms after a new range goes and one starting 300 ms after stays; the mark sits at the range; a fresh transcript's segment 100 ms after a range it was cut by stays, and the next promotion writes nothing for it |
+| a range extended on one side | a held range 31:05 to 31:40 grown to 31:42 keeps the segment from 30:50 to 31:04.9 on the held side, and drops one starting 100 ms past 31:42 |
+| a family whose Whisper marks hold every range | passed over with no read of raw (a test seam counts the reads) |
 | a later version with no new cut, or one whose cut lies inside the Whisper marks already | nothing written |
 | the summary classified private and the transcript cut 31:05 to 31:40 in one review | the family withheld, a private decision on the summary, and the Whisper version written all the same |
 | a cursor file without the source | the recorder's version promoted, no Whisper version |
@@ -240,11 +245,11 @@ Invented data only: `docket_testkit` and `media_kit` records, a tone made at tes
 
 | Risk | Status |
 |---|---|
-| two writers race on one record's versions. `version()` hashes content only, so when one clone's cut lies inside another's, or a run file sorts before the version it cut (a clock behind), the cut both need equals a version already in raw, the raw log doesn't write it again, and the less-cut version stays latest. Nothing fixes it by itself: the follow looks at the family at every promotion and writes nothing | accepted: it needs two clones running one source that promote cuts of one recording before a pull, or a clock behind; the recorder's transcript has the same race; a later cut, or `docket transcribe` on the audio put again, makes a new latest |
+| two writers race on one record's versions. `version()` hashes content only, so when one clone's cut lies inside another's, or a run file sorts before the version it cut (a clock behind), the cut both need equals a version already in raw, the raw log doesn't write it again, and the less-cut version stays latest. Nothing fixes it by itself: the follow reads the family at every promotion and writes nothing | accepted: it needs two clones running one source that promote cuts of one recording before a pull, or a clock behind; the recorder's transcript has the same race; a later cut, or `docket transcribe` on the audio put again, makes a new latest |
 | a cut takes a whole Whisper segment beside it, up to 30 s, and with the pad one that only touches 250 ms past a new range | accepted, as the recorder's transcript loses whole utterances (DR-0028); `docket transcribe` on the audio put again gives the words back |
 | a cut promoted on another clone waits for this clone's next promotion | accepted: promotions are the owner's, from the Staging page or the CLI; the audio reads `recut` and plays nothing meanwhile |
 | a family cut only by characters keeps the stretch in Whisper | out of scope, as its audio (DR-0562) |
-| the follow slows promotion | Cost, above: one index row per cut family, and line reads only for the few with a Whisper transcript |
+| the follow slows promotion | Cost, above: set operations per cut family, and a read only for a family with a range its Whisper transcript doesn't hold |
 
 ## Needs the maintainer
 
@@ -264,3 +269,6 @@ Invented data only: `docket_testkit` and `media_kit` records, a tone made at tes
 | 1 | K4: a missed cut waited for the audio to be put again, for good if it never was | minor | fixed: the stamp and the waiting-audio trigger dropped; every family the cut scan names with a Whisper transcript is followed at every promotion; Cost |
 | 1 | K5: DR-0015 still said staging was the only way | minor | fixed: DR-0596 supersedes it; DR-0590's bind; gate.py's first line |
 | 1 | K6: a staged Whisper version and a followed raw one in one promotion | minor | fixed: a family whose staged version is promoted gets only that one; the test holds an earlier version in raw |
+| 2 | K1 to K6 re-checked | | resolved |
+| 2 | K7: a range that grew on one side was padded on both, so a fresh transcript lost a segment on the held side | minor | fixed: each end is padded only when it lies outside the version's own marks; a test |
+| 2 | K8: the follow read every cut family at every promotion | minor | fixed: the cut scan keeps each rid's spans and each machine transcript's latest marks; a family whose marks hold every range is passed over without a read |
