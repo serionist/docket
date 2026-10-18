@@ -90,7 +90,7 @@
         <dl class="machine-facts">
           <div><dt>Machine</dt><dd>{{ row.machine }}{% if row.this %} <span class="badge">this one</span>{% endif %}</dd></div>
           <div><dt>Mark</dt><dd>{% if row.mark %}<time datetime="{{ row.mark.isoformat() }}">{{ row.mark|at(tz) }}</time>, {{ row.mark_age }}{% if row.ahead %} <span class="badge">ahead of this clock: left out</span>{% endif %}{% else %}none yet{% endif %}</dd></div>
-          <div><dt>Lookback</dt><dd>{{ row.lookback }} days</dd></div>
+          <div><dt>Lookback</dt><dd>{{ row.lookback }} day{{ "s" if row.lookback != 1 else "" }}</dd></div>
           <div><dt>Retry</dt><dd>{{ row.retry|length }}</dd></div>
           <div><dt>Waiting</dt><dd>{{ row.waiting|length }}</dd></div>
         </dl>

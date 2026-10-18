@@ -79,6 +79,7 @@ class Owner(_Model):
 TOOL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 # A source's key from before media came from any https host (DR-0604): read and ignored, never written.
 OLD_SOURCE_KEYS = frozenset({"media_hosts"})
+MAX_LOOKBACK_DAYS = 30
 
 
 class SourceConfig(_Model):
@@ -93,6 +94,9 @@ class SourceConfig(_Model):
     # The folders media_put may take this source's media from (DR-0604): relative to the consuming repo or under ~/,
     # as a folder source's folder is written. Written only when set.
     media_folders: list[str] = Field(default_factory=list[str])
+    # How far before the latest mark a live run's window starts, in whole days (DR-0606): a day suits chat and mail, a
+    # week a recorder. Unset, the cursor file's own lookback holds, 7 days. Written only when set.
+    lookback_days: int | None = Field(default=None, ge=0, le=MAX_LOOKBACK_DAYS, strict=True)
     # A folder source (DR-0481): the folder docket scan reads, relative to the consuming repo or under ~/, and fnmatch
     # patterns on the paths inside it to leave out. Written only when set, so a vault.yaml without folder sources
     # reads as before on an older Docket.
@@ -173,11 +177,13 @@ class SourceConfig(_Model):
 
     @model_serializer(mode="wrap")
     def _dump(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
-        """`folder`, `exclude` and `media_folders` only when set: an older Docket refuses keys it doesn't know
-        (DR-0021)."""
+        """`folder`, `exclude`, `media_folders` and `lookback_days` only when set: an older Docket refuses keys it
+        doesn't know (DR-0021)."""
         data: dict[str, Any] = handler(self)
         if self.folder is None:
             data.pop("folder", None)
+        if self.lookback_days is None:
+            data.pop("lookback_days", None)
         if not self.exclude:
             data.pop("exclude", None)
         if not self.media_folders:

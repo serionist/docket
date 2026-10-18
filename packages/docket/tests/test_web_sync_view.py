@@ -460,6 +460,15 @@ def test_each_machine_shows_its_mark_and_entries_with_ages_and_leaving_days() ->
     assert (broken.problem, broken.window_since, broken.rows) == ("line 2", None, [])
 
 
+def test_the_window_and_every_row_take_vault_yaml_s_lookback_as_run_open_does() -> None:
+    own = {"memo": cursors.Cursor(mark=NOW - timedelta(hours=2))}
+    others = {"desktop-2": {"memo": cursors.Cursor(mark=NOW - timedelta(hours=5), lookback_days=3)}}
+    sources = [SourceFacts("memo", enabled=True, live=True, lookback_days=1)]
+    [block] = sync_view.cursor_blocks(facts(own=own, others=others, sources=sources), ["memo"])
+    assert block.window_since == NOW - timedelta(hours=2) - timedelta(days=1)
+    assert [row.lookback for row in block.rows] == [1, 1]
+
+
 def test_a_long_set_shows_its_first_entries_and_how_many_more(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sync_view, "SHOWN", 2)
     waiting = {f"w{n}": cursors.Waiting(f"w{n}", "summary", TODAY - timedelta(days=n)) for n in range(5)}

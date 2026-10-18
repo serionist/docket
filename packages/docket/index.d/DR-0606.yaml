@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0606
+    title: "A source's lookback_days in vault.yaml sets how far back its live runs read: optional, 0 to 30 days, written only when set"
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#194"]
+    description: "sources.<name>.lookback_days is how many days before the latest mark a live run's window starts (DR-0607): a day suits chat and mail, where a week back opens every chat active that week on every run; a week suits a recorder. It is optional and written only when set, so schema_version stays 1 and a vault.yaml without it reads as before (DR-0021), as for DR-0124's keys. Its value is a whole number from 0 to 30, as YAML writes an integer: a string, a float or true is refused. docket source new writes it only with --lookback-days and otherwise keeps the one vault.yaml has. Like every key the gate doesn't read, an edit not committed waits until it is (DR-0521). The cursor file keeps its own lookback_days as before (DR-0245)."
+    binds:
+      - "An older Docket refuses a vault.yaml that sets lookback_days (DR-0021): every machine upgrades before it is set."
+    not_chosen:
+      - "The cursor file's lookback_days alone: Docket writes 7 there for every source, and a cursor is one machine's, not the source's."
+      - "Up to 366 days, as the cursor file allows: a reach of more than a month is a backfill, which run_open's since gives."

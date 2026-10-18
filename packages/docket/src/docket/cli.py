@@ -53,6 +53,7 @@ from docket.sources.ingest import IngestReport, ingest_run
 from docket.sources.local import record as record_import_folder
 from docket.sources.runner import MapperFailedError
 from docket.vault import convert, curatelog, cuts, holds, inforce, redaction, releaselog, rendered
+from docket.vault.config import MAX_LOOKBACK_DAYS
 from docket.vault.docstore import DocStore
 from docket.vault.entitystore import EntityStore, RefusedError, Written, load_changes
 from docket.vault.gate import Gate, Label
@@ -466,13 +467,22 @@ def source_new(
             "--folder", help="A folder source instead: the folder docket scan reads, in the repo or under your home."
         ),
     ] = None,
+    lookback_days: Annotated[
+        int | None,
+        typer.Option(
+            "--lookback-days",
+            min=0,
+            max=MAX_LOOKBACK_DAYS,
+            help="Days before the last sync each live run reads back, 0 to 30; default: as vault.yaml has it, else 7.",
+        ),
+    ] = None,
     vault: VaultOption = None,
 ) -> None:
     """Write a source's skill, mapper and tests into the project that holds the vault, and add it to vault.yaml; with
     --folder, add a folder source that docket scan reads."""
     if sensitivity is not None and sensitivity not in SENSITIVITIES:
         raise DocketError(f"--sensitivity is work, mixed or private, not {sensitivity!r}")
-    if folder is not None and (example or tool or sensitivity not in (None, "work")):
+    if folder is not None and (example or tool or sensitivity not in (None, "work") or lookback_days is not None):
         raise DocketError("a folder source is work, with no reference, mapper or tools: --folder goes alone")
     found, how = locate_vault(vault)
     # A vault found through the environment or the config can be another project's: the folder would land in its
@@ -492,7 +502,9 @@ def source_new(
             say_all((added.block or "").splitlines())
         say(f"next     docket scan {name}")
         return
-    made = scaffold.new_source(found, name, example=example, sensitivity=sensitivity, tools=tool or [])
+    made = scaffold.new_source(
+        found, name, example=example, sensitivity=sensitivity, tools=tool or [], lookback_days=lookback_days
+    )
     if made.declined:
         say(f"source   {name} not added: nothing was confirmed, so vault.yaml is as it was and {made.folder} is gone")
         raise typer.Exit(1)
@@ -501,6 +513,8 @@ def source_new(
         say(f"         {rel}")
     entry = made.entry
     tools = ", ".join(entry.tools) or "none yet"
+    if entry.lookback_days is not None:
+        tools += f", lookback_days {entry.lookback_days}"
     if made.registered:
         commit = f", committed {made.commit[:12]}" if made.commit else inforce.note(found.waiting)
         say(f"source   {name} in vault.yaml: {entry.sensitivity}, mapper {entry.mapper}, tools {tools}{commit}")

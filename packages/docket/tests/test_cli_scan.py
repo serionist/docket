@@ -144,7 +144,9 @@ def test_a_folder_source_is_added_as_every_machine_reads_it(
     assert "under folders" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("extra", [["--example"], ["--tool", "list_files"], ["--sensitivity", "mixed"]])
+@pytest.mark.parametrize(
+    "extra", [["--example"], ["--tool", "list_files"], ["--sensitivity", "mixed"], ["--lookback-days", "1"]]
+)
 def test_folder_goes_alone(tmp_path: Path, capsys: pytest.CaptureFixture[str], extra: list[str]) -> None:
     _, vault = repo_vault(tmp_path)
     assert main(["source", "new", SOURCE, "--folder", "docs", *extra, "--vault", str(vault.root)]) == 2

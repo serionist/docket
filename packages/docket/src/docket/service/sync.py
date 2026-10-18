@@ -340,7 +340,9 @@ async def run_open(
         window: cursors.Window | None = None
         kept: frozenset[str] = frozenset()
         if not final:
-            window = cursors.window(own, others, now, _since(since, ZoneInfo(vault.config.owner.time_zone), now))
+            start = _since(since, ZoneInfo(vault.config.owner.time_zone), now)
+            lookback = vault.config.sources[source].lookback_days
+            window = cursors.window(own, others, now, start, lookback_days=lookback)
             notes.extend(window.notes)
             kept = _kept(vault, source, window, notes)
         handed = owed(vault, source, ready, now, final=final)

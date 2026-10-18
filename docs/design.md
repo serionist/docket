@@ -96,9 +96,10 @@ flowchart LR
 - Cursors are a high-water mark plus a lookback window plus a retry set and a waiting set per source, so late
   arrivals and rate-limited calls are caught on the next run. Each machine commits its own cursor file,
   `state/cursors-<machine>.yaml` (DR-0245), and a run's window starts at the furthest mark any machine reached, less
-  the lookback (DR-0246). The mark moves only on a whole close, to the moment the run opened: a listing is newest
-  first, so moving it on partial progress would skip the older part for good. What a run skipped waits in the retry
-  set, what its mapper still waits for in the waiting set, and both pass to another machine (DR-0247).
+  the source's lookback: its `lookback_days` in `vault.yaml`, such as a day for chat and mail, else a week (DR-0606,
+  DR-0607). The mark moves only on a whole close, to the moment the run opened: a listing is newest first, so moving
+  it on partial progress would skip the older part for good. What a run skipped waits in the retry set, what its
+  mapper still waits for in the waiting set, and both pass to another machine (DR-0247).
 - Source skills don't retype anything. A sync run (DR-0240) goes:
 
   | Step | Who | What |

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from docket_testkit import commit_config
 from docket_webkit import a11y_problems, html_problems, parse
 from starlette.testclient import TestClient
 from sync_kit import BEARER, OURS, PORT, TITLE, TOKEN, Session, app_of, memo, service_client, sync_template, sync_vault
@@ -321,6 +322,16 @@ def test_each_machines_mark_entries_and_hand_over(client: TestClient, vault: Vau
     assert "on test-box;" in limited
     assert "r8" not in limited
     assert "due a final run" not in machines[2].text()
+
+
+def test_each_row_shows_the_lookback_the_window_takes(client: TestClient, vault: Vault) -> None:
+    write_cursor(vault, "test-box", cursors.Cursor(mark=datetime.now(UTC) - timedelta(hours=2)))
+    [row] = parse(page(client)).find_all("li", class_="machine")
+    assert "7 days" in [dd.text() for dd in row.find_all("dd")]
+    set_config(vault, lambda c: setattr(c.sources["memo"], "lookback_days", 1))
+    commit_config(vault.root)
+    [row] = parse(page(client)).find_all("li", class_="machine")
+    assert "1 day" in [dd.text() for dd in row.find_all("dd")]
 
 
 # -- what never reaches the page ---------------------------------------------------------------------------------------

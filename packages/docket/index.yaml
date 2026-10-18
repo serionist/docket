@@ -1306,11 +1306,12 @@ decisions:
       - "merge=union: two mark keys for one source, which the read refuses."
   - id: DR-0246
     title: A run's window is the furthest mark less the lookback, and the mark moves only on a whole close
-    status: proposed
+    status: superseded
     at: "2026-10-15"
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#41"]
+    superseded_by: [DR-0607]
     description: A run's window runs from the latest mark any machine's cursor file holds for its source, leaving out a mark later than this machine's clock and naming it in run_open's notes, less this machine's lookback_days, to the moment it opened; with no mark, from now less the lookback; run_open's since starts it elsewhere. A close that takes the run and kept at least one capture moves this machine's mark to the run's open time, but only when its window started no later than the default. A dropped run, a failed close, a close with no captures, a narrower since or any final close leaves the mark; a final run has no window. A source skill closes a run only after its listing reached the window's start; one that can't finish stops without closing. A run's open time is taken in whole seconds, as the mark is written.
     not_chosen:
       - "Moving the mark on partial progress: a listing paged newest first reaches the old end last, so a stop partway would skip it for good."
