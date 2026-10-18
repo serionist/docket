@@ -24,6 +24,7 @@ from docket.service import calls, sync
 from docket.service.models import ModelsStatus
 from docket.service.runs import BUDGET, CAPTURE_CAP
 from docket.service.sessions import CODE_SECONDS
+from docket.service.speech import SpeechJob, SpeechStatus
 from docket.service.state import Service, Status
 from docket.vault.docstore import PutResult
 from docket.vault.processed import DocRefusedError
@@ -137,6 +138,19 @@ def router(service: Service) -> APIRouter:
     def models() -> ModelsStatus:  # pyright: ignore[reportUnusedFunction]
         # The models alone, for the CLI: status also hashes the vault's files for the index's state.
         return service.models.status()
+
+    @api.get("/speech")
+    def speech() -> SpeechStatus:  # pyright: ignore[reportUnusedFunction]
+        return service.speech.status()
+
+    @api.post("/transcribe")
+    async def transcribe(  # pyright: ignore[reportUnusedFunction]
+        request: Request, rid: Annotated[str, Query(max_length=512)]
+    ) -> SpeechJob:
+        # Only a client with the token queues a job: no page has a reason to (DR-0571).
+        bearer_only(request)
+        found, _ = await calls.transcribe(service, rid)
+        return found
 
     @api.post("/session")
     def session_link() -> SessionLink:  # pyright: ignore[reportUnusedFunction]

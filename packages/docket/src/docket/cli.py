@@ -1222,6 +1222,24 @@ def _service_token(vault: Vault | None = None) -> str | None:
         return None
 
 
+def _service_transcribe(vault: Vault, rid: str) -> str | None:
+    """The running service's word on a queued job, when it serves this vault with speech on (DR-0571); None for
+    anything else, and the command runs the job itself."""
+    from docket.service.speech import SpeechJob  # noqa: PLC0415
+    from docket.service.speech import line as speech_line  # noqa: PLC0415
+
+    token = _service_token(vault)
+    if token is None:
+        return None
+    answer = client.call("POST", f"/api/transcribe?{urlencode({'rid': rid})}", token=token, at=client.port())
+    if answer is None or answer.status != 200:
+        return None
+    try:
+        return speech_line(SpeechJob.model_validate(answer.body))
+    except ValidationError:
+        return None
+
+
 def _service_models(vault: Vault | None = None) -> dict[str, Any] | None:
     """The running service's models in its own words, when it runs for this vault (any vault without one); None when
     no Docket service answers with this machine's token."""
@@ -1406,15 +1424,27 @@ def _same_embedder(status: dict[str, Any], vault: Vault) -> bool:
 
 @app.command("eval")
 def eval_command(
-    file: Annotated[Path, typer.Argument(help="Your question file, YAML of schema 1. It is only read.")],
+    file: Annotated[
+        Path, typer.Argument(help="Your question file, YAML of schema 1; or speech, then your speech file. Only read.")
+    ],
+    speech_file: Annotated[
+        Path | None, typer.Argument(help="After speech: your stretches corrected by hand, YAML of schema 1.")
+    ] = None,
     *,
     k: Annotated[int, typer.Option("-k", "--k", help="Score the top k hits, 1 to 100.")] = questions.K,
     as_json: Annotated[bool, typer.Option("--json", help="The numbers and each question's ranks, as JSON.")] = False,
     no_models: NoModels = False,
     vault: VaultOption = None,
 ) -> None:
-    """Measure search with your own questions: recall at k and MRR per kind of question. Writes nothing."""
+    """Measure search with your own questions: recall at k and MRR per kind of question. `docket eval speech <file>`
+    measures each engine's transcripts against stretches you corrected: word, character and name error rates. Writes
+    nothing."""
     v = find_vault(vault)
+    if speech_file is not None:
+        if file.as_posix() != "speech":
+            raise DocketError("one file: your question file, or speech and then your speech file")
+        _eval_speech(v, speech_file, as_json=as_json)
+        return
     asked = questions.load(file, ZoneInfo(v.config.owner.time_zone))
     with _query_models(no_models, measure=True, vault=v) as models:
         report = questions.run(v, asked, k=k, models=models)
@@ -1423,6 +1453,17 @@ def eval_command(
         typer.echo(json.dumps(report.model_dump(mode="json"), indent=2))
     else:
         say_all(render.eval_report(report))
+
+
+def _eval_speech(vault: Vault, file: Path, *, as_json: bool) -> None:
+    """`docket eval speech` (DR-0571): the vault is only read."""
+    from docket.speech import evaluate  # noqa: PLC0415
+
+    report = evaluate.run(vault, file, evaluate.load(file))
+    if as_json:
+        typer.echo(json.dumps(report.model_dump(mode="json"), indent=2))
+    else:
+        say_all(evaluate.lines(report))
 
 
 @import_app.command("notes")
@@ -1826,13 +1867,20 @@ def models_remove(
 def transcribe(
     rid: Annotated[str, typer.Argument(help="The recording whose stored audio to transcribe.")],
     wait: Annotated[bool, typer.Option("--wait", help="Wait for a transcription already running here.")] = False,
+    here: Annotated[bool, typer.Option("--here", help="Run it in this terminal, not in the service's queue.")] = False,
     vault: VaultOption = None,
 ) -> None:
     """Transcribe a recording's stored audio with Whisper on this machine and stage the transcript at the gate. Its
-    audio must be stored and cut by every cut its records need; docket models install --speech sets Whisper up."""
+    audio must be stored and cut by every cut its records need; docket models install --speech sets Whisper up. With
+    the service running for the vault the job goes in its queue; --here runs it in this terminal."""
     from docket.speech import job  # noqa: PLC0415
 
-    done = job.transcribe(find_vault(vault), rid, wait=wait, say=say)
+    found = find_vault(vault)
+    queued = None if here else _service_transcribe(found, job.checked(rid))
+    if queued is not None:
+        say(f"{rid}: {queued}; its outcome shows on its Recording page and in docket service status")
+        return
+    done = job.transcribe(found, rid, wait=wait, say=say)
     say(done.line)
     if not done.staged:
         raise typer.Exit(1)

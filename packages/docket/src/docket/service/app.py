@@ -95,6 +95,9 @@ def create_app(settings: Settings, *, sessions: Sessions | None = None) -> Servi
             # The worker starts in the background; until it says hello, searches go without vectors.
             service.models.start()
             stack.callback(service.models.close)
+            # Speech reads the machine's choice once; with none installed it stays off and starts no thread.
+            service.speech.start()
+            stack.callback(service.speech.close)
             await stack.enter_async_context(server.session_manager.run())
             # The index is brought up to date at start, and built when there is none; nobody waits for it here.
             service.updater.poke()

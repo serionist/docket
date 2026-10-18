@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from docket_testkit import make_record
 from filelock import FileLock
 from media_kit import CALL, POLISHED, SAID, call, in_raw, media_vault, tone
 
@@ -31,7 +32,7 @@ from docket.vault.cuts import Cut
 from docket.vault.gate import Gate
 from docket.vault.records import TRANSCRIBED_VIA, RawRecord, Segment
 from docket.vault.releaselog import Kept, LoggedCut, Release
-from docket.vault.staging import Staging
+from docket.vault.staging import Staging, rid_hash
 from docket.vault.vault import Vault
 
 FAKE = Path(__file__).with_name("speech_fake_worker.py")
@@ -387,3 +388,57 @@ def test_a_source_turned_off_keeps_its_waiting_whisper_transcript(tmp_path: Path
     change_config(vault, lambda c: setattr(c.sources["plaud"], "enabled", False))
     Gate(vault).list()
     assert staged(vault)
+
+
+def test_what_the_service_queues_by_itself_is_stored_audio_that_reads_ok_without_a_transcript(tmp_path: Path) -> None:
+    vault = stored_vault(tmp_path / "one")
+    # A second recording with no audio stored is never due.
+    Gate(vault).stage([make_record(rid="plaud:rec-b", source="plaud", kind="recording", text="", container=None)])
+    in_raw(vault)
+    assert job.due(vault, MODEL.engine) == [CALL]
+    assert job.due(vault, MODEL.engine, limit=0) == []
+    assert transcribe(vault, tmp_path).staged
+    assert job.due(vault, MODEL.engine) == [], "staged"
+    Gate(vault).promote()
+    assert job.due(vault, MODEL.engine) == [], "in raw"
+    held = stored_vault(tmp_path / "held")
+    holds.add(held, "plaud", ["rec-a"])
+    assert job.due(held, MODEL.engine) == []
+
+
+def test_a_recording_that_staged_nothing_for_good_isn_t_queued_again_after_a_restart(tmp_path: Path) -> None:
+    vault = stored_vault(tmp_path)
+    done = transcribe(vault, tmp_path, segments=[])
+    assert not done.staged and done.final == "no-speech"
+    [line] = (userconfig.state_dir() / job.TRIED).read_text(encoding="utf-8").splitlines()
+    key = crypto.key_id(layout.stored_files(vault.root, CALL)[0])
+    assert json.loads(line) == {"rid": rid_hash(CALL), "key": key, "engine": MODEL.engine, "outcome": "no-speech"}
+    # The file is the state folder's, so a service started again reads it: this engine passes the file over.
+    assert job.due(vault, MODEL.engine) == []
+    assert job.due(vault, NEWER.model.engine) == [CALL], "another engine tries it afresh"
+    with (userconfig.state_dir() / job.TRIED).open("a", encoding="utf-8") as out:
+        out.write("not json\n" + json.dumps({"rid": "x"}) + "\n")
+    assert job.tried(MODEL.engine) == {(rid_hash(CALL), key)}, "a line that doesn't read is skipped"
+
+
+def test_tried_ones_don_t_take_the_window_and_older_ones_get_their_turn(tmp_path: Path) -> None:
+    vault = media_vault(tmp_path)
+    rids = [f"plaud:rec-{n:02d}" for n in range(job.AUTO + 2)]
+    Gate(vault).stage(
+        [
+            make_record(rid=rid, source="plaud", kind="recording", text="", container=None, ts=AT.replace(day=n + 1))
+            for n, rid in enumerate(rids)
+        ]
+    )
+    in_raw(vault)
+    drop = media.drop_folder()
+    drop.mkdir(parents=True, exist_ok=True)
+    for n, rid in enumerate(rids):
+        (drop / "take").write_bytes(b"ID3\x04" + bytes([n]) * 4000)
+        media.put(vault, rid, path=str(drop / "take"))
+    in_raw(vault)
+    newest = list(reversed(rids))
+    assert job.due(vault, MODEL.engine) == newest[: job.AUTO]
+    for rid in newest[: job.AUTO]:
+        job.remember(rid, crypto.key_id(layout.stored_files(vault.root, rid)[0]), MODEL.engine, "no-speech")
+    assert job.due(vault, MODEL.engine) == newest[job.AUTO :]

@@ -9,6 +9,7 @@ logged as its type and frames and answered with the error page, as on the other 
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -19,6 +20,7 @@ from docket import index, recall
 from docket.errors import DocketError
 from docket.media import reader
 from docket.recall import DocView
+from docket.service.speech import line as speech_line
 from docket.service.state import Service
 from docket.service.writer import IndexBuildingError
 from docket.vault import holds
@@ -99,6 +101,12 @@ AUDIO: dict[reader.State, NoAudio] = {
 }
 
 
+def _with_speech(service: Service, facts: Facts) -> Facts:
+    """The facts with the service's Whisper job for the recording, when it queued or ran one."""
+    found = service.speech.job(facts.recording.rid) if facts.recording is not None else None
+    return dataclasses.replace(facts, speech=f"Whisper: {speech_line(found)}") if found is not None else facts
+
+
 def _audio(vault: Vault, rid: str, lookup: RawLookup) -> NoAudio:
     return AUDIO[reader.state_of(vault, rid, raw=lookup)]
 
@@ -130,7 +138,7 @@ def router(service: Service) -> APIRouter:
                 return _page(context, None, state, str(e), status=503)
             except DocketError as e:
                 return _page(context, None, state, str(e), status=400)
-            view = build(facts, state)
+            view = build(_with_speech(service, facts), state)
             context["title"] = f"{view.title} - Recording"
             return _page(context, view, state, status=404 if view.mode in ("missing", "other") else 200)
 
