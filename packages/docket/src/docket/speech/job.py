@@ -10,7 +10,8 @@ gate.
 | 4 | under the vault's lock again: step 1's checks; segments in the cut ranges dropped, `[cut]` put there; staged |
 
 Both plain files go on every path. A job on the same stored file with the same engine as a version staged or in raw
-stages nothing. Nothing here logs a segment, a name or the prompt.
+stages nothing. A cut the family gains later reaches the transcript at promotion, cut by text (`speech.follow`). Nothing
+here logs a segment, a name or the prompt.
 """
 
 from __future__ import annotations
@@ -31,17 +32,18 @@ from docket.errors import DocketError
 from docket.media import crypto, cutter, layout, reader
 from docket.media.ranges import Range
 from docket.speech import client, prompt, setup
+from docket.speech.follow import SUFFIX, whisper_rid
 from docket.speech.setup import Speech
 from docket.vault import cursors
+from docket.vault import cuts as cutting
 from docket.vault.entities import load_entities
 from docket.vault.gate import Gate, StageResult
 from docket.vault.records import RID, TRANSCRIBED_VIA, RawRecord, Segment, is_native_id
-from docket.vault.segments import normalize, render
+from docket.vault.segments import render
 from docket.vault.spans import RawLookup
 from docket.vault.staging import Staging, rid_hash
 from docket.vault.vault import Vault
 
-SUFFIX = "/whisper"
 LOCK = "speech.lock"
 PID = "speech.pid"
 # The stored files and engines that staged nothing for good, one JSON line each, in the state folder (DR-0571).
@@ -159,10 +161,6 @@ def remember(rid: str, key: str, engine: str, outcome: str) -> None:
     line = {"rid": rid_hash(rid), "key": key, "engine": engine, "outcome": outcome}
     with (folder / TRIED).open("a", encoding="utf-8", newline="\n") as out:
         out.write(json.dumps(line) + "\n")
-
-
-def whisper_rid(rid: str) -> str:
-    return f"{rid}{SUFFIX}"
 
 
 def due(vault: Vault, engine: str, limit: int = AUTO) -> list[str]:
@@ -323,15 +321,15 @@ def _record(family: Family, found: client.Result, engine: str, languages: Sequen
     """The Whisper record (DR-0570): its segments outside the cut ranges, `[cut]` over each range; None when no
     segment is left."""
     recording = family.recording
-    kept = [
+    said = [
         Segment(start_ms=s.start_ms, end_ms=max(s.start_ms, s.end_ms), text=s.text.strip())
         for s in found.segments
-        if _said(s.text) and not any(_overlaps(s.start_ms, s.end_ms, r) for r in family.ranges)
+        if _said(s.text)
     ]
-    if not kept:
+    # No pad: the audio Whisper heard was silent over every range already (DR-0590).
+    segments = cutting.place(said, family.ranges)
+    if all(s.text == CUT_MARKER for s in segments):
         return None
-    marks = [Segment(start_ms=start, end_ms=end, text=CUT_MARKER) for start, end in family.ranges]
-    segments = normalize([*kept, *marks])
     return RawRecord(
         rid=whisper_rid(recording.rid),
         source=recording.source,
@@ -360,11 +358,6 @@ def _clock(ms: int) -> str:
     hours, rest = divmod(ms // 1000, 3600)
     minutes, seconds = divmod(rest, 60)
     return f"{hours}:{minutes:02d}:{seconds:02d}" if hours else f"{minutes}:{seconds:02d}"
-
-
-def _overlaps(start: int, end: int, cut: Range) -> bool:
-    # As a cut takes a segment (cuts.py): a segment with no length still sits at its moment.
-    return start < cut[1] and max(end, start + 1) > cut[0]
 
 
 def _staged(record: RawRecord, result: StageResult) -> Outcome:

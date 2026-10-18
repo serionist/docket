@@ -211,6 +211,10 @@ Unreleased in the same PR.
 
 ### Changed
 
+- A cut you make on a later version of a recording now reaches its Whisper transcript in the same promotion: the
+  gate writes the transcript's next version with the stretch replaced by `[cut]`, so search, `read` and the
+  Recording page stop showing it. It needs no Whisper or audio on the machine. A cut made before this version is
+  followed at the first promotion after you update, on a machine that runs the recording's source.
 - A line of a brief, a decision or a correction can cite the doc line it was built from, `[d:<doc id>@<rev>#<n>]`,
   as `verify` gives it, and is flagged when that line changes: `docket doc read` says so beside the line, `docket doc
   stale` lists every flagged line, and the session start counts them. Update every machine before docs cite lines,

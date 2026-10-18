@@ -64,8 +64,39 @@ def cut_text(record: RawRecord, cuts: list[Cut]) -> RawRecord:
 
 
 def _overlaps(segment: Segment, cut: Cut) -> bool:
+    return _within(segment, cut.start, cut.end)
+
+
+def _within(segment: Segment, start: int, end: int) -> bool:
     # A segment with no length still sits at a moment: it goes when that moment is inside the cut.
-    return segment.start_ms < cut.end and max(segment.end_ms, segment.start_ms + 1) > cut.start
+    return segment.start_ms < end and max(segment.end_ms, segment.start_ms + 1) > start
+
+
+def place(segs: Sequence[Segment], ranges: Sequence[tuple[int, int]], pad: int = 0) -> list[Segment]:
+    """A machine transcript's segments cut at time ranges (DR-0570, DR-0590): every segment overlapping a range goes,
+    `[cut]` ones too, and one `[cut]` segment sits at each range, merged with the ones it held. Never widened over what
+    it removed, since every transcript's `[cut]` segments widen its audio's cut (DR-0561), and never refused for a range
+    after the last segment. An end of a range outside the `[cut]` segments it held is padded by `pad` for what goes:
+    the words there were heard from audio not yet silent there."""
+    held = [(s.start_ms, s.end_ms) for s in segs if s.text == CUT_MARKER]
+    spans: list[tuple[int, int]] = []
+    for start, end in sorted([*ranges, *held]):
+        if spans and start <= spans[-1][1]:
+            spans[-1] = (spans[-1][0], max(spans[-1][1], end))
+        else:
+            spans.append((start, end))
+    # Each end on its own: one inside a mark it held was silent in the audio it was heard from, so a range that grew
+    # on one side is padded on that side only.
+    drop = [
+        (start if _held(start, held) else max(0, start - pad), end if _held(end, held) else end + pad)
+        for start, end in spans
+    ]
+    kept = [s for s in segs if not any(_within(s, start, end) for start, end in drop)]
+    return normalize([*kept, *(Segment(start_ms=start, end_ms=end, text=CUT_MARKER) for start, end in spans)])
+
+
+def _held(at: int, held: Sequence[tuple[int, int]]) -> bool:
+    return any(start <= at <= end for start, end in held)
 
 
 def cut_segments(record: RawRecord, cuts: list[Cut]) -> RawRecord:

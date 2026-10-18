@@ -7,7 +7,7 @@ from docket_testkit import make_record
 from pydantic import ValidationError
 
 from docket.errors import DocketError
-from docket.vault.cuts import CUT_MARKER, Cut, apply, cut_text, merge, parse, removes, widen
+from docket.vault.cuts import CUT_MARKER, Cut, apply, cut_text, merge, parse, place, removes, widen
 from docket.vault.cuts import spec as cut_spec
 from docket.vault.records import RawRecord, Segment
 
@@ -202,3 +202,39 @@ def test_a_cut_between_utterances_widens_to_itself_and_a_character_cut_doesn_t_w
     assert removes(talk, gap) == []
     with pytest.raises(DocketError, match="only a time cut"):
         widen(talk, Cut(start=0, end=5))
+
+
+def said(*spans: tuple[int, int, str]) -> list[Segment]:
+    return [Segment(start_ms=start, end_ms=end, text=text) for start, end, text in spans]
+
+
+def marked(segs: list[Segment]) -> list[tuple[int, int]]:
+    return [(s.start_ms, s.end_ms) for s in segs if s.text == CUT_MARKER]
+
+
+def test_placing_a_range_takes_what_overlaps_it_and_marks_the_range_itself() -> None:
+    segs = said((0, 4000, "before"), (3500, 6000, "inside"), (8000, 9000, "after"))
+    placed = place(segs, [(4000, 7000), (30_000, 31_000)])
+    assert [s.text for s in placed] == ["before", CUT_MARKER, "after", CUT_MARKER]
+    # Not widened over the segment it took, and a range after the last segment is marked, not refused.
+    assert marked(placed) == [(4000, 7000), (30_000, 31_000)]
+    assert place(placed, [(4000, 7000), (30_000, 31_000)]) == placed
+
+
+def test_a_new_range_is_padded_for_what_goes_but_its_mark_is_not() -> None:
+    segs = said((1000, 4900, "close before"), (5000, 6000, "the stretch"), (6100, 7000, "close after"))
+    segs.append(Segment(start_ms=6300, end_ms=8000, text="clear after"))
+    placed = place(segs, [(5000, 6000)], pad=250)
+    assert [s.text for s in placed] == [CUT_MARKER, "clear after"]
+    assert marked(placed) == [(5000, 6000)]
+    assert place(placed, [(5000, 6000)], pad=250) == placed
+
+
+def test_an_end_inside_a_mark_already_held_is_not_padded_again() -> None:
+    held = said((1000, 4900, "close before"), (5000, 6000, CUT_MARKER), (6100, 7000, "close after"))
+    # The range grew on its right: only that end is padded, so the segment beside the held start stays.
+    placed = place(held, [(5000, 6200)], pad=250)
+    assert [s.text for s in placed] == ["close before", CUT_MARKER]
+    assert marked(placed) == [(5000, 6200)]
+    # A range the marks hold already takes nothing more.
+    assert place(held, [(5000, 6000)], pad=250) == held
