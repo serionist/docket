@@ -19,9 +19,9 @@ Docket writes it, numbered as the rewritten file will be.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, replace
-from typing import Protocol
+from typing import Any, Protocol
 
 from docket.vault.anchors import Anchor, DocRef, trailing_anchors
 from docket.vault.decision_form import FINAL
@@ -29,6 +29,10 @@ from docket.vault.forgotten import Forgotten
 from docket.vault.processed import ProcessedDoc, parse_doc
 
 LEGACY = "legacy-note"
+# What the rule reads beyond the docs it judges, a round at a time: docs by id as they read now, and docs at an earlier
+# rev by id and rev.
+Current = Callable[[Collection[str]], Mapping[str, ProcessedDoc]]
+Older = Callable[[Collection[tuple[str, int]]], Mapping[tuple[str, int], ProcessedDoc]]
 
 
 class Raw(Protocol):
@@ -97,26 +101,47 @@ def anchored(doc: ProcessedDoc, raw: Raw) -> set[int]:
 
 
 class _Rule:
-    """One pass of the rule over every doc, with the earlier revs refs name read once each."""
+    """One pass of the rule over some docs and everything their refs lead to, read in rounds: a line drops only for
+    what it cites, so what it cites, and what that cites, is all the rule reads."""
 
     def __init__(
-        self,
-        docs: Iterable[ProcessedDoc],
-        raw: Raw,
-        listed: Forgotten,
-        older: Callable[[str, int], ProcessedDoc | None],
+        self, docs: Iterable[ProcessedDoc], raw: Raw, listed: Forgotten, current: Current, older: Older
     ) -> None:
         self.docs = {doc.meta.id: doc for doc in docs}
         self.raw = raw
         self.listed = listed
-        self.older = older
+        # Each earlier rev a ref names, with its lines anchored on the family; None when it can't be read.
+        self._earlier: dict[tuple[str, int], tuple[ProcessedDoc, set[int]] | None] = {}
+        self._close(current, older)
         self.removed = {
             doc_id
             for doc_id, doc in self.docs.items()
             if doc.meta.type == LEGACY and listed.legacy(doc.meta.old_paths, doc.meta.import_hash)
         }
         self.dropped = {doc_id: anchored(doc, raw) for doc_id, doc in self.docs.items() if doc_id not in self.removed}
-        self._earlier: dict[tuple[str, int], tuple[ProcessedDoc, set[int]] | None] = {}
+
+    def _close(self, current: Current, older: Older) -> None:
+        """Read every doc a ref leads to, as it reads now, and every earlier rev a ref names, a round of each at a
+        time, so a caller reads each round in one go."""
+        frontier = list(self.docs.values())
+        missing: set[str] = set()
+        while frontier:
+            refs = [ref for doc in frontier for _, ref in _refs(doc)]
+            wanted = {ref.doc for ref in refs} - set(self.docs) - missing
+            found = dict(current(wanted)) if wanted else {}
+            missing |= wanted - set(found)
+            self.docs.update(found)
+            revs = {(ref.doc, ref.rev) for ref in refs if ref.rev is not None and self._earlier_rev(ref.doc, ref.rev)}
+            revs -= set(self._earlier)
+            read = dict(older(revs)) if revs else {}
+            for key in revs:
+                doc = read.get(key)
+                self._earlier[key] = None if doc is None else (doc, anchored(doc, self.raw))
+            frontier = [*found.values(), *read.values()]
+
+    def _earlier_rev(self, doc_id: str, rev: int) -> bool:
+        cited = self.docs.get(doc_id)
+        return cited is None or cited.meta.rev != rev
 
     def settle(self) -> None:
         """Drop every line citing a dropped line until no more go: a brief line built on a note line goes with it."""
@@ -140,7 +165,7 @@ class _Rule:
         if ref.rev is None or (ref.doc, ref.rev, ref.line) in seen:
             return False
         seen.add((ref.doc, ref.rev, ref.line))
-        earlier = self._read(ref.doc, ref.rev)
+        earlier = self._earlier.get((ref.doc, ref.rev))
         if earlier is None:
             return False
         if earlier[0].meta.type == LEGACY:
@@ -148,14 +173,6 @@ class _Rule:
         if ref.line in earlier[1]:
             return True
         return any(n == ref.line and self.cites_dropped(cited, seen) for n, cited in _refs(earlier[0]))
-
-    def _read(self, doc_id: str, rev: int) -> tuple[ProcessedDoc, set[int]] | None:
-        """An earlier rev, with its lines anchored on the family, read once."""
-        key = (doc_id, rev)
-        if key not in self._earlier:
-            found = self.older(doc_id, rev)
-            self._earlier[key] = None if found is None else (found, anchored(found, self.raw))
-        return self._earlier[key]
 
     def fate(self, doc: ProcessedDoc) -> Fate | None:
         doc_id = doc.meta.id
@@ -181,16 +198,27 @@ def without(doc: ProcessedDoc, lines: set[int], covers: list[str]) -> ProcessedD
     return parse_doc(left.render(), lenient=True)
 
 
+def _nothing(_wanted: Collection[Any]) -> Mapping[Any, ProcessedDoc]:
+    return {}
+
+
 def fates(
-    docs: Iterable[ProcessedDoc], raw: Raw, listed: Forgotten, older: Callable[[str, int], ProcessedDoc | None]
+    docs: Iterable[ProcessedDoc],
+    raw: Raw,
+    listed: Forgotten,
+    *,
+    current: Current = _nothing,
+    older: Older = _nothing,
 ) -> dict[str, Fate]:
-    """Each doc the list changes, by its id; a doc it leaves as it is has no entry. `older` reads a doc at an earlier
-    rev, None when it can't be read."""
-    rule = _Rule(docs, raw, listed, older)
+    """Each of `docs` the list changes, by its id; a doc it leaves as it is has no entry. The rule reads what their
+    refs lead to through `current`, the docs by id as they read now, and `older`, docs at an earlier rev; each answers
+    a whole round at once, leaving out what it can't read."""
+    targets = list(docs)
+    rule = _Rule(targets, raw, listed, current, older)
     rule.settle()
     out: dict[str, Fate] = {}
-    for doc_id, doc in rule.docs.items():
-        found = rule.fate(doc)
+    for doc in targets:
+        found = rule.fate(rule.docs[doc.meta.id])
         if found is not None:
-            out[doc_id] = found
+            out[doc.meta.id] = found
     return out

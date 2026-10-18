@@ -30,7 +30,9 @@ SCHEMA_VERSION = 10
 TOKENIZER = "unicode61 remove_diacritics 2"
 # remove_diacritics 2 came in SQLite 3.27.
 MIN_SQLITE = (3, 27, 0)
-# The meta key of the forgotten list's digest: a cache's key like the rest (DR-0115), so it needs no new schema.
+# The meta key of the forgotten list's digest: a cache's key like the rest (DR-0115), so it needs no new schema. Nor
+# does `skipped`, what the list took from raw: only an index built under a list that takes something reads or writes
+# it, and an index from before the list is rebuilt under one.
 FORGOTTEN = "forgotten"
 
 TABLES = """
@@ -112,6 +114,7 @@ CREATE TABLE mentions (
 CREATE INDEX mentions_entity ON mentions (entity);
 CREATE TABLE problems (kind TEXT NOT NULL, place TEXT NOT NULL, message TEXT NOT NULL,
   PRIMARY KEY (kind, place, message)) WITHOUT ROWID;
+CREATE TABLE skipped (rid TEXT PRIMARY KEY, parts INTEGER NOT NULL) WITHOUT ROWID;
 """
 
 

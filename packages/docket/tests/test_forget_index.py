@@ -6,7 +6,7 @@ a vault that never held them. Invented data only."""
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -16,6 +16,7 @@ from docket_testkit import (
     PLAUD,
     POLISHED,
     copied,
+    git_calls,
     logical_dump,
     make_config,
     make_record,
@@ -25,6 +26,7 @@ from forget_kit import KEY, forget, line, stored, write_raw_file
 
 from docket import recall
 from docket.cli import main
+from docket.documents import records as documents
 from docket.errors import DocketError
 from docket.index import build, lookup
 from docket.index.languages import resolve
@@ -34,6 +36,7 @@ from docket.vault import forgetdocs, forgotten
 from docket.vault.anchors import Anchor
 from docket.vault.docstore import DocStore
 from docket.vault.processed import ProcessedDoc, parse_doc
+from docket.vault.records import RawRecord
 from docket.vault.vault import Vault
 
 NOTE = "recording-note:2026-10-14-supplier-sync"
@@ -255,6 +258,71 @@ def test_update_under_the_same_list_skips_a_listed_line_a_new_run_file_brings(he
     assert rows(held, "SELECT count(*) FROM records WHERE rid = ?", make_record(9).rid) == [(1,)]
 
 
+COPY = "docs:aaaaaaaaaaaa"
+COPY_NOTE = "recording-note:2026-10-14-copy"
+SETTLED = "- The settlement is forty thousand."
+
+
+def folder_record(rid: str, kind: str, text: str, **native: object) -> RawRecord:
+    fields = {"rid": rid, "source": "docs", "kind": kind, "via": documents.VIA, "ts": at(9), "fetched": at(9)}
+    return RawRecord.model_validate({**fields, "native": native, "text": text, "title": rid})
+
+
+def test_an_update_judges_what_the_list_took_as_the_rebuild_before_it(tmp_path: Path) -> None:
+    vault = with_records(tmp_path, family=False)
+    sha = "c0" * 32
+    write_raw_file(vault.root, "raw/docs/2026/10/2026-10-14T0900-test-box.jsonl", [
+        folder_record(COPY, documents.FILE_KIND, "", sha256=sha),
+        folder_record(f"{COPY}/page1", "page", SETTLED.removeprefix("- ")),
+    ])  # fmt: skip
+    vault.commit([], "Raw: docs")
+    note = doc(COPY_NOTE, [COPY], [f"{SETTLED} [r:{COPY}]"], "rev: 1", title="The copy")
+    write_doc(vault, "recording-note/2026/10/2026-10-14-copy.md", note)
+    # A copy of a forgotten file, at another path: forgotten by its identity alone, its page with it.
+    forget(vault, files=[f"sha256:{sha}"])
+    build.rebuild(vault)
+    assert rows(vault, "SELECT rid, parts FROM skipped") == [(COPY, 1), (f"{COPY}/page1", 0)]
+    write_doc(vault, "recording-note/2026/10/2026-10-14-copy.md", note + "\nA line added by hand.\n")
+    page = folder_record(f"{COPY}/page1", "page", "The settlement is forty thousand, signed.")
+    write_raw_file(vault.root, "raw/docs/2026/10/2026-10-14T1000-test-box.jsonl", [page])
+    report = build.update(vault)
+    # The note is indexed again and the page's new version read alone, with what the rebuild knew.
+    assert not report.rebuilt and report.docs == 1 and report.runs == 1
+    assert rows(vault, "SELECT count(*) FROM records WHERE source = 'docs'") == [(0,)]
+    assert rows(vault, "SELECT count(*) FROM doc_anchors WHERE doc = ?", COPY_NOTE) == [(0,)]
+    assert rows(vault, "SELECT count(*) FROM chunks WHERE text LIKE '%forty thousand%'") == [(0,)]
+
+
+def test_an_update_reads_only_the_docs_it_indexes_and_what_they_cite(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = with_records(tmp_path, family=False)
+    recall.doc_put(vault, doc(NOTE, [CHAT], [KEPT]))
+    recall.doc_put(vault, doc(DIGEST, [], [f"- The channel opened. {cite(vault, NOTE, KEPT)}"], title="The day"))
+    for n in range(4):
+        later = f"recording-note:2026-10-15-other-{n}"
+        recall.doc_put(vault, doc(later, [OTHER], [f"- Another message, {n}. [r:{OTHER}]"]))
+    # The note's second rev, so the digest cites an earlier one.
+    recall.doc_put(vault, doc(NOTE, [CHAT, OTHER], [KEPT, TEN_AGAIN], "rev: 1"))
+    forget(vault, rids=["chat:C0ELSEWHERE"])
+    build.rebuild(vault)
+    rel = "processed/recording-note/2026/10/2026-10-14-supplier-sync.md"
+    first = next(sha for n, sha in DocStore(vault).history(NOTE) if n == 1)
+    digest = vault.root / "processed/digest/2026/10/2026-10-14-day.md"
+    # Another process: the rebuild's earlier revs aren't kept in this one.
+    build._EARLIER.clear()  # pyright: ignore[reportPrivateUsage]
+    for said, wanted in (
+        ("- By hand.", [f"log --no-show-signature --format=%H%x1f%B%x1e -- {rel}", f"cat-file blob {first}:./{rel}"]),
+        ("- By hand again.", []),
+    ):
+        digest.write_text(digest.read_text(encoding="utf-8") + f"{said}\n", encoding="utf-8", newline="\n")
+        with git_calls(monkeypatch) as calls:
+            report = build.update(vault)
+        # The digest's history isn't read, nor any other doc: the earlier rev it cites, once a process.
+        assert not report.rebuilt and report.docs == 1 and calls == wanted
+    assert rows(vault, "SELECT count(*) FROM derived_from WHERE doc = ?", DIGEST) == [(1,)]
+
+
 # -- what a rebuild leaves out -----------------------------------------------------------------------------------------
 
 # What a vault that never held the family can't match: the list's digest, the run files and the doc files' bytes.
@@ -343,16 +411,21 @@ def test_a_version_forget_takes_the_lines_on_a_rid_it_leaves_no_version_of(tmp_p
     assert rows(vault, "SELECT src_line FROM derived_from WHERE doc = ?", LATER) == [(numbers[BYE],)]
 
 
-def test_the_rule_reads_past_a_doc_it_can_t_read_and_a_rev_git_has_none_of(tmp_path: Path) -> None:
+def test_the_rule_reads_past_a_doc_it_can_t_read_and_a_rev_git_has_none_of(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     vault = Vault.open(copied(tmp_path, lambda d: build_docs(d).root, f"{__name__}.docs"))
     write_doc(vault, "digest/2026/10/2026-10-18-broken.md", "not a doc\n")
     write_doc(vault, "digest/misplaced.md", doc("digest:2026-10-18-misplaced", [], ["- Elsewhere."]))
     nine = "digest:2026-10-18-nine"
-    write_doc(vault, "digest/2026/10/2026-10-18-nine.md", doc(nine, [], [f"- On rev 9. [d:{NOTE}@9#12=00000000]"]))
+    lines = [f"- On rev 9. [d:{NOTE}@9#12=00000000]", "- On a doc that went. [d:digest:2026-10-01-gone@1#12=00000000]"]
+    write_doc(vault, "digest/2026/10/2026-10-18-nine.md", doc(nine, [], lines))
     forget_the_transcript(vault)
+    # Earlier revs kept for the process make room when full.
+    monkeypatch.setattr(build, "EARLIER_KEPT", 0)
     problems = build.rebuild(vault).problems
     assert any("2026-10-18-broken.md" in p for p in problems) and any("misplaced.md" in p for p in problems)
-    assert rows(vault, "SELECT rev FROM derived_from WHERE doc = ?", nine) == [(9,)]
+    assert sorted(rows(vault, "SELECT rev FROM derived_from WHERE doc = ?", nine)) == [(1,), (9,)]
 
 
 def test_no_list_means_every_doc_reads_as_it_is(tmp_path: Path) -> None:
@@ -405,6 +478,11 @@ def pin(doc_id: str, rev: int | None, n: int) -> str:
     return f"[d:{doc_id}#{n}]" if rev is None else f"[d:{doc_id}@{rev}#{n}=00000000]"
 
 
+def revs(earlier: Mapping[tuple[str, int], ProcessedDoc]) -> forgetdocs.Older:
+    """The earlier revs a test has, answered a round at a time as the index's reader answers."""
+    return lambda wanted: {key: earlier[key] for key in wanted if key in earlier}
+
+
 def test_an_anchor_reads_where_it_lands() -> None:
     time = Anchor(PLAUD, "time", 642)
     assert forgetdocs.on_family(time, PLAUD, FakeRaw({PLAUD}))
@@ -434,7 +512,7 @@ def test_refs_are_followed_to_a_fixed_point_through_earlier_revs() -> None:
     elsewhere = "- On a doc that isn't here. " + pin(THANKS, None, 12)
     brief = parsed(DIGEST, [], [on_two, lost, current, elsewhere])
     earlier = {(NOTE, 1): first, (NOTE, 2): second}
-    found = forgetdocs.fates([note, brief], FakeRaw({POLISHED}), forgotten.EMPTY, lambda d, r: earlier.get((d, r)))
+    found = forgetdocs.fates([note, brief], FakeRaw({POLISHED}), forgotten.EMPTY, older=revs(earlier))
     assert set(found) == {DIGEST} and found[DIGEST].dropped == {number(brief, on_two)}
     left = found[DIGEST].doc
     assert left is not None and [said for _, said in left.lines() if said.startswith("-")] == [lost, current, elsewhere]
@@ -449,20 +527,21 @@ def test_a_ref_loop_between_earlier_revs_ends() -> None:
     }
     note = parsed(NOTE, [CHAT], [KEPT], "rev: 2")
     digest = parsed(DIGEST, [], ["- Loop. " + pin(NOTE, 1, y)], "rev: 2")
-    assert forgetdocs.fates([note, digest], FakeRaw(), forgotten.EMPTY, lambda d, r: earlier.get((d, r))) == {}
+    assert forgetdocs.fates([note, digest], FakeRaw(), forgotten.EMPTY, older=revs(earlier)) == {}
 
 
 def test_a_line_built_on_a_removed_legacy_note_goes() -> None:
     listed = forgotten.fold([line(old_paths=[OLD_PATH])])
     note = parse_doc(legacy(LEGACY, [PLAUD], OLD_PATH, "Ten million."), lenient=True)
     digest = parsed(DIGEST, [], ["- From the note. " + pin(LEGACY, 1, 12)], "rev: 1")
-    found = forgetdocs.fates([note, digest], FakeRaw(), listed, lambda d, r: None)
+    found = forgetdocs.fates([note, digest], FakeRaw(), listed)
     assert found[LEGACY].doc is None and found[DIGEST].doc is None
     # The note renamed since: the old path its earlier rev held is the one listed.
     renamed = parse_doc(legacy(LEGACY, [PLAUD], "notes/renamed.md", "Ten million.", rev=2), lenient=True)
     older = parsed(LATER, [], ["- From the old note. " + pin(LEGACY, 1, 12)], "rev: 1")
-    assert set(forgetdocs.fates([renamed, older], FakeRaw(), listed, lambda d, r: note)) == {LATER}
-    assert forgetdocs.fates([renamed, older], FakeRaw(), forgotten.EMPTY, lambda d, r: note) == {}
+    first = revs({(LEGACY, 1): note})
+    assert set(forgetdocs.fates([renamed, older], FakeRaw(), listed, older=first)) == {LATER}
+    assert forgetdocs.fates([renamed, older], FakeRaw(), forgotten.EMPTY, older=first) == {}
 
 
 def test_without_drops_lines_by_their_number_and_reads_back_as_docket_writes_it() -> None:
@@ -471,3 +550,20 @@ def test_without_drops_lines_by_their_number_and_reads_back_as_docket_writes_it(
     assert [said for _, said in left.lines() if said] == ["# Supplier sync", KEPT]
     assert left.meta.covers == [CHAT] and number(left, KEPT) == left.head_lines + 4
     assert left.source == left.render()
+
+
+def test_the_rule_reads_what_refs_lead_to_and_judges_only_its_docs() -> None:
+    note = parsed(NOTE, [POLISHED], [BYE], "rev: 1")
+    built = "- Built on the thanks. " + pin(NOTE, 1, number(note, BYE))
+    elsewhere = "- On a doc no one can read. " + pin(THANKS, 1, 12)
+    digest = parsed(DIGEST, [], [built, elsewhere], "rev: 1")
+    asked: list[set[str]] = []
+
+    def current(wanted: Collection[str]) -> dict[str, ProcessedDoc]:
+        asked.append(set(wanted))
+        return {NOTE: note} if NOTE in wanted else {}
+
+    found = forgetdocs.fates([digest], FakeRaw({POLISHED}), forgotten.EMPTY, current=current)
+    # The note is read to judge the digest's line, and judged only for that: it gets no fate of its own here.
+    assert set(found) == {DIGEST} and found[DIGEST].dropped == {number(digest, built)}
+    assert asked == [{NOTE, THANKS}]

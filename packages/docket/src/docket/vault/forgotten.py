@@ -19,7 +19,7 @@ import contextlib
 import hashlib
 import json
 import secrets
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import cached_property
@@ -30,7 +30,6 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, Validation
 
 from docket.documents import records as documents
 from docket.errors import DocketError
-from docket.media.layout import owners
 from docket.vault.git import Git
 from docket.vault.home import Home
 from docket.vault.records import RawRecord, canonical_json, version
@@ -153,7 +152,12 @@ class Forgotten:
     def whole(self, rid: str) -> bool:
         """Whether a rid was forgotten whole: it, or a rid it sits under by nesting (`plaud:<id>/<block>` under
         `plaud:<id>`), is on the list's rids. Never by thread or container, so a reply never goes with its thread."""
-        return bool(self.rids) and any(rid_hash(owner) in self.rids for owner in owners(rid))
+        if not self.rids:
+            return False
+        # Here, not at the top: media's modules import the vault, which imports this.
+        from docket.media.layout import owners  # noqa: PLC0415
+
+        return any(rid_hash(owner) in self.rids for owner in owners(rid))
 
     def versioned(self, rid: str) -> bool:
         """Whether some version of a rid was forgotten alone: a held rid's or a folder file's."""
@@ -197,8 +201,9 @@ class Forgotten:
         granted = releaselog.read(self.root, record.source)
         return any((record.rid, v) in one.keep for one in granted.values())
 
-    def reading(self) -> Reading:
-        return Reading(self)
+    def reading(self, files: Iterable[str] = ()) -> Reading:
+        """A pass in run order; `files` are the folder files whose parts an earlier pass found the list takes."""
+        return Reading(self, files)
 
 
 EMPTY = Forgotten()
@@ -207,11 +212,17 @@ EMPTY = Forgotten()
 class Reading:
     """One pass over run files in run order. A folder file's parts carry no identity of their own, so they go with the
     file line before them whose identity is listed; a later line of that file with another identity, a changed file or
-    a new one at its path, lets the parts after it in."""
+    a new one at its path, lets the parts after it in. A pass over new run files alone starts from the files an earlier
+    pass left marked, as an index update does."""
 
-    def __init__(self, listed: Forgotten) -> None:
+    def __init__(self, listed: Forgotten, files: Iterable[str] = ()) -> None:
         self.listed = listed
-        self._files: set[str] = set()
+        self._files: set[str] = set(files)
+
+    @property
+    def files(self) -> frozenset[str]:
+        """The folder files whose parts this pass takes from here on."""
+        return frozenset(self._files)
 
     def skips(self, record: RawRecord) -> bool:
         listed = self.listed

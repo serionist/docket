@@ -402,7 +402,7 @@ the earlier ones (DR-0112).
 
 | Table | What |
 |---|---|
-| `meta`, `run_files`, `problems` | what the index was built with (schema, languages, stemmer, the forgotten list's digest), the run files it read, what didn't load |
+| `meta`, `run_files`, `problems`, `skipped` | what the index was built with (schema, languages, stemmer, the forgotten list's digest), the run files it read, what didn't load, what the list took from them |
 | `records`, `record_versions`, `crosswalk` | every raw record's current version with its file and line in the raw log, and every version with its byte offset there (DR-0445); old and new ids of one thing |
 | `segments` | transcript utterances: rid, engine, start and end ms, speaker, person, text |
 | `chunks`, `chunks_fts`, `chunk_vec_<model>` | the searchable units; FTS5 over the text as written and a stemmed column per language (DR-0114); a vector table per model, keyed by the hash of each chunk's input and kept in step with the chunks by every update and rebuild (DR-0336) |
