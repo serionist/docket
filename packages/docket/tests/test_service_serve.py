@@ -251,6 +251,7 @@ def test_the_service_as_a_process_answers_mcp_with_the_token_and_refuses_a_forge
                     "run_open",
                     "ingest",
                     "media_put",
+                    "transcribe",
                 }
                 result = await mcp.call_tool("search", {"query": "fleet dashboard battery"})
                 assert not result.is_error

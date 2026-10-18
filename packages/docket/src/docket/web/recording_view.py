@@ -69,11 +69,14 @@ class Facts:
     summary: DocView | None = None
     problems: tuple[str, ...] = ()
     audio: NoAudio = "not-fetched"
+    # The service's Whisper job for the recording, in its words, when it ran or queued one (DR-0571).
+    speech: str | None = None
 
 
 @dataclass(frozen=True)
 class Audio:
     why: NoAudio
+    speech: str | None = None
 
     @property
     def message(self) -> str:
@@ -209,7 +212,7 @@ def build(facts: Facts, state: RecordingState) -> RecordingView:
         rid=facts.rid,
         title=head.title or (shown.title if shown is not None else None) or facts.rid,
         locator=_locator(facts.rid, state.at),
-        audio=Audio(facts.audio),
+        audio=Audio(facts.audio, facts.speech),
         problems=list(facts.problems),
     )
     parts = [head.source, local_time(head.ts, facts.tz)]

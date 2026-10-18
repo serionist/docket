@@ -718,7 +718,7 @@ MCP tools:
 | `run_open` | opens a sync run of a source: its window, its skill, what to skip and what is owed, the steps (DR-0241) |
 | `ingest` | closes a run: the captures the hook kept and the manifest; the source's mapper makes normalized records, the core checks their rids and computes their versions, and they go to staging (DR-0241) |
 | `media_put` | audio or an attachment by path or URL, within the limits in Sources (named folders, https to the hosts `vault.yaml` lists for the source, no private addresses, few redirects, a size cap); the service fetches, encrypts and stores it (phase 2, #42) |
-| `transcribe` | run speech recognition on a stored recording (phase 2, when a model is installed) |
+| `transcribe` | queue a stored recording for Whisper in the service, one job at a time; answers with the job's place (phase 2, DR-0571) |
 | `ledger` | snapshot, history queries, batch ops, queue, meetings, points |
 | `secret` | a named secret, with a confirmation |
 

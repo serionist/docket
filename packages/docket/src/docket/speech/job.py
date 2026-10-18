@@ -15,16 +15,18 @@ stages nothing. Nothing here logs a segment, a name or the prompt.
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from filelock import FileLock, Timeout
 
-from docket import userconfig
+from docket import recall, userconfig
 from docket.errors import DocketError
 from docket.media import crypto, cutter, layout, reader
 from docket.media.ranges import Range
@@ -36,17 +38,21 @@ from docket.vault.gate import Gate, StageResult
 from docket.vault.records import RID, TRANSCRIBED_VIA, RawRecord, Segment, is_native_id
 from docket.vault.segments import normalize, render
 from docket.vault.spans import RawLookup
-from docket.vault.staging import Staging
+from docket.vault.staging import Staging, rid_hash
 from docket.vault.vault import Vault
 
 SUFFIX = "/whisper"
 LOCK = "speech.lock"
 PID = "speech.pid"
+# The stored files and engines that staged nothing for good, one JSON line each, in the state folder (DR-0571).
+TRIED = "speech-tried.jsonl"
 CUT_MARKER = "[cut]"
 # The job's time limit by the audio's length: CUDA ran large-v3 at 26 times the audio's speed and a CPU about as fast
 # as the audio, so these leave room; never under ten minutes, for the model's load.
 FACTOR = {"cuda": 0.5, "cpu": 3.0}
 LEAST_LIMIT = 600.0
+# How many recordings the service queues by itself after an index update, newest first, on CUDA only (DR-0571).
+AUTO = 20
 # Why a recording's audio can't be transcribed, by the reader's state (DR-0551).
 WHY: dict[reader.State, str] = {
     "not-fetched": "no audio is stored for it",
@@ -91,6 +97,8 @@ class Outcome:
     rid: str
     staged: bool
     line: str
+    # Why this stored file and engine will never stage anything, when that is so: the service skips them (DR-0571).
+    final: str | None = None
 
 
 @contextmanager
@@ -117,8 +125,77 @@ def machine_lock(*, wait: bool) -> Generator[None]:
         lock.release()
 
 
+def checked(rid: str) -> str:
+    """A recording's rid as a job takes it, or why not: a rid, and not a Whisper transcript's."""
+    if RID.match(rid) is None or not is_native_id(rid.partition(":")[2]):
+        raise DocketError(f"{rid!r} isn't a rid: <source>:<id>")
+    if rid.endswith(SUFFIX):
+        raise DocketError(f"{rid} is a Whisper transcript; give its recording's rid")
+    return rid
+
+
+def tried(engine: str) -> set[tuple[str, str]]:
+    """The (rid hash, key id) pairs whose job with this engine staged nothing and never will: the service doesn't
+    queue them again, across restarts (DR-0571). A line that doesn't read is skipped."""
+    try:
+        lines = (userconfig.state_dir() / TRIED).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return set()
+    found: set[tuple[str, str]] = set()
+    for line in lines:
+        try:
+            data: Any = json.loads(line)
+            if data["engine"] == engine:
+                found.add((str(data["rid"]), str(data["key"])))
+        except (ValueError, KeyError, TypeError):
+            continue
+    return found
+
+
+def remember(rid: str, key: str, engine: str, outcome: str) -> None:
+    """A stored file and engine that staged nothing for good, by the rid's hash and the file's key id: no content."""
+    folder = userconfig.state_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    line = {"rid": rid_hash(rid), "key": key, "engine": engine, "outcome": outcome}
+    with (folder / TRIED).open("a", encoding="utf-8", newline="\n") as out:
+        out.write(json.dumps(line) + "\n")
+
+
 def whisper_rid(rid: str) -> str:
     return f"{rid}{SUFFIX}"
+
+
+def due(vault: Vault, engine: str, limit: int = AUTO) -> list[str]:
+    """The newest recordings, at most `limit`, whose stored audio reads ok and that have no Whisper transcript staged
+    or in raw, from the sources this machine ingests: what the service queues by itself after an index update on CUDA
+    (DR-0571). A stored file this engine staged nothing from for good is passed over before the limit, so older
+    recordings get their turn. Raw is read at its places, and a recording without a stored file costs no read."""
+    ingested = cursors.read(vault.root, vault.machine)
+    passed = tried(engine)
+    staged = {e.staged.record.rid for e in Staging(vault.root, vault.home).scan().entries}
+    found: list[tuple[datetime, str]] = []
+    with recall.raw_lookup(vault) as lookup:
+        for source in sorted(s for s in ingested if s in vault.config.sources):
+            folder = vault.root / layout.STORED / source
+            stored: set[str] = set()
+            if folder.is_dir():
+                stored = {p.name.split(".", 1)[0] for p in folder.glob(f"*/*/*{layout.SUFFIX}")}
+            taken = 0
+            for rid in lookup.of_kind(source, "recording"):
+                if taken >= limit:
+                    break
+                made = whisper_rid(rid)
+                if rid_hash(rid) not in stored or made in staged or lookup.has(made):
+                    continue
+                latest = lookup.latest(rid)
+                if latest is None or reader.state_of(vault, rid, raw=lookup) != "ok":
+                    continue
+                # A file that reads ok is the one stored file, and no LFS pointer.
+                if (rid_hash(rid), crypto.key_id(layout.stored_files(vault.root, rid)[0])) in passed:
+                    continue
+                found.append((latest.ts, rid))
+                taken += 1
+    return [rid for _, rid in sorted(found, reverse=True)[:limit]]
 
 
 def transcribe(
@@ -132,10 +209,7 @@ def transcribe(
     decoder: Sequence[str] | None = None,
 ) -> Outcome:
     """One recording transcribed and staged, or why nothing was staged. `worker` and `decoder` are a test's commands."""
-    if RID.match(rid) is None or not is_native_id(rid.partition(":")[2]):
-        raise DocketError(f"{rid!r} isn't a rid: <source>:<id>")
-    if rid.endswith(SUFFIX):
-        raise DocketError(f"{rid} is a Whisper transcript; give its recording's rid")
+    checked(rid)
     chosen = speech if speech is not None else setup.chosen()
     if isinstance(chosen, str):
         raise DocketError(chosen)
@@ -157,8 +231,13 @@ def transcribe(
                 return Outcome(rid, False, f"{rid}'s stored audio was transcribed by {engine} already; nothing staged")
             record = _record(again, found, engine, vault.config.owner.languages)
             if record is None:
-                return Outcome(rid, False, f"Whisper heard no speech in {rid}'s stored audio; nothing staged")
-            return _staged(record, Gate(vault).stage([record]))
+                heard = f"Whisper heard no speech in {rid}'s stored audio; nothing staged"
+                done = Outcome(rid, False, heard, "no-speech")
+            else:
+                done = _staged(record, Gate(vault).stage([record]))
+            if done.final is not None:
+                remember(rid, again.key, engine, done.final)
+            return done
 
 
 def _family(vault: Vault, rid: str) -> Family:
@@ -298,6 +377,6 @@ def _staged(record: RawRecord, result: StageResult) -> Outcome:
     if result.on_hold:
         return Outcome(record.rid, False, f"{record.rid}: a hold covers it, so nothing was staged")
     if result.skipped:
-        return Outcome(record.rid, False, f"{record.rid}: the same transcript is staged or in raw already")
+        return Outcome(record.rid, False, f"{record.rid}: the same transcript is staged or in raw already", "same")
     why = ", ".join(sorted(result.dropped)) or "the gate's rules"
-    return Outcome(record.rid, False, f"{record.rid}: the gate dropped it ({why}); nothing staged")
+    return Outcome(record.rid, False, f"{record.rid}: the gate dropped it ({why}); nothing staged", "dropped")

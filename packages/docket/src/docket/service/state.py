@@ -19,6 +19,7 @@ from docket.service.history import RunHistory
 from docket.service.models import ModelsKeeper, ModelsStatus
 from docket.service.runs import Runs
 from docket.service.sessions import Sessions
+from docket.service.speech import SpeechQueue, SpeechStatus
 from docket.service.writer import IndexUpdater, Writer
 from docket.vault.home import Home
 from docket.vault.vault import Vault
@@ -53,6 +54,8 @@ class Status(BaseModel):
     models: ModelsStatus = ModelsStatus()
     # Media keys this clone holds that no export does (DR-0550): the session start asks for a backup.
     media_unbacked: int = 0
+    # The speech queue (DR-0571): off and why, or what runs and waits.
+    speech: SpeechStatus = SpeechStatus()
 
 
 @dataclass(frozen=True)
@@ -76,6 +79,8 @@ class Service:
         self.updater = IndexUpdater(self._update)
         # The embedder's worker and the embedding pass, started by the app's lifespan (DR-0330).
         self.models = ModelsKeeper(self.vault)
+        # Whisper's jobs, one at a time, started by the app's lifespan too (DR-0571).
+        self.speech = SpeechQueue(self.vault)
         # Kept for the web app's footer: index.status() hashes every doc and entity file, too much for each page.
         self.last_update: LastUpdate | None = None
 
@@ -83,6 +88,7 @@ class Service:
         report = index.update(self.vault())
         self.last_update = LastUpdate(datetime.now(UTC), dict(report.counts))
         self.models.poke()
+        self.speech.after_update()
 
     def _home(self) -> Home:
         return self.vault().home
@@ -118,6 +124,7 @@ class Service:
             index=found,
             models=self.models.status(),
             media_unbacked=KeyStore(vault.home).unbacked() if vault is not None else 0,
+            speech=self.speech.status(),
         )
 
     @staticmethod

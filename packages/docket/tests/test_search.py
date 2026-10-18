@@ -235,6 +235,33 @@ def test_two_recordings_in_one_thread_at_other_hours_stay_apart(tmp_path: Path) 
     assert all(h.also == [] for g in result.groups for h in g.hits)
 
 
+def test_a_whisper_transcript_and_the_recorder_s_on_one_stretch_are_one_hit(tmp_path: Path) -> None:
+    """A Whisper transcript sits under its recording as the recorder's does, so a stretch both match is one hit, the
+    other its `also` (DR-0570)."""
+    v = empty_vault(tmp_path, index_config())
+    at = datetime(2026, 10, 12, 8, tzinfo=UTC)
+    under = {"source": "calls", "container": "calls:rec-9", "thread": "calls:rec-9", "ts": at}
+
+    def said(rid: str, text: str, speaker: str | None, **fields: Any) -> RawRecord:
+        segs = [{"start_ms": 1000, "end_ms": 9000, "speaker": speaker, "text": text}]
+        return make_record(rid=rid, kind="transcript", segments=segs, **under, **fields)
+
+    v.write_run(
+        "calls",
+        [
+            make_record(rid="calls:rec-9", kind="recording", text="", title="Crane review", **under),
+            said("calls:rec-9/t", "the crane budget is fine for now", "Ben Sample"),
+            said(
+                "calls:rec-9/whisper", "the crane budget is fine for now.", None, via="docket transcribe 0f", engine="w"
+            ),
+        ],
+        LATER,
+    )
+    rebuild(v)
+    hits = [h for g in find(v, "crane budget").groups for h in g.hits]
+    assert len(hits) == 1 and hits[0].also, hits
+
+
 def test_groups_carry_their_kind_title_and_current_summary(vault: Vault) -> None:
     result = find(vault, "fleet dashboard", k=20)
     by_key = {g.key: g for g in result.groups}
