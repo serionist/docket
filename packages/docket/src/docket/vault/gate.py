@@ -39,8 +39,8 @@ from docket.media import staged as media_staged
 from docket.media.keystore import KeyStore
 from docket.media.screen import Screen
 from docket.speech import follow
-from docket.vault import cursors, holds, inforce, neverstore, releaselog
 from docket.vault import cuts as cutting
+from docket.vault import holds, inforce, neverstore, releaselog
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.cuts import CUT_MARKER, Cut
 from docket.vault.host import Lfs, lfs_state
@@ -630,6 +630,10 @@ class Gate:
         promoted = [item for items in groups.values() for item in items]
         due = follow.due(self._seen, promoted, entries, self._releases, sources)
         if due:
+            # The cursor file reaches the source contract, which imports the vault package: imported here, so a
+            # process that imports the contract first doesn't meet it half made.
+            from docket.vault import cursors  # noqa: PLC0415
+
             # Only where the cursor file names the source; read only when something is due, so a promotion with
             # nothing to follow reads no more than it did.
             ran = cursors.read(self.vault.root, self.vault.machine)

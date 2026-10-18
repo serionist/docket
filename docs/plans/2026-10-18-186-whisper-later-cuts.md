@@ -268,6 +268,7 @@ Invented data only: `docket_testkit` and `media_kit` records, a tone made at tes
 | the transcribe row is tested at the gate: a Whisper version staged after the follow waits for the owner | the full transcribe job needs audio and the fake worker for what the gate's own rule decides |
 | the two-clone test runs the second clone under a machine name that sorts after the first | a follow in the same minute as the version it cut, by a machine whose name sorts first, lies before that version in run order; the Risks row and DR-0591 now name it |
 | `speech/follow.py` imports the cutter as a module, not its pad by name | a process that imports the cutter first reaches the gate, and so the follow, through the vault package before the cutter is done; `test_media_cut.py`'s killed-parent test caught it |
+| the gate imports the cursor file's module in `_follow`, where it reads it | the cursor module reaches the source contract, which imports the vault package, so a process that imports the contract first met it half made; CI's `test_source_new.py` caught it. `test_module_imports.py` now imports every module first, with the seven media modules whose cycles came before listed until they are fixed |
 
 ## Plan review
 
