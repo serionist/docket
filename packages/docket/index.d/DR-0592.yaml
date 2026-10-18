@@ -1,0 +1,11 @@
+decisions:
+  - id: DR-0592
+    title: A Whisper transcript isn't queued again by itself after its family's cut; docket transcribe redoes it when asked
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#186"]
+    description: "The service's queue keeps DR-0571's rule: a recording with a Whisper transcript staged or in raw isn't queued by itself, whichever stored file the transcript came from. The version the gate cuts (DR-0590) holds nothing of the cut, so a transcript made again from the audio put again, cut, only gives back the words of the segments a cut took whole beside it. A recut family's new Whisper transcript waits for the owner, as any version of a cut record does, so queuing it would hand the owner a record to classify, and run a GPU job, for every recut. docket transcribe and the transcribe tool still redo it when asked: the followed version names the earlier stored file, so DR-0569's same-file rule lets a run on the new one through."
+    not_chosen:
+      - "Queuing a recording whose Whisper transcript came from an earlier stored file, as #186 first proposed: a GPU job and a record for the owner to classify for every recut, for the words of a few segments."
