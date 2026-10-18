@@ -125,6 +125,7 @@ A version that only removes text already in raw is the safe side, so only what w
 | runs it, pulls a cut it didn't promote | writes it: the cut scan finds the family |
 | two that run it, from the same raw | the same version: a function of the Whisper version, the ranges and the rules in force, so the same `v`; after the merge every reader's latest is that version, and the index counts it once |
 | two that each promote a different cut before pulling | a version each, neither holding what its own clone cut; the next promotion cuts by both, except in the race under Risks |
+| any clone, the version it cuts stamped after its promotion's run | waits: written at a later promotion, in a run that sorts after it |
 
 ### A staged Whisper record
 
@@ -245,7 +246,8 @@ Invented data only: `docket_testkit` and `media_kit` records, a tone made at tes
 
 | Risk | Status |
 |---|---|
-| two writers race on one record's versions. `version()` hashes content only, so when one clone's cut lies inside another's, or a run file sorts before the version it cut (a clock behind, or the same minute and a machine name that sorts first), the cut both need equals a version already in raw, the raw log doesn't write it again, and the less-cut version stays latest. Nothing fixes it by itself: the follow reads the family at every promotion and writes nothing | accepted: it needs two clones running one source that promote cuts of one recording before a pull, or a follow in the minute the version it cuts was written, or a clock behind; the recorder's transcript has the same race; a later cut, or `docket transcribe` on the audio put again, makes a new latest |
+| two writers race on one record's versions. `version()` hashes content only, so when one clone's cut lies inside another's, the cut both need equals a version already in raw, the raw log doesn't write it again, and the less-cut version stays latest. Nothing fixes it by itself: the follow reads the family at every promotion and writes nothing, and counts nothing | accepted: it needs two clones running one source that promote cuts of one recording before a pull; the recorder's transcript has the same race; a later cut, or `docket transcribe` on the audio put again, makes a new latest |
+| a cut version written in a run that sorts before the one it cuts (another clone's clock ahead, or the same minute and a machine name that sorts after) | closed: the follow writes only in a run that sorts after the version it cuts; until then it stays due, and a later promotion writes it (DR-0591) |
 | a cut takes a whole Whisper segment beside it, up to 30 s, and with the pad one that only touches 250 ms past a new range | accepted, as the recorder's transcript loses whole utterances (DR-0028); `docket transcribe` on the audio put again gives the words back |
 | a cut promoted on another clone waits for this clone's next promotion | accepted: promotions are the owner's, from the Staging page or the CLI; the audio reads `recut` and plays nothing meanwhile |
 | a family cut only by characters keeps the stretch in Whisper | out of scope, as its audio (DR-0562) |
@@ -267,6 +269,7 @@ Invented data only: `docket_testkit` and `media_kit` records, a tone made at tes
 | `PromoteResult.followed` counts the versions cut, and the promotion's log line says how many | the tests and the log need the count; no rid goes in either |
 | the transcribe row is tested at the gate: a Whisper version staged after the follow waits for the owner | the full transcribe job needs audio and the fake worker for what the gate's own rule decides |
 | the two-clone test runs the second clone under a machine name that sorts after the first | a follow in the same minute as the version it cut, by a machine whose name sorts first, lies before that version in run order; the Risks row and DR-0591 now name it |
+| a raw follow is written only in a run that sorts after the version it cuts, and `followed` counts only the versions written | the code review found the run-order race could be closed: `Due` carries the version's run order, which the scan has, and promotion takes one time for its runs |
 | `speech/follow.py` imports the cutter as a module, not its pad by name | a process that imports the cutter first reaches the gate, and so the follow, through the vault package before the cutter is done; `test_media_cut.py`'s killed-parent test caught it |
 | the gate imports the cursor file's module in `_follow`, where it reads it | the cursor module reaches the source contract, which imports the vault package, so a process that imports the contract first met it half made; CI's `test_source_new.py` caught it. `test_module_imports.py` now imports every module first, with the seven media modules whose cycles came before listed until they are fixed |
 
@@ -283,3 +286,10 @@ Invented data only: `docket_testkit` and `media_kit` records, a tone made at tes
 | 2 | K1 to K6 re-checked | | resolved |
 | 2 | K7: a range that grew on one side was padded on both, so a fresh transcript lost a segment on the held side | minor | fixed: each end is padded only when it lies outside the version's own marks; a test |
 | 2 | K8: the follow read every cut family at every promotion | minor | fixed: the cut scan keeps each rid's spans and each machine transcript's latest marks; a family whose marks hold every range is passed over without a read |
+
+## Code review
+
+| Round | Finding | Severity | Status |
+|---|---|---|---|
+| 1 | C1: the gate imported the cursor module at its top, which reaches the source contract while it loads, so a process that imported the contract first failed | major | fixed: imported in `_follow`; `test_module_imports.py` imports every module first |
+| 1 | C2: a cut version written in a run that sorts before the version it cuts left that one latest, and `followed` counted it each time | minor | fixed: written only in a run that sorts after; counted only when written; two tests |

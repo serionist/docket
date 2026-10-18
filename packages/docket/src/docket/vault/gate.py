@@ -331,9 +331,12 @@ class Gate:
                     result.held.append(self._hold(entry, str(e)))
                     continue
                 groups.setdefault(name, []).append((entry, final))
-            extra = self._follow(config, groups, entries, redactor, source=source, result=result)
+            # One time for the runs and the follow, which writes a version only in a run that sorts after the one it
+            # cuts.
+            at = datetime.now(UTC)
+            extra = self._follow(config, groups, entries, redactor, source=source, at=at, result=result)
             for name in sorted({*groups, *extra}):
-                result.runs.append(self._promote_source(name, groups.get(name, []), extra.get(name, [])))
+                result.runs.append(self._promote_source(name, groups.get(name, []), extra.get(name, []), at))
             self._promote_media(config, result)
             log.info(
                 "gate: promoted %d record(s) and %d media file(s), held %d, dropped %d, on hold %d, cut %d Whisper "
@@ -619,6 +622,7 @@ class Gate:
         redactor: Redactor,
         *,
         source: str | None,
+        at: datetime,
         result: PromoteResult,
     ) -> dict[str, list[RawRecord]]:
         """A Whisper transcript follows its family's cuts (DR-0590): a staged one this promotion takes is cut in its
@@ -637,7 +641,10 @@ class Gate:
             # Only where the cursor file names the source; read only when something is due, so a promotion with
             # nothing to follow reads no more than it did.
             ran = cursors.read(self.vault.root, self.vault.machine)
-            due = [d for d in due if d.rid.partition(":")[0] in ran]
+            # A version written now must sort after the one it cuts, or the uncut one stays latest: one stamped ahead
+            # (another clone's clock, or this minute by a name that sorts after) stays due for a later promotion.
+            stamp = (f"{at.astimezone(UTC):%Y-%m-%d}", f"{at.astimezone(UTC):%H%M}", self.vault.machine)
+            due = [d for d in due if d.rid.partition(":")[0] in ran and (d.at is None or d.at[0][:3] <= stamp)]
         latest = self._latest([d.rid for d in due if d.key is None])
         places = {entry.key: (name, n) for name, items in groups.items() for n, (entry, _) in enumerate(items)}
         extra: dict[str, list[RawRecord]] = {}
@@ -646,14 +653,17 @@ class Gate:
                 # Staged, its family's checks ran at the sweep (DR-0570), and a hold kept it out of the groups.
                 name, n = places[found.key]
                 entry, final = groups[name][n]
-                groups[name][n] = (entry, redactor.record(follow.cut(final, found.ranges))[0])
-                result.followed += 1
+                made, _ = redactor.record(follow.cut(final, found.ranges))
+                groups[name][n] = (entry, made)
+                # Counted only when written: the raw log takes a version once.
+                if not self.vault.rawlog.contains(made):
+                    result.followed += 1
                 continue
             record = latest[found.rid]
             if record is None or self._holds.covers(record):
                 continue
             made, _ = redactor.record(follow.cut(record, found.ranges))
-            if not neverstore.match(made, config.never_store):
+            if not neverstore.match(made, config.never_store) and not self.vault.rawlog.contains(made):
                 extra.setdefault(made.source, []).append(made)
                 result.followed += 1
         return extra
@@ -674,11 +684,15 @@ class Gate:
                 index.close()
 
     def _promote_source(
-        self, name: str, items: list[tuple[Entry, RawRecord]], extra: Sequence[RawRecord] = ()
+        self,
+        name: str,
+        items: list[tuple[Entry, RawRecord]],
+        extra: Sequence[RawRecord] = (),
+        run_at: datetime | None = None,
     ) -> SourceRun:
         # The versions the gate cut from raw go after the staged records, in the same run and commit (DR-0596).
         written = [*(final for _, final in items), *extra]
-        run = self.vault.rawlog.write_run(name, written)
+        run = self.vault.rawlog.write_run(name, written, run_at)
         files = f" in {len(run.paths)} run files" if len(run.paths) > 1 else ""
         what = f"{run.written} record(s){files}" if run.written else "an interrupted run"
         # Committed even when nothing new was written: a crash between an earlier write and its commit left the run

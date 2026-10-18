@@ -65,12 +65,14 @@ class Seen:
 
 @dataclass(frozen=True)
 class Due:
-    """A Whisper transcript whose family has a range its latest version doesn't hold: its rid, the family's ranges, and
-    the key of its staged version when the promotion takes that one, to be cut in its place."""
+    """A Whisper transcript whose family has a range its latest version doesn't hold: its rid, the family's ranges; the
+    key of its staged version when the promotion takes that one, to be cut in its place; else where its latest version
+    stands in raw, so the gate writes the cut only in a run that sorts after it."""
 
     rid: str
     ranges: tuple[Range, ...]
     key: str | None = None
+    at: At | None = None
 
 
 def due(
@@ -97,9 +99,12 @@ def due(
     for family in sorted(families):
         rid = whisper_rid(family)
         ranges = _ranges(family, seen, [final for _, final in promoted], waiting, releases)
-        key, held = (taken[rid][0], marks(taken[rid][1])) if rid in taken else (None, list(seen.latest[rid][1]))
+        if rid in taken:
+            key, held, at = taken[rid][0], marks(taken[rid][1]), None
+        else:
+            key, held, at = None, list(seen.latest[rid][1]), seen.latest[rid][0]
         if not covers(held, ranges):
-            out.append(Due(rid, ranges, key))
+            out.append(Due(rid, ranges, key, at))
     return out
 
 

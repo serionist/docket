@@ -8,18 +8,19 @@ from __future__ import annotations
 import shutil
 import sqlite3
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import make_config, make_record, sh
+from docket_testkit import git, make_config, make_record, sh
 
 from docket.index import rebuild, search
 from docket.index.build import db_path
 from docket.media import staged as media_staged
 from docket.speech import follow
 from docket.vault import cursors, holds, rawlog, releaselog
+from docket.vault import gate as gate_module
 from docket.vault.config import CONFIG_FILE, SourceConfig, VaultConfig
 from docket.vault.cuts import CUT_MARKER, Cut
 from docket.vault.gate import Gate, PromoteResult
@@ -410,3 +411,57 @@ def test_a_release_s_cuts_reach_the_whisper_transcript_with_the_version_they_cut
     Gate(vault).classify(POLISHED, "work")
     assert Gate(vault).promote().followed == 1
     assert marks(latest(vault, POLISHED)) == [(600_000, 620_000)] == marks(latest(vault))
+
+
+def ahead(monkeypatch: pytest.MonkeyPatch, minutes: int) -> None:
+    """The gate's clock this many minutes on: a later promotion, without waiting for it."""
+    real = datetime
+
+    class Later(real):
+        @classmethod
+        def now(cls, tz: tzinfo | None = None) -> Later:  # pyright: ignore[reportIncompatibleMethodOverride]
+            moved = real.now(tz) + timedelta(minutes=minutes)
+            return cls.fromtimestamp(moved.timestamp(), moved.tzinfo)
+
+    monkeypatch.setattr(gate_module, "datetime", Later)
+
+
+def pulled(vault: Vault, record: RawRecord) -> None:
+    """A version another clone wrote with its clock a minute ahead, as a pull brings it."""
+    other = rawlog.RawLog(vault.root, "zeta-box", vault.lock)
+    other.write_run("plaud", [record], datetime.now(UTC) + timedelta(minutes=1))
+    git(vault.root, "add", "-A")
+    git(vault.root, "commit", "-q", "-m", "Raw: plaud, pulled")
+
+
+def test_a_version_stamped_after_this_promotion_waits_for_a_run_that_sorts_after_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = plaud_vault(tmp_path)
+    again = whisper([*HEARD, (1_950_000, 1_955_000, "Heard again.")], key="cd" * 32)
+    pulled(vault, again)
+    later(vault, CUT)
+    first = Gate(vault).promote()
+    # Written now, the cut version would lie before the one it cuts, which would stay latest.
+    assert first.followed == 0 and first.runs[0].written == 1
+    assert latest(vault).via == again.via and marks(latest(vault)) == []
+    ahead(monkeypatch, 2)
+    assert Gate(vault).promote().followed == 1
+    assert latest(vault).via == again.via and marks(latest(vault)) == [(START, END)]
+    assert found_in(vault, "orthodontist") == set()
+    assert Gate(vault).promote().followed == 0
+
+
+def test_a_cut_already_in_raw_but_not_latest_counts_as_nothing_written(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = plaud_vault(tmp_path)
+    heard = latest(vault)
+    narrow = (620_000, 640_000)
+    vault.rawlog.write_run("plaud", [follow.cut(heard, [(600_000, 700_000), (START, END)])])
+    pulled(vault, follow.cut(heard, [narrow, (START, END)]))
+    ahead(monkeypatch, 2)
+    result = Gate(vault).promote()
+    assert (result.followed, result.runs) == (0, [])
+    # The race the plan accepts: the cut both clones need is in raw, so the version with fewer cuts stays latest.
+    assert marks(latest(vault)) == [narrow, (START, END)]
