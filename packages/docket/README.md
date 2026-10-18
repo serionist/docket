@@ -15,7 +15,7 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 | `docket staging classify <ref> work\|private` | work makes it ready, `--cut 120-340` (characters) or `--cut 12:30-14:05` (a time) cuts a stretch; private drops it |
 | `docket staging promote` | writes every ready record to the raw log, cut and redacted, one run per source, and commits; a record on hold stays in staging |
 | `docket ingest <source> <folder>` | imports payloads fetched earlier through the source's mapper: the folder's `hold.txt` first, then its JSON files; every record goes to staging, nothing on hold; `--hold <file>` adds more ids to hold, `--final` tells the mapper not to wait for more, `--mapper-errors` prints the mapper's own errors |
-| `docket source new <name>` | writes a source's skill, mapper and tests into `.claude/skills/sources/<name>/` of the repo that holds the vault, from Docket's blank template, or `--example` for a reference source (Plaud), and adds the source to `vault.yaml` with `--sensitivity` and its `--tool`s; never over a folder that exists; `--folder <folder>` adds a folder source instead; adding one asks at your own console: your OS prompt, or a code typed back |
+| `docket source new <name>` | writes a source's skill, mapper and tests into `.claude/skills/sources/<name>/` of the repo that holds the vault, from Docket's blank template, or `--example` for a reference source (Plaud), and adds the source to `vault.yaml` with `--sensitivity` and its `--tool`s; never over a folder that exists; `--folder <folder>` adds a folder source instead; it commits `vault.yaml`, run on your yes |
 | `docket render` | writes the people directory and the glossary from the entities, at the paths `vault.yaml`'s `rendered` names in the repo that holds the vault; never commits them; leaves a file edited by hand and says so, and writes nothing into a repo anyone can read; exit 1 when a file was left or refused. It runs after each curate write too |
 | `docket scan [source]` | reads a folder source's folder, read-only, and stages each new or changed document's text; every folder source turned on without a name; `--accept-gone` when most files the vault held are missing on purpose |
 | `docket doc put <file or ->` | store a processed doc as its next rev, redacted first, saying on which lines; refused, with every problem and its line, when the frontmatter is wrong, an anchor doesn't resolve, the doc changed since the rev it carries, or it says something on the never-store keywords list (then only the lines are named) |
@@ -30,7 +30,7 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 | `docket index update` | index what changed since; it rebuilds when it has to |
 | `docket index status` | whether the index is there and current, its languages, counts, what is new, and its problems |
 | `docket import notes <folder>` | each markdown note in an existing folder becomes a legacy note that keeps its old path, so `doc read notes/x.md` or `notes/x.md@12:08` still finds it; the folder is only read; run it again to pick up changes; `--dry-run` first, `--as` for what old paths start with; says how many markers redaction added |
-| `docket redaction` | which redaction rules run; `docket redaction set <credentials\|phone\|pattern name> on\|off` changes one and commits it; turning one off asks at your own console: your OS prompt, or a code typed back |
+| `docket redaction` | which redaction rules run; `docket redaction set <credentials\|phone\|pattern name> on\|off` changes one and commits it; turning credentials off asks at your own console: your OS prompt, or a code typed back |
 
 A command finds its vault from `--vault`, `DOCKET_VAULT`, the working folder upward, a `vault/` folder in it, or the
 default the wizard recorded. A `<ref>` is a record's rid, or at least 6 characters of the key `staging list` shows.
@@ -70,7 +70,7 @@ once you commit it, and `docket vault status` says when one waits (DR-0521).
 |---|---|
 | `sources.<name>.sensitivity` | `work` goes through, `mixed` waits in staging to be classified, `private` is dropped |
 | `sources.<name>.mapper` | the source's mapper, relative to the repo that holds the vault: `.claude/skills/sources/<name>/mapper.py` |
-| `sources.<name>.tools`, `media_hosts`, `media_folders` | the tools the capture hook posts for the source, and where `media_put` may take its media from: hosts over https, folders under `~/` or in the repo |
+| `sources.<name>.tools`, `media_folders` | the tools the capture hook posts for the source, and the folders under `~/` or in the repo `media_put` may take its media from; an old `media_hosts` key is read and ignored |
 | `never_store.people` | drops a record whose author, any recipient, or any id in its source's payload equals an entry: an exact address (`kid@example.invalid`, also inside `Kid <kid@example.invalid>`) or the source's user id (`U0KID`); case doesn't matter |
 | `never_store.containers` | drops a record from a channel, chat or folder: its id, with or without the source's prefix (`slack:C0FAMILY` or `C0FAMILY`) |
 | `never_store.keywords` | drops a record that says the words anywhere, title, text, attachment names or payload, as whole words: case, accents and curly apostrophes don't matter (`kovacs` matches `Kovács`, not `kovacsfalva`), and any punctuation may join the words; a keyword of two or more words also matches them joined by a case change or by nothing (`dora example` matches `dora-example`, `dora_example`, `DoraExample` and `doraexample`), while a one-word keyword never matches inside a word (`Max` leaves `maxRetries` alone); a name behind an encoding matches too: percent-encoded, once or wrapped again as a Safe Link does (`Dora%2520Example`), behind HTML entities, in Latin-1, or as `%u` and `\u` escapes |
@@ -98,32 +98,37 @@ once you commit it, and `docket vault status` says when one waits (DR-0521).
 - A transcript is cut by time: each utterance the cut touches goes whole, and one `[cut]` takes its place. Any other
   text is cut by characters. A cut record keeps no payload.
 
-### Loosening, at your console
+### Claude acts with your OK
 
-A change that lets more in, or might, is yours to make: Docket's commands ask you for it at your own console (DR-0517 to
-DR-0520).
+Claude releases, changes settings, confirms decisions and confirms old cuts by running the same commands you would,
+after you say yes in chat (DR-0599). Docket doesn't check that yes: Claude Code's own prompt shows each such command
+unless you allow it. Every commit such a command makes says who acted.
 
-| What | How |
+| Who | The commit's body |
 |---|---|
-| `docket redaction set <rule> off`, `docket source new` | each shows the change, path by path, never a never-store value, and asks your OS prompt, or a code typed back where the machine has none (The OS prompt, below) |
-| any command, while `vault.yaml` holds an edit not committed yet that loosens | the same question, for the edit; it is committed on its own first |
-| an edit by hand | yours: what it only tightens applies at once, the rest once you commit it |
+| you, in your own terminal | nothing more |
+| Claude, in Claude Code's shell | `by Claude, with the owner's OK in chat` |
+| a page | `via page` |
+| you, at your console, turning credentials off | `confirmed at the console` |
 
-- Refused in Claude Code's shell (`CLAUDECODE`), from a pipe or a redirect: run the command in your own terminal, in Git
-  Bash's own window through `winpty`. A no writes nothing.
-- The commit says `confirmed at the console` in its body.
-- No flag, variable or token skips the question, for your own scripts either: whatever a script of yours reads, an agent
-  running as you reads too. A script that must loosen edits `vault.yaml`, and you commit it.
+Two steps stay yours, at your own console: turning credentials redaction off (`docket redaction set credentials off`,
+or an uncommitted edit of `vault.yaml` that a command would take in) and forgetting for real. Each shows what it does
+and asks your OS prompt, or a code typed back where the machine has none (The OS prompt, below); Claude Code's shell, a
+pipe or a redirect is refused, so run it in your own terminal, in Git Bash's own window through `winpty`. A no writes
+nothing.
+
+An edit of `vault.yaml` by hand is yours: what it only tightens applies at once, the rest once it is committed, by you
+or by the next command that writes `vault.yaml`, which commits it on its own first (DR-0601).
 
 ### The OS prompt
 
 Where this machine has one set up, the yes is the system's own prompt, which only you answer: Windows Hello, Touch ID
-or your Mac's password, polkit (DR-0572 to DR-0575). The console code is asked only where there is none.
+or your Mac's password, polkit (DR-0572 to DR-0574). The console code is asked only where there is none.
 
 | Step | Asks |
 |---|---|
-| `docket hold release`, a loosening (`redaction set off`, `source new`, `media host add`, `media folder add`, `models allow`), `docket media confirm-cuts`, `docket media keys export`, `docket forget --now` | your OS prompt, after `Press Enter` at the console; or the code |
-| `docket media keys import`, `models install --api`, `models key` | nothing more: your console only |
+| turning credentials redaction off, `docket forget --now` | your OS prompt, after `Press Enter` at the console; or the code |
+| `docket media keys export` and `import`, `models key` | nothing more: your console only, since a passphrase or a key is shown or typed there |
 
 | System | Prompt | Set up when | Otherwise |
 |---|---|---|---|
@@ -303,7 +308,7 @@ Records Docket must not stage yet, such as backfilled recordings with stretches 
 
 ### Releasing a held recording
 
-A held recording goes in only with the cuts you confirm (DR-0200 to DR-0206).
+A held recording goes in only with the cuts you said yes to (DR-0200, DR-0203 to DR-0206, DR-0600).
 
 | Command | What |
 |---|---|
@@ -312,9 +317,9 @@ A held recording goes in only with the cuts you confirm (DR-0200 to DR-0206).
 | `docket hold release <source> <id> --from <folder> --cut 12:30-14:05 [--keep <rid>]` | one recording, its cuts and what to keep as it reads |
 | `docket hold release <source> --from <folder> --proposals <file>` | the proposals file `/docket:cuts` writes, outside any repo |
 
-- Run the release in your own terminal: it refuses Claude Code's shell, a pipe and a redirect. Each recording shows
-  each cut widened to whole utterances, its edges, and every record it keeps in full; it is released only on your OS
-  prompt's yes, or where the machine has none, when you type back the code it shows. `n` keeps it held, `q` stops.
+- Run it on your yes: in your own terminal, or let `/docket:cuts` show you the cuts in chat and run it after you say
+  yes (DR-0600). Each recording shows each cut widened to whole utterances, its edges, and every record it keeps in
+  full, then is released.
 - A recording needs a transcript and at least one time cut that removes an utterance; a record without segments, such
   as the vendor's notes, is left out unless you keep it. Anything else stays held, with the reason.
 - The release line goes to `state/releases/<source>.jsonl` and is committed before the hold comes off; then the
@@ -325,7 +330,7 @@ A held recording goes in only with the cuts you confirm (DR-0200 to DR-0206).
 - The gate cuts a released recording by the same times wherever it is staged again, on any machine. Update Docket on
   every machine before your first release.
 - A merge can bring a hold back: `hold list` and every ingest say so, and the next import with a hold file, or
-  `docket hold release <source> <id> --from <folder>` (one code, no cuts asked), takes it off; what that stages waits
+  `docket hold release <source> <id> --from <folder>` (no cuts asked), takes it off; what that stages waits
   as pending. `hold show` refuses such an id: its cuts are on record.
 
 ## Media
@@ -337,11 +342,10 @@ its record is in raw; the next `docket staging promote` stores it in `media/` in
 | From | Taken when |
 |---|---|
 | a path | it is under one of the source's `media_folders`, or Docket's drop folder (`docket media drop` prints it), whose files are deleted once stored |
-| a URL | https, to a host in the source's `media_hosts`, every address it resolves to public; at most 3 redirects, each checked again |
+| a URL | https, to any host, every address it resolves to public; at most 3 redirects, each checked again (DR-0604) |
 
 - A file is 512 MiB at most; `media.max_bytes` in Docket's `config.yaml` sets this machine's cap.
-- `docket media host add <source> <host>` and `docket media folder add` let more in, so they ask at your console;
-  `remove` writes at once.
+- `docket media folder add <source> <folder>` and `remove` change a source's folders and commit `vault.yaml`.
 - Media follows its record: a version of it dropped (private, never-store, left out by a release) takes the media with
   it, and a held recording, or one whose transcript named a never-store value, gets none.
 - A put needs this machine to have synced the source once: what the gate dropped is remembered per clone.
@@ -361,7 +365,7 @@ cut is stored as it came.
 | held | no audio until the release, and a stored file isn't played; then the next run puts it, cut |
 | a record cut by characters | no audio, and a stored file stays unplayed: no cut of the audio can match; the Recording page and `docket media status` say so |
 | a version dropped for a never-store value or as private, its own transcript's or Whisper's | a stored file isn't played (`withheld`); a source only turned off still plays |
-| decided by hand before Docket kept which way | no audio until `docket media confirm-cuts <rid>`, in your own terminal, shows each decision against the versions cut by hand and you confirm they were cuts |
+| decided by hand before Docket kept which way | no audio until `docket media confirm-cuts <rid>`, run on your yes that they were cuts, shows each decision against the versions cut by hand and marks them |
 
 - The cutting runs in a child process with a memory cap and 15 minutes; uncut audio is plain only in a folder of
   Docket's private folder, removed when the put ends, or by the next gate call if the process died.
@@ -519,9 +523,9 @@ same without them. Both run on ONNX Runtime in a worker process of its own, on t
 | `docket models install [--device auto\|cpu\|cuda] [--no-reranker]` | builds the models' environment with uv, fetches the embedder's and the device's reranker's pinned files, checks the worker runs, times the reranker and turns models on for this machine; `--no-reranker` leaves the reranker out and removes its files |
 | `docket models status [--check]` | the choice, the environment, the files, the reranker's timing or why it is off, each model's vectors in the vault's index, and the running service's worker with its reranks and the last lines it wrote to stderr; `--check` starts a worker once and says what it runs on |
 | `docket models remove` | deletes the environment, the files and the choice; search goes on with keywords. On Windows the service's worker holds its files: models go off at once, and the remove asks you to stop the service and run it again |
-| `docket models install --api [--no-reranker]` | chooses Voyage AI's API for this machine instead (Through Voyage AI's API, below), at your own console; nothing is downloaded |
+| `docket models install --api [--no-reranker]` | chooses Voyage AI's API for this machine instead (Through Voyage AI's API, below); nothing is downloaded |
 | `docket models key voyage [--forget]` | keeps the Voyage key in this machine's keychain, typed at your own console and never shown; `--forget` removes it, and this machine sends nothing from then on |
-| `docket models allow voyage\|none [--vault]` | lets this vault's text go to Voyage AI, or stops it, in `vault.yaml`; asked at your own console either way, and committed |
+| `docket models allow voyage\|none [--vault]` | lets this vault's text go to Voyage AI, or stops it, in `vault.yaml`, and commits it |
 
 - Downloads, once: 0.98 GB of model files for the CPU or 1.64 GB for CUDA, the reranker's 0.49 GB or 1.15 GB of them,
   and about 50 MB of packages for the CPU or 1.3 GB for CUDA (NVIDIA's CUDA 13 and cuDNN wheels, under NVIDIA's
@@ -626,11 +630,11 @@ on the machine that ingests the recording's source.
 
 A machine with no GPU and no time for CPU embedding can use Voyage AI instead: voyage-4 at 512 dimensions for search
 by meaning, rerank-2.5-lite for the reranker's 50 pairs. It sends your vault's text off the machine, so it runs only
-when three things hold at once, each set in your own terminal:
+when three things hold at once, each set on your yes, the key in your own terminal:
 
 | Lock | Set with | Off |
 |---|---|---|
-| this vault allows it: `api_provider: voyage` in `vault.yaml`, committed | `docket models allow voyage` | `docket models allow none`, asked too |
+| this vault allows it: `api_provider: voyage` in `vault.yaml`, committed | `docket models allow voyage` | `docket models allow none` |
 | this machine chose it, in your config's `models:` block | `docket models install --api` | `docket models remove`, at once |
 | the key is in this machine's keychain | `docket models key voyage` | `docket models key voyage --forget`, at once |
 
@@ -899,7 +903,7 @@ DR-0384).
 | The open record | as promotion would write it, redacted by today's rules: check utterances or lines to cut, or type a range (`12:30-14:05`, `120-340`), Preview, then Work; or Private, which asks once more and drops it |
 | Held | each source's held ids, and the commands that read and release one in your terminal, quoted, with `--from` and `--vault` filled |
 
-- Releases stay at your console: the page names the command, and no page releases a hold (DR-0382).
+- The page names the release's command, which you run or Claude runs on your yes; no page releases a hold (DR-0382).
 - A record the CLI, Claude or another tab changed since you opened it isn't overwritten: the page says so and shows it
   as it stands.
 - A record that already has cuts opens with them checked, and Work keeps them unless you uncheck them. Utterances its
@@ -911,9 +915,10 @@ DR-0384).
 
 ### The Settings page
 
-`/settings` shows what the gate obeys and this machine's models, and names every change (DR-0505, DR-0506, DR-0510).
-It makes the changes that keep more out, each with its button: a never-store value added, a redaction rule turned
-on, a source made mixed or private, or turned off. Every other change it names.
+`/settings` shows what the gate obeys and this machine's models (DR-0505, DR-0510). Its buttons make changes both
+ways (DR-0601): a never-store value added or taken off, a redaction rule turned on or off, a source's sensitivity, a
+source on or off. Turning credentials redaction off it names, for your own terminal; a new source, a media folder and
+the api provider it names as commands.
 
 | Part | Shows |
 |---|---|
@@ -922,13 +927,10 @@ on, a source made mixed or private, or turned off. Every other change it names.
 | Redaction | each rule and pattern of yours, on or off, with the `docket redaction set` command that turns it the other way and the warning it prints; the block for a new pattern |
 | Models | what `docket models status` says, the service's worker, the vectors; the commands to install, remove or restart |
 
-- A change that lets more in (a rule turned off, a never-store value taken off, a source made looser, turned on or
-  added, its tools, mapper or folder) is never made from a page: the page names the command, for your own
-  terminal, where it asks your OS prompt or a code typed back, or the line, for your editor, which applies once you
-  commit it.
-  What it lets in reaches git for good.
+- A change that lets more in is marked so on the page: what it lets in reaches git for good.
 - While `vault.yaml` holds an edit that isn't in force, the page says so at the top.
-- A rule turned on, or a source made mixed or turned off, is one click; a source made private asks once more first,
+- A rule turned on or off, a value taken off, or a source's sensitivity or on and off, is one click; private asks
+  once more first,
   naming what waits from it in staging, which it drops. Turning a rule on names `docket doc redact` for the docs
   already stored. A click on a page older than `vault.yaml` writes nothing, and a click sent twice writes once.
 - A `vault.yaml` with comments or a layout of your own is never rewritten: the page says so, and each change is a
@@ -943,8 +945,7 @@ on, a source made mixed or private, or turned off. Every other change it names.
   the vault is pushed.
 - A change made while the page was open (another tab, the CLI, an editor) refuses the add, and the question comes
   back counted again. An edit of `vault.yaml` not committed yet is committed on its own first, by the CLI too,
-  and the question says so; one that lets more in is never committed for you: the add is refused until you commit
-  or undo it.
+  and the question says so; one that turns credentials redaction off refuses the add until you commit or undo it.
 - Keys: `?`.
 
 The pages' browser test runs on CI. To run it here, against your own Chrome or Edge:

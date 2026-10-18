@@ -1,19 +1,15 @@
 """The Briefs page: `/briefs` is always a whole page, and its links are plain links (DR-0557); `/briefs/decision` is
-the user's click on a decision, the only writer of a decision's status (DR-0564, DR-0566).
+the user's click on a decision, which writes its status as `docket decision set` does (DR-0603, DR-0566).
 
 `GET` reads the stale report, the brief, the raw its lines cite and the entity's decisions in this process, through
 `docket.briefs`, `docket.decisions` and recall's own reads, and writes nothing. The report reads the index, so the page
 waits for an update as a search does.
 
-The click is a plain form post the Guard checks (DR-0152), as the Settings page's are: same origin and the browser's
-session. A post that sends the token is refused, which stops a client of Docket's API that sends it; a token holder
-can still mint a session (`POST /api/session`, `docket open`) and post with its cookie, the floor DR-0382 and
-DR-0564 accept: a deliberate step, outside every door Docket gives Claude. It runs on the service's writer thread
-through `DocStore.decide`, carries the rev the page showed, and answers a 303 back to the page with `done`; a decision
-that moved since, or one that replaces or contradicts a decision no longer current, writes nothing and answers 409
-with the page as it stands now. A value the URL or the form can't hold, or a `DocketError`, is the page's own error
-state; anything else is logged as its type and frames and answered with the error page, as on the other pages
-(DR-0170).
+The click is a plain form post the Guard checks (DR-0152), as the Settings page's are. It runs on the service's writer
+thread through `DocStore.decide`, carries the rev the page showed, and answers a 303 back to the page with `done`; a
+decision that moved since, or one that replaces or contradicts a decision no longer current, writes nothing and answers
+409 with the page as it stands now. A value the URL or the form can't hold, or a `DocketError`, is the page's own error
+state; anything else is logged as its type and frames and answered with the error page, as on the other pages (DR-0170).
 """
 
 from __future__ import annotations
@@ -26,7 +22,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Request
-from starlette.responses import PlainTextResponse, RedirectResponse, Response
+from starlette.responses import RedirectResponse, Response
 
 from docket import briefs, decisions, recall
 from docket.errors import DocketError
@@ -174,9 +170,6 @@ def router(service: Service) -> APIRouter:
     @web.post("/briefs/decision", include_in_schema=False)
     async def decide(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
         async def answer() -> Response:
-            if request.headers.get("authorization") is not None:
-                # The token is Docket's API, Claude's too: a decision's status is the user's click, in the browser.
-                return PlainTextResponse("a decision is confirmed or rejected in the browser, with its session", 403)
             form = await templating.read_form(request)
             if isinstance(form, Response):
                 return form

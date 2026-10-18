@@ -60,7 +60,7 @@ class Switched:
     commit: str | None = None
     by_hand: str | None = None
     notes: list[str] = field(default_factory=list[str])
-    # Not made: the owner didn't type the code back at the console.
+    # Not made: the owner didn't confirm turning credentials redaction off at the console.
     declined: bool = False
 
 

@@ -1,0 +1,13 @@
+decisions:
+  - id: DR-0605
+    title: The plugin's skills run an acting command after the owner's yes in chat, and pre-approve only reads
+    status: decided
+    at: "2026-10-18"
+    by: Soma Osvay
+    cost: one-way
+    sources: ["#191", "18 Oct, in chat"]
+    supersedes: [DR-0207]
+    description: /docket:cuts lists the holds and skips an id held again after its release, which needs only the release run again; tells the owner where docket hold show's output stays (Claude Code's session log and tool-results files, a bridged claude.ai session, for cleanupPeriodDays) and goes on only on their word; places each stretch the owner named on the transcript, every stretch or none, the recording otherwise staying held; leaves the vendor summary out unless it plainly doesn't touch the stretch; writes the proposals file in a temp folder outside any git work tree; shows the owner each recording's cuts in chat, each with the utterances at its edges and what is kept; and on their yes runs docket hold release --proposals itself and reports its screen. /docket:setup runs docket source new, docket media folder add and docket models allow on the owner's yes; the owner still types docket models key and docket media keys export at their own console. /docket:decision asks for the pick in chat and runs docket decision set on it, or links the Briefs page. Each skill's pre-approvals stay reads only, so Claude Code's prompt shows each acting command unless the owner allows it. No skill runs docket redaction set credentials off or docket forget --now for the owner, clears CLAUDECODE or wraps a console of its own.
+    binds: [The skill name cuts is a one-way door (AGENTS.md).]
+    not_chosen:
+      - "Pre-approving the acting commands: an owner who wants no second prompt adds an allow rule of their own; the skills change only what they say."

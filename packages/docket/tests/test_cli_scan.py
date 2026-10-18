@@ -8,7 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from docket_testkit import AtConsole, git, host_repo, make_config
+from docket_testkit import AtConsole, cant_place, git, host_repo, make_config
 from documents_scan_kit import SOURCE, folder_vault, name, put, rid
 
 from docket.cli import main, scan_lines
@@ -122,7 +122,6 @@ def repo_vault(tmp_path: Path) -> tuple[Path, Vault]:
 def test_a_folder_source_is_added_as_every_machine_reads_it(
     owner: Callable[..., AtConsole], tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    owner(*["code"] * 6)  # each loosening below is typed back at the console (DR-0517)
     top, vault = repo_vault(tmp_path)
     (top / "docs").mkdir()
     assert main(["source", "new", SOURCE, "--folder", str(top / "docs"), "--vault", str(vault.root)]) == 0
@@ -155,7 +154,6 @@ def test_folder_goes_alone(tmp_path: Path, capsys: pytest.CaptureFixture[str], e
 def test_a_mapper_source_isn_t_turned_into_a_folder_source(
     owner: Callable[..., AtConsole], tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    owner("code", "code", "code", "code")  # each loosening below is typed back at the console (DR-0517)
     top, vault = repo_vault(tmp_path)
     assert main(["source", "new", "memo", "--tool", "get_memo", "--vault", str(vault.root)]) == 0
     assert main(["source", "new", "memo", "--folder", str(top), "--vault", str(vault.root)]) == 2
@@ -163,34 +161,36 @@ def test_a_mapper_source_isn_t_turned_into_a_folder_source(
     assert main(["source", "new", "Bad", "--folder", str(top), "--vault", str(vault.root)]) == 2
 
 
-def test_a_hand_written_vault_yaml_gets_the_entry_to_paste(
-    owner: Callable[..., AtConsole], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+def test_a_hand_written_vault_yaml_gets_the_entry_to_paste_where_docket_can_t_place_it(
+    owner: Callable[..., AtConsole],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    owner("code", "code", "code", "code")  # each loosening below is typed back at the console (DR-0517)
+    cant_place(monkeypatch)
     top, vault = repo_vault(tmp_path)
     path = vault.root / "vault.yaml"
     path.write_text("# mine\n" + path.read_text(encoding="utf-8"), encoding="utf-8")
     assert main(["source", "new", SOURCE, "--folder", str(top), "--vault", str(vault.root)]) == 0
     out = capsys.readouterr().out
-    assert "add under sources:" in out
+    assert "add the source under sources:" in out
     assert "  documents:\n" in out
     assert "    folder: .\n" in out
 
 
 @pytest.mark.parametrize(
-    ("level", "hosts", "fix"),
+    ("level", "fix"),
     [
-        ("mixed", [], "mixed would hold every page"),
-        ("mixed", ["media.example.invalid"], "has no mapper, tools or media_hosts"),
-        ("private", [], "enabled: false"),
+        ("mixed", "mixed would hold every page"),
+        ("private", "enabled: false"),
     ],
 )
 def test_a_mixed_or_private_source_isn_t_turned_into_a_work_folder_source(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], level: str, hosts: list[str], fix: str
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], level: str, fix: str
 ) -> None:
     top = host_repo(tmp_path)
     config = make_config("folder")
-    config.sources["journal"] = SourceConfig(sensitivity=level, media_hosts=hosts)  # type: ignore[arg-type]
+    config.sources["journal"] = SourceConfig(sensitivity=level)  # type: ignore[arg-type]
     vault = Vault.init(top / "vault", config, "test-box")
     before = (vault.root / "vault.yaml").read_bytes()
     assert main(["source", "new", "journal", "--folder", str(top), "--vault", str(vault.root)]) == 2

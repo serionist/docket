@@ -122,8 +122,6 @@ media_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(media_app, name="media")
-media_host_app = typer.Typer(help="The hosts a source's media may be fetched from, over https.", no_args_is_help=True)
-media_app.add_typer(media_host_app, name="host")
 media_folder_app = typer.Typer(help="The folders a source's media may be taken from.", no_args_is_help=True)
 media_app.add_typer(media_folder_app, name="folder")
 media_keys_app = typer.Typer(help="This clone's media keys: where their seal lives.", no_args_is_help=True)
@@ -484,22 +482,19 @@ def source_new(
     if folder is not None:
         added = scaffold.new_folder_source(found, name, folder)
         if added.declined:
-            say(f"source   {name} not added: the code wasn't typed back, so vault.yaml is as it was")
+            say(f"source   {name} not added: nothing was confirmed, so vault.yaml is as it was")
             raise typer.Exit(1)
         if added.registered:
             commit = f", committed {added.commit[:12]}" if added.commit else inforce.note(found.waiting)
             say(f"source   {name} in vault.yaml: a folder source, folder {added.entry.folder}{commit}")
         else:
-            say("source   vault.yaml has comments or a layout of your own, so it is left as it is; add under sources:")
+            say("source   vault.yaml has a layout Docket can't edit for this; add the source under sources:")
             say_all((added.block or "").splitlines())
         say(f"next     docket scan {name}")
         return
     made = scaffold.new_source(found, name, example=example, sensitivity=sensitivity, tools=tool or [])
     if made.declined:
-        say(
-            f"source   {name} not added: the code wasn't typed back, so vault.yaml is as it was and "
-            f"{made.folder} is gone"
-        )
+        say(f"source   {name} not added: nothing was confirmed, so vault.yaml is as it was and {made.folder} is gone")
         raise typer.Exit(1)
     say(f"wrote    {made.folder}" + (", Docket's reference" if made.example else ", from the blank template"))
     for rel in made.files:
@@ -510,7 +505,7 @@ def source_new(
         commit = f", committed {made.commit[:12]}" if made.commit else inforce.note(found.waiting)
         say(f"source   {name} in vault.yaml: {entry.sensitivity}, mapper {entry.mapper}, tools {tools}{commit}")
     else:
-        say("source   vault.yaml has comments or a layout of your own, so it is left as it is; add under sources:")
+        say("source   vault.yaml has a layout Docket can't edit for this; add the source under sources:")
         for line in (made.block or "").splitlines():
             say(line)
     say(f"tests    python -m pytest {made.folder / 'tests'}")
@@ -563,8 +558,8 @@ def hold_release(
     ] = None,
     vault: VaultOption = None,
 ) -> None:
-    """Release held recordings with their cuts: each shows what goes and what is kept, and is released only when you
-    type back the code it shows. Only at your own console: Claude Code's shell, a pipe or a script is refused."""
+    """Release held recordings with their cuts: each shows what goes and what is kept, then is released. Run it on
+    your own yes: Claude runs it after the cuts skill showed you the cuts and you said yes."""
     found = find_vault(vault)
     if proposals is not None:
         if native is not None or cut or keep:
@@ -580,8 +575,6 @@ def hold_release(
     rows += [f"staged     {i}  released already; its records wait as pending" for i in report.restaged]
     rows += [f"held       {i}  {why}" for i, why in report.held]
     rows += [f"refused    {i}  {why}" for i, why in report.refused]
-    if report.stopped:
-        rows.append("stopped    the rest stay held")
     if report.taken_off or report.restaged:
         rows.append("next       docket staging list --state pending, and classify what waits, already cut")
     if report.released:
@@ -615,10 +608,10 @@ def redaction_set(
     found = find_vault(named)
     done = redaction.set_rule(found, rule, state == "on")
     if done.declined:
-        say(f"redact   {rule} not changed: the code wasn't typed back")
+        say(f"redact   {rule} not changed: nothing was confirmed")
         raise typer.Exit(1)
     if done.by_hand is not None:
-        say(f"vault.yaml has comments or a layout of your own, so it is left as it is; set it there: {done.by_hand}")
+        say(f"vault.yaml has a layout Docket can't edit for this, so it is left as it is; set it there: {done.by_hand}")
     elif done.changed:
         say(f"redact   {rule} {state}" + (f", committed {done.commit[:12]}" if done.commit else ""))
     else:
@@ -683,7 +676,6 @@ def vault_convert(
 RefArgument = Annotated[str, typer.Argument(help="A rid, or at least 6 characters of a key from `staging list`.")]
 SourceOption = Annotated[str | None, typer.Option("--source", help="Only this source.")]
 SourceArgument = Annotated[str, typer.Argument(help="The source, as vault.yaml names it.")]
-HostArgument = Annotated[str, typer.Argument(help="A host name, such as media.example.com.")]
 FolderArgument = Annotated[str, typer.Argument(help="A folder under ~/ or in the repo, such as ~/Downloads.")]
 
 
@@ -934,11 +926,25 @@ def decision_list(
     vault: VaultOption = None,
 ) -> None:
     """Each decision, newest first: proposed, current, superseded or rejected, with what it replaces, contradicts or
-    supersedes and what replaced or contradicted it. Only the Briefs page confirms or rejects one."""
+    supersedes and what replaced or contradicted it. The Briefs page or docket decision set confirms or rejects one."""
     if status is not None and status not in STATUSES:
         raise DocketError(f"--status is {', '.join(STATUSES)}, not {status!r}")
     found = find_vault(vault)
     say_all(render.decisions(decisions.report(found, entity, status)))
+
+
+@decision_app.command("set")
+def decision_set(
+    decision: Annotated[str, typer.Argument(help="The decision's id, such as decision:2026-10-13-first.")],
+    pick: Annotated[
+        str, typer.Argument(help="confirm or reject; for one that contradicts a decision, replace, stand or unrelated.")
+    ],
+    rev: Annotated[int, typer.Option("--rev", help="The rev you decided on, as docket decision list shows it.")],
+    vault: VaultOption = None,
+) -> None:
+    """Confirm or reject a proposed decision, as the Briefs page's click does, on your own yes; refused when it moved
+    since the rev you name."""
+    say_all(render.put(DocStore(find_vault(vault)).decide(decision, rev, pick, via="cli")))
 
 
 @doc_app.command("put")
@@ -1022,7 +1028,7 @@ def media_put(
 ) -> None:
     """Stage a record's audio or file: fetched within the limits, encrypted with a key of its own as it is read, and
     stored in media/ once its record is in raw. A path is taken from a media folder of the source or Docket's drop
-    folder; a URL only over https from one of its media hosts."""
+    folder; a URL only over https, to a public address."""
     found = find_vault(vault)
     is_url = "://" in where
     stored = media_put_run(found, rid, path=None if is_url else where, url=where if is_url else None)
@@ -1048,30 +1054,18 @@ def _media_change(vault: Path | None, source: str, field: MediaField, value: str
     done = media_sources.set_media_list(found, source, field, value, add=add)
     word = media_sources.WORDS[field]
     if done.declined:
-        say(f"media    {word} not changed: the code wasn't typed back")
+        say(f"media    {word} not changed: nothing was confirmed")
     elif done.by_hand:
-        say(f"media    vault.yaml has a layout of your own; change sources.{source}.{field} there, then commit it")
+        say(f"media    vault.yaml has a layout Docket can't edit for this; change sources.{source}.{field} there")
     elif done.changed:
         say(f"media    {word} {value} {'added to' if add else 'removed from'} {source}")
     else:
         say(f"media    {source} {'has' if add else 'has no'} {word} {value} already")
 
 
-@media_host_app.command("add")
-def media_host_add(source: SourceArgument, host: HostArgument, vault: VaultOption = None) -> None:
-    """Let a source's media be fetched from a host. It lets more in, so it asks at your own console first."""
-    _media_change(vault, source, "media_hosts", host, add=True)
-
-
-@media_host_app.command("remove")
-def media_host_remove(source: SourceArgument, host: HostArgument, vault: VaultOption = None) -> None:
-    """Stop fetching a source's media from a host: written at once."""
-    _media_change(vault, source, "media_hosts", host, add=False)
-
-
 @media_folder_app.command("add")
 def media_folder_add(source: SourceArgument, folder: FolderArgument, vault: VaultOption = None) -> None:
-    """Let a source's media be taken from a folder. It lets more in, so it asks at your own console first."""
+    """Let a source's media be taken from a folder."""
     _media_change(vault, source, "media_folders", folder, add=True)
 
 
@@ -1087,12 +1081,9 @@ def media_confirm_cuts(
     vault: VaultOption = None,
 ) -> None:
     """Say that a recording's hand decisions from before Docket kept their kind were cuts, not private
-    classifications, so its audio can be put again, cut. Shows the evidence first; only at your own console."""
+    classifications, so its audio can be put again, cut. Shows the evidence, then confirms; run it on your own yes."""
     done = media_confirm.confirm(find_vault(vault), rid)
-    if done:
-        say(f"cuts     {done} decision(s) marked as cuts; the next run puts the audio, cut")
-    else:
-        say("cuts     nothing confirmed")
+    say(f"cuts     {done} decision(s) marked as cuts; the next run puts the audio, cut")
 
 
 @media_keys_app.command("export")
@@ -1106,8 +1097,6 @@ def media_keys_export(
     done = media_backup.export(found, target)
     if done.kept:
         say(f"keys     {done.keys} exported to {target}; `docket media keys import` reads it on another machine")
-    elif done.declined:
-        say("keys     not exported: nothing was confirmed, and no file was written")
     else:
         say("keys     not exported: the passphrase wasn't confirmed")
     if done.forgotten:
@@ -1766,9 +1755,7 @@ def models_install(
     no_reranker: Annotated[
         bool, typer.Option("--no-reranker", help="Leave the reranker out, and remove its files if they are here.")
     ] = False,
-    api: Annotated[
-        bool, typer.Option("--api", help="Use Voyage AI's API instead, at your own console; nothing is installed.")
-    ] = False,
+    api: Annotated[bool, typer.Option("--api", help="Use Voyage AI's API instead; nothing is installed.")] = False,
     speech: Annotated[
         bool, typer.Option("--speech", help="Install speech to text instead: Whisper, for docket transcribe.")
     ] = False,
@@ -1791,7 +1778,7 @@ def models_install(
         reranker = chosen.reranker.name if chosen.reranker is not None else "no reranker"
         say(f"models     {chosen.embedder.name} and {reranker} through Voyage AI's API, chosen for this machine")
         say(f"sends      at most {chosen.monthly_tokens:,} tokens a month (api_monthly_tokens in your config)")
-        say(f"next       {api_models.KEY_HINT}; then docket models allow voyage in each vault, at your console")
+        say(f"next       {api_models.KEY_HINT}; then docket models allow voyage in each vault")
         say("then       docket service install, so the service reads its models again")
         return
     from docket.models import install  # noqa: PLC0415
@@ -1827,8 +1814,7 @@ def models_allow(
     provider: Annotated[str, typer.Argument(help="voyage, or none to stop.")],
     vault: VaultOption = None,
 ) -> None:
-    """Allow this vault's text to go to an api provider, or none, in vault.yaml; asked at your own console either way,
-    and committed."""
+    """Allow this vault's text to go to an api provider, or none, in vault.yaml, and commit it."""
     from docket.models import api as api_models  # noqa: PLC0415
 
     named: Path | None = vault if vault is not None else ctx.obj
@@ -1836,10 +1822,10 @@ def models_allow(
     wanted = api_models.check_provider(provider)
     done = api_models.allow(found, wanted)
     if done.declined:
-        say("api        not changed: the code wasn't typed back")
+        say("api        not changed: nothing was confirmed")
         raise typer.Exit(1)
     if done.by_hand is not None:
-        say(f"vault.yaml has comments or a layout of your own, so it is left as it is; set it there: {done.by_hand}")
+        say(f"vault.yaml has a layout Docket can't edit for this, so it is left as it is; set it there: {done.by_hand}")
         raise typer.Exit(1)
     what = f"allows {wanted}" if wanted is not None else "allows no api provider"
     if done.changed:

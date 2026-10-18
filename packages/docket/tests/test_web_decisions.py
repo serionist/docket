@@ -1,9 +1,11 @@
-"""The Briefs page's decisions (#162, DR-0564, DR-0566): an entity's decisions newest first, superseded ones folded,
-waiting candidates beside what they contradict, and `POST /briefs/decision`, the only writer of a decision's status:
-confirm, reject and the three picks, a stale view, D3's re-check, and crafted posts. On the invented decisions vault."""
+"""The Briefs page's decisions (#162, DR-0603, DR-0566): an entity's decisions newest first, superseded ones folded,
+waiting candidates beside what they contradict, and `POST /briefs/decision`, which writes a decision's status as
+`docket decision set` does: confirm, reject and the three picks, a stale view, D3's re-check, and crafted posts; then
+the command itself. On the invented decisions vault."""
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -22,11 +24,12 @@ from decisions_kit import (
     propose,
 )
 from docket_testkit import git
-from docket_webkit import OURS, TOKEN, Element, a11y_problems, html_problems, parse, signed_in
+from docket_webkit import OURS, Element, a11y_problems, html_problems, parse, signed_in
 from httpx2 import Response
 from starlette.testclient import TestClient
 
-from docket import decisions
+from docket import console, decisions
+from docket.cli import main
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.docstore import DocStore
 from docket.vault.vault import Vault
@@ -290,7 +293,6 @@ def test_a_plain_confirm_of_a_contradicting_candidate_is_refused(client: TestCli
         ({"Origin": "http://evil.example"}, 403),
         ({"Sec-Fetch-Site": "cross-site"}, 403),
         ({}, 403),
-        (SAME | {"Authorization": f"Bearer {TOKEN}"}, 403),
     ],
 )
 def test_only_the_browser_s_own_session_can_click(
@@ -364,3 +366,36 @@ def test_daily_and_pilot_are_where_the_kit_put_them(client: TestClient, tmp_path
         AGAIN: ("proposed", False),
         WEEKLY: ("proposed", False),
     }
+
+
+# -- the command ------------------------------------------------------------------------------------------------------
+
+
+def test_decision_set_writes_what_the_click_writes_saying_who(
+    template: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Claude, after the owner's yes in chat, or the owner at their own terminal (DR-0603): the page's one writer, its
+    `by` and its commit saying who."""
+    shutil.copytree(template, tmp_path / "vault")
+    root = str(tmp_path / "vault")
+    shown = rev(tmp_path, WEEKLY)
+    monkeypatch.setenv("CLAUDECODE", "1")
+    assert main(["decision", "set", WEEKLY, "confirm", "--rev", str(shown), "--vault", root]) == 0
+    assert f"put {WEEKLY} rev {shown + 1}" in capsys.readouterr().out
+    assert standing(tmp_path, WEEKLY) == ("confirmed", True)
+    assert "by: Claude, with Ada Example's OK" in committed(tmp_path, WEEKLY)
+    assert git(tmp_path / "vault", "log", "-1", "--format=%B").strip() == (
+        f"Decision: {WEEKLY} confirmed on the command line\n\nDoc: {WEEKLY} rev {shown + 1}\n\n{console.BY_CLAUDE}"
+    )
+    monkeypatch.delenv("CLAUDECODE")
+    again = rev(tmp_path, AGAIN)
+    assert main(["decision", "set", AGAIN, "confirm", "--rev", str(again), "--vault", root]) == 2
+    assert "takes one of three picks" in capsys.readouterr().err
+    assert main(["decision", "set", AGAIN, "stand", "--rev", str(again - 1), "--vault", root]) == 2
+    assert "the decision changed since" in capsys.readouterr().err
+    assert main(["decision", "set", AGAIN, "stand", "--rev", str(again), "--vault", root]) == 0
+    assert standing(tmp_path, AGAIN) == ("rejected", False)
+    assert "by: Ada Example, command line" in committed(tmp_path, AGAIN)
+    assert (
+        git(tmp_path / "vault", "log", "-1", "--format=%s").strip() == f"Decision: {AGAIN} rejected on the command line"
+    )

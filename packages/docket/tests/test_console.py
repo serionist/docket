@@ -1,4 +1,4 @@
-"""The owner's yes at their own console (DR-0518): what counts as a console, the code, the question."""
+"""The owner's yes at their own console (DR-0572, DR-0599): what counts as a console, the code, the question."""
 
 from __future__ import annotations
 
@@ -34,8 +34,8 @@ def test_with_a_console_on_both_sides_and_outside_claude_code_the_question_is_as
     assert console.problem(console.RELEASE) is None
     monkeypatch.setenv("CLAUDECODE", "1")
     assert console.problem(console.LOOSENING) == (
-        "this shell is Claude Code's (CLAUDECODE is set): a vault.yaml change that isn't only stricter is yours to "
-        "confirm, so run the command in your own terminal"
+        "this shell is Claude Code's (CLAUDECODE is set): turning credentials redaction off is yours to confirm, so "
+        "run the command in your own terminal"
     )
 
 
@@ -74,11 +74,10 @@ def test_the_code_typed_back_is_the_only_yes(
 
 
 def test_the_release_keeps_its_two_names_for_a_copied_reference_test(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A project's copy of the Plaud reference's tests stands in for the owner as releasing._console_problem and
-    releasing._ask: both stay, each only a call through to docket.console."""
-    monkeypatch.setattr(console, "problem", lambda act: f"asked about {act}")
+    """A project's copy of the Plaud reference's tests from before #191 patches releasing._console_problem and
+    releasing._ask: both stay, unused, as a release asks nothing (DR-0600)."""
     monkeypatch.setattr(console, "ask", lambda prompt: f"read {prompt}")
-    assert releasing._console_problem() == "asked about a release"  # pyright: ignore[reportPrivateUsage]
+    assert releasing._console_problem() is None  # pyright: ignore[reportPrivateUsage]
     assert releasing._ask("?") == "read ?"  # pyright: ignore[reportPrivateUsage]
 
 
@@ -203,18 +202,8 @@ def _docket(*args: str, **kwargs: object) -> subprocess.Popen[bytes]:
     return subprocess.Popen([sys.executable, "-c", CHILD, *args], env=env, **kwargs)  # type: ignore[call-overload]
 
 
-@pytest.mark.parametrize(
-    "command",
-    [
-        ["redaction", "set", "phone", "off"],
-        ["source", "new", "diary"],
-        ["source", "new", "papers", "--folder", "papers"],
-    ],
-    ids=["redaction off", "source new", "folder source new"],
-)
-def test_each_loosening_command_with_a_y_piped_in_is_refused_and_writes_nothing(
-    tmp_path: Path, command: list[str]
-) -> None:
+def test_credentials_off_with_a_y_piped_in_is_refused_and_writes_nothing(tmp_path: Path) -> None:
+    command = ["redaction", "set", "credentials", "off"]
     root = _project(tmp_path)
     before = (root / CONFIG_FILE).read_bytes()
     at = sh(root, "git", "rev-parse", "HEAD")
@@ -248,7 +237,7 @@ def test_at_a_real_terminal_the_code_typed_back_makes_the_change(tmp_path: Path)
     proc = _docket(
         "redaction",
         "set",
-        "phone",
+        "credentials",
         "off",
         "--vault",
         str(root),
@@ -271,5 +260,5 @@ def test_at_a_real_terminal_the_code_typed_back_makes_the_change(tmp_path: Path)
             proc.kill()
         proc.wait()
         os.close(main_fd)
-    assert not VaultConfig.load(root / CONFIG_FILE).redaction.phone
+    assert not VaultConfig.load(root / CONFIG_FILE).redaction.credentials
     assert "confirmed at the console" in sh(root, "git", "log", "-1", "--format=%B")

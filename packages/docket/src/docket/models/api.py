@@ -1,9 +1,10 @@
-"""Turning the API provider on (#89): the three locks, each set only at the owner's console (DR-0537, DR-0539).
+"""Turning the API provider on (#89): the three locks (DR-0537, DR-0539).
 
-- the vault allows it: `api_provider` in vault.yaml, written through vault.yaml's one writer, which asks at the console
-  for any change of it, since a key added later never only keeps more out (DR-0517, DR-0521);
+- the vault allows it: `api_provider` in vault.yaml, written through vault.yaml's one writer (DR-0601);
 - this machine chose it: `provider: api` in the user config's models block;
-- the key: in the system keychain.
+- the key: in the system keychain, typed at the owner's own console, so it stays out of Claude's session log.
+
+The allow and the choice are made on the owner's yes, at their own terminal or in chat to Claude (DR-0599).
 
 Removing the machine's choice or the key stops sending at once and asks nothing: neither touches the gate.
 """
@@ -23,7 +24,6 @@ from docket.vault.config import VaultConfig
 from docket.vault.vault import Vault
 
 PROVIDERS = (VOYAGE,)
-CHOOSING = "choosing the api provider for this machine, which sends a vault's text to Voyage AI"
 KEEPING = "keeping the Voyage key in this machine's keychain"
 SENDS = (
     "this vault's chunks, and every search's query and top 50 candidates, go to Voyage AI over HTTPS once this "
@@ -39,9 +39,7 @@ def at_console(act: str) -> None:
 
 
 def choose(*, reranker: bool = True, monthly: int | None = None) -> config.ApiChoice:
-    """This machine's choice of the api provider, at the owner's console; the month's token cap kept when the config
-    already gives one."""
-    at_console(CHOOSING)
+    """This machine's choice of the api provider; the month's token cap kept when the config already gives one."""
     now = config.read()
     tokens = monthly if monthly is not None else now.monthly_tokens if isinstance(now, config.ApiChoice) else None
     chosen = config.ApiChoice(VOYAGE_4, VOYAGE_RERANK if reranker else None, tokens or config.DEFAULT_MONTHLY_TOKENS)
@@ -79,7 +77,7 @@ class Allowed:
 
 
 def allow(vault: Vault, provider: str | None) -> Allowed:
-    """Set the vault's `api_provider`, through vault.yaml's one writer: every change of it asks at the console."""
+    """Set the vault's `api_provider`, through vault.yaml's one writer."""
 
     def edit(current: VaultConfig) -> VaultConfig:
         return current.model_copy(update={"api_provider": provider})
@@ -98,7 +96,7 @@ def status(vault: Vault | None, keys: KeyStore | None = None) -> list[str]:
         out.append(
             f"vault      allows {allowed}"
             if allowed is not None
-            else "vault      ! doesn't allow sending its text: docket models allow voyage, at your console"
+            else "vault      ! doesn't allow sending its text: docket models allow voyage"
         )
     return out
 

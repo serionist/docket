@@ -14,6 +14,7 @@ decisions:
       - Every never-store screen reads the text as written, before any redaction, so a rule turned on only keeps more out.
       - "A one-way door on AGENTS.md's list, in the gate's loosening line: what a loosening lets in reaches raw, every clone and git history."
       - A rule turned on or a pattern added only ever redacts more, wherever it stands, as DR-0525 has every rule read the text as given and their spans merge.
+      - "Amended by #191 (DR-0601): an uncommitted edit is in force once committed by the owner or by any write of Docket's to vault.yaml, which takes it in unasked unless it turns credentials redaction off."
     not_chosen:
       - "The file as it stands, as before: an uncommitted edit, Claude's under auto mode too, lets records into raw at the next ingest before anyone confirms it."
       - "Refusing every write while the file holds an uncommitted loosening edit: every sync stops on a stray edit, and nothing tells the owner's editor from Claude's."

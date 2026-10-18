@@ -1,6 +1,6 @@
-"""Adding a never-store value from the Settings page (DR-0507 to DR-0509): two form posts, the second only after a view
-naming what the value drops now and what already stored holds it; the list only grows; the value travels in the posts'
-bodies alone, never in a URL, the log or a commit message. Invented people only: Dora Example, Cleo Test."""
+"""Adding a never-store value from the Settings page (DR-0508, DR-0509, DR-0602): two form posts, the second only after
+a view naming what the value drops now and what already stored holds it; the list only grows; the value travels in the
+posts' bodies alone, never in a URL, the log or a commit message. Invented people only: Dora Example, Cleo Test."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from docket_testkit import make_record, sh
+from docket_testkit import cant_place, git, make_record, sh
 from docket_webkit import OURS, a11y_problems, html_problems, parse
 from httpx2 import Response
 from settings_kit import settings_template, settings_vault
@@ -193,14 +193,27 @@ def test_a_file_changed_since_the_view_asks_again_with_fresh_counts(client: Test
     assert (vault.root / CONFIG_FILE).read_bytes() == before
 
 
-def test_a_hand_edited_file_gets_the_line_and_is_left_as_it_is(client: TestClient, vault: Vault) -> None:
+def test_a_hand_edited_file_takes_the_add_in_place(client: TestClient, vault: Vault) -> None:
     path = vault.root / CONFIG_FILE
     mine = path.read_text(encoding="utf-8").replace("never_store:\n", "never_store:   # mine\n", 1)
     path.write_text(mine, encoding="utf-8", newline="\n")
-    assert not parse(client.get("/settings").text).find_all("form")
-    html = ask(client, "Dora #2x")
-    assert not parse(html).find_all("form")
-    assert "- 'Dora #2x'" in said(html)
+    git(vault.root, "commit", "-qam", "A comment of mine")
+    assert parse(ask(client, NAME)).find_all("form", class_="confirm-form")
+    answer = client.post(
+        ADD, data={"list": "people", "value": NAME, "shown": shown(vault), "confirmed": "1"}, headers=SAME
+    )
+    assert answer.status_code == 303
+    assert "never_store:   # mine\n" in path.read_text(encoding="utf-8")
+    assert NAME in VaultConfig.load(path).never_store.people
+
+
+def test_an_add_docket_can_t_place_gets_the_line_and_is_left_as_it_is(
+    client: TestClient, vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cant_place(monkeypatch)
+    path = vault.root / CONFIG_FILE
+    mine = path.read_text(encoding="utf-8").replace("never_store:\n", "never_store:   # mine\n", 1)
+    path.write_text(mine, encoding="utf-8", newline="\n")
     answer = client.post(
         ADD, data={"list": "people", "value": NAME, "shown": shown(vault), "confirmed": "1"}, headers=SAME
     )

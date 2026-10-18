@@ -13,10 +13,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import AtConsole, FakePrompt, git
+from docket_testkit import AtConsole, git
 from media_kit import CALL, audio, in_raw, media_vault
 
-from docket import console, hooks, osprompt
+from docket import console, hooks
 from docket.cli import main
 from docket.errors import DocketError
 from docket.media import backup, crypto, layout, reader
@@ -25,7 +25,6 @@ from docket.media.keystore import KeyStore
 from docket.service.install import ServiceStatus
 from docket.service.state import Service, Settings
 from docket.service.sync import FINAL_STEPS, STEPS, steps
-from docket.vault.config import SourceConfig
 from docket.vault.vault import Vault
 
 PASSPHRASE = "ABCD-EFGH-JKLM-NPQR-STUV-WXYZ"  # noqa: S105 - an invented passphrase
@@ -60,7 +59,7 @@ def test_an_export_carries_every_key_to_a_second_clone(
     keys = KeyStore(first.home)
     assert keys.unbacked() == 1
     target = tmp_path / "usb" / "docket-keys.age"
-    owner("code", "WXYZ")
+    owner("WXYZ")
     done = backup.export(first, target)
     assert (done.keys, done.kept) == (1, True)
     assert keys.unbacked() == 0
@@ -87,7 +86,7 @@ def test_the_bundle_s_format_is_pinned_by_its_version(
     vault = media_vault(tmp_path)
     stored(vault)
     target = tmp_path / "keys.age"
-    owner("code", "WXYZ")
+    owner("WXYZ")
     backup.export(vault, target)
     found: Any = json.loads(crypto.open_with_passphrase(target.read_bytes(), fixed))
     assert backup.BUNDLE_VERSION == 1
@@ -125,7 +124,7 @@ def test_a_wrong_passphrase_or_a_missing_file_opens_nothing(
     vault = media_vault(tmp_path)
     stored(vault)
     target = tmp_path / "keys.age"
-    owner("code", "WXYZ")
+    owner("WXYZ")
     backup.export(vault, target)
     typed(monkeypatch, "AAAA-AAAA-AAAA-AAAA-AAAA-AAAA")
     with pytest.raises(DocketError, match="the passphrase doesn't open it"):
@@ -138,36 +137,10 @@ def test_an_unconfirmed_passphrase_leaves_no_file(tmp_path: Path, owner: Callabl
     vault = media_vault(tmp_path)
     stored(vault)
     target = tmp_path / "keys.age"
-    owner("code", "ABCD")
+    owner("ABCD")
     assert not backup.export(vault, target).kept
     assert not target.exists()
     assert KeyStore(vault.home).unbacked() == 1
-
-
-def test_an_export_asks_the_os_prompt_first_and_a_no_writes_nothing(
-    tmp_path: Path,
-    owner: Callable[..., AtConsole],
-    os_prompt: Callable[..., FakePrompt],
-    fixed: str,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Every key leaves the clone, so the export asks the OS prompt where there is one (DR-0575)."""
-    vault = media_vault(tmp_path)
-    stored(vault)
-    target = tmp_path / "keys.age"
-    hello = os_prompt(osprompt.Refused("cancelled"))
-    owner("")
-    done = backup.export(vault, target)
-    assert (done.kept, done.declined) == (False, True)
-    assert not target.exists()
-    assert hello.acts == ["export this clone's media keys"]
-    out = capsys.readouterr().out
-    assert fixed not in out
-    assert "Fake Hello didn't confirm it (cancelled); nothing was exported" in out
-    os_prompt(osprompt.Verified())
-    owner("", "WXYZ")
-    assert backup.export(vault, target).kept
-    assert KeyStore(vault.home).unbacked() == 0
 
 
 def test_an_export_refuses_what_it_can_t_do(tmp_path: Path, owner: Callable[..., AtConsole], fixed: str) -> None:
@@ -231,7 +204,7 @@ def test_the_commands_and_every_counter_of_keys_no_export_holds(
         assert service.status().media_unbacked == 1
     finally:
         service.writer.close()
-    owner("code", "WXYZ")
+    owner("WXYZ")
     assert main(["media", "keys", "export", str(tmp_path / "keys.age"), "--vault", root]) == 0
     out = capsys.readouterr().out
     assert fixed in out
@@ -241,13 +214,9 @@ def test_the_commands_and_every_counter_of_keys_no_export_holds(
     out = capsys.readouterr().out
     assert "backup   every key is in an export" in out
     assert "media    " not in out
-    owner("code", "n")
+    owner("n")
     assert main(["media", "keys", "export", str(tmp_path / "again.age"), "--vault", root]) == 0
     assert "keys     not exported: the passphrase wasn't confirmed" in capsys.readouterr().out
-    owner("n")
-    assert main(["media", "keys", "export", str(tmp_path / "declined.age"), "--vault", root]) == 0
-    assert "keys     not exported: nothing was confirmed, and no file was written" in capsys.readouterr().out
-    assert not (tmp_path / "declined.age").exists()
     owner()
     typed(monkeypatch, fixed)
     assert main(["media", "keys", "import", str(tmp_path / "keys.age"), "--vault", root]) == 0
@@ -265,14 +234,13 @@ def test_the_session_start_asks_for_a_backup_while_a_key_has_none() -> None:
     )
 
 
-def test_a_run_gains_the_media_step_only_where_media_can_come_from() -> None:
-    plain = SourceConfig()
-    assert steps(False, "run-1", plain) == STEPS.format(run="run-1")
-    assert steps(True, "run-1", plain) == FINAL_STEPS.format(run="run-1")
-    hosted = steps(False, "run-1", SourceConfig(media_hosts=["media.example"]))
-    assert hosted.startswith(STEPS.format(run="run-1"))
-    assert "8. Media: after closing" in hosted and "media_put(rid, url)" in hosted
-    assert "6. Media: after closing" in steps(True, "run-1", SourceConfig(media_folders=["~/Downloads"]))
+def test_a_run_with_media_gains_the_media_step_after_the_close() -> None:
+    assert steps(False, "run-1", media=False) == STEPS.format(run="run-1")
+    assert steps(True, "run-1", media=False) == FINAL_STEPS.format(run="run-1")
+    plain = steps(False, "run-1", media=True)
+    assert plain.startswith(STEPS.format(run="run-1"))
+    assert "8. Media: after closing" in plain and "media_put(rid, url)" in plain
+    assert "6. Media: after closing" in steps(True, "run-1", media=True)
 
 
 def test_a_hidden_answer_comes_from_getpass_and_the_end_of_input_stops(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -331,7 +299,7 @@ def test_a_write_that_fails_partway_leaves_nothing_under_the_name(
         raise OSError(errno.ENOSPC, "no space left on the device")
 
     monkeypatch.setattr(os, "fsync", full)
-    owner("code")
+    owner()
     with pytest.raises(DocketError, match=r"can't write .*no space left on the device; nothing was exported"):
         backup.export(vault, target)
     assert list(folder.iterdir()) == []
@@ -349,7 +317,7 @@ def test_a_drive_without_hard_links_takes_the_name_first(
         raise OSError(errno.EPERM, "hard links aren't supported here")
 
     monkeypatch.setattr(os, "link", no_links)
-    owner("code", "WXYZ")
+    owner("WXYZ")
     assert backup.export(vault, target).kept
     assert [p.name for p in target.parent.iterdir()] == ["docket-keys.age"]
     assert json.loads(crypto.open_with_passphrase(target.read_bytes(), fixed))["schema_version"] == 1
@@ -390,7 +358,7 @@ def test_the_passphrase_opens_the_file_however_it_is_typed(
     first = media_vault(tmp_path / "a")
     stored(first)
     target = tmp_path / "keys.age"
-    owner("code", "WXYZ")
+    owner("WXYZ")
     backup.export(first, target)
     second = media_vault(tmp_path / "b")
     monkeypatch.setattr(console, "ask_hidden", lambda prompt: typed)

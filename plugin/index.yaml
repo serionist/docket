@@ -61,11 +61,12 @@ decisions:
       - "Accepted: in auto mode the skill's text is the control on an override; init's summary leaves each one in the transcript."
   - id: DR-0207
     title: The plugin's cuts skill
-    status: proposed
+    status: superseded
     at: "2026-10-15"
     by: Claude (autonomy grant)
     cost: one-way
     sources: ["#31"]
+    superseded_by: [DR-0605]
     description: /docket:cuts turns the owner's words for a held recording's left-out stretches into time ranges. It lists the holds and skips an id held again after its release, which needs only the release run again; tells the owner where docket hold show's output will stay (Claude Code's session log and tool-results files, a bridged claude.ai session, for cleanupPeriodDays, 30 days by default) and goes on only on their word; places each stretch on the transcript, every stretch the owner named or none, the recording then staying held; leaves the vendor summary out unless it plainly doesn't touch the stretch; writes the proposals file in a temp folder outside any git work tree; and hands the owner the docket hold release command to run in their own terminal. It pre-approves docket hold list and docket hold show only, and never runs, pipes into or wraps the release. The name extends DR-0161's door.
     binds: [The skill name cuts is a one-way door (AGENTS.md).]
     not_chosen:

@@ -466,12 +466,14 @@ def test_the_settings_page_in_a_browser(settings_service: tuple[int, str], tmp_p
         page.goto(f"{link.body['url']}&next=/settings")
         page.wait_for_url(f"{base}/settings")
         expect(page.locator(".lead")).to_contain_text("4 sources, 4 on; 4 never-store values")
-        # No value of a list in the page until asked for; its forms make only the changes pages may make.
+        # No value of a list in the page until asked for. A form for each change a page makes, either way (DR-0601):
+        # an add per list, phone on and the pattern off, never credentials off.
         expect(page.locator("main")).not_to_contain_text("Dora #2")
         expect(page.locator("form[action='/settings/never-store']")).to_have_count(3)
-        expect(page.locator("form[action='/settings/redaction']")).to_have_count(1)
+        expect(page.locator("form[action='/settings/redaction'] input[name='rule']")).to_have_count(2)
+        expect(page.locator("form:has(input[name='rule'][value='credentials'])")).to_have_count(0)
 
-        # A source's changes fold out without JavaScript's help, stricter first, each with its line.
+        # A source's changes fold out without JavaScript's help, stricter first, each with its button.
         page.click("text=Change calls")
         changes = page.locator("#source-calls li.change")
         expect(changes.first).to_contain_text("Make it private")
@@ -487,7 +489,14 @@ def test_the_settings_page_in_a_browser(settings_service: tuple[int, str], tmp_p
         page.set_viewport_size({"width": 390, "height": 844})
         page.reload()
         page.click("text=Change calls")
-        _fits(page, "#source-calls", "#source-calls .paste-text", "#list-people", ".setting-facts.models")
+        _fits(
+            page,
+            "#source-calls",
+            "#source-calls .act-form",
+            "#list-people",
+            "#list-people .button",
+            ".setting-facts.models",
+        )
         page.screenshot(path=str(shots / "settings-390.png"), full_page=True)
 
         # A value added: its own question, then the add; the address bar never holds it, at either width.
@@ -533,7 +542,7 @@ def test_the_settings_page_in_a_browser(settings_service: tuple[int, str], tmp_p
 
 def test_the_settings_page_says_when_an_edit_isn_t_in_force(settings_service: tuple[int, str], tmp_path: Path) -> None:
     """An edit of vault.yaml by hand that lets more in waits for its commit (DR-0521): the page says so at the top,
-    naming no value, and a loosening command is for the owner's own terminal (DR-0517)."""
+    naming no value, and says what the file now holds (DR-0601)."""
     port, token = settings_service
     shots = Path(os.environ.get("DOCKET_TEST_SCREENSHOTS") or tmp_path)
     shots.mkdir(parents=True, exist_ok=True)
@@ -550,7 +559,7 @@ def test_the_settings_page_says_when_an_edit_isn_t_in_force(settings_service: tu
         page.goto(f"{link.body['url']}&next=/settings")
         page.wait_for_url(f"{base}/settings")
         expect(page.locator(".notice").first).to_contain_text("vault.yaml has an edit that isn't in force")
-        expect(page.locator("main")).to_contain_text("run it in your own terminal")
+        expect(page.locator("main")).to_contain_text("Credentials are not redacted")
         expect(page.locator("main")).not_to_contain_text("Dora #2")
         page.screenshot(path=str(shots / "settings-waiting.png"), full_page=True)
         page.set_viewport_size({"width": 390, "height": 844})
@@ -796,7 +805,7 @@ def _add(page: Page, base: str, value: str, shot: Path) -> None:
     """A never-store value added through the page: the field, the question, the add, the notice."""
     page.click("#list-people summary")
     page.fill("#add-people", value)
-    page.click("#list-people form button")
+    page.click("#list-people .add-form button")
     expect(page.locator("h1")).to_have_text("Add to people?")
     expect(page.locator(".confirm-value")).to_have_text(value)
     assert value.split(maxsplit=1)[0] not in page.url

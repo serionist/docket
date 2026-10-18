@@ -247,8 +247,9 @@ def create_mcp(service: Service) -> MCPServer:
         annotations=FETCHES,
         description=(
             "Store a record's audio or file, by a local path or an https URL: the record staged or in raw, the file "
-            "fetched within limits (a path from the source's media folders or Docket's drop folder, a URL from its "
-            "media hosts), encrypted with a key of its own, and kept beside its record until the record is in raw. "
+            "fetched within limits (a path from the source's media folders or Docket's drop folder, a URL over https "
+            "to a public address), encrypted with a key of its own, and kept beside its record until the record is in "
+            "raw. "
             "Refused for a held recording, one released or cut with cuts, or a record the gate keeps out."
         ),
     )

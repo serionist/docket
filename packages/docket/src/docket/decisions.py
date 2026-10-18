@@ -1,6 +1,6 @@
 """Each decision and where it stands (DR-0565): what `docket decision list` prints and the `decisions` MCP tool answers.
 
-A decision is read as every read takes it (DR-0564): a confirmed or rejected one from its last commit, a proposed one
+A decision is read as every read takes it (DR-0603): a confirmed or rejected one from its last commit, a proposed one
 with its status and links from it. It is current when confirmed and no confirmed decision supersedes it, and only a
 current one gives the `cite` a brief's Decisions line takes. The links back, superseded and contradicted, come from
 the other decisions. A decision on an entity a never-store list holds is left out and counted as hidden, as briefs

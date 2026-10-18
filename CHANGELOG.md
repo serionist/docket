@@ -33,9 +33,8 @@ Unreleased in the same PR.
   stored and cut by everything its records need is transcribed, cut stretches come back as `[cut]`, and the transcript
   carries the recording's people, so a never-store name drops it as it drops the recorder's. A never-store word
   Whisper hears drops it too, and the stored audio stops playing. Off until you install it.
-- The OS prompt: where your machine has one set up, a release, a change that loosens `vault.yaml`, `docket media
-  confirm-cuts` and `docket media keys export` ask Windows Hello, Touch ID or your Mac's password, or polkit, after
-  you press Enter at the console; the code typed back is asked only where there is none. `docket vault status` says
+- The OS prompt: where your machine has one set up, turning credentials redaction off asks Windows Hello, Touch ID
+  or your Mac's password, or polkit, after you press Enter at the console; the code typed back is asked only where there is none. `docket vault status` says
   which this machine asks, and why. On Linux, install Docket's polkit action once with the line it prints. A
   console-code marker, which only an admin or root can make, sends a machine back to the code; the README gives the
   lines.
@@ -57,8 +56,8 @@ Unreleased in the same PR.
   beside the raw its lines cite, the lines it was built from one click away. A brief or a line a never-store list
   now holds shows only that it is hidden.
 - Voyage AI's API for search by meaning and the reranker, for a machine with no GPU and no time for CPU embedding:
-  `docket models install --api`, then `docket models key voyage` and, in each vault, `docket models allow voyage`,
-  all in your own terminal. It sends a vault's text off the machine only when the vault allows it in `vault.yaml`,
+  `docket models install --api`, then `docket models key voyage` in your own terminal and, in each vault, `docket
+  models allow voyage`. It sends a vault's text off the machine only when the vault allows it in `vault.yaml`,
   the machine chose it and its key is in the keychain; only chunks that pass the vault's settings in force go, never
   anything staged, never-store, from a source now private or gone, or that a redaction rule would change. The
   README's "Through Voyage AI's API" says what leaves the machine and when. A vault that opts in can't be opened by an
@@ -77,19 +76,20 @@ Unreleased in the same PR.
   stretches made silent before its audio is encrypted, so every transcript time still points at the right moment,
   and is stored as WebM Opus. Audio refused before is named in the run's `media` line and put again, cut. A put
   is refused when the audio and its transcript may not share a timeline. Recordings cut by hand before this
-  release wait for `docket media confirm-cuts <rid>` in your own terminal. Cutting adds PyAV (FFmpeg) as a
+  release wait for `docket media confirm-cuts <rid>`, run on your yes. Cutting adds PyAV (FFmpeg) as a
   dependency.
 - Media: `docket media put` and the `media_put` tool keep a record's audio or file, encrypted with a key of its own
   as it is read, beside its record until the record is in raw, then in `media/` in LFS. A path comes from a folder you
-  name or Docket's drop folder, a URL only over https from a host you name; adding either asks at your console. A
+  name or Docket's drop folder, a URL only over https. A
   held recording, one cut or released with cuts, or one the gate dropped for a never-store value gets no media yet.
   Keys stay on this machine, in the system keychain or, by your choice, a private file; the Recording page says when
   the audio waits, isn't downloaded, or has no key here.
 - Media keys on a second machine, and their backup: `docket media keys export <file>` writes every key of a clone
   into one file sealed with a passphrase it draws and shows once, and `docket media keys import <file>` adds them on
   another machine; both only in your own terminal. The newest export is the backup, and `docket media status`,
-  `docket vault status` and the session start count the keys no export holds yet. A source with a media host or
-  folder gets a media step in each run, and the Plaud skill says how to turn its audio on.
+  `docket vault status` and the session start count the keys no export holds yet. A source whose skill puts audio,
+  with a media folder, or with a recording gets a media step in each run, and the Plaud skill says how to turn its
+  audio on.
 - The Recording page, `/recording` in the web app: a recording's summary beside its transcript, each anchor a link
   that marks the lines it points at, with the recording and the line in the address. Search's transcript hits open
   there. No audio is stored yet, and the page says so.
@@ -150,12 +150,12 @@ Unreleased in the same PR.
 - Each machine's sync cursor, committed in `state/cursors-<machine>.yaml`: where its syncs reached, and the ids still
   owed. A run starts from the furthest point any machine reached.
 - Releasing held recordings: `docket hold list`, `docket hold show` and `docket hold release`. A held recording goes
-  into staging only with the cuts you confirm, each one by typing back the code it shows at your own console, and
+  into staging only with the cuts you said yes to, and
   leaves the hold list once its release is committed to `state/releases/<source>.jsonl`. The gate cuts a released
   recording on every machine; its vendor notes stay out unless you keep them. Update Docket on every machine before
   your first release: an older one doesn't read the release log.
 - `/docket:cuts` in the plugin: Claude turns your words for each left-out stretch into time ranges on the transcript
-  and hands you the release to run in your own terminal.
+  shows them to you, and runs the release on your yes.
 - The web app's first page, Search: the search Claude uses, with facets by source, person, entity and time, results
   grouped by recording or thread, and a panel that puts a hit's summary next to its raw and checks each line
   against it. Opened with `docket open`; light and dark, by keyboard, and offline.
@@ -165,7 +165,7 @@ Unreleased in the same PR.
   private folder.
 - The Staging page: what waits at the gate by source and age, with why it waits; open a record to read it as it will
   be written, check utterances or lines to cut, preview, then classify it work or drop it as private; promote what is
-  ready. Held recordings are listed with the commands that release them in your own terminal.
+  ready. Held recordings are listed with the commands that release them.
 - A time in `--cut` can carry milliseconds, such as `0:30.400`, so a cut on an utterance's own times is exact.
 - The Claude Code plugin's first version: it registers the service as the MCP server `docket`, tells each session at
   its start whether Docket runs and what waits in staging, and brings `/docket:recall`, which answers from the raw with
@@ -222,13 +222,21 @@ Unreleased in the same PR.
 
 ### Changed
 
+- `media_put` fetches a URL from any https host, every address it resolves to still checked: `docket media host` is
+  gone, and a source's `media_hosts` key in `vault.yaml` is read and ignored. A `vault.yaml` with comments or a layout
+  of your own is now edited in place, its comments and order kept, by every command and the Settings page; only a
+  change Docket can't place there is still a line to make by hand.
+- Claude acts with your OK in chat: it releases a held recording with the cuts it showed you, changes `vault.yaml`,
+  confirms or rejects a decision with the new `docket decision set`, and confirms old cuts, by running the commands
+  you would, after your yes. Each commit it makes says `by Claude, with the owner's OK in chat`. The Settings page
+  changes settings both ways: a source's sensitivity, a source on or off, a rule on or off, a never-store value
+  taken off. Only turning credentials redaction off, and forgetting for real, still ask at your own console.
 - A cut you make on a later version of a recording now reaches its Whisper transcript in the same promotion: the
   gate writes the transcript's next version with the stretch replaced by `[cut]`, so search, `read` and the
   Recording page stop showing it. It needs no Whisper or audio on the machine. A cut made before this version is
   followed at the first promotion after you update, on a machine that runs the recording's source.
-- `docket media keys export` asks for your yes before it writes the file, as every key leaves the clone.
 - On Windows, a machine with a TPM or a fingerprint or face reader where Windows Hello isn't set up for you now
-  refuses a release or a loosening: set Hello up, or make the console-code marker. Update every machine before you
+  refuses turning credentials redaction off: set Hello up, or make the console-code marker. Update every machine before you
   rely on the prompt.
 - A line of a brief, a decision or a correction can cite the doc line it was built from, `[d:<doc id>@<rev>#<n>]`,
   as `verify` gives it, and is flagged when that line changes: `docket doc read` says so beside the line, `docket doc
@@ -255,18 +263,16 @@ Unreleased in the same PR.
   address a pattern redacts, a phone number or a password, is refused now, as a record holding it is dropped. A doc
   redacted before still goes in again. `docket doc redact` names such a stored doc and leaves it for you to edit,
   where it redacted it before.
-- A change that lets more into the vault asks you at your own console: `docket redaction set <rule> off` and `docket
-  source new` show the change and wait for a code typed back, and are refused in Claude Code's shell, from a pipe or a
-  redirect. A script that ran them now gets that refusal. The setup skill hands you each `docket source new` to run in
-  your terminal.
+- Turning credentials redaction off asks you at your own console: `docket redaction set credentials off` shows the
+  change and waits for your yes, and is refused in Claude Code's shell, from a pipe or a redirect.
 - An edit of `vault.yaml` by hand applies at once only where it keeps more out; the rest applies once you commit it, and
   `docket vault status` says: vault.yaml has an edit that isn't in force until you commit it. A vault holding such an
   edit when you upgrade stops applying its looser part until then.
 - An edit of `vault.yaml` not committed yet is committed on its own, as `Config: vault.yaml as edited`, before
   `docket redaction set`, `docket source new` or the Settings page commits a change to it, so each commit says what
-  it did. An edit that lets more in than the committed file (a rule turned off, a source made looser, a never-store
-  value taken off) is never committed this way unasked: a page refuses the change and writes nothing, and a command
-  asks you about the edit at your own console, with a code typed back, or you commit or undo it yourself.
+  it did. An edit that turns credentials redaction off is never committed this way unasked: a page refuses the
+  change and writes nothing, and a command asks you about the edit at your own console, or you commit or undo it
+  yourself.
 - A `vault.yaml` that doesn't read as YAML is named by its line and column and what was wrong there, no longer with
   the line's text, so a never-store value on it never shows in a page, a terminal or a log.
 - Verifying a doc and writing one no longer load the raw log of each source it covers when the search index is

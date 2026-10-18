@@ -20,6 +20,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from docket import console
 from docket.errors import DocketError
 from docket.vault.cuts import Cut, merge
 from docket.vault.records import RawRecord, is_native_id, owning_id, source_name_problem
@@ -207,7 +208,7 @@ def add(vault: Vault, source: str, release: Release) -> None:
             text += "\n"
         path.parent.mkdir(parents=True, exist_ok=True)
         write_replacing(vault.home, path, f"{text}{release.line()}\n", f"releases-{source}")
-        commit_pending(vault, source, f"Releases: {source}, 1 added on {vault.machine}")
+        commit_pending(vault, source, console.signed(f"Releases: {source}, 1 added on {vault.machine}"))
 
 
 def commit_pending(vault: Vault, source: str, message: str | None = None) -> str | None:

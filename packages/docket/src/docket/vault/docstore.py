@@ -22,9 +22,11 @@ from collections.abc import Callable, Iterator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from docket import console
 from docket.documents import records as documents
 from docket.errors import DocketError
 from docket.vault import brief_form, decision_form, derived
@@ -49,7 +51,7 @@ from docket.vault.spans import RawLookup, problem
 from docket.vault.vault import UnmergedError, Vault
 
 log = logging.getLogger(__name__)
-# A final decision's committed text, by its blob id: what every read of it takes (DR-0564), read once a process.
+# A final decision's committed text, by its blob id: what every read of it takes (DR-0603), read once a process.
 _BLOBS: dict[str, str] = {}
 BLOBS_KEPT = 1000
 
@@ -144,7 +146,7 @@ class DocStore:
 
     def get(self, doc_id: str) -> ProcessedDoc | None:
         """The doc as it is on disk, read leniently; None when there is no file. A decision as every read takes it: a
-        final one whole from its last commit, a proposed one with its status and links from it (DR-0564)."""
+        final one whole from its last commit, a proposed one with its status and links from it (DR-0603)."""
         path = self.file(doc_id)
         if not path.is_file():
             return None
@@ -184,9 +186,12 @@ class DocStore:
             out[rel] = _BLOBS[sha]
         return out
 
-    def decide(self, doc_id: str, shown: int, pick: str, subject: str | None = None) -> PutResult:
-        """The user's click on the Briefs page (DR-0564, DR-0566), and the only writer of a decision's status: the
-        candidate's next rev, confirmed or rejected as `pick` says, written and committed under the vault's lock.
+    def decide(
+        self, doc_id: str, shown: int, pick: str, subject: str | None = None, *, via: Literal["page", "cli"] = "page"
+    ) -> PutResult:
+        """The user's click on the Briefs page, or `docket decision set` on the owner's yes (DR-0603, DR-0566), and the
+        only writer of a decision's status: the candidate's next rev, confirmed or rejected as `pick` says, written and
+        committed under the vault's lock, its `by` and its commit saying who and where.
         Refused when it isn't a proposed decision, its file says otherwise than its last commit, or a never-store list
         holds its subject; `MovedError` when its rev isn't the one the page showed, or a decision it replaces or
         contradicts isn't confirmed and current any more (D3)."""
@@ -218,10 +223,17 @@ class DocStore:
             for key, targets in (("replaces", doc.meta.replaces), ("contradicts", doc.meta.contradicts)):
                 if any(t not in standing or not standing[t].current for t in targets):
                     raise moved(f"the decision it {key} was replaced meanwhile; the candidate needs a new rev")
-            new = decision_form.status_rev(doc, pick, f"{self.vault.config.owner.name}, Briefs page")
+            owner = self.vault.config.owner.name
+            if via == "page":
+                by, where = f"{owner}, Briefs page", "on the Briefs page"
+            else:
+                by = f"Claude, with {owner}'s OK" if console.who() else f"{owner}, command line"
+                where = "on the command line"
+            new = decision_form.status_rev(doc, pick, by)
             rev = doc.meta.rev + 1
             status = "confirmed" if pick in decision_form.CONFIRMING else "rejected"
-            message = f"Decision: {doc_id} {status} on the Briefs page\n\nDoc: {doc_id} rev {rev}"
+            message = f"Decision: {doc_id} {status} {where}\n\nDoc: {doc_id} rev {rev}"
+            message = console.signed(message) if via == "cli" else message
             commit = self._write_all_and_commit([(rel, new)], message)
         (self._known or {}).pop(doc_id, None)
         return PutResult(id=doc_id, rev=rev, path=rel, changed=True, commit=commit)
@@ -635,7 +647,7 @@ class DocStore:
     def _hand_edit(self, edited: ProcessedDoc, text: str, last: str | None) -> derived.HandEdit:
         """A hand edit as `derived.hand_edit` reads it, and for a brief or a decision its own stops too: one that names
         a listed person stays on disk, as one that says a keyword does (DR-0558), and so does one that changes a
-        decision's status or links, or a confirmed or rejected decision at all (DR-0564), or one that adds a brief's
+        decision's status or links, or a confirmed or rejected decision at all (DR-0603), or one that adds a brief's
         Decisions line no current decision backs (DR-0565)."""
         edit = derived.hand_edit(edited.meta.type, text, last, self.redactor, self.lists)
         if edited.meta.type == "brief":

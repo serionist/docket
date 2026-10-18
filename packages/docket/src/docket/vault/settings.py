@@ -1,12 +1,12 @@
-"""vault.yaml's one writer, the short list of changes a page may make, and the lines to paste for every other change.
+"""vault.yaml's one writer, the changes a page makes, and the lines to paste.
 
-`rewrite` is the general entry: under the vault lock it reads vault.yaml, asks for the change, and rewrites and commits
-the file only when its text is what Docket writes for it, so no comment or layout of the user's is lost (DR-0166,
-DR-0193, DR-0507). `docket redaction set` and `docket source new` write through it, and so does every page.
+`rewrite` is the general entry: under the vault lock it reads vault.yaml, asks for the change, and commits the file
+rewritten whole when its text is what Docket writes for it, or edited in place, its comments and layout kept, when it
+isn't (DR-0602). `docket redaction set`, `docket source new` and every page write through it.
 
-A page's write is held to `loosens` (from `inforce`, the settings in force's one rule): pages make only the changes
-that keep more out, and every other vault.yaml change is named with its command or its line, never made (DR-0506).
-What a page may import from here is `FOR_PAGES`; a test holds the web and the service to it.
+It makes any change its caller asks for, the CLI's and a page's alike (DR-0601): the owner says yes before the command,
+at their own terminal or in chat to Claude. The one change kept at the owner's console is turning credentials redaction
+off: the CLI asks `console.confirm` for it, and a page refuses it.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ import unicodedata
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal, cast
 
 import yaml
@@ -23,74 +24,49 @@ from pydantic import ValidationError
 
 from docket import console
 from docket.errors import DocketError
-from docket.vault import inforce, neverstore
+from docket.vault import inforce, neverstore, yamledit
 from docket.vault.config import CONFIG_FILE, SourceConfig, UniqueKeyLoader, VaultConfig, write_config
 from docket.vault.neverstore import ListName
 from docket.vault.vault import Vault
 
 Via = Literal["cli", "page"]
-# The rank, the lists and the door are the settings in force's one rule; pages read them from here.
+# The rank and the lists are the settings in force's; pages read them from here.
 RANK = inforce.RANK
 LISTS = inforce.LISTS
-loosens = inforce.loosens
 # The built-in redaction switches, by their keys in vault.yaml's redaction block.
 BUILTIN_RULES = ("credentials", "phone")
-# The names docket.web and docket.service may import from here: the read-only helpers and the stricter operations,
-# with what they raise. Never `rewrite`, which makes any change (DR-0506).
-FOR_PAGES = frozenset(
-    {
-        "RANK",
-        "LISTS",
-        "loosens",
-        "key_line",
-        "item_line",
-        "source_block",
-        "pattern_block",
-        "file_hash",
-        "checked_value",
-        "add_listed",
-        "Added",
-        "StaleError",
-        "edit_to_take_in",
-        "rule_on",
-        "stricter",
-        "turn_off",
-        "BUILTIN_RULES",
-        "LooseningError",
-        "Rewritten",
-    }
-)
 # A line to paste never wraps: a long keyword stays one line.
 _WIDTH = 4096
 # A never-store value is a name, a chat or a phrase: this is long enough for any, and short enough for one line.
 MAX_VALUE = 200
 TAKEN_IN = "Config: vault.yaml as edited"
-# A commit's body when the owner typed the code back for it at their console (DR-0519).
+# A commit's body when the owner confirmed it at their console (DR-0601).
 CONFIRMED = "confirmed at the console"
-
-
-class LooseningError(DocketError):
-    """A page asked for a change outside the list pages may make."""
+CREDENTIALS_OFF_HERE = (
+    "turning credentials redaction off is yours to confirm at your own console: docket redaction set credentials off"
+)
+UNCOMMITTED_CREDENTIALS_OFF = (
+    f"{inforce.NOTICE}, and it turns credentials redaction off; commit it yourself, or run a docket command that "
+    "writes vault.yaml at your own console, which asks"
+)
+UNREADABLE_HEAD = inforce.UNREADABLE_HEAD
 
 
 class StaleError(DocketError):
     """vault.yaml changed since the page read it, so the change the page asked for is not made."""
 
 
-class UncommittedLooseningError(DocketError):
-    """vault.yaml holds an edit not committed yet that lets more in than the committed file, which no write of Docket's
-    takes in: committing it would carry a loosening to every clone (DR-0506, DR-0507)."""
-
-
-UNCOMMITTED_LOOSENING = f"{inforce.NOTICE}; commit it yourself or undo it, then try again"
-UNREADABLE_HEAD = inforce.UNREADABLE_HEAD
+class CredentialsOffError(DocketError):
+    """A page asked to turn credentials redaction off, by its change or by an uncommitted edit a write would take in:
+    only the owner's console does (DR-0601)."""
 
 
 @dataclass(frozen=True)
 class Rewritten:
     """What `rewrite` did: vault.yaml rewritten and committed, nothing to do, or nothing done because the file isn't in
-    Docket's form, so the change is the user's to make by hand, or because the owner didn't type the code back.
-    `taken_in` is the commit of an edit the file held that wasn't committed yet, made on its own first."""
+    Docket's form, so the change is the user's to make by hand, or because the owner didn't confirm turning credentials
+    redaction off. `taken_in` is the commit of an edit the file held that wasn't committed yet, made on its own
+    first."""
 
     changed: bool = False
     commit: str | None = None
@@ -102,16 +78,21 @@ class Rewritten:
 @dataclass(frozen=True)
 class _Held:
     """What HEAD holds against the file: its vault.yaml's text, its settings when the file differs from it (an edit not
-    committed yet, which a write takes in first), and whether that edit loosens."""
+    committed yet, which a write takes in first), and whether that edit turns credentials redaction off."""
 
     text: str
     committed: VaultConfig | None = None
-    loosens: bool = False
+    credentials_off: bool = False
 
 
 def file_hash(data: bytes) -> str:
-    """vault.yaml as a page read it, which its form carries back, so a change made since is seen (DR-0507)."""
+    """vault.yaml as a page read it, which its form carries back, so a change made since is seen (DR-0602)."""
     return hashlib.sha256(data).hexdigest()
+
+
+def credentials_off(before: VaultConfig, after: VaultConfig) -> bool:
+    """Whether a change turns credentials redaction off: the one change asked at the owner's console (DR-0601)."""
+    return before.redaction.credentials and not after.redaction.credentials
 
 
 def rewrite(
@@ -125,16 +106,16 @@ def rewrite(
 ) -> Rewritten:
     """Change vault.yaml: `edit` gets the settings as written and gives the new ones. Nothing to change is no write at
     all, whatever the file did since. A page's change is refused when the file isn't the one it showed (`shown`, its
-    hash), when it loosens (DR-0506), and when the file holds an edit not committed yet that loosens (DR-0507).
+    hash). Every change is made, the commit saying who (DR-0601), but one that turns credentials redaction off.
 
-    The CLI's change that loosens, or one made over an uncommitted edit that does, is made only on the owner's yes at
-    their own console (DR-0517): refused before anything is written in Claude Code's shell or without a console, then
-    shown, path by path and never a never-store value, with the command's `warnings`, and asked for a code typed back,
-    outside the vault lock (DR-0519). On the code the file and HEAD's vault.yaml are read again, and anything is written
-    only when both are as asked about. Nothing here answers the question for the owner.
+    That one, or one made over an uncommitted edit that does, is made for the CLI only on the owner's yes at their own
+    console: refused before anything is written in Claude Code's shell or without a console, then shown with the
+    command's `warnings` and asked through `console.confirm`, outside the vault lock. On a yes the file and HEAD's
+    vault.yaml are read again, and anything is written only when both are as asked about. A page's is refused.
 
-    A change is written only when the file is exactly what Docket writes for it, now or in the form before the
-    redaction switches were split; an uncommitted edit goes in first, in a commit of its own. The change is read back
+    A file in Docket's form, now or before the redaction switches were split, is rewritten whole; any other is edited in
+    place, and only when that reads back as exactly the settings asked for, else nothing is written and the caller
+    gives the line (DR-0602). An uncommitted edit goes in first, in a commit of its own. The change is read back
     through the schema, written through a temp file and a rename, and committed alone; a failure puts the file back."""
     path = vault.root / CONFIG_FILE
     with vault.writing():
@@ -146,42 +127,50 @@ def rewrite(
             return Rewritten()
         if shown is not None and file_hash(data) != shown:
             raise StaleError("vault.yaml changed since the page showed it, so nothing was written")
-        change_loosens = loosens(before, after)
-        if via == "page" and change_loosens:
-            raise LooseningError(
-                "a page makes only the changes that keep more out: a never-store value added, a redaction rule turned "
-                "on, a source made stricter or turned off; make this one at the console or in vault.yaml by hand"
-            )
-        updated = after.dump()
-        _reads_back(updated)
-        if via == "cli" and change_loosens:
+        change_off = credentials_off(before, after)
+        if via == "page" and change_off:
+            raise CredentialsOffError(CREDENTIALS_OFF_HERE)
+        _reads_back(after.dump())
+        if via == "cli" and change_off:
             _at_console()
-        if not before.written_by_docket(text):
+        updated = after.dump() if before.written_by_docket(text) else _in_place(text, before, after, path)
+        if updated is None:
             return Rewritten(by_hand=True)
         held = _weigh(vault, before, text)
-        if held.loosens and via == "page":
-            raise UncommittedLooseningError(UNCOMMITTED_LOOSENING)
-        if held.loosens:
-            _at_console(UNCOMMITTED_LOOSENING)
-        asked = via == "cli" and (held.loosens or change_loosens)
-        if not asked:
-            return _write(vault, text, updated, _message(message, via, False), held, edit_confirmed=False)
-        # A conflict refuses before the owner is asked, not after they typed the code (DR-0528).
+        if held.credentials_off and via == "page":
+            raise CredentialsOffError(UNCOMMITTED_CREDENTIALS_OFF)
+        if held.credentials_off:
+            _at_console(UNCOMMITTED_CREDENTIALS_OFF)
+        if not (held.credentials_off or change_off):
+            return _write(vault, text, updated, _message(message, via, False), held, via=via, edit_confirmed=False)
+        # A conflict refuses before the owner is asked, not after they confirmed (DR-0528).
         vault.refuse_unmerged()
-    screen = _screen(held, before, after if change_loosens else None, warnings)
+    screen = _screen(held, before, after if change_off else None, warnings)
     answer = console.confirm(
         screen,
         "make this change",
         "leave vault.yaml as it is",
         "vault.yaml stays as it is",
-        act="make a vault.yaml change that isn't only stricter",
+        act="turn credentials redaction off",
     )
     if answer != "yes":
         return Rewritten(declined=True)
     with vault.writing():
         if file_hash(path.read_bytes()) != file_hash(data) or _head_text(vault) != held.text:
             raise StaleError("vault.yaml changed while you were asked, so nothing was written; run the command again")
-        return _write(vault, text, updated, _message(message, via, change_loosens), held, edit_confirmed=held.loosens)
+        message = _message(message, via, change_off)
+        return _write(vault, text, updated, message, held, via=via, edit_confirmed=held.credentials_off)
+
+
+def _in_place(text: str, before: VaultConfig, after: VaultConfig, path: Path) -> str | None:
+    """The file edited in place, its comments and layout kept (DR-0602), when that reads back as exactly `after`."""
+    patched = yamledit.patch(text, before, after)
+    if patched is None:
+        return None
+    try:
+        return patched if VaultConfig.parse(patched, path) == after else None
+    except DocketError:
+        return None
 
 
 def _at_console(edit: str | None = None) -> None:
@@ -195,16 +184,19 @@ def _at_console(edit: str | None = None) -> None:
 def _message(message: str, via: Via, confirmed: bool) -> str:
     if via == "page":
         return f"{message}\n\nvia page"
-    return f"{message}\n\n{CONFIRMED}" if confirmed else message
+    return f"{message}\n\n{CONFIRMED}" if confirmed else console.signed(message)
 
 
-def _write(vault: Vault, text: str, updated: str, message: str, held: _Held, *, edit_confirmed: bool) -> Rewritten:
+def _write(
+    vault: Vault, text: str, updated: str, message: str, held: _Held, *, via: Via, edit_confirmed: bool
+) -> Rewritten:
     """The uncommitted edit committed on its own first, then the change written and committed; a failed commit of the
     change puts the file back as it was."""
     path = vault.root / CONFIG_FILE
     taken_in = None
     if held.committed is not None:
-        taken_in = vault.commit([CONFIG_FILE], f"{TAKEN_IN}\n\n{CONFIRMED}" if edit_confirmed else TAKEN_IN)
+        taken = f"{TAKEN_IN}\n\n{CONFIRMED}" if edit_confirmed else _message(TAKEN_IN, via, False)
+        taken_in = vault.commit([CONFIG_FILE], taken)
     write_config(vault.home, path, updated)
     try:
         commit = vault.commit([CONFIG_FILE], message)
@@ -215,9 +207,10 @@ def _write(vault: Vault, text: str, updated: str, message: str, held: _Held, *, 
 
 
 def _screen(held: _Held, before: VaultConfig, after: VaultConfig | None, warnings: Sequence[str]) -> list[str]:
-    """What the owner is asked about: the uncommitted edit, then the command's change, each only when it loosens."""
+    """What the owner is asked about: the uncommitted edit, then the command's change, each only when it turns
+    credentials redaction off."""
     lines: list[str] = []
-    if held.committed is not None and held.loosens:
+    if held.committed is not None and held.credentials_off:
         lines += [f"{inforce.NOTICE}; it goes in first:", *(f"  {c}" for c in changes(held.committed, before))]
     if after is not None:
         lines += ["this command changes vault.yaml:", *(f"  {c}" for c in changes(before, after))]
@@ -237,33 +230,32 @@ def _weigh(vault: Vault, now: VaultConfig, text: str) -> _Held:
     try:
         committed_text = inforce.committed_text(vault.root, vault.home)
     except inforce.UnreadableHeadError:
-        raise UncommittedLooseningError(UNREADABLE_HEAD) from None
+        raise DocketError(UNREADABLE_HEAD) from None
     if committed_text == text.replace("\r\n", "\n"):
         return _Held(committed_text)
     try:
         committed = VaultConfig.model_validate(yaml.load(committed_text, Loader=UniqueKeyLoader))  # noqa: S506 - a SafeLoader
     except (yaml.YAMLError, ValidationError):
-        raise UncommittedLooseningError(UNREADABLE_HEAD) from None
-    return _Held(committed_text, committed, loosens(committed, now))
+        raise DocketError(UNREADABLE_HEAD) from None
+    return _Held(committed_text, committed, credentials_off(committed, now))
 
 
 def edit_to_take_in(vault: Vault, now: VaultConfig, text: str) -> bool:
-    """Whether vault.yaml holds an edit not committed yet, which a write commits on its own first. One that loosens
-    against the committed file is refused instead, naming no value: a click must never carry a loosening someone typed
-    into history; the CLI asks at the console in `rewrite` instead. A committed file that is gone or doesn't read is
+    """Whether vault.yaml holds an edit not committed yet, which a write commits on its own first. One that turns
+    credentials redaction off is refused for a page, naming no value; a committed file that is gone or doesn't read is
     refused too. Run by a page before it asks."""
     held = _weigh(vault, now, text)
-    if held.loosens:
-        raise UncommittedLooseningError(UNCOMMITTED_LOOSENING)
+    if held.credentials_off:
+        raise CredentialsOffError(UNCOMMITTED_CREDENTIALS_OFF)
     return held.committed is not None
 
 
-# -- the stricter operations ------------------------------------------------------------------------------------------
+# -- the page's changes -----------------------------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class Added:
-    """What adding a never-store value did: the write, and whether the list held the value already."""
+    """What adding or taking off a never-store value did: the write, and whether the list was so already."""
 
     written: Rewritten
     already: bool
@@ -283,11 +275,10 @@ def checked_value(value: str) -> str:
 
 
 def add_listed(vault: Vault, name: ListName, value: str, *, shown: str) -> Added:
-    """Add a value to a never-store list from a page, the one change this makes: the list only grows (DR-0506). A value
-    the list already holds, as the matcher reads it, is no write at all, so a post sent twice adds it once. The commit
-    names the list and the count, never the value (DR-0508)."""
-    if name not in LISTS:
-        raise DocketError(f"a never-store list is people, containers or keywords, not {name!r}")
+    """Add a value to a never-store list from a page. A value the list already holds, as the matcher reads it, is no
+    write at all, so a post sent twice adds it once. The commit names the list and the count, never the value
+    (DR-0508)."""
+    _list_name(name)
     value = checked_value(value)
     already = False
 
@@ -304,54 +295,77 @@ def add_listed(vault: Vault, name: ListName, value: str, *, shown: str) -> Added
     return Added(written, already)
 
 
-def rule_on(vault: Vault, rule: str, *, shown: str) -> Rewritten:
-    """Turn a redaction rule on from a page: `credentials`, `phone`, or one of the user's patterns by its name. Only
-    ever on (DR-0506); a rule on already is no write. A name that is no rule, or that a built-in rule and a pattern or
-    two patterns share, is refused, as `docket redaction set` refuses it."""
+def take_off_listed(vault: Vault, name: ListName, value: str, *, shown: str) -> Added:
+    """Take a value off a never-store list from a page (DR-0601): matched with its ends trimmed, the posted value and
+    the list's alike, so one written with spaces round it comes off too. A value the list doesn't hold is no write, so
+    a post sent twice takes it off once. The commit names the list and the count, never the value."""
+    _list_name(name)
+    value = value.strip()
+    already = False
+
+    def edit(config: VaultConfig) -> VaultConfig:
+        nonlocal already
+        lists = config.never_store
+        values: list[str] = getattr(lists, name)
+        kept_values = [v for v in values if v.strip() != value]
+        if len(kept_values) == len(values):
+            already = True
+            return config
+        kept = lists.model_copy(update={name: kept_values})
+        return config.model_copy(update={"never_store": kept})
+
+    written = rewrite(vault, edit, f"Config: never-store {name}, 1 taken off", via="page", shown=shown)
+    return Added(written, already)
+
+
+def _list_name(name: str) -> None:
+    if name not in LISTS:
+        raise DocketError(f"a never-store list is people, containers or keywords, not {name!r}")
+
+
+def set_rule(vault: Vault, rule: str, on: bool, *, shown: str) -> Rewritten:
+    """Turn a redaction rule on or off from a page: `credentials`, `phone`, or one of the user's patterns by its name. A
+    rule that is so already is no write; credentials off is refused (DR-0601). A name that is no rule, or that a
+    built-in rule and a pattern or two patterns share, is refused, as `docket redaction set` refuses it."""
 
     def edit(config: VaultConfig) -> VaultConfig:
         found = config.redaction
         named = [p for p in found.patterns if p.name == rule]
         if rule in BUILTIN_RULES and not named:
-            return config.model_copy(update={"redaction": found.model_copy(update={rule: True})})
+            return config.model_copy(update={"redaction": found.model_copy(update={rule: on})})
         if len(named) != 1 or rule in BUILTIN_RULES:
             raise DocketError(
-                "no redaction rule by that name, or more than one: turn it on with docket redaction set, or in "
+                "no redaction rule by that name, or more than one: change it with docket redaction set, or in "
                 "vault.yaml by hand"
             )
-        patterns = [p.model_copy(update={"enabled": True}) if p.name == rule else p for p in found.patterns]
+        patterns = [p.model_copy(update={"enabled": on}) if p.name == rule else p for p in found.patterns]
         return config.model_copy(update={"redaction": found.model_copy(update={"patterns": patterns})})
 
-    return rewrite(vault, edit, f"Config: redaction {rule} on", via="page", shown=shown)
+    return rewrite(vault, edit, f"Config: redaction {rule} {'on' if on else 'off'}", via="page", shown=shown)
 
 
-def stricter(vault: Vault, source: str, sensitivity: str, *, shown: str) -> Rewritten:
-    """Make a source stricter from a page: work to mixed, either to private (DR-0506). The same sensitivity is no
-    write, and a looser one is refused. A folder source is work only, so the schema refuses it before it is written."""
+def set_sensitivity(vault: Vault, source: str, sensitivity: str, *, shown: str) -> Rewritten:
+    """Set a source's sensitivity from a page, either way (DR-0601). The same sensitivity is no write. A folder source
+    is work only, so the schema refuses another before it is written."""
     if sensitivity not in RANK:
         raise DocketError(f"a source's sensitivity is work, mixed or private, not {sensitivity!r}")
 
     def edit(config: VaultConfig) -> VaultConfig:
         entry = _source(config, source)
-        if RANK[sensitivity] < RANK[entry.sensitivity]:
-            raise LooseningError(
-                f"{source} is {entry.sensitivity}; a page makes a source only stricter, so {sensitivity} is a line to "
-                "change in vault.yaml by hand"
-            )
         return _with_source(config, source, entry.model_copy(update={"sensitivity": sensitivity}))
 
     return rewrite(vault, edit, f"Config: source {source} {sensitivity}", via="page", shown=shown)
 
 
-def turn_off(vault: Vault, source: str, *, shown: str) -> Rewritten:
-    """Turn a source off from a page (DR-0506): its syncs and scans stop, and what waits from it stays. Off already is
-    no write; turning one on is a line to change by hand."""
+def set_enabled(vault: Vault, source: str, on: bool, *, shown: str) -> Rewritten:
+    """Turn a source on or off from a page (DR-0601): off, its syncs and scans stop, and what waits from it stays. The
+    same state is no write."""
 
     def edit(config: VaultConfig) -> VaultConfig:
         entry = _source(config, source)
-        return _with_source(config, source, entry.model_copy(update={"enabled": False}))
+        return _with_source(config, source, entry.model_copy(update={"enabled": on}))
 
-    return rewrite(vault, edit, f"Config: source {source} off", via="page", shown=shown)
+    return rewrite(vault, edit, f"Config: source {source} {'on' if on else 'off'}", via="page", shown=shown)
 
 
 def _source(config: VaultConfig, name: str) -> SourceConfig:
@@ -380,7 +394,7 @@ def _reads_back(text: str) -> None:
 
 def changes(before: VaultConfig, after: VaultConfig) -> list[str]:
     """Each difference by its full path, such as `sources.calls.sensitivity: mixed -> work`; a never-store list only
-    as how many values were taken off and added, never a value, so a swap reads as one off and one added (DR-0519)."""
+    as how many values were taken off and added, never a value, so a swap reads as one off and one added."""
     out: list[str] = []
     _walk("", before.model_dump(mode="json"), after.model_dump(mode="json"), out)
     return out

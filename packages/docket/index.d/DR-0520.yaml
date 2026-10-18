@@ -1,11 +1,12 @@
 decisions:
   - id: DR-0520
     title: Nothing skips a loosening's question, for the owner's scripts either; a hand edit of vault.yaml stays the owner's
-    status: proposed
+    status: superseded
     at: "2026-10-17"
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#134"]
+    superseded_by: [DR-0599]
     description: "No flag, environment variable, token or MCP tool answers the question. The owner's scripts need none: loosening is a setup-time change, and whatever a script running as the owner reads, a key in the keychain, a file or a variable, an agent running as the owner reads too, so a path for scripts would be the agent's path. The human-only factor is an OS prompt (Windows Hello, Touch ID, polkit), deferred with the release's (DR-0382, DR-0506). A hand edit of vault.yaml stays possible and is the owner's own console edit: every part of it that only keeps more out applies at once and the rest once committed (DR-0521), and the owner's own git commit of it is theirs. Docket's own commit of it is weighed: the take-in commits an edit that doesn't loosen unasked, and one that loosens only on the owner's code at a console (DR-0517). Claude's edit of the file passes Claude Code's permission prompt with its diff, applies nothing that loosens, and in Claude's shell the next Docket write refuses to commit it; the skills forbid a loosening edit and give the owner the line, as the Settings page does."
     binds:
       - "Not a wall against a process running as the user: a pseudo-terminal of its own with CLAUDECODE cleared passes, as for the release (DR-0202); the skills forbid it."

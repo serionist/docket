@@ -83,7 +83,6 @@ def test_storage_and_a_source_s_keys_sit_together_in_vault_yaml(tmp_path: Path) 
         sensitivity="mixed",
         mapper=".claude/skills/sources/calls/mapper.py",
         tools=["get_transcript"],
-        media_hosts=["media.example.invalid"],
     )
     (tmp_path / CONFIG_FILE).write_text(config.dump(), encoding="utf-8")
     loaded = VaultConfig.load(tmp_path / CONFIG_FILE)

@@ -1,14 +1,14 @@
-"""The owner's yes at their own console, for a release (DR-0202), a vault.yaml change that isn't only stricter
-(DR-0517, DR-0518), a recording's decisions confirmed as cuts, an export of the media keys (DR-0575) and a forget
-(DR-0577): refused in Claude Code's shell and without a console on stdin and stdout, then the screen, then the OS
-prompt where this machine has one set up, or a code drawn fresh and typed back where it hasn't (DR-0572).
+"""The owner's yes at their own console, for the two steps that keep it (DR-0599): turning redaction.credentials off
+and forgetting for real (DR-0577). Refused in Claude Code's shell and without a console on stdin and stdout, then the
+screen, then the OS prompt where this machine has one set up, or a code drawn fresh and typed back where it hasn't
+(DR-0572). Every other act runs on the owner's yes in chat, which Docket doesn't check; `who` labels the commit it
+makes.
 
 `confirm` is the one question. Once a prompt is set up, only its verified answer is a yes: a cancel, a failure or no
 answer in time is a no, and the code is never asked then (DR-0574). The entry points that ask take no answer as a
-parameter, so a Python caller, a pipe or Claude Code's shell gets a refusal, not a yes; `asker` is only the release's
-own name for `ask`. The prompt says a person answered, not that Docket's code is intact: a process running as the user
-can still patch Docket, the floor DR-0202 accepts. What it ends is a pseudo-terminal of an agent's own reading the code
-and typing it back. Callers use the module (`console.ask(...)`), so a test stands in for the owner in one place.
+parameter, so a Python caller, a pipe or Claude Code's shell gets a refusal, not a yes. The prompt says a person
+answered, not that Docket's code is intact: a process running as the user can still patch Docket. Callers use the
+module (`console.ask(...)`), so a test stands in for the owner in one place.
 """
 
 from __future__ import annotations
@@ -28,8 +28,10 @@ from docket.plaintext import printable
 CODE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"
 CODE_LENGTH = 4
 RELEASE = "a release"
-LOOSENING = "a vault.yaml change that isn't only stricter"
+LOOSENING = "turning credentials redaction off"
 FORGET = "a forget"
+# The body line of a commit an act makes from Claude Code's shell (DR-0599).
+BY_CLAUDE = "by Claude, with the owner's OK in chat"
 
 Answer = Literal["yes", "no", "stop"]
 
@@ -48,6 +50,18 @@ def problem(act: str) -> str | None:
             "own window, through winpty)"
         )
     return None
+
+
+def who() -> str | None:
+    """Who runs this command, for the commit its act makes: Claude, in Claude Code's shell, which sets CLAUDECODE. A
+    label, never a check: nothing is refused on it (DR-0599)."""
+    return BY_CLAUDE if os.environ.get("CLAUDECODE") else None
+
+
+def signed(message: str) -> str:
+    """A commit message with `who`'s line as its body's last paragraph, when there is one."""
+    by = who()
+    return f"{message}\n\n{by}" if by else message
 
 
 def is_console(stream: TextIO | None) -> bool:

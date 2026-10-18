@@ -3,14 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from docket_testkit import make_config, sh
+from docket_testkit import empty_vault, git, make_config, sh
 from pydantic import ValidationError
 
 from docket import userconfig
 from docket.cli import main
 from docket.errors import DocketError
-from docket.vault import machine
-from docket.vault.config import SourceConfig, VaultConfig
+from docket.vault import machine, settings
+from docket.vault.config import CONFIG_FILE, SourceConfig, VaultConfig
 from docket.vault.home import Home
 
 
@@ -43,13 +43,12 @@ def test_the_wizard_s_sources_are_checked_the_same_way(tmp_path: Path, capsys: p
     assert not (tmp_path / "vault").exists()
 
 
-def test_a_source_s_mapper_tools_and_media_hosts_round_trip(tmp_path: Path) -> None:
+def test_a_source_s_mapper_tools_and_media_folders_round_trip(tmp_path: Path) -> None:
     config = make_config()
     config.sources["plaud"] = SourceConfig(
         sensitivity="mixed",
         mapper=".claude/skills/sources/plaud/mapper.py",
         tools=["list_files", "get_transcript"],
-        media_hosts=["media.example.invalid"],
         media_folders=["~/Downloads/Calls"],
     )
     path = tmp_path / "vault.yaml"
@@ -59,8 +58,58 @@ def test_a_source_s_mapper_tools_and_media_hosts_round_trip(tmp_path: Path) -> N
     assert "media_folders" not in make_config().dump()
 
 
+def test_media_hosts_from_before_any_https_host_is_read_and_ignored(tmp_path: Path) -> None:
+    """A source's old `media_hosts`, any list, reads as if it weren't there, and Docket never writes it; a file Docket
+    wrote while it had one is still in Docket's form (DR-0604)."""
+    config = make_config()
+    old = config.dump().replace("  tools: []\n", "  tools: []\n    media_hosts: []\n")
+    assert old.count("media_hosts: []") == len(config.sources)
+    assert config.written_by_docket(old)
+    path = tmp_path / "vault.yaml"
+    path.write_text(old.replace("media_hosts: []", "media_hosts: [media.example, 42]", 1), encoding="utf-8")
+    loaded = VaultConfig.load(path)
+    assert loaded == config and "media_hosts" not in loaded.dump()
+    assert not config.written_by_docket(path.read_text(encoding="utf-8"))
+
+
+def test_an_old_docket_form_with_hosts_listed_is_still_docket_s_own(tmp_path: Path) -> None:
+    """Docket wrote a source's hosts as a block list after its tools: such a file, its redaction block from before the
+    switches were split too, is Docket's form whatever hosts it lists, so the next write is whole and drops the key."""
+    config = make_config()
+    old = config.dump().replace("  tools: []\n", "  tools: []\n    media_hosts: []\n")
+    listed = old.replace("    media_hosts: []\n", "    media_hosts:\n    - media.example\n    - 42\n", 1)
+    assert config.written_by_docket(listed)
+    assert config.written_by_docket(listed.replace("  credentials: true\n  phone: false\n", "  builtin: true\n"))
+    assert not config.written_by_docket(listed.replace("    - 42\n", "    - 42   # mine\n"))
+    vault = empty_vault(tmp_path, config)
+    path = vault.root / CONFIG_FILE
+    path.write_text(listed, encoding="utf-8", newline="\n")
+    git(vault.root, "commit", "-qam", "An old vault.yaml")
+    phone = config.redaction.model_copy(update={"phone": True})
+    assert settings.rewrite(vault, lambda c: c.model_copy(update={"redaction": phone}), "Config: a", via="cli").changed
+    assert path.read_text(encoding="utf-8") == config.model_copy(update={"redaction": phone}).dump()
+
+
+@pytest.mark.parametrize(
+    "text", ["storage: [repo\n", "- storage\n", "storage: repo\n", "sources: 3\n", "sources:\n  chat: media_hosts\n"]
+)
+def test_a_text_that_doesn_t_read_as_settings_is_never_docket_s_form(text: str) -> None:
+    assert not make_config().written_by_docket(text)
+
+
+@pytest.mark.parametrize("written", ["work", "", "[get_memo]"])
+def test_a_source_that_isn_t_a_mapping_is_refused_by_name(tmp_path: Path, written: str) -> None:
+    """Old keys are taken out of a source's mapping only: anything else under its name is refused, as before."""
+    text = make_config().dump()
+    start, end = text.index("  chat:\n"), text.index("  calls:\n")
+    path = tmp_path / "vault.yaml"
+    path.write_text(f"{text[:start]}  chat: {written}\n{text[end:]}", encoding="utf-8")
+    with pytest.raises(DocketError, match=r"sources.chat: Input should be a valid dictionary"):
+        VaultConfig.load(path)
+
+
 def test_a_file_written_before_the_source_keys_reads_unchanged(tmp_path: Path) -> None:
-    keys = ("mapper: null", "tools: []", "media_hosts: []")
+    keys = ("mapper: null", "tools: []")
     text = "".join(f"{line}\n" for line in make_config().dump().splitlines() if line.strip() not in keys)
     assert "mapper" not in text
     path = tmp_path / "vault.yaml"
@@ -80,9 +129,6 @@ def test_a_file_written_before_the_source_keys_reads_unchanged(tmp_path: Path) -
         ("mapper", ".claude/skills/sources/plaud/mapper.sh", "names a .py file"),
         ("tools", ["mcp__plaud__list_files"], "without the host's mcp__ prefix"),
         ("tools", ["list files"], "isn't a tool's own name"),
-        ("media_hosts", ["https://media.example.invalid"], "no scheme, port or path"),
-        ("media_hosts", ["media.example.invalid:443"], "no scheme, port or path"),
-        ("media_hosts", ["Media.Example.invalid"], "lowercase"),
         ("media_folders", ["C:/Users/x"], "an absolute path"),
         ("media_folders", ["~/a/../../b"], r"with no \.\."),
     ],
@@ -194,8 +240,8 @@ def test_a_folder_source_round_trips_and_a_vault_without_one_writes_neither_key(
         ({"folder": " "}, r"with no \.\."),
         ({"folder": "docs", "sensitivity": "mixed"}, "mixed would hold every page on the Staging page"),
         ({"folder": "docs", "sensitivity": "private"}, "set enabled: false instead"),
-        ({"folder": "docs", "mapper": ".claude/skills/sources/x/mapper.py"}, "has no mapper, tools or media_hosts"),
-        ({"folder": "docs", "tools": ["list_files"]}, "has no mapper, tools or media_hosts"),
+        ({"folder": "docs", "mapper": ".claude/skills/sources/x/mapper.py"}, "has no mapper or tools"),
+        ({"folder": "docs", "tools": ["list_files"]}, "has no mapper or tools"),
         ({"exclude": ["archive/*"]}, "exclude goes with folder"),
         ({"folder": "docs", "exclude": [" "]}, "never empty"),
     ],

@@ -87,9 +87,12 @@ flowchart LR
 - Only then are records written to the raw log and committed. An unclassified record waits in staging; the app
   shows how many. The one version that goes in unstaged is the gate's own cut of one already in raw, made at
   promotion: a Whisper transcript following its family's cuts (DR-0596).
-- A held recording goes in only once its owner releases it at their own console, on the OS prompt or, where the
-  machine has none, a code typed back, for the cuts they confirm (DR-0572). The release log keeps those cuts, and the
-  gate applies them to every version of the recording, on every machine (DR-0200 to DR-0203).
+- A held recording goes in only once it is released with the cuts its owner said yes to, at their own terminal or in
+  chat to Claude, who runs the release (DR-0600). The release log keeps those cuts, and the gate applies them to every
+  version of the recording, on every machine (DR-0200, DR-0201, DR-0203).
+- Claude acts with the owner's OK in chat: it releases, changes settings, confirms decisions and old cuts by running
+  the owner's own commands after their yes, which Docket doesn't check; each commit says who acted. Only forgetting
+  for real and turning credentials redaction off keep the owner's yes at their own console (DR-0599).
 - Cursors are a high-water mark plus a lookback window plus a retry set and a waiting set per source, so late
   arrivals and rate-limited calls are caught on the next run. Each machine commits its own cursor file,
   `state/cursors-<machine>.yaml` (DR-0245), and a run's window starts at the furthest mark any machine reached, less
@@ -182,7 +185,7 @@ same result on any day.
 | Feature | How it works | Phase |
 |---|---|---|
 | Briefs | a processed doc per entity, `brief:<entity id>`: what changed, the last conversations, the decisions, in three fixed sections, every line cited (DR-0555); stale when its entity's records sit in run files its last rev's tree lacks, or a line is flagged (DR-0556); never for a listed entity, never naming a listed person (DR-0558); rebuilt by the brief skill when the user asks. Open items wait for the ledger, and a brief before each meeting for the calendar's meetings (phase 3) | 2 |
-| Decision log | a processed doc per decision, `decision:<yyyy-mm-dd>-<words>`, on a project, topic or stream entity (DR-0563): Claude proposes candidates with the decision skill; only the user's click on the Briefs page confirms or rejects one, and every read takes a decision's status from git (DR-0564); a proposed one never reads as decided, and a brief's Decisions cite current decisions only (DR-0565); a contradiction is marked, never resolved by the machine; a later decision supersedes an earlier one, and history stays | 2 |
+| Decision log | a processed doc per decision, `decision:<yyyy-mm-dd>-<words>`, on a project, topic or stream entity (DR-0563): Claude proposes candidates with the decision skill; only the user confirms or rejects one, by their click on the Briefs page or their word in chat, which Claude writes with `docket decision set`, and every read takes a decision's status from git (DR-0603); a proposed one never reads as decided, and a brief's Decisions cite current decisions only (DR-0565); a contradiction is marked, never resolved by the machine; a later decision supersedes an earlier one, and history stays | 2 |
 | Own documents | the work folder and attachments, read-only, so search covers what was written next to what was said: `docket scan` reads a folder source's docx, xlsx, pptx, pdf, md and txt as text, by page, slide and sheet (DR-0480) | 1 |
 | Highlights | a recorder's highlight button and later a hotkey; marked stretches go to the top of the minutes | 1 |
 | Secrets | never in the vault; a keychain-backed `docket secret`, never indexed or sent to a model unless asked for by name | 2 |
@@ -619,10 +622,10 @@ change lands on whoever uses that vendor, while the core still checks every rid 
   by its path, the list of sources coming from `vault.yaml` (DR-0168).
 - Plaud is the reference source, under `examples/sources/plaud` and tested in CI: an example to copy, not a
   dependency. The wheel carries a byte-identical copy for `--example` (DR-0167).
-- Audio is handed over by path or URL, and the service fetches it only within limits (DR-0548):
+- Audio is handed over by path or URL, and the service fetches it only within limits (DR-0604):
   - a path under a folder `vault.yaml` names for the source (`media_folders`) or Docket's own drop folder;
-  - a URL over https, to a host `vault.yaml` lists for that source, every address it resolves to public and none an
-    IPv6 form of an IPv4 one, the connection made to a checked address;
+  - a URL over https, to any host, every address it resolves to public and none an IPv6 form of an IPv4 one, the
+    connection made to a checked address; a source's old `media_hosts` key is read and ignored;
   - 3 redirects at most, each checked again, no compression, and a size cap.
 - Media passes the gate's checks at the put, again after the fetch, at every sweep and at promotion, and goes with any
   drop of a version of its record (DR-0547). A release's cuts and a transcript cut by time are cut out of the audio,
@@ -633,11 +636,10 @@ change lands on whoever uses that vendor, while the core still checks every rid 
   left out: `state/holds/<source>.txt`, ids only, read on every ingest and by the gate, failing closed (DR-0121,
   DR-0122). A held record in staging stops every ingest of its source until its file is deleted.
 - Releasing one: `/docket:cuts` turns the owner's words for each left-out stretch into time ranges on the transcript,
-  and the owner runs `docket hold release` in their own terminal, which asks the OS prompt per recording, or a code
-  typed back where the machine has none, and refuses Claude Code's shell, a pipe or a redirect. The release line is committed to `state/releases/<source>.jsonl`
-  before the hold comes off; the gate then cuts the recording by those times wherever it is staged, and leaves its
-  records without segments out unless the owner kept them (DR-0200 to DR-0207). No audio is stored before #42, which
-  cuts a released recording's audio by the same times.
+  shows them, and on the owner's yes runs `docket hold release`, which prints each recording's screen and releases it
+  (DR-0600, DR-0605). The release line is committed to `state/releases/<source>.jsonl` before the hold comes off; the
+  gate then cuts the recording by those times wherever it is staged, and leaves its records without segments out
+  unless the owner kept them (DR-0200, DR-0203 to DR-0206). Its audio is cut by the same times.
 - A Python connector is written only where no skill can harvest: a scheduled run with nobody's Claude session open.
 - A folder source is the core's own connector (DR-0480): `docket scan` lists the folder `vault.yaml` names, read-only,
   extracts each changed file's text in a child process with limits (DR-0485), and stages the records through the
@@ -653,7 +655,7 @@ change lands on whoever uses that vendor, while the core still checks every rid 
 | Page | What | Phase |
 |---|---|---|
 | Search | the same search Claude uses, with facets by entity, source, person and time | 0 |
-| Staging | records waiting for the gate: classify, cut, drop, promote; held recordings listed with the command that releases each at the owner's console | 1 |
+| Staging | records waiting for the gate: classify, cut, drop, promote; held recordings listed with the command that releases each | 1 |
 | Curate | the weekly round of proposals: accept, edit, reject, undo; what tier 1 applied; the log and the stoplist | 1 |
 | Sync | runs, failures, cursors, rate limits, what needs a Claude session | 1 |
 | Settings | sources, never-store lists, models, redaction rules; the Claude API key and a spend cap later | 1 |
@@ -683,8 +685,8 @@ How it is built (DR-0170 to DR-0175, DR-0546):
 - The Staging page lists what waits at the gate by source and age, with why each waits, and shows a record's text only
   once it is opened (DR-0380), as promotion would write it (DR-0383). It writes only through the gate's own calls on
   the writer thread, as same-origin form posts the Guard checks, and refuses a classification the record changed under
-  (DR-0381). Held recordings are listed with the commands that release them at the owner's console; no page releases
-  (DR-0382). Its URL holds the list's filters, the open record and what is checked on it (DR-0384).
+  (DR-0381). Held recordings are listed with the commands that release them, run by the owner or by Claude on their
+  yes; no page releases (DR-0382, DR-0600). Its URL holds the list's filters, the open record and what is checked on it (DR-0384).
 - The Curate page shows this machine's round: its cards, the open one beside the list with its snippets cut when
   opened, and its edit form in place; what tier 1 applied by itself; the review minutes, the question set before and
   after, the forms matching left out, the log with Undo and the stoplist with Lift. A round starts only on the user's
@@ -692,14 +694,14 @@ How it is built (DR-0170 to DR-0175, DR-0546):
   this machine's current one or the entity file changed since the card was shown (DR-0473). Its URL holds the open
   card, the edit form and what the last change did.
 - The Settings page shows each source, the never-store lists (their values only with `show=lists`), redaction and
-  this machine's models (DR-0505, DR-0510). Pages make only the `vault.yaml` changes that keep more out, through the
-  CLI's writer and its `loosens()` check; every other change is a loosening, named as its command, which asks at
-  the owner's console (DR-0517), or its line, which applies once committed (DR-0521), and
-  never made by a page (DR-0506). A redaction rule turned on, a source made mixed or turned off is one form post on
-  the writer thread, and a source made private asks once more first. A never-store value is added in two form posts
-  on the writer thread: the first
-  answers a view naming the staged records it drops and what already stored holds it, the second adds it if
-  `vault.yaml` is still the file the view counted; the value travels in the posts' bodies only (DR-0507 to DR-0509).
+  this machine's models (DR-0505, DR-0510). Its buttons make changes both ways through the CLI's writer: a source's
+  sensitivity, a source on or off, a redaction rule on or off, a never-store value added or taken off, each committed
+  via page (DR-0601). Turning credentials redaction off is the one change no page makes: it asks at the owner's
+  console. What has no button (a new source, a media folder, the api provider) is named as its command. Each change
+  is one form post on the writer thread, and a source made private asks once more first. A never-store value is
+  added in two form posts on the writer thread: the first answers a view naming the staged records it drops and what
+  already stored holds it, the second adds it if `vault.yaml` is still the file the view counted; the value travels
+  in the posts' bodies only (DR-0508, DR-0509, DR-0602).
   The Claude API key and a spend cap come with the features they set.
 - The Recording page puts a recording's summary beside its transcript, each anchor a link that marks the lines it
   points at (DR-0545). Its URL holds `rid`, `doc` and `at`; its links are plain links that land on the marked line,
@@ -710,8 +712,8 @@ How it is built (DR-0170 to DR-0175, DR-0546):
   holds `brief`, `line` and `type`. A brief a never-store list now holds answers hidden, and a line a list now
   names opens nothing (DR-0558). A project's, topic's or stream's page shows its decisions: what waits beside
   what it contradicts, then what is decided, superseded ones folded. Its buttons post to `/briefs/decision`,
-  the only writer of a decision's status, on the writer thread and checked against the rev the page showed
-  (DR-0564, DR-0566).
+  which writes a decision's status as `docket decision set` does, on the writer thread and checked against the rev
+  the page showed (DR-0603, DR-0566).
 
 ## 11. Claude first
 
@@ -749,7 +751,7 @@ Phase 0's plugin, by piece:
 | `recall` | the rules above as a method, with the read-only tools pre-approved and the command line when the service is down (DR-0164) |
 | `setup` | DR-0103's round: sources first, the vault named on every command, each override asked (DR-0165) |
 | `curate` | a round in chat over `docket curate`: the cards in one table with Claude's call and why, each decided only on the user's answer for it; seeding from a people directory or glossary in `seeding.md`; only `status`, `show` and `log` pre-approved (DR-0472) |
-| `cuts` | the owner's words for a held recording's left-out stretches placed as time ranges, in a proposals file, and the release handed to the owner's own terminal; only `docket hold list` and `show` pre-approved (DR-0207) |
+| `cuts` | the owner's words for a held recording's left-out stretches placed as time ranges, in a proposals file, shown to the owner, and the release run on their yes; only `docket hold list` and `show` pre-approved (DR-0605) |
 | the capture hook | PostToolUse for `mcp__.*` runs `docket hook post-tool-use`: binds a run, posts the captures an open run of this session wants, one line to Claude each (DR-0242) |
 
 - The plugin holds no scripts: its hook and token helper run the `docket` command, which must be on PATH (DR-0162).

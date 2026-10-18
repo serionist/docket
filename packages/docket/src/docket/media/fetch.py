@@ -1,9 +1,9 @@
-"""Where media may come from (DR-0548), and the reader that hands its bytes to the encryption as they arrive.
+"""Where media may come from (DR-0604), and the reader that hands its bytes to the encryption as they arrive.
 
 | From | Allowed when |
 |---|---|
 | a path | after every link, a regular file under a `media_folders` entry or the drop folder; no placeholder |
-| a URL | https, to a host exactly in the source's `media_hosts`, every address it resolves to allowed |
+| a URL | https, to any host, every address it resolves to allowed |
 
 An address is allowed when it is global and isn't an IPv6 form of an IPv4 address (mapped, compatible, NAT64, 6to4,
 Teredo), which `is_global` passes for some on Python 3.12 and which can reach an IPv4 address the check never saw. One
@@ -190,7 +190,7 @@ class Fetcher:
     is_allowed: Allowed = allowed
     context: ssl.SSLContext | None = None
 
-    def open(self, url: str, hosts: Sequence[str]) -> tuple[http.client.HTTPResponse, http.client.HTTPConnection]:
+    def open(self, url: str) -> tuple[http.client.HTTPResponse, http.client.HTTPConnection]:
         """The response whose body is the media, after at most `limits.redirects` redirects, each checked again."""
         context = self.context or ssl.create_default_context()
         for _ in range(self.limits.redirects + 1):
@@ -198,8 +198,8 @@ class Fetcher:
             host = (parts.hostname or "").lower()
             if parts.scheme != "https":
                 raise DocketError(f"media is fetched over https only, not {parts.scheme or 'a bare path'}")
-            if host not in hosts:
-                raise DocketError(f"{host or 'that URL'} isn't one of the source's media hosts")
+            if not host:
+                raise DocketError("that URL names no host")
             port = parts.port or 443
             addresses = self.resolver(host, port)
             if not addresses or not all(self.is_allowed(a) for a in addresses):

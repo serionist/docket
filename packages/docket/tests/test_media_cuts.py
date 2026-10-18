@@ -1,5 +1,5 @@
 """Released and hand-cut recordings get their audio, cut (DR-0561, DR-0562): the ranges at the put, staged audio whose
-cuts grew taken and put again, kind-less decisions confirmed at the owner's console, the timeline checks, the cut log
+cuts grew taken and put again, kind-less decisions confirmed on the owner's yes, the timeline checks, the cut log
 committed with the media, and the run's media line. Audio is a tone the test makes; records are invented."""
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ import pytest
 from docket_testkit import AtConsole, FakePrompt, git
 from media_kit import CALL, POLISHED, audio, dbfs, decoded, https_server, in_raw, media_vault, tone
 
+from docket import index
 from docket.cli import main
 from docket.errors import DocketError
 from docket.media import cutlog, cutter, layout, reader
@@ -20,8 +21,9 @@ from docket.media import put as media
 from docket.media import staged as media_staged
 from docket.media.keystore import KeyStore
 from docket.media.ranges import Needed
-from docket.service.sync import RunOpened, opened_text
+from docket.service.sync import RunOpened, media_for, opened_text
 from docket.vault import holds, releaselog
+from docket.vault.config import CONFIG_FILE, SourceConfig, VaultConfig
 from docket.vault.cuts import Cut
 from docket.vault.gate import Gate
 from docket.vault.records import RawRecord
@@ -305,53 +307,22 @@ def test_a_version_cut_after_kinds_or_on_another_machine_isn_t_evidence(
     assert "on another machine, which this one's decisions don't cover" in capsys.readouterr().out
 
 
-def test_confirm_cuts_asks_at_the_console_and_n_changes_nothing(
-    tmp_path: Path, owner: Callable[..., AtConsole], capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+def test_confirm_cuts_from_claude_code_s_shell_asks_nothing_and_shows_the_evidence(
+    tmp_path: Path,
+    os_prompt: Callable[..., FakePrompt],
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """On the owner's yes in chat, given before the command (DR-0599): no prompt and no code; the evidence it printed
+    stays the record of what was confirmed."""
     vault = _hand_cut(tmp_path)
     _strip_kinds(vault)
-    owner("n")
-    assert main(["media", "confirm-cuts", CALL, "--vault", str(vault.root)]) == 0
-    assert "cuts     nothing confirmed" in capsys.readouterr().out
+    hello = os_prompt()
     monkeypatch.setenv("CLAUDECODE", "1")
-    from docket import console
-
-    monkeypatch.setattr(console, "problem", lambda act: f"{act} asks you at a console: Claude Code's shell can't")
-    with pytest.raises(DocketError, match="Claude Code's shell"):
-        media_confirm(vault)
-
-
-def test_confirm_cuts_asks_the_os_prompt_where_there_is_one(
-    tmp_path: Path, owner: Callable[..., AtConsole], os_prompt: Callable[..., FakePrompt]
-) -> None:
-    """A confirmation lets audio in for good, so it asks the OS prompt (DR-0575); its no confirms nothing."""
-    from docket import osprompt
-
-    vault = _hand_cut(tmp_path)
-    _strip_kinds(vault)
-    hello = os_prompt(osprompt.Refused("cancelled"), osprompt.Verified())
-    owner("", "")
-    assert media_confirm(vault) == 0
-    assert media_confirm(vault) > 0
-    assert hello.acts == ["confirm a recording's decisions were cuts"] * 2
-
-
-def test_confirm_cuts_refuses_when_the_decisions_change_while_asked(
-    tmp_path: Path, owner: Callable[..., AtConsole]
-) -> None:
-    vault = _hand_cut(tmp_path)
-    _strip_kinds(vault)
-    staging = Staging(vault.root, vault.home)
-
-    def meanwhile() -> str:
-        with staging.decided_file.open("a", encoding="utf-8") as out:
-            out.write(json.dumps({"rid": rid_hash(POLISHED), "key": "b" * 64}) + "\n")
-        prompt = owner_said.prompts[-1]
-        return prompt[prompt.index("Type ") + 5 : prompt.index("Type ") + 9].lower()
-
-    owner_said = owner(meanwhile)
-    with pytest.raises(DocketError, match="changed while you were asked"):
-        media_confirm(vault)
+    assert main(["media", "confirm-cuts", CALL, "--vault", str(vault.root)]) == 0
+    out = capsys.readouterr().out
+    assert out.index("decision(s) without a kind") < out.index("decision(s) marked as cuts")
+    assert hello.acts == []
 
 
 def test_a_private_decision_beside_a_release_cut_version_refuses(tmp_path: Path) -> None:
@@ -369,11 +340,14 @@ def media_confirm(vault: Vault) -> int:
     return confirm.confirm(vault, CALL)
 
 
-def test_the_run_names_cut_recordings_without_audio_only_where_media_comes_from(tmp_path: Path) -> None:
-    vault = media_vault(tmp_path, hosts=())
-    in_raw(vault)
-    release(vault, (2000, 4000))
-    assert Gate(vault).media_due("plaud") == [], "no host or folder: nowhere to put audio from"
+def test_the_run_names_cut_recordings_without_audio_for_every_source_but_a_folder_one(tmp_path: Path) -> None:
+    vault = media_vault(tmp_path)
+    path = vault.root / CONFIG_FILE
+    config = VaultConfig.load(path)
+    config.sources["docs"] = SourceConfig(folder="docs")
+    path.write_text(config.dump(), encoding="utf-8", newline="\n")
+    vault.commit([CONFIG_FILE], "Config: a folder source")
+    assert Gate(Vault.open(vault.root)).media_due("docs") == [], "a folder source puts no audio"
     assert Gate(vault).media_due("nosuch") == []
     hosted = media_vault(tmp_path / "hosted")
     release(hosted, (2000, 4000))
@@ -386,6 +360,42 @@ def test_the_run_names_cut_recordings_without_audio_only_where_media_comes_from(
     )  # fmt: skip
     assert "media    1: rec-a" in opened_text(opened)
     assert "media    none" in opened_text(opened.model_copy(update={"media": []}))
+
+
+def test_only_a_source_that_can_have_audio_gets_the_media_step_and_its_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mail or chat gets no media step and no media_due scan under the lock: the index and staging are asked first. A
+    skill that puts audio, a recording staged or in raw, or a media folder gets the step (DR-0604); the skill's word
+    gives a new Plaud source's first run the step for what it stages."""
+    scanned: list[str] = []
+    real = Gate.media_due
+
+    def due(gate: Gate, source: str, **limits: int) -> list[str]:
+        scanned.append(source)
+        return real(gate, source, **limits)
+
+    monkeypatch.setattr(Gate, "media_due", due)
+    vault = media_vault(tmp_path)
+    # No index yet: it can't say, so media_due's scan decides; plaud's recording waits in staging.
+    assert (media_for(vault, "chat", skill_puts=False), scanned) == ((False, []), ["chat"])
+    assert media_for(vault, "plaud", skill_puts=False) == (True, [])
+    in_raw(vault)
+    index.rebuild(vault)
+    scanned.clear()
+    assert (media_for(vault, "chat", skill_puts=False), scanned) == ((False, []), [])
+    assert (media_for(vault, "chat", skill_puts=True), scanned) == ((True, []), []), "nothing to name yet"
+    assert (media_for(vault, "plaud", skill_puts=False), scanned) == ((True, []), ["plaud"]), "in raw now"
+    path = vault.root / CONFIG_FILE
+    config = VaultConfig.load(path)
+    config.sources["chat"] = SourceConfig(media_folders=["~/Calls"])
+    config.sources["docs"] = SourceConfig(folder="docs")
+    path.write_text(config.dump(), encoding="utf-8", newline="\n")
+    vault.commit([CONFIG_FILE], "Config: a media folder and a folder source")
+    scanned.clear()
+    assert media_for(Vault.open(vault.root), "chat", skill_puts=False) == (True, [])
+    assert media_for(Vault.open(vault.root), "docs", skill_puts=True) == (False, [])
+    assert scanned == ["chat"]
 
 
 def test_a_cut_put_past_the_cap_or_failing_its_encryption_leaves_nothing(

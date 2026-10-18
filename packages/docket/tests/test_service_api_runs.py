@@ -118,6 +118,8 @@ def test_a_whole_run_stages_its_records_and_commits_the_moved_mark(client: TestC
     assert opened["skill"].endswith("SKILL.md")
     assert opened["budget"] == 400 * 1024
     assert "How this run goes" in opened["steps"]
+    # A source with no media folder and no recording gets no media step (DR-0604).
+    assert "Media: after closing" not in opened["steps"] and opened["media"] == []
     a, b = memo("a1"), memo("b1")
     run.listing(a, b)
     run.fetch(a)

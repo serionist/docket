@@ -1,14 +1,14 @@
 ---
 name: cuts
-description: Turn the owner's words for the stretches they left out of held recordings into time ranges on each transcript, and hand them the release to confirm in their own terminal. Use when the user asks to release held recordings, to go through a backfill's held recordings or left-out stretches, or to cut a private part out of a held recording before it goes into Docket.
+description: Turn the owner's words for the stretches they left out of held recordings into time ranges on each transcript, show them the cuts, and release on their yes. Use when the user asks to release held recordings, to go through a backfill's held recordings or left-out stretches, or to cut a private part out of a held recording before it goes into Docket.
 allowed-tools: Bash(docket hold list) Bash(docket hold list *) Bash(docket hold show *)
 ---
 
 # Cuts for held recordings
 
-A held recording goes into Docket only after its owner confirms, in their own terminal, the cuts that take out what
-they left out. This skill does the judgement: it finds each stretch the owner described in words and proposes time
-ranges. It never releases anything.
+A held recording goes into Docket only after its owner says yes to the cuts that take out what they left out. This
+skill does the judgement: it finds each stretch the owner described in words, proposes time ranges, shows them, and
+runs the release on the owner's yes, never before it.
 
 ## Before anything
 
@@ -37,7 +37,7 @@ ranges. It never releases anything.
 Write it in a temp folder, outside any git work tree: Docket refuses one inside. YAML, every time quoted.
 
 ```yaml
-# Proposed by Claude. Nothing is released until you type back the code docket hold release shows you.
+# Proposed by Claude. Nothing is released until you say yes to these cuts.
 source: plaud
 recordings:
   - id: rec-0001
@@ -51,28 +51,29 @@ recordings:
 - `note` holds the owner's words for the stretch, never the transcript's.
 - Nothing else of the recording goes in the file: ids, times, rids and the notes.
 
-## Hand it over
+## Show the cuts, then release
 
-Give the owner the one command to run in their own terminal (Windows Terminal, PowerShell, a macOS or Linux terminal;
-in Git Bash's own window, through `winpty`):
+Show the owner one table per recording: each cut as a time range, the utterances at its two edges from `hold show`,
+what is kept as it reads, and every recording that stays held with why. Ask for their yes in chat. A release lets
+the recording into git for good, so ask again after any change they make.
+
+On their yes, and only for what they said yes to, run:
 
 ```
 docket hold release <source> --from <folder> --proposals <file> --vault <vault>
 ```
 
-- Each recording shows what goes, with its edges, and what is kept, in full; it goes in only when they type back the
-  code it shows.
-- Never run it yourself, pipe into it, wrap it in a console or pseudo-terminal of your own, or clear `CLAUDECODE` for
-  it. Auto mode changes nothing here: prepare everything up to the command, then stop and hand it over.
-- The same holds for `vault.yaml`: never edit or commit it, or run a command, to let more in; give the owner the
-  line or the command.
+- It prints each recording's screen, what goes with its edges and what is kept, then releases it; report what it
+  printed. It isn't pre-approved, so Claude Code asks the owner too, and the commit says you ran it with their OK.
+- A recording they didn't say yes to stays out of the file, or goes in with `held`.
 
 ## After
 
 - `docket hold list --vault <vault>`: what is still held; the command's own output says why.
 - After the next sync on each other machine, again: an id marked `held again after its release` came back with a
   merge. The next import with a hold file takes it off, or the owner runs `docket hold release <source> <id> --from
-  <folder> --vault <vault>` (one code, no cuts asked); its records then wait as pending for a classification.
+  <folder> --vault <vault>` (no cuts asked), or you run it on their yes; its records then wait as pending for a
+  classification.
 - Then `docket staging promote --vault <vault>`, as for any record.
 - When the backfill is done, remind the owner to delete this session: their words and the transcripts are in it.
 

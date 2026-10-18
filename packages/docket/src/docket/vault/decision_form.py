@@ -1,13 +1,13 @@
 """What doc_put checks of a decision, how every read takes one, and what a brief's Decisions section may cite
-(DR-0563, DR-0564, DR-0565).
+(DR-0563, DR-0603, DR-0565).
 
 A decision is `decision:<yyyy-mm-dd>-<words>`, on one `subject`: a project, topic or stream entity that `entities` holds
-too. Every put writes it proposed, its title `# Proposed: <the decision>`. Only the Briefs page confirms or rejects
-one, and moves its `replaces` into `supersedes` (DR-0564). `replaces` and `contradicts` name confirmed, current
-decisions on the same subject. A confirmed or rejected decision is final: it takes no new rev, and every read takes it
-whole from its last commit. A proposed one reads as on disk with its status and links from its last commit, so an
-edit no commit holds never makes one read as decided. Never-store is as for briefs (DR-0558). Problems name the line,
-never a listed value.
+too. Every put writes it proposed, its title `# Proposed: <the decision>`. Only the Briefs page or `docket decision set`
+confirms or rejects one, and moves its `replaces` into `supersedes` (DR-0603). `replaces` and `contradicts` name
+confirmed, current decisions on the same subject. A confirmed or rejected decision is final: it takes no new rev, and
+every read takes it whole from its last commit. A proposed one reads as on disk with its status and links from its last
+commit, so an edit no commit holds never makes one read as decided. Never-store is as for briefs (DR-0558). Problems
+name the line, never a listed value.
 """
 
 from __future__ import annotations
@@ -38,8 +38,8 @@ CITE_ONE = (
     "gives both"
 )
 # What stops a hand edit to a decision, on its line: the take-in and the redact pass add their own advice.
-LINKS_EDIT = "changes the decision's status or links, which only the Briefs page writes"
-TITLE_EDIT = "takes Proposed: from the title of a decision only the Briefs page confirms"
+LINKS_EDIT = "changes the decision's status or links, which only the Briefs page or docket decision set writes"
+TITLE_EDIT = "takes Proposed: from the title of a decision only the Briefs page or docket decision set confirms"
 FINAL_EDIT = "changes a decision that is {status}, which is final: a change is a new decision that replaces it"
 NAMES_SOMEONE = "an id here names someone a never-store list holds; leave them out"
 DECISIONS_EDIT = "is a Decisions line that doesn't read as a current decision's title with its cite"
@@ -119,7 +119,7 @@ def committed_doc(text: str | None) -> ProcessedDoc | None:
 
 
 def as_committed(on_disk: ProcessedDoc, committed: ProcessedDoc | None) -> ProcessedDoc:
-    """A decision as every read takes it (DR-0564): a confirmed or rejected one whole from its last commit; a proposed
+    """A decision as every read takes it (DR-0603): a confirmed or rejected one whole from its last commit; a proposed
     one as on disk, its status and links from that commit; one no commit holds, proposed with nothing it supersedes,
     replaces or contradicts. Its title says Proposed: whatever the file says. A file that says otherwise is read as
     Docket would write it, so no read, its text included, shows a proposed decision as decided. Any other doc as it
@@ -182,7 +182,7 @@ def pick_problem(doc: ProcessedDoc, pick: str) -> str | None:
 
 
 def status_rev(doc: ProcessedDoc, pick: str, by: str) -> str:
-    """The candidate's next rev as the user's click writes it (DR-0564): confirmed, its `replaces` moved into
+    """The candidate's next rev as the user's click writes it (DR-0603): confirmed, its `replaces` moved into
     `supersedes`, and with replace its `contradicts` too; or rejected, its links kept as the record of what it said.
     Its title says Rejected: or nothing. Only `DocStore.decide` writes it."""
     meta = doc.meta
@@ -211,7 +211,7 @@ def evidence_gone(doc: ProcessedDoc) -> bool:
 
 
 def edited(on_disk: str, committed: str | None) -> bool:
-    """Whether a final decision's file says other than its last commit: the index and the tool note it (DR-0564)."""
+    """Whether a final decision's file says other than its last commit: the index and the tool note it (DR-0603)."""
     return committed is not None and normalize_newlines(on_disk) != normalize_newlines(committed)
 
 
@@ -247,7 +247,10 @@ def check(
             )
         )
     if meta.status != "proposed":
-        message = "status: a put writes a decision as proposed; only the Briefs page confirms or rejects one"
+        message = (
+            "status: a put writes a decision as proposed; only the Briefs page or docket decision set confirms or "
+            "rejects one"
+        )
         problems.append(DocProblem(brief_form.head_line(doc, "status"), message))
     if meta.supersedes:
         message = "supersedes: a decision names what it would supersede in replaces; the Briefs page's confirm moves it"
@@ -352,7 +355,7 @@ def _names_someone(doc: ProcessedDoc, shapes: NeverStore) -> bool:
 def hand_stops(
     edited_doc: ProcessedDoc, text: str, last: str | None, root: Path, lists: NeverStore
 ) -> list[tuple[int, str]]:
-    """What stops the take-in of a hand edit to a decision (DR-0564): any change to a confirmed or rejected one; a
+    """What stops the take-in of a hand edit to a decision (DR-0603): any change to a confirmed or rejected one; a
     status or a link a proposed one's last commit doesn't hold, or one no commit holds yet that isn't proposed with no
     links; and what never-store refuses on a put. Each on a line of the file."""
     committed = committed_doc(last)

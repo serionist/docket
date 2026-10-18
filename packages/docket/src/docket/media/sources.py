@@ -1,7 +1,6 @@
-"""A source's media hosts and folders in vault.yaml (DR-0548), changed through vault.yaml's one writer.
+"""A source's media folders in vault.yaml (DR-0604), changed through vault.yaml's one writer.
 
-Adding one lets more in, so `settings.rewrite` asks at the owner's console first (DR-0517); removing one keeps more out
-and is written at once. A page makes neither change (DR-0506): it shows the command.
+Each is made on the owner's yes, at their own terminal or in chat to Claude, and committed saying who (DR-0601).
 """
 
 from __future__ import annotations
@@ -10,19 +9,15 @@ from typing import Literal
 
 from docket.errors import DocketError
 from docket.vault import settings
-from docket.vault.config import HOST, VaultConfig, folder_problem
+from docket.vault.config import VaultConfig, folder_problem
 from docket.vault.settings import Rewritten
 from docket.vault.vault import Vault
 
-Field = Literal["media_hosts", "media_folders"]
-WORDS: dict[Field, str] = {"media_hosts": "media host", "media_folders": "media folder"}
+Field = Literal["media_folders"]
+WORDS: dict[Field, str] = {"media_folders": "media folder"}
 
 
-def _checked(field: Field, value: str) -> str:
-    if field == "media_hosts":
-        if not HOST.match(value):
-            raise DocketError(f"{value!r} isn't a host name: lowercase, with no scheme, port or path")
-        return value
+def _checked(value: str) -> str:
     problem = folder_problem(value)
     if problem is not None:
         raise DocketError(problem)
@@ -30,8 +25,8 @@ def _checked(field: Field, value: str) -> str:
 
 
 def set_media_list(vault: Vault, source: str, field: Field, value: str, *, add: bool) -> Rewritten:
-    """Add or remove one host or folder of a source, and commit vault.yaml."""
-    value = _checked(field, value)
+    """Add or remove one folder of a source, and commit vault.yaml."""
+    value = _checked(value)
 
     def edit(config: VaultConfig) -> VaultConfig:
         entry = config.sources.get(source)

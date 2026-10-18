@@ -3,8 +3,7 @@
 An edit of vault.yaml not committed yet keeps more out at once and lets more in only once committed. `effective` is
 HEAD's settings with every part of the working file that only keeps more out put in, field by field, each checked
 against what the gate and the jobs do with it; everything else stays HEAD's, so a key a later schema adds waits too.
-`loosens` is the same rule seen from the other side: a change loosens when the settings in force under it aren't the
-change itself (DR-0506). One rule, so the page's door, the take-in, the console's question and the gate never drift.
+Every write of Docket's that changes vault.yaml commits such an edit first (DR-0601), so it is in force from there.
 """
 
 from __future__ import annotations
@@ -139,12 +138,6 @@ def effective(committed: VaultConfig, file: VaultConfig) -> VaultConfig:
     )
 
 
-def loosens(before: VaultConfig, after: VaultConfig) -> bool:
-    """Whether `after` is anything but `before` with changes that only keep more out: a page makes none such (DR-0506),
-    the CLI makes one only at the owner's console (DR-0517), and one made by hand applies only once committed."""
-    return effective(before, after) != after
-
-
 def _grown(before: list[str], after: list[str]) -> list[str]:
     """`after`'s values, then those of `before` that `after` dropped: what was added counts, and what was taken off
     stays."""
@@ -206,15 +199,14 @@ def _sources(before: Mapping[str, SourceConfig], after: Mapping[str, SourceConfi
 
 
 def _source(before: SourceConfig, after: SourceConfig) -> SourceConfig:
-    """The stricter sensitivity, off if either is off, the tools, media hosts and media folders `after` still lists,
-    and for a folder source the exclude entries added. A run takes its tools when it opens and a capture from any other
-    marks it short; media comes only from a host or folder both list (DR-0548); exclude is fnmatch with no negation,
-    so an entry only leaves paths out. Every other key stays `before`'s."""
+    """The stricter sensitivity, off if either is off, the tools and media folders `after` still lists, and for a
+    folder source the exclude entries added. A run takes its tools when it opens and a capture from any other marks it
+    short; a path's media comes only from a folder both list (DR-0604); exclude is fnmatch with no negation, so an
+    entry only leaves paths out. Every other key stays `before`'s."""
     update: dict[str, object] = {
         "sensitivity": max(before.sensitivity, after.sensitivity, key=RANK.__getitem__),
         "enabled": before.enabled and after.enabled,
         "tools": [tool for tool in after.tools if tool in before.tools],
-        "media_hosts": [host for host in after.media_hosts if host in before.media_hosts],
         "media_folders": [folder for folder in after.media_folders if folder in before.media_folders],
     }
     if before.folder is not None:

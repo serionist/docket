@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0600
+    title: docket hold release releases with no question, run by the owner or by Claude after the owner's OK on the cuts shown in chat
+    status: decided
+    at: "2026-10-18"
+    by: Soma Osvay
+    cost: one-way
+    sources: ["#191", "18 Oct, in chat"]
+    supersedes: [DR-0202]
+    description: "release() shows each recording's screen, what goes with its edges and what is kept in full, then releases it: the line committed, the hold taken off, the records staged through the gate, every check DR-0203 lists unchanged. A recording held again after its release has its hold taken off. Nothing asks, and Claude Code's shell, a pipe or a redirect is no longer refused. The cuts skill shows the cuts in chat first and runs the command only on the owner's yes (DR-0605); the screen prints what docket hold show already printed, so the skill's word about where that output stays covers both. The release line keeps its fields (DR-0200); the Releases and Holds commits carry DR-0599's line. The versions the screen showed are classified work by the user, as before: the yes is theirs. No page, route or MCP tool releases (DR-0382). sources/release.py keeps _console_problem and _ask as calls through, so a project's copy of the reference source's tests, which patches them, still runs."
+    binds: [Inside the package only cli.py calls release(); a test scans for it.]
+    not_chosen:
+      - "An MCP tool for the release: a new door, while the CLI does it."
+      - "A dry run flag: hold show and the skill's table show the cuts before, and the screen shows them as released."
+      - "Keeping the code typed back: the owner can't hand the release to Claude, which is the trust model's point."

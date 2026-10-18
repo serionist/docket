@@ -60,7 +60,7 @@ class NewSource:
     registered: bool
     block: str | None
     commit: str | None
-    # Not added: the owner didn't type the code back, and the folder written for it is gone again.
+    # Not added: the owner didn't confirm the uncommitted edit it would take in, and the folder is gone again.
     declined: bool = False
 
 
@@ -140,7 +140,6 @@ def new_folder_source(vault: Vault, name: str, given: Path) -> NewFolderSource:
         entry = SourceConfig(
             enabled=kept.enabled,
             sensitivity=kept.sensitivity,
-            media_hosts=kept.media_hosts,
             folder=folder,
             exclude=kept.exclude,
         )
@@ -180,7 +179,7 @@ def _entry(
     tools: list[str],
 ) -> SourceConfig:
     """The source's entry: what the flags give, else what vault.yaml already has, else the reference's, else Docket's
-    guess for a source it knows. Checked here, before anything is written."""
+    guess for a source it knows; its media folders as vault.yaml has them. Checked here, before anything is written."""
     kept_level = existing.sensitivity if existing is not None else None
     level = sensitivity or kept_level or (reference.sensitivity if reference else KNOWN_SOURCES.get(name, "mixed"))
     kept_tools = existing.tools if existing is not None else []
@@ -190,7 +189,7 @@ def _entry(
             sensitivity=level,
             mapper="/".join([*SKILLS, name, "mapper.py"]),
             tools=tools or kept_tools or list(reference.tools if reference else ()),
-            media_hosts=existing.media_hosts if existing is not None else [],
+            media_folders=existing.media_folders if existing is not None else [],
         )
     except ValidationError as e:
         raise DocketError(f"source {name}: " + "; ".join(str(err["msg"]) for err in e.errors())) from None

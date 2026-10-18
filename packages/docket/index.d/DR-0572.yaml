@@ -12,6 +12,7 @@ decisions:
       - No flag, environment variable, config key or token answers or skips the prompt; the one way back to the code where a prompt is set up is a marker only an admin or root can make (DR-0574).
       - "Tests never reach a real prompt: an autouse fixture replaces osprompt.find, and a test's child process patches it before Docket's main runs."
       - "Amends DR-0202 and DR-0517: the yes is the OS prompt, or the code where the machine has none. A one-way door on AGENTS.md's list, in the release's and the loosening's lines."
+      - "Amended by #191 (DR-0599): console.confirm asks for two steps only, turning credentials redaction off and docket forget --now."
     not_chosen:
       - "The OS prompt without the console check, so Claude's shell can ask and the owner answers in the dialog: the owner would approve a screen they never read, and a prompt they didn't start can pass on a face."
       - "Both the code and the OS prompt: the code adds nothing a pseudo-terminal can't type."

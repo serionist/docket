@@ -153,7 +153,7 @@ def set_service(
 
 
 def media_max_bytes(default: int) -> int:
-    """`media.max_bytes`: the largest media file `media_put` takes on this machine (DR-0548), `default` when unset. A
+    """`media.max_bytes`: the largest media file `media_put` takes on this machine (DR-0604), `default` when unset. A
     value of another kind is refused, as the service's keys are."""
     raw: Any = load().get("media")
     value: Any = cast(dict[str, Any], raw).get("max_bytes") if isinstance(raw, dict) else None

@@ -114,27 +114,18 @@ def test_an_exclude_added_and_a_tool_removed_apply_at_once(vault: Vault) -> None
     assert not found.waiting
 
 
-def test_a_media_host_or_folder_added_by_hand_waits_and_one_removed_applies_at_once(vault: Vault) -> None:
+def test_a_media_folder_added_by_hand_waits_and_one_removed_applies_at_once(vault: Vault) -> None:
     calls = vault.config.sources["calls"]
-    edit(vault, source("calls", calls.model_copy(update={"media_hosts": ["a.example"], "media_folders": ["~/In"]})))
+    edit(vault, source("calls", calls.model_copy(update={"media_folders": ["~/In"]})))
     commit(vault)
-    edit(
-        vault,
-        source(
-            "calls",
-            calls.model_copy(update={"media_hosts": ["a.example", "b.example"], "media_folders": ["~/In", "~/Out"]}),
-        ),
-    )
+    edit(vault, source("calls", calls.model_copy(update={"media_folders": ["~/In", "~/Out"]})))
     found = Vault.open(vault.root)
-    assert (found.config.sources["calls"].media_hosts, found.config.sources["calls"].media_folders) == (
-        ["a.example"],
-        ["~/In"],
-    )
+    assert found.config.sources["calls"].media_folders == ["~/In"]
     assert found.waiting
-    assert inforce.loosens(found.config, found.written)
-    edit(vault, source("calls", calls.model_copy(update={"media_hosts": [], "media_folders": []})))
+    assert inforce.effective(found.config, found.written) != found.written
+    edit(vault, source("calls", calls.model_copy(update={"media_folders": []})))
     found = Vault.open(vault.root)
-    assert (found.config.sources["calls"].media_hosts, found.config.sources["calls"].media_folders) == ([], [])
+    assert found.config.sources["calls"].media_folders == []
     assert not found.waiting
 
 

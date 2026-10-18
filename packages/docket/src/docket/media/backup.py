@@ -3,9 +3,9 @@
 Nothing about a key travels in git. An export writes every key of this clone into one file, sealed with age's
 passphrase mode under a passphrase Docket draws and shows once; the owner moves the file where they like and types the
 passphrase on the other machine. Both run only at the owner's own console: Claude Code's shell, a pipe or a redirect is
-refused, since whoever has the file and the passphrase opens every media file the clone stored. The export asks the OS
-prompt first, or the code where there is none, since every key leaves the clone; the import's passphrase is its factor
-(DR-0575). A key on the forgotten list is left out of an export and skipped by an import, each counted (DR-0595).
+refused, since whoever has the file and the passphrase opens every media file the clone stored, and the passphrase
+shown or typed there stays out of Claude's session log. Neither asks a yes of its own (DR-0599). A key on the
+forgotten list is left out of an export and skipped by an import, each counted (DR-0595).
 
 The file's format is a door, pinned by its `schema_version`: a later Docket reads every earlier version.
 
@@ -63,8 +63,6 @@ class Bundle(BaseModel):
 class Exported:
     keys: int
     kept: bool
-    # The owner said no before anything was written (DR-0575).
-    declined: bool = False
     # Keys on the forgotten list, left out of the file (DR-0595).
     forgotten: int = 0
 
@@ -155,12 +153,6 @@ def export(vault: Vault, target: Path, keys: KeyStore | None = None) -> Exported
                 "went), so nothing is exported"
             )
         found.append(BundleKey(id=key_id, identity=key.identity, path=key.path, at=key.at))
-    screen = [f"{len(found)} media key(s) of this clone go into {target}, sealed with a passphrase shown once."]
-    asked = console.confirm(
-        screen, "export them", "export nothing", "nothing was exported", act="export this clone's media keys"
-    )
-    if asked != "yes":
-        return Exported(len(found), kept=False, declined=True, forgotten=len(left_out))
     passphrase = draw()
     sealed = crypto.seal_with_passphrase(Bundle(keys=found).model_dump_json(), passphrase)
     try:

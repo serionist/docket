@@ -167,7 +167,7 @@ def test_a_proposed_decision_reads_as_proposed_everywhere(vault: Vault, capsys: 
 def test_a_put_writes_only_a_proposed_decision(vault: Vault) -> None:
     text = decision(FIRST, "Proposed: x", [f"- Cleo said so. {cite(vault, NOTE, FRIDAY)}"])
     assert any(
-        "only the Briefs page confirms" in p
+        "only the Briefs page or docket decision set confirms" in p
         for p in refused(vault, text.replace("status: proposed", "status: confirmed"))
     )
     supersedes = text.replace("subject: fleet-management", f"subject: fleet-management\nsupersedes: [{OTHER}]")
@@ -206,7 +206,10 @@ def test_a_status_changed_on_disk_reads_as_its_last_commit_and_isn_t_taken_in(va
     assert hits(vault, "charging queue comes first") == ["Proposed: the charging queue comes first"]
     head = git(vault.root, "rev-parse", "HEAD")
     problems = refused(vault, decision(FIRST, "Proposed: the queue", [f"- Cleo. {cite(vault, NOTE, FRIDAY)}"], rev="1"))
-    assert any("changes the decision's status or links, which only the Briefs page writes" in p for p in problems)
+    assert any(
+        "changes the decision's status or links, which only the Briefs page or docket decision set writes" in p
+        for p in problems
+    )
     assert any("takes Proposed: from the title" in p for p in problems)
     assert (git(vault.root, "rev-parse", "HEAD"), path.read_text(encoding="utf-8")) == (head, edited)
 

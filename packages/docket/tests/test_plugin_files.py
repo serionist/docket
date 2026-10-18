@@ -159,7 +159,7 @@ def test_setup_runs_commands_with_flags_docket_has() -> None:
         assert flag in options("init")
 
 
-def test_cuts_pre_approves_only_reading_holds_and_hands_the_release_to_the_owner() -> None:
+def test_cuts_pre_approves_only_reading_holds_and_runs_the_release_on_the_owner_s_yes() -> None:
     allowed = re.findall(r"Bash\(([^)]*)\)", frontmatter("cuts")["allowed-tools"])
     assert allowed == ["docket hold list", "docket hold list *", "docket hold show *"]
     for skill in sorted(p.name for p in (PLUGIN / "skills").iterdir()):
@@ -170,21 +170,23 @@ def test_cuts_pre_approves_only_reading_holds_and_hands_the_release_to_the_owner
         assert used, command
         flags = {flag for line in used for flag in re.findall(r"--[a-z][a-z-]*", line)}
         assert flags <= options(*command), command
-    # Where hold show's output stays, said before the first one; and the release the skill never runs.
+    # Where hold show's output stays, said before the first one; and the release run only on the owner's yes, after
+    # the cuts were shown (DR-0605).
     for words in ("session log", "tool-results/*.txt", "bridged", "cleanupPeriodDays", "delete this session"):
         assert words in text, words
-    assert "Never run it yourself" in text
-    assert "CLAUDECODE" in text
+    assert text.index("Show the owner one table per recording") < text.index("On their yes, and only for what")
 
 
-def test_setup_hands_each_source_to_the_owner_one_at_a_time_and_never_loosens_itself() -> None:
-    """Adding a source asks at the owner's console (DR-0517): setup gives the commands one at a time, since a pasted
-    block feeds its second line into the first one's question, and runs none of them."""
+def test_setup_adds_each_source_on_the_user_s_yes_and_leaves_the_key_to_them() -> None:
+    """Adding a source runs on the user's yes, one at a time (DR-0605); the API key is typed in their own terminal, and
+    credentials off stays theirs at their console."""
     setup = (PLUGIN / "skills" / "setup" / "SKILL.md").read_text(encoding="utf-8")
-    for words in ("one command at a\ntime", "type back a code", "Never run these yourself", "CLAUDECODE", "winpty"):
+    for words in ("only on the user's yes, one source at a time", "they type in their own terminal", "CLAUDECODE"):
         assert words in setup, words
     assert "source new" not in frontmatter("setup").get("allowed-tools", "")
-    cuts = (PLUGIN / "skills" / "cuts" / "SKILL.md").read_text(encoding="utf-8")
-    assert "never edit or commit it, or run a command, to let more in" in cuts
+    decision = (PLUGIN / "skills" / "decision" / "SKILL.md").read_text(encoding="utf-8")
+    used = re.findall(r"docket decision set[^`\n]*", decision)
+    assert used
+    assert {flag for line in used for flag in re.findall(r"--[a-z][a-z-]*", line)} <= options("decision", "set")
     plaud = (PLUGIN.parent / "examples" / "sources" / "plaud" / "SKILL.md").read_text(encoding="utf-8")
     assert "Then commit `vault.yaml`" in plaud

@@ -1,6 +1,7 @@
-"""The CLI's question before a vault.yaml change that isn't only stricter (DR-0517, DR-0519): refused in Claude Code's
-shell and without a console, then the change shown path by path, never a never-store value, and made only on the code
-typed back; an uncommitted edit that loosens is asked about in the same question. Invented values only."""
+"""The CLI's one question before a vault.yaml change, turning credentials redaction off (DR-0601): refused in Claude
+Code's shell and without a console, then the change shown path by path, never a never-store value, and made only on
+the yes; an uncommitted edit that turns it off is asked about in the same question. Every other change asks nothing,
+and its commit says who made it (DR-0599). Invented values only."""
 
 from __future__ import annotations
 
@@ -10,7 +11,16 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from docket_testkit import AtConsole, FakePrompt, consuming_project, empty_vault, git, make_config, sh
+from docket_testkit import (
+    AtConsole,
+    FakePrompt,
+    cant_place,
+    consuming_project,
+    empty_vault,
+    git,
+    make_config,
+    sh,
+)
 from pydantic import Field
 
 from docket import console, osprompt
@@ -21,6 +31,7 @@ from docket.vault.config import CONFIG_FILE, NeverStore, Redaction, RedactionPat
 from docket.vault.vault import Vault, remove_tree
 
 Edit = Callable[[VaultConfig], VaultConfig]
+BY_CLAUDE = f"\n\n{console.BY_CLAUDE}\n"
 
 
 @pytest.fixture
@@ -68,11 +79,11 @@ def cli(vault: Vault, change: Edit, **kwargs: object) -> settings.Rewritten:
     return settings.rewrite(vault, change, "Config: a change", via="cli", **kwargs)  # type: ignore[arg-type]
 
 
-def test_a_loosening_is_refused_in_claude_code_s_shell_and_without_a_console(
+def test_turning_credentials_off_is_refused_in_claude_code_s_shell_and_without_a_console(
     vault: Vault, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     before, at = text(vault), head(vault)
-    with pytest.raises(DocketError, match=r"a vault.yaml change that isn't only stricter asks you at a console"):
+    with pytest.raises(DocketError, match=r"turning credentials redaction off asks you at a console"):
         cli(vault, credentials(False))
     monkeypatch.setenv("CLAUDECODE", "1")
     with pytest.raises(DocketError, match=r"this shell is Claude Code's \(CLAUDECODE is set\)"):
@@ -91,7 +102,7 @@ def test_anything_but_the_code_writes_nothing(vault: Vault, owner: Callable[...,
 def test_with_an_os_prompt_its_yes_makes_the_change_and_its_no_writes_nothing(
     vault: Vault, owner: Callable[..., AtConsole], os_prompt: Callable[..., FakePrompt]
 ) -> None:
-    """A loosening asks the OS prompt where this machine has one, and never the code then (DR-0572, DR-0574)."""
+    """Credentials off asks the OS prompt where this machine has one, and never the code then (DR-0572, DR-0574)."""
     before, at = text(vault), head(vault)
     hello = os_prompt(osprompt.Refused("cancelled"), osprompt.Verified())
     person = owner("", "")
@@ -99,7 +110,7 @@ def test_with_an_os_prompt_its_yes_makes_the_change_and_its_no_writes_nothing(
     assert (text(vault), head(vault)) == (before, at)
     assert cli(vault, credentials(False)).changed
     assert bodies(vault, 1) == ["Config: a change\n\nconfirmed at the console\n"]
-    assert hello.acts == ["make a vault.yaml change that isn't only stricter"] * 2
+    assert hello.acts == ["turn credentials redaction off"] * 2
     assert not any("Type" in p for p in person.prompts)
 
 
@@ -107,23 +118,28 @@ def test_the_code_writes_and_commits_saying_it_was_confirmed(
     vault: Vault, owner: Callable[..., AtConsole], capsys: pytest.CaptureFixture[str]
 ) -> None:
     person = owner("code")
-    done = cli(vault, memo(sensitivity="mixed", tools=["get_memo"]), warnings=["think twice"])
+    done = cli(vault, credentials(False), warnings=["think twice"])
     assert done.changed and not done.declined
     assert bodies(vault, 1) == ["Config: a change\n\nconfirmed at the console\n"]
     out = capsys.readouterr().out
-    assert (
-        "this command changes vault.yaml:\n  sources.memo.sensitivity: work -> mixed\n"
-        "  sources.memo.tools: [] -> [get_memo]\nnote     think twice\n"
-    ) in out
+    assert "this command changes vault.yaml:\n  redaction.credentials: true -> false\nnote     think twice\n" in out
     assert person.prompts == [person.prompts[0]]
     assert person.prompts[0].endswith("to make this change, n to leave vault.yaml as it is, q to stop: ")
 
 
-def test_a_stricter_change_asks_nothing(vault: Vault, owner: Callable[..., AtConsole]) -> None:
+def test_every_other_change_asks_nothing_and_its_commit_says_who(
+    vault: Vault, owner: Callable[..., AtConsole], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A looser change is made on the owner's yes, given before the command: from Claude Code's shell it commits saying
+    Claude made it with the owner's OK, from the owner's own terminal with nothing more (DR-0599, DR-0601)."""
     person = owner()
+    monkeypatch.setenv("CLAUDECODE", "1")
+    assert cli(vault, memo(sensitivity="mixed", tools=["get_memo"])).changed
+    assert bodies(vault, 1) == [f"Config: a change{BY_CLAUDE}"]
+    monkeypatch.delenv("CLAUDECODE")
     assert cli(vault, phone(True)).changed
-    assert person.prompts == []
     assert bodies(vault, 1) == ["Config: a change\n"]
+    assert person.prompts == []
 
 
 def test_a_file_changed_while_the_owner_reads_writes_nothing(vault: Vault, owner: Callable[..., AtConsole]) -> None:
@@ -160,9 +176,20 @@ def test_a_commit_of_vault_yaml_while_asked_writes_nothing_and_of_another_file_d
     assert cli(vault, credentials(False)).changed
 
 
-def test_a_hand_edited_file_gets_its_line_and_no_code_but_is_still_refused_in_claude_code(
+def test_a_hand_edited_file_is_asked_about_and_edited_in_place(vault: Vault, owner: Callable[..., AtConsole]) -> None:
+    path = vault.root / CONFIG_FILE
+    path.write_text(text(vault) + "# my own note\n", encoding="utf-8")
+    git(vault.root, "commit", "-qm", "a note of mine", "--", CONFIG_FILE)
+    person = owner("code")
+    assert cli(vault, credentials(False)).changed
+    assert len(person.prompts) == 1
+    assert text(vault).endswith("# my own note\n") and "credentials: false" in text(vault)
+
+
+def test_a_change_docket_can_t_place_gets_its_line_and_no_code_but_is_still_refused_in_claude_code(
     vault: Vault, owner: Callable[..., AtConsole], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    cant_place(monkeypatch)
     path = vault.root / CONFIG_FILE
     path.write_text(text(vault) + "# my own note\n", encoding="utf-8")
     git(vault.root, "commit", "-qm", "a note of mine", "--", CONFIG_FILE)
@@ -187,17 +214,18 @@ def test_nothing_answers_the_question_for_the_owner() -> None:
     ]
 
 
-# -- an uncommitted edit that loosens ----------------------------------------------------------------------------------
+# -- an uncommitted edit -----------------------------------------------------------------------------------------------
 
 
-def test_an_uncommitted_loosening_is_asked_about_before_a_stricter_command_and_goes_in_first(
+def test_an_uncommitted_credentials_off_is_asked_about_before_any_command_and_goes_in_first(
     vault: Vault, owner: Callable[..., AtConsole], capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     by_hand(vault, lambda c: c.model_copy(update={"never_store": NeverStore(people=["Ben Sample", "Cleo Test"])}))
-    by_hand(vault, memo(sensitivity="work", tools=["get_memo"]))
+    by_hand(vault, memo(mapper=".claude/skills/sources/memo/mapper.py", tools=["list_memos", "get_memo"]))
+    by_hand(vault, credentials(False))
     at = head(vault)
     monkeypatch.setenv("CLAUDECODE", "1")
-    with pytest.raises(DocketError, match=settings.UNCOMMITTED_LOOSENING):
+    with pytest.raises(DocketError, match=settings.UNCOMMITTED_CREDENTIALS_OFF):
         cli(vault, phone(True))
     assert head(vault) == at
     monkeypatch.delenv("CLAUDECODE")
@@ -207,7 +235,10 @@ def test_an_uncommitted_loosening_is_asked_about_before_a_stricter_command_and_g
     out = capsys.readouterr().out
     assert "vault.yaml has an edit that isn't in force until you commit it; it goes in first:" in out
     assert "  never_store.people: 1 taken off, 1 added\n" in out
-    assert "  sources.memo.tools: [] -> [get_memo]\n" in out
+    # Every other change the edit holds is on the same screen, each as the file has it.
+    assert "  sources.memo.mapper: none -> .claude/skills/sources/memo/mapper.py\n" in out
+    assert "  sources.memo.tools: [] -> [list_memos, get_memo]\n" in out
+    assert "  redaction.credentials: true -> false\n" in out
     assert "Dora" not in out and "Cleo" not in out
     assert "this command changes vault.yaml" not in out
     owner("code")
@@ -216,7 +247,20 @@ def test_an_uncommitted_loosening_is_asked_about_before_a_stricter_command_and_g
     assert bodies(vault, 2) == ["Config: a change\n", "Config: vault.yaml as edited\n\nconfirmed at the console\n"]
 
 
-def test_a_loosening_edit_and_a_loosening_command_take_one_code_and_two_commits(
+def test_any_other_uncommitted_edit_goes_in_first_unasked_saying_who(
+    vault: Vault, owner: Callable[..., AtConsole], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    by_hand(vault, lambda c: c.model_copy(update={"never_store": NeverStore(people=["Ben Sample", "Cleo Test"])}))
+    by_hand(vault, memo(tools=["get_memo"]))
+    person = owner()
+    monkeypatch.setenv("CLAUDECODE", "1")
+    done = cli(vault, phone(True))
+    assert done.taken_in is not None and done.changed
+    assert bodies(vault, 2) == [f"Config: a change{BY_CLAUDE}", f"Config: vault.yaml as edited{BY_CLAUDE}"]
+    assert person.prompts == []
+
+
+def test_an_edit_and_credentials_off_take_one_code_and_two_commits(
     vault: Vault, owner: Callable[..., AtConsole], capsys: pytest.CaptureFixture[str]
 ) -> None:
     by_hand(vault, memo(sensitivity="mixed"))
@@ -230,12 +274,9 @@ def test_a_loosening_edit_and_a_loosening_command_take_one_code_and_two_commits(
     assert cli(vault, credentials(False)).changed
     assert len(person.prompts) == 1
     out = capsys.readouterr().out
-    assert "  sources.calls.sensitivity: mixed -> work\n" in out
     assert "  redaction.credentials: true -> false\n" in out
-    assert bodies(vault, 2) == [
-        "Config: a change\n\nconfirmed at the console\n",
-        "Config: vault.yaml as edited\n\nconfirmed at the console\n",
-    ]
+    assert "sources.calls" not in out
+    assert bodies(vault, 2) == ["Config: a change\n\nconfirmed at the console\n", "Config: vault.yaml as edited\n"]
 
 
 def test_an_edit_that_only_keeps_more_out_goes_in_unasked(vault: Vault, owner: Callable[..., AtConsole]) -> None:
@@ -254,7 +295,7 @@ def test_a_head_without_a_readable_vault_yaml_is_refused_at_a_console_too(
     git(vault.root, "commit", "-qm", "broken", "--", CONFIG_FILE)
     (vault.root / CONFIG_FILE).write_text(good, encoding="utf-8", newline="\n")
     owner("code")
-    with pytest.raises(settings.UncommittedLooseningError, match="isn't in the last commit"):
+    with pytest.raises(DocketError, match="isn't in the last commit"):
         settings.rewrite(vault, phone(True), "Config: a change", via="cli")
 
 
@@ -265,7 +306,7 @@ def test_redaction_set_shows_the_credentials_warning_before_the_code(
     assert main(["redaction", "set", "credentials", "off", "--vault", str(vault.root)]) == 1
     out = capsys.readouterr().out
     warning = out.index("note     from the next sync, passwords, keys and tokens are stored as written")
-    assert warning < out.index("redact   credentials not changed: the code wasn't typed back")
+    assert warning < out.index("redact   credentials not changed: nothing was confirmed")
 
 
 # -- each command -------------------------------------------------------------------------------------------------
@@ -283,40 +324,69 @@ def project_vault(tmp_path: Path) -> Vault:
     return Vault.open(found.root)
 
 
-LOOSENING = {
-    "credentials off": ["redaction", "set", "credentials", "off"],
+CHANGES = {
     "phone off": ["redaction", "set", "phone", "off"],
     "a pattern off": ["redaction", "set", "ticket-id", "off"],
     "a source added": ["source", "new", "diary"],
     "a folder source added": ["source", "new", "papers", "--folder", "papers"],
+    "a media folder added": ["media", "folder", "add", "chat", "papers"],
+    "the api provider allowed": ["models", "allow", "voyage"],
 }
 
 
-@pytest.mark.parametrize("what", sorted(LOOSENING))
-def test_each_loosening_command_is_refused_in_claude_code_s_shell_writing_nothing(
+@pytest.mark.parametrize("what", sorted(CHANGES))
+def test_each_other_command_commits_from_claude_code_s_shell_saying_so(
     tmp_path: Path, what: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    vault = project_vault(tmp_path)
+    at = head(vault)
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.chdir(vault.root.parent)
+    assert main([*CHANGES[what], "--vault", str(vault.root)]) == 0, capsys.readouterr()
+    assert head(vault) != at
+    assert bodies(vault, 1)[0].endswith(BY_CLAUDE)
+
+
+def test_credentials_off_is_refused_in_claude_code_s_shell_writing_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     vault = project_vault(tmp_path)
     before, at = text(vault), head(vault)
     monkeypatch.setenv("CLAUDECODE", "1")
-    monkeypatch.chdir(vault.root.parent)
-    assert main([*LOOSENING[what], "--vault", str(vault.root)]) == 2
+    assert main(["redaction", "set", "credentials", "off", "--vault", str(vault.root)]) == 2
     assert "this shell is Claude Code's (CLAUDECODE is set)" in capsys.readouterr().err
+    assert (text(vault), head(vault)) == (before, at)
+
+
+@pytest.mark.parametrize("what", sorted(CHANGES))
+def test_a_no_to_an_uncommitted_credentials_off_leaves_each_command_undone(
+    tmp_path: Path,
+    what: str,
+    owner: Callable[..., AtConsole],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    vault = project_vault(tmp_path)
+    by_hand(vault, credentials(False))
+    before, at = text(vault), head(vault)
+    monkeypatch.chdir(vault.root.parent)
+    owner("n")
+    main([*CHANGES[what], "--vault", str(vault.root)])
+    assert "nothing was confirmed" in capsys.readouterr().out
     assert (text(vault), head(vault)) == (before, at)
     assert not (vault.root.parent / ".claude" / "skills" / "sources" / "diary").exists()
 
 
-def test_a_no_at_source_new_takes_its_folder_away_and_the_same_entry_again_asks_nothing(
+def test_source_new_after_a_no_writes_its_folder_again_on_a_yes(
     tmp_path: Path, owner: Callable[..., AtConsole], capsys: pytest.CaptureFixture[str]
 ) -> None:
     vault = project_vault(tmp_path)
+    by_hand(vault, credentials(False))
     folder = vault.root.parent / ".claude" / "skills" / "sources" / "diary"
-    before = text(vault)
     owner("n")
     assert main(["source", "new", "diary", "--vault", str(vault.root)]) == 1
-    assert "source   diary not added: the code wasn't typed back" in capsys.readouterr().out
+    assert "source   diary not added: nothing was confirmed" in capsys.readouterr().out
     assert not folder.exists()
-    assert text(vault) == before
     owner("code")
     assert main(["source", "new", "diary", "--vault", str(vault.root)]) == 0
     assert "diary:" in text(vault)
@@ -326,11 +396,11 @@ def test_a_no_at_source_new_takes_its_folder_away_and_the_same_entry_again_asks_
     assert person.prompts == []
 
 
-def test_a_loosening_during_a_conflict_refuses_before_any_question(
+def test_turning_credentials_off_during_a_conflict_refuses_before_any_question(
     vault: Vault, owner: Callable[..., AtConsole]
 ) -> None:
-    """An unmerged path, as a stash pop that conflicts leaves one: the write refuses before the owner types a code, as
-    a release does (DR-0528)."""
+    """An unmerged path, as a stash pop that conflicts leaves one: the write refuses before the owner is asked
+    (DR-0528)."""
     blob = sh(vault.root, "git", "hash-object", "-w", "--", CONFIG_FILE).strip()
     info = "".join(f"100644 {blob} {n}\tconflict.txt\n" for n in (1, 2, 3))
     proc = subprocess.run(
@@ -392,21 +462,6 @@ def test_head_s_vault_yaml_gone_while_the_owner_reads_writes_nothing(
     owner(takes_it_out_of_head)
     with pytest.raises(settings.StaleError, match="changed while you were asked"):
         cli(vault, credentials(False))
-
-
-def test_a_no_at_a_folder_source_leaves_vault_yaml_as_it_was(
-    tmp_path: Path,
-    owner: Callable[..., AtConsole],
-    capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    vault = project_vault(tmp_path)
-    monkeypatch.chdir(vault.root.parent)
-    before = text(vault)
-    owner("n")
-    assert main(["source", "new", "papers", "--folder", "papers", "--vault", str(vault.root)]) == 1
-    assert "source   papers not added: the code wasn't typed back" in capsys.readouterr().out
-    assert text(vault) == before
 
 
 def test_the_screen_matches_patterns_by_name_so_a_reorder_says_nothing() -> None:

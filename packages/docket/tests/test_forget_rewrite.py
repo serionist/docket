@@ -108,7 +108,7 @@ def forgot(host: Path, owner: Callable[..., AtConsole]) -> Forgot:
     """Two forgets of a folder vault: the starter and the call whole, then a held recording by its versions, released
     with a cut afterwards; and a note and a doc written again after them."""
     config = make_config("folder")
-    config.sources = {"plaud": SourceConfig(media_hosts=["media.example"]), "chat": SourceConfig()}
+    config.sources = {"plaud": SourceConfig(), "chat": SourceConfig()}
     vault = Vault.init(host / "vault", config, "test-box")
     cursors.save(vault, "plaud", cursors.Cursor())
     KeyStore(vault.home).init("file")
