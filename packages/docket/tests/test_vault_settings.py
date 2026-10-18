@@ -648,6 +648,16 @@ def test_a_never_store_value_is_taken_off_by_its_list_and_count_and_never_named(
         settings.take_off_listed(vault, "aliases", "Cleo Test", shown=shown(vault))  # type: ignore[arg-type]
 
 
+def test_a_value_written_with_spaces_round_it_is_taken_off_as_the_page_posts_it(tmp_path: Path) -> None:
+    config = make_config()
+    config.never_store = NeverStore(people=[" Cleo Test ", "Ben Sample"])
+    vault = empty_vault(tmp_path, config)
+    assert "- ' Cleo Test '\n" in text(vault)
+    taken = settings.take_off_listed(vault, "people", " Cleo Test ", shown=shown(vault))
+    assert taken.written.changed and not taken.already
+    assert VaultConfig.load(vault.root / CONFIG_FILE).never_store.people == ["Ben Sample"]
+
+
 def test_the_take_in_rule_holds_for_a_rule_and_a_source(tmp_path: Path) -> None:
     vault = rules_vault(tmp_path)
     path = vault.root / CONFIG_FILE

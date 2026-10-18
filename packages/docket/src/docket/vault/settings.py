@@ -296,8 +296,9 @@ def add_listed(vault: Vault, name: ListName, value: str, *, shown: str) -> Added
 
 
 def take_off_listed(vault: Vault, name: ListName, value: str, *, shown: str) -> Added:
-    """Take a value off a never-store list from a page (DR-0601), as written there: a value the list doesn't hold is no
-    write, so a post sent twice takes it off once. The commit names the list and the count, never the value."""
+    """Take a value off a never-store list from a page (DR-0601): matched with its ends trimmed, the posted value and
+    the list's alike, so one written with spaces round it comes off too. A value the list doesn't hold is no write, so
+    a post sent twice takes it off once. The commit names the list and the count, never the value."""
     _list_name(name)
     value = value.strip()
     already = False
@@ -306,10 +307,11 @@ def take_off_listed(vault: Vault, name: ListName, value: str, *, shown: str) -> 
         nonlocal already
         lists = config.never_store
         values: list[str] = getattr(lists, name)
-        if value not in values:
+        kept_values = [v for v in values if v.strip() != value]
+        if len(kept_values) == len(values):
             already = True
             return config
-        kept = lists.model_copy(update={name: [v for v in values if v != value]})
+        kept = lists.model_copy(update={name: kept_values})
         return config.model_copy(update={"never_store": kept})
 
     written = rewrite(vault, edit, f"Config: never-store {name}, 1 taken off", via="page", shown=shown)
