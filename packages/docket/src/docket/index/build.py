@@ -66,7 +66,7 @@ from docket.vault.vault import Vault
 INDEX_DIR = "index"
 DB_NAME = "docket.sqlite"
 LOCK_NAME = "docket.lock"
-# Docs at earlier revs, by git dir, doc and rev, for the docs' rule to follow refs to: a rev's text never changes.
+# Docs at earlier revs, by vault root, doc and rev, for the docs' rule to follow refs to: a rev's text never changes.
 EARLIER_KEPT = 4096
 _EARLIER: dict[tuple[Path, str, int], ProcessedDoc] = {}
 REPLACE_SECONDS = 5.0
@@ -562,8 +562,9 @@ class Indexer:
     def _earlier(self, wanted: Collection[tuple[str, int]]) -> dict[tuple[str, int], ProcessedDoc]:
         """Docs at the earlier revs refs name, as pinning reads them (DR-0540): each doc's history read for all its
         revs at once, each rev's text kept for the process, since a rev never changes."""
-        git_dir = self.vault.home.git_dir
-        out = {key: _EARLIER[(git_dir, *key)] for key in wanted if (git_dir, *key) in _EARLIER}
+        # By the vault's root, not its git dir: folder vaults in one host repo share it, and each has its own docs.
+        root = self.vault.root
+        out = {key: _EARLIER[(root, *key)] for key in wanted if (root, *key) in _EARLIER}
         missing = sorted(set(wanted) - set(out))
         if not missing:
             return out
@@ -577,7 +578,7 @@ class Indexer:
             if doc is not None:
                 if len(_EARLIER) >= EARLIER_KEPT:
                     _EARLIER.clear()
-                _EARLIER[(git_dir, doc_id, rev)] = out[(doc_id, rev)] = doc
+                _EARLIER[(root, doc_id, rev)] = out[(doc_id, rev)] = doc
         return out
 
     def sync_docs(self, covering: set[str]) -> int:

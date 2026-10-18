@@ -11,17 +11,18 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
-from docket_testkit import PLAUD, POLISHED, copy_vault, make_record, plaud_records, template_vault
+from docket_testkit import PLAUD, POLISHED, copy_vault, make_config, make_record, plaud_records, template_vault
 from forget_kit import AT, forget, stored, write_raw_file
 
 from docket.documents import records as documents
 from docket.documents import scan
 from docket.imports import notes
-from docket.vault import rawlog
-from docket.vault.cuts import CUT_MARKER
+from docket.vault import cursors, rawlog
+from docket.vault.config import SourceConfig
+from docket.vault.cuts import CUT_MARKER, Cut
 from docket.vault.gate import Gate
 from docket.vault.rawlog import RawLog
-from docket.vault.records import RawRecord
+from docket.vault.records import TRANSCRIBED_VIA, RawRecord
 from docket.vault.spans import RawLookup
 from docket.vault.vault import Vault
 
@@ -121,6 +122,43 @@ def test_the_cut_scan_skips_a_listed_cut_version_and_reads_a_changed_file_again(
     (path,) = [p for p in runs if "hello again" in p.read_text(encoding="utf-8")]
     path.write_text("", encoding="utf-8")
     assert set(other.list(source="calls").why.values()) == {"mixed"}
+
+
+CALL = "plaud:rec-follow"
+UNDER = {"source": "plaud", "container": CALL, "thread": CALL, "author": None}
+SAID = [
+    {"start_ms": 0, "end_ms": 9000, "speaker": "Ada Example", "text": "The crane passed its load test."},
+    {"start_ms": 10_000, "end_ms": 20_000, "speaker": "Ben Sample", "text": "My dentist moved to Friday."},
+]
+
+
+def test_a_forgotten_family_gets_no_whisper_version_from_the_follow(tmp_path: Path) -> None:
+    config = make_config()
+    config.sources = {"plaud": SourceConfig()}
+    vault = Vault.init(tmp_path / "vault", config, "test-box")
+    cursors.save(vault, "plaud", cursors.Cursor())
+    transcript = f"{CALL}/transaction_polish"
+    said = "\n".join(f"{s['speaker']}: {s['text']}" for s in SAID)
+    heard = make_record(
+        rid=f"{CALL}/whisper", kind="transcript", segments=SAID, text=said, via=f"{TRANSCRIBED_VIA} {'ab' * 32}",
+        fidelity="derived", engine="whisper-fake@0123456", **UNDER,
+    )  # fmt: skip
+    gate = Gate(vault)
+    gate.stage([make_record(rid=CALL, kind="recording", title="Crane check", text="", **UNDER)])
+    gate.stage([make_record(rid=transcript, kind="transcript", segments=SAID, text=said, **UNDER), heard])
+    gate.promote()
+    forget(vault, rids=[CALL])
+    # A later version of the transcript, cut by hand: without the list, the follow would cut Whisper's to match.
+    newer = [*SAID, {"start_ms": 30_000, "end_ms": 31_000, "speaker": "Ada Example", "text": "Bye."}]
+    gate.stage(
+        [make_record(rid=transcript, kind="transcript", segments=newer, text=said + "\nAda Example: Bye.", **UNDER)]
+    )
+    gate.classify(transcript, "work", cuts=[Cut(start=10_000, end=20_000, unit="ms")])
+    assert gate.promote().followed == 0
+    # The cut scan never read the forgotten Whisper transcript's marks, so the follow had no family to cut.
+    assert f"{CALL}/whisper" not in gate._seen.latest  # pyright: ignore[reportPrivateUsage]
+    lines = [line for run in vault.rawlog.stamped() for line in run[0].path.read_text(encoding="utf-8").splitlines()]
+    assert sum(f'"rid":"{CALL}/whisper"' in line for line in lines) == 1
 
 
 def test_the_notes_import_names_no_listed_record(vault: Vault) -> None:

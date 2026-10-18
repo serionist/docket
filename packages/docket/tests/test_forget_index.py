@@ -17,6 +17,7 @@ from docket_testkit import (
     POLISHED,
     copied,
     git_calls,
+    host_repo,
     logical_dump,
     make_config,
     make_record,
@@ -291,6 +292,32 @@ def test_an_update_judges_what_the_list_took_as_the_rebuild_before_it(tmp_path: 
     assert rows(vault, "SELECT count(*) FROM records WHERE source = 'docs'") == [(0,)]
     assert rows(vault, "SELECT count(*) FROM doc_anchors WHERE doc = ?", COPY_NOTE) == [(0,)]
     assert rows(vault, "SELECT count(*) FROM chunks WHERE text LIKE '%forty thousand%'") == [(0,)]
+
+
+def test_two_folder_vaults_of_one_host_never_judge_by_each_other_s_earlier_revs(tmp_path: Path) -> None:
+    top = host_repo(tmp_path)
+    call, day = "recording-note:2026-10-14-call", "digest:2026-10-14-day"
+
+    def made(name: str, first: str) -> Vault:
+        """A note whose rev 1 anchors `first`, its rev 2 the kept message, and a digest built on rev 1."""
+        vault = Vault.init(top / name, make_config("folder"), "test-box")
+        vault.write_run("chat", [make_record(1), make_record(2)])
+        said = f"- The price. [r:{first}]"
+        recall.doc_put(vault, doc(call, [first], [said]))
+        built = f"- Built on rev 1. {cite(vault, call, said)}"
+        recall.doc_put(vault, doc(call, [OTHER], [f"- The price, later. [r:{OTHER}]"], "rev: 1"))
+        recall.doc_put(vault, doc(day, [], [built], title="The day"))
+        forget(vault, rids=[CHAT])
+        return vault
+
+    # The same doc, rev and git dir in both: in one, rev 1's line is on the forgotten message; in the other, kept.
+    forgot, kept = made("forgot", CHAT), made("kept", OTHER)
+    build._EARLIER.clear()  # pyright: ignore[reportPrivateUsage]
+    for first, second in ((forgot, kept), (kept, forgot)):
+        build.rebuild(first)
+        build.rebuild(second)
+    assert rows(forgot, "SELECT count(*) FROM derived_from WHERE doc = ?", day) == [(0,)]
+    assert rows(kept, "SELECT count(*) FROM derived_from WHERE doc = ?", day) == [(1,)]
 
 
 def test_an_update_reads_only_the_docs_it_indexes_and_what_they_cite(
