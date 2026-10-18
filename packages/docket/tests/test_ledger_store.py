@@ -3,6 +3,7 @@ refuses, the text rules, undo, renumbering a clash, and putting things back when
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -12,7 +13,7 @@ from docket_testkit import commit_config, empty_vault, folder_vault, make_config
 from ledger_kit import ADD_FIELDS, NOW
 
 from docket.errors import DocketError
-from docket.ledger import ops, store
+from docket.ledger import load, ops, store
 from docket.ledger.fold import Item, Ledger, fold
 from docket.ledger.ops import Op
 from docket.ledger.store import LedgerError, material_ref, write
@@ -459,3 +460,23 @@ def test_a_failure_after_the_commit_landed_leaves_the_ops_where_head_holds_them(
     assert [p for p in vault.check() if p.where.startswith("ledger")] == []
     write(vault, [{"op": "log", "item": "A-0001", "note": "next"}], now=later(2))
     assert [e.line for e in item(vault, 1).log] == ["added", "landed", "next"]
+
+
+def test_a_broken_line_whose_id_ends_in_a_newline_never_becomes_the_highest_id(vault: Vault) -> None:
+    """A line that doesn't read, its id a ULID with an escaped newline after it: `$` would match before that newline,
+    the clock would mint from it, and every write would fail until the line was fixed by hand."""
+    (add,) = write(vault, [ADD], now=NOW).ops
+    broken = {"schema_version": 1, "id": "7" + "Z" * 24 + "Y\n", "op": "add"}
+    path = vault.root / FILE
+    path.write_text(path.read_text(encoding="utf-8") + json.dumps(broken) + "\n", encoding="utf-8", newline="\n")
+    vault.commit([FILE], "A broken line")
+    assert load(vault.root).highest_id == add.id
+    (log,) = write(vault, [{"op": "log", "item": "A-0001", "note": "after"}], now=later(1)).ops
+    assert log.id > add.id
+    for change, why in [
+        ({"op": "add", "fields": {**ADD_FIELDS, "stream": "pilot\n"}}, "stream is a slug"),
+        ({"op": "add", "fields": {**ADD_FIELDS, "due": "2026-10-21\n"}}, "due is a day"),
+        ({"op": "snooze", "item": "A-0001", "until": "2026-10-25\n"}, "a day after today"),
+    ]:
+        with pytest.raises(LedgerError, match=why):
+            write(vault, [change], now=later(2))

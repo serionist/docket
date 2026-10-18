@@ -159,11 +159,11 @@ class _Write:
         if not isinstance(ref, str) or not ref.strip():
             self.refuse(n, "it needs item, an A- number or an item's id")
         text = ref.strip()
-        if ops.ULID.match(text):
+        if ops.ULID.fullmatch(text):
             if self.fold(text).item is None:
                 self.refuse(n, f"no item {text}")
             return text
-        m = NUMBER.match(text)
+        m = NUMBER.fullmatch(text)
         if m is None:
             self.refuse(n, "item is an A- number or an item's id")
         number = int(m.group(1))
@@ -245,7 +245,7 @@ class _Write:
             self.refuse(n, f"{name} is text")
         if name == "kind" and value not in KINDS:
             self.refuse(n, f"kind is one of {', '.join(KINDS)}")
-        if name == "stream" and not SLUG.match(value):
+        if name == "stream" and not SLUG.fullmatch(value):
             self.refuse(n, "stream is a slug: lowercase letters, digits and inner hyphens")
         if name in DAYS and not _day(value):
             self.refuse(n, f"{name} is a day, YYYY-MM-DD")
@@ -419,7 +419,7 @@ class _Write:
 
 
 def _day(value: str) -> bool:
-    return bool(ops.DAY.match(value)) and ops.is_day(value)
+    return bool(ops.DAY.fullmatch(value)) and ops.is_day(value)
 
 
 def _text(value: object) -> str | None:
@@ -454,7 +454,7 @@ def pending(vault: Vault) -> list[str]:
                 f"{rel} lost or changed a committed op line; ops are written once, so put it back from git "
                 "(`docket vault check` names it); nothing written"
             )
-    new = [rel for rel in vault.git.not_in_head(OPS_DIR) if ops.FILE_NAME.match(Path(rel).name)]
+    new = [rel for rel in vault.git.not_in_head(OPS_DIR) if ops.FILE_NAME.fullmatch(Path(rel).name)]
     return sorted({*changed, *new})
 
 

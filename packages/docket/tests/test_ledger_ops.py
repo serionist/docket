@@ -273,3 +273,13 @@ def test_a_clock_behind_mints_after_the_highest_id_with_fresh_random_bits() -> N
     assert not set(desk) & set(live)
     same_ms = ops.mint(ops.encode(int(AT.timestamp() * 1000) << 80 | 50), AT, 1, rand=bits(60))
     assert ops.decode(same_ms[0]) == (int(AT.timestamp() * 1000) << 80) + 60
+
+
+@pytest.mark.parametrize("key", ["id", "item", "op", "by", "via", "machine", "batch"])
+def test_a_trailing_newline_never_passes_an_anchored_pattern(key: str) -> None:
+    data = json.loads(made("done").text())
+    data[key] += "\n"
+    with pytest.raises(ValidationError):
+        Op.model_validate_json(json.dumps(data))
+    assert ops.id_of(json.dumps({"id": A + "\n"})) is None
+    assert ops.FILE_NAME.fullmatch("2026-10-desk.jsonl\n") is None

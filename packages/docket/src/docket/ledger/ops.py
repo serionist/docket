@@ -142,7 +142,7 @@ class Op(BaseModel):
                     raise ValueError(f"{name} is text or null")
             for name in DAYS:
                 value = fields.get(name)
-                if value is not None and not (DAY.match(value) and is_day(value)):
+                if value is not None and not (DAY.fullmatch(value) and is_day(value)):
                     raise ValueError(f"{name} is a day, YYYY-MM-DD")
         return self
 
@@ -269,7 +269,7 @@ def id_of(raw: str) -> str | None:
     except ValueError:
         return None
     found = cast(dict[str, object], data).get("id") if isinstance(data, dict) else None
-    return found if isinstance(found, str) and ULID.match(found) else None
+    return found if isinstance(found, str) and ULID.fullmatch(found) else None
 
 
 def parse(text: str, rel: str) -> Read:
@@ -279,7 +279,7 @@ def parse(text: str, rel: str) -> Read:
     problems: list[tuple[str, str]] = []
     ids: list[str] = []
     # The file's month and machine, compared field by field: formatting each op's file name costs as much as reading it.
-    m = FILE_NAME.match(rel.rsplit("/", 1)[-1])
+    m = FILE_NAME.fullmatch(rel.rsplit("/", 1)[-1])
     year, month, machine = (int(m.group(1)), int(m.group(2)), m.group(3)) if m else (0, 0, "")
     for n, raw in enumerate(text.split("\n"), start=1):
         if not raw.strip():
@@ -301,7 +301,7 @@ def parse(text: str, rel: str) -> Read:
 
 
 def _op_file(path: Path) -> bool:
-    m = FILE_NAME.match(path.name)
+    m = FILE_NAME.fullmatch(path.name)
     if m is None or not path.is_file() or linked(path):
         return False
     try:
