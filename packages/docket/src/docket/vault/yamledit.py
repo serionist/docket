@@ -3,8 +3,9 @@ into the text where PyYAML's composed nodes say the value stands, so every comme
 own indentation stay as they were.
 
 `patch` gives the new text, or None when a change can't be placed: an alias anywhere in the file, a block sequence of
-mappings that grows or shrinks, a key written twice. The caller reads the result back and writes it only when it reads
-as exactly the settings asked for; otherwise the user gets the line, as before any of this.
+mappings that grows or shrinks, a key written twice, a block scalar (`|` or `>`) the change touches. The caller reads
+the result back and writes it only when it reads as exactly the settings asked for; otherwise the user gets the line,
+as before any of this.
 """
 
 from __future__ import annotations
@@ -65,7 +66,7 @@ class _Edits:
     def mapping(self, node: MappingNode, old: Mapping[str, Any], new: Mapping[str, Any]) -> None:
         if node.flow_style:
             # One line, such as {}: written again whole, as it reads now.
-            self.replace(node, dict(new))
+            self.splice(node, dict(new))
             return
         pairs = _pairs(node)
         for key in [*old, *(k for k in new if k not in old)]:
@@ -75,69 +76,89 @@ class _Edits:
             if key not in new:
                 # A key Docket no longer writes when it is empty, such as media_folders: emptied where it stands.
                 if found is not None:
-                    self.value(found, old[key], [])
+                    self.value(*found, old[key], [])
             elif found is None:
                 self.add_key(node, key, new[key])
             else:
-                self.value(found, old.get(key), new[key])
+                self.value(*found, old.get(key), new[key])
 
-    def value(self, node: Node, old: Any, new: Any) -> None:
+    def value(self, key: Node, node: Node, old: Any, new: Any) -> None:
+        """A value changed, under its key's node."""
         if isinstance(node, MappingNode) and isinstance(old, dict) and isinstance(new, dict):
             self.mapping(node, cast(dict[str, Any], old), cast(dict[str, Any], new))
         elif isinstance(node, SequenceNode) and isinstance(old, list) and isinstance(new, list):
-            self.sequence(node, cast(list[Any], old), cast(list[Any], new))
+            self.sequence(key, node, cast(list[Any], old), cast(list[Any], new))
         else:
-            self.replace(node, new)
+            self.replace(key, node, new)
 
-    def sequence(self, node: SequenceNode, old: list[Any], new: list[Any]) -> None:
+    def sequence(self, key: Node, node: SequenceNode, old: list[Any], new: list[Any]) -> None:
         if node.flow_style or not node.value or len(node.value) != len(old):
-            self.replace(node, new)
+            self.replace(key, node, new)
             return
         if isinstance(node.value[0], MappingNode):
             # Patterns, matched by place: one added or taken off has no place here.
             if len(old) != len(new):
                 raise _UnplacedError
+            # Each item reads as a pattern's mapping, so each is a mapping node.
             for item, was, now in zip(node.value, old, new, strict=True):
                 if was != now:
-                    self.value(item, was, now)
+                    self.mapping(cast(MappingNode, item), was, now)
             return
         removed, added = _diff(old, new)
         if len(removed) == len(old) and not added:
-            self.replace(node, [])
+            self.replace(key, node, [])
             return
         for i in removed:
-            item = node.value[i]
+            item = _touched(node.value[i])
             self.splices.append(
                 _Splice(self._line_start(_dash(self.text, item)), self._next_line(item.end_mark.index), "")
             )
         if added:
             first = node.value[0]
             indent = self.text[self._line_start(_dash(self.text, first)) : _dash(self.text, first)]
-            at = self._next_line(node.value[-1].end_mark.index)
+            at = self._next_line(_touched(node.value[-1]).end_mark.index)
             lines = "".join(f"{indent}- {_flow(v)}{self.newline}" for v in added)
             self.splices.append(_Splice(at, at, self._ending(at) + lines))
 
     def add_key(self, node: MappingNode, key: str, value: Any) -> None:
         indent = " " * node.value[0][0].start_mark.column
-        at = self._next_line(_last(node).end_mark.index)
+        at = self._next_line(_touched(_last(node)).end_mark.index)
         block = yaml.safe_dump(
             {key: value}, sort_keys=False, allow_unicode=True, default_flow_style=False, width=4096, indent=self.step
         )
         lines = "".join(f"{indent}{line}{self.newline}" for line in block.splitlines())
         self.splices.append(_Splice(at, at, self._ending(at) + lines))
 
-    def replace(self, node: Node, value: Any) -> None:
+    def replace(self, key: Node, node: Node, value: Any) -> None:
+        """The value under a key set: a block collection becomes a flow one, a key with none written gets one, anything
+        else is written again whole where it stands."""
+        _touched(node)
         if isinstance(node, (MappingNode, SequenceNode)) and not node.flow_style and node.value:
-            # A block collection becomes a flow one on its key's line: the key keeps its place.
-            key_end = self.text.rfind(":", 0, node.start_mark.index)
-            self.splices.append(_Splice(key_end + 1, self._end_of_line(_last(node).end_mark.index), f" {_flow(value)}"))
+            # A block collection becomes a flow one on its key's line: the key keeps its place, and a comment there
+            # stays, after the new value.
+            colon = self._colon(key)
+            rest = self.text[colon + 1 : self._end_of_line(colon)]
+            note = rest.lstrip()
+            if note and not note.startswith("#"):
+                # An anchor or a tag on the key's line: no place for a value beside it.
+                raise _UnplacedError
+            end = self._end_of_line(_last(node).end_mark.index)
+            self.splices.append(_Splice(colon + 1, end, f" {_flow(value)}{rest if note else ''}"))
             return
         if isinstance(node, ScalarNode) and node.start_mark.index == node.end_mark.index:
             # A key with no value written: the value goes right after its colon.
-            key_end = self.text.rfind(":", 0, node.start_mark.index)
-            self.splices.append(_Splice(key_end + 1, key_end + 1, f" {_flow(value)}"))
+            colon = self._colon(key)
+            self.splices.append(_Splice(colon + 1, colon + 1, f" {_flow(value)}"))
             return
+        self.splice(node, value)
+
+    def splice(self, node: Node, value: Any) -> None:
+        """A scalar or a flow collection written again whole, where it stands."""
         self.splices.append(_Splice(node.start_mark.index, node.end_mark.index, _flow(value)))
+
+    def _colon(self, key: Node) -> int:
+        """Where the colon after a key stands: the first after the key's own text, never one in a comment."""
+        return self.text.index(":", key.end_mark.index)
 
     # -- the text --------------------------------------------------------------------------------------------------
 
@@ -167,13 +188,29 @@ def _step(root: MappingNode) -> int:
     return 2
 
 
-def _pairs(node: MappingNode) -> dict[str, Node]:
-    out: dict[str, Node] = {}
+def _pairs(node: MappingNode) -> dict[str, tuple[Node, Node]]:
+    """Each key's node and its value's, by the key's text."""
+    out: dict[str, tuple[Node, Node]] = {}
     for key, value in node.value:
         if not isinstance(key, ScalarNode) or key.value in out or key.tag == "tag:yaml.org,2002:merge":
             raise _UnplacedError
-        out[key.value] = value
+        out[key.value] = (key, value)
     return out
+
+
+def _touched(node: Node) -> Node:
+    """A node a change splices at or takes out, refused when it holds a block scalar (`|` or `>`): its text runs on to
+    the next line, so a splice there would take a line the change didn't ask for (DR-0602)."""
+    todo = [node]
+    while todo:
+        found = todo.pop()
+        if isinstance(found, ScalarNode) and found.style in ("|", ">"):
+            raise _UnplacedError
+        if isinstance(found, MappingNode):
+            todo += [part for pair in found.value for part in pair]
+        elif isinstance(found, SequenceNode):
+            todo += found.value
+    return node
 
 
 def _shared(root: Node) -> bool:

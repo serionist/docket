@@ -192,6 +192,84 @@ def test_a_pattern_added_has_no_place() -> None:
     assert yamledit.patch(TEXT, before, rules(patterns=two)(before)) is None
 
 
+PEOPLE = '    people:\n        - Cleo Test    # a colleague\n        - "Dora #2"\n'
+
+
+@pytest.mark.parametrize(
+    ("people", "emptied"),
+    [
+        (
+            PEOPLE.replace("people:\n", "people:      # asked to stay out\n"),
+            "    people: []      # asked to stay out\n",
+        ),
+        (PEOPLE.replace("people:\n", "people:   # names: never stored\n"), "    people: []   # names: never stored\n"),
+        (PEOPLE.replace("people:\n", "people:\n        # format: one name per line\n"), "    people: []\n"),
+    ],
+    ids=["a comment on the key's line", "a colon in that comment", "a colon in a comment above the first item"],
+)
+def test_a_list_emptied_keeps_the_comment_on_its_key_s_line(people: str, emptied: str) -> None:
+    """The key's own colon is found from the key, never in a comment, and its line's comment stays after the value."""
+    text = TEXT.replace(PEOPLE, people)
+    before = read(text)
+    after = lists(people=[])(before)
+    out = yamledit.patch(text, before, after)
+    assert out is not None and out == text.replace(people, emptied)
+    assert read(out) == after
+
+
+def test_a_list_emptied_with_an_anchor_on_its_key_s_line_has_no_place() -> None:
+    text = TEXT.replace(PEOPLE, PEOPLE.replace("people:\n", "people: &mine\n"))
+    before = read(text)
+    assert yamledit.patch(text, before, lists(people=[])(before)) is None
+
+
+BLOCK = TEXT.replace('        - "Dora #2"\n', "        - |-\n            Dora #2\n")
+
+
+@pytest.mark.parametrize(
+    ("text", "change"),
+    [
+        (BLOCK, lists(people=["Cleo Test"])),
+        (BLOCK, lists(people=[])),
+        (BLOCK, lists(people=["Cleo Test", "Dora #2", "Ben Sample"])),
+        (
+            TEXT.replace("        sensitivity: mixed\n", "        sensitivity: >-\n            mixed\n"),
+            source("calls", sensitivity="work"),
+        ),
+        (
+            TEXT.replace("            - ~/Calls\n", "            - >-\n                ~/Calls\n"),
+            source("calls", enabled=False),
+        ),
+    ],
+    ids=["its item taken off", "its list emptied", "an item added after it", "it set", "a key added after it"],
+)
+def test_a_change_touching_a_block_scalar_has_no_place(text: str, change: Change) -> None:
+    """A block scalar's text runs on to the next line, here `containers: []` or a key of the parent: a splice at its end
+    would take that line too, and the file would still read the same (DR-0602)."""
+    before = read(text)
+    assert yamledit.patch(text, before, change(before)) is None
+
+
+def test_a_change_beside_a_block_scalar_is_still_made() -> None:
+    before = read(BLOCK)
+    after = lists(people=["Dora #2"])(before)
+    out = yamledit.patch(BLOCK, before, after)
+    assert out is not None and out == BLOCK.replace("        - Cleo Test    # a colleague\n", "", 1)
+    assert read(out) == after
+
+
+def test_a_flow_list_of_patterns_is_written_again_whole() -> None:
+    block = "    patterns:\n        - name: ticket\n          pattern: TCK-\\d+\n"
+    text = TEXT.replace(block, "    patterns: [{name: ticket, pattern: TCK-\\d+}]   # mine\n")
+    before = read(text)
+    after = ticket(False)(before)
+    out = yamledit.patch(text, before, after)
+    assert out is not None and out.endswith(
+        "    patterns: [{name: ticket, pattern: TCK-\\d+, enabled: false}]   # mine\n"
+    )
+    assert read(out) == after
+
+
 # -- through vault.yaml's writer ---------------------------------------------------------------------------------------
 
 
@@ -209,6 +287,19 @@ def test_the_writer_edits_a_file_of_the_user_s_own_in_place(vault: Vault) -> Non
     assert done.changed
     text = (vault.root / CONFIG_FILE).read_text(encoding="utf-8")
     assert text.startswith("# mine\n") and read(text).redaction.phone
+
+
+def test_the_page_s_take_off_of_the_last_value_keeps_the_key_s_comment_and_line_endings(vault: Vault) -> None:
+    path = vault.root / CONFIG_FILE
+    hand = TEXT.replace(PEOPLE, "    people:      # asked to stay out\n        - Cleo Test\n").replace("\n", "\r\n")
+    path.write_bytes(hand.encode("utf-8"))
+    git(vault.root, "commit", "-qam", "Mine")
+    taken = settings.take_off_listed(vault, "people", "Cleo Test", shown=settings.file_hash(path.read_bytes()))
+    assert taken.written.changed
+    out = path.read_bytes().decode("utf-8")
+    assert out == hand.replace("    people:      # asked to stay out\r\n        - Cleo Test\r\n", "", 1).replace(
+        "never_store:\r\n", "never_store:\r\n    people: []      # asked to stay out\r\n", 1
+    )
 
 
 @pytest.mark.parametrize(

@@ -307,6 +307,22 @@ def test_a_value_docket_can_t_take_off_in_place_is_left_to_the_owner(client: Tes
     assert sh(vault.root, "git", "rev-parse", "HEAD") == at
 
 
+def test_a_list_s_last_values_come_off_in_place_with_a_colon_in_its_key_s_comment(
+    client: TestClient, vault: Vault
+) -> None:
+    """The comment on the list's key line stays after the emptied list, its colon never taken for the key's."""
+    path = vault.root / CONFIG_FILE
+    mine = path.read_text(encoding="utf-8").replace("  people:\n", "  people:   # names: never stored\n", 1)
+    path.write_text(mine, encoding="utf-8", newline="\n")
+    git(vault.root, "commit", "-qam", "A comment of mine")
+    for value in ("Cleo Test", "Dora #2"):
+        fields = {"act": "off", "list": "people", "value": value, "shown": shown(vault)}
+        assert client.post(ADD, data=fields, headers=SAME).headers["location"] == "/settings?done=unlisted-people-1"
+    text = path.read_text(encoding="utf-8")
+    assert "  people: []   # names: never stored\n  containers:\n" in text
+    assert config(vault).never_store.people == []
+
+
 @pytest.mark.parametrize(("headers", "status"), [({"Origin": "http://evil.example"}, 403), ({}, 403), (SAME, 303)])
 def test_every_post_passes_the_guard(client: TestClient, vault: Vault, headers: dict[str, str], status: int) -> None:
     assert client.post(RULE, data={"rule": "phone", "shown": shown(vault)}, headers=headers).status_code == status
