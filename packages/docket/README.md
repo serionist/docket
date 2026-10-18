@@ -15,7 +15,7 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 | `docket staging classify <ref> work\|private` | work makes it ready, `--cut 120-340` (characters) or `--cut 12:30-14:05` (a time) cuts a stretch; private drops it |
 | `docket staging promote` | writes every ready record to the raw log, cut and redacted, one run per source, and commits; a record on hold stays in staging |
 | `docket ingest <source> <folder>` | imports payloads fetched earlier through the source's mapper: the folder's `hold.txt` first, then its JSON files; every record goes to staging, nothing on hold; `--hold <file>` adds more ids to hold, `--final` tells the mapper not to wait for more, `--mapper-errors` prints the mapper's own errors |
-| `docket source new <name>` | writes a source's skill, mapper and tests into `.claude/skills/sources/<name>/` of the repo that holds the vault, from Docket's blank template, or `--example` for a reference source (Plaud), and adds the source to `vault.yaml` with `--sensitivity` and its `--tool`s; never over a folder that exists; `--folder <folder>` adds a folder source instead; adding one asks at your own console, with a code typed back |
+| `docket source new <name>` | writes a source's skill, mapper and tests into `.claude/skills/sources/<name>/` of the repo that holds the vault, from Docket's blank template, or `--example` for a reference source (Plaud), and adds the source to `vault.yaml` with `--sensitivity` and its `--tool`s; never over a folder that exists; `--folder <folder>` adds a folder source instead; adding one asks at your own console: your OS prompt, or a code typed back |
 | `docket render` | writes the people directory and the glossary from the entities, at the paths `vault.yaml`'s `rendered` names in the repo that holds the vault; never commits them; leaves a file edited by hand and says so, and writes nothing into a repo anyone can read; exit 1 when a file was left or refused. It runs after each curate write too |
 | `docket scan [source]` | reads a folder source's folder, read-only, and stages each new or changed document's text; every folder source turned on without a name; `--accept-gone` when most files the vault held are missing on purpose |
 | `docket doc put <file or ->` | store a processed doc as its next rev, redacted first, saying on which lines; refused, with every problem and its line, when the frontmatter is wrong, an anchor doesn't resolve, the doc changed since the rev it carries, or it says something on the never-store keywords list (then only the lines are named) |
@@ -30,7 +30,7 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 | `docket index update` | index what changed since; it rebuilds when it has to |
 | `docket index status` | whether the index is there and current, its languages, counts, what is new, and its problems |
 | `docket import notes <folder>` | each markdown note in an existing folder becomes a legacy note that keeps its old path, so `doc read notes/x.md` or `notes/x.md@12:08` still finds it; the folder is only read; run it again to pick up changes; `--dry-run` first, `--as` for what old paths start with; says how many markers redaction added |
-| `docket redaction` | which redaction rules run; `docket redaction set <credentials\|phone\|pattern name> on\|off` changes one and commits it; turning one off asks at your own console, with a code typed back |
+| `docket redaction` | which redaction rules run; `docket redaction set <credentials\|phone\|pattern name> on\|off` changes one and commits it; turning one off asks at your own console: your OS prompt, or a code typed back |
 
 A command finds its vault from `--vault`, `DOCKET_VAULT`, the working folder upward, a `vault/` folder in it, or the
 default the wizard recorded. A `<ref>` is a record's rid, or at least 6 characters of the key `staging list` shows.
@@ -105,7 +105,7 @@ DR-0520).
 
 | What | How |
 |---|---|
-| `docket redaction set <rule> off`, `docket source new` | each shows the change, path by path, never a never-store value, and asks you to type back a code |
+| `docket redaction set <rule> off`, `docket source new` | each shows the change, path by path, never a never-store value, and asks your OS prompt, or a code typed back where the machine has none (The OS prompt, below) |
 | any command, while `vault.yaml` holds an edit not committed yet that loosens | the same question, for the edit; it is committed on its own first |
 | an edit by hand | yours: what it only tightens applies at once, the rest once you commit it |
 
@@ -114,6 +114,74 @@ DR-0520).
 - The commit says `confirmed at the console` in its body.
 - No flag, variable or token skips the question, for your own scripts either: whatever a script of yours reads, an agent
   running as you reads too. A script that must loosen edits `vault.yaml`, and you commit it.
+
+### The OS prompt
+
+Where this machine has one set up, the yes is the system's own prompt, which only you answer: Windows Hello, Touch ID
+or your Mac's password, polkit (DR-0572 to DR-0575). The console code is asked only where there is none.
+
+| Step | Asks |
+|---|---|
+| `docket hold release`, a loosening (`redaction set off`, `source new`, `media host add`, `media folder add`, `models allow`), `docket media confirm-cuts`, `docket media keys export` | your OS prompt, after `Press Enter` at the console; or the code |
+| `docket media keys import`, `models install --api`, `models key` | nothing more: your console only |
+
+| System | Prompt | Set up when | Otherwise |
+|---|---|---|---|
+| Windows 10 1709 and later | Windows Hello: a fingerprint, your PIN, or your face | Hello is set up for you | the code on a machine with neither a TPM nor a biometric device; refused on one with either, until you set Hello up or make the marker |
+| macOS | Touch ID, an Apple Watch or your login password | always, on a Mac with a login password | refused if this Python can't use LocalAuthentication: make the marker |
+| Linux | polkit: your password, or a fingerprint through PAM; at the console when no desktop agent runs, as over SSH | you installed Docket's action, once: the line `docket vault status` prints, `sudo install -m 0644 <file> /usr/share/polkit-1/actions/` | the code |
+
+- `docket vault status` says which one this machine asks, and why. Nothing shows a prompt to find out.
+- Tried on real hardware so far: Windows 11 with a PIN, in Windows Terminal and conhost. Face recognition, SSH, macOS
+  and Linux follow the design and CI's checks, but no one has tried them on a real machine yet.
+- Once a prompt is set up, its no is a no: a cancel, two minutes without an answer, or no desktop to show it on (SSH to
+  Windows or a Mac) writes nothing, and the code is never asked instead. Run the command at the machine.
+- After two minutes, or Ctrl+C, Windows may leave its Hello dialog on screen. Docket has already refused, and
+  whatever you type into it changes nothing: cancel it.
+- Windows Hello's face recognition proves you are there, not that you agreed: a prompt you didn't start may pass as
+  soon as the camera sees you. For a yes you have to give, use a fingerprint or your PIN, or turn face recognition off.
+- A prompt you didn't start is not yours: cancel it.
+
+What it stops, and what it doesn't. A prompt says a person answered. It doesn't make Docket's own code tamper-proof: a
+process running as you can still change Docket, or call its insides, on every system. What it ends is the easy way
+round the console check, a pseudo-terminal of an agent's own that reads the code and types it back.
+
+| System | What a process running as you can still do |
+|---|---|
+| Windows | start the prompt while you face the camera; type into the PIN box, or read the PIN as you type, if the dialog lets same-user input in; with UAC that doesn't ask, or a UAC bypass, make the marker |
+| macOS | type into the password dialog, if its terminal has Accessibility and it knows your password; with passwordless sudo, make the marker |
+| Linux | on X11, read or type into the agent's dialog; with passwordless sudo, add a polkit rule that says yes, remove the action or make the marker |
+
+Root, or an admin with UAC that doesn't ask, is past every check Docket has.
+
+#### The console-code marker
+
+A file only an admin or root can make sends this machine back to the console code, even where a prompt is set up. It
+is the way out of a refusal. It counts only when every folder on its path and the file are an admin's or root's and
+nothing on the path is one you could replace or add a file to; `docket vault status` names the check it fails.
+
+Windows, in an elevated PowerShell (UAC's own screen asks you first):
+
+<!-- the Windows marker's lines -->
+```powershell
+$dir = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'Docket'
+$admins = 'S-1-5-32-544'
+if ((Test-Path $dir) -and (Get-Acl $dir).GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $admins) {
+  Remove-Item -Recurse -Force $dir
+}
+New-Item -ItemType Directory -Force $dir | Out-Null
+icacls $dir /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' | Out-Null
+New-Item -ItemType File -Force (Join-Path $dir 'console-code') | Out-Null
+icacls $dir /setowner "*$admins" /T | Out-Null
+```
+
+- The lines remake a `Docket` folder that isn't the Administrators', take away the right Users inherit to add files
+  there, and make the Administrators the owner, so a policy that leaves new files to their creator can't fail it
+  silently.
+- macOS: `sudo mkdir -p "/Library/Application Support/Docket"`, then `sudo touch "/Library/Application
+  Support/Docket/console-code"`.
+- Linux: `sudo mkdir -p /etc/docket`, then `sudo touch /etc/docket/console-code`.
+- Remove it the same way, as an admin, to have the prompt again.
 
 ## Sources and their mappers
 
@@ -245,8 +313,8 @@ A held recording goes in only with the cuts you confirm (DR-0200 to DR-0206).
 | `docket hold release <source> --from <folder> --proposals <file>` | the proposals file `/docket:cuts` writes, outside any repo |
 
 - Run the release in your own terminal: it refuses Claude Code's shell, a pipe and a redirect. Each recording shows
-  each cut widened to whole utterances, its edges, and every record it keeps in full; it is released only when you
-  type back the code it shows. `n` keeps it held, `q` stops.
+  each cut widened to whole utterances, its edges, and every record it keeps in full; it is released only on your OS
+  prompt's yes, or where the machine has none, when you type back the code it shows. `n` keeps it held, `q` stops.
 - A recording needs a transcript and at least one time cut that removes an utterance; a record without segments, such
   as the vendor's notes, is left out unless you keep it. Anything else stays held, with the reason.
 - The release line goes to `state/releases/<source>.jsonl` and is committed before the hold comes off; then the
@@ -311,8 +379,8 @@ key here or not downloaded.
 ### Keys on a second machine, and the backup
 
 Lose a clone's keys and its media is gone for good. `docket media keys export <file>`, in your own terminal, writes
-every key of the clone into one new file, sealed with a passphrase it draws and shows once; type the passphrase's last
-four letters back and the file is kept. `docket media keys import <file>` on the other machine asks for the passphrase
+every key of the clone into one new file, sealed with a passphrase it draws and shows once, after your OS prompt's yes
+(or the code); type the passphrase's last four letters back and the file is kept. `docket media keys import <file>` on the other machine asks for the passphrase
 and adds the keys it lacks. Neither runs in Claude Code's shell or through a pipe (DR-0550).
 
 The newest export holds every key, so it is the backup. Keep the file and the passphrase in different places:
@@ -816,7 +884,8 @@ on, a source made mixed or private, or turned off. Every other change it names.
 
 - A change that lets more in (a rule turned off, a never-store value taken off, a source made looser, turned on or
   added, its tools, mapper or folder) is never made from a page: the page names the command, for your own
-  terminal, where it asks you to type back a code, or the line, for your editor, which applies once you commit it.
+  terminal, where it asks your OS prompt or a code typed back, or the line, for your editor, which applies once you
+  commit it.
   What it lets in reaches git for good.
 - While `vault.yaml` holds an edit that isn't in force, the page says so at the top.
 - A rule turned on, or a source made mixed or turned off, is one click; a source made private asks once more first,

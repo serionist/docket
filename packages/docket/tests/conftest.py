@@ -8,10 +8,10 @@ from pathlib import Path
 
 import keyring
 import pytest
-from docket_testkit import TEST_GITCONFIG, AtConsole, make_config, make_record, use_factory
+from docket_testkit import TEST_GITCONFIG, AtConsole, FakePrompt, make_config, make_record, use_factory
 from keyring.backends.fail import Keyring as FailKeyring
 
-from docket import console
+from docket import console, osprompt
 from docket.models import voyage
 from docket.vault.config import VaultConfig
 from docket.vault.records import RawRecord
@@ -74,6 +74,41 @@ def isolated(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.Monke
     monkeypatch.delenv("CLAUDECODE", raising=False)
     for name in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
         monkeypatch.delenv(name, raising=False)
+
+
+# The tests that call the system's own prompt checks run only where this is set: CI, never a developer's machine.
+OSPROMPT_VAR = "DOCKET_TEST_OSPROMPT"
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    if os.environ.get(OSPROMPT_VAR):
+        return
+    skip = pytest.mark.skip(reason=f"calls the system's prompt checks: set {OSPROMPT_VAR}, as CI does")
+    for item in items:
+        if item.get_closest_marker("osprompt") is not None:
+            item.add_marker(skip)
+
+
+@pytest.fixture(autouse=True)
+def no_os_prompt(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test reaches the system's prompt or its checks (DR-0572): the console code everywhere, unless a test installs
+    a fake prompt (`os_prompt`) or is marked `osprompt`, which only CI runs."""
+    if request.node.get_closest_marker("osprompt") is not None:
+        return
+    monkeypatch.setattr(osprompt, "find", lambda: osprompt.NoPrompt("no OS prompt in tests"))
+    monkeypatch.setattr(osprompt, "status", lambda: ["the console code: no OS prompt in tests"])
+
+
+@pytest.fixture
+def os_prompt(monkeypatch: pytest.MonkeyPatch) -> Callable[..., FakePrompt]:
+    """A prompt set up on this machine, answering each question from the script given: Verified() or Refused(why)."""
+
+    def install(*answers: osprompt.Answer) -> FakePrompt:
+        fake = FakePrompt(*answers)
+        monkeypatch.setattr(osprompt, "find", lambda: osprompt.Prompt("Fake Hello", fake))
+        return fake
+
+    return install
 
 
 @pytest.fixture(autouse=True)

@@ -10,4 +10,5 @@ decisions:
     binds:
       - Only sources/release.py and vault/settings.py import docket.console; a test scans for it, so no page, route or tool asks or answers.
       - The release's refusals, prompt and answers are unchanged, and test_release.py keeps its cases.
+      - "Amended knowingly by #143 (DR-0572): console.confirm is the one question, the OS prompt or the code, and only docket.console imports docket.osprompt."
     not_chosen: ["A copy of the check in settings.py: two checks to keep in step on three systems."]

@@ -1,11 +1,14 @@
-"""The owner's yes at their own console, for a release (DR-0202) and for a vault.yaml change that isn't only stricter
-(DR-0517, DR-0518): refused in Claude Code's shell and without a console on stdin and stdout, then a code drawn fresh
-and typed back.
+"""The owner's yes at their own console, for a release (DR-0202), a vault.yaml change that isn't only stricter
+(DR-0517, DR-0518), a recording's decisions confirmed as cuts and an export of the media keys (DR-0575): refused in
+Claude Code's shell and without a console on stdin and stdout, then the screen, then the OS prompt where this machine
+has one set up, or a code drawn fresh and typed back where it hasn't (DR-0572).
 
-The entry points that ask, `release()` and `settings.rewrite()`, take no answer as a parameter, so a Python caller, a
-pipe or Claude Code's shell gets a refusal, not a yes; `typed_back`'s `asker` is only the release's own name for
-`ask`. None of it stops a process running as the user on purpose: it makes the yes a deliberate act, which the skills
-forbid Claude. Callers use the module (`console.ask(...)`), so a test stands in for the owner in one place.
+`confirm` is the one question. Once a prompt is set up, only its verified answer is a yes: a cancel, a failure or no
+answer in time is a no, and the code is never asked then (DR-0574). The entry points that ask take no answer as a
+parameter, so a Python caller, a pipe or Claude Code's shell gets a refusal, not a yes; `asker` is only the release's
+own name for `ask`. The prompt says a person answered, not that Docket's code is intact: a process running as the user
+can still patch Docket, the floor DR-0202 accepts. What it ends is a pseudo-terminal of an agent's own reading the code
+and typing it back. Callers use the module (`console.ask(...)`), so a test stands in for the owner in one place.
 """
 
 from __future__ import annotations
@@ -17,6 +20,8 @@ import sys
 from collections.abc import Callable, Sequence
 from typing import Literal, TextIO
 
+from docket import osprompt
+from docket.errors import DocketError
 from docket.plaintext import printable
 
 # Four letters with no look-alikes (no I or O), drawn fresh for each question.
@@ -114,3 +119,41 @@ def typed_back(
     if answer.lower() != "n":
         say(f"that isn't the code; {kept}")
     return "no"
+
+
+def confirm(
+    lines: Sequence[str], do: str, keep: str, kept: str, *, act: str, asker: Callable[[str], str] | None = None
+) -> Answer:
+    """Show the screen and ask: "yes" only for the OS prompt's verified answer, or, where this machine has none, for the
+    code typed back; "stop" for q, "no" for anything else. `act` is what the OS prompt names, such as "release a held
+    recording". It refuses on its own, before the screen, in Claude Code's shell, without a console, or on a machine
+    that can't ask at all, so a caller added later can't skip the console's check; today's callers check first too, in
+    their own words, before they read or write anything."""
+    refused = problem(f"the step to {act}")
+    if refused is not None:
+        raise DocketError(refused)
+    found = osprompt.find()
+    if isinstance(found, osprompt.Refusal):
+        raise DocketError(f"nothing was asked: {found.why}")
+    if isinstance(found, osprompt.NoPrompt):
+        return typed_back([*lines, f"the console code: {found.why}"], do, keep, kept, asker=asker)
+    for line in lines:
+        say(line)
+    typed = (asker if asker is not None else ask)(f"Press Enter to {do} with {found.name}, n to {keep}, q to stop: ")
+    typed = typed.strip().lower()
+    if typed == "q":
+        return "stop"
+    if typed:
+        if typed != "n":
+            say(f"that isn't Enter; {kept}")
+        return "no"
+    answer = found.ask(act)
+    if isinstance(answer, osprompt.Verified):
+        return "yes"
+    say(f"{found.name} didn't confirm it ({answer.why}); {kept}")
+    return "no"
+
+
+def which_yes() -> list[str]:
+    """`docket vault status`'s lines for the owner's yes on this machine. Shows no prompt."""
+    return osprompt.status()
