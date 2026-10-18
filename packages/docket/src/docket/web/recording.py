@@ -18,16 +18,16 @@ from starlette.responses import Response
 
 from docket import index, recall
 from docket.errors import DocketError
-from docket.media import reader
+from docket.media import layout, reader
 from docket.recall import DocView
 from docket.service.speech import line as speech_line
 from docket.service.state import Service
 from docket.service.writer import IndexBuildingError
 from docket.vault import holds
-from docket.vault.records import owning_id, source_name_problem
+from docket.vault.records import RID, is_native_id, owning_id, source_name_problem
 from docket.vault.spans import RawLookup, is_transcript
 from docket.vault.vault import Vault
-from docket.web import templating
+from docket.web import audio, templating
 from docket.web.recording_state import RecordingState, RecordingStateError
 from docket.web.recording_view import Facts, NoAudio, RecordingView, build, is_recording
 from docket.web.shell import shell
@@ -120,6 +120,21 @@ def _page(
 
 def router(service: Service) -> APIRouter:
     web = APIRouter()
+
+    @web.get("/recording/audio", include_in_schema=False)
+    async def recording_audio(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
+        """The recording's stored audio for the page's player (#159): decrypted through the reader, only while it
+        reads ok, and served by byte range with no caching. Nothing of it is logged."""
+        rid = request.query_params.get("rid", "")
+        if RID.match(rid) is None or not is_native_id(rid.partition(":")[2]):
+            return audio.refused("give a recording's rid")
+        try:
+            found = await asyncio.to_thread(lambda: reader.read(service.vault(), rid))
+        except DocketError as e:
+            return audio.refused(str(e))
+        if found.state != "ok" or found.data is None or found.ext not in layout.AUDIO or found.type is None:
+            return audio.refused(found.state if found.state != "ok" else "it isn't audio")
+        return audio.ranged(found.data, found.type, request.headers.get("range"))
 
     @web.get("/recording", include_in_schema=False)
     async def recording_page(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]

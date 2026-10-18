@@ -31,8 +31,8 @@ from docket.web import assets, pages
 log = logging.getLogger("docket.service.web")
 
 PAGE_CSP = (
-    "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; "
-    "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+    "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; media-src 'self'; "
+    "connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 )
 # htmx's settings: its own indicator CSS off (ours has it), and a 401 not swapped in, since the page reloads into the
 # sign-in page instead. Read once by htmx from a meta tag, so no script sets them.

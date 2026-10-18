@@ -8,6 +8,10 @@ Unreleased in the same PR.
 
 ### Added
 
+- The Recording page plays a recording's stored audio from any line, and shows Whisper's transcript beside the
+  recorder's, a row per stretch of time, a cut stretch cut in both. The audio is decrypted on this machine for each
+  request and never cached; audio that isn't stored, waits at the gate, is held, cut since, kept out by a never-store
+  value or has no key here plays nothing, and the page says why.
 - The `transcribe` tool queues a recording for Whisper in the service, one job at a time, and `docket transcribe`
   queues there too when the service runs; the job's place and outcome show in `docket service status` and on the
   recording's page. On an NVIDIA GPU the service transcribes the newest stored recordings by itself after each index
