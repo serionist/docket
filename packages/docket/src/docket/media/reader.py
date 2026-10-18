@@ -28,7 +28,7 @@ from docket.media import crypto, cutlog, layout
 from docket.media import ranges as cut_ranges
 from docket.media import staged as media_staged
 from docket.media.keystore import KeyStore
-from docket.media.screen import refusal
+from docket.media.screen import Refusal, refusal
 from docket.vault import holds, releaselog
 from docket.vault.records import owning_id
 from docket.vault.spans import RawLookup
@@ -100,7 +100,7 @@ def state_of(vault: Vault, rid: str, keys: KeyStore | None = None, raw: RawLooku
         lookup = raw or RawLookup(vault.root)
         staging = Staging(vault.root, vault.home)
         entries = staging.scan().entries
-        if _kept_out(vault, rid, lookup, staging, entries):
+        if kept_out(vault, rid, lookup, staging, entries) is not None:
             return "withheld"
         cut = cuts_of(vault, rid, path, lookup, entries)
         if cut != "ok":
@@ -114,14 +114,15 @@ def state_of(vault: Vault, rid: str, keys: KeyStore | None = None, raw: RawLooku
     return "held" if _held(vault, rid) else "not-fetched"
 
 
-def _kept_out(vault: Vault, rid: str, lookup: RawLookup, staging: Staging, entries: Sequence[Entry]) -> bool:
-    """Whether media's screen keeps all of the rid's family out now (DR-0570): as a Whisper transcript that heard a
-    never-store word withholds its recording, the stored audio stops playing too. A source only off still plays. The
-    raw is read at its places through the lookup, as `cuts_of` reads it."""
+def kept_out(vault: Vault, rid: str, lookup: RawLookup, staging: Staging, entries: Sequence[Entry]) -> Refusal | None:
+    """Why media's screen keeps all of the rid's family out now (DR-0570), or None: as a Whisper transcript that heard
+    a never-store word withholds its recording, the stored audio stops playing too, and a reconcile finds no spots in
+    it (DR-0583). A source only off still plays. The raw is read at its places through the lookup, as `cuts_of` reads
+    it."""
     staged = [e.staged.record for e in entries if layout.in_family(rid, e.staged.record.rid)]
     records = [*staged, *(r for other in lookup.nested(rid) for r in lookup.versions(other))]
     found = refusal(rid, vault.config, records, staging.decided(), media_staged.read_withheld(vault.root))
-    return found is not None and found[0] != "off"
+    return found if found is not None and found[0] != "off" else None
 
 
 def read(vault: Vault, rid: str, keys: KeyStore | None = None, raw: RawLookup | None = None) -> Media:

@@ -1,0 +1,13 @@
+decisions:
+  - id: DR-0587
+    title: A spot's kind reads the words that differ, not the agreeing words it widened by
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#183"]
+    description: "Refines DR-0583's kinds, found building #183's first PR. A spot's kind is decided on the words the two transcripts disagree on, before widening: a widened text carries the agreeing words either side, and a name among them (Northwind offer against Northwind new offer) would make a word spot a name spot and rank it first. Merged stretches are read by each of their parts. A name word under three letters (of, de) counts for no spot, as matching's vocabulary leaves such words out, and a capital makes a name only on a word of two letters or more, so English's I is none. A word both transcripts spell alike is a spot when it is a one-word asr alias, or near a name and none of its forms; an asr alias of several words is matched word by word, as every name is."
+    binds:
+      - A spot's kind and its near entities come from the words that differ, never from the agreeing words around them.
+    not_chosen:
+      - "Kinds on the widened texts, as DR-0583 words it: the agreeing words around a spot would rank word spots as names."
