@@ -3,6 +3,7 @@ what is due, the runs open and ended, the failures and the cursors, the URL's st
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -25,6 +26,13 @@ from docket.web.templating import PAGE_CSP
 
 SESSION = "session-4e7a"
 TODAY = datetime.now(UTC).date()
+
+
+@pytest.fixture(autouse=True)
+def _today(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Today as each test starts, not as the module loaded: the service reads its clock when a run opens, and a test
+    run that crosses midnight UTC would otherwise put a retry a day older than the test means."""
+    monkeypatch.setattr(sys.modules[__name__], "TODAY", datetime.now(UTC).date())
 
 
 @pytest.fixture(scope="module")
