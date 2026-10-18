@@ -1,5 +1,5 @@
 """The history rewrite a forget writes for a fresh clone and never runs (DR-0594), and `--check-rewrite`, which applies
-it to every branch tip read-only.
+it to every branch tip read-only: it refuses a change to HEAD or outside the vault, and names each older branch.
 
 `<private>/forget/<stamp>/`, the stamp a UTC time with no colon so the folder is valid on Windows:
 
@@ -11,9 +11,10 @@ it to every branch tip read-only.
 
 A rid forgotten whole never comes back, so its run files' lines are matched by their leading `rid` field. Every other
 line is blanked only in the blobs that held it: a version forgotten alone, which a release can write again just as it
-was; each doc line the docs' rule drops in any blob the doc's file has had, each judged on its own rev; and each line of
-the vault's docs holding an `[r:` token on a rid forgotten whole (DR-0598). Files outside the vault are the owner's
-own, as a copy anywhere else is, and are never touched.
+was; each doc line the docs' rule drops in any blob any doc's file has had, deleted docs' too, each judged on its own
+rev once its bytes name the family or cite a doc built on it; and each line of the vault's docs holding an `[r:` token
+on a rid forgotten whole (DR-0598). Files outside the vault are the owner's own, as a copy anywhere else is: only a
+copy of a forgotten record's own raw line there is blanked.
 
 Nothing in them is text from the family: rids and versions are ids, lines are named by their hashes.
 """
@@ -25,19 +26,20 @@ import hashlib
 import json
 import re
 import subprocess
-from collections.abc import Iterable, Iterator
+from collections.abc import Collection, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from docket.childproc import console_flags
 from docket.errors import DocketError
 from docket.forget import apply as forget_apply
 from docket.forget.plan import DocCut, Plan
-from docket.vault import forgotten
+from docket.media import layout
+from docket.vault import forgetdocs, forgotten
 from docket.vault.anchors import encode_rid
 from docket.vault.docstore import DocStore
-from docket.vault.processed import doc_path, parse_doc
+from docket.vault.processed import ProcessedDoc, doc_path, parse_doc
 from docket.vault.spans import RawLookup
 from docket.vault.staging import rid_hash
 from docket.vault.vault import Vault
@@ -200,7 +202,7 @@ def _earlier(base: Path, folder: Path) -> tuple[list[str], set[tuple[str, str]],
 
 class _Judged:
     """The docs' rule on a doc as one of its blobs holds it (DR-0580): raw as the forget leaves it, and what a ref
-    leads to read through the store, an earlier rev from git."""
+    leads to read through the store, an earlier rev from git, each doc and rev read once for every blob judged."""
 
     def __init__(self, vault: Vault, plan: Plan) -> None:
         self.store = DocStore(vault)
@@ -208,23 +210,60 @@ class _Judged:
         # The family's rids count as taken, so a version forget's rid reads as gone even before the apply's state.
         taken = {*forget_apply.skipped(vault.home), *(rid_hash(rid) for rid in plan.family)}
         self.raw = forget_apply.Left(RawLookup(vault.root), self.listed, taken)
+        self._current: dict[str, ProcessedDoc | None] = {}
+        self._older: dict[tuple[str, int], ProcessedDoc | None] = {}
 
-    def dropped(self, data: bytes, cut: DocCut) -> set[int]:
+    def current(self, wanted: Collection[str]) -> dict[str, ProcessedDoc]:
+        for doc_id in set(wanted) - set(self._current):
+            try:
+                self._current[doc_id] = self.store.get(doc_id)
+            except DocketError:
+                self._current[doc_id] = None
+        return {doc_id: doc for doc_id in wanted if (doc := self._current[doc_id]) is not None}
+
+    def older(self, wanted: Collection[tuple[str, int]]) -> dict[tuple[str, int], ProcessedDoc]:
+        for key in set(wanted) - set(self._older):
+            try:
+                self._older[key] = self.store.at_rev(*key)
+            except DocketError:
+                self._older[key] = None
+        return {key: doc for key in wanted if (doc := self._older[key]) is not None}
+
+    def dropped(self, data: bytes, cut: DocCut | None) -> set[int]:
         """The numbers of the lines the rule drops from this blob, judged on its own rev; for a blob that doesn't read
-        as a doc, the lines holding the very words the forget dropped from the current rev."""
+        as a doc, the lines holding the very words the forget dropped from the current rev of a doc it touched."""
         lines = data.split(b"\n")
         try:
             doc = parse_doc(data.decode("utf-8"), lenient=True)
         except (DocketError, UnicodeDecodeError):
-            return {n for n, line in enumerate(lines, start=1) if line_hash(line) in cut.hashes}
-        fate = forget_apply.judge(self.store, [doc], self.raw, self.listed).get(doc.meta.id)
+            hashes = cut.hashes if cut is not None else frozenset[str]()
+            return {n for n, line in enumerate(lines, start=1) if line_hash(line) in hashes}
+        fate = forgetdocs.fates([doc], self.raw, self.listed, current=self.current, older=self.older).get(doc.meta.id)
         return set(fate.dropped) if fate is not None else set()
 
 
+# A doc-line ref's cited doc, as a blob's bytes hold it: what the pre-filter follows.
+_CITED = re.compile(rb"\[d:([^@#\]\s]+)[@#]")
+
+
+def _doc_id(rel: str) -> str:
+    """A doc's id from its path in the vault, as `doc_path` builds the path from it."""
+    parts = PurePosixPath(rel).parts
+    return f"{parts[1]}:{PurePosixPath(rel).stem}" if len(parts) > 2 else rel
+
+
+def _needles(plan: Plan) -> list[bytes]:
+    """What a blob holds when a line of it may read on the family: a family rid, or a rid one sits under, as a covers
+    line holds it and as an anchor's token does."""
+    rids = {owner for rid in {*plan.family, *plan.rids} for owner in layout.owners(rid)}
+    return sorted({form.encode("utf-8") for rid in rids for form in (rid, encode_rid(rid))})
+
+
 def write(vault: Vault, plan: Plan, held: Before, at: datetime) -> Written:
-    """The rewrite's files for this forget, with every earlier forget's on this clone: each blob of the vault's docs
-    read once, in every commit on every ref, HEAD's before the apply included, so a forget whose apply failed or left a
-    doc for its owner still writes them; `held` is what HEAD held before the apply."""
+    """The rewrite's files for this forget, with every earlier forget's on this clone: each blob of the vault's docs,
+    deleted docs' too, in every commit on every ref, HEAD's before the apply included, read once, and those the bytes
+    pre-filter keeps read again to be judged, so a forget whose apply failed or left a doc for its owner still writes
+    them; `held` is what HEAD held before the apply."""
     base = vault.home.private / FOLDER
     base.mkdir(parents=True, exist_ok=True)
     folder = base / stamp(at)
@@ -243,18 +282,36 @@ def write(vault: Vault, plan: Plan, held: Before, at: datetime) -> Written:
         for blob in blobs:
             by_blob.setdefault(blob, set()).add(rel)
     token = _token(plan.rids)
-    judged = _Judged(vault, plan) if cuts else None
+    needles = _needles(plan)
+    # Every doc blob once, deleted docs' too: the token lines, and what the pre-filter needs of each.
+    cites: dict[str, set[str]] = {}
+    named: set[str] = set()
     order = sorted(by_blob)
     for blob, data in zip(order, _cat(vault, order), strict=True):
-        cut = next((cuts[rel] for rel in sorted(by_blob[blob]) if rel in cuts), None)
-        if cut is not None and cut.removed:
+        if any(cuts[rel].removed for rel in by_blob[blob] if rel in cuts):
             stripped.add(blob)
             continue
-        lines = data.split(b"\n")
         if token is not None:
-            scoped |= {(blob, line_hash(line)) for line in lines if token.search(line)}
-        if cut is not None and judged is not None:
-            scoped |= {(blob, line_hash(lines[n - 1])) for n in judged.dropped(data, cut) if 0 < n <= len(lines)}
+            scoped |= {(blob, line_hash(line)) for line in data.split(b"\n") if token.search(line)}
+        cites[blob] = {m.group(1).decode("utf-8", errors="replace") for m in _CITED.finditer(data)}
+        if any(needle in data for needle in needles):
+            named.add(blob)
+    # The blobs the rule can drop a line from: a touched doc's, one naming the family, and one citing a doc among
+    # those, to a fixed point, so an earlier rev built on a dropped line goes though its doc's HEAD rev cites none.
+    affected = {c.id for c in plan.docs}
+    candidates = {b for b in cites if b in named or any(rel in cuts for rel in by_blob[b])}
+    while True:
+        affected |= {_doc_id(rel) for b in candidates for rel in by_blob[b]}
+        more = {b for b, ids in cites.items() if b not in candidates and ids & affected}
+        if not more:
+            break
+        candidates |= more
+    judged = _Judged(vault, plan)
+    order = sorted(candidates)
+    for blob, data in zip(order, _cat(vault, order), strict=True):
+        cut = next((cuts[rel] for rel in sorted(by_blob[blob]) if rel in cuts), None)
+        lines = data.split(b"\n")
+        scoped |= {(blob, line_hash(lines[n - 1])) for n in judged.dropped(data, cut) if 0 < n <= len(lines)}
     found = list(dict.fromkeys([*found, *expressions(plan)]))
     (folder / LINES).write_text("".join(f"{e}\n" for e in found), encoding="utf-8", newline="\n")
     (folder / SCOPED).write_text("".join(f"{b} {h}\n" for b, h in sorted(scoped)), encoding="utf-8", newline="\n")
@@ -276,8 +333,8 @@ def history_lines(vault: Vault, written: Written) -> list[str]:
     return [
         f"history   the text stays in the history of {repo}: Docket never rewrites it. To take it out:",
         "  the files hold every earlier forget's on this clone too: run only the newest folder's",
-        "  1. check it leaves every branch as it is now, HEAD's and the others': "
-        f'docket forget --check-rewrite "{folder}" --vault "{vault.root}"',
+        "  1. check it leaves HEAD and your files outside the vault as they are, and which branches to merge the "
+        f'forget into first: docket forget --check-rewrite "{folder}" --vault "{vault.root}"',
         "  2. back the repo up",
         f'  3. git clone --no-local "{repo}" "{fresh}", then in "{fresh}": {run}',
         "     never in the working repo: filter-repo refuses a clone that isn't fresh, and --force there risks your "
@@ -361,28 +418,56 @@ def _tips(vault: Vault) -> list[tuple[str, str]]:
     return tips
 
 
-def check(vault: Vault, folder: Path) -> list[str]:
+@dataclass(frozen=True)
+class Checked:
+    """What the rewrite would change in the trees there are now. `refused` stops it: a change to HEAD, or to a file
+    outside the vault on any branch tip, the owner's own. `branches` names each other branch whose tip still holds, in
+    the vault, what the forget took: merging the forget into it, or deleting it, clears it (DR-0598)."""
+
+    refused: list[str]
+    branches: dict[str, list[str]]
+
+
+def check(vault: Vault, folder: Path) -> Checked:
     """Each path and line number of HEAD's tree and of each other branch tip the rewrite would change, the repo's whole
-    tree as filter-repo rewrites it; none means every branch stays as it is now. A branch's file whose blob HEAD holds
-    is read once, under HEAD. Read-only."""
+    tree as filter-repo rewrites it. A file of a branch whose blob HEAD holds at a place as much the vault's is read
+    once, under HEAD. Read-only."""
     files = _read(folder)
-    problems: list[str] = []
-    seen: set[str] = set()
+    prefix = vault.git.prefix
+    refused: list[str] = []
+    branches: dict[str, list[str]] = {}
+    seen: set[tuple[str, bool]] = set()
     for name, commit in _tips(vault):
-        entries = [(blob, path) for blob, path in _tree(vault, commit) if blob not in seen]
-        seen |= {blob for blob, _ in entries}
-        where = f"{name}: " if name else ""
-        for (blob, path), data in zip(entries, _cat(vault, [blob for blob, _ in entries]), strict=True):
-            if blob in files.stripped:
-                problems.append(f"{where}{path}: the whole file, whose blob the rewrite strips")
+        entries = [(b, path) for b, path in _tree(vault, commit) if (b, _outside(path, prefix)) not in seen]
+        seen |= {(b, _outside(path, prefix)) for b, path in entries}
+        for (blob, path), data in zip(entries, _cat(vault, [b for b, _ in entries]), strict=True):
+            change = _change(data, blob, files)
+            if change is None:
                 continue
-            after = _rewritten(data, blob, files)
-            if after == data:
-                continue
-            pairs = zip(data.split(b"\n"), after.split(b"\n"), strict=False)
-            changed = [str(n) for n, (old, new) in enumerate(pairs, start=1) if old != new]
-            problems.append(f"{where}{path}: line {_first(changed)}")
-    return problems
+            said = f"{path}: {change}"
+            if not name:
+                refused.append(said)
+            elif _outside(path, prefix):
+                refused.append(f"{name}: {said}")
+            else:
+                branches.setdefault(name, []).append(said)
+    return Checked(refused, branches)
+
+
+def _outside(path: str, prefix: str) -> bool:
+    """Whether a path from the repo's top lies outside the vault: only a folder vault has an outside."""
+    return bool(prefix) and not path.startswith(prefix)
+
+
+def _change(data: bytes, blob: str, files: _Files) -> str | None:
+    """What the rewrite would change in one file: the whole of it, or its line numbers; None when nothing."""
+    if blob in files.stripped:
+        return "the whole file, whose blob the rewrite strips"
+    after = _rewritten(data, blob, files)
+    if after == data:
+        return None
+    pairs = zip(data.split(b"\n"), after.split(b"\n"), strict=False)
+    return f"line {_first([str(n) for n, (old, new) in enumerate(pairs, start=1) if old != new])}"
 
 
 def _first(numbers: list[str]) -> str:

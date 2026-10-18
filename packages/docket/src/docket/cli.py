@@ -801,10 +801,13 @@ def forget_command(
     source: SourceOption = None,
     check_rewrite: Annotated[
         Path | None,
-        typer.Option("--check-rewrite", help="A forget's rewrite folder: check it leaves every branch as it is now."),
+        typer.Option(
+            "--check-rewrite", help="A forget's rewrite folder: check it leaves HEAD as it is, and name each branch."
+        ),
     ] = None,
     now: Annotated[
-        bool, typer.Option("--now", help="Forget for good, at your own console, once you type back the code.")
+        bool,
+        typer.Option("--now", help="Forget for good, at your own console, on your OS prompt or a code typed back."),
     ] = False,
     vault: VaultOption = None,
 ) -> None:
@@ -858,13 +861,15 @@ def forget_command(
 
 
 def _check_rewrite(vault: Vault, folder: Path) -> None:
-    problems = forget_rewrite.check(vault, folder)
-    if not problems:
-        say("rewrite   every branch stays as it is now: the rewrite takes only what the forget took out")
+    checked = forget_rewrite.check(vault, folder)
+    for branch, changes in checked.branches.items():
+        say(f"branch    {branch} still holds what the forget took: merge the forget into it, or delete it, first")
+        say_all([f"          {change}" for change in changes])
+    if not checked.refused:
+        say("rewrite   HEAD and your files outside the vault stay as they are: it takes only what the forget took")
         return
-    say("rewrite   refused: it would change what a branch holds now, so don't run it")
-    for problem in problems:
-        say(f"          {problem}")
+    say("rewrite   refused: it would change HEAD or a file outside the vault, so don't run it")
+    say_all([f"          {problem}" for problem in checked.refused])
     raise typer.Exit(1)
 
 

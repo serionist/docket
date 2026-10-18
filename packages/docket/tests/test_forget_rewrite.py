@@ -29,6 +29,7 @@ from docket.vault import cursors, holds, releaselog
 from docket.vault.config import SourceConfig
 from docket.vault.docstore import DocStore
 from docket.vault.gate import Gate
+from docket.vault.processed import parse_doc
 from docket.vault.records import version
 from docket.vault.releaselog import Kept, LoggedCut, Release
 from docket.vault.vault import Vault
@@ -163,7 +164,7 @@ def test_the_files_hold_no_text_and_leave_head_as_it_is(forgot: Forgot) -> None:
     first, second = forgot.first, forgot.second
     assert first.folder.parent == second.folder.parent and first.folder.name < second.folder.name
     for written in (first, second):
-        assert rewrite.check(forgot.vault, written.folder) == []
+        assert rewrite.check(forgot.vault, written.folder) == rewrite.Checked([], {})
         text = "".join((written.folder / name).read_text(encoding="utf-8") for name in rewrite.FILES)
         for said in ("The crane passed", "A whole call", "The brake pad", "Ada checks"):
             assert said not in text
@@ -186,8 +187,8 @@ def test_check_refuses_a_head_that_holds_a_blob_the_rewrite_strips(forgot: Forgo
     )
     git(vault.root, "add", "processed/again.md")
     git(vault.root, "commit", "-qm", "A file by hand")
-    problems = rewrite.check(vault, forgot.second.folder)
-    assert problems == ["vault/processed/again.md: the whole file, whose blob the rewrite strips"]
+    checked = rewrite.check(vault, forgot.second.folder)
+    assert checked.refused == ["vault/processed/again.md: the whole file, whose blob the rewrite strips"]
 
 
 def test_check_reads_expressions_as_filter_repo_does_and_leaves_binary_files_alone(
@@ -206,13 +207,13 @@ def test_check_reads_expressions_as_filter_repo_does_and_leaves_binary_files_alo
     (folder / rewrite.SCOPED).write_text("", encoding="utf-8")
     (folder / rewrite.BLOBS).write_text("", encoding="utf-8")
     # A literal with no replacement takes filter-repo's own; the binary file's first bytes hold a NUL.
-    assert rewrite.check(vault, folder) == ["vault/processed/kept.md: line 2"]
+    assert rewrite.check(vault, folder).refused == ["vault/processed/kept.md: line 2"]
     # A line blanked by its blob: the binary file's too, which the callback reads as any other.
     binary = git(vault.root, "rev-parse", "HEAD:./processed/blob.bin").strip()
     (folder / rewrite.LINES).write_text("", encoding="utf-8")
     line = rewrite.line_hash(b"\0\0A ZQX token, ZQX here.")
     (folder / rewrite.SCOPED).write_text(f"{binary} {line}\n", encoding="utf-8")
-    assert rewrite.check(vault, folder) == ["vault/processed/blob.bin: line 1"]
+    assert rewrite.check(vault, folder).refused == ["vault/processed/blob.bin: line 1"]
 
 
 def test_the_rewrite_takes_what_the_forgets_took_and_leaves_head_and_the_rest(forgot: Forgot, tmp_path: Path) -> None:
@@ -255,9 +256,20 @@ def test_the_rewrite_rewrites_every_branch_and_the_check_names_one_that_still_ho
     assert any("a branch only the remote has isn't in the clone and keeps the text" in line for line in lines)
     assert not any("other branches keep the text" in line for line in lines)
     git(host, "branch", "before", forgot.before)
-    problems = rewrite.check(vault, forgot.second.folder)
-    assert problems and all(p.startswith("before: vault/") for p in problems)
-    assert any(p.startswith("before: vault/raw/chat/") for p in problems)
+    # A branch from before the forget holds what it took in the vault: named, with what to do, but no refusal.
+    checked = rewrite.check(vault, forgot.second.folder)
+    assert checked.refused == [] and list(checked.branches) == ["before"]
+    assert all(p.startswith("vault/") for p in checked.branches["before"])
+    assert any(p.startswith("vault/raw/chat/") for p in checked.branches["before"])
+    # A change outside the vault on any tip refuses: a copy of a forgotten raw line in the owner's own file.
+    git(host, "checkout", "-q", "-b", "side")
+    copy = host / "notes" / "copy.jsonl"
+    copy.write_text(f'{{"rid":"{STARTER}","text":"The starter."}}\nKept.\n', encoding="utf-8", newline="\n")
+    git(host, "add", "notes/copy.jsonl")
+    git(host, "commit", "-qm", "A copy of my own")
+    git(host, "checkout", "-q", "main")
+    assert rewrite.check(vault, forgot.second.folder).refused == ["side: notes/copy.jsonl: line 1"]
+    git(host, "branch", "-D", "side")
     fresh = tmp_path / "fresh"
     git(tmp_path, "clone", "-q", "--no-local", str(host), str(fresh))
     filter_repo(fresh, forgot.second.folder)
@@ -332,7 +344,7 @@ DROPPED = (
 
 def test_each_rev_of_a_doc_is_judged_on_its_own_and_head_stays(reworded: Reworded) -> None:
     vault = reworded.vault
-    assert rewrite.check(vault, reworded.second.folder) == []
+    assert rewrite.check(vault, reworded.second.folder) == rewrite.Checked([], {})
     rows = (reworded.second.folder / rewrite.SCOPED).read_text(encoding="utf-8")
     # A row for each dropped line in each blob that held it: the first forget's six doc lines over their revs, and
     # the held note's two, besides the held recording's raw lines.
@@ -376,4 +388,77 @@ def test_a_blob_that_doesn_t_read_as_a_doc_loses_the_words_the_forget_dropped(
     assert done.written is not None
     rows = (done.written.folder / rewrite.SCOPED).read_text(encoding="utf-8")
     assert f"{broken} {rewrite.line_hash(said)}" in rows
-    assert rewrite.check(vault, done.written.folder) == []
+    assert rewrite.check(vault, done.written.folder) == rewrite.Checked([], {})
+
+
+def test_a_doc_the_forget_leaves_at_head_loses_what_its_earlier_revs_built_on_the_family(
+    tmp_path: Path, owner: Callable[..., AtConsole], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A digest whose first rev was built on the note's line about the transcript, rebuilt without it before the
+    forget, and another built on it that the owner deleted: neither is touched at HEAD, and both lose the line."""
+    vault = media_vault(tmp_path)
+    in_raw(vault)
+    vault.write_run("chat", [make_record(2, rid=REPLY, source="chat", text="The reply.")])
+    line = f"- The crane passed its load test. [r:{POLISHED}@0:01]"
+    recall.doc_put(vault, doc(vault, NOTE, [POLISHED, REPLY], [line, KEPT]))
+    reply = f"- A reply came. {cite(vault, NOTE, KEPT)}"
+    recall.doc_put(vault, doc(vault, DIGEST, [], [f"- The crane looks fine. {cite(vault, NOTE, line)}", reply]))
+    recall.doc_put(vault, doc(vault, DIGEST, [], [reply]))
+    brief = "digest:2026-10-11-week"
+    recall.doc_put(vault, doc(vault, brief, [], [f"- The brief said it passed. {cite(vault, NOTE, line)}"]))
+    git(vault.root, "rm", "-q", DocStore(vault).path(brief).as_posix())
+    git(vault.root, "commit", "-qm", "The owner deletes a digest")
+    other = "recording-note:2026-10-12-other"
+    recall.doc_put(vault, doc(vault, other, [REPLY], ["- Unrelated words. [r:" + REPLY + "]"]))
+    judged: list[bytes] = []
+    real = rewrite._Judged.dropped
+
+    def watched(self: rewrite._Judged, data: bytes, cut: object) -> set[int]:
+        judged.append(data)
+        return real(self, data, cut)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(rewrite._Judged, "dropped", watched)
+    owner("code")
+    done = forget_now.forget(vault, "rids", [POLISHED])
+    assert done.written is not None
+    assert [c.id for c in done.plan.docs] == [NOTE]
+    # Only what names the family or cites a doc built on it is judged: the unrelated note never is.
+    assert judged and not any(b"Unrelated words." in data for data in judged)
+    assert rewrite.check(vault, done.written.folder) == rewrite.Checked([], {})
+    top = vault.home.top
+    head_tree = git(top, "rev-parse", "HEAD^{tree}").strip()
+    fresh = tmp_path / "fresh"
+    git(tmp_path, "clone", "-q", "--no-local", str(top), str(fresh))
+    filter_repo(fresh, done.written.folder)
+    assert git(fresh, "rev-parse", "HEAD^{tree}").strip() == head_tree
+    history = git(fresh, "log", "--all", "-p", "--format=%H")
+    assert "The crane looks fine." not in history and "The brief said it passed." not in history
+    for said in ("A reply came.", "Someone replied.", "Unrelated words."):
+        assert said in history
+
+
+def test_refs_a_judged_blob_can_t_follow_drop_nothing(tmp_path: Path, owner: Callable[..., AtConsole]) -> None:
+    vault = media_vault(tmp_path)
+    in_raw(vault)
+    vault.write_run("chat", [make_record(2, rid=REPLY, source="chat", text="The reply.")])
+    line = f"- The crane passed its load test. [r:{POLISHED}@0:01]"
+    recall.doc_put(vault, doc(vault, NOTE, [POLISHED, REPLY], [line, KEPT]))
+    # A ref to a rev history doesn't hold, and one to a doc whose file isn't UTF-8, in a digest written by hand.
+    broken = vault.root / "processed" / "recording-note" / "2026" / "10" / "2026-10-14-broken.md"
+    broken.write_bytes(b"---\nid: recording-note:2026-10-14-broken\n\xff\n")
+    refs = [
+        f"- Gone rev. [d:{NOTE}@7#9=deadbeef]",
+        "- Bad file. [d:recording-note:2026-10-14-broken@1#9=deadbeef]",
+        f"- A reply came. {cite(vault, NOTE, KEPT)}",
+    ]
+    path = vault.root / "processed" / "digest" / "2026" / "10" / "2026-10-12-refs.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(parse_doc(doc(vault, "digest:2026-10-12-refs", [], refs), lenient=True).render(), encoding="utf-8",
+                    newline="\n")  # fmt: skip
+    git(vault.root, "add", "-A")
+    git(vault.root, "commit", "-qm", "Docs by hand")
+    owner("code")
+    done = forget_now.forget(vault, "rids", [POLISHED])
+    assert done.written is not None
+    assert rewrite.check(vault, done.written.folder) == rewrite.Checked([], {})
+    assert "Gone rev." in path.read_text(encoding="utf-8")

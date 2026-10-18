@@ -4,11 +4,11 @@ it takes no answer as a parameter, so a Python caller, a pipe or Claude Code's s
 | Step | What |
 |---|---|
 | 1 | refused, before anything is read, without the owner at a console (`console.problem`) |
-| 2 | the plan and its screen, with ids; one code typed back for the whole forget |
+| 2 | the plan and its screen, with ids; one question for the whole forget: the OS prompt, or a code typed back |
 | 3 | under the vault lock: the plan worked out again, stopped with nothing written on a difference from the screen |
 | 4 | the list's line, then its commit alone; then the apply, in one commit (DR-0581) |
-| 5 | the history rewrite's files, written whatever stopped the list's commit or the apply: nothing writes them later |
-| 6 | the lock let go; the index rebuilt under its own lock; the rewrite's lines printed |
+| 5 | the lock let go; the history rewrite's files, written under it instead when the list's commit or the apply stops |
+| 6 | the index rebuilt under its own lock; the rewrite's lines printed |
 
 None of it stops a process running as the user on purpose: it makes a forget a deliberate act, which the skills forbid
 Claude.
@@ -30,6 +30,8 @@ from docket.vault import forgotten
 from docket.vault.vault import Vault
 
 CHANGED = "the vault changed since the screen; nothing was forgotten, so run it again"
+# What the OS prompt names when it asks (DR-0572).
+ACT = "forget records for good"
 IN_FORCE = (
     "the forget's line is on the list and in force: every read skips what it takes, and the next gate call commits "
     "and finishes the rest"
@@ -58,8 +60,8 @@ def refuse() -> None:
 
 
 def forget(vault: Vault, kind: Kind, rids: list[str], source: str | None = None) -> Forgot:
-    """Forget for good, at the owner's console only, after the code they type back. Refused before anything is read
-    without the owner at a console."""
+    """Forget for good, at the owner's console only, after the OS prompt's yes or, where this machine has none, the
+    code they type back. Refused before anything is read without the owner at a console."""
     refuse()
     # What a crash left reaches git first, and a conflict refuses here, before the screen (DR-0528).
     with vault.writing():
@@ -73,7 +75,9 @@ def forget(vault: Vault, kind: Kind, rids: list[str], source: str | None = None)
         return done
     if shown.stops:
         raise DocketError("the forget can't go on:\n" + "\n".join(screen))
-    done.answer = console.typed_back(screen, "forget all of it for good", "keep everything", "nothing was forgotten")
+    done.answer = console.confirm(
+        screen, "forget all of it for good", "keep everything", "nothing was forgotten", act=ACT
+    )
     if done.answer != "yes":
         return done
     at = datetime.now(UTC)
@@ -95,7 +99,8 @@ def forget(vault: Vault, kind: Kind, rids: list[str], source: str | None = None)
                 raise DocketError(f"{str(e) or 'stopped'}\n{said}") from e
             e.add_note(said)
             raise
-        done.written, problem = _write(vault, again, held, at)
+    # After the lock: it only reads git objects, every doc blob on every ref, which can outlast the lock's waiters.
+    done.written, problem = _write(vault, again, held, at)
     done.lines = rewrite.history_lines(vault, done.written) if done.written else [f"history   {problem}"]
     # The index after the lock, under its own: the vault lock's waiters give up after 60 s (DR-0581). Until it lands,
     # its digest keeps the old index refused (DR-0593).

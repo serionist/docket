@@ -15,10 +15,10 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from docket_testkit import AtConsole, git, make_record
+from docket_testkit import AtConsole, FakePrompt, git, make_record
 from media_kit import CALL, POLISHED, audio, call, in_raw, media_vault
 
-from docket import cli, console, index, recall
+from docket import cli, console, index, osprompt, recall
 from docket.cli import main
 from docket.errors import DocketError
 from docket.forget import apply as forget_apply
@@ -263,7 +263,7 @@ def test_the_code_forgets_in_the_order_of_writes(
     assert "git clone --no-local" in out and "git filter-repo isn't Docket's dependency" in out
     # The rewrite leaves HEAD as it is.
     assert run(vault, "--check-rewrite", str(folder)) == 0
-    assert "rewrite   every branch stays as it is now" in capsys.readouterr().out
+    assert "rewrite   HEAD and your files outside the vault stay as they are" in capsys.readouterr().out
 
 
 def test_a_change_since_the_screen_stops_it_with_nothing_written(
@@ -347,18 +347,21 @@ def test_check_rewrite_reads_every_branch_and_refuses_one_that_holds_a_line_the_
     git(vault.root, "commit", "-q", "-m", "A file by hand")
     assert run(vault, "--check-rewrite", folder) == 0
     capsys.readouterr()
-    # A branch from before the forget still holds the run file's lines, and the rewrite rewrites every branch.
+    # A branch from before the forget still holds the run file's lines, and the rewrite rewrites every branch: named,
+    # with what to do, but HEAD stays as it is, so no refusal (DR-0598).
     git(vault.root, "branch", "before", before)
-    assert run(vault, "--check-rewrite", folder) == 1
+    assert run(vault, "--check-rewrite", folder) == 0
     out = capsys.readouterr().out
-    assert "rewrite   refused: it would change what a branch holds now, so don't run it" in out
-    assert f"before: {rel}: line 1, 2" in out
+    assert "branch    before still holds what the forget took: merge the forget into it, or delete it, first" in out
+    assert f"          {rel}: line 1, 2" in out and "rewrite   HEAD and your files outside the vault stay" in out
     git(vault.root, "branch", "-D", "before")
     # HEAD, once a merge an older Docket made brings the lines back: refused, named by path alone.
     run_file.write_text(git(vault.root, "show", f"{before}:./{rel}"), encoding="utf-8", newline="\n")
     git(vault.root, "commit", "-q", "-m", "An older Docket's merge", "--", rel)
     assert run(vault, "--check-rewrite", folder) == 1
-    assert f"          {rel}: line 1, 2" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "rewrite   refused: it would change HEAD or a file outside the vault, so don't run it" in out
+    assert f"          {rel}: line 1, 2" in out
 
 
 def test_check_rewrite_refuses_a_folder_that_isn_t_one(
@@ -531,3 +534,23 @@ def test_a_doc_left_for_its_owner_keeps_its_head_blob_in_the_rewrite(
     Gate(vault).list()
     assert not path.exists()
     assert run(vault, "--check-rewrite", found.group(1)) == 0
+
+
+def test_with_an_os_prompt_its_yes_forgets_and_its_no_keeps_everything(
+    vault: Vault,
+    owner: Callable[..., AtConsole],
+    os_prompt: Callable[..., FakePrompt],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The OS prompt is the forget's yes where this machine has one, and the code is never asked then (DR-0572)."""
+    hello = os_prompt(osprompt.Refused("cancelled"), osprompt.Verified())
+    person = owner("", "")
+    head = git(vault.root, "rev-parse", "HEAD")
+    assert run(vault, CALL, "--now") == 0
+    out = capsys.readouterr().out
+    assert "Fake Hello didn't confirm it (cancelled); nothing was forgotten" in out
+    assert git(vault.root, "rev-parse", "HEAD") == head and vault.rawlog.read(CALL) != []
+    assert run(vault, CALL, "--now") == 0
+    assert "forgot    2 record(s)" in capsys.readouterr().out and vault.rawlog.read(CALL) == []
+    assert hello.acts == [forget_now.ACT, forget_now.ACT]
+    assert all(p.startswith("Press Enter to forget all of it for good with Fake Hello") for p in person.prompts)

@@ -122,7 +122,7 @@ or your Mac's password, polkit (DR-0572 to DR-0575). The console code is asked o
 
 | Step | Asks |
 |---|---|
-| `docket hold release`, a loosening (`redaction set off`, `source new`, `media host add`, `media folder add`, `models allow`), `docket media confirm-cuts`, `docket media keys export` | your OS prompt, after `Press Enter` at the console; or the code |
+| `docket hold release`, a loosening (`redaction set off`, `source new`, `media host add`, `media folder add`, `models allow`), `docket media confirm-cuts`, `docket media keys export`, `docket forget --now` | your OS prompt, after `Press Enter` at the console; or the code |
 | `docket media keys import`, `models install --api`, `models key` | nothing more: your console only |
 
 | System | Prompt | Set up when | Otherwise |
@@ -407,11 +407,11 @@ forget: an older one reads what a merge brings back until a newer one's gate cal
 | `docket forget <rid>...` | each rid and everything under it, the audio it is in with every key, and its Whisper transcripts |
 | `docket forget --never-store [--source <name>]` | each record in raw a never-store list in force matches now |
 | `docket forget --held [--source <name>]` | each record in raw under a hold not released, by its versions, so the release still lets its cut version in |
-| `docket forget --check-rewrite <folder>` | nothing: checks the history rewrite a forget wrote leaves every branch as it is now |
+| `docket forget --check-rewrite <folder>` | nothing: checks the history rewrite a forget wrote leaves HEAD as it is, and names each branch to merge the forget into first |
 
 - Without `--now` it only says what it would take: counts, run files and doc line numbers, never a doc's id or a
   line's text, so it runs in Claude Code's shell too. `--now` runs in your own terminal only, shows the ids, and
-  forgets once you type back the code.
+  forgets on your OS prompt's yes, or a code typed back where the machine has none.
 - A forget writes `state/forgotten.jsonl`, hashes only, and commits it first. Every read, search and gate call obeys it
   at once, on every clone after its pull; the next gate call there takes the lines, audio and keys out too.
 - A folder file is taken by its content: move it out of the folder too, since a forget never writes there.
@@ -424,8 +424,9 @@ outside the vault that quote it.
 The text stays in your repo's history: Docket never rewrites it. The forget writes `git filter-repo` files to its
 private folder and prints how to use them, in order:
 
-1. check them with `--check-rewrite`: it reads HEAD and every other branch, and refuses while one would change, as a
-   branch from before the forget does until you merge the forget into it or delete it;
+1. check them with `--check-rewrite`: it refuses while the rewrite would change HEAD, or a file outside the vault on
+   any branch, and names each other branch that still holds what the forget took: merge the forget into it, or
+   delete it, first;
 2. back the repo up, then run filter-repo in a fresh `git clone --no-local`;
 3. filter-repo rewrites every branch and tag there and removes the `origin` remote: add it back, force-push every
    branch and tag, and clone again on every machine.

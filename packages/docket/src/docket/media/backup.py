@@ -160,7 +160,7 @@ def export(vault: Vault, target: Path, keys: KeyStore | None = None) -> Exported
         screen, "export them", "export nothing", "nothing was exported", act="export this clone's media keys"
     )
     if asked != "yes":
-        return Exported(len(found), kept=False, declined=True)
+        return Exported(len(found), kept=False, declined=True, forgotten=len(left_out))
     passphrase = draw()
     sealed = crypto.seal_with_passphrase(Bundle(keys=found).model_dump_json(), passphrase)
     try:
