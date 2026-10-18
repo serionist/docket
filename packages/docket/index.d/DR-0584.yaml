@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0584
+    title: The MCP tool spots lists a recording's doubtful spots, and the plugin's reconcile skill decides them
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#183"]
+    description: "spots(rid=None) is read-only. With a recording's rid, or either of its transcripts', it gives rid, transcript and whisper (the two rids it compares), doc (the fixes doc's id and rev, or null), why (null, or the reason the family screen keeps the recording out, never a value), people (the meeting's entities and the glossary terms near a spot: id, type, name, aliases with asr marked), spots (id, kind, left, right, the recorder's anchor and Whisper's, the recorder's speaker, the recorder's line and Whisper's words for it, near entity ids, count), fixes (the doc's lines: n, cite, the two texts, chosen, state, applied, and why not: waiting, rejected, no longer matching, cut or hidden) and left_out (counts by reason: past the cap per kind, heard differently, near a never-store value). Without a rid it gives the recordings to reconcile: at most 10 of the newest 30 with both transcripts in raw that pass the screen and have spots no fix decides or fixes waiting for the owner, each with its counts, and hidden, how many the screen kept out. The plugin's skill /docket:reconcile reads spots, decides each spot from the meeting's people and terms, the line on both sides, and search over other calls, mail and notes, and puts the recording's fixes doc with doc_put: a line per spot with the two texts as the tool gives them, the chosen text (the recorder's own when it was right), sure when evidence settles it and unsure when it rests on reading the context alone, why, and its evidence as anchors and refs. It never writes confirmed or rejected, keeps every committed line that isn't its own sure one, and ends with the unsure fixes in one table and the Recording page's link, where the user clicks. It pre-approves spots, search, read and verify; doc_put asks. It runs only when the user asks: a sync run's closing steps count the recordings waiting, said once."
+    binds:
+      - "spots(rid) is an MCP tool: its name and parameter only gain optional ones, and its result only gains fields (DR-0150)."
+      - The skill name reconcile is a one-way door (AGENTS.md).
+      - The skill pre-approves no write, and never writes a confirmed or rejected fix.
+    not_chosen:
+      - "A read view for spots: read takes a locator and gives raw or a summary; spots are a capped, ranked list with context, and the listing has no locator."
+      - "reconcile as the tool's name: a tool named for the act reads as one that writes."
+      - "Reconciling after every sync by itself: Claude's time is the user's, and no headless Claude runs before phase 3 (DR-0018)."

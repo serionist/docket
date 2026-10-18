@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0586
+    title: Only the owner's click on the Recording page decides an unsure fix
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#183"]
+    description: "Each fix line on the Recording page shows the click that sets its other state: Confirm on an unsure or rejected fix, Reject on an unsure, sure or confirmed one. A click is a same-origin form post to /recording/fix with the browser's session, a request carrying Authorization refused, checked by the Guard and run on the writer thread, carrying the doc's id, the rev shown, the line and the pick; it is refused when the doc moved since the page showed it, written by DocStore.settle as the doc's next rev with that line's state confirmed or rejected and by: <owner>, Recording page, in a commit Fix: <doc id> line <n> <state> on the Recording page, and answered 303 back to the page with done, an optional parameter (DR-0544). DocStore.settle is the only writer of those two states: a scan over the package pins that only the Recording page's route calls it. doc_put and the take-in refuse a put or an edit that adds a confirmed or rejected line or changes or drops a committed line that isn't sure (DR-0582), and every read takes the doc from its last commit, so neither Claude's tools nor its edits set an unsure fix's state. An unsure fix is not applied until the owner confirms it, and one left alone is safe: the reading keeps the recorder's text. Claude could still drive the page, post its form with a session got from the token, or commit with git itself, each a deliberate step outside every door: DR-0564's floor."
+    binds:
+      - DocStore.settle is the only writer of a confirmed or rejected fix, and only the Recording page's route calls it.
+      - "The token never posts a click: the route refuses Authorization."
+    not_chosen:
+      - "Curate's round in chat (DR-0472): Claude runs the writes on the user's word, so it could set the state, and auto mode or an allow rule removes the prompt."
+      - "A console code per batch (DR-0202): a code for a word in a transcript, which lets nothing private in."
