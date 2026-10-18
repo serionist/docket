@@ -407,7 +407,7 @@ forget: an older one reads what a merge brings back until a newer one's gate cal
 | `docket forget <rid>...` | each rid and everything under it, the audio it is in with every key, and its Whisper transcripts |
 | `docket forget --never-store [--source <name>]` | each record in raw a never-store list in force matches now |
 | `docket forget --held [--source <name>]` | each record in raw under a hold not released, by its versions, so the release still lets its cut version in |
-| `docket forget --check-rewrite <folder>` | nothing: checks the history rewrite a forget wrote leaves HEAD as it is |
+| `docket forget --check-rewrite <folder>` | nothing: checks the history rewrite a forget wrote leaves every branch as it is now |
 
 - Without `--now` it only says what it would take: counts, run files and doc line numbers, never a doc's id or a
   line's text, so it runs in Claude Code's shell too. `--now` runs in your own terminal only, shows the ids, and
@@ -422,10 +422,18 @@ destroy the old), the LFS server's encrypted copies, chunks sent to an API provi
 outside the vault that quote it.
 
 The text stays in your repo's history: Docket never rewrites it. The forget writes `git filter-repo` files to its
-private folder and prints how to use them: check them with `--check-rewrite`, back the repo up, run filter-repo in a
-fresh `git clone --no-local`, force-push from there, and clone again on every machine. The remote keeps the commits a
-force-push left behind until its host purges them, forks keep theirs, and other branches keep the text. Each folder
-holds every earlier forget's files on that clone: run only the newest.
+private folder and prints how to use them, in order:
+
+1. check them with `--check-rewrite`: it reads HEAD and every other branch, and refuses while one would change, as a
+   branch from before the forget does until you merge the forget into it or delete it;
+2. back the repo up, then run filter-repo in a fresh `git clone --no-local`;
+3. filter-repo rewrites every branch and tag there and removes the `origin` remote: add it back, force-push every
+   branch and tag, and clone again on every machine.
+
+- Your own files elsewhere in the repo keep what they say, but for a copy of a forgotten record's raw line.
+- A branch only the remote has isn't in the clone and keeps the text: check it out first, or delete it there.
+- The remote keeps the commits a force-push left behind until its host purges them, and forks keep theirs.
+- Each folder holds every earlier forget's files on that clone: run only the newest.
 
 ## Processed docs
 

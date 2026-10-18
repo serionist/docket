@@ -15,9 +15,15 @@ the next call. Until then every reader skips what the list takes.
 A key the apply deletes that no line names, a stored file's this clone made before its pull, goes on a keys-only line
 (DR-0595), so the clones that imported its export delete it too.
 
-Each file is written whole through a temp file and a rename, and all of them go in one commit. With no list the apply
-costs a stat; otherwise `<private>/forget/applied.json` keeps the list it applied and the size and modification time of
-each run file, doc, media file and cursor file it checked, so only what moved since is read again. Nothing it keeps or
+Keys and staging are this clone's own and go at once. The tree waits while git is in the middle of something the owner
+runs, a rebase, a merge, a detached HEAD or unmerged paths, since its commit would be refused and the owner's
+`git rebase --continue` would then refuse Docket's changes (DR-0597); every reader skips what the list takes meanwhile.
+
+Each file is written whole through a temp file and a rename, and all of them go in one commit. The paths, and the docs'
+revs, are recorded before anything in the tree changes, so a crash or a failed commit leaves them for the next call to
+commit. With no list the apply costs a stat; otherwise `<private>/forget/applied.json` keeps the list it applied, the
+HEAD it last walked the docs and media at, and the size and modification time each run file, doc, media file and cursor
+file had when it was read, a media file's key with it, so only what moved since is read again. Nothing it keeps or
 reports names a record.
 """
 
@@ -26,7 +32,8 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
-from collections.abc import Iterable, Sequence
+import logging
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -41,17 +48,23 @@ from docket.vault.docstore import DocStore
 from docket.vault.forgotten import FORGOTTEN, Forget, Forgotten
 from docket.vault.home import Home
 from docket.vault.processed import DocRefusedError, ProcessedDoc, doc_path
-from docket.vault.records import RawRecord
+from docket.vault.rawlog import RunFile, lines_of, record_of
 from docket.vault.segments import segments, time_range
 from docket.vault.spans import RawLookup
 from docket.vault.staging import Staging, retry, rid_hash, write_replacing
 from docket.vault.vault import Vault
+
+log = logging.getLogger(__name__)
 
 FOLDER = "forget"
 APPLIED = "applied.json"
 SCHEMA_VERSION = 1
 
 Stamp = tuple[int, int]
+# A stored media file's size and modification time, and its key id as its header named it then: None for a header that
+# doesn't read, an LFS pointer's, and UNREAD while no listed key asked for it.
+MediaStamp = tuple[int, int, str | None]
+UNREAD = ""
 
 
 @dataclass
@@ -70,34 +83,47 @@ class Applied:
     # Keys this clone held that no line named, now on a keys-only line.
     listed_keys: int = 0
     commit: str | None = None
+    # Why the tree's part waits for the owner's git (DR-0597); keys and staging went all the same.
+    waits: str | None = None
 
 
 @dataclass
 class _State:
-    """`applied.json`: the list as it was applied, keys too, the stamps of what it checked, the folder files whose
-    parts it takes from here on, the hashes of the rids whose lines it took, and the paths written but not committed."""
+    """`applied.json`: the list as it was applied, keys too; the HEAD the docs and media were last walked at; the
+    stamps of what it read, each taken before the read; the docs it left, watched on every call; the folder files whose
+    parts it takes from here on; the hashes of the rids whose lines it took; and the paths written but not committed,
+    with the revs of the docs among them."""
 
     applied: str = ""
+    # The digest of what raw and the docs are judged by: a keys-only line leaves it as it was (DR-0593).
+    digest: str = ""
+    head: str | None = None
     runs: dict[str, Stamp] = field(default_factory=dict[str, Stamp])
     docs: dict[str, Stamp] = field(default_factory=dict[str, Stamp])
-    media: dict[str, Stamp] = field(default_factory=dict[str, Stamp])
+    media: dict[str, MediaStamp] = field(default_factory=dict[str, MediaStamp])
     cursor: Stamp | None = None
+    left: dict[str, Stamp | None] = field(default_factory=dict[str, Stamp | None])
     files: list[str] = field(default_factory=list[str])
     skipped: list[str] = field(default_factory=list[str])
     pending: list[str] = field(default_factory=list[str])
+    revs: dict[str, int] = field(default_factory=dict[str, int])
 
     def dump(self) -> str:
         return json.dumps(
             {
                 "schema_version": SCHEMA_VERSION,
                 "list": self.applied,
+                "digest": self.digest,
+                "head": self.head,
                 "runs": self.runs,
                 "docs": self.docs,
                 "media": self.media,
                 "cursor": self.cursor,
+                "left": self.left,
                 "files": sorted(self.files),
                 "skipped": sorted(self.skipped),
                 "pending": sorted(self.pending),
+                "revs": self.revs,
             },
             separators=(",", ":"),
         )
@@ -118,21 +144,33 @@ def _stamps(value: Any) -> dict[str, Stamp]:
     return {str(rel): (int(size), int(mtime)) for rel, (size, mtime) in value.items()}
 
 
+def _media_of(value: Any) -> dict[str, MediaStamp]:
+    out: dict[str, MediaStamp] = {}
+    for rel, (size, mtime, key) in value.items():
+        out[str(rel)] = (int(size), int(mtime), None if key is None else str(key))
+    return out
+
+
 def _read_state(home: Home) -> _State:
     """What the last apply kept; one that doesn't read, or that a later Docket wrote, is no state, so everything is
     read again."""
     try:
         data: Any = json.loads(state_path(home).read_text(encoding="utf-8"))
         cursor = data["cursor"]
+        head = data["head"]
         found = _State(
             applied=str(data["list"]),
+            digest=str(data["digest"]),
+            head=None if head is None else str(head),
             runs=_stamps(data["runs"]),
             docs=_stamps(data["docs"]),
-            media=_stamps(data["media"]),
+            media=_media_of(data["media"]),
             cursor=None if cursor is None else (int(cursor[0]), int(cursor[1])),
+            left={str(rel): None if s is None else (int(s[0]), int(s[1])) for rel, s in data["left"].items()},
             files=[str(f) for f in data["files"]],
             skipped=[str(s) for s in data["skipped"]],
             pending=[str(p) for p in data["pending"]],
+            revs={str(doc_id): int(rev) for doc_id, rev in data["revs"].items()},
         )
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return _State()
@@ -161,9 +199,10 @@ def key_of(listed: Forgotten) -> str:
 
 def _stamp(path: Path) -> Stamp | None:
     """A file's size and modification time, or None when it isn't there."""
-    if not path.exists():
+    try:
+        st = path.stat()
+    except FileNotFoundError:
         return None
-    st = path.stat()
     return st.st_size, st.st_mtime_ns
 
 
@@ -212,13 +251,6 @@ def _staging(vault: Vault, keys: KeyStore, listed: Forgotten) -> tuple[int, int]
     return versions, media
 
 
-def _record(line: str) -> RawRecord | None:
-    try:
-        return RawRecord.model_validate(json.loads(line))
-    except ValueError:
-        return None
-
-
 @dataclass
 class _Raw:
     """What the list takes from the run files read: each file's text as it is left, the rids whose lines went, how many
@@ -230,9 +262,10 @@ class _Raw:
     files: frozenset[str] = frozenset()
 
 
-def _raw(vault: Vault, listed: Forgotten, state: _State, moved: bool, runs: Sequence[tuple[Any, Stamp]]) -> _Raw:
+def _raw(vault: Vault, listed: Forgotten, state: _State, moved: bool, runs: Sequence[tuple[RunFile, Stamp]]) -> _Raw:
     """The listed lines of each run file that moved, or of every one when the list did, in run order. A line that
-    doesn't read as a record is kept as it is: only a line the list takes ever leaves a run file."""
+    doesn't read as a record is kept as it is: only a line the list takes ever leaves a run file. Lines are split at
+    LFs alone, as every reader of run files splits them."""
     out = _Raw()
     reading = listed.reading(() if moved else state.files)
     for run, stamp in runs:
@@ -242,8 +275,8 @@ def _raw(vault: Vault, listed: Forgotten, state: _State, moved: bool, runs: Sequ
         text = run.path.read_bytes().decode("utf-8")
         kept: list[str] = []
         taken = 0
-        for line in text.splitlines(keepends=True):
-            record = _record(line) if line.strip() else None
+        for line in lines_of(text):
+            record = record_of(line) if line.strip() else None
             if record is not None and reading.skips(record):
                 out.rids.add(record.rid)
                 taken += 1
@@ -261,41 +294,71 @@ def logged_keys(root: Path, source: str, stem: str) -> set[str]:
     return {line.key for line in cutlog.read(root, source) if line.rid == stem and line.key is not None}
 
 
+class _Logged:
+    """The keys the media cut log names, by source and rid hash, each source's log read once."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self._by: dict[str, dict[str, set[str]]] = {}
+
+    def of(self, source: str, stem: str) -> set[str]:
+        found = self._by.get(source)
+        if found is None:
+            found = dict[str, set[str]]()
+            for line in cutlog.read(self.root, source):
+                if line.key is not None:
+                    found.setdefault(line.rid, set()).add(line.key)
+            self._by[source] = found
+        return set(found.get(stem, set()))
+
+
 @dataclass
 class _Media:
+    """The stored files the list takes and the keys to delete with them, gathered before anything goes; the keys among
+    them no line names; and each file's stamp and key as read now."""
+
     removed: list[Path] = field(default_factory=list[Path])
-    # Keys deleted here that no line names.
+    keys: set[str] = field(default_factory=set[str])
     unlisted: set[str] = field(default_factory=set[str])
+    seen: dict[str, MediaStamp] = field(default_factory=dict[str, MediaStamp])
 
 
 def _media(
-    vault: Vault, keys: KeyStore, listed: Forgotten, state: _State, *, moved: bool, taken: Iterable[str]
+    vault: Vault, listed: Forgotten, cached: Mapping[str, MediaStamp], now: Mapping[str, Stamp], taken: Iterable[str]
 ) -> _Media:
     """Each stored file the list takes: on a rid its `media` holds, or one forgotten whole whose lines went now, with
-    every key the cut log names for that rid; or a file whose own key is listed. An LFS pointer is taken by its rid
-    alone: its key can't be read. Each key goes from this clone's store."""
+    every key the cut log names for that rid; a file whose own key is listed; or an LFS pointer, whose key can't be
+    read, when every key the cut log names for its rid is listed, as a version forget lists them. A file's key comes
+    from its stamp's cache while the file hasn't moved, else from its header, read only once a key is listed or its rid
+    is. Nothing is deleted here."""
     root = vault.root
     out = _Media()
     hashes = set(listed.media) | {rid_hash(rid) for rid in taken if listed.whole(rid)}
-    folder = root / layout.STORED
-    for path in sorted(folder.glob(f"*/*/*/*{layout.SUFFIX}")) if folder.is_dir() else []:
-        stem = path.name.split(".", 1)[0]
-        if not moved and state.media.get(path.relative_to(root).as_posix()) == _stamp(path) and stem not in hashes:
-            continue
-        key = media_staged.key_of(path)
+    logged = _Logged(root)
+    for rel, stamp in sorted(now.items()):
+        path = root / rel
+        held = cached.get(rel)
+        key = held[2] if held is not None and held[:2] == stamp else UNREAD
+        stem, source = path.name.split(".", 1)[0], path.parts[-4]
+        if key == UNREAD and (stem in hashes or listed.keys):
+            key = media_staged.key_of(path)
+        out.seen[rel] = (*stamp, key)
         if stem in hashes:
-            found = {key} if key is not None else set[str]()
-            found |= logged_keys(root, path.parts[-4], stem)
-        elif key is not None and key in listed.keys:
+            found = ({key} if key else set[str]()) | logged.of(source, stem)
+        elif key == UNREAD:
+            # No key is listed, so no file is taken by its own.
+            continue
+        elif key is not None:
+            if key not in listed.keys:
+                continue
             found = {key}
         else:
-            continue
-        retry(lambda path=path: path.unlink(missing_ok=True))
+            found = logged.of(source, stem)
+            if not found or not found <= listed.keys:
+                continue
         out.removed.append(path)
-        for one in sorted(found):
-            keys.delete(one)
-            if one not in listed.keys:
-                out.unlisted.add(one)
+        out.keys |= found
+        out.unlisted |= found - listed.keys
     return out
 
 
@@ -364,7 +427,6 @@ class _Docs:
     writes: list[tuple[str, str | None]] = field(default_factory=list[tuple[str, str | None]])
     revs: list[tuple[str, int]] = field(default_factory=list[tuple[str, int]])
     left: list[str] = field(default_factory=list[str])
-    stamps: dict[str, Stamp] = field(default_factory=dict[str, Stamp])
 
 
 def _doc_files(root: Path) -> dict[str, Path]:
@@ -372,24 +434,26 @@ def _doc_files(root: Path) -> dict[str, Path]:
     return {p.relative_to(root).as_posix(): p for p in sorted(folder.rglob("*.md"))} if folder.is_dir() else {}
 
 
-def _docs(vault: Vault, listed: Forgotten, state: _State, moved: bool, skipped: Iterable[str]) -> _Docs:
+def _doc_stamps(root: Path) -> dict[str, Stamp]:
+    return {rel: s for rel, path in _doc_files(root).items() if (s := _stamp(path)) is not None}
+
+
+def _docs(
+    vault: Vault, listed: Forgotten, state: _State, *, moved: bool, skipped: Iterable[str], stamps: Mapping[str, Stamp]
+) -> _Docs:
     """Each doc that moved, or every one when the list did, judged by the docs' rule; a hand edit of a doc it changes
-    taken in first and the doc judged again, so the rev the forget writes holds the edit. A final decision edited on
-    disk, and a hand edit the take-in refuses, stay as they are, and are named."""
+    taken in first and that doc judged again, with the docs citing it, so the rev the forget writes holds the edit. A
+    final decision edited on disk, and a hand edit the take-in refuses, stay as they are, and are named."""
     root = vault.root
     out = _Docs()
-    files = _doc_files(root)
-    due: list[Path] = []
-    for rel, path in files.items():
-        stamp = _stamp(path)
-        if moved or state.docs.get(rel) != stamp:
-            due.append(path)
+    due = [root / rel for rel, stamp in stamps.items() if moved or state.docs.get(rel) != stamp or rel in state.left]
     if not due or not listed.digest:
         return out
     store = DocStore(vault)
     raw = Left(RawLookup(root), listed, skipped)
-    fates = judge(store, store.at_paths(due), raw, listed)
-    taken = False
+    parsed = store.at_paths(due)
+    fates = judge(store, parsed, raw, listed)
+    taken: list[str] = []
     for doc_id, fate in sorted(fates.items()):
         if _final(fate):
             # Read whole from its last commit, so an edit on disk is never taken in (DR-0564): left for its owner.
@@ -397,11 +461,18 @@ def _docs(vault: Vault, listed: Forgotten, state: _State, moved: bool, skipped: 
                 out.left.append(doc_id)
             continue
         try:
-            taken = store.take_in(doc_id) is not None or taken
+            if store.take_in(doc_id) is not None:
+                taken.append(doc_id)
         except DocRefusedError:
             out.left.append(doc_id)
     if taken:
-        fates = judge(store, store.at_paths(due), raw, listed)
+        # Only the docs taken in read again; with those citing them, the only fates their new rev can change.
+        again = {*taken, *forgetdocs.citing(parsed, taken)}
+        fresh = {d.meta.id: d for d in store.at_paths([store.file(doc_id) for doc_id in taken])}
+        by_id = {d.meta.id: d for d in parsed} | fresh
+        for doc_id in again:
+            fates.pop(doc_id, None)
+        fates |= judge(store, [by_id[i] for i in sorted(again) if i in by_id], raw, listed)
     histories = store.histories(sorted(set(fates) - set(out.left)))
     for doc_id in sorted(set(fates) - set(out.left)):
         fate = fates[doc_id]
@@ -441,71 +512,108 @@ def _cursor(vault: Vault, listed: Forgotten) -> str | None:
 
 def apply(vault: Vault, keys: KeyStore, *, first: bool = False) -> Applied:
     """The list in force against this clone, idempotent: each part takes what the list takes and nothing else, so a
-    second run finds nothing. `first` is the forget's own run, whose commit counts what it took; any other run's says
-    it was applied here. A commit that fails leaves the files on disk, and the next run commits them."""
+    second run finds nothing. `first` is the forget's own run, whose commit counts what it took and which refuses when
+    the tree waits; any other run's says it was applied here. A commit that fails leaves the files on disk, and the
+    next run commits them."""
     listed = forgotten.load(vault.root, vault.home)
     key = key_of(listed)
     if not key:
         return Applied()
     home = vault.home
+    root = vault.root
     with vault.lock:
-        if listed.pending and listed.problem is None:
-            forgotten.commit_pending(vault)
         state = _read_state(home)
         moved = state.applied != key
+        # What raw, the docs and the cursor entries are judged by: a keys-only line moves the list but not this.
+        judged = moved and state.digest != listed.digest
         done = Applied()
         done.keys = drop_keys(listed, keys)
         _reached("keys")
         if moved:
             done.staged, done.staged_media = _staging(vault, keys, listed)
         _reached("staging")
+        # Each stamp is taken before its file is read, HEAD's too, so what a pull changes meanwhile is read again on the
+        # next call.
+        head = vault.git.head_id()
         runs = vault.rawlog.stamped()
-        stamps = {run.path.relative_to(vault.root).as_posix(): stamp for run, stamp in runs}
-        cursor_path = cursors.file_path(vault.root, vault.machine)
+        run_stamps = {run.path.relative_to(root).as_posix(): stamp for run, stamp in runs}
+        cursor_path = cursors.file_path(root, vault.machine)
         cursor_stamp = _stamp(cursor_path)
-        nothing_moved = (
+        # Docs and stored media arrive by a commit or a pull, which moves HEAD: walked only then, or when the list
+        # moved, a write waits to be committed, or a doc left for its owner changed.
+        left_moved = _left_moved(root, state)
+        walk = moved or bool(state.pending) or head != state.head or left_moved
+        was = {rel: (size, mtime) for rel, (size, mtime, _) in state.media.items()}
+        doc_stamps = _doc_stamps(root) if walk else dict(state.docs)
+        media_now = _media_stamps(root) if walk else was
+        if (
             not moved
             and not state.pending
-            and stamps == state.runs
+            and not listed.pending
+            and run_stamps == state.runs
             and cursor_stamp == state.cursor
-            and _unmoved(vault.root, state)
-        )
-        if nothing_moved:
+            and doc_stamps == state.docs
+            and media_now == was
+            and not left_moved
+        ):
+            if head != state.head:
+                _write_state(home, dataclasses.replace(state, head=head))
             return done
-        raw = _raw(vault, listed, state, moved, runs) if listed.acts else _Raw(files=frozenset(state.files))
+        # Before any tracked file changes: the tree is the owner's while git is in the middle of something (DR-0597).
+        done.waits = vault.blocked()
+        if done.waits is not None:
+            if first:
+                raise DocketError(done.waits)
+            log.info("the forgotten list's apply waits for git: %s", done.waits)
+            return done
+        if listed.pending and listed.problem is None:
+            forgotten.commit_pending(vault)
+        raw = _raw(vault, listed, state, judged, runs) if listed.acts else _Raw(files=frozenset(state.files))
         done.records = raw.lines
-        media = _media(vault, keys, listed, state, moved=moved, taken=raw.rids)
+        if raw.rids and not walk:
+            # A whole rid's line came back without HEAD moving: its media and docs are looked at again.
+            walk = True
+            doc_stamps, media_now = _doc_stamps(root), _media_stamps(root)
+        media = _media(vault, listed, state.media, media_now, raw.rids) if walk else _Media()
         done.media = len(media.removed)
+        _reached("media")
         # The list only grows, so a rid whose lines an earlier run took stays taken.
         skipped = {*state.skipped, *(rid_hash(rid) for rid in raw.rids)}
-        docs = _docs(vault, listed, state, moved, skipped)
+        docs = _docs(vault, listed, state, moved=judged, skipped=skipped, stamps=doc_stamps) if walk else _Docs()
         done.left = docs.left
-        cursor = _cursor(vault, listed) if moved or cursor_stamp != state.cursor else None
+        cursor = _cursor(vault, listed) if judged or cursor_stamp != state.cursor else None
         writes: list[tuple[str, str | None]] = [
-            *((p.relative_to(vault.root).as_posix(), text) for p, text in raw.left.items()),
+            *((p.relative_to(root).as_posix(), text) for p, text in raw.left.items()),
             *docs.writes,
         ]
         if cursor is not None:
-            writes.append((cursor_path.relative_to(vault.root).as_posix(), cursor))
-        removed = [p.relative_to(vault.root).as_posix() for p in media.removed]
+            writes.append((cursor_path.relative_to(root).as_posix(), cursor))
+        removed = [p.relative_to(root).as_posix() for p in media.removed]
         unlisted = sorted(media.unlisted) if listed.problem is None else []
         named: set[str] = {*state.pending, *(rel for rel, _ in writes), *removed, *([FORGOTTEN] if unlisted else [])}
         paths = sorted(named)
-        # The paths go on record before any is written, so a crash before the commit leaves them for the next run.
-        _write_state(home, dataclasses.replace(state, pending=paths))
+        revs = {**state.revs, **dict(docs.revs)}
+        # The paths and the docs' revs go on record before anything in the tree changes, so a crash or a failure from
+        # here on leaves them for the next run to commit.
+        _write_state(home, dataclasses.replace(state, pending=paths, revs=revs))
         _reached("recorded")
+        if unlisted:
+            # Listed before the keys go, so a key deleted here is named for the clones that imported this one's export.
+            forgotten.write_line(vault, Forget(keys=unlisted, at=datetime.now(UTC), machine=vault.machine))
+            done.listed_keys = len(unlisted)
         for rel, text in writes:
-            path = vault.root / rel
+            path = root / rel
             if text is None:
                 retry(lambda path=path: path.unlink(missing_ok=True))
             else:
                 write_replacing(home, path, text, "forget")
+        for path in media.removed:
+            retry(lambda path=path: path.unlink(missing_ok=True))
+        for one in sorted(media.keys):
+            keys.delete(one)
         done.docs = len(docs.revs)
         done.removed = sum(1 for _, text in docs.writes if text is None)
         _reached("written")
-        if unlisted:
-            forgotten.write_line(vault, Forget(keys=unlisted, at=datetime.now(UTC), machine=vault.machine))
-            done.listed_keys = len(unlisted)
         paths = _committable(vault, paths)
         if paths:
             what = (
@@ -514,23 +622,48 @@ def apply(vault: Vault, keys: KeyStore, *, first: bool = False) -> Applied:
                 if first
                 else f"Forget: applied on {vault.machine}"
             )
-            lines = "".join(f"\nDoc: {doc_id} rev {rev}" for doc_id, rev in docs.revs)
+            # The docs' revs a failed commit left too, so every rev the apply wrote is in a history (DR-0112).
+            committed = set(paths)
+            lines = "".join(
+                f"\nDoc: {doc_id} rev {rev}"
+                for doc_id, rev in sorted(revs.items())
+                if (rel := doc_path(doc_id).as_posix()) in committed and (root / rel).is_file()
+            )
             done.commit = vault.commit(paths, f"{what}\n{lines}" if lines else what)
         _reached("committed")
-        after = forgotten.load(vault.root, vault.home)
+        written = {rel for rel, _ in writes}
+        after = forgotten.load(root, home)
         _write_state(
             home,
             _State(
                 applied=key_of(after),
-                runs={run.path.relative_to(vault.root).as_posix(): stamp for run, stamp in vault.rawlog.stamped()},
-                docs={rel: s for rel, path in _doc_files(vault.root).items() if (s := _stamp(path)) is not None},
-                media=_media_stamps(vault.root),
-                cursor=_stamp(cursor_path),
+                digest=after.digest,
+                head=head,
+                runs={rel: (_stamp(root / rel) or s) if rel in written else s for rel, s in run_stamps.items()},
+                docs=_restamped(root, doc_stamps, written) if walk else state.docs,
+                media={rel: s for rel, s in media.seen.items() if rel not in removed} if walk else state.media,
+                cursor=_stamp(cursor_path) if cursor is not None else cursor_stamp,
+                left={rel: doc_stamps.get(rel) for rel in (doc_path(i).as_posix() for i in docs.left)},
                 files=sorted(raw.files),
                 skipped=sorted(skipped),
             ),
         )
         return done
+
+
+def _left_moved(root: Path, state: _State) -> bool:
+    """Whether a doc the last apply left for its owner changed since, so the next call writes the forget's rev."""
+    return any(_stamp(root / rel) != stamp for rel, stamp in state.left.items())
+
+
+def _restamped(root: Path, stamps: Mapping[str, Stamp], written: set[str]) -> dict[str, Stamp]:
+    """The docs' stamps as they were read, those the apply wrote taken again and those it removed left out."""
+    out: dict[str, Stamp] = {}
+    for rel, stamp in stamps.items():
+        now = _stamp(root / rel) if rel in written else stamp
+        if now is not None:
+            out[rel] = now
+    return out
 
 
 def _committable(vault: Vault, paths: Sequence[str]) -> list[str]:
@@ -552,9 +685,3 @@ def _media_stamps(root: Path) -> dict[str, Stamp]:
         if stamp is not None:
             out[path.relative_to(root).as_posix()] = stamp
     return out
-
-
-def _unmoved(root: Path, state: _State) -> bool:
-    """Whether every doc and stored media file is as the last apply left it: their stamps, never their bytes."""
-    docs = {rel: s for rel, path in _doc_files(root).items() if (s := _stamp(path)) is not None}
-    return docs == state.docs and _media_stamps(root) == state.media

@@ -7,7 +7,8 @@ it takes no answer as a parameter, so a Python caller, a pipe or Claude Code's s
 | 2 | the plan and its screen, with ids; one code typed back for the whole forget |
 | 3 | under the vault lock: the plan worked out again, stopped with nothing written on a difference from the screen |
 | 4 | the list's line, then its commit alone; then the apply, in one commit (DR-0581) |
-| 5 | the lock let go; the index rebuilt under its own lock; the history rewrite's files written, their lines printed |
+| 5 | the history rewrite's files, written whatever stopped the list's commit or the apply: nothing writes them later |
+| 6 | the lock let go; the index rebuilt under its own lock; the rewrite's lines printed |
 
 None of it stops a process running as the user on purpose: it makes a forget a deliberate act, which the skills forbid
 Claude.
@@ -29,6 +30,10 @@ from docket.vault import forgotten
 from docket.vault.vault import Vault
 
 CHANGED = "the vault changed since the screen; nothing was forgotten, so run it again"
+IN_FORCE = (
+    "the forget's line is on the list and in force: every read skips what it takes, and the next gate call commits "
+    "and finishes the rest"
+)
 
 
 @dataclass
@@ -77,14 +82,36 @@ def forget(vault: Vault, kind: Kind, rids: list[str], source: str | None = None)
         if again.signature() != shown.signature():
             raise DocketError(CHANGED)
         held = rewrite.before(vault, again)
-        forgotten.append(vault, again.line(vault.machine, at))
-        done.applied = forget_apply.apply(vault, KeyStore(vault.home), first=True)
+        forgotten.write_line(vault, again.line(vault.machine, at))
+        # From here the line is in force, so the forget can't be stopped: whatever stops the list's commit or the
+        # apply, the rewrite's files are written, since nothing writes them later, and the error says so.
+        try:
+            forgotten.commit_pending(vault, f"Forget: the list from {vault.machine}")
+            done.applied = forget_apply.apply(vault, KeyStore(vault.home), first=True)
+        except BaseException as e:
+            written, problem = _write(vault, again, held, at)
+            said = f"{IN_FORCE}; " + (f"the history rewrite's files are in {written.folder}" if written else problem)
+            if isinstance(e, DocketError | KeyboardInterrupt):
+                raise DocketError(f"{str(e) or 'stopped'}\n{said}") from e
+            e.add_note(said)
+            raise
+        done.written, problem = _write(vault, again, held, at)
+    done.lines = rewrite.history_lines(vault, done.written) if done.written else [f"history   {problem}"]
     # The index after the lock, under its own: the vault lock's waiters give up after 60 s (DR-0581). Until it lands,
     # its digest keeps the old index refused (DR-0593).
     try:
         index.rebuild(vault)
     except DocketError as e:
         done.index_problem = str(e)
-    done.written = rewrite.write(vault, again, held, at)
-    done.lines = rewrite.history_lines(vault, done.written)
+    except KeyboardInterrupt:
+        done.index_problem = "the rebuild was stopped; docket index rebuild finishes it"
     return done
+
+
+def _write(vault: Vault, plan: Plan, held: rewrite.Before, at: datetime) -> tuple[rewrite.Written | None, str]:
+    """The rewrite's files, or why they couldn't be written: never an error of its own, so what stopped the apply is
+    the one said."""
+    try:
+        return rewrite.write(vault, plan, held, at), ""
+    except (DocketError, OSError) as e:
+        return None, f"the history rewrite's files couldn't be written: {e}"

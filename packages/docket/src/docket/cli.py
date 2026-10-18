@@ -800,7 +800,8 @@ def forget_command(
     held: Annotated[bool, typer.Option("--held", help="Each record in raw under a hold not released.")] = False,
     source: SourceOption = None,
     check_rewrite: Annotated[
-        Path | None, typer.Option("--check-rewrite", help="A forget's rewrite folder: check it leaves HEAD as it is.")
+        Path | None,
+        typer.Option("--check-rewrite", help="A forget's rewrite folder: check it leaves every branch as it is now."),
     ] = None,
     now: Annotated[
         bool, typer.Option("--now", help="Forget for good, at your own console, once you type back the code.")
@@ -828,7 +829,10 @@ def forget_command(
         plan = forget_plan.make(found, kind, rids or [], source)
         say_all(forget_plan.lines(plan, screen=False))
         if plan.taken and not plan.stops:
-            say(f"next      run in your own terminal: {forget_plan.command(plan)}")
+            unfilled: list[tuple[str, str]] = []
+            say(f"next      run in your own terminal: {forget_plan.command(plan, unfilled)}")
+            for name, value in unfilled:
+                say(f"          <{name}> is {value}: put it in by hand, quoted as your shell reads it")
         return
     done = forget_now.forget(found, kind, rids or [], source)
     if done.answer is None or done.applied is None:
@@ -841,7 +845,10 @@ def forget_command(
         f"doc(s); {applied.keys} key(s) deleted here{commit}"
     )
     for doc_id in applied.left:
-        say(f"left      {doc_id}: the forget's rev wasn't written; fix the edit, and the next gate call writes it")
+        say(
+            f"left      {doc_id}: the forget's rev wasn't written; fix the edit, and the next gate call writes it "
+            "(--check-rewrite refuses until then)"
+        )
     if done.index_problem is not None:
         say(f"index     refused until rebuilt: {done.index_problem}")
     else:
@@ -853,9 +860,9 @@ def forget_command(
 def _check_rewrite(vault: Vault, folder: Path) -> None:
     problems = forget_rewrite.check(vault, folder)
     if not problems:
-        say("rewrite   HEAD stays as it is: the rewrite takes only what the forget took out")
+        say("rewrite   every branch stays as it is now: the rewrite takes only what the forget took out")
         return
-    say("rewrite   refused: it would change HEAD, so don't run it")
+    say("rewrite   refused: it would change what a branch holds now, so don't run it")
     for problem in problems:
         say(f"          {problem}")
     raise typer.Exit(1)

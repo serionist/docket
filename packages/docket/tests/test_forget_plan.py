@@ -92,7 +92,7 @@ def test_a_transcript_takes_its_recording_s_audio_and_whisper_transcript(vault: 
     assert plan.family == {POLISHED, WHISPER}
     assert plan.media == {POLISHED, CALL, WHISPER}
     assert plan.stored_files == 1 and plan.keys
-    assert any(f"{CALL} stays" in note for note in plan.notes)
+    assert any(f"{CALL} stays" in note.text for note in plan.notes)
     dry = planning.lines(plan, screen=False)
     assert any(line.startswith("note      plaud:rec-a stays") for line in dry)
 
@@ -155,7 +155,7 @@ def test_a_folder_file_takes_its_versions_parts_and_identity(tmp_path: Path) -> 
     assert plan.taken == [planning.Taken("docs:aaaaaaaaaaaa", "folder")]
     assert plan.files == {f"sha256:{'cd' * 32}"} and len(plan.versions) == 2
     assert plan.rids == set() and plan.media == set()
-    assert any("move the file out" in note for note in plan.notes)
+    assert any("move the file out" in note.text for note in plan.notes)
 
 
 def test_an_lfs_pointer_whose_key_nothing_names_stops_the_forget(vault: Vault) -> None:
@@ -225,11 +225,11 @@ def test_the_screen_counts_an_id_a_never_store_list_names(vault: Vault) -> None:
 
 def test_the_next_line_and_what_the_api_provider_holds(vault: Vault) -> None:
     plan = planning.make(vault, "rids", [CALL])
-    assert planning.command(plan) == f'docket forget {CALL} --vault "{vault.root}" --now'
+    assert planning.command(plan) == f'docket forget "{CALL}" --vault "{vault.root}" --now'
     plan.api = True
     assert any("chunks sent to the API provider" in line for line in planning.lines(plan, screen=False))
     held = planning.make(vault, "held", source="plaud")
-    assert planning.command(held) == f'docket forget --held --source plaud --vault "{vault.root}" --now'
+    assert planning.command(held) == f'docket forget --held --source "plaud" --vault "{vault.root}" --now'
 
 
 # -- the docs, what stays, and every line of the screens ---------------------------------------------------------------
@@ -343,9 +343,10 @@ def test_a_final_decision_edited_on_disk_stops_the_forget(vault: Vault) -> None:
     path.write_text(path.read_text(encoding="utf-8") + "A note by hand.\n", encoding="utf-8", newline="\n")
     plan = planning.make(vault, "rids", [POLISHED])
     assert plan.stops == [
-        (
+        planning.Stop(
             "decision:2026-10-12-passed was edited on disk: check it out again, then forget",
             "a confirmed or rejected decision was edited on disk: check it out again, then forget",
+            "decision:2026-10-12-passed",
         )
     ]
 
@@ -356,3 +357,45 @@ def test_a_legacy_note_covering_nothing_and_an_op_whose_locator_doesn_t_read_sta
     curate_op(vault, "r:")
     plan = planning.make(vault, "rids", [POLISHED])
     assert plan.old_paths == set() and plan.legacy_kept == [] and plan.ops == []
+
+
+def test_the_screen_counts_a_never_store_id_in_a_stop_a_note_and_a_doc_group(vault: Vault) -> None:
+    project = vault.root / "entities" / "project" / "crane.yaml"
+    project.parent.mkdir(parents=True)
+    project.write_text("id: crane\ntype: project\nname: {en: Crane}\n", encoding="utf-8")
+    vault.commit(["entities/project/crane.yaml"], "Entities")
+    decision = f"decision:2026-10-12-{MARKER}-deal"
+    head = "entities: [crane]\nstatus: proposed\nsubject: crane\n"
+    decided = doc(decision, [POLISHED], [f"- It passed. [r:{POLISHED}@0:01]"])
+    recall.doc_put(vault, decided.replace("---\n\n# Crane check", f"{head}---\n\n# Proposed: it passed"))
+    DocStore(vault).decide(decision, 1, "confirm")
+    path = DocStore(vault).file(decision)
+    path.write_text(path.read_text(encoding="utf-8") + "A note by hand.\n", encoding="utf-8", newline="\n")
+    plan = planning.make(vault, "rids", [POLISHED])
+    assert any(decision in line for line in planning.lines(plan, screen=True))
+    plan.lists = plan.lists.model_copy(update={"keywords": [MARKER]})
+    screen = planning.lines(plan, screen=True)
+    said = "\n".join(screen)
+    # The stop says what it says in the dry run; the decisions' group shows its counts alone, no empty brackets.
+    assert MARKER not in said and "()" not in said
+    assert "stops     a confirmed or rejected decision was edited on disk: check it out again, then forget" in screen
+    assert "unnamed   1 id a never-store list names" in screen
+    # A rid the list names: the note says what stays without it, and the forget line counts what it takes.
+    plan.lists = plan.lists.model_copy(update={"keywords": ["rec-a"]})
+    screen = planning.lines(plan, screen=True)
+    said = "\n".join(screen)
+    assert "rec-a" not in said and "()" not in said
+    assert screen[0].startswith("forget    1 record: ")
+    assert (
+        "note      the record it sits under stays, its audio gone with this; forgetting that record takes it whole"
+        in screen
+    )
+
+
+def test_a_rid_a_shell_reads_more_into_stays_its_placeholder_in_the_next_line(vault: Vault) -> None:
+    odd = "chat:C0TEST/a<b>&c|d;$e"
+    vault.write_run("chat", [make_record(9, rid=odd, source="chat", text="Unrelated words.")])
+    plan = planning.make(vault, "rids", [odd, THREAD[1]])
+    unfilled: list[tuple[str, str]] = []
+    assert planning.command(plan, unfilled) == (f'docket forget "<rid 1>" "{THREAD[1]}" --vault "{vault.root}" --now')
+    assert unfilled == [("rid 1", odd)]

@@ -1,14 +1,17 @@
-"""The apply (DR-0581, DR-0595): the forgotten list against this clone's tree, staging and key store, in one commit; a
-crash at each step finished by the next gate call, with nothing of the family read meanwhile; a line a union merge
-brought back taken out again; a key no line named put on a keys-only line; and no run file read when nothing moved.
-Lines are written by hand here, as `docket forget` writes them; invented data only."""
+"""The apply (DR-0581, DR-0595, DR-0597): the forgotten list against this clone's tree, staging and key store, in one
+commit; a crash at each step finished by the next gate call, with nothing of the family read meanwhile, no file or key
+gone before its path is on record; the tree waiting while git is in the middle of something, keys and staging gone; a
+line a union merge or a pull brought back taken out again; a record's line separators; a key no line named put on a
+keys-only line; and no run file, doc or media file read when nothing moved. Lines are written by hand here, as
+`docket forget` writes them; invented data only."""
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
-from docket_testkit import git, make_record
+from docket_testkit import git, make_record, sh
 from forget_kit import forget, line, stored
 from media_kit import CALL, POLISHED, audio, call, in_raw, media_vault
 
@@ -148,7 +151,7 @@ def test_this_machine_s_cursor_entries_on_a_forgotten_rid_go(vault: Vault) -> No
 # -- crashes and merges -------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("step", ["keys", "staging", "recorded", "written", "committed"])
+@pytest.mark.parametrize("step", ["keys", "staging", "media", "recorded", "written", "committed"])
 def test_a_crash_at_each_step_is_finished_by_the_next_gate_call(
     vault: Vault, monkeypatch: pytest.MonkeyPatch, step: str
 ) -> None:
@@ -322,3 +325,297 @@ def test_a_forget_of_a_message_leaves_the_audio_and_a_line_that_isn_t_a_record(v
     forget_apply.apply(vault, KeyStore(vault.home))
     assert _read(run)[-1] == "not a record"
     assert layout.stored_files(vault.root, CALL)
+
+
+# -- a record's line separators ----------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("separator", ["\u2028", "\u2029", "\u0085"])
+def test_a_listed_record_whose_text_holds_a_line_separator_leaves_its_run_file(tmp_path: Path, separator: str) -> None:
+    vault = media_vault(tmp_path, store=False)
+    odd = make_record(1, source="chat", text=f"first part{separator}second part")
+    plain = make_record(2, source="chat")
+    kept = make_record(3, source="chat", text=f"kept{separator}as it is")
+    vault.write_run("chat", [odd, plain, kept])
+    (run,) = [r.path for r in vault.rawlog.run_files() if r.source == "chat"]
+    # The record's JSON holds the separator as it is, which str.splitlines() would split the line at.
+    assert separator in run.read_text(encoding="utf-8")
+    forget(vault, rids=[odd.rid, plain.rid])
+    done = forget_apply.apply(vault, KeyStore(vault.home), first=True)
+    assert done.records == 2
+    (left,) = _read_bytes_lines(run)
+    assert kept.rid in left and separator in left
+    assert clean(vault) and vault.check() == []
+
+
+def _read_bytes_lines(path: Path) -> list[str]:
+    return [line for line in path.read_bytes().decode("utf-8").split("\n") if line]
+
+
+def test_vault_check_names_an_unfinished_forget_whose_kept_line_holds_a_separator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = media_vault(tmp_path, store=False)
+    kept = make_record(1, source="chat", text="first part\u2028second part")
+    gone = make_record(2, source="chat")
+    vault.write_run("chat", [kept, gone])
+    forget(vault, rids=[gone.rid])
+    real = Vault.commit
+
+    def failing(self: Vault, paths: list[str], message: str) -> str | None:
+        if message.startswith("Forget: 1 record"):
+            raise DocketError("a commit refused")
+        return real(self, paths, message)
+
+    monkeypatch.setattr(Vault, "commit", failing)
+    with pytest.raises(DocketError, match="refused"):
+        forget_apply.apply(vault, KeyStore(vault.home), first=True)
+    problems = [str(p) for p in vault.check()]
+    assert len(problems) == 1 and "a forget took listed lines out and isn't committed yet" in problems[0]
+
+
+def test_vault_check_keeps_a_head_line_that_isn_t_a_record(tmp_path: Path) -> None:
+    vault = media_vault(tmp_path, store=False)
+    vault.write_run("chat", [make_record(1, source="chat"), make_record(2, source="chat")])
+    (run,) = [r.path for r in vault.rawlog.run_files() if r.source == "chat"]
+    rel = run.relative_to(vault.root).as_posix()
+    good = run.read_text(encoding="utf-8")
+    # A line a hand edit committed that isn't a record, then taken out on disk.
+    run.write_text(good + "{oops\n", encoding="utf-8", newline="\n")
+    git(vault.root, "commit", "-qm", "A hand edit", "--", rel)
+    run.write_text(good, encoding="utf-8", newline="\n")
+    forget(vault, rids=["chat:C0TEST/1791000099.000100"])
+    problems = [str(p) for p in vault.check()]
+    assert any(p.startswith(rel) and "changed or deleted after it was committed" in p for p in problems)
+
+
+# -- git in the middle of something ------------------------------------------------------------------------------------
+
+
+def _conflict(vault: Vault) -> None:
+    """An unmerged path, as a stash pop that conflicts leaves one: stages 1 to 3 and no *_HEAD file."""
+    blob = sh(vault.root, "git", "hash-object", "-w", "--", "vault.yaml").strip()
+    info = "".join(f"100644 {blob} {n}\tconflict.txt\n" for n in (1, 2, 3))
+    proc = subprocess.run(["git", "update-index", "--index-info"], cwd=vault.root, input=info.encode(), check=False)
+    assert proc.returncode == 0
+
+
+@pytest.mark.parametrize("state", ["rebase-merge", "MERGE_HEAD", "detached", "unmerged"])
+def test_the_tree_waits_for_the_owner_s_git_while_keys_and_staging_go(vault: Vault, state: str) -> None:
+    Gate(vault).stage([call(text="The crane failed its load test.")[1]])
+    assert Staging(vault.root, vault.home).scan().entries
+    key = forget_call(vault)
+    (stored_file,) = layout.stored_files(vault.root, CALL)
+    git_dir = vault.home.git_dir
+    branch = git(vault.root, "branch", "--show-current").strip()
+    if state == "rebase-merge":
+        (git_dir / state).mkdir()
+    elif state == "MERGE_HEAD":
+        (git_dir / state).write_text(git(vault.root, "rev-parse", "HEAD"), encoding="utf-8")
+    elif state == "detached":
+        git(vault.root, "checkout", "-q", "--detach")
+    else:
+        _conflict(vault)
+    head = git(vault.root, "rev-parse", "HEAD")
+    # A gate call that only reads goes on, and so does every read: nothing of the family shows.
+    listing = Gate(vault).list()
+    assert all(e.staged.record.rid != POLISHED for e in listing.entries)
+    done = forget_apply.apply(vault, KeyStore(vault.home))
+    assert done.waits is not None and done.records == 0
+    with pytest.raises(DocketError):
+        forget_apply.apply(vault, KeyStore(vault.home), first=True)
+    # The keys and staging are this clone's own: gone at once. The tree is the owner's: as it was.
+    assert not KeyStore(vault.home).has(key)
+    assert Staging(vault.root, vault.home).scan().entries == []
+    assert stored_file.exists() and any(CALL in line for line in lines_of(vault, "plaud"))
+    assert git(vault.root, "rev-parse", "HEAD") == head
+    assert vault.rawlog.read(CALL) == []
+    if state == "rebase-merge":
+        (git_dir / state).rmdir()
+    elif state == "MERGE_HEAD":
+        (git_dir / state).unlink()
+    elif state == "detached":
+        git(vault.root, "checkout", "-q", branch)
+    else:
+        git(vault.root, "update-index", "--force-remove", "conflict.txt")
+    Gate(vault).list()
+    assert clean(vault) and not stored_file.exists()
+    assert not any(CALL in line for line in lines_of(vault, "plaud"))
+
+
+# -- the media step's order --------------------------------------------------------------------------------------------
+
+
+def test_a_key_delete_that_fails_after_its_file_went_is_committed_by_the_next_call(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (stored_file,) = layout.stored_files(vault.root, CALL)
+    forget_call(vault)
+    real = KeyStore.delete
+
+    def failing(self: KeyStore, one: str) -> None:
+        # The listed key goes first, its file still there; the media step's own delete fails, its file gone already.
+        if not stored_file.exists():
+            raise PermissionError("the key file is open in another process")
+        real(self, one)
+
+    monkeypatch.setattr(KeyStore, "delete", failing)
+    with pytest.raises(PermissionError):
+        forget_apply.apply(vault, KeyStore(vault.home), first=True)
+    monkeypatch.setattr(KeyStore, "delete", real)
+    assert not stored_file.exists()
+    Gate(vault).list()
+    assert clean(vault)
+    assert "media/plaud/" not in git(vault.root, "ls-tree", "-r", "--name-only", "HEAD", "--", "media")
+
+
+def test_a_kill_while_the_docs_are_judged_deletes_nothing_and_the_next_call_does_it_all(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (stored_file,) = layout.stored_files(vault.root, CALL)
+    forget_call(vault)
+
+    def killed(*_: object, **__: object) -> object:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(forget_apply, "_docs", killed)
+    with pytest.raises(KeyboardInterrupt):
+        forget_apply.apply(vault, KeyStore(vault.home), first=True)
+    monkeypatch.undo()
+    # The stored file goes only once its path is on record for the commit.
+    assert stored_file.exists()
+    Gate(vault).list()
+    assert clean(vault) and not stored_file.exists()
+    assert "media/plaud/" not in git(vault.root, "ls-tree", "-r", "--name-only", "HEAD", "--", "media")
+
+
+def test_a_version_forget_takes_a_stored_lfs_pointer_whose_every_logged_key_is_listed(vault: Vault) -> None:
+    (path,) = layout.stored_files(vault.root, CALL)
+    key = key_of(vault)
+    # This clone never downloaded the object: the plan names its key from the cut log, as it does for a pointer.
+    path.write_text("version https://git-lfs.github.com/spec/v1\noid sha256:" + "0" * 64 + "\nsize 9\n",
+                    encoding="utf-8")  # fmt: skip
+    git(vault.root, "commit", "-qam", "A pointer")
+    assert forget_apply.logged_keys(vault.root, "plaud", path.name.split(".", 1)[0]) == {key}
+    forget(vault, versions=vault.rawlog.read(POLISHED) + vault.rawlog.read(CALL), keys=[key])
+    done = forget_apply.apply(vault, KeyStore(vault.home), first=True)
+    assert done.media == 1 and not path.exists()
+    assert clean(vault)
+
+
+def test_a_pointer_with_a_logged_key_not_listed_stays(vault: Vault) -> None:
+    (path,) = layout.stored_files(vault.root, CALL)
+    path.write_text("version https://git-lfs.github.com/spec/v1\noid sha256:" + "0" * 64 + "\nsize 9\n",
+                    encoding="utf-8")  # fmt: skip
+    git(vault.root, "commit", "-qam", "A pointer")
+    forget(vault, rids=[CHAT[0].rid], keys=["cd" * 32])
+    forget_apply.apply(vault, KeyStore(vault.home))
+    assert path.exists()
+
+
+# -- stamps taken before the read --------------------------------------------------------------------------------------
+
+
+def test_a_pull_landing_during_the_apply_is_read_again_by_the_next_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = media_vault(tmp_path, store=False)
+    gone = make_record(1, source="chat")
+    vault.write_run("chat", [gone, make_record(2, source="chat")])
+    vault.write_run("chat", [make_record(3, source="chat")])
+    later = [r.path for r in vault.rawlog.run_files() if r.source == "chat"][-1]
+    forget(vault, rids=[gone.rid])
+    real = forget_apply._docs
+
+    def pull_lands(*args: object, **kwargs: object) -> object:
+        found = real(*args, **kwargs)  # type: ignore[arg-type]
+        # The owner's own pull lands meanwhile: a union merge brings the listed line into a run file already read.
+        with later.open("a", encoding="utf-8", newline="\n") as f:
+            f.write(stored(gone).model_copy(update={"run": later.stem}).to_json() + "\n")
+        git(vault.root, "commit", "-qm", "Merge", "--", later.relative_to(vault.root).as_posix())
+        return found
+
+    monkeypatch.setattr(forget_apply, "_docs", pull_lands)
+    forget_apply.apply(vault, KeyStore(vault.home), first=True)
+    monkeypatch.setattr(forget_apply, "_docs", real)
+    assert gone.rid in later.read_text(encoding="utf-8") and vault.rawlog.read(gone.rid) == []
+    forget_apply.apply(vault, KeyStore(vault.home))
+    assert gone.rid not in later.read_text(encoding="utf-8")
+    assert clean(vault)
+
+
+# -- what an unmoved list costs ----------------------------------------------------------------------------------------
+
+
+def test_docs_and_media_are_walked_only_once_head_or_the_list_moves(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    forget_call(vault)
+    forget_apply.apply(vault, KeyStore(vault.home))
+    # The apply's own commit moved HEAD: the next call walks once more and keeps where HEAD is.
+    forget_apply.apply(vault, KeyStore(vault.home))
+    walks: list[str] = []
+    real_docs, real_media = forget_apply._doc_stamps, forget_apply._media_stamps
+
+    def docs(root: Path) -> object:
+        walks.append("docs")
+        return real_docs(root)
+
+    def media_files(root: Path) -> object:
+        walks.append("media")
+        return real_media(root)
+
+    monkeypatch.setattr(forget_apply, "_doc_stamps", docs)
+    monkeypatch.setattr(forget_apply, "_media_stamps", media_files)
+    done = forget_apply.apply(vault, KeyStore(vault.home))
+    assert walks == [] and done.commit is None
+    git(vault.root, "commit", "-q", "--allow-empty", "-m", "Something of the owner's")
+    forget_apply.apply(vault, KeyStore(vault.home))
+    assert walks == ["docs", "media"]
+    forget_apply.apply(vault, KeyStore(vault.home))
+    assert walks == ["docs", "media"]
+
+
+def test_a_media_file_s_key_is_read_once_while_the_file_stays(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
+    read: list[str] = []
+    real = media_staged.key_of
+
+    def watched(path: Path) -> str | None:
+        read.append(path.name)
+        return real(path)
+
+    monkeypatch.setattr(media_staged, "key_of", watched)
+    # A list naming no key and no media reads no header.
+    forget(vault, rids=[CHAT[0].rid])
+    forget_apply.apply(vault, KeyStore(vault.home))
+    assert read == []
+    # A key listed: each stored file's header read once, then kept by its stamp.
+    forget(vault, rids=[CHAT[1].rid], keys=["cd" * 32])
+    forget_apply.apply(vault, KeyStore(vault.home))
+    assert len(read) == 1
+    forget(vault, keys=["ef" * 32])
+    forget_apply.apply(vault, KeyStore(vault.home))
+    assert len(read) == 1
+
+
+def test_a_whole_rid_s_line_back_without_head_moving_has_the_docs_and_media_walked(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (run,) = [r.path for r in vault.rawlog.run_files() if r.source == "plaud"]
+    before = run.read_text(encoding="utf-8")
+    forget_call(vault)
+    forget_apply.apply(vault, KeyStore(vault.home))
+    forget_apply.apply(vault, KeyStore(vault.home))
+    walks: list[str] = []
+    real = forget_apply._doc_stamps
+
+    def docs(root: Path) -> object:
+        walks.append("docs")
+        return real(root)
+
+    monkeypatch.setattr(forget_apply, "_doc_stamps", docs)
+    # The line back on disk alone, as a checkout of an older run file leaves it: HEAD where it was.
+    run.write_text(before.splitlines(keepends=True)[0], encoding="utf-8", newline="\n")
+    done = forget_apply.apply(vault, KeyStore(vault.home))
+    assert done.records == 1 and walks == ["docs"]
+    assert run.read_bytes() == b"" and clean(vault)

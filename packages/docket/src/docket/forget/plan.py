@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Literal
 
 from docket import index
+from docket.copied import filled
 from docket.documents import records as documents
 from docket.errors import DocketError
 from docket.forget.apply import judge, logged_keys
@@ -97,6 +98,26 @@ class DocCut:
     hashes: frozenset[str] = frozenset()
 
 
+@dataclass(frozen=True, order=True)
+class Stop:
+    """What stops a forget: the screen's words, which name `id` when it has one, and the dry run's, which name no doc
+    and stand in on the screen when a never-store list names the id (DR-0558)."""
+
+    screen: str
+    dry: str
+    id: str = ""
+
+
+@dataclass(frozen=True)
+class Note:
+    """A note on what a forget leaves: its words naming `rid`, and the same words without it, for a screen whose
+    never-store list names the rid."""
+
+    rid: str
+    text: str
+    unnamed: str
+
+
 @dataclass(frozen=True)
 class _Version:
     """A version as the plan keeps it: where it is (its run file, or "" when staged), its version, its source, whether
@@ -145,9 +166,8 @@ class Plan:
     legacy_kept: list[str] = field(default_factory=list[str])
     entities: list[str] = field(default_factory=list[str])
     ops: list[str] = field(default_factory=list[str])
-    # What stops the forget: the screen's words, and the dry run's, which name no doc.
-    stops: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
-    notes: list[str] = field(default_factory=list[str])
+    stops: list[Stop] = field(default_factory=list[Stop])
+    notes: list[Note] = field(default_factory=list[Note])
     api: bool = False
     lists: NeverStore = field(default_factory=NeverStore)
 
@@ -332,7 +352,13 @@ def _take(plan: Plan, held: _Held, taken: Taken) -> None:
             plan.media.update(layout.owners(whole))
         top = layout.owners(rid)[-1]
         if top != rid:
-            plan.notes.append(f"{top} stays, its audio gone with this; docket forget {top} takes it whole")
+            plan.notes.append(
+                Note(
+                    top,
+                    f"{top} stays, its audio gone with this; docket forget {top} takes it whole",
+                    "the record it sits under stays, its audio gone with this; forgetting that record takes it whole",
+                )
+            )
         return
     if taken.how == "held":
         # Its versions in raw and those of the rids under it: a hold keeps everything staged out already.
@@ -350,8 +376,13 @@ def _take(plan: Plan, held: _Held, taken: Taken) -> None:
         plan.files.update(v.identity for v in found if v.identity is not None)
     if documents.file_of(rid) == rid:
         plan.notes.append(
-            f"{rid} stays in its folder: move the file out, since a forget never writes there; a changed file, or a "
-            "new one at its path, comes in"
+            Note(
+                rid,
+                f"{rid} stays in its folder: move the file out, since a forget never writes there; a changed file, or "
+                "a new one at its path, comes in",
+                "a folder file stays in its folder: move it out, since a forget never writes there; a changed file, or "
+                "a new one at its path, comes in",
+            )
         )
 
 
@@ -379,7 +410,7 @@ def _media(vault: Vault, plan: Plan) -> None:
             else:
                 rel = path.relative_to(root).as_posix()
                 plan.stops.append(
-                    (
+                    Stop(
                         f"{rel} is an LFS pointer and no cut log line names its key: git lfs pull it, then forget",
                         "a stored media file is an LFS pointer whose key no cut log line names: git lfs pull, then "
                         "forget",
@@ -441,9 +472,10 @@ def _docs(vault: Vault, plan: Plan, listed: Forgotten) -> None:
             path = store.file(doc_id)
             if path.is_file() and decision_form.edited(store.read_file(path), store.committed_text(doc_id)):
                 plan.stops.append(
-                    (
+                    Stop(
                         f"{doc_id} was edited on disk: check it out again, then forget",
                         "a confirmed or rejected decision was edited on disk: check it out again, then forget",
+                        doc_id,
                     )
                 )
     _unreadable(plan, docs)
@@ -469,11 +501,12 @@ def _unreadable(plan: Plan, docs: Iterable[ProcessedDoc]) -> None:
         for n, line, role in doc.roles():
             if role == "content" and trailing_anchors(line).errors and any(rid in line for rid in plan.family):
                 plan.stops.append(
-                    (
+                    Stop(
                         f"{doc.meta.id} line {n}: an anchor this Docket can't read names what the forget takes; "
                         "update Docket, or fix the line",
                         f"a {_one(doc.meta.type)} line {n}: an anchor this Docket can't read names what the forget "
                         "takes; update Docket, or fix the line",
+                        doc.meta.id,
                     )
                 )
 
@@ -577,7 +610,9 @@ def _doc_groups(cuts: Sequence[DocCut], lines: Callable[[DocCut], tuple[int, ...
         total = sum(len(lines(c)) for c in group)
         numbers = {c.id: _first([str(n) for n in lines(c)]) for c in group}
         each = [f"{i} {numbers[i]}" for i in ids.shown(numbers)] if ids is not None else list(numbers.values())
-        out.append(f"{_plural(total, 'line')} in {_docs_of(doc_type, len(group))} ({_first(each, '; ')})")
+        # A group whose every id a never-store list names shows its counts alone.
+        shown = f" ({_first(each, '; ')})" if each else ""
+        out.append(f"{_plural(total, 'line')} in {_docs_of(doc_type, len(group))}{shown}")
     return out
 
 
@@ -605,7 +640,7 @@ def lines(plan: Plan, *, screen: bool) -> list[str]:
         heads = [f"{rid}{kinds[rid]}" for rid in (ids.shown(kinds) if ids is not None else kinds)]
         under = len(plan.family - taken)
         more = f" and {_plural(under, 'record')} with it" if under and ids is None else ""
-        head = f"{_first(heads)}{more}"
+        head = f"{_first(heads) or _plural(len(kinds), 'record')}{more}"
     elif plan.kind == "never-store":
         head = f"records a never-store list matches ({counted})"
     else:
@@ -647,8 +682,8 @@ def lines(plan: Plan, *, screen: bool) -> list[str]:
         else:
             out.append(f"stays     {what} whose locators all lie here: named at the console")
     if plan.kind == "rids" or screen:
-        out += [f"note      {note}" for note in plan.notes]
-    out += [f"stops     {at if screen else dry}" for at, dry in plan.stops]
+        out += [f"note      {_noted(note, ids)}" for note in plan.notes]
+    out += [f"stops     {_stopped(stop, ids)}" for stop in plan.stops]
     if ids is not None and ids.hidden:
         out.append(f"unnamed   {_plural(len(ids.hidden), 'id')} a never-store list names")
     out.append(f"history   the text stays in the history of {plan.repo}; the forget writes how to take it out")
@@ -657,10 +692,23 @@ def lines(plan: Plan, *, screen: bool) -> list[str]:
     return out
 
 
-def command(plan: Plan) -> str:
-    """The `--now` line to run at the owner's own console."""
+def _noted(note: Note, ids: _Ids | None) -> str:
+    return note.text if ids is None or ids.shown([note.rid]) else note.unnamed
+
+
+def _stopped(stop: Stop, ids: _Ids | None) -> str:
+    if ids is None:
+        return stop.dry
+    return stop.screen if not stop.id or ids.shown([stop.id]) else stop.dry
+
+
+def command(plan: Plan, unfilled: list[tuple[str, str]] | None = None) -> str:
+    """The `--now` line to run at the owner's own console, each rid in double quotes as the vault path is. A rid
+    holding what a shell reads as more than itself stays its placeholder, `<rid 1>`, and goes on `unfilled` with its
+    value, to put in by hand (DR-0382)."""
+    left = unfilled if unfilled is not None else []
     if plan.kind == "rids":
-        what = " ".join(t.rid for t in plan.taken)
+        what = " ".join(f'"{filled(t.rid, f"rid {n}", left)}"' for n, t in enumerate(plan.taken, start=1))
     else:
-        what = f"--{plan.kind}" + (f" --source {plan.source}" if plan.source else "")
+        what = f"--{plan.kind}" + (f' --source "{plan.source}"' if plan.source else "")
     return f'docket forget {what} --vault "{plan.vault_root}" --now'

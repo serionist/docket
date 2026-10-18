@@ -1,5 +1,6 @@
-"""The commands pages hand the user to copy: a value goes into one, inside double quotes, only when every shell reads
-it as itself there (DR-0382); otherwise its placeholder stands in and the value is listed beside the command."""
+"""The commands Docket hands the user to copy, on a page or at the console: a value goes into one, inside double
+quotes, only when every shell reads it as itself there (DR-0382); otherwise its placeholder stands in and the value is
+listed beside the command."""
 
 from __future__ import annotations
 

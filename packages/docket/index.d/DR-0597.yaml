@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0597
+    title: A forget's apply waits for the owner's git before it changes the tree, while keys and staging go at once
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#182"]
+    description: "A gate call's apply asks, before it changes a tracked file, whether git is in the middle of something the owner runs: a rebase, merge, cherry-pick or revert under way, a detached HEAD, or unmerged paths (DR-0528), a rebase a killed sync of Docket's left being undone first, as every write does. While it is, the keys and staging, which are this clone's own and never committed, still go, and the tree's part waits: no run file, doc, media file or cursor file changes and nothing is committed, so the owner's git rebase --continue never meets Docket's changes. The gate calls that only read (list, show, media_due, media_check and the media plans) go on, so the Staging page keeps working during a rebase; promote refuses at its own commit, as before. Nothing forgotten shows meanwhile: every reader skips listed lines, and the index stays refused by its digest (DR-0593). The forget's own apply refuses instead, its list's commit having passed the same checks a moment before. The first gate call once git is done finishes the tree. The question costs a git call, so an apply asks it only once something moved."
+    binds:
+      - An apply changes no tracked file while git is in the middle of something the owner runs.
+      - A gate call that only reads goes on while the tree waits.
+    not_chosen:
+      - "Writing the tree and refusing at the commit: after a git pull --rebase conflict, git rebase --continue refuses until the owner discards Docket's changes."
+      - "Refusing the whole gate call: the Staging page would stop during the owner's rebase, while keys and staging need no commit."

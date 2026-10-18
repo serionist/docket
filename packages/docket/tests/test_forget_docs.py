@@ -15,6 +15,7 @@ from docket_testkit import PLAUD, POLISHED, git, make_config, make_record, plaud
 from forget_kit import forget
 
 from docket import decisions, recall
+from docket.errors import DocketError
 from docket.forget import apply as forget_apply
 from docket.imports import notes
 from docket.index import build
@@ -243,3 +244,53 @@ def test_refs_the_rule_can_t_follow_drop_nothing(vault: Vault) -> None:
     apply(vault)
     text = path.read_text(encoding="utf-8")
     assert "Gone rev." in text and "Bad file." in text
+
+
+# -- a hand edit judged again, a commit retried ------------------------------------------------------------------------
+
+
+def test_only_the_docs_taken_in_and_those_citing_them_are_read_again(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = DocStore(vault).file(NOTE)
+    path.write_text(path.read_text(encoding="utf-8").replace(KEPT, f"{KEPT}\n- Ada joined late. [r:{CHAT}]"),
+                    encoding="utf-8", newline="\n")  # fmt: skip
+    read: list[list[str]] = []
+    real = DocStore.at_paths
+
+    def watched(self: DocStore, paths: list[Path]) -> list[object]:
+        read.append(sorted(p.name for p in paths))
+        return real(self, paths)  # type: ignore[return-value]
+
+    monkeypatch.setattr(DocStore, "at_paths", watched)
+    forget_transcript(vault)
+    apply(vault)
+    # Every doc once, then the one taken in: its new rev is judged again with the digest and decision citing it.
+    assert len(read) == 2 and len(read[0]) == len(list((vault.root / "processed").rglob("*.md")))
+    assert read[1] == [path.name]
+    digest = DocStore(vault).get(DIGEST)
+    assert digest is not None and "ten million" not in digest.source and "The channel opened" in digest.source
+    assert "Said on the call" not in text_of(vault, DECISION)
+
+
+def test_a_commit_retried_by_the_next_call_carries_the_docs_revs(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
+    forget_transcript(vault)
+    real = Vault.commit
+
+    def failing(self: Vault, paths: list[str], message: str) -> str | None:
+        if message.startswith("Forget: 1 record"):
+            raise DocketError("a commit refused")
+        return real(self, paths, message)
+
+    monkeypatch.setattr(Vault, "commit", failing)
+    with pytest.raises(DocketError, match="refused"):
+        apply(vault)
+    monkeypatch.setattr(Vault, "commit", real)
+    forget_apply.apply(vault, KeyStore(vault.home))
+    body = git(vault.root, "log", "-1", "--format=%B")
+    assert body.startswith("Forget: applied on test-box")
+    assert f"Doc: {NOTE} rev 2" in body and f"Doc: {DIGEST} rev 2" in body and f"Doc: {DECISION} rev 3" in body
+    # The forget's rev is in the doc's history, so the next take-in finds no hand edit.
+    store = DocStore(vault)
+    assert store.history(NOTE)[0][0] == 2
+    assert store.take_in(NOTE) is None

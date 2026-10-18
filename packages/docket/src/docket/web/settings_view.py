@@ -17,6 +17,7 @@ from pathlib import Path
 
 from starlette.datastructures import QueryParams
 
+from docket.copied import filled
 from docket.errors import DocketError
 from docket.index.build import VectorCoverage
 from docket.index.query import Reach
@@ -24,7 +25,6 @@ from docket.models.report import Report
 from docket.vault import inforce, redaction
 from docket.vault.config import SourceConfig, VaultConfig
 from docket.vault.settings import BUILTIN_RULES, LISTS, RANK, item_line, key_line, pattern_block, source_block
-from docket.web.commands import filled
 
 PATH = "/settings"
 ADD = "/settings/never-store"

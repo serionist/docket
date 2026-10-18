@@ -1,11 +1,13 @@
-"""`docket forget` (DR-0577, DR-0581, DR-0594): the dry run in any shell; `--now` refused under Claude Code, from a pipe
-and to a redirect before anything is read; n and q keep everything; the code forgets in the order of writes, rebuilds
-the index after the lock and writes the rewrite's files; a change since the screen stops it with nothing written;
-only the command calls `forget()`; and `--check-rewrite` passes on a fresh forget and refuses once HEAD holds a line the
-files would blank. Every vault is a temp one with a test key store; invented data only."""
+"""`docket forget` (DR-0577, DR-0581, DR-0594, DR-0598): the dry run in any shell, its next line quoting each rid;
+`--now` refused under Claude Code, from a pipe and to a redirect before anything is read; n and q keep everything; the
+code forgets in the order of writes, rebuilds the index after the lock and writes the rewrite's files, whatever stops
+the list's commit or the apply once the line is in force; a change since the screen stops it with nothing written;
+only the command calls `forget()`, by an AST scan; and `--check-rewrite` passes on a fresh forget and refuses once a
+branch holds a line the files would blank. Every vault is a temp one with a test key store; invented data only."""
 
 from __future__ import annotations
 
+import ast
 import inspect
 import re
 import sys
@@ -13,12 +15,13 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from docket_testkit import AtConsole, git
+from docket_testkit import AtConsole, git, make_record
 from media_kit import CALL, POLISHED, audio, call, in_raw, media_vault
 
 from docket import cli, console, index, recall
 from docket.cli import main
 from docket.errors import DocketError
+from docket.forget import apply as forget_apply
 from docket.forget import now as forget_now
 from docket.forget import rewrite
 from docket.index import build
@@ -28,6 +31,7 @@ from docket.media.keystore import KeyStore
 from docket.vault import forgotten
 from docket.vault.config import VaultConfig
 from docket.vault.docstore import DocStore
+from docket.vault.gate import Gate
 from docket.vault.vault import Vault
 
 NOTE = "recording-note:2026-10-12-crane-check"
@@ -103,14 +107,87 @@ def test_forget_refuses_a_python_caller_without_the_owner(vault: Vault) -> None:
     assert forgotten.load(vault.root, vault.home) == forgotten.EMPTY
 
 
+NOW = "docket.forget.now"
+
+
+def _imports_now(source: str, rel: str) -> bool:
+    """Whether a module's source reaches `docket.forget.now`, however it is written: an import of it, of a name from
+    it or of it by name from its package, a relative one, the package's attribute, or its name to importlib."""
+    module = ast.parse(source)
+    package = ["docket", *Path(rel).parent.parts]
+    bound: set[str] = set()
+    for node in ast.walk(module):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == NOW or alias.name.startswith(f"{NOW}."):
+                    return True
+                if alias.name == "docket.forget" and alias.asname:
+                    bound.add(alias.asname)
+        elif isinstance(node, ast.ImportFrom):
+            base = node.module or ""
+            if node.level:
+                base = ".".join([*package[: len(package) - node.level + 1], *([base] if base else [])])
+            if base == NOW or base.startswith(f"{NOW}."):
+                return True
+            names = {alias.name for alias in node.names}
+            if base == "docket.forget" and "now" in names:
+                return True
+            if base == "docket":
+                bound |= {alias.asname or alias.name for alias in node.names if alias.name == "forget"}
+        elif isinstance(node, ast.Constant) and node.value == NOW:
+            return True
+    return any(isinstance(node, ast.Attribute) and node.attr == "now" and _the_package(node.value, bound)
+               for node in ast.walk(module))  # fmt: skip
+
+
+def _the_package(node: ast.expr, bound: set[str]) -> bool:
+    """Whether an expression is the `docket.forget` package: a name bound to it, or `docket.forget` itself."""
+    if isinstance(node, ast.Name):
+        return node.id in bound
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == "forget"
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "docket"
+    )
+
+
 def test_only_the_command_calls_forget() -> None:
     src = Path(forget_now.__file__).resolve().parents[1]
     callers = sorted(
-        p.relative_to(src).as_posix()
+        rel
         for p in src.rglob("*.py")
-        if p.name != "now.py" and re.search(r"forget(\.| import )now\b", p.read_text(encoding="utf-8"))
+        if (rel := p.relative_to(src).as_posix()) != "forget/now.py"
+        and _imports_now(p.read_text(encoding="utf-8"), rel)
     )
     assert callers == ["cli.py"]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from docket.forget import apply, now",
+        "from docket.forget import (\n    apply,\n    now,\n)",
+        "from docket.forget import now as forgetting",
+        "import docket.forget.now",
+        "import docket.forget.now as forgetting",
+        "from docket.forget.now import forget",
+        "from . import now",
+        "from .now import forget",
+        "from docket import forget\nforget.now.forget(vault)",
+        "from docket import forget as f\nf.now.forget(vault)",
+        "import docket.forget as f\nf.now.forget(vault)",
+        "import docket\ndocket.forget.now.forget(vault)",
+        "import importlib\nimportlib.import_module('docket.forget.now')",
+    ],
+)
+def test_the_scan_finds_each_way_of_reaching_forget(source: str) -> None:
+    assert _imports_now(source, "forget/other.py")
+
+
+def test_the_scan_lets_the_forget_s_other_modules_by() -> None:
+    assert not _imports_now("from docket.forget import apply, plan\nfrom . import rewrite", "forget/other.py")
+    assert not _imports_now("import datetime\ndatetime.datetime.now()", "service/clock.py")
 
 
 # -- the dry run -------------------------------------------------------------------------------------------------------
@@ -125,8 +202,9 @@ def test_the_dry_run_works_in_claude_code_s_shell_and_writes_nothing(
     out = capsys.readouterr().out
     assert out.startswith(f"forget    {CALL} and 1 record with it: 2 versions in 1 run file")
     assert "docs      1 line in 1 recording note (14)" in out and "removed   1 doc left with no line" in out
-    assert f'next      run in your own terminal: docket forget {CALL} --vault "{vault.root}" --now' in out
+    assert f'next      run in your own terminal: docket forget "{CALL}" --vault "{vault.root}" --now' in out
     assert NOTE not in out and "crane passed" not in out
+    assert "put it in by hand" not in out
     assert git(vault.root, "rev-parse", "HEAD") == head
     assert not (vault.root / forgotten.FORGOTTEN).exists()
 
@@ -185,7 +263,7 @@ def test_the_code_forgets_in_the_order_of_writes(
     assert "git clone --no-local" in out and "git filter-repo isn't Docket's dependency" in out
     # The rewrite leaves HEAD as it is.
     assert run(vault, "--check-rewrite", str(folder)) == 0
-    assert "rewrite   HEAD stays as it is" in capsys.readouterr().out
+    assert "rewrite   every branch stays as it is now" in capsys.readouterr().out
 
 
 def test_a_change_since_the_screen_stops_it_with_nothing_written(
@@ -248,21 +326,39 @@ def test_nothing_stored_says_so_and_asks_nothing(
 # -- the rewrite check -------------------------------------------------------------------------------------------------
 
 
-def test_check_rewrite_refuses_once_head_holds_a_line_the_files_would_blank(
+def test_check_rewrite_reads_every_branch_and_refuses_one_that_holds_a_line_the_files_would_blank(
     vault: Vault, owner: Callable[..., AtConsole], capsys: pytest.CaptureFixture[str]
 ) -> None:
+    before = git(vault.root, "rev-parse", "HEAD").strip()
+    (run_file,) = [r.path for r in vault.rawlog.run_files() if r.source == "plaud"]
+    rel = run_file.relative_to(vault.root).as_posix()
     owner("code")
     assert run(vault, CALL, "--now") == 0
     found = re.search(r'docket forget --check-rewrite "([^"]+)"', capsys.readouterr().out)
     assert found is not None
+    folder = found.group(1)
+    # A branch whose tip holds HEAD's very tree: nothing of its own to read.
+    twin = git(vault.root, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "A twin").strip()
+    git(vault.root, "branch", "twin", twin)
+    # A file written after the forget that quotes the rid is the owner's: a blob the files never name (DR-0598).
     later = vault.root / "processed" / "quoted.md"
     later.write_text(f"Kept by hand.\nIt said [r:{CALL}@0:01] once.\n", encoding="utf-8", newline="\n")
     git(vault.root, "add", "processed/quoted.md")
     git(vault.root, "commit", "-q", "-m", "A file by hand")
-    assert run(vault, "--check-rewrite", found.group(1)) == 1
+    assert run(vault, "--check-rewrite", folder) == 0
+    capsys.readouterr()
+    # A branch from before the forget still holds the run file's lines, and the rewrite rewrites every branch.
+    git(vault.root, "branch", "before", before)
+    assert run(vault, "--check-rewrite", folder) == 1
     out = capsys.readouterr().out
-    assert "rewrite   refused: it would change HEAD, so don't run it" in out
-    assert "processed/quoted.md: line 2" in out
+    assert "rewrite   refused: it would change what a branch holds now, so don't run it" in out
+    assert f"before: {rel}: line 1, 2" in out
+    git(vault.root, "branch", "-D", "before")
+    # HEAD, once a merge an older Docket made brings the lines back: refused, named by path alone.
+    run_file.write_text(git(vault.root, "show", f"{before}:./{rel}"), encoding="utf-8", newline="\n")
+    git(vault.root, "commit", "-q", "-m", "An older Docket's merge", "--", rel)
+    assert run(vault, "--check-rewrite", folder) == 1
+    assert f"          {rel}: line 1, 2" in capsys.readouterr().out
 
 
 def test_check_rewrite_refuses_a_folder_that_isn_t_one(
@@ -285,5 +381,153 @@ def test_a_hand_edit_the_take_in_refuses_is_left_and_named(
     path.write_text(edited, encoding="utf-8", newline="\n")
     owner("code")
     assert run(vault, CALL, "--now") == 0
-    assert f"left      {NOTE}: the forget's rev wasn't written; fix the edit" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert f"left      {NOTE}: the forget's rev wasn't written; fix the edit" in out
     assert path.read_text(encoding="utf-8") == edited
+    # HEAD still holds the note as it was, which the rewrite strips: the check refuses until the edit is fixed.
+    found = re.search(r'docket forget --check-rewrite "([^"]+)"', out)
+    assert found is not None
+    assert run(vault, "--check-rewrite", found.group(1)) == 1
+    capsys.readouterr()
+    git(vault.root, "checkout", "--", path.relative_to(vault.root).as_posix())
+    Gate(vault).list()
+    assert not path.exists()
+    assert run(vault, "--check-rewrite", found.group(1)) == 0
+
+
+# -- what stops the apply after the list's commit ----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("stop", [DocketError("git commit failed: the index is locked"), KeyboardInterrupt()])
+def test_an_apply_stopped_after_the_list_s_commit_says_so_and_still_writes_the_rewrite(
+    vault: Vault,
+    owner: Callable[..., AtConsole],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    stop: BaseException,
+) -> None:
+    real = forget_apply.apply
+
+    def stopped(found: Vault, keys: KeyStore, *, first: bool = False) -> forget_apply.Applied:
+        if first:
+            raise stop
+        return real(found, keys, first=first)
+
+    monkeypatch.setattr(forget_apply, "apply", stopped)
+    owner("code")
+    assert run(vault, CALL, "--now") == 2
+    err = capsys.readouterr().err
+    assert (str(stop) or "stopped") in err and forget_now.IN_FORCE in err
+    found = re.search(r"the history rewrite's files are in (.+)$", err.strip(), re.MULTILINE)
+    assert found is not None
+    folder = Path(found.group(1))
+    assert {p.name for p in folder.iterdir()} == set(rewrite.FILES)
+    assert subjects(vault)[0] == "Forget: the list from test-box"
+    assert vault.rawlog.read(CALL) == []
+    monkeypatch.setattr(forget_apply, "apply", real)
+    Gate(vault).list()
+    assert subjects(vault)[0] == "Forget: applied on test-box"
+    assert run(vault, "--check-rewrite", str(folder)) == 0
+
+
+def test_a_list_whose_commit_fails_is_in_force_and_its_rewrite_is_written(
+    vault: Vault, owner: Callable[..., AtConsole], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = forgotten.commit_pending
+
+    def refused(found: Vault, message: str | None = None) -> str | None:
+        if message is None:
+            return real(found)
+        raise DocketError("a hook refused the commit")
+
+    owner("code")
+    monkeypatch.setattr(forgotten, "commit_pending", refused)
+    with pytest.raises(DocketError, match="a hook refused the commit") as caught:
+        forget_now.forget(vault, "rids", [CALL])
+    assert forget_now.IN_FORCE in str(caught.value) and "the history rewrite's files are in" in str(caught.value)
+    assert vault.rawlog.read(CALL) == []
+
+
+def test_an_error_nobody_expected_keeps_its_trace_and_gets_the_note(
+    vault: Vault, owner: Callable[..., AtConsole], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(found: Vault, keys: KeyStore, *, first: bool = False) -> forget_apply.Applied:
+        raise RuntimeError("a bug")
+
+    monkeypatch.setattr(forget_apply, "apply", broken)
+    owner("code")
+    with pytest.raises(RuntimeError, match="a bug") as caught:
+        forget_now.forget(vault, "rids", [CALL])
+    (note,) = caught.value.__notes__
+    assert note.startswith(forget_now.IN_FORCE) and "the history rewrite's files are in" in note
+
+
+def test_rewrite_files_that_can_t_be_written_are_said_and_the_forget_stands(
+    vault: Vault, owner: Callable[..., AtConsole], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def full(*_: object) -> rewrite.Written:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(rewrite, "write", full)
+    owner("code")
+    assert run(vault, CALL, "--now") == 0
+    out = capsys.readouterr().out
+    assert "history   the history rewrite's files couldn't be written: [Errno 28] No space left on device" in out
+    assert vault.rawlog.read(CALL) == [] and subjects(vault)[0].startswith("Forget: 2 record(s)")
+
+
+def test_a_rebuild_stopped_with_ctrl_c_is_said_and_the_rest_printed(
+    vault: Vault, owner: Callable[..., AtConsole], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def stopped(found: Vault) -> object:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(index, "rebuild", stopped)
+    owner("code")
+    assert run(vault, CALL, "--now") == 0
+    out = capsys.readouterr().out
+    assert "index     refused until rebuilt: the rebuild was stopped; docket index rebuild finishes it" in out
+    assert "docket forget --check-rewrite" in out
+    assert index.status(vault).stale is not None
+
+
+def test_the_next_line_leaves_a_rid_a_shell_reads_more_into_to_put_in_by_hand(
+    vault: Vault, capsys: pytest.CaptureFixture[str]
+) -> None:
+    odd = "chat:C0TEST/a<b>&c|d;$e"
+    vault.write_run("chat", [make_record(9, rid=odd, source="chat", text="Unrelated words.")])
+    assert run(vault, odd) == 0
+    out = capsys.readouterr().out
+    assert f'next      run in your own terminal: docket forget "<rid 1>" --vault "{vault.root}" --now' in out
+    assert f"          <rid 1> is {odd}: put it in by hand, quoted as your shell reads it" in out
+
+
+def test_a_doc_left_for_its_owner_keeps_its_head_blob_in_the_rewrite(
+    vault: Vault, owner: Callable[..., AtConsole], capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Short anchors only, so no [r: token names the transcript: the rule alone finds the lines, in HEAD's blob too.
+    short = "recording-note:2026-10-12-short"
+    text = (
+        f"---\nid: {short}\ntype: recording-note\ncovers:\n  - {POLISHED}\nby: claude-test, sync 2026-10-12\n---\n\n"
+        "# Short\n\n- The crane cleared. @0:01\n"
+    )
+    recall.doc_put(vault, text)
+    settings = vault.root / "vault.yaml"
+    config = VaultConfig.load(settings)
+    config.never_store.keywords.append("zanzibar")
+    settings.write_text(config.dump(), encoding="utf-8", newline="\n")
+    path = DocStore(vault).file(short)
+    path.write_text(path.read_text(encoding="utf-8") + "- Zanzibar said so. @0:02\n", encoding="utf-8", newline="\n")
+    owner("code")
+    assert run(vault, POLISHED, "--now") == 0
+    out = capsys.readouterr().out
+    assert f"left      {short}" in out
+    found = re.search(r'docket forget --check-rewrite "([^"]+)"', out)
+    assert found is not None
+    # HEAD's blob of the doc is the rewrite's too: the check refuses until the edit is fixed and the forget's rev lands.
+    assert run(vault, "--check-rewrite", found.group(1)) == 1
+    assert "the whole file, whose blob the rewrite strips" in capsys.readouterr().out
+    git(vault.root, "checkout", "--", path.relative_to(vault.root).as_posix())
+    Gate(vault).list()
+    assert not path.exists()
+    assert run(vault, "--check-rewrite", found.group(1)) == 0

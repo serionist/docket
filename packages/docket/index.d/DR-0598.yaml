@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0598
+    title: The history rewrite blanks a token line only in the vault's doc blobs, and its check reads every branch tip
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#182"]
+    description: "A doc line holding its own [r: token on a rid forgotten whole is blanked only in the blobs the vault's docs have had, in any commit on any ref, each by its blob id and its line's hash in scoped.txt, read from git once the forget's line is in force; lines.txt keeps only the raw run files' expressions on their leading rid field. Files outside the vault, a note of the owner's or a copy of a doc anywhere else in the host repo, are the owner's own and among what a forget can't reach, as a copy anywhere else is, so the rewrite changes none of their lines, in any commit or on any branch, but a copy of a forgotten record's own raw line, which the run files' expressions match by its leading rid field wherever it is. git filter-repo in a fresh clone rewrites every branch and tag the clone has: it turns origin's branches into the clone's own and removes the origin remote. So docket forget --check-rewrite reads HEAD's tree and each other branch tip's, a blob HEAD holds read once, under HEAD, and refuses, naming the branch, the path and the line, unless every branch stays as it is now: a branch from before the forget still holds what it took, and is merged with the forget or deleted first. The printed lines say the rewrite rewrites every branch and tag, that it removes origin, to be added back before the force-push, and that a branch only the remote has isn't in the clone and keeps the text."
+    binds:
+      - Outside the vault, the rewrite changes only a copy of a forgotten record's own raw line.
+      - "--check-rewrite refuses unless every branch tip stays as it is now."
+    not_chosen:
+      - "A --replace-text expression on a doc line's [r: token: it blanks the owner's lines outside the vault, in every commit and on every branch."
+      - "Checking HEAD alone: filter-repo rewrites every branch the clone has, and a branch from before the forget would change unseen."

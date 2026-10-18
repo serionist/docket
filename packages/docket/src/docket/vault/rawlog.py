@@ -275,3 +275,18 @@ def _lines(path: Path) -> Iterator[tuple[int, RawRecord]]:
         for n, line in enumerate(f, start=1):
             if line.strip():
                 yield n, RawRecord.model_validate(json.loads(line))
+
+
+def lines_of(text: str) -> list[str]:
+    """A run file's lines, each with its newline, split at LFs only, as `_lines` reads them: never `str.splitlines()`,
+    which also splits at U+0085, U+2028 and U+2029, characters a record's text holds as they are."""
+    parts = text.split("\n")
+    return [f"{part}\n" for part in parts[:-1]] + ([parts[-1]] if parts[-1] else [])
+
+
+def record_of(line: str) -> RawRecord | None:
+    """A run file's line as a record, or None when it isn't one."""
+    try:
+        return RawRecord.model_validate(json.loads(line))
+    except ValueError:  # a JSONDecodeError, or pydantic's ValidationError
+        return None

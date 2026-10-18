@@ -425,10 +425,10 @@ Prevention first: the gate keeps private, uncut and unredacted content out of gi
 | the family | a rid and every rid under it, the audio on it and on the rids it sits under with every key, and the Whisper transcripts of that audio; a held rid and a folder file by their versions, a folder file by its identity too (DR-0578) |
 | the list | `state/forgotten.jsonl`, hashes only, merged by union, committed alone first: every reader of raw skips its lines, intake drops what it lists, and media's screen and reader refuse a rid it holds (DR-0579) |
 | the index | built under the list's digest, refused under another until rebuilt; a forget rebuilds it after the vault lock (DR-0593) |
-| the apply | the list against the tree, staging and the key store: raw lines, audio and its keys, doc lines and what was built on them, cursor entries, in one commit. Every gate call on every clone runs it first (DR-0581) |
+| the apply | the list against the tree, staging and the key store: raw lines, audio and its keys, doc lines and what was built on them, cursor entries, in one commit. Every gate call on every clone runs it first; the tree waits while the owner's git is mid-rebase or mid-merge (DR-0581, DR-0597) |
 | docs | a line anchored on what was forgotten goes, and every line built on it; an empty doc goes, but a confirmed or rejected decision keeps its title and links (DR-0580) |
 | keys | deleted on this clone at once, on the others at their next gate call, read or service start; kept out of every export and import made from then on (DR-0595) |
-| history | the text stays in the history of the repo the vault lives in: Docket never rewrites it, and writes the `git filter-repo` files for a fresh clone, checked read-only against HEAD by `docket forget --check-rewrite` (DR-0594) |
+| history | the text stays in the history of the repo the vault lives in: Docket never rewrites it, and writes the `git filter-repo` files for a fresh clone, which leave the owner's files outside the vault as they are and are checked read-only against every branch tip by `docket forget --check-rewrite` (DR-0594, DR-0598) |
 
 What a forget can't reach, which every dry run names: key exports made before, the LFS server's encrypted copies,
 chunks an API provider was sent, the source itself, other clones until their next gate call, and files outside the

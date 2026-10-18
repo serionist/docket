@@ -1,18 +1,19 @@
 """The history rewrite a forget writes for a fresh clone and never runs (DR-0594), and `--check-rewrite`, which applies
-it to HEAD's tree read-only.
+it to every branch tip read-only.
 
 `<private>/forget/<stamp>/`, the stamp a UTC time with no colon so the folder is valid on Windows:
 
 | File | Holds |
 |---|---|
-| `lines.txt` | `--replace-text` expressions, each blanking one whole line on a rid forgotten whole |
+| `lines.txt` | `--replace-text` expressions, each blanking one raw run file line on a rid forgotten whole |
 | `scoped.txt`, `scoped.py` | every other line, by blob and line hash, and the `--blob-callback` blanking them |
-| `blobs.txt` | for `--strip-blobs-with-ids`: every rev of each removed doc, and each removed media file's pointer |
+| `blobs.txt` | for `--strip-blobs-with-ids`: every blob of each removed doc, and each removed media file's pointer |
 
-A rid forgotten whole never comes back, so its run files' lines are matched by their leading `rid` field and its doc
-lines by their own `[r:` token. A version forgotten alone can: a release keeps that very version, its line written
-again just as it was. So its run files' lines, and every other dropped doc line, are blanked only in the blobs that
-held them.
+A rid forgotten whole never comes back, so its run files' lines are matched by their leading `rid` field. Every other
+line is blanked only in the blobs that held it: a version forgotten alone, which a release can write again just as it
+was; each doc line the docs' rule drops in any blob the doc's file has had, each judged on its own rev; and each line of
+the vault's docs holding an `[r:` token on a rid forgotten whole (DR-0598). Files outside the vault are the owner's
+own, as a copy anywhere else is, and are never touched.
 
 Nothing in them is text from the family: rids and versions are ids, lines are named by their hashes.
 """
@@ -31,10 +32,14 @@ from pathlib import Path
 
 from docket.childproc import console_flags
 from docket.errors import DocketError
-from docket.forget.plan import Plan
+from docket.forget import apply as forget_apply
+from docket.forget.plan import DocCut, Plan
+from docket.vault import forgotten
 from docket.vault.anchors import encode_rid
 from docket.vault.docstore import DocStore
-from docket.vault.processed import doc_path
+from docket.vault.processed import doc_path, parse_doc
+from docket.vault.spans import RawLookup
+from docket.vault.staging import rid_hash
 from docket.vault.vault import Vault
 
 FOLDER = "forget"
@@ -45,6 +50,8 @@ BLOBS = "blobs.txt"
 FILES = (LINES, SCOPED, CALLBACK, BLOBS)
 # filter-repo leaves a blob alone when its first bytes hold a NUL, as a binary file's do.
 BINARY_PEEK = 8192
+# A tree entry or a raw diff's side that names nothing: a file added, or deleted.
+NO_BLOB = "0" * 40
 CALLBACK_BODY = """# Docket's scoped blanking (DR-0594): each blob the table names loses the lines whose sha256 it
 # lists, keeping their newlines. Read once, from the file beside this one.
 import contextlib
@@ -81,33 +88,39 @@ def _json(text: str) -> str:
 
 
 def expressions(plan: Plan) -> list[str]:
-    """`--replace-text` expressions, each blanking one whole line on a rid forgotten whole and keeping its newline."""
-    out: list[str] = []
-    for rid in sorted(plan.rids):
-        out.append(f'regex:(?m)^\\{{"rid":"{re.escape(_json(rid))}(?:/[^"]*)?".*$==>')
-        out.append(f"regex:(?m)^.*\\[r:{re.escape(encode_rid(rid))}(?:[/@#][^\\]]*)?\\].*$==>")
-    return out
+    """`--replace-text` expressions, each blanking one raw run file line on a rid forgotten whole, by its leading `rid`
+    field, and keeping its newline."""
+    return [f'regex:(?m)^\\{{"rid":"{re.escape(_json(rid))}(?:/[^"]*)?".*$==>' for rid in sorted(plan.rids)]
+
+
+def _token(rids: Iterable[str]) -> re.Pattern[bytes] | None:
+    """A doc line's own `[r:` token on one of these rids or a rid under it, as its file's bytes hold it."""
+    names = [re.escape(encode_rid(rid).encode("utf-8")) for rid in sorted(rids)]
+    if not names:
+        return None
+    return re.compile(rb"\[r:(?:" + b"|".join(names) + rb")(?:[/@#][^\]]*)?\]")
 
 
 def raw_rows(vault: Vault, plan: Plan) -> set[tuple[str, str]]:
-    """Each version forgotten alone, by every blob its run file has had and its line's hash, read before the apply
-    takes it out: what the rewrite blanks there and nowhere else. A run file changes only by a forget or a merge, so
-    its history is a few blobs."""
+    """Each version forgotten alone, by every blob its run file has had on any branch and its line's hash, read before
+    the apply takes it out: what the rewrite blanks there and nowhere else. A run file changes only by a forget or a
+    merge, so its history is a few blobs."""
     if not plan.pairs:
         return set()
     refs: list[str] = []
     for rel in sorted(plan.runs):
-        commits = vault.git.out("log", "--no-show-signature", "--format=%H", "--", rel).split()
+        commits = vault.git.out("log", "--all", "--no-show-signature", "--format=%H", "--", rel).split()
         refs += [f"{sha}:./{rel}" for sha in commits]
     rows: set[tuple[str, str]] = set()
-    for blob in sorted(set(_blob_ids(vault, refs).values())):
-        for line in vault.git.run("cat-file", "blob", blob).stdout.split("\n"):
+    blobs = sorted(set(_blob_ids(vault, refs).values()))
+    for blob, data in zip(blobs, _cat(vault, blobs), strict=True):
+        for line in data.split(b"\n"):
             if _pair(line) in plan.pairs:
                 rows.add((blob, line_hash(line)))
     return rows
 
 
-def _pair(line: str) -> tuple[object, object] | None:
+def _pair(line: bytes) -> tuple[object, object] | None:
     """A run file line's rid and version, or None for a line that isn't a record's."""
     try:
         found: object = json.loads(line)
@@ -131,11 +144,28 @@ def _blob_ids(vault: Vault, refs: Iterable[str]) -> dict[str, str]:
         return {}
     proc = vault.git.run("cat-file", "--batch-check=%(objectname) %(objecttype)", stdin="\n".join(wanted) + "\n")
     out: dict[str, str] = {}
-    for ref, row in zip(wanted, proc.stdout.splitlines(), strict=False):
+    for ref, row in zip(wanted, proc.stdout.split("\n"), strict=False):
         fields = row.split()
         if len(fields) == 2 and fields[1] == "blob":
             out[ref] = fields[0]
     return out
+
+
+def doc_blobs(vault: Vault) -> dict[str, set[str]]:
+    """Every blob each doc's file has had in any commit on any ref, merges' sides included, by its path in the vault:
+    the vault's doc blobs, which the rewrite reads and nothing outside them."""
+    git = vault.git
+    out = git.out("log", "--all", "-m", "--no-renames", "--format=", "--raw", "--no-abbrev", "-z", "--", "processed")
+    found: dict[str, set[str]] = {}
+    fields = out.split("\0")
+    for n, info in enumerate(fields[:-1]):
+        parts = info.strip("\n").split()
+        if len(parts) != 5 or not parts[0].startswith(":") or parts[1] not in ("100644", "100755"):
+            continue
+        blob = parts[3]
+        if blob != NO_BLOB:
+            found.setdefault(fields[n + 1].removeprefix(git.prefix), set()).add(blob)
+    return found
 
 
 @dataclass(frozen=True)
@@ -162,16 +192,39 @@ def _earlier(base: Path, folder: Path) -> tuple[list[str], set[tuple[str, str]],
     for earlier in sorted(p for p in base.iterdir() if p.is_dir() and p != folder and (p / LINES).is_file()):
         with contextlib.suppress(DocketError):
             files = _read(earlier)
-            expressions += [e for e in (earlier / LINES).read_text(encoding="utf-8").splitlines() if e.strip()]
+            expressions += [e for e in (earlier / LINES).read_text(encoding="utf-8").split("\n") if e.strip()]
             scoped |= {(blob, digest) for blob, found in files.scoped.items() for digest in found}
             stripped |= files.stripped
     return expressions, scoped, stripped
 
 
+class _Judged:
+    """The docs' rule on a doc as one of its blobs holds it (DR-0580): raw as the forget leaves it, and what a ref
+    leads to read through the store, an earlier rev from git."""
+
+    def __init__(self, vault: Vault, plan: Plan) -> None:
+        self.store = DocStore(vault)
+        self.listed = forgotten.load(vault.root, vault.home)
+        # The family's rids count as taken, so a version forget's rid reads as gone even before the apply's state.
+        taken = {*forget_apply.skipped(vault.home), *(rid_hash(rid) for rid in plan.family)}
+        self.raw = forget_apply.Left(RawLookup(vault.root), self.listed, taken)
+
+    def dropped(self, data: bytes, cut: DocCut) -> set[int]:
+        """The numbers of the lines the rule drops from this blob, judged on its own rev; for a blob that doesn't read
+        as a doc, the lines holding the very words the forget dropped from the current rev."""
+        lines = data.split(b"\n")
+        try:
+            doc = parse_doc(data.decode("utf-8"), lenient=True)
+        except (DocketError, UnicodeDecodeError):
+            return {n for n, line in enumerate(lines, start=1) if line_hash(line) in cut.hashes}
+        fate = forget_apply.judge(self.store, [doc], self.raw, self.listed).get(doc.meta.id)
+        return set(fate.dropped) if fate is not None else set()
+
+
 def write(vault: Vault, plan: Plan, held: Before, at: datetime) -> Written:
-    """The rewrite's files for this forget, written once its commit is in, with every earlier forget's on this clone:
-    the blobs each dropped doc line was in are read from each doc's history; `held` is what HEAD held before the
-    apply."""
+    """The rewrite's files for this forget, with every earlier forget's on this clone: each blob of the vault's docs
+    read once, in every commit on every ref, HEAD's before the apply included, so a forget whose apply failed or left a
+    doc for its owner still writes them; `held` is what HEAD held before the apply."""
     base = vault.home.private / FOLDER
     base.mkdir(parents=True, exist_ok=True)
     folder = base / stamp(at)
@@ -182,22 +235,26 @@ def write(vault: Vault, plan: Plan, held: Before, at: datetime) -> Written:
         folder = base / f"{stamp(at)}-{n}"
     folder.mkdir()
     found, scoped, stripped = _earlier(base, folder)
-    store = DocStore(vault)
-    cuts = [c for c in plan.docs if c.hashes or c.removed]
-    histories = store.histories([c.id for c in cuts])
-    head = set(_blob_ids(vault, [f"HEAD:./{doc_path(c.id).as_posix()}" for c in cuts]).values())
-    refs = {c.id: [f"{sha}:./{doc_path(c.id).as_posix()}" for _, sha in histories.get(c.id, [])] for c in cuts}
-    blob_of = _blob_ids(vault, (ref for each in refs.values() for ref in each))
     scoped |= held.raw
     stripped |= held.pointers
-    for cut in cuts:
-        blobs = {blob_of[ref] for ref in refs[cut.id] if ref in blob_of} - head
-        if cut.removed:
-            stripped |= blobs
+    cuts = {doc_path(c.id).as_posix(): c for c in plan.docs}
+    by_blob: dict[str, set[str]] = {}
+    for rel, blobs in doc_blobs(vault).items():
+        for blob in blobs:
+            by_blob.setdefault(blob, set()).add(rel)
+    token = _token(plan.rids)
+    judged = _Judged(vault, plan) if cuts else None
+    order = sorted(by_blob)
+    for blob, data in zip(order, _cat(vault, order), strict=True):
+        cut = next((cuts[rel] for rel in sorted(by_blob[blob]) if rel in cuts), None)
+        if cut is not None and cut.removed:
+            stripped.add(blob)
             continue
-        for blob in sorted(blobs):
-            text = vault.git.run("cat-file", "blob", blob).stdout
-            scoped |= {(blob, line_hash(line)) for line in text.split("\n") if line_hash(line) in cut.hashes}
+        lines = data.split(b"\n")
+        if token is not None:
+            scoped |= {(blob, line_hash(line)) for line in lines if token.search(line)}
+        if cut is not None and judged is not None:
+            scoped |= {(blob, line_hash(lines[n - 1])) for n in judged.dropped(data, cut) if 0 < n <= len(lines)}
     found = list(dict.fromkeys([*found, *expressions(plan)]))
     (folder / LINES).write_text("".join(f"{e}\n" for e in found), encoding="utf-8", newline="\n")
     (folder / SCOPED).write_text("".join(f"{b} {h}\n" for b, h in sorted(scoped)), encoding="utf-8", newline="\n")
@@ -219,15 +276,19 @@ def history_lines(vault: Vault, written: Written) -> list[str]:
     return [
         f"history   the text stays in the history of {repo}: Docket never rewrites it. To take it out:",
         "  the files hold every earlier forget's on this clone too: run only the newest folder's",
-        f'  1. check it leaves HEAD as it is: docket forget --check-rewrite "{folder}" --vault "{vault.root}"',
+        "  1. check it leaves every branch as it is now, HEAD's and the others': "
+        f'docket forget --check-rewrite "{folder}" --vault "{vault.root}"',
         "  2. back the repo up",
         f'  3. git clone --no-local "{repo}" "{fresh}", then in "{fresh}": {run}',
         "     never in the working repo: filter-repo refuses a clone that isn't fresh, and --force there risks your "
         "uncommitted work",
-        f'  4. force-push its branches from "{fresh}", then clone again on every machine, this one too',
+        "  4. filter-repo rewrites every branch and tag the clone has and removes its origin remote: add it back "
+        f'(git remote add origin <url>) in "{fresh}", force-push every branch and tag (git push --force --all, then '
+        "--tags), then clone again on every machine, this one too",
+        "  a branch only the remote has isn't in the clone and keeps the text: check it out here before step 1, or "
+        "delete it there",
         "  the remote keeps the commits a force-push leaves behind, reachable by their ids: on GitHub until its "
         "support purges them, and in forks and pull request refs",
-        "  other branches keep the text, with no list line to keep it out of their trees",
         "  git filter-repo isn't Docket's dependency: install it to run this",
     ]
 
@@ -248,7 +309,7 @@ def _read(folder: Path) -> _Files:
     if missing:
         raise DocketError(f"{folder} isn't a forget's rewrite folder: it lacks {', '.join(missing)}")
     regexes: list[tuple[re.Pattern[bytes], bytes]] = []
-    for raw in (folder / LINES).read_bytes().splitlines():
+    for raw in (folder / LINES).read_bytes().split(b"\n"):
         if not raw.strip():
             continue
         pattern, _, replacement = raw.rpartition(b"==>") if b"==>" in raw else (raw, b"", b"***REMOVED***")
@@ -257,11 +318,11 @@ def _read(folder: Path) -> _Files:
         else:
             regexes.append((re.compile(re.escape(pattern.removeprefix(b"literal:"))), replacement))
     scoped: dict[str, set[str]] = {}
-    for row in (folder / SCOPED).read_text(encoding="utf-8").splitlines():
+    for row in (folder / SCOPED).read_text(encoding="utf-8").split("\n"):
         if row.strip():
             blob, digest = row.split()
             scoped.setdefault(blob, set()).add(digest)
-    stripped = {row.strip() for row in (folder / BLOBS).read_text(encoding="utf-8").splitlines() if row.strip()}
+    stripped = {row.strip() for row in (folder / BLOBS).read_text(encoding="utf-8").split("\n") if row.strip()}
     return _Files(regexes, scoped, stripped)
 
 
@@ -276,28 +337,51 @@ def _rewritten(data: bytes, blob: str, files: _Files) -> bytes:
     return data
 
 
-def check(vault: Vault, folder: Path) -> list[str]:
-    """Each path and line number of HEAD's tree the rewrite would change, the repo's whole tree as filter-repo rewrites
-    it; none means HEAD stays as it is. Read-only."""
-    files = _read(folder)
-    listing = vault.git.out("ls-tree", "-r", "-z", "--full-tree", "HEAD")
+def _tree(vault: Vault, commit: str) -> list[tuple[str, str]]:
+    """A commit's whole tree, the repo's as filter-repo rewrites it: (blob, path) for each file."""
+    listing = vault.git.out("ls-tree", "-r", "-z", "--full-tree", commit)
     entries: list[tuple[str, str]] = []
     for entry in listing.split("\0"):
         info, _, path = entry.partition("\t")
         fields = info.split()
         if len(fields) == 3 and fields[1] == "blob":
             entries.append((fields[2], path))
+    return entries
+
+
+def _tips(vault: Vault) -> list[tuple[str, str]]:
+    """HEAD and each branch tip, (name, commit), HEAD first with no name: what a fresh clone of the repo has, every
+    branch of which the rewrite rewrites."""
+    head = vault.git.out("rev-parse", "--verify", "HEAD").strip()
+    tips = [("", head)]
+    for row in vault.git.out("for-each-ref", "--format=%(objectname) %(refname:short)", "refs/heads").split("\n"):
+        commit, _, name = row.partition(" ")
+        if name and commit != head:
+            tips.append((name, commit))
+    return tips
+
+
+def check(vault: Vault, folder: Path) -> list[str]:
+    """Each path and line number of HEAD's tree and of each other branch tip the rewrite would change, the repo's whole
+    tree as filter-repo rewrites it; none means every branch stays as it is now. A branch's file whose blob HEAD holds
+    is read once, under HEAD. Read-only."""
+    files = _read(folder)
     problems: list[str] = []
-    for (blob, path), data in zip(entries, _cat(vault, [blob for blob, _ in entries]), strict=True):
-        if blob in files.stripped:
-            problems.append(f"{path}: the whole file, whose blob the rewrite strips")
-            continue
-        after = _rewritten(data, blob, files)
-        if after == data:
-            continue
-        pairs = zip(data.split(b"\n"), after.split(b"\n"), strict=False)
-        changed = [str(n) for n, (old, new) in enumerate(pairs, start=1) if old != new]
-        problems.append(f"{path}: line {_first(changed)}")
+    seen: set[str] = set()
+    for name, commit in _tips(vault):
+        entries = [(blob, path) for blob, path in _tree(vault, commit) if blob not in seen]
+        seen |= {blob for blob, _ in entries}
+        where = f"{name}: " if name else ""
+        for (blob, path), data in zip(entries, _cat(vault, [blob for blob, _ in entries]), strict=True):
+            if blob in files.stripped:
+                problems.append(f"{where}{path}: the whole file, whose blob the rewrite strips")
+                continue
+            after = _rewritten(data, blob, files)
+            if after == data:
+                continue
+            pairs = zip(data.split(b"\n"), after.split(b"\n"), strict=False)
+            changed = [str(n) for n, (old, new) in enumerate(pairs, start=1) if old != new]
+            problems.append(f"{where}{path}: line {_first(changed)}")
     return problems
 
 
@@ -307,6 +391,8 @@ def _first(numbers: list[str]) -> str:
 
 def _cat(vault: Vault, blobs: list[str]) -> Iterator[bytes]:
     """Each blob's bytes in turn, from one `git cat-file --batch` asked a blob at a time: one is held at once."""
+    if not blobs:
+        return
     proc = subprocess.Popen(  # noqa: S603 - git with fixed arguments, the blob ids on stdin
         ["git", f"--git-dir={vault.home.git_dir}", "cat-file", "--batch"],  # noqa: S607 - git on PATH, as everywhere
         stdin=subprocess.PIPE,
