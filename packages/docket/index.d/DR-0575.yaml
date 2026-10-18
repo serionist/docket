@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0575
+    title: The release, a loosening, confirm-cuts and the key export ask the OS prompt; the key import, the API key and choice, and a browser session don't
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#143"]
+    description: "console.confirm is asked by docket hold release (DR-0202); by every vault.yaml change rewrite makes for the CLI that loosens (DR-0517), so docket redaction set off, docket source new, docket media host add and folder add, and docket models allow; by docket media confirm-cuts (DR-0561), which lets audio in for good that an old private classification may have kept out; and by docket media keys export (DR-0550), before the file is written, since every key leaves the clone, with the passphrase's last four letters still typed back after. docket media keys import stays at the console with no prompt: its passphrase is the factor, and it lets no key out and nothing into git. docket models install --api and docket models key stay at the console (DR-0539): neither sends anything until the vault allows it, and that asks. Minting a browser session (POST /api/session, docket open) asks nothing, and DR-0564's floor stays: a session can't release or loosen (DR-0382, DR-0506), the one thing a session adds over the token and the CLI is a decision's click, which lets nothing in, as Staging's and Curate's writes are in the CLI already, and the token already reads everything over MCP. The route is the service's, with no console or window of the owner's to anchor a prompt; docket open runs many times a day, and a prompt each time would teach a yes without reading, which weakens it where it matters; and a browser agent works in the owner's own signed-in browser, so it needs no session minted."
+    binds:
+      - A page or route that gains a release or a loosening, which DR-0382 and DR-0506 forbid, would make minting a session a step for the prompt.
+      - models/api.py still calls only console.problem; the scan keeps it.
+    not_chosen:
+      - "The prompt on minting a session: a prompt several times a day, for a page that lets nothing in."
+      - "The prompt on the key import: the passphrase already asks for what only the owner kept."
+      - "The prompt on models install --api: the vault's allow, which asks, is the lock that sends."

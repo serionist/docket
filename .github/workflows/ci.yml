@@ -229,6 +229,74 @@ jobs:
           DOCKET_TEST_LIVE_SERVICE: "1"
         run: uv run pytest packages/docket/tests/test_service_install_live.py -v -rs -p no:cacheprovider
 
+  # The OS prompt against each system itself (DR-0573, DR-0574), where no person is there to answer: Windows checks
+  # Hello's availability and the TPM, asks a runner without Hello, and runs the README's marker lines on the real
+  # ProgramData; macOS loads LocalAuthentication and runs the reply on a context invalidated first; Linux runs stage by
+  # stage, the workflow making the marker and installing the polkit action and a rule that answers, with sudo.
+  osprompt:
+    name: OS prompt (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, name: Windows }
+          - { os: macos-latest, name: macOS }
+          - { os: ubuntu-latest, name: Linux }
+    env:
+      DOCKET_TEST_OSPROMPT: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync --locked
+      - name: The system's own checks, nothing installed
+        env:
+          OSPROMPT_TEST_STAGE: bare
+        run: uv run pytest packages/docket/tests/test_osprompt_system.py -v -rs -p no:cacheprovider
+      - name: polkit on the runner
+        if: runner.os == 'Linux'
+        run: |
+          if [ ! -x /usr/bin/pkcheck ]; then
+            sudo apt-get update -q
+            sudo apt-get install -y -q polkitd
+          fi
+          sudo mkdir -p /etc/polkit-1/rules.d
+      - name: A marker made with sudo
+        if: runner.os == 'Linux'
+        env:
+          OSPROMPT_TEST_STAGE: marker
+        run: |
+          sudo mkdir -p /etc/docket
+          sudo touch /etc/docket/console-code
+          uv run pytest packages/docket/tests/test_osprompt_system.py -v -rs -p no:cacheprovider
+          sudo rm -rf /etc/docket
+      - name: polkit with a rule that says yes
+        if: runner.os == 'Linux'
+        env:
+          OSPROMPT_TEST_STAGE: polkit-yes
+        run: |
+          sudo install -m 0644 packages/docket/src/docket/osprompt/io.github.serionist.docket.policy \
+            /usr/share/polkit-1/actions/
+          printf '%s\n' 'polkit.addRule(function (action, subject) {' \
+            '  if (action.id == "io.github.serionist.docket.confirm") { return polkit.Result.YES; }' \
+            '});' | sudo tee /etc/polkit-1/rules.d/10-docket-ci.rules > /dev/null
+          sudo systemctl restart polkit
+          uv run pytest packages/docket/tests/test_osprompt_system.py -v -rs -p no:cacheprovider
+      - name: polkit with a rule that says no
+        if: runner.os == 'Linux'
+        env:
+          OSPROMPT_TEST_STAGE: polkit-no
+        run: |
+          sudo sed -i 's/Result.YES/Result.NO/' /etc/polkit-1/rules.d/10-docket-ci.rules
+          sudo systemctl restart polkit
+          uv run pytest packages/docket/tests/test_osprompt_system.py -v -rs -p no:cacheprovider
+
   # The web app in a real browser: the runner's own Chrome, which Playwright drives without downloading a browser. It
   # sees what render tests can't (a CSP violation, a swap that doesn't happen, a key that does nothing); its
   # screenshots are kept with the run.

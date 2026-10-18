@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 import typer
 from pydantic import ValidationError
 
-from docket import __version__, briefs, decisions, index, questions, recall, render, userconfig
+from docket import __version__, briefs, console, decisions, index, questions, recall, render, userconfig
 from docket.curate import batch as curate
 from docket.documents import scan as documents_scan
 from docket.errors import DocketError
@@ -281,6 +281,11 @@ def vault_status(vault: VaultOption = None) -> None:
     if s.branch_warning:
         typer.echo(f"warning  {s.branch_warning}")
     typer.echo(f"machine  {s.machine}")
+    # The owner's yes on this machine (DR-0574): which prompt asks, or why the code does; it shows no prompt.
+    yes, *marker = console.which_yes()
+    typer.echo(f"yes      {yes}")
+    for line in marker:
+        typer.echo(f"marker   {line}")
     if found.waiting:
         typer.echo(f"settings {inforce.NOTICE}")
     typer.echo(f"runs     {s.runs}")
@@ -1007,6 +1012,8 @@ def media_keys_export(
     done = media_backup.export(found, target)
     if done.kept:
         say(f"keys     {done.keys} exported to {target}; `docket media keys import` reads it on another machine")
+    elif done.declined:
+        say("keys     not exported: nothing was confirmed, and no file was written")
     else:
         say("keys     not exported: the passphrase wasn't confirmed")
 

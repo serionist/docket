@@ -1,0 +1,26 @@
+decisions:
+  - id: DR-0573
+    title: Windows Hello through ctypes, LocalAuthentication through rubicon-objc, and polkit through pkcheck with one action file
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#143"]
+    description: "docket.osprompt has one backend per system; each finds, without showing anything, whether a prompt is set up, and asks it. Windows 10 1709 and later: UserConsentVerifier through combase.dll with ctypes and no package. RoGetActivationFactory for Windows.Security.Credentials.UI.UserConsentVerifier gives IUserConsentVerifierStatics (af4f3f91-564c-4ddc-b8b5-973447627c65), whose CheckAvailabilityAsync finds it, and IUserConsentVerifierInterop (39E050C3-4E74-441A-8DC0-B81104DF949C), whose RequestVerificationForWindowAsync is the desktop's way to ask; the IIDs are the SDK headers' (UserConsentVerifierInterop.idl, windows.security.credentials.ui.h). The dialog is anchored to an invisible top-level window Docket makes with CreateWindowEx and places over the console's window, never to Windows Terminal's own window; its messages are pumped while the operation is polled through IAsyncInfo. Close is called on every async object and every interface is released, on every path. Every DLL it calls, combase.dll, tbs.dll, winbio.dll, user32.dll, advapi32.dll and shell32.dll among them, loads from System32 only (LoadLibraryExW with LOAD_LIBRARY_SEARCH_SYSTEM32, ctypes' winmode), never from Python's own folder, as Linux runs /usr/bin/pkcheck by its absolute path. Windows Hello's face recognition is accepted: it proves the owner is there, not that they agreed, and the README advises a fingerprint or the PIN, or face turned off, for an owner who wants consent. macOS: LAContext's evaluatePolicy with LAPolicyDeviceOwnerAuthentication, so Touch ID, an Apple Watch or the login password, through rubicon-objc (BSD-3-Clause, pure Python, no dependencies, darwin only), a fresh context each time so no answer is reused. Its success is a yes; userCancel, systemCancel, appCancel (Docket's own timeout) and authenticationFailed are a no; notInteractive (-1004) is a no that says to run it at the Mac; every other code means this caller can't use LocalAuthentication, invalidContext (-10) and the private -1000 range among them, such as the -1007 Caller is not Apple signed seen on a macOS 27 beta, and refuses, naming the marker (DR-0574) as the way out: one branch, with no second route to the code. Linux: /usr/bin/pkcheck by its absolute path, for Docket's own process as pid,start-time,uid, with --allow-user-interaction and --enable-internal-agent, so the desktop's agent asks, or with none, as over SSH, a text agent at the console. The action is io.github.serionist.docket.confirm, auth_self for any, inactive and active sessions, never auth_self_keep, which passes again for five minutes; its message is fixed in the file, as polkit refuses details from a caller that isn't root. The file ships in the package and the owner installs it once with sudo; docket vault status prints the line."
+    binds:
+      - "The action id io.github.serionist.docket.confirm and the file's defaults are a contract with what owners installed: a later act uses the same action, so no owner installs the file again."
+      - rubicon-objc is pinned, only on macOS, and a new version comes in by its own reviewed bump.
+      - Each backend's calls into the system sit behind one function per call, which the tests fake; CI runs the real availability check on each system, and never a real prompt.
+      - On Windows a test counts every interface acquired and released, and every async object closed, on the success, error and timeout paths.
+      - "A test scans osprompt's Windows backend: every DLL is loaded with System32's search flag, and no ctypes.windll or cdll attribute is reached for."
+    not_chosen:
+      - "pywinrt's packages: winrt-runtime and one per namespace, compiled, and the projection lacks the interop interface a desktop process needs."
+      - "pyobjc: pyobjc-core, Cocoa and Security, compiled and several MB, for one call."
+      - "A Swift or C helper: a build per system, and signing on macOS."
+      - "Polkit over D-Bus with jeepney, already installed on Linux: it brings no text agent, so nothing asks over SSH; pkcheck does."
+      - "pkexec's own action: it asks for an admin, and its message says a program runs as root."
+      - "One action per act: each later act would need every owner to install the file again, and until then it would ask the code."
+      - "LAPolicyDeviceOwnerAuthenticationWithBiometrics: a Mac without Touch ID would get the code, where the login password is a factor only the owner knows."
+      - "CredUIPromptForWindowsCredentials: it offers face too, hands the PIN or the password to Docket's own process, where a process running as the owner reads it, and leaves Docket to check what comes back."
+      - "Windows Terminal's window, or the foreground one, as the dialog's owner: a window of another process, whose z-order and focus Docket doesn't control; kept as the hardware test's comparison."
+      - "The code when a Mac refuses this caller: a second branch, and a way to the code that a change of signing on the owner's Python opens."

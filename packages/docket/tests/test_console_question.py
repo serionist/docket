@@ -10,10 +10,10 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from docket_testkit import AtConsole, consuming_project, empty_vault, git, make_config, sh
+from docket_testkit import AtConsole, FakePrompt, consuming_project, empty_vault, git, make_config, sh
 from pydantic import Field
 
-from docket import console
+from docket import console, osprompt
 from docket.cli import main
 from docket.errors import DocketError
 from docket.vault import settings
@@ -86,6 +86,21 @@ def test_anything_but_the_code_writes_nothing(vault: Vault, owner: Callable[...,
     owner(answer)
     assert cli(vault, credentials(False)).declined
     assert (text(vault), head(vault)) == (before, at)
+
+
+def test_with_an_os_prompt_its_yes_makes_the_change_and_its_no_writes_nothing(
+    vault: Vault, owner: Callable[..., AtConsole], os_prompt: Callable[..., FakePrompt]
+) -> None:
+    """A loosening asks the OS prompt where this machine has one, and never the code then (DR-0572, DR-0574)."""
+    before, at = text(vault), head(vault)
+    hello = os_prompt(osprompt.Refused("cancelled"), osprompt.Verified())
+    person = owner("", "")
+    assert cli(vault, credentials(False)).declined
+    assert (text(vault), head(vault)) == (before, at)
+    assert cli(vault, credentials(False)).changed
+    assert bodies(vault, 1) == ["Config: a change\n\nconfirmed at the console\n"]
+    assert hello.acts == ["make a vault.yaml change that isn't only stricter"] * 2
+    assert not any("Type" in p for p in person.prompts)
 
 
 def test_the_code_writes_and_commits_saying_it_was_confirmed(
