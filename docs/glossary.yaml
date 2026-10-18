@@ -135,7 +135,7 @@ terms:
     definition: "[redacted:<rule>], what redaction leaves in place of a secret in a record or a doc: it names the rule and never the value, it is never matched again, and in a doc it is text, never an anchor."
     see: [staging gate]
   - term: reference source
-    definition: "A source Docket keeps working and tested in CI as an example to copy, never a dependency: Plaud, under examples/sources/plaud. docket source new --example copies it."
+    definition: "A source Docket keeps working and tested in CI as an example to copy, never a dependency: Plaud, Slack, Teams, Outlook mail and the calendar, each under examples/sources/<name>/. docket source new <name> --example copies one."
     see: [examples/sources/plaud/SKILL.md]
   - term: release
     definition: "Letting a held recording into the vault with the cuts its owner said yes to, at their own terminal or in chat to Claude, who runs docket hold release: the release line is committed, then the id leaves the hold list."

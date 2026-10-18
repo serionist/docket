@@ -196,8 +196,8 @@ checks what it returns (DR-0108, DR-0119). `docket source new <name> --vault <va
 source to `vault.yaml` (DR-0166); the plugin's `/docket:setup` runs it for each source you choose.
 
 - Without `--example` it writes Docket's blank template: a `SKILL.md` to fill, a mapper that sets every capture aside
-  as `not-mapped-yet` until you write the mapping, and its tests. With `--example` it copies a reference source whole:
-  in this version Plaud, [examples/sources/plaud](../../examples/sources/plaud) (DR-0167).
+  as `not-mapped-yet` until you write the mapping, and its tests. With `--example` it copies a reference source whole,
+  one of the example sources below (DR-0609).
 - It writes only into that folder of the repo around the vault, never through a link out of it or into the vault, and
   never over a folder that exists. It changes `vault.yaml` only when the file is as Docket wrote it, and commits it;
   otherwise it prints the lines to add under `sources:`. The folder is yours to commit.
@@ -219,6 +219,27 @@ source to `vault.yaml` (DR-0166); the plugin's `/docket:setup` runs it for each 
 - Changing a mapper: keep its output stable, since every record the lookback reads again gets a new version when it
   changes; pin golden versions in its tests, as the example does; pull the project on every machine before its next
   sync.
+
+### Example sources
+
+Five working sources ship in [examples/sources](../../examples/sources), each a skill, a mapper, the page scripts it
+runs and its tests, tested in CI (DR-0608). `docket source new <name> --example --vault <vault>` copies one into your
+project under its own name, with its sensitivity, tools and lookback in `vault.yaml`.
+
+| Example | Route | Reads | In `vault.yaml` |
+|---|---|---|---|
+| `plaud` | MCP: Plaud's own server | recordings, their transcripts and Plaud's notes | `mixed` |
+| `slack` | MCP: the Slack plugin's read tools, its search to find what to read | channels, DMs and their threads | `work` |
+| `teams` | Claude in Chrome: Teams on the web, two fixed page scripts | one-on-one, group and meeting chats | `work`, a day back |
+| `outlook` | Claude in Chrome: Outlook on the web, two fixed page scripts | mail in every folder, the online archive | `work`, a day back |
+| `calendar` | Claude in Chrome: Outlook on the web's week view, one fixed page script | events, one record per occurrence | `work`, a week back |
+
+- The copy is yours from then on: change its route as your workspace or tenant needs and keep its tests passing.
+  Docket never updates it; a newer example is in the repo to compare with.
+- The browser routes are for a tenant no MCP server reaches. Their page notes were learned on one tenant, and a quirk
+  seen once says so. Where an MCP server reaches the source, start from the blank template instead.
+- The three browser examples all capture `javascript_tool`, and a session's capture hook posts to the open run that
+  lists the tool: run one of them at a time in a session, or each in its own agent.
 
 ## Folder sources
 
@@ -289,6 +310,10 @@ each of the source's tools returned, so Claude never retypes a payload.
 | a final run | `run_open(source, final=true)` for the ids that waited a week: fetched by id, no listing, the mark untouched |
 | a folder | a live run reads a backfill folder only when `docket ingest` read it on this machine first |
 
+- A sync of your own (a skill or a command in your project) runs each source the same way: `run_open("<source>")`
+  opens the run and names the source's `SKILL.md`; Claude makes the reads it lists, which the capture hook hands to
+  Docket; `ingest(run, captures=<n>, skipped=[...])` closes it. What your sync does with the records after that is its
+  own.
 - Each machine commits its cursor file when a whole run changes it: one commit per run, `Cursors: <source> on
   <machine>`, naming no id.
 - A cursor file that doesn't read stops this machine's runs, naming the line; another machine's is left out with a

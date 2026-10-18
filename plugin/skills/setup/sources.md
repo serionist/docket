@@ -8,14 +8,17 @@ fills from a saved payload.
 | Source | Sensitivity | What to look for | Reference |
 |---|---|---|---|
 | `plaud` | mixed | an MCP server with `list_files`, `get_file`, `get_transcript` and `get_note` (Plaud's) | yes |
-| `slack` | work | the Slack plugin or an MCP server with Slack's read and search tools | no |
-| `outlook` | work | a Microsoft 365 or Outlook MCP server or connector with mail tools, or mail read in the browser | no |
-| `teams` | work | a Microsoft 365 or Teams MCP server or connector with chat tools, or Teams in the browser | no |
-| `calendar` | work | a calendar MCP server or connector (Microsoft 365, Google Calendar) | no |
+| `slack` | work | the Slack plugin or an MCP server with Slack's read and search tools | yes |
+| `outlook` | work | a Microsoft 365 or Outlook MCP server or connector with mail tools, or mail read in the browser | yes |
+| `teams` | work | a Microsoft 365 or Teams MCP server or connector with chat tools, or Teams in the browser | yes |
+| `calendar` | work | a calendar MCP server or connector (Microsoft 365, Google Calendar), or Outlook's calendar in the browser | yes |
 | `gmail` | mixed | a Gmail MCP server or connector | no |
 | `claude-sessions` | work | Claude Code's own session logs on this machine; no tool needed | no |
 | `documents` | work | a work folder of the user's own documents; no tool needed: a folder source, `--folder <folder>`, read by `docket scan` | no |
 
+- A reference is one route. Slack's reads with the Slack plugin's `slack_read_channel` and `slack_read_thread`;
+  Teams', Outlook's and the calendar's read Teams and Outlook on the web through Claude in Chrome's `javascript_tool`,
+  for a tenant no MCP server can reach. A user who reaches the source another way gets the blank template instead.
 - A source's tools go in `vault.yaml` by their own names, without the host's prefix: `mcp__plaud__list_files` is
   `list_files`, `mcp__plugin_slack_slack__slack_read_channel` is `slack_read_channel`. Pass the ones that return the
   source's content, one `--tool` each; the user can change them later, in `vault.yaml`, where a tool added applies

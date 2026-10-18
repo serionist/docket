@@ -48,7 +48,7 @@ The schema is `docs/docs-regime.yaml`, explained in `docs/docs-regime.md`.
 |------|------|
 | `packages/docket/` | the app: the vault, the service (web app, MCP endpoint, scheduler), the source contract, the `docket` command |
 | `plugin/` | the Claude Code plugin: the MCP entry, the session-start status hook, the capture hook, the skills (recall, setup, cuts and curate now; sync and tasks later), no scripts of its own (its hooks run `docket`); source skills live in the consuming project, scaffolded by `docket source new`; `.claude-plugin/marketplace.json` makes the repo its marketplace |
-| `examples/` | reference sources to copy into a project, tested in CI and never a dependency: Plaud under `sources/plaud` |
+| `examples/` | reference sources to copy into a project, tested in CI and never a dependency: Plaud, Slack, Teams, Outlook mail and the calendar under `sources/<name>` |
 | `tools/devkit/` | the development kit, never published: `gate`, `docs`, `devkit` |
 | `docs/` | the design, the regime, the glossary, plans and reviews |
 | `.claude/skills/` | the work loop: `start-work`, `review-plan`, `review-code`, `finish-work` |

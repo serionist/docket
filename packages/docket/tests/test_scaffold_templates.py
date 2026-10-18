@@ -1,5 +1,5 @@
-"""The source templates the wheel carries: the blank one, and the Plaud reference, kept byte for byte with the example
-under examples/sources/plaud, which stays the reference."""
+"""The source templates the wheel carries: the blank one, and each reference source, kept byte for byte with its
+example under examples/sources/<name>/, which stays the reference."""
 
 from __future__ import annotations
 
@@ -20,26 +20,36 @@ from docket.errors import DocketError
 from docket.sources import scaffold
 
 REPO = Path(__file__).resolve().parents[3]
-EXAMPLE = REPO / "examples" / "sources" / "plaud"
+EXAMPLES = REPO / "examples" / "sources"
+EXAMPLE = EXAMPLES / "plaud"
 TEMPLATES = "packages/docket/src/docket/sources/templates"
-# What a run of the example's tests leaves beside it, never part of the reference.
-LEFTOVERS = {"__pycache__", ".pytest_cache"}
+# What a run of the example's tests or its linters leaves beside it, never part of the reference.
+LEFTOVERS = {"__pycache__", ".pytest_cache", ".ruff_cache"}
+REFERENCES = sorted(scaffold.REFERENCES)
 
 
-def example_files() -> dict[str, bytes]:
+def example_files(name: str) -> dict[str, bytes]:
+    folder = EXAMPLES / name
     return {
-        p.relative_to(EXAMPLE).as_posix(): p.read_bytes()
-        for p in sorted(EXAMPLE.rglob("*"))
-        if p.is_file() and not LEFTOVERS & set(p.relative_to(EXAMPLE).parts)
+        p.relative_to(folder).as_posix(): p.read_bytes()
+        for p in sorted(folder.rglob("*"))
+        if p.is_file() and not LEFTOVERS & set(p.relative_to(folder).parts)
     }
 
 
-def test_the_plaud_copy_is_the_example_byte_for_byte() -> None:
-    expected = example_files()
-    copied = scaffold.template_files("plaud")
-    assert sorted(copied) == sorted(expected), f"the files under {TEMPLATES}/plaud differ from the example's"
+@pytest.mark.parametrize("name", REFERENCES)
+def test_each_reference_copy_is_its_example_byte_for_byte_in_lf(name: str) -> None:
+    expected = example_files(name)
+    copied = scaffold.template_files(name)
+    assert "SKILL.md" in expected and "mapper.py" in expected
+    assert sorted(copied) == sorted(expected), f"the files under {TEMPLATES}/{name} differ from the example's"
     for rel, data in expected.items():
-        assert copied[rel] == data, f"copy examples/sources/plaud/{rel} to {TEMPLATES}/plaud/{rel}.tmpl"
+        assert copied[rel] == data, f"copy examples/sources/{name}/{rel} to {TEMPLATES}/{name}/{rel}.tmpl"
+        assert b"\r\n" not in data, rel
+
+
+def test_every_example_is_a_reference_docket_source_new_can_copy() -> None:
+    assert sorted(p.name for p in EXAMPLES.iterdir() if p.is_dir()) == REFERENCES
 
 
 def test_the_blank_template_is_a_skill_a_mapper_and_tests_in_lf() -> None:
@@ -101,12 +111,12 @@ def test_the_wheel_carries_every_template(tmp_path: Path) -> None:
     sh(REPO, uv, "build", "--package", "docket", "--wheel", "--quiet", "-o", str(tmp_path))
     (wheel,) = tmp_path.glob("docket-*.whl")
     names = set(zipfile.ZipFile(wheel).namelist())
-    for kind in ("blank", "plaud"):
+    for kind in ("blank", *REFERENCES):
         for rel in scaffold.template_files(kind):
             assert f"docket/sources/templates/{kind}/{rel}.tmpl" in names
 
 
-@pytest.mark.parametrize("name", ["plaud", "blank"])
+@pytest.mark.parametrize("name", [*REFERENCES, "blank"])
 def test_a_skill_names_only_the_tools_parameters_and_the_hooks_line_prefixes(name: str) -> None:
     text = scaffold.template_files(name)["SKILL.md"].decode("utf-8")
     assert "<!-- docket: steps from run_open -->" in text

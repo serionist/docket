@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0608
+    title: Slack, Teams, Outlook mail and the calendar ship as example sources beside Plaud, one source a folder
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#197"]
+    description: "Slack, Teams, Outlook mail and the calendar ship beside Plaud as example sources, each in examples/sources/<name>/ with its SKILL.md, its mapper, the page scripts it runs and its tests, collected in CI like Plaud's (DR-0101). Slack reads with the Slack plugin's MCP read tools; Teams, Outlook mail and the calendar read Teams and Outlook on the web through Claude in Chrome's javascript_tool with fixed page scripts, for a tenant no MCP server reaches. Mail and the calendar are two sources, since a source is one folder, one mapper and one rid prefix, and the two read different pages over different windows. Each starts from a route that has run for real once, and its notes stay generic: a page's quirk learned on one tenant is written as seen once, never as a rule, and nothing of a maintainer's own sync wiring ships. This widens DR-0108's Plaud bind: these are reference sources too, examples and never dependencies."
+    binds:
+      - Tests, page notes and examples use invented people, chats, channels, folders and ids only; a tenant's own names stay out (CV-0006).
+    not_chosen:
+      - "Mail and the calendar as one outlook example with two runs: a source's mapper, rids and window are its own, so one folder would hold two sources."
+      - "An MCP route for Teams and Outlook: no Microsoft 365 MCP server reached the tenant the routes were learned on, and the blank template stays for a user whose server does."
