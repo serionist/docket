@@ -1,4 +1,5 @@
-"""A ledger of a few years: 5,000 items and 50,000 ops read and folded by `load` in under a second (DR-0616).
+"""A ledger of a few years: 5,000 items and 50,000 ops read and folded by `load`, and folded into the index's tables,
+each in under a second; one op more, as a write leaves it, read into them in a tenth of one (DR-0616).
 
 The ops are written as the writer writes them, a month file per machine, each item an add and nine changes. Wall
 time is asserted only when no tracer runs; the files are built before the clock starts.
@@ -6,6 +7,7 @@ time is asserted only when no tracer runs; the files are built before the clock 
 
 from __future__ import annotations
 
+import sqlite3
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -14,11 +16,14 @@ import pytest
 from docket_testkit import traced
 from ledger_kit import ADD_FIELDS
 
+from docket.index import ledger as ledger_index
+from docket.index.schema import LEDGER_TABLES
 from docket.ledger import load, ops
 from docket.ledger.ops import Op
 
 ITEMS = 5_000
 SECONDS = 1.0
+CATCH_UP_SECONDS = 0.1
 CHANGES = ("log", "triage", "set", "log", "snooze", "triage", "log", "done", "reopen")
 
 
@@ -65,3 +70,41 @@ def test_a_few_thousand_items_read_and_fold_in_under_a_second(tmp_path: Path) ->
     assert ledger.problems == ()
     if not traced():
         assert elapsed < SECONDS, f"reading and folding {ITEMS:,} items took {elapsed:.2f} s"
+
+
+@pytest.mark.perf
+def test_a_few_thousand_items_fold_into_the_index_in_under_a_second(tmp_path: Path) -> None:
+    """The rebuild's ledger part, on a file set up as a rebuild sets its new index up; then a write's catch-up."""
+    root = tmp_path / "vault"
+    build(root)
+    conn = sqlite3.connect(tmp_path / "index.sqlite", isolation_level=None)
+    try:
+        conn.execute("PRAGMA journal_mode = OFF")
+        conn.execute("PRAGMA synchronous = OFF")
+        conn.executescript(LEDGER_TABLES)
+        began = time.perf_counter()
+        conn.execute("BEGIN")
+        read = ledger_index.rebuild(conn, root)
+        conn.execute("COMMIT")
+        elapsed = time.perf_counter() - began
+        counts = [conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in ("items", "item_log")]  # noqa: S608
+        item, text = conn.execute("SELECT item, keys FROM item_log ORDER BY id DESC LIMIT 1").fetchone()
+        last = Op.model_validate_json(text)
+        (op_id,) = ops.mint(last.id, datetime(2026, 12, 1, tzinfo=UTC), 1)
+        more = last.model_copy(update={"id": op_id, "op": "log", "note": "one more", "after": last.id})
+        with (root / ops.rel_of(more)).open("a", encoding="utf-8", newline="\n") as f:
+            f.write(more.text() + "\n")
+        began = time.perf_counter()
+        conn.execute("BEGIN IMMEDIATE")
+        grown = ledger_index.update(conn, root)
+        conn.execute("COMMIT")
+        caught = time.perf_counter() - began
+        logged = conn.execute("SELECT line FROM item_log WHERE id = ?", (op_id,)).fetchone()
+    finally:
+        conn.close()
+    print(f"ledger into the index: {elapsed:.2f} s for {ITEMS:,} items; one op more: {caught * 1000:.0f} ms")
+    assert (read, *counts) == (ITEMS * (1 + len(CHANGES)), ITEMS, ITEMS * (1 + len(CHANGES)))
+    assert (grown, logged, item) == (1, ("one more",), last.item)
+    if not traced():
+        assert elapsed < SECONDS, f"folding {ITEMS:,} items into the index took {elapsed:.2f} s"
+        assert caught < CATCH_UP_SECONDS, f"reading one op more into the index took {caught:.2f} s"

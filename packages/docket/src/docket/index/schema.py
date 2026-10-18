@@ -26,7 +26,8 @@ from docket.index.text import snowball_version
 # 9: derived_from and doc_lines, what each line cites and every doc's citable lines (DR-0542).
 # 10: a decision's status in docs, and decision_lines, the decisions each of a brief's Decisions lines cites, so
 # a search hit marks one that cites no confirmed decision (DR-0565).
-SCHEMA_VERSION = 10
+# 11: the ledger folded from its ops, in items, item_log, item_numbers and ledger_files (DR-0616).
+SCHEMA_VERSION = 11
 TOKENIZER = "unicode61 remove_diacritics 2"
 # remove_diacritics 2 came in SQLite 3.27.
 MIN_SQLITE = (3, 27, 0)
@@ -117,6 +118,31 @@ CREATE TABLE problems (kind TEXT NOT NULL, place TEXT NOT NULL, message TEXT NOT
 CREATE TABLE skipped (rid TEXT PRIMARY KEY, parts INTEGER NOT NULL) WITHOUT ROWID;
 """
 
+# The ledger's tables (DR-0616), which a write also builds in memory when the index can't be had. item_log keeps
+# rowids: its rows hold each op's line, too long for a table without them.
+LEDGER_TABLES = """
+CREATE TABLE ledger_files (
+  path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime_ns INTEGER NOT NULL, sha256 TEXT NOT NULL, highest TEXT
+) WITHOUT ROWID;
+CREATE TABLE items (
+  id TEXT PRIMARY KEY, number INTEGER, claimed INTEGER NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL,
+  who TEXT NOT NULL, stream TEXT NOT NULL, source TEXT NOT NULL, opened TEXT NOT NULL, due TEXT, description TEXT,
+  notes TEXT, outcome TEXT, state TEXT NOT NULL, until TEXT, closed TEXT, triage TEXT, archived INTEGER NOT NULL,
+  materials TEXT NOT NULL, added_by TEXT NOT NULL, last_op TEXT NOT NULL
+) WITHOUT ROWID;
+CREATE INDEX items_claimed ON items (claimed);
+CREATE TABLE item_log (
+  item TEXT NOT NULL, id TEXT NOT NULL, version INTEGER NOT NULL, after TEXT, day TEXT NOT NULL, at TEXT,
+  by TEXT NOT NULL, via TEXT NOT NULL, kind TEXT NOT NULL, batch TEXT, keys TEXT NOT NULL, line TEXT,
+  undone_by TEXT, fate TEXT NOT NULL, PRIMARY KEY (item, id, version)
+);
+CREATE INDEX item_log_id ON item_log (id);
+CREATE TABLE item_numbers (
+  number INTEGER NOT NULL, item TEXT NOT NULL, claim TEXT NOT NULL, hidden INTEGER NOT NULL, PRIMARY KEY (number, item)
+) WITHOUT ROWID;
+CREATE INDEX item_numbers_item ON item_numbers (item);
+"""
+
 
 def check_sqlite() -> None:
     """The SQLite this Python links: new enough for `remove_diacritics 2`, and built with FTS5."""
@@ -147,6 +173,7 @@ def create(conn: sqlite3.Connection, langs: Languages, forgotten: str = "") -> N
     columns = ", ".join(langs.columns)
     conn.executescript(
         TABLES
+        + LEDGER_TABLES
         + f"CREATE VIRTUAL TABLE chunks_fts USING fts5({columns}, content='', tokenize='{TOKENIZER}');\n"
         + "CREATE VIRTUAL TABLE vocab USING fts5vocab(chunks_fts, 'col');\n"
     )

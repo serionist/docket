@@ -6,6 +6,8 @@
 | `fold` | items from their ops: undo, archive, numbers; `load`, the vault's ledger read and folded |
 | `store` | the one writer of ops |
 | `check` | what `docket vault check` says about the ledger (DR-0617) |
+
+The fold's tables in the index, which the writer and `docket ledger show` ask, are `docket.index.ledger` (DR-0616).
 """
 
 from docket.ledger.fold import load

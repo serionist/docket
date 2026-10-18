@@ -27,6 +27,7 @@ read as text and checked when written. The format is a one-way door: a later one
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -311,15 +312,27 @@ def _op_file(path: Path) -> bool:
     return True
 
 
-def read_all(root: Path) -> Read:
-    """Every machine's op files. A file there not named `<yyyy-mm>-<machine>.jsonl`, a link, or one that isn't UTF-8
-    is a problem and is skipped; a folder that is a link is read as empty, and said."""
+@dataclass(frozen=True)
+class FileRead:
+    """One op file as `read_all` read it, for the index (DR-0616): its path from the vault's root, its modification
+    time taken before the read, its size and sha256, the highest op id a line of it names, and how many lines read."""
+
+    rel: str
+    mtime_ns: int
+    size: int
+    sha256: str
+    highest: str | None
+    lines: int
+
+
+def listing(root: Path) -> tuple[list[tuple[str, Path]], list[tuple[str, str]]]:
+    """The op files every reader reads, by their path from the vault's root in name order, and a problem for each
+    other file in the folder. A folder that is a link holds none, and is said."""
     path = root / OPS_DIR
     if linked(path):
-        return Read((), ((OPS_DIR, "is a link; nothing in it is read"),))
-    lines: list[Line] = []
+        return [], [(OPS_DIR, "is a link; nothing in it is read")]
+    files: list[tuple[str, Path]] = []
     problems: list[tuple[str, str]] = []
-    ids: list[str] = []
     for child in sorted(path.iterdir()) if path.is_dir() else []:
         rel = f"{OPS_DIR}/{child.name}"
         if child.name == KEEP:
@@ -327,12 +340,30 @@ def read_all(root: Path) -> Read:
         if not _op_file(child):
             problems.append((rel, "isn't an op file (<yyyy-mm>-<machine>.jsonl); skipped"))
             continue
+        files.append((rel, child))
+    return files, problems
+
+
+def read_all(root: Path, files: list[FileRead] | None = None) -> Read:
+    """Every machine's op files. A file there not named `<yyyy-mm>-<machine>.jsonl`, a link, or one that isn't UTF-8
+    is a problem and is skipped; a folder that is a link is read as empty, and said. With `files`, each file read is
+    added to it as it was read."""
+    listed, problems = listing(root)
+    lines: list[Line] = []
+    ids: list[str] = []
+    for rel, child in listed:
+        # Taken before the read, so a file written while it is read looks changed to the next update.
+        mtime = child.stat().st_mtime_ns if files is not None else 0
+        data = child.read_bytes()
         try:
-            text = child.read_bytes().decode("utf-8")
+            text = data.decode("utf-8")
         except UnicodeDecodeError:
             problems.append((rel, "isn't UTF-8; skipped"))
             continue
         found = parse(text, rel)
+        if files is not None:
+            sha = hashlib.sha256(data).hexdigest()
+            files.append(FileRead(rel, mtime, len(data), sha, found.highest, len(found.lines)))
         lines += found.lines
         problems += found.problems
         if found.highest is not None:
