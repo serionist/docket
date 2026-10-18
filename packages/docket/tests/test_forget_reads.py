@@ -67,6 +67,16 @@ def test_the_raw_log_reads_a_run_file_changed_in_place_again(vault: Vault) -> No
     assert not log.contains(notes_record)
 
 
+def test_a_raw_log_with_no_raw_folder_lists_no_run_file(vault: Vault, tmp_path: Path) -> None:
+    for name in ("no-raw", "raw-a-file"):
+        root = tmp_path / name
+        root.mkdir()
+        if name == "raw-a-file":
+            (root / "raw").write_text("", encoding="utf-8")
+        log = RawLog(root, "other-box", vault.lock)
+        assert log.stamped() == [] and log.run_files() == [] and not log.contains(stored(make_record(1)))
+
+
 def test_the_lookup_s_load_reads_a_listed_line_as_gone(vault: Vault) -> None:
     forget(vault, rids=[POLISHED])
     lookup = RawLookup(vault.root)
