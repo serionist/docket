@@ -245,11 +245,12 @@ def test_a_vault_yaml_with_the_user_s_own_lines_gets_the_entry_where_docket_can_
 def test_an_entry_already_there_keeps_what_the_flags_don_t_set(owner: Callable[..., AtConsole], tmp_path: Path) -> None:
     top = host_repo(tmp_path)
     config = make_config("folder")
-    config.sources["zebra-notes"] = SourceConfig(sensitivity="private", tools=["get_note"])
+    config.sources["zebra-notes"] = SourceConfig(sensitivity="private", tools=["get_note"], media_folders=["~/Notes"])
     vault = Vault.init(top / "vault", config, "test-box")
     kept = scaffold.new_source(vault, "zebra-notes").entry
-    assert (kept.sensitivity, kept.tools) == ("private", ["get_note"])
+    assert (kept.sensitivity, kept.tools, kept.media_folders) == ("private", ["get_note"], ["~/Notes"])
     assert kept.mapper == ".claude/skills/sources/zebra-notes/mapper.py"
+    assert VaultConfig.load(vault.root / "vault.yaml").sources["zebra-notes"].media_folders == ["~/Notes"]
     calls = scaffold.new_source(Vault.open(vault.root), "calls", sensitivity="work", tools=["list_calls"]).entry
     assert (calls.sensitivity, calls.tools) == ("work", ["list_calls"])
 

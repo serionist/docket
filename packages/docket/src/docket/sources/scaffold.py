@@ -179,7 +179,7 @@ def _entry(
     tools: list[str],
 ) -> SourceConfig:
     """The source's entry: what the flags give, else what vault.yaml already has, else the reference's, else Docket's
-    guess for a source it knows. Checked here, before anything is written."""
+    guess for a source it knows; its media folders as vault.yaml has them. Checked here, before anything is written."""
     kept_level = existing.sensitivity if existing is not None else None
     level = sensitivity or kept_level or (reference.sensitivity if reference else KNOWN_SOURCES.get(name, "mixed"))
     kept_tools = existing.tools if existing is not None else []
@@ -189,6 +189,7 @@ def _entry(
             sensitivity=level,
             mapper="/".join([*SKILLS, name, "mapper.py"]),
             tools=tools or kept_tools or list(reference.tools if reference else ()),
+            media_folders=existing.media_folders if existing is not None else [],
         )
     except ValidationError as e:
         raise DocketError(f"source {name}: " + "; ".join(str(err["msg"]) for err in e.errors())) from None
