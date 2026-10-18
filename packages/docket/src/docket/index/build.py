@@ -7,6 +7,8 @@ last commit holds it, the file noted when it says otherwise (DR-0564).
 `update` runs the same indexer on the live file for what changed since: new run files, docs whose bytes changed, and
 the entity files; anything it can't follow (a run file changed or removed, another schema or set of languages) makes it
 rebuild. Raw lines are read leniently: a line that doesn't load is a problem and the rest is indexed (DR-0115).
+Both leave out what the forgotten list takes, the records and the doc lines its docs' rule drops, and the index is built
+under the list's digest: one built under another is rebuilt by `update` and refused by `open_index` (DR-0593).
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ import os
 import sqlite3
 import time
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from datetime import datetime
 from pathlib import Path
 from typing import Any, NamedTuple, cast
@@ -49,18 +51,24 @@ from docket.index.text import Analyzer
 from docket.models import config as models_config
 from docket.models.provider import Off
 from docket.plaintext import fold, words
-from docket.vault import decision_form, legacy
+from docket.vault import decision_form, forgetdocs, forgotten, legacy
 from docket.vault.anchors import trailing_anchors
+from docket.vault.docstore import DocStore
 from docket.vault.entities import entity_files, load_entities
+from docket.vault.forgotten import Forgotten
 from docket.vault.processed import ProcessedDoc, doc_path, parse_doc
 from docket.vault.rawlog import RunFile, parse_run_file
 from docket.vault.records import Attachment, RawRecord
 from docket.vault.segments import segments
+from docket.vault.staging import rid_hash
 from docket.vault.vault import Vault
 
 INDEX_DIR = "index"
 DB_NAME = "docket.sqlite"
 LOCK_NAME = "docket.lock"
+# Docs at earlier revs, by vault root, doc and rev, for the docs' rule to follow refs to: a rev's text never changes.
+EARLIER_KEPT = 4096
+_EARLIER: dict[tuple[Path, str, int], ProcessedDoc] = {}
 REPLACE_SECONDS = 5.0
 REPLACE_WAIT = 0.1
 BUSY_SECONDS = 5.0
@@ -213,8 +221,41 @@ def read_run(root: Path, run: RunFile) -> tuple[list[RunLine], list[tuple[str, s
     return records, problems
 
 
+class _Left:
+    """Raw as the forgotten list leaves it, for the docs' rule (DR-0580): the rows this build wrote, which hold nothing
+    the list takes, and the rids whose lines it skipped."""
+
+    def __init__(self, conn: sqlite3.Connection, listed: Forgotten, skipped: set[str]) -> None:
+        self.conn = conn
+        self.listed = listed
+        self.skipped = skipped
+
+    def gone(self, rid: str) -> bool:
+        if self.listed.whole(rid):
+            return True
+        if self.conn.execute("SELECT 1 FROM records WHERE rid = ?", (rid,)).fetchone() is not None:
+            return False
+        return rid in self.skipped or self.listed.versioned(rid)
+
+    def timed(self, rid: str) -> bool:
+        return self.conn.execute("SELECT 1 FROM segments WHERE rid = ? LIMIT 1", (rid,)).fetchone() is not None
+
+    def lands(self, rid: str, start: int, last: int) -> bool:
+        """Whether the time lands on a transcript under the rid, by the whole seconds it spans (`time_range`)."""
+        rows = self.conn.execute(
+            "SELECT min(s.start_ms), max(s.end_ms) FROM records r JOIN segments s ON s.rid = r.rid WHERE r.kind = "
+            "'transcript' AND r.source = ? AND (r.thread = ? OR r.container = ?) AND r.rid != ? GROUP BY r.rid",
+            (rid.partition(":")[0], rid, rid, rid),
+        ).fetchall()
+        return any(lo // 1000 <= start and last <= -(-hi // 1000) for lo, hi in rows)
+
+    def media(self, rid: str) -> bool:
+        return rid_hash(rid) in self.listed.media
+
+
 class Indexer:
-    """Writes the index's rows for records, threads, docs and entities, on a connection inside a transaction."""
+    """Writes the index's rows for records, threads, docs and entities, on a connection inside a transaction. What the
+    forgotten list takes it leaves out: the records, and the doc lines the docs' rule drops (DR-0593)."""
 
     def __init__(
         self,
@@ -224,6 +265,7 @@ class Indexer:
         *,
         collect: bool,
         vectors: vectors.Keeper | None = None,
+        listed: Forgotten | None = None,
     ) -> None:
         self.conn = conn
         self.vectors = vectors
@@ -233,6 +275,19 @@ class Indexer:
         self.tz = ZoneInfo(vault.config.owner.time_zone)
         self.collect = collect
         self.new_words: dict[str, set[str]] = defaultdict(set)
+        self.listed = listed if listed is not None else forgotten.load(vault.root, vault.home)
+        # What the list took from raw, kept in `skipped` so an update judges as the rebuild before it did: each rid
+        # whose lines it skipped, and the folder files whose parts it takes.
+        self.skipped: set[str] = set()
+        self._parts: set[str] = set()
+        if self.listed.acts:
+            for rid, parts in conn.execute("SELECT rid, parts FROM skipped"):
+                self.skipped.add(rid)
+                if parts:
+                    self._parts.add(rid)
+        # What the docs' rule makes of the docs a sync indexes, and each decision's text at HEAD, read once.
+        self._fates: dict[str, forgetdocs.Fate] = {}
+        self._head: dict[str, str | None] = {}
         # The column names are the index's own, never from a user.
         marks = ", ".join("?" * len(analyzer.columns))
         cols = ", ".join(analyzer.columns)
@@ -276,6 +331,8 @@ class Indexer:
         by_source: dict[str, list[RunFile]] = defaultdict(list)
         for run in runs:
             by_source[run.source].append(run)
+        # A folder file's parts follow it from the run files read before these.
+        reading = self.listed.reading(self._parts)
         for source in sorted(by_source):
             latest: dict[str, tuple[tuple[tuple[str, str, str, int, str], int], str, RawRecord]] = {}
             seen: set[str] = set()
@@ -288,6 +345,9 @@ class Indexer:
                     "INSERT OR IGNORE INTO problems (kind, place, message) VALUES ('raw', ?, ?)", problems
                 )
                 for line, offset, record in records:
+                    if reading.skips(record):
+                        self.skipped.add(record.rid)
+                        continue
                     seen.add(record.rid)
                     self.conn.execute(
                         "INSERT OR IGNORE INTO record_versions (rid, v, path, line, offset) VALUES (?, ?, ?, ?, ?)",
@@ -308,6 +368,13 @@ class Indexer:
                 "UPDATE records SET versions = (SELECT count(DISTINCT v) FROM record_versions WHERE rid = ?) "
                 "WHERE rid = ?",
                 [(rid, rid) for rid in sorted(seen)],
+            )
+        if self.listed.acts:
+            self._parts = set(reading.files)
+            self.conn.execute("DELETE FROM skipped")
+            self.conn.executemany(
+                "INSERT INTO skipped (rid, parts) VALUES (?, ?)",
+                [(rid, int(rid in self._parts)) for rid in sorted(self.skipped | self._parts)],
             )
         self.rewindow(threads)
         return touched, len(runs)
@@ -386,60 +453,137 @@ class Indexer:
         else:
             if doc.meta.type == "decision":
                 doc = self._decision(rel, doc, data)
-            meta = doc.meta
-            doc_id = meta.id
-            chunks, anchors = doc_chunks(doc, self._info, self.tz)
-            self.conn.execute(
-                "INSERT INTO docs (id, type, rev, path, title, by, supersedes, superseded_by, entities, status) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
-                (
-                    meta.id, meta.type, meta.rev, rel, doc_title(doc), meta.by, json.dumps(meta.supersedes),
-                    json.dumps(meta.entities), meta.status,
-                ),
-            )  # fmt: skip
-            self.conn.executemany(
-                "INSERT INTO doc_covers (doc, rid) VALUES (?, ?)", [(meta.id, rid) for rid in sorted(meta.covers)]
-            )
-            self.conn.executemany(
-                "INSERT INTO old_paths (doc, path, folded, name) VALUES (?, ?, ?, ?)",
-                [legacy.index_row(e) for e in legacy.old_paths([doc])],
-            )
-            self.conn.executemany(
-                "INSERT INTO doc_anchors (doc, line, ordinal, rid, kind, start, end) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                [(meta.id, a.line, a.ordinal, a.rid, a.kind, a.start, a.end) for a in anchors],
-            )
-            self.conn.executemany(
-                "INSERT INTO derived_from (doc, line, ordinal, src, rev, src_line, hash) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                flags.ref_rows(doc),
-            )
-            if meta.type == "brief":
-                self.conn.executemany(
-                    "INSERT INTO decision_lines (doc, line, cites) VALUES (?, ?, ?)",
-                    [
-                        (meta.id, n, json.dumps(sorted({r.doc for r in trailing_anchors(line).refs})))
-                        for n, line in decision_form.decisions_lines(doc)
-                    ],
-                )
-            self.conn.executemany(
-                "INSERT OR IGNORE INTO doc_lines (doc, hash, line) VALUES (?, ?, ?)",
-                [(meta.id, found, n) for n, found in sorted(doc.citable().items())],
-            )
-            self.add_chunks(chunks)
+            # The doc as a forget leaves it, so one the apply hasn't rewritten yet reads as it will (DR-0593); a doc it
+            # removes keeps its file's row, so the docs still read as current.
+            fate = self._fates.get(doc.meta.id)
+            left = doc if fate is None else fate.doc
+            if left is not None:
+                doc_id = left.meta.id
+                self._add_doc(rel, left)
         self.conn.execute("INSERT INTO doc_files (path, sha256, doc) VALUES (?, ?, ?)", (rel, _sha(data), doc_id))
+
+    def _add_doc(self, rel: str, doc: ProcessedDoc) -> None:
+        meta = doc.meta
+        chunks, anchors = doc_chunks(doc, self._info, self.tz)
+        self.conn.execute(
+            "INSERT INTO docs (id, type, rev, path, title, by, supersedes, superseded_by, entities, status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+            (
+                meta.id, meta.type, meta.rev, rel, doc_title(doc), meta.by, json.dumps(meta.supersedes),
+                json.dumps(meta.entities), meta.status,
+            ),
+        )  # fmt: skip
+        self.conn.executemany(
+            "INSERT INTO doc_covers (doc, rid) VALUES (?, ?)", [(meta.id, rid) for rid in sorted(meta.covers)]
+        )
+        self.conn.executemany(
+            "INSERT INTO old_paths (doc, path, folded, name) VALUES (?, ?, ?, ?)",
+            [legacy.index_row(e) for e in legacy.old_paths([doc])],
+        )
+        self.conn.executemany(
+            "INSERT INTO doc_anchors (doc, line, ordinal, rid, kind, start, end) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [(meta.id, a.line, a.ordinal, a.rid, a.kind, a.start, a.end) for a in anchors],
+        )
+        self.conn.executemany(
+            "INSERT INTO derived_from (doc, line, ordinal, src, rev, src_line, hash) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            flags.ref_rows(doc),
+        )
+        if meta.type == "brief":
+            self.conn.executemany(
+                "INSERT INTO decision_lines (doc, line, cites) VALUES (?, ?, ?)",
+                [
+                    (meta.id, n, json.dumps(sorted({r.doc for r in trailing_anchors(line).refs})))
+                    for n, line in decision_form.decisions_lines(doc)
+                ],
+            )
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO doc_lines (doc, hash, line) VALUES (?, ?, ?)",
+            [(meta.id, found, n) for n, found in sorted(doc.citable().items())],
+        )
+        self.add_chunks(chunks)
+
+    def _committed(self, rel: str) -> str | None:
+        """A decision's text at HEAD, read once per build."""
+        if rel not in self._head:
+            proc = self.vault.git.run("cat-file", "blob", f"HEAD:./{rel}", check=False)
+            self._head[rel] = proc.stdout if proc.returncode == 0 else None
+        return self._head[rel]
 
     def _decision(self, rel: str, doc: ProcessedDoc, data: bytes) -> ProcessedDoc:
         """A decision as every read takes it, from its last commit (DR-0564); a final one whose file says otherwise is
         noted as edited on disk, not taken in."""
-        proc = self.vault.git.run("cat-file", "blob", f"HEAD:./{rel}", check=False)
-        text = proc.stdout if proc.returncode == 0 else None
+        text = self._committed(rel)
         found = decision_form.as_committed(doc, decision_form.committed_doc(text))
         if found.meta.status in decision_form.FINAL and decision_form.edited(data.decode("utf-8"), text):
             row = (rel, decision_form.EDITED)
             self.conn.execute("INSERT INTO problems (kind, place, message) VALUES ('doc', ?, ?)", row)
         return found
 
+    def _judge(self, due: list[tuple[Path, bytes]]) -> None:
+        """What the docs' rule makes of the docs about to be indexed, as every read takes them, once the records are in
+        (DR-0580). The rule reads what their refs lead to and nothing else, so an update that indexes one doc reads
+        that doc and what it cites, not every doc."""
+        docs = self._as_read({_rel(self.root, path): data for path, data in due})
+        raw = _Left(self.conn, self.listed, self.skipped)
+        self._fates = forgetdocs.fates(docs.values(), raw, self.listed, current=self._current, older=self._earlier)
+
+    def _as_read(self, files: dict[str, bytes]) -> dict[str, ProcessedDoc]:
+        """Doc files by their ids, as every read takes them, decisions from their last commit, read together; a file
+        that isn't a doc where its id says is left out, as the index leaves it."""
+        found: dict[str, tuple[str, ProcessedDoc]] = {}
+        for rel, data in files.items():
+            try:
+                doc = parse_doc(data.decode("utf-8"), lenient=True)
+            except (DocketError, UnicodeDecodeError):
+                continue
+            if doc_path(doc.meta.id).as_posix() == rel:
+                found[doc.meta.id] = (rel, doc)
+        decisions = [rel for rel, doc in found.values() if doc.meta.type == "decision" and rel not in self._head]
+        if decisions:
+            self._head.update(DocStore(self.vault).committed_texts(decisions))
+        return {
+            doc_id: (
+                decision_form.as_committed(doc, decision_form.committed_doc(self._committed(rel)))
+                if doc.meta.type == "decision"
+                else doc
+            )
+            for doc_id, (rel, doc) in found.items()
+        }
+
+    def _current(self, doc_ids: Collection[str]) -> dict[str, ProcessedDoc]:
+        """Docs a ref names, by id, as they read now."""
+        files: dict[str, bytes] = {}
+        for doc_id in doc_ids:
+            rel = doc_path(doc_id).as_posix()
+            with contextlib.suppress(OSError):
+                files[rel] = (self.root / rel).read_bytes()
+        return self._as_read(files)
+
+    def _earlier(self, wanted: Collection[tuple[str, int]]) -> dict[tuple[str, int], ProcessedDoc]:
+        """Docs at the earlier revs refs name, as pinning reads them (DR-0540): each doc's history read for all its
+        revs at once, each rev's text kept for the process, since a rev never changes."""
+        # By the vault's root, not its git dir: folder vaults in one host repo share it, and each has its own docs.
+        root = self.vault.root
+        out = {key: _EARLIER[(root, *key)] for key in wanted if (root, *key) in _EARLIER}
+        missing = sorted(set(wanted) - set(out))
+        if not missing:
+            return out
+        histories = DocStore(self.vault).histories([doc_id for doc_id, _ in missing])
+        for doc_id, rev in missing:
+            sha = next((sha for n, sha in histories.get(doc_id, []) if n == rev), None)
+            if sha is None:
+                continue
+            proc = self.vault.git.run("cat-file", "blob", f"{sha}:./{doc_path(doc_id).as_posix()}", check=False)
+            doc = decision_form.committed_doc(proc.stdout if proc.returncode == 0 else None)
+            if doc is not None:
+                if len(_EARLIER) >= EARLIER_KEPT:
+                    _EARLIER.clear()
+                _EARLIER[(root, doc_id, rev)] = out[(doc_id, rev)] = doc
+        return out
+
     def sync_docs(self, covering: set[str]) -> int:
-        """Docs whose bytes changed, new or removed, and docs that cover a record that changed. Returns how many."""
+        """Docs whose bytes changed, new or removed, and docs that cover a record that changed. Returns how many. Under
+        a forgotten list that reaches docs, the ones to index are read first, for the docs' rule to judge together."""
         folder = self.root / "processed"
         current = {_rel(self.root, p): p for p in sorted(folder.rglob("*.md"))} if folder.is_dir() else {}
         stored = dict(self.conn.execute("SELECT path, sha256 FROM doc_files").fetchall())
@@ -454,11 +598,19 @@ class Indexer:
         for rel in sorted(set(stored) - set(current)):
             self.drop_doc_file(rel)
             changed += 1
+        due: list[tuple[Path, bytes]] = []
         for rel, path in current.items():
             data = path.read_bytes()
             if stored.get(rel) != _sha(data) or rel in forced:
-                self.index_doc_file(path, data)
+                if self.listed.digest:
+                    due.append((path, data))
+                else:
+                    self.index_doc_file(path, data)
                 changed += 1
+        if due:
+            self._judge(due)
+            for path, data in due:
+                self.index_doc_file(path, data)
         if changed:
             self.supersede()
         return changed
@@ -555,18 +707,20 @@ def _rebuild(vault: Vault, reason: str | None, started: float) -> BuildReport:
     for left in db.parent.glob(f"{db.name}.*.tmp"):
         with contextlib.suppress(OSError):
             left.unlink()
+    # Read once: the digest the index is built under is the list its rows leave out (DR-0593).
+    listed = forgotten.load(vault.root, vault.home)
     conn = _connect(tmp)
     try:
         conn.execute("PRAGMA journal_mode = OFF")
         conn.execute("PRAGMA synchronous = OFF")
-        create(conn, langs)
+        create(conn, langs, listed.digest)
         keeper = _carry(conn, db)
         conn.execute("BEGIN")
         conn.executemany(
             "INSERT INTO problems (kind, place, message) VALUES ('language', 'vault.yaml', ?)",
             [(p,) for p in sorted(set(langs.problems))],
         )
-        indexer = Indexer(conn, vault, analyzer, collect=False, vectors=keeper)
+        indexer = Indexer(conn, vault, analyzer, collect=False, vectors=keeper, listed=listed)
         _, runs = indexer.add_runs(vault.rawlog.run_files())
         docs = indexer.sync_docs(set())
         indexer.sync_entities(force=True)
@@ -659,9 +813,12 @@ def update(vault: Vault) -> BuildReport:
         db = db_path(vault)
         if not db.exists():
             return _rebuild(vault, "there was no index", started)
+        # An index built under another forgotten list can't be followed, as for another schema (DR-0593): the list can
+        # move with no run file moving.
+        listed = forgotten.load(vault.root, vault.home)
         conn = _connect(db)
         try:
-            why = stale(conn, langs)
+            why = stale(conn, langs, listed.digest)
             new, gone = _changed_runs(conn, vault) if why is None else ([], 0)
             if why is None and gone:
                 why = f"{gone} indexed run file(s) changed or went (a rewritten history)"
@@ -673,7 +830,7 @@ def update(vault: Vault) -> BuildReport:
             try:
                 kept = vectors.tables(conn)
                 keeper = vectors.Keeper(conn, kept) if kept else None
-                indexer = Indexer(conn, vault, analyzer, collect=True, vectors=keeper)
+                indexer = Indexer(conn, vault, analyzer, collect=True, vectors=keeper, listed=listed)
                 touched, runs = indexer.add_runs(new)
                 docs = indexer.sync_docs(touched)
                 entities = indexer.sync_entities()
@@ -704,14 +861,16 @@ def _reader(db: Path, timeout: float = BUSY_SECONDS) -> sqlite3.Connection:
 
 
 def open_index(vault: Vault, timeout: float = BUSY_SECONDS) -> sqlite3.Connection:
-    """The index to read, refused when there is none or it was built for another Docket or other languages. Its
-    statements wait up to `timeout` seconds for an update's lock."""
+    """The index to read, refused when there is none or it was built for another Docket, other languages or another
+    forgotten list: a search refuses rather than answer from rows a forget took (DR-0593). Its statements wait up to
+    `timeout` seconds for an update's lock."""
     check_sqlite()
     db = db_path(vault)
     if not db.exists():
         raise DocketError("there is no index yet; run docket index rebuild")
+    digest = forgotten.load(vault.root, vault.home).digest
     conn = _reader(db, timeout)
-    why = stale(conn, languages_of(vault))
+    why = stale(conn, languages_of(vault), digest)
     if why is not None:
         conn.close()
         raise DocketError(f"the index can't be used: {why}; run docket index rebuild")
@@ -747,7 +906,7 @@ def status(vault: Vault) -> IndexStatus:
         return base
     conn = _reader(db)
     try:
-        base.stale = stale(conn, langs)
+        base.stale = stale(conn, langs, forgotten.load(vault.root, vault.home).digest)
         if base.stale is not None:
             return base
         base.columns = list(langs.columns)

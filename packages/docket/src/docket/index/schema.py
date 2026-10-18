@@ -30,6 +30,10 @@ SCHEMA_VERSION = 10
 TOKENIZER = "unicode61 remove_diacritics 2"
 # remove_diacritics 2 came in SQLite 3.27.
 MIN_SQLITE = (3, 27, 0)
+# The meta key of the forgotten list's digest: a cache's key like the rest (DR-0115), so it needs no new schema. Nor
+# does `skipped`, what the list took from raw: only an index built under a list that takes something reads or writes
+# it, and an index from before the list is rebuilt under one.
+FORGOTTEN = "forgotten"
 
 TABLES = """
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
@@ -110,6 +114,7 @@ CREATE TABLE mentions (
 CREATE INDEX mentions_entity ON mentions (entity);
 CREATE TABLE problems (kind TEXT NOT NULL, place TEXT NOT NULL, message TEXT NOT NULL,
   PRIMARY KEY (kind, place, message)) WITHOUT ROWID;
+CREATE TABLE skipped (rid TEXT PRIMARY KEY, parts INTEGER NOT NULL) WITHOUT ROWID;
 """
 
 
@@ -127,28 +132,31 @@ def check_sqlite() -> None:
         probe.close()
 
 
-def expected_meta(langs: Languages) -> dict[str, str]:
+def expected_meta(langs: Languages, forgotten: str = "") -> dict[str, str]:
+    """What an index is built with, `forgotten` the digest of the forgotten list it was built under (DR-0593)."""
     return {
         "schema": str(SCHEMA_VERSION),
         "tokenizer": TOKENIZER,
         "languages": ",".join(langs.codes),
         "snowballstemmer": snowball_version(),
+        FORGOTTEN: forgotten,
     }
 
 
-def create(conn: sqlite3.Connection, langs: Languages) -> None:
+def create(conn: sqlite3.Connection, langs: Languages, forgotten: str = "") -> None:
     columns = ", ".join(langs.columns)
     conn.executescript(
         TABLES
         + f"CREATE VIRTUAL TABLE chunks_fts USING fts5({columns}, content='', tokenize='{TOKENIZER}');\n"
         + "CREATE VIRTUAL TABLE vocab USING fts5vocab(chunks_fts, 'col');\n"
     )
-    conn.executemany("INSERT INTO meta (key, value) VALUES (?, ?)", sorted(expected_meta(langs).items()))
+    conn.executemany("INSERT INTO meta (key, value) VALUES (?, ?)", sorted(expected_meta(langs, forgotten).items()))
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 
-def stale(conn: sqlite3.Connection, langs: Languages) -> str | None:
-    """Why an index can't be used as it is, or None: another schema, tokenizer, set of languages or stemmer."""
+def stale(conn: sqlite3.Connection, langs: Languages, forgotten: str = "") -> str | None:
+    """Why an index can't be used as it is, or None: another schema, tokenizer, set of languages or stemmer, or built
+    under another forgotten list than the one in force (DR-0593)."""
     try:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         stored = dict(conn.execute("SELECT key, value FROM meta").fetchall())
@@ -156,7 +164,12 @@ def stale(conn: sqlite3.Connection, langs: Languages) -> str | None:
         return "it isn't an index this Docket can read"
     if version != SCHEMA_VERSION:
         return f"it has schema {version}, and this Docket writes {SCHEMA_VERSION}"
-    for key, want in expected_meta(langs).items():
-        if stored.get(key) != want:
-            return f"it was built with {key} {stored.get(key)!r}, and now it is {want!r}"
+    for key, want in expected_meta(langs, forgotten).items():
+        # An index from before the list has no digest, and was built under none.
+        have = stored.get(key, "" if key == FORGOTTEN else None)
+        if have == want:
+            continue
+        if key == FORGOTTEN:
+            return "it was built before a forget"
+        return f"it was built with {key} {have!r}, and now it is {want!r}"
     return None

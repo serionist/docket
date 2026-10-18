@@ -33,6 +33,8 @@ reading:
   - { path: packages/docket/src/docket/web/settings.py, role: contract, note: "the Settings page: the sources, never-store lists, redaction and this machine's models; the changes that keep more out made with their buttons (a never-store value added after its question, a rule on, a source mixed or off, private after its question), each a form post on the writer thread through vault.yaml's writer; every other change named; never-store values only with show=lists (DR-0505 to DR-0509)" }
   - { path: packages/docket/src/docket/console.py, role: contract, note: "the owner yes at their own console, for a release and a vault.yaml change that is not only stricter: the refusals, the code, the question, nothing that answers it (DR-0202, DR-0518)" }
   - { path: packages/docket/src/docket/vault/inforce.py, role: contract, note: "the settings in force: HEAD vault.yaml plus what an uncommitted edit only tightens, field by field; loosens() as the same rule; the loader and its cache by HEAD commit id (DR-0521)" }
+  - { path: packages/docket/src/docket/vault/forgotten.py, role: contract, note: "the forgotten list, a one-way door: its line, how it reads and fails closed, HEAD's lines and the disk's in force with HEAD's cached by commit id, what it takes, the digest the index is built under (DR-0579, DR-0593)" }
+  - { path: packages/docket/src/docket/vault/forgetdocs.py, role: contract, note: "which doc lines a forget drops, by where each anchor reads and by refs to a fixed point, and the docs it removes (DR-0580)" }
 decisions:
   - id: DR-0019
     title: The vault's layout and run-file names are fixed

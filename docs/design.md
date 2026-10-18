@@ -301,6 +301,7 @@ vault/
   state/cursors-<machine>.yaml   each machine's mark, lookback, retry and waiting per source -> plain git
   state/holds/<source>.txt       ids a source must not stage yet, merged by union           -> plain git
   state/releases/<source>.jsonl  held ids the owner let in, with their cuts, merged by union -> plain git
+  state/forgotten.jsonl          what a forget took, by hash, merged by union                -> plain git
   index/docket.sqlite            derived; `docket index rebuild` makes it from the above    -> never committed
 ```
 
@@ -401,7 +402,7 @@ the earlier ones (DR-0112).
 
 | Table | What |
 |---|---|
-| `meta`, `run_files`, `problems` | what the index was built with (schema, languages, stemmer), the run files it read, what didn't load |
+| `meta`, `run_files`, `problems`, `skipped` | what the index was built with (schema, languages, stemmer, the forgotten list's digest), the run files it read, what didn't load, what the list took from them |
 | `records`, `record_versions`, `crosswalk` | every raw record's current version with its file and line in the raw log, and every version with its byte offset there (DR-0445); old and new ids of one thing |
 | `segments` | transcript utterances: rid, engine, start and end ms, speaker, person, text |
 | `chunks`, `chunks_fts`, `chunk_vec_<model>` | the searchable units; FTS5 over the text as written and a stemmed column per language (DR-0114); a vector table per model, keyed by the hash of each chunk's input and kept in step with the chunks by every update and rebuild (DR-0336) |
@@ -424,6 +425,10 @@ will touch first. What it does to the text depends on where the vault lives:
 | a folder of the user's repo | the record leaves the current tree and a tombstone makes rebuilds skip it; Docket says plainly that the text stays in the host repo's history and shows the rewrite command for the user to run |
 
 Docket never rewrites or force-pushes a repo it shares with the user's own work.
+
+The forgotten list, `state/forgotten.jsonl`, keeps by hash what a forget took: every reader of raw skips its lines,
+wherever a merge left them, and the index is built under its digest, refused under another until it is rebuilt
+(DR-0579, DR-0593).
 
 ## 6. Keywords and aliases
 

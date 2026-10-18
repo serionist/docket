@@ -163,7 +163,9 @@ class Gate:
         self.staging = Staging(vault.root, vault.home)
         self._cut_rids: set[str] = set()
         self._seen = follow.Seen()
-        self._read_runs: set[Path] = set()
+        # The run files the cut scan read, with their size and modification time, and the list it read them under.
+        self._read_runs: dict[Path, tuple[int, int]] = {}
+        self._cut_digest = ""
         self._holds = holds.Holds()
         self._releases = releaselog.Releases()
         # Whether the last read found an edit of vault.yaml not in force, for the messages that send the user there.
@@ -860,8 +862,18 @@ class Gate:
 
     def _refresh_cuts(self) -> None:
         """The rids whose raw text holds a cut marker, from the run files this gate hasn't read yet; with each rid's
-        `[cut]` spans and each machine transcript's latest marks, for the follow (DR-0590)."""
-        for run in self.vault.rawlog.run_files():
+        `[cut]` spans and each machine transcript's latest marks, for the follow (DR-0590). Each file is kept by its
+        size and modification time, since a forget changes a run file in place, and a line the forgotten list takes
+        reads as gone, so a forgotten family is never followed (DR-0579)."""
+        listed = self.vault.rawlog.listed()
+        runs = self.vault.rawlog.stamped()
+        stamps = {run.path: stamp for run, stamp in runs}
+        if listed.digest != self._cut_digest or any(stamps.get(p) != s for p, s in self._read_runs.items()):
+            self._cut_rids.clear()
+            self._seen = follow.Seen()
+            self._read_runs.clear()
+            self._cut_digest = listed.digest
+        for run, stamp in runs:
             if run.path in self._read_runs:
                 continue
             with run.path.open(encoding="utf-8", newline="\n") as f:
@@ -869,10 +881,12 @@ class Gate:
                     if CUT_MARKER not in line and TRANSCRIBED_VIA not in line:
                         continue
                     data: Any = json.loads(line)
+                    if listed.covers(RawRecord.model_construct(**data)):
+                        continue
                     if CUT_MARKER in str(data.get("text", "")):
                         self._cut_rids.add(str(data["rid"]))
                     self._seen.add(data, (run.order, n))
-            self._read_runs.add(run.path)
+            self._read_runs[run.path] = stamp
 
     # Last, so the name doesn't shadow the builtin in the annotations above it.
     def list(self, source: str | None = None, state: State | None = None) -> Listing:

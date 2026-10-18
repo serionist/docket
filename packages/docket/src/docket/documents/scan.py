@@ -220,11 +220,15 @@ class _Holdings:
         raw = vault.root / "raw"
         folder = raw / source
         runs = [parse_run_file(raw, p) for p in folder.rglob("*.jsonl")] if folder.is_dir() else []
+        # A file a forget took isn't held, so no gone version of it ever names its path again (DR-0579).
+        reading = vault.rawlog.listed().reading()
         for run in sorted((r for r in runs if r is not None), key=lambda r: r.order):
             with run.path.open(encoding="utf-8", newline="\n") as f:
                 for line in f:
                     if line.strip():
-                        self._add(RawRecord.model_validate(json.loads(line)))
+                        record = RawRecord.model_validate(json.loads(line))
+                        if not reading.skips(record):
+                            self._add(record)
         staging = Staging(vault.root, vault.home)
         staged: list[Staged] = []
         for path in sorted((vault.root / "staging" / source).glob("*.json")):

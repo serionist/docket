@@ -11,6 +11,7 @@ decisions:
       - Nothing commits from staging/_media/.
       - An attachment whose bytes matter is a record of its own under its message, and its rid gets the media.
       - "Deleting media on a hold or a hand cut was revisited by #157 (DR-0561): a hold still deletes it; a hand cut by time deletes staged audio its ranges outgrow, and the audio is put again, cut."
+      - "A forget keeps media off a rid for good only through the forgotten list's media (DR-0579): a rid forgotten whole takes no put again, while a held rid's or a folder file's forget, by its versions, leaves the rid free for a cut put. Stored media is replaced only by a recut (DR-0562)."
     not_chosen:
       - "The native id in the file name: Plaud's has a slash, a mail's an @ and brackets."
       - "Checking media only at the put: a version in raw kept media alive that the gate since refused, and promotion committed it."
