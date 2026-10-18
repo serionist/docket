@@ -8,7 +8,7 @@ on each call from the latest versions in raw and never stored; and the recording
 | the screen | media's reader's family screen passes (`reader.kept_out`), a source only off aside |
 | stretches | `align.py`, per recorder line, outside every cut; a number written two ways is none (`numbers.py`) |
 | kinds | name, number, word: the first that fits the words that differ |
-| left out | a spot whose texts or line name a person a never-store list holds, or that touches a redaction marker |
+| left out | its texts, line or speaker name a listed person; it touches a redaction marker or a cut segment's text |
 | fixes | a spot a fix line decides isn't listed again; one at a settled place comes last, with the picks turned down |
 | rank and cap | names, numbers, words, by time within each; 40 a recording, the rest counted by kind |
 
@@ -195,6 +195,20 @@ class Names:
         found.vocab = sorted(w for w in found.owners if len(w) >= SHORT)
         return found
 
+    def joined(self, first: Sequence[Entity]) -> Names:
+        """These names with `first`'s ahead of them: a recording's meeting beside the glossary, which a listing builds
+        once for all its recordings."""
+        ahead = Names.of(first)
+        mine = {e.id for e in ahead.entities}
+        out = Names([*ahead.entities, *(e for e in self.entities if e.id not in mine)])
+        for found in (ahead, self):
+            for into, words in ((out.owners, found.owners), (out.asr, found.asr)):
+                for word, ids in words.items():
+                    have = into.setdefault(word, [])
+                    have += [i for i in ids if i not in have]
+        out.vocab = sorted(w for w in out.owners if len(w) >= SHORT)
+        return out
+
     def near(self, word: str) -> list[str]:
         """The entities a word is a word of, or within matching's edit distance of a word of their names."""
         key = fold(word)
@@ -346,22 +360,24 @@ def _capitalised(word: Word, text: str) -> bool:
 
 
 def _heard_for(aligned: Aligned, s: Stretch) -> str:
-    """Whisper's words for a stretch's line: its text from the first word the line was given to the last."""
-    span = aligned.heard.span(aligned.given[s.line])
-    return aligned.heard.text[span[0] : span[1]] if span else ""
+    """Whisper's words for a stretch's line, from the first word the line was given to the last: a segment a cut
+    overlaps between them reads `[cut]`."""
+    return aligned.heard.shown(aligned.heard.span(aligned.given[s.line]))
 
 
 def _hidden(aligned: Aligned, s: Stretch, shapes: NeverStore, marked: list[tuple[int, int]]) -> bool:
-    """Whether a spot names a person a never-store list holds, in its texts, its line or Whisper's words for it, or
-    touches a redaction marker on either side."""
-    line = aligned.lines[s.line].text
+    """Whether a spot names a person a never-store list holds, in its texts, its line, its speaker or Whisper's words
+    for it; touches a redaction marker on either side; or holds Whisper's text of a segment a cut overlaps. The family
+    screen reads speakers by the lists as written, so a listed person labelled in the other word order or by an alias
+    meets only this one."""
+    line = aligned.lines[s.line]
     left, right = aligned.left(s), aligned.right(s)
     if shapes.keywords:
-        texts = (*aligned.texts(s), line, _heard_for(aligned, s))
+        texts = (*aligned.texts(s), line.text, line.segment.speaker or "", _heard_for(aligned, s))
         if any(matches_text(text, shapes) for text in texts):
             return True
-    mine = [m.span() for m in MARKER.finditer(line)]
-    return _touches(left, mine) or _touches(right, marked)
+    mine = [m.span() for m in MARKER.finditer(line.text)]
+    return _touches(left, mine) or _touches(right, marked) or _touches(right, list(aligned.heard.cut))
 
 
 def _touches(span: tuple[int, int] | None, marks: list[tuple[int, int]]) -> bool:
@@ -427,7 +443,8 @@ def _place(
     touched = _touched(anchored, fix.right)
     if cut or any(align.in_cut(s, spans) for s in touched):
         return _Placed(fix, "cut")
-    said = (fix.left, fix.right, fix.chosen, lines[line].text if line is not None else "")
+    found = lines[line] if line is not None else None
+    said = (fix.left, fix.right, fix.chosen, *((found.text, found.speaker or "") if found is not None else ()))
     if any(matches_text(text, shapes) or matches_text(text, lists) for text in said):
         return _Placed(fix, "hidden")
     if not standing or not touched:
@@ -540,12 +557,14 @@ class _Vault:
     lists: NeverStore
     shapes: NeverStore
     languages: list[str]
+    glossary: Names
 
 
 def _read(vault: Vault) -> _Vault:
     known = load_entities(vault.root).entities
     lists = vault.config.never_store
-    return _Vault(known, lists, brief_form.phrases(known, lists), vault.config.owner.languages)
+    glossary = Names.of(meeting.glossary(known, vault.config))
+    return _Vault(known, lists, brief_form.phrases(known, lists), vault.config.owner.languages, glossary)
 
 
 def _spots(
@@ -556,7 +575,7 @@ def _spots(
     transcript, whisper = pair
     family = [r for other in lookup.nested(recording.rid) if (r := lookup.latest(other)) is not None]
     chosen = meeting.entities([r for r in family if r.rid != whisper.rid], read.known, vault.config)
-    names = Names.of([*chosen, *meeting.glossary(read.known, vault.config)])
+    names = read.glossary.joined(chosen)
     return chosen, names, find(transcript, whisper, names, lists=read.lists, shapes=read.shapes, fixes=fixes)
 
 

@@ -13,7 +13,22 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from docket_testkit import copy_vault, traced
-from reconcile_kit import CALL, REC, TRANSCRIPT, WHEN, WHISPER, cut, heard, pair, reconcile_template, recording, segment
+from reconcile_kit import (
+    CALL,
+    CROWD,
+    HOUR,
+    REC,
+    TRANSCRIPT,
+    WHEN,
+    WHISPER,
+    crowded_template,
+    cut,
+    heard,
+    pair,
+    reconcile_template,
+    recording,
+    segment,
+)
 from reconcile_kit import transcript as recorder
 
 from docket import index, recall
@@ -438,3 +453,83 @@ def test_an_hour_s_call_takes_well_under_a_second() -> None:
     assert len(found.spots) == spots.CAP
     if not traced():
         assert elapsed < 1.0, f"an hour's call took {elapsed:.2f} s"
+
+
+# -- review: a speaker's label, a cut segment's text, an off source, many entities -----------------------------------
+
+
+@pytest.mark.parametrize("label", ["Minta Dóra", "Dóri"])
+def test_a_listed_person_labelled_in_another_word_order_or_by_an_alias_as_a_speaker_is_left_out(
+    vault: Vault, label: str
+) -> None:
+    # The family screen reads speakers by the list as written, so neither label stops the recording there.
+    rec = "calls:rec-0102"
+    relabelled = [*CALL[:3], (label, *CALL[3][1:])]
+    vault.write_run("calls", [recording(rec), *pair(relabelled, rec)])
+    listed = settings(vault, {"never_store.people": ["Dóra Minta"]})
+    found = spots.report(listed, rec)
+    assert found.why is None
+    assert [s.left for s in found.spots] == ["Nortwin", "thousand"]
+    assert found.left_out.never_store == 1
+    assert label not in found.model_dump_json()
+    # A fix on that line is hidden, its texts not shown.
+    on = Fix(1, "the offer", "the new offer", "the new offer", "sure", (18, 23), (18, 23))
+    assert [(f.why, f.left) for f in spots.report(listed, rec, [on]).fixes] == [("hidden", None)]
+
+
+def test_whisper_s_text_of_a_segment_a_cut_overlaps_is_never_shown() -> None:
+    mine = [segment(0, 3000, "We sign the offer", "Ben Sample"), segment(3100, 3400, "[cut]")]
+    mine.append(segment(5000, 8000, "and that is all", "Ben Sample"))
+    # "secret" overlaps the cut; "deal" is timed into the first line, so the line's words sit either side of it.
+    theirs = [segment(0, 2900, "We sign a"), segment(2900, 3200, "secret"), segment(3400, 3800, "deal")]
+    found = find(recorder(mine), heard(theirs))
+    assert found.spots == [] and found.left_out.never_store == 1
+    # Beside a spot that doesn't hold it, Whisper's words for the line read [cut] there.
+    mine[0] = segment(0, 3000, "We sign the offer today", "Ben Sample")
+    theirs = [segment(0, 2900, "We sign the offer"), segment(2900, 3200, "secret"), segment(3400, 3800, "todays")]
+    found = find(recorder(mine), heard(theirs))
+    assert [(s.left, s.right, s.heard) for s in found.spots] == [("today", "todays", "We sign the offer [cut] todays")]
+
+
+def test_an_off_source_keeps_its_spots_unless_something_else_keeps_its_family_out(vault: Vault) -> None:
+    off = settings(
+        vault,
+        {
+            "sources": {
+                **vault.config.sources,
+                "calls": vault.config.sources["calls"].model_copy(update={"enabled": False}),
+            }
+        },
+    )
+    found = spots.report(off, REC)
+    assert found.why is None and [s.left for s in found.spots] == ["Nortwin", "thousand", "the offer"]
+    media_staged.withhold(off.root, REC)
+    found = spots.report(off, REC)
+    assert found.spots == []
+    assert found.why == (
+        f"its family is kept out: a version of {REC} or a record under it was dropped for a never-store value "
+        "or as private"
+    )
+
+
+@pytest.fixture
+def crowded(tmp_path_factory: pytest.TempPathFactory, tmp_path: Path) -> Vault:
+    return copy_vault(crowded_template(tmp_path_factory), tmp_path)
+
+
+def test_among_hundreds_of_entities_the_meeting_is_still_its_own(crowded: Vault) -> None:
+    found = spots.report(crowded, HOUR)
+    assert [p.id for p in found.people] == ["ben-sample", "northwind"]
+    assert len(found.spots) == spots.CAP and {s.kind for s in found.spots} == {"name"}
+    assert found.left_out.cap == {"name": 680, "number": 720, "word": 0}
+
+
+@pytest.mark.perf
+def test_a_report_among_hundreds_of_entities_takes_well_under_two_seconds(crowded: Vault) -> None:
+    began = time.perf_counter()
+    found = spots.report(crowded, HOUR)
+    elapsed = time.perf_counter() - began
+    print(f"report: {elapsed:.2f} s for an hour's call among {CROWD} entities")
+    assert len(found.spots) == spots.CAP
+    if not traced():
+        assert elapsed < 2.0, f"a report among {CROWD} entities took {elapsed:.2f} s"

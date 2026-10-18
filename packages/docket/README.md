@@ -497,8 +497,8 @@ is off until you install it.
 ### Where the two transcripts disagree
 
 `docket reconcile spots <rid>` lists where a recording's transcript and Whisper's disagree on a name, a number or a
-word, for Claude to decide in context (DR-0583, DR-0587). It writes nothing, and works from raw each time, on the
-machine that ingests the recording's source.
+word, for Claude to decide in context (DR-0583, DR-0587, DR-0589). It writes nothing, and works from raw each time,
+on the machine that ingests the recording's source.
 
 | Command | Does |
 |---|---|
@@ -507,9 +507,11 @@ machine that ingests the recording's source.
 
 - Each spot is in one recorder line, its two texts widened until the recorder's stands once there, so it names one
   place.
-- A number written two ways (`forty two` and `42`, `tízmillió` and `tíz millió`) is no spot.
-- None sits in a cut stretch. One that names someone a never-store list holds, or touches a redaction marker, is
-  counted, never shown, and a recording a never-store value or your decisions keep out gets none.
+- A number written two ways (`forty two` and `42`, `tízmillió` and `tíz millió`, `a hundred` and `100`) is no spot.
+- None sits in a cut stretch, and Whisper's words cut there read `[cut]`. One whose texts, line or speaker name
+  someone a never-store list holds, in any word order or by an alias, or that touches a redaction marker or cut words,
+  is counted, never shown. A recording a never-store value or your decisions keep out gets none, its source off or
+  on.
 - Claude's fixes, the doc that keeps them and the reading they make come in the next releases.
 
 ### Through Voyage AI's API

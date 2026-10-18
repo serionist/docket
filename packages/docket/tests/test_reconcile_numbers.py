@@ -77,3 +77,22 @@ def test_a_word_that_is_not_wholly_number_words_is_a_word() -> None:
 
 def test_filler_sounds_are_skipped_inside_a_number() -> None:
     assert numbers.reading("ten um thousand", "en", frozenset({"um"})) == (Fraction(10_000),)
+
+
+def test_english_a_before_a_scale_word_is_one_and_and_after_one_goes_on() -> None:
+    for spoken, written in (
+        ("two hundred and fifty", "250"),
+        ("a hundred", "100"),
+        ("a million", "1 million"),
+        ("two thousand and five", "2005"),
+        ("a hundred and one", "101"),
+    ):
+        assert numbers.reading(spoken, "en") == numbers.reading(written, "en"), spoken
+        assert numbers.reading(spoken, None) == numbers.reading(written, None), spoken
+    # Elsewhere they stay words.
+    assert numbers.reading("a crate", "en") == ("a", "crate")
+    assert numbers.reading("two hundred and more", "en") == (200, "and", "more")
+    assert numbers.reading("ten and two", "en") == (10, "and", 2)
+    assert numbers.reading("ten, and a", "en") == (10, "and", "a")
+    # Not in Hungarian: there `a` is the article.
+    assert numbers.reading("a száz", "hu") == ("a", 100)

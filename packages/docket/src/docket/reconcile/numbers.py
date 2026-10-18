@@ -6,6 +6,7 @@ so a number written two ways (`forty two` and `42`, `tízmillió` and `tíz mill
 | digits, thousands grouped by a comma, a dot or a space, decimals after a comma or a dot | `42`, `10,000`, `1,5` |
 | a word that splits wholly into the language's number words | `forty`, `tízmillió` (`tíz` + `millió`), `huszonöt` |
 | number words in a row, a space or a hyphen between them | `ten thousand`, `forty-two`, `5 millió` |
+| in English, `a` before a scale word, and `and` after one | `a hundred`, `two hundred and fifty` |
 
 A text with no language reads every language's words. `egy` and `one` alone don't make a text hold a number: one is
 Hungarian's article, the other English's pronoun as often as a number. Digits and whole number words only, until the
@@ -117,28 +118,38 @@ def _items(text: str, lang: str | None, skip: frozenset[str]) -> Iterator[tuple[
     """The text's words, casefolded, each number among them as its value, with whether it counts as holding one."""
     text = nfc(text)
     vocab = _vocab(lang)
+    english = lang is None or lang == "en"
+    found = list(TOKEN.finditer(text))
+    words = [None if m.group("digits") else split(m.group().casefold(), lang) for m in found]
+    joins = [i > 0 and set(text[found[i - 1].end() : m.start()]) <= JOINS for i, m in enumerate(found)]
     number: _Number | None = None
-    last_end = 0
-    for m in TOKEN.finditer(text):
-        token = m.group().casefold()
-        joined = number is not None and set(text[last_end : m.start()]) <= JOINS
-        last_end = m.end()
-        if token in skip:
+    for i, m in enumerate(found):
+        written, parts, joined = m.group().casefold(), words[i], joins[i]
+        if written in skip:
             continue
-        parts = None if m.group("digits") else split(token, lang)
+        after = words[i + 1] if i + 1 < len(found) and joins[i + 1] else None
+        if english and parts is None and after is not None:
+            # English's `a` before a scale word is one (a hundred), and its `and` after one goes on below a hundred
+            # (two hundred and fifty).
+            if written == "a" and vocab[after[0]] >= 100:
+                parts, joined = ("one",), False
+            elif (
+                written == "and" and number is not None and number.last == "scale" and joined and vocab[after[0]] < 100
+            ):
+                continue
         if number is not None and (parts is None or not joined or not number.takes(vocab[parts[0]])):
             yield number.value, not number.alone
             number = None
         if m.group("digits"):
             number = _Number(below=_literal(m.group("digits")), last="digits")
         elif parts is None:
-            yield token, False
+            yield written, False
         else:
             number = number or _Number()
             for part in parts:
                 number.add(vocab[part], part)
             number.words += 1
-            number.alone = number.words == 1 and token in ALONE
+            number.alone = number.words == 1 and written in ALONE
     if number is not None:
         yield number.value, not number.alone
 

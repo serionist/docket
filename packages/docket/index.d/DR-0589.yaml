@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0589
+    title: A spot's screen reads its speaker and Whisper's cut segments, and off is a family's reason only when nothing else refuses it
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#183"]
+    description: "Found by #183's first PR's code review; refines DR-0583's left-out spots and the family screen DR-0547 and DR-0570 share. A spot is left out and counted when its line's speaker names a person a never-store list holds in the shapes the brief screen reads, beside its texts, its line and Whisper's words for it: the family screen holds a speaker to the list as written, so a listed person labelled in the other word order or by an alias meets only this screen. A fix line whose line's speaker does is hidden. A Whisper segment a cut overlaps keeps its place in Whisper's joined text, so a fix's anchored segments read as DR-0582 has them, but its text is never shown: Whisper's words for a line read [cut] there, and a spot whose Whisper text holds it is left out and counted, as one touching a redaction marker is. media.screen.refusal returns off only when no never-store value, withheld mark or private decision refuses the family first, so a withheld family in an off source is withheld: its audio doesn't play, a staged Whisper transcript of it is swept, and it gets no spots. A family that is only off goes on where it did."
+    binds:
+      - A listed person's name never leaves in a spot's speaker, and a cut segment's words never leave in its texts.
+      - A source only off never stops what it let go on before; one that is off and withheld is withheld.
+    not_chosen:
+      - "Screening speakers by every shape in the family screen itself: it would withhold whole recordings over a label, where only the spots need it."

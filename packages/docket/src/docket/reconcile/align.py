@@ -145,15 +145,29 @@ def lines(record: RawRecord, spans: Sequence[Cut]) -> list[Line]:
 @dataclass(frozen=True)
 class Heard:
     """Whisper's transcript as one text: its segments other than `[cut]` in time order, joined by a space, as a fix's
-    anchored segments are read (DR-0582); its words outside every cut, each with its time and its segment."""
+    anchored segments are read (DR-0582); its words outside every cut, each with its time and its segment; and the
+    places in it of the segments a cut overlaps, whose text is never shown."""
 
     text: str
     segments: tuple[Segment, ...]
     words: tuple[Word, ...]
+    cut: tuple[tuple[int, int], ...] = ()
 
     def span(self, ks: Sequence[int]) -> tuple[int, int] | None:
         """The place of the text from the first of these words to the last."""
         return (self.words[ks[0]].start, self.words[ks[-1]].end) if ks else None
+
+    def shown(self, span: tuple[int, int] | None) -> str:
+        """The text at a place, each segment a cut overlaps in it read `[cut]`."""
+        if span is None:
+            return ""
+        out: list[str] = []
+        at = span[0]
+        for start, end in self.cut:
+            if start < span[1] and end > at:
+                out += [self.text[at : max(at, start)], CUT_MARKER]
+                at = min(end, span[1])
+        return "".join([*out, self.text[at : span[1]]])
 
 
 def heard(record: RawRecord, spans: Sequence[Cut]) -> Heard:
@@ -161,10 +175,13 @@ def heard(record: RawRecord, spans: Sequence[Cut]) -> Heard:
     segs = said(record)
     parts: list[str] = []
     found: list[Word] = []
+    cut: list[tuple[int, int]] = []
     at = 0
     for i, s in enumerate(segs):
         text = nfc(s.text)
-        if not in_cut(s, spans):
+        if in_cut(s, spans):
+            cut.append((at, at + len(text)))
+        else:
             length = s.end_ms - s.start_ms
             found += [
                 Word(
@@ -179,7 +196,7 @@ def heard(record: RawRecord, spans: Sequence[Cut]) -> Heard:
             ]
         parts.append(text)
         at += len(text) + 1
-    return Heard(" ".join(parts), tuple(segs), tuple(found))
+    return Heard(" ".join(parts), tuple(segs), tuple(found), tuple(cut))
 
 
 def given(lines: Sequence[Line], heard: Heard) -> list[list[int]]:

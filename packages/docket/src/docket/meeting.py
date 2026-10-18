@@ -26,22 +26,34 @@ def forms(entity: Entity, *, asr: bool = True) -> list[str]:
     return names + [a.text for a in entity.aliases if a.kind == "asr" or not asr]
 
 
-def _says(folded: str, form: str) -> bool:
-    found = neverstore.fold(form).strip()
-    return bool(found) and re.search(rf"(?<!\w){re.escape(found)}(?!\w)", folded) is not None
+# A word as a form and the records' text are compared: folded, so case and accents never decide.
+WORD = re.compile(r"\w+")
+
+
+def _words(text: str) -> tuple[str, ...]:
+    return tuple(WORD.findall(neverstore.fold(text)))
 
 
 def entities(records: Sequence[RawRecord], known: Iterable[Entity], config: VaultConfig) -> list[Entity]:
-    """The meeting's entities, each once: its people first, then their projects, then those its records name."""
+    """The meeting's entities, each once: its people first, then their projects, then those its records name. The
+    records' text is folded and cut into runs of words once, and each form is looked up among the runs of its length,
+    so a vault of a thousand entities costs what a few do."""
     known = list(known)
     people = {neverstore.fold(p) for r in records for p in (r.author, *r.to) if p}
     people |= {neverstore.fold(s.speaker) for r in records for s in r.segments or [] if s.speaker}
-    said = neverstore.fold(" ".join(f"{r.title or ''} {r.text}" for r in records))
     chosen: list[Entity] = [e for e in known if any(neverstore.fold(f) in people for f in forms(e, asr=False))]
     related = {i for e in chosen for i in e.related.get("project", ())}
     chosen += [e for e in known if e.id in related and e.type == "project"]
-    chosen += [e for e in known if any(_says(said, f) for f in forms(e, asr=False))]
+    named = {e.id: [w for f in forms(e, asr=False) if (w := _words(f))] for e in known}
+    said = _runs(" ".join(f"{r.title or ''} {r.text}" for r in records), {len(w) for ws in named.values() for w in ws})
+    chosen += [e for e in known if any(w in said for w in named[e.id])]
     return [e for e in {e.id: e for e in chosen}.values() if not listed(e, config)]
+
+
+def _runs(text: str, lengths: set[int]) -> set[tuple[str, ...]]:
+    """Every run of words a text holds, of the lengths asked."""
+    words = _words(text)
+    return {words[i : i + n] for n in lengths for i in range(len(words) - n + 1)}
 
 
 def glossary(known: Iterable[Entity], config: VaultConfig) -> list[Entity]:

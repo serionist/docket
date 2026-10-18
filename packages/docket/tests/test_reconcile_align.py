@@ -232,3 +232,14 @@ def test_a_recorder_line_in_whisper_s_cut_is_skipped_whole() -> None:
     # A long line before a short one still holds a word the short one ended before.
     found = aligned([(0, 9000, "a long first line"), (1000, 2000, "short")], [(5000, 6000, "line")])
     assert found.given == [[0], []]
+
+
+def test_whisper_s_text_shows_a_segment_a_cut_overlaps_as_cut() -> None:
+    record = transcript([segment(0, 3000, "Kept"), segment(3000, 9000, CUT_MARKER)])
+    other = heard([segment(0, 3000, "We sign"), segment(3500, 8000, "secret"), segment(9000, 9900, "deal")])
+    found = align.align(record, other).heard
+    assert found.cut == ((8, 14),)
+    assert found.shown((0, len(found.text))) == "We sign [cut] deal"
+    assert found.shown((3, 10)) == "sign [cut]"
+    assert found.shown((0, 7)) == "We sign"
+    assert found.shown(None) == ""

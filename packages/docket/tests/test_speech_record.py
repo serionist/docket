@@ -23,6 +23,7 @@ from docket import userconfig
 from docket.errors import DocketError
 from docket.media import crypto, layout, reader
 from docket.media import put as media
+from docket.media import staged as media_staged
 from docket.models.catalogue import ModelFile
 from docket.speech import client, job, setup
 from docket.speech.catalogue import SpeechModel
@@ -350,6 +351,13 @@ def test_a_source_only_turned_off_still_plays_and_a_private_one_doesn_t(tmp_path
     assert reader.state_of(Vault.open(vault.root), CALL) == "withheld"
 
 
+def test_a_withheld_family_doesn_t_play_with_its_source_off(tmp_path: Path) -> None:
+    vault = stored_vault(tmp_path)
+    change_config(vault, lambda c: setattr(c.sources["plaud"], "enabled", False))
+    media_staged.withhold(vault.root, CALL)
+    assert reader.state_of(Vault.open(vault.root), CALL) == "withheld"
+
+
 def test_one_transcription_at_a_time_on_a_machine() -> None:
     state = userconfig.state_dir()
     with job.machine_lock(wait=False):
@@ -388,6 +396,15 @@ def test_a_source_turned_off_keeps_its_waiting_whisper_transcript(tmp_path: Path
     change_config(vault, lambda c: setattr(c.sources["plaud"], "enabled", False))
     Gate(vault).list()
     assert staged(vault)
+
+
+def test_a_source_turned_off_still_drops_a_waiting_whisper_transcript_whose_family_is_withheld(tmp_path: Path) -> None:
+    vault = stored_vault(tmp_path)
+    assert transcribe(vault, tmp_path).staged
+    change_config(vault, lambda c: setattr(c.sources["plaud"], "enabled", False))
+    media_staged.withhold(vault.root, CALL)
+    Gate(vault).list()
+    assert staged(vault) == []
 
 
 def test_what_the_service_queues_by_itself_is_stored_audio_that_reads_ok_without_a_transcript(tmp_path: Path) -> None:

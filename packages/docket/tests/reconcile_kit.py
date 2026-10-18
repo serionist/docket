@@ -8,7 +8,8 @@ test kit's cast, and Northwind, the customer, has the `asr` alias Nortwin.
 | 3 | Forty two units | 42 units: one number, written two ways |
 | 4 | the offer is ten and the deadline is Friday | the new offer is ten: a word |
 
-`build_reconcile_vault` keeps it in a vault this machine ingests `calls` in, with the entities committed.
+`build_reconcile_vault` keeps it in a vault this machine ingests `calls` in, with the entities committed;
+`build_crowded_vault` adds 300 invented entities and an hour-long call, for the cost of a report among many.
 """
 
 from __future__ import annotations
@@ -111,3 +112,57 @@ def build_reconcile_vault(root: Path) -> Vault:
 def reconcile_template(factory: pytest.TempPathFactory) -> Path:
     """The vault above, built once per session; tests copy it."""
     return template_with(factory, build_reconcile_vault)
+
+
+# A vault of many entities: invented two-word names of invented syllables, a third each people, customers, projects.
+SYLLABLES = ("ka", "lo", "mi", "re", "tu", "sa", "ne", "vo", "di", "pa", "ze", "ro")
+CROWD = 300
+HOUR = "calls:rec-0200"
+
+
+def invented(n: int, size: int) -> str:
+    """The n-th invented word of `size` syllables."""
+    out = ""
+    for _ in range(size):
+        n, at = divmod(n, len(SYLLABLES))
+        out += SYLLABLES[at]
+    return out.capitalize()
+
+
+def hour(rec: str = HOUR) -> list[RawRecord]:
+    """An hour's call: 720 lines, each heard two ways at a name and a number."""
+    lines = [
+        (
+            "Ben Sample",
+            i * 5_000,
+            i * 5_000 + 4_000,
+            f"Line {i}: the offer from Nortwin is ten thousand, said {invented(i, 2)}",
+            f"Line {i}: the offer from Northwood is ten million, said {invented(i, 2)}",
+        )
+        for i in range(720)
+    ]
+    return [recording(rec, "An hour", WHEN), *pair(lines, rec)]
+
+
+def build_crowded_vault(root: Path) -> Vault:
+    vault = build_reconcile_vault(root)
+    kinds = ("person", "customer", "project")
+    files: dict[str, str] = {}
+    for i in range(CROWD):
+        kind = kinds[i * len(kinds) // CROWD]
+        name = f"{invented(i, 2)} {invented(i * 7 + 3, 3)}"
+        files[f"entities/{kind}/crowd-{i:04d}.yaml"] = (
+            f"id: crowd-{i:04d}\ntype: {kind}\nname: {{en: {name}}}\n"
+            f"aliases:\n  - {{text: {invented(i * 5 + 1, 3)}, kind: asr}}\n"
+        )
+    for rel, text in files.items():
+        (vault.root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (vault.root / rel).write_text(text, encoding="utf-8", newline="\n")
+    vault.commit(list(files), "A crowd of entities")
+    vault.write_run("calls", hour())
+    return vault
+
+
+def crowded_template(factory: pytest.TempPathFactory) -> Path:
+    """The vault above, built once per session; tests copy it."""
+    return template_with(factory, build_crowded_vault)
