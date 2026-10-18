@@ -3,8 +3,9 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 from docket_testkit import commit_config, copy_vault, index_template, make_record
@@ -69,7 +70,10 @@ def test_search_prints_groups_hits_and_locators(vault: Vault, capsys: pytest.Cap
     code, out = run(vault, capsys, "search", "Nortwin", "--no-update")
     assert "'nortwin' is northwind" in out and "lines 14-14" in out
     code, out = run(vault, capsys, "search", "múlt", "héten", "pallet", "--person", "Nobody", "--no-update")
-    assert "from 2026-10-05 00:00 to 2026-10-12 00:00 (múlt héten)" in out
+    # Last week as the owner's clock reads it today: from last Monday's start to this Monday's.
+    today = datetime.now(ZoneInfo(vault.config.owner.time_zone)).date()
+    monday = today - timedelta(days=today.weekday())
+    assert f"from {monday - timedelta(days=7)} 00:00 to {monday} 00:00 (múlt héten)" in out
     assert "not found as a person or entity: Nobody" in out
     code, out = run(
         vault, capsys, "search", "pallet", "--since", "2026-10-08", "--until", "2026-10-08T12:00", "--no-update"
