@@ -15,7 +15,7 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 | `docket staging classify <ref> work\|private` | work makes it ready, `--cut 120-340` (characters) or `--cut 12:30-14:05` (a time) cuts a stretch; private drops it |
 | `docket staging promote` | writes every ready record to the raw log, cut and redacted, one run per source, and commits; a record on hold stays in staging |
 | `docket ingest <source> <folder>` | imports payloads fetched earlier through the source's mapper: the folder's `hold.txt` first, then its JSON files; every record goes to staging, nothing on hold; `--hold <file>` adds more ids to hold, `--final` tells the mapper not to wait for more, `--mapper-errors` prints the mapper's own errors |
-| `docket source new <name>` | writes a source's skill, mapper and tests into `.claude/skills/sources/<name>/` of the repo that holds the vault, from Docket's blank template, or `--example` for a reference source (Plaud), and adds the source to `vault.yaml` with `--sensitivity`, its `--tool`s and `--lookback-days`; never over a folder that exists; `--folder <folder>` adds a folder source instead; it commits `vault.yaml`, run on your yes |
+| `docket source new <name>` | writes a source's skill, mapper and tests into `.claude/skills/sources/<name>/` of the repo that holds the vault, from Docket's blank template, or `--example` for one of the example sources (`plaud`, `slack`, `teams`, `outlook`, `calendar`; see Example sources), and adds the source to `vault.yaml` with `--sensitivity`, its `--tool`s and `--lookback-days`; never over a folder that exists; `--folder <folder>` adds a folder source instead; it commits `vault.yaml`, run on your yes |
 | `docket render` | writes the people directory and the glossary from the entities, at the paths `vault.yaml`'s `rendered` names in the repo that holds the vault; never commits them; leaves a file edited by hand and says so, and writes nothing into a repo anyone can read; exit 1 when a file was left or refused. It runs after each curate write too |
 | `docket scan [source]` | reads a folder source's folder, read-only, and stages each new or changed document's text; every folder source turned on without a name; `--accept-gone` when most files the vault held are missing on purpose |
 | `docket doc put <file or ->` | store a processed doc as its next rev, redacted first, saying on which lines; refused, with every problem and its line, when the frontmatter is wrong, an anchor doesn't resolve, the doc changed since the rev it carries, or it says something on the never-store keywords list (then only the lines are named) |
@@ -196,8 +196,8 @@ checks what it returns (DR-0108, DR-0119). `docket source new <name> --vault <va
 source to `vault.yaml` (DR-0166); the plugin's `/docket:setup` runs it for each source you choose.
 
 - Without `--example` it writes Docket's blank template: a `SKILL.md` to fill, a mapper that sets every capture aside
-  as `not-mapped-yet` until you write the mapping, and its tests. With `--example` it copies a reference source whole:
-  in this version Plaud, [examples/sources/plaud](../../examples/sources/plaud) (DR-0167).
+  as `not-mapped-yet` until you write the mapping, and its tests. With `--example` it copies a reference source whole,
+  one of the example sources below (DR-0609).
 - It writes only into that folder of the repo around the vault, never through a link out of it or into the vault, and
   never over a folder that exists. It changes `vault.yaml` only when the file is as Docket wrote it, and commits it;
   otherwise it prints the lines to add under `sources:`. The folder is yours to commit.
@@ -219,6 +219,29 @@ source to `vault.yaml` (DR-0166); the plugin's `/docket:setup` runs it for each 
 - Changing a mapper: keep its output stable, since every record the lookback reads again gets a new version when it
   changes; pin golden versions in its tests, as the example does; pull the project on every machine before its next
   sync.
+
+### Example sources
+
+Five working sources ship in [examples/sources](../../examples/sources), each a skill, a mapper, the page scripts it
+runs and its tests, tested in CI (DR-0608). `docket source new <name> --example --vault <vault>` copies one into your
+project under its own name, with its sensitivity, tools and lookback in `vault.yaml`.
+
+| Example | Route | Reads | In `vault.yaml` |
+|---|---|---|---|
+| `plaud` | MCP: Plaud's own server | recordings, their transcripts and Plaud's notes | `mixed` |
+| `slack` | MCP: the Slack plugin's read tools, its search to find what to read | channels, DMs and their threads | `work` |
+| `teams` | Claude in Chrome: Teams on the web, two fixed page scripts | one-on-one, group and meeting chats | `work`, a day back |
+| `outlook` | Claude in Chrome: Outlook on the web, two fixed page scripts | mail in every folder, the online archive | `work`, a day back |
+| `calendar` | Claude in Chrome: Outlook on the web's week view, one fixed page script | events, one record per occurrence | `work`, a week back |
+
+- The copy is yours from then on: change its route as your workspace or tenant needs and keep its tests passing.
+  Docket never updates it; a newer example is in the repo to compare with.
+- The browser routes are for a tenant no MCP server reaches. Their page notes were learned on one tenant, and a quirk
+  seen once says so. Where an MCP server reaches the source, start from the blank template instead.
+- A session or agent holds one open run: opening another, of any source, drops the one before. Run sources one after
+  another in a session, or each in its own agent.
+- With two or more copied, `python -m pytest .claude/skills/sources` stops at collection, since every folder has a
+  `tests/test_mapper.py`: run each folder's tests on its own, or all of them with `--import-mode=importlib`.
 
 ## Folder sources
 
@@ -289,6 +312,10 @@ each of the source's tools returned, so Claude never retypes a payload.
 | a final run | `run_open(source, final=true)` for the ids that waited a week: fetched by id, no listing, the mark untouched |
 | a folder | a live run reads a backfill folder only when `docket ingest` read it on this machine first |
 
+- A sync of your own (a skill or a command in your project) runs each source the same way: `run_open("<source>")`
+  opens the run and names the source's `SKILL.md`; Claude makes the reads it lists, which the capture hook hands to
+  Docket; `ingest(run, captures=<n>, skipped=[...])` closes it. What your sync does with the records after that is its
+  own.
 - Each machine commits its cursor file when a whole run changes it: one commit per run, `Cursors: <source> on
   <machine>`, naming no id.
 - A cursor file that doesn't read stops this machine's runs, naming the line; another machine's is left out with a

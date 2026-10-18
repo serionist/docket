@@ -621,8 +621,10 @@ change lands on whoever uses that vendor, while the core still checks every rid 
   links, and never over a folder that exists.
 - Claude Code doesn't load a `SKILL.md` under `.claude/skills/sources/` as a skill, so whatever runs a source reads it
   by its path, the list of sources coming from `vault.yaml` (DR-0168).
-- Plaud is the reference source, under `examples/sources/plaud` and tested in CI: an example to copy, not a
-  dependency. The wheel carries a byte-identical copy for `--example` (DR-0167).
+- Plaud, Slack, Teams, Outlook mail and the calendar are the reference sources, under `examples/sources/<name>` and
+  tested in CI: examples to copy, not dependencies (DR-0608). Plaud and Slack read through MCP, the other three through
+  Claude in Chrome with fixed page scripts. The wheel carries a byte-identical copy of each for `--example`, registered
+  with its sensitivity, tools and lookback (DR-0609).
 - Audio is handed over by path or URL, and the service fetches it only within limits (DR-0604):
   - a path under a folder `vault.yaml` names for the source (`media_folders`) or Docket's own drop folder;
   - a URL over https, to any host, every address it resolves to public and none an IPv6 form of an IPv4 one, the

@@ -748,11 +748,12 @@ decisions:
       - "Setup editing vault.yaml itself: a hand edit can drop the user's comments or slip past the schema."
   - id: DR-0167
     title: The wheel carries the reference sources as scaffold data
-    status: proposed
+    status: superseded
     at: "2026-10-15"
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#12"]
+    superseded_by: [DR-0609]
     description: packages/docket/src/docket/sources/templates/<name>/ holds each reference source byte for byte, each file with .tmpl appended so no linter, type checker or test runner takes it for the package's code. A test keeps the Plaud copy identical to examples/sources/plaud/, which stays the reference (DR-0101, DR-0108), and another that the wheel holds every template file. docket source new <name> --example copies the reference of that name under its own name, registered with its sensitivity and tools. Nothing imports it.
     not_chosen:
       - "The blank template only: a new user picking Plaud would rewrite a mapper that exists."

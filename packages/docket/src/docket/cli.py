@@ -473,7 +473,10 @@ def source_new(
             "--lookback-days",
             min=0,
             max=MAX_LOOKBACK_DAYS,
-            help="Days before the last sync each live run reads back, 0 to 30; default: as vault.yaml has it, else 7.",
+            help=(
+                "Days before the last sync each live run reads back, 0 to 30; default: as vault.yaml has it, else the "
+                "reference's with --example, else 7."
+            ),
         ),
     ] = None,
     vault: VaultOption = None,

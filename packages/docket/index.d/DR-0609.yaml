@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0609
+    title: The wheel carries every reference source as scaffold data, registered with its own lookback
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#12", "#197"]
+    supersedes: [DR-0167]
+    description: "packages/docket/src/docket/sources/templates/<name>/ holds each reference source byte for byte, each file with .tmpl appended so no linter, type checker or test runner takes it for the package's code: Plaud, Slack, Teams, Outlook mail and the calendar. A test keeps each copy identical to examples/sources/<name>/, which stays the reference (DR-0101, DR-0608), another that every example folder is a reference, and another that the wheel holds every template file. docket source new <name> --example copies the reference of that name under its own name, registered with its sensitivity, its tools and its lookback: the flag's, else what vault.yaml has, else the reference's (a day for Teams and mail, a week for the calendar, none for Plaud and Slack). The copy is the project's own from then on, and Docket never updates it. Nothing imports it."
+    not_chosen:
+      - "--example naming the reference apart from the source's name: a reference's rids, its mapper and its SKILL.md carry its name, so a copy under another name would need rewriting where a byte-for-byte copy needs none."
+      - "The blank template only: a new user picking a reference would rewrite a mapper that exists."
+      - "The reference downloaded at the version's tag: the network, and a fetched file that then runs as a mapper."
+      - "A reference's lookback left to the user: the Teams and mail skills read a day back, and the default week opens every chat or conversation of the week on every run."

@@ -96,8 +96,9 @@ docket source new documents --vault <path> --folder <folder>
   stands: that one is theirs, in their own terminal (in Git Bash's own window, through `winpty`). Never wrap it in a
   console or pseudo-terminal of your own, or clear `CLAUDECODE`.
 
-One `--tool` per tool. `--example` where sources.md lists a reference; its sensitivity and tools come with it. Each
-command prints the folder it wrote, under the project's `.claude/skills/sources/`. Claude Code doesn't load those
+One `--tool` per tool. `--example` where sources.md lists a reference and the user reaches the source its way; its
+sensitivity, tools and lookback come with it. Each command prints the folder it wrote, under the project's
+`.claude/skills/sources/`. Claude Code doesn't load those
 folders as skills: whatever runs a source reads its `SKILL.md` by path.
 
 `--folder` adds a folder source instead: no skill or mapper, the folder in the repo or under the user's home. Ask

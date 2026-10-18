@@ -133,6 +133,43 @@ def test_example_copies_the_plaud_reference_and_registers_it(
     assert tested.returncode == 0, tested.stdout + tested.stderr
 
 
+@pytest.mark.parametrize(
+    ("name", "tools", "lookback"),
+    [
+        ("slack", ["slack_read_channel", "slack_read_thread"], None),
+        ("teams", ["javascript_tool"], 1),
+        ("outlook", ["javascript_tool"], 1),
+        ("calendar", ["javascript_tool"], 7),
+    ],
+)
+def test_example_copies_a_chat_mail_or_calendar_reference_with_its_lookback(
+    owner: Callable[..., AtConsole], tmp_path: Path, name: str, tools: list[str], lookback: int | None
+) -> None:
+    top = host_repo(tmp_path)
+    vault = folder_vault_in(top)
+    assert main(["source", "new", name, "--example", "--vault", str(vault.root)]) == 0
+    folder = skills(top, name)
+    copied = {p.relative_to(folder).as_posix(): p.read_bytes() for p in folder.rglob("*") if p.is_file()}
+    assert copied == scaffold.template_files(name)
+    assert VaultConfig.load(vault.root / "vault.yaml").sources[name] == SourceConfig(
+        sensitivity="work", mapper=f".claude/skills/sources/{name}/mapper.py", tools=tools, lookback_days=lookback
+    )
+    # The copy's own tests, a live run through the service and the capture hook among them.
+    tested = run_tests(folder)
+    assert tested.returncode == 0, tested.stdout + tested.stderr
+
+
+def test_a_reference_s_lookback_gives_way_to_the_flag_and_to_vault_yaml(
+    owner: Callable[..., AtConsole], tmp_path: Path
+) -> None:
+    top = host_repo(tmp_path)
+    config = make_config("folder")
+    config.sources["outlook"] = SourceConfig(lookback_days=3)
+    vault = Vault.init(top / "vault", config, "test-box")
+    assert scaffold.new_source(vault, "outlook", example=True).entry.lookback_days == 3
+    assert scaffold.new_source(Vault.open(vault.root), "teams", example=True, lookback_days=0).entry.lookback_days == 0
+
+
 def test_a_nested_repo_of_its_own_commits_in_its_own_history(owner: Callable[..., AtConsole], tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
@@ -153,7 +190,8 @@ def test_a_nested_repo_of_its_own_commits_in_its_own_history(owner: Callable[...
         (["a/b"], "isn't a source name"),
         (["Plaud"], "isn't a source name"),
         (["notes."], "isn't a source name"),
-        (["zebra-notes", "--example"], "no reference source named zebra-notes; --example copies one of: plaud"),
+        (["zebra-notes", "--example"], "no reference source named zebra-notes; --example copies one of: calendar, "
+                                       "outlook, plaud, slack, teams"),
         (["zebra-notes", "--sensitivity", "secret"], "--sensitivity is work, mixed or private, not 'secret'"),
         (["zebra-notes", "--tool", "mcp__plaud__list_files"], "isn't a tool's own name"),
         (["zebra-notes", "--lookback-days", "31"], "not in the range"),

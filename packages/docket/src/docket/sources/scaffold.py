@@ -42,10 +42,16 @@ class Reference:
 
     sensitivity: Sensitivity
     tools: tuple[str, ...]
+    # The lookback its window wants; None leaves the cursor file's 7.
+    lookback_days: int | None = None
 
 
 REFERENCES: dict[str, Reference] = {
     "plaud": Reference("mixed", ("list_files", "get_file", "get_transcript", "get_note")),
+    "slack": Reference("work", ("slack_read_channel", "slack_read_thread")),
+    "teams": Reference("work", ("javascript_tool",), lookback_days=1),
+    "outlook": Reference("work", ("javascript_tool",), lookback_days=1),
+    "calendar": Reference("work", ("javascript_tool",), lookback_days=7),
 }
 
 
@@ -184,12 +190,14 @@ def _entry(
     lookback_days: int | None,
 ) -> SourceConfig:
     """The source's entry: what the flags give, else what vault.yaml already has, else the reference's, else Docket's
-    guess for a source it knows; its media folders as vault.yaml has them, and its lookback unless the flag gives one.
-    Checked here, before anything is written."""
+    guess for a source it knows; its media folders as vault.yaml has them, and its lookback as the flag gives it, else
+    as vault.yaml has it, else the reference's. Checked here, before anything is written."""
     kept_level = existing.sensitivity if existing is not None else None
     level = sensitivity or kept_level or (reference.sensitivity if reference else KNOWN_SOURCES.get(name, "mixed"))
     kept_tools = existing.tools if existing is not None else []
     kept_lookback = existing.lookback_days if existing is not None else None
+    if kept_lookback is None and reference is not None:
+        kept_lookback = reference.lookback_days
     try:
         return SourceConfig(
             enabled=existing.enabled if existing is not None else True,

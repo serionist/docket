@@ -13,8 +13,8 @@ file turns a run's captures into records. This folder is an example to copy, not
 ## Set it up
 
 `docket source new plaud --example --vault <vault>` copies this folder to `.claude/skills/sources/plaud/` in the repo
-that holds the vault and adds the source to `vault.yaml`, after you type back the code it shows; run it in your own
-terminal, as `/docket:setup` tells you. By hand, the same two steps:
+that holds the vault and adds the source to `vault.yaml`, committed. `/docket:setup` runs it on your yes, or you run
+it in your own terminal. By hand, the same two steps:
 
 1. Copy this folder to `.claude/skills/sources/plaud/` in the repo that holds the vault.
 2. In `vault.yaml`, add the source:
@@ -64,9 +64,9 @@ backfill file is final by itself. A recording the listing shows and the folder l
 
 Recordings with stretches their owner left out go in `hold.txt` beside the backfill files before the first import, and
 stay out until they are released with their cuts. `/docket:cuts` places the owner's words for each stretch on its
-transcript and hands over `docket hold release plaud --from <folder> --proposals <file>`, which the owner runs in their
-own terminal: each recording goes in only when they type back the code it shows. Plaud's notes of a released recording
-are left out unless the owner keeps them, since they summarise the stretch too.
+transcript, shows each recording's cuts in chat, and on the owner's yes runs `docket hold release plaud --from <folder>
+--proposals <file>`, which asks nothing more; the owner can run it in their own terminal instead. Plaud's notes of a
+released recording are left out unless the owner keeps them, since they summarise the stretch too.
 
 ## What it makes
 

@@ -8,6 +8,10 @@ Unreleased in the same PR.
 
 ### Added
 
+- Slack, Teams, Outlook mail and the calendar ship as example sources beside Plaud, in `examples/sources/`:
+  `docket source new <name> --example` copies one into your project with its sensitivity, tools and lookback. Slack
+  reads through the Slack plugin; Teams, mail and the calendar read Teams and Outlook on the web through Claude in
+  Chrome, for a tenant no MCP server reaches.
 - `sources.<name>.lookback_days` in `vault.yaml`, 0 to 30, sets how many days before the last sync a live run reads
   back: `1` suits chat and mail, where a week back opens every chat active that week on every run. Unset keeps 7, the
   cursor file's own. `docket source new --lookback-days` writes it. Update Docket on every machine before you set it:
