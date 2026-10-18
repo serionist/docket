@@ -126,7 +126,12 @@ def confirm(
 ) -> Answer:
     """Show the screen and ask: "yes" only for the OS prompt's verified answer, or, where this machine has none, for the
     code typed back; "stop" for q, "no" for anything else. `act` is what the OS prompt names, such as "release a held
-    recording". A machine that can't ask at all refuses before the screen is shown."""
+    recording". It refuses on its own, before the screen, in Claude Code's shell, without a console, or on a machine
+    that can't ask at all, so a caller added later can't skip the console's check; today's callers check first too, in
+    their own words, before they read or write anything."""
+    refused = problem(f"the step to {act}")
+    if refused is not None:
+        raise DocketError(refused)
     found = osprompt.find()
     if isinstance(found, osprompt.Refusal):
         raise DocketError(f"nothing was asked: {found.why}")
