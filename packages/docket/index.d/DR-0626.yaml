@@ -1,0 +1,13 @@
+decisions:
+  - id: DR-0626
+    title: "An item names its meeting in a field meeting: the meeting's id"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#199"]
+    description: "#198 left an item's meeting to #199. meeting joins an item's fields, optional, in add and set: the id of the meeting's add, or of any add of its key (DR-0621), as text; null clears it. The writer takes an M- number and writes the id, so a renumber never moves the link. A Docket from #198 reads it as a name it doesn't know and keeps it."
+    binds: ["An item names its meeting by id, never by number."]
+    not_chosen:
+      - "The M- number, todo.py's: a renumber after a clash would move the link."
+      - "An op on the meeting naming its items: todo.py's meeting link sets the item's field, and an item has one meeting."

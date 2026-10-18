@@ -1,0 +1,11 @@
+decisions:
+  - id: DR-0629
+    title: "suggest is a read over the folded ledger: the open items worth raising in a meeting, by todo.py's rules"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#199"]
+    description: Open and snoozed items linked to the meeting, prep items left out; then replies, waits and decisions on someone in the meeting, its organiser or an attendee, in its stream when it has one; then waits in its stream. Items already on a point are left out; 15 at most, each with why. It writes nothing; the ledger tool (#201) and the Meetings page (#205) call it.
+    not_chosen:
+      - "suggest as proposed points the writer adds: the sync proposes points, and a read can be shown anywhere without a write."

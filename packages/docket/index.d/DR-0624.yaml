@@ -1,0 +1,13 @@
+decisions:
+  - id: DR-0624
+    title: "Rollover and a meeting's archive are ops the writer writes: it decides what is due and which meeting is next, and the fold only applies them"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#199"]
+    description: "The fold never reads the clock (DR-0615), so time is the writer's. A roll is two ops in one write: a point on the next meeting with from, then a point_set on the old point with state rolled and to the copy; the writer's undo of either undoes both. Its rollover change finds the meetings due as todo.py did: a cancelled one at once, one that is over and has an outcome, any other 24 hours after its end. The next meeting is the next by start, not cancelled or declined: the same series when both have one, else the same subject with case and spaces folded, else one subject starting with the other, 15 characters or more, with the same organiser (todo.py's next_in_series). Before #200 no meeting has a series, so the subject decides. A point with nowhere to go stays open and the day lists it. The sync asks for rollover (#210), the scheduler later; todo.py's roll on every write goes, since nothing in Docket writes unasked. The sync archives a meeting that started 14 days back or more with no open point, and skips one whose archive was undone. The writer refuses any change to an archived meeting but an undo."
+    binds: ["Rolls and archives are ops, so a rebuild gives the same meetings on any day."]
+    not_chosen:
+      - "Rollover in the fold: a rebuild on another day would give another day."
+      - "A roll on every write, todo.py's after three days: a write would change meetings nobody asked about."

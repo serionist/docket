@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0628
+    title: The index folds meetings into meetings, points, meeting_log and meeting_numbers, and streams into streams and stream_log, beside the items' tables
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#199"]
+    description: "meetings holds each meeting's state: number, event, series, start, end, its day, subject, organiser, where, response, attendees, stream, notes, outcome, materials, archived, its add's by and its last op. points holds each point: id, meeting, n, text, state, answer, item, from, to, proposed, its point op's day and by. meeting_log and stream_log hold every op of a meeting, its points' too, or of a stream, with item_log's columns. meeting_numbers holds each M- number and the meetings that held it. streams holds each stream: name, status, where, next, deadline, updated and its last op. items gains a meeting column. An update reads a file that only grew as DR-0616 does and folds again each object its new lines name, every object of their keys and the holders of each number they claim. Schema 12, after #198's 11."
+    binds: [The rebuild-equals-update test includes a key two clones added and an M- clash.]
+    not_chosen:
+      - "One log table for every object: #198's item_log is being built as it is, and the tables aren't a door."

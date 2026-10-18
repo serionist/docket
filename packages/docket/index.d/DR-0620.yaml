@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0620
+    title: "An op whose item is its own id makes an object, and its kind names what: add an item, meeting a meeting, stream a stream; an object of a kind this Docket doesn't know is kept and changes nothing"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#199"]
+    description: "DR-0611 has every op name an add's item and left #199 to say how other objects are named. An object's add is the op whose item is its own id, and its kind says what it makes: add an item (DR-0611), meeting a meeting (DR-0622), stream a stream (DR-0625). Every other op names its object by item, the add's id, whatever the object is: the key keeps its name. An op naming an id no add made is a problem and is left out, as before. An op naming an object whose add is of a kind this Docket doesn't know, and that add itself, are kept, change nothing and are no problem, so a later object joins the same files in schema 1. A talking point is part of its meeting, not an object: its ops name the meeting (DR-0623). The rules for fields are per object: an item's field names are checked on an item's ops only."
+    binds:
+      - An object's add is the op whose item is its own id; its kind names the object's kind.
+      - An op naming an object of a kind this Docket doesn't know is kept, changes nothing and is no problem.
+    not_chosen:
+      - "Meetings as items of kind meeting: they would take A- numbers and need an item's who and source, and an older Docket would list them as items."
+      - "An add with a key naming the object's kind: a Docket that doesn't know the key would read a meeting's add as an item's."
+      - "Points as objects of their own: a meeting's points would fold from many objects, and a roll's undo would span them."

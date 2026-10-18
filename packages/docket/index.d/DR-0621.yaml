@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0621
+    title: "A meeting's event and a stream's name are keys set by its add: the adds of one key are one object, the first by id holding it and each later one folding in as a set"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#199"]
+    description: "DR-0105 keys a meeting by its calendar event, so a second add for one event, which only two clones apart can write, must not make a second meeting. The adds that carry one key, a meeting's event or a stream's name, fold as one object: the first by id is its id; each later one folds in as a set of its fields at its place in the order, and the number it claimed stays one the object held before (DR-0613), so it still finds the object. Ops naming any of them are the object's, an undo among them too. An undone add is left out, and the object stands while one of its adds does. A key is set by the add only, never by a set, so which ops are one object is known before anything folds. A meeting with no event, one from before the calendar or added by hand, is its own. The writer never writes a second add for a key the ledger holds; it writes a set. The export (#215) gives an old meeting the event of a calendar record that matches its time and subject, its fields as they were, and leaves one with no match keyless."
+    binds:
+      - A key is set by its object's add only.
+      - The first add of a key by id holds it; a later one folds in as a set, its number still finding the object.
+    not_chosen:
+      - "A key set later by a set: which ops are one object would depend on the fold, and an undone set would split a meeting."
+      - "The later add refused as a problem: the second clone's points and prep on it would be lost."
+      - "Matching on start time plus subject: DR-0105 rules it out."
