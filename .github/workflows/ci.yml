@@ -57,6 +57,13 @@ jobs:
           fi
       - name: Gate
         run: uv run gate full
+      # Temporary, for #143's coverage floor on Linux: the lines of docket the run missed. Removed before merge.
+      - name: The missed lines
+        if: failure()
+        run: >-
+          python3 -c "import json; d = json.load(open('.local/coverage.json'));
+          [print(f, v['missing_lines']) for f, v in sorted(d['files'].items())
+          if v['missing_lines'] and '/src/docket/' in f]"
 
   # Windows runs the tests in two halves, each on a runner of its own: the runner's four vCPUs are busy for the whole
   # parallel run, so more workers on one don't help, and each of its git calls costs about 40 ms (DR-0495). The first
