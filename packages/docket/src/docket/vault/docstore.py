@@ -606,6 +606,19 @@ class DocStore:
             self._known.pop(doc_id, None)
         return rev, text
 
+    def take_in(self, doc_id: str) -> int | None:
+        """A hand edit of the doc taken in as its next rev, as a put takes it in first: the rev, or None when its file
+        is as its last rev wrote it. Refused as a put's take-in refuses it, the edit left on disk. A forget rewrites a
+        doc only once its edit is in (DR-0580)."""
+        path = self.file(doc_id)
+        history = self.history(doc_id)
+        written = normalize_newlines(self._blob(history[0][1], doc_id)) if history else None
+        on_disk = self.read_file(path)
+        if normalize_newlines(on_disk) == written:
+            return None
+        rev, _ = self._take_in(doc_id, path, on_disk, max((n for n, _ in history), default=0), written)
+        return rev
+
     def _kind_problems(self, doc: ProcessedDoc, notes: list[str]) -> list[DocProblem]:
         """What a brief's or a decision's own form refuses, on top of every doc's rules: a brief's sections, its
         Decisions lines and its never-store screen (DR-0555, DR-0558, DR-0565), with a section the form doesn't name

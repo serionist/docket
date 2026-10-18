@@ -60,11 +60,17 @@ terms:
     definition: "A list beside the Search page's results that narrows or favours the search by one of its parameters: sources and time narrow, people and entities favour. Its counts are over the candidates search ranked."
     see: [packages/docket/src/docket/web/views.py]
     close_terms: [boost]
+  - term: family
+    definition: "What a forget takes with a rid: it and every rid nested under it, the audio on it and on each rid it sits under, with every key, and the Whisper transcripts made from that audio. Rid nesting only: a reply never takes its thread. A held rid and a folder source's file are taken by their versions instead."
+    see: [packages/docket/src/docket/forget/plan.py]
   - term: folder source
     definition: "A source whose records Docket reads itself from a folder vault.yaml names, read-only: each docx, xlsx, pptx, pdf, md or txt file as text, by page, slide and sheet, staged through the gate by docket scan. It has no mapper or tools, and only the primary machine scans it."
     see: [packages/docket/src/docket/documents/scan.py]
+  - term: forget
+    definition: "docket forget: takes a record out of the vault for good, on every clone, through the forgotten list: its run file lines, the doc lines built on it, its audio and the audio's keys. A dry run by default; --now only at the owner's console, after a code typed back. The text stays in git's history, for which it writes a git filter-repo rewrite and never runs it."
+    see: [packages/docket/src/docket/forget/now.py]
   - term: forgotten list
-    definition: "state/forgotten.jsonl: one line per forget, what it took by hash only (rids forgotten whole, versions, a folder file's identity, media rids, key ids, a removed legacy note's old paths and body hash), merged by union. HEAD's lines and the disk's act together; every reader of raw skips a line it takes, and the index is built under its digest."
+    definition: "state/forgotten.jsonl: one line per forget, what it took by hash only (rids forgotten whole, versions, a folder file's identity, media rids, key ids, a removed legacy note's old paths and body hash), merged by union. HEAD's lines and the disk's act together; every reader of raw skips a line it takes, intake drops what it lists, the index is built under its digest, and every gate call applies it to the tree, staging and the key store."
     see: [packages/docket/src/docket/vault/forgotten.py]
   - term: gate
     definition: The one set of checks every change passes, `uv run gate`. The quick lane runs in seconds before every push; `gate full` is the merge rule.

@@ -329,6 +329,7 @@ def import_notes(
     skipped: Counter[str] = Counter()
     lists: NeverStore = vault.config.never_store
     redactor = Redactor.from_config(vault.config.redaction)
+    forgot = vault.rawlog.listed()
     store = DocStore(vault)
     wanted = {t.old_path: t for t in takes or []}
     used: set[str] = set()
@@ -372,6 +373,14 @@ def import_notes(
         redacted = derived.redact(derived.LEGACY, body, redactor)
         new_body = canonical(redacted.body)
         new_hash = body_hash(new_body)
+        if forgot.legacy([item.old_path], new_hash):
+            # A forget removed it: by its old path, or by its body wherever it went, --take note included (DR-0579).
+            skipped["forgotten"] += 1
+            take = wanted.get(item.old_path)
+            if take is not None:
+                used.add(item.old_path)
+                report.refused.append(f"--take {take.side}:{take.hash}:{item.old_path}: a forget removed it for good")
+            continue
         found = names.covers(item, new_body)
         report.covered += bool(found)
         report.sample = report.sample or item.old_path

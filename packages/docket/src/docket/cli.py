@@ -23,6 +23,9 @@ from docket import __version__, briefs, console, decisions, index, questions, re
 from docket.curate import batch as curate
 from docket.documents import scan as documents_scan
 from docket.errors import DocketError
+from docket.forget import now as forget_now
+from docket.forget import plan as forget_plan
+from docket.forget import rewrite as forget_rewrite
 from docket.imports import notes
 from docket.index import flags as index_flags
 from docket.index.build import db_path
@@ -785,6 +788,91 @@ def staging_promote(source: SourceOption = None, vault: VaultOption = None) -> N
         typer.echo("nothing ready")
 
 
+@app.command("forget")
+def forget_command(
+    rids: Annotated[
+        list[str] | None, typer.Argument(metavar="[RID]...", help="The rids to forget, each with what is under it.")
+    ] = None,
+    *,
+    never_store: Annotated[
+        bool, typer.Option("--never-store", help="Each record in raw a never-store list in force matches now.")
+    ] = False,
+    held: Annotated[bool, typer.Option("--held", help="Each record in raw under a hold not released.")] = False,
+    source: SourceOption = None,
+    check_rewrite: Annotated[
+        Path | None,
+        typer.Option(
+            "--check-rewrite", help="A forget's rewrite folder: check it leaves HEAD as it is, and name each branch."
+        ),
+    ] = None,
+    now: Annotated[
+        bool,
+        typer.Option("--now", help="Forget for good, at your own console, on your OS prompt or a code typed back."),
+    ] = False,
+    vault: VaultOption = None,
+) -> None:
+    """Forget records for good, on every clone: their lines, their docs' lines and their audio, with its keys. Without
+    --now it only says what it would take, in counts and line numbers; --now asks at your own console, and Claude
+    Code's shell, a pipe or a redirect is refused. The text stays in git's history: the forget writes how to take it
+    out, and never does."""
+    if now:
+        # Before anything is read (DR-0577).
+        forget_now.refuse()
+    kinds = [k for k, on in (("rids", bool(rids)), ("never-store", never_store), ("held", held)) if on]
+    if check_rewrite is not None:
+        if kinds or source is not None or now:
+            raise DocketError("--check-rewrite takes a rewrite folder and the vault, nothing else")
+        _check_rewrite(find_vault(vault), check_rewrite)
+        return
+    if len(kinds) != 1:
+        raise DocketError("name the rids to forget, or give --never-store or --held: one kind a call")
+    kind = cast(forget_plan.Kind, kinds[0])
+    found = find_vault(vault)
+    if not now:
+        plan = forget_plan.make(found, kind, rids or [], source)
+        say_all(forget_plan.lines(plan, screen=False))
+        if plan.taken and not plan.stops:
+            unfilled: list[tuple[str, str]] = []
+            say(f"next      run in your own terminal: {forget_plan.command(plan, unfilled)}")
+            for name, value in unfilled:
+                say(f"          <{name}> is {value}: put it in by hand, quoted as your shell reads it")
+        return
+    done = forget_now.forget(found, kind, rids or [], source)
+    if done.answer is None or done.applied is None:
+        say_all(done.lines if done.answer is None else ["kept      nothing was forgotten"])
+        return
+    applied = done.applied
+    commit = f", committed {applied.commit[:12]}" if applied.commit else ""
+    say(
+        f"forgot    {applied.records} record(s), {applied.media} media file(s), {applied.docs + applied.removed} "
+        f"doc(s); {applied.keys} key(s) deleted here{commit}"
+    )
+    for doc_id in applied.left:
+        say(
+            f"left      {doc_id}: the forget's rev wasn't written; fix the edit, and the next gate call writes it "
+            "(--check-rewrite refuses until then)"
+        )
+    if done.index_problem is not None:
+        say(f"index     refused until rebuilt: {done.index_problem}")
+    else:
+        say("index     rebuilt without what was forgotten")
+    say("keys      make a new key export now: the ones made before hold the forgotten keys")
+    say_all(done.lines)
+
+
+def _check_rewrite(vault: Vault, folder: Path) -> None:
+    checked = forget_rewrite.check(vault, folder)
+    for branch, changes in checked.branches.items():
+        say(f"branch    {branch} still holds what the forget took: merge the forget into it, or delete it, first")
+        say_all([f"          {change}" for change in changes])
+    if not checked.refused:
+        say("rewrite   HEAD and your files outside the vault stay as they are: it takes only what the forget took")
+        return
+    say("rewrite   refused: it would change HEAD or a file outside the vault, so don't run it")
+    say_all([f"          {problem}" for problem in checked.refused])
+    raise typer.Exit(1)
+
+
 def _entry_line(entry: Entry) -> str:
     staged = entry.staged
     record = staged.record
@@ -1022,6 +1110,8 @@ def media_keys_export(
         say("keys     not exported: nothing was confirmed, and no file was written")
     else:
         say("keys     not exported: the passphrase wasn't confirmed")
+    if done.forgotten:
+        say(f"keys     {done.forgotten} forgotten key(s) left out: a forget listed them")
 
 
 @media_keys_app.command("import")
@@ -1031,7 +1121,8 @@ def media_keys_import(
 ) -> None:
     """Add the media keys an export holds and this clone lacks, after its passphrase. Only at your own console."""
     done = media_backup.import_keys(find_vault(vault), source)
-    say(f"keys     {done.added} added, {done.had} held already")
+    forgot = f", {done.forgotten} skipped: a forget listed them" if done.forgotten else ""
+    say(f"keys     {done.added} added, {done.had} held already{forgot}")
 
 
 @media_keys_app.command("init")

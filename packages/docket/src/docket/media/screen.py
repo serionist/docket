@@ -8,6 +8,7 @@ recording, and what was said, and cut, is in the transcript under it. Thread and
 
 | Check | Fails when |
 |---|---|
+| forgotten | the rid, or a rid under it, was forgotten whole: the forgotten list's `media` holds it (DR-0579) |
 | its record | no version of the rid is staged or in raw |
 | its source and text | the source isn't in force, is off or private; a record of it matches a never-store value |
 | the owner's decisions | withheld; classified private, or decided before kinds were kept; cut by characters |
@@ -32,6 +33,7 @@ from docket.media import ranges as cut_ranges
 from docket.media.ranges import Needed, Range
 from docket.vault import neverstore
 from docket.vault.config import VaultConfig
+from docket.vault.forgotten import EMPTY, Forgotten
 from docket.vault.holds import Holds
 from docket.vault.records import RawRecord
 from docket.vault.releaselog import Releases
@@ -52,6 +54,7 @@ class Screen:
     holds: Holds
     releases: Releases
     left_out: Callable[[RawRecord], bool]
+    listed: Forgotten = EMPTY
     _nested: dict[str, list[str]] = field(default_factory=dict[str, list[str]])
     _logged: dict[str, dict[tuple[str, str], tuple[Range, ...]]] = field(
         default_factory=dict[str, dict[tuple[str, str], tuple[Range, ...]]]
@@ -70,6 +73,8 @@ class Screen:
 
     def plan(self, rid: str, *, committing: bool = False) -> Needed | str:
         """The ranges a rid's media must be cut by, or why it can't be staged or stored now."""
+        if self.listed.media_refused(rid):
+            return forgotten_refusal(rid)[1]
         own = [e.staged.record for e in self.staged if e.staged.record.rid == rid]
         raw_own = self.raw.versions(rid)
         if not own and not raw_own:
@@ -102,7 +107,7 @@ class Screen:
         staged under it, except while its source is only off (DR-0570)."""
         staged = [e.staged.record for e in self.staged if layout.in_family(rid, e.staged.record.rid)]
         records = [*staged, *(r for other in self._family_in_raw(rid) for r in self.raw.versions(other))]
-        return refusal(rid, self.config, records, self.decided, self.withheld)
+        return refusal(rid, self.config, records, self.decided, self.withheld, listed=self.listed)
 
     def cut_by(self, rid: str, path: Path) -> tuple[Range, ...]:
         """What the rid's stored file was cut by: the cut log's line for its key (DR-0562); none for a file stored as it
@@ -118,18 +123,31 @@ class Screen:
         return self._nested[rid]
 
 
-# Why nothing of a family may be kept, by kind: dropped as private, for a never-store value, or its source only off.
-Refusal = tuple[Literal["private", "never-store", "off"], str]
+# Why nothing of a family may be kept, by kind: forgotten, dropped as private, for a never-store value, or its source
+# only off.
+Refusal = tuple[Literal["forgotten", "private", "never-store", "off"], str]
+
+
+def forgotten_refusal(rid: str) -> Refusal:
+    return "forgotten", f"{rid} was forgotten: no media is stored on it again"
 
 
 def refusal(
-    rid: str, config: VaultConfig, records: Sequence[RawRecord], decided: Decided, withheld: frozenset[str]
+    rid: str,
+    config: VaultConfig,
+    records: Sequence[RawRecord],
+    decided: Decided,
+    withheld: frozenset[str],
+    *,
+    listed: Forgotten = EMPTY,
 ) -> Refusal | None:
-    """Why nothing of a rid's family may be kept now, by the source and the owner's decisions, or None: the source not
-    in force or private; a version of a record of it (`records`, staged or in raw) matching a never-store value; the
-    rid withheld; a private decision on a record of it (DR-0547, DR-0561); else the source off. Off comes last: its
-    callers let a family that is only off go on, and one an off source holds can still be withheld. The screen and
-    the reader both ask it."""
+    """Why nothing of a rid's family may be kept now, by the forgotten list, the source and the owner's decisions, or
+    None: the rid forgotten whole, or a rid under it (DR-0579); the source not in force or private; a version of a
+    record of it (`records`, staged or in raw) matching a never-store value; the rid withheld; a private decision on a
+    record of it (DR-0547, DR-0561); else the source off. Off comes last: its callers let a family that is only off go
+    on, and one an off source holds can still be withheld. The screen and the reader both ask it."""
+    if listed.media_refused(rid):
+        return forgotten_refusal(rid)
     source = layout.source_of(rid)
     entry = config.sources.get(source)
     if entry is None:

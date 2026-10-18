@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -216,8 +217,10 @@ class KeyStore:
             return frozenset()
         return frozenset(i for i in cast(list[Any], ids) if isinstance(i, str))
 
-    def mark_exported(self, ids: list[str]) -> None:
-        held = sorted(self.exported() | set(ids))
+    def mark_exported(self, ids: list[str], *, without: Collection[str] = ()) -> None:
+        """Record the ids an export holds, and leave out `without`, the keys a forget listed, which no export may say
+        it holds (DR-0595)."""
+        held = sorted((self.exported() | set(ids)) - set(without))
         self._write(self.folder / EXPORTED, json.dumps({"schema_version": 1, "ids": held}).encode("utf-8"))
 
     def unbacked(self) -> int:

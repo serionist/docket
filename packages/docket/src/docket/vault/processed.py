@@ -283,7 +283,10 @@ class DocMeta(BaseModel):
                 raise ValueError(f"type {self.type!r} isn't one of {', '.join(DOC_TYPES)}")
             log.warning("%s has a type this Docket doesn't know: %s", self.id, self.type)
         cites_only = bool(info.context and info.context.get("cites_only"))
-        if not self.covers and self.type != "legacy-note" and not lenient and not cites_only:
+        # A confirmed or rejected decision whose evidence a forget took keeps its title and links, and nothing else
+        # (DR-0580): the one doc that may cover nothing with no line citing anything.
+        forgotten = bool(info.context and info.context.get("no_content")) and self.status in ("confirmed", "rejected")
+        if not self.covers and self.type != "legacy-note" and not lenient and not cites_only and not forgotten:
             raise ValueError("covers names at least one rid, unless no line has a raw anchor and lines cite doc lines")
         if self.type != "legacy-note" and (self.old_paths or self.import_hash is not None):
             if not lenient:
@@ -467,7 +470,12 @@ def parse_doc(text: str, *, lenient: bool = False) -> ProcessedDoc:
         if extra:
             log.warning("a doc has keys this Docket doesn't know, kept as they are: %s", ", ".join(sorted(extra)))
     # Only a strict read asks whether the body cites doc lines alone: a lenient one never refuses empty covers.
-    context = {"lenient": lenient, "cites_only": not lenient and cites_only(lines[close + 1 :])}
+    body = lines[close + 1 :]
+    context = {
+        "lenient": lenient,
+        "cites_only": not lenient and cites_only(body),
+        "no_content": not lenient and "content" not in line_roles(body),
+    }
     try:
         meta = DocMeta.model_validate(fields, context=context)
     except ValidationError as e:

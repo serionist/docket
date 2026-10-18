@@ -6,6 +6,7 @@ goes to the MCP SDK's app, the rest to FastAPI, where the web app (`docket.web`)
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import AsyncExitStack, asynccontextmanager
 
@@ -89,6 +90,8 @@ def create_app(settings: Settings, *, sessions: Sessions | None = None) -> Servi
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         async with AsyncExitStack() as stack:
+            # Before anything reads the vault: a forget's keys leave this clone even if it never makes a gate call.
+            await asyncio.to_thread(service.drop_forgotten_keys)
             stack.callback(service.writer.close)
             # Open runs live in memory: a stopping service drops them and takes its marker away.
             stack.callback(service.runs.close_all)

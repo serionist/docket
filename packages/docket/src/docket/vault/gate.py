@@ -1,10 +1,12 @@
 """The staging gate: the only way a record from a source reaches the raw log (DR-0596).
 
-Intake drops in memory what a private source or a never-store list names, so a dropped record never touches the disk,
-then redacts the rest and stages it: `ready` from a work source, `pending` from a mixed one or when the record was
-decided by hand before. Classification (by the user or Claude) makes a pending record ready, with cuts, or drops it.
-Promotion cuts, redacts again with the current rules and writes one run per source. Every call first sweeps staging
-against the current vault.yaml and reads the hold lists: a record on hold is never staged, classified or promoted.
+Intake drops in memory what the forgotten list takes, before any other rule, then what a private source or a
+never-store list names, so a dropped record never touches the disk, then redacts the rest and stages it: `ready` from a
+work source, `pending` from a mixed one or when the record was decided by hand before. Classification (by the user or
+Claude) makes a pending record ready, with cuts, or drops it. Promotion cuts, redacts again with the current rules and
+writes one run per source. Every call first sweeps staging against the current vault.yaml and reads the hold lists: a
+record on hold is never staged, classified or promoted. Before that it applies the forgotten list on this clone
+(DR-0581).
 
 It reads the release logs with them (DR-0201): a record under a released id goes in only with the release's cuts, at
 intake and again at promotion, and one without segments only when the release keeps it; the rest is left out and only
@@ -40,9 +42,10 @@ from docket.media.keystore import KeyStore
 from docket.media.screen import Screen
 from docket.speech import follow
 from docket.vault import cuts as cutting
-from docket.vault import holds, inforce, neverstore, releaselog
+from docket.vault import forgotten, holds, inforce, neverstore, releaselog
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.cuts import CUT_MARKER, Cut
+from docket.vault.forgotten import Forgotten
 from docket.vault.host import Lfs, lfs_state
 from docket.vault.records import TRANSCRIBED_VIA, RawRecord, version
 from docket.vault.redact import Redactor, markers
@@ -172,6 +175,9 @@ class Gate:
         self._waiting = False
         self.keys = KeyStore(vault.home)
         self._media_dropped = 0
+        # One pass of intake over this gate's batches, in their order: a folder file the list takes takes its parts
+        # with it, in a later batch too (DR-0579).
+        self._intake = forgotten.EMPTY.reading()
 
     def stage(self, records: Iterable[RawRecord]) -> StageResult:
         """Take records from a connector: drop, skip or stage each one."""
@@ -196,9 +202,15 @@ class Gate:
             decided = self.staging.decided()
             cut_in_staging = _cut_rids(scan)
             redactor = Redactor.from_config(config.redaction)
+            listed = self._listed()
             # The order promotion keeps (DR-0488): after everything staging holds, then in the batch's order.
             now = max([datetime.now(UTC), *(e.staged.staged_at + TICK for e in scan.entries)])
             for record in batch:
+                if self._intake.skips(record, versions=False):
+                    # Before every other rule (DR-0579): a whole rid's media goes and stays out, as for never-store.
+                    self._drop_media(record.rid, withhold=listed.whole(record.rid))
+                    result.dropped["forgotten"] += 1
+                    continue
                 sensitivity = config.sources[record.source].sensitivity
                 if sensitivity == "private":
                     self._drop_media(record.rid, withhold=False)
@@ -223,6 +235,12 @@ class Gate:
                         continue
                 redacted, counts = redactor.record(taken)
                 redacted = redacted.model_copy(update={"v": version(redacted), "run": ""})
+                if listed.covers(redacted):
+                    # A version forgotten alone is listed as raw held it: cut by its release and redacted, so known
+                    # only now. A release's cut version is another, and comes in.
+                    self._drop_media(record.rid, withhold=False)
+                    result.dropped["forgotten"] += 1
+                    continue
                 if release is not None and not redacted.segments and not release.keeps(redacted):
                     self._drop_media(record.rid, withhold=False)
                     result.dropped["left-out"] += 1
@@ -414,6 +432,22 @@ class Gate:
 
     # -- inside the gate -------------------------------------------------------------------------------------------
 
+    def _listed(self) -> Forgotten:
+        """The forgotten list in force (DR-0579), and intake's pass over it, begun again when what it takes moved."""
+        listed = self.vault.rawlog.listed()
+        if listed.digest != self._intake.listed.digest:
+            self._intake = listed.reading()
+        return listed
+
+    def _apply(self) -> int:
+        """The forgotten list applied on this clone before anything else is read (DR-0581): how many staged versions it
+        dropped. The forget's modules import the gate's: imported here."""
+        from docket.forget import apply  # noqa: PLC0415
+
+        done = apply.apply(self.vault, self.keys)
+        self._media_dropped += done.staged_media
+        return done.staged
+
     def _drop_media(self, rid: str, *, withhold: bool) -> None:
         """Before a version of `rid` goes: the staged media on it and on each rid it nests under, then, for a drop
         for a never-store value or as private, the withheld marks (DR-0547)."""
@@ -441,6 +475,7 @@ class Gate:
                 holds=self._holds,
                 releases=self._releases,
                 left_out=self._left_out,
+                listed=self._listed(),
             )
         finally:
             if index is not None:
@@ -755,11 +790,13 @@ class Gate:
         self._holds = holds.read_all(self.vault.root)
         self._releases = releaselog.read_all(self.vault.root)
         self.staging.clear_temp()
+        dropped = Counter[str]()
+        if forgotten_now := self._apply():
+            dropped["forgotten"] += forgotten_now
         self._refresh_cuts()
         scan = self.staging.scan()
         decided = self.staging.decided()
         cut_in_staging = _cut_rids(scan)
-        dropped = Counter[str]()
         for entry in scan.entries:
             staged = entry.staged
             source = config.sources.get(staged.record.source)
@@ -852,13 +889,17 @@ class Gate:
             raise DocketError(f"source {record.source!r} isn't in vault.yaml")
         if not source.enabled:
             raise DocketError(f"source {record.source!r} is disabled in vault.yaml")
+        listed = self._listed()
+        if listed.covers(record, versions=False):
+            return "forgotten"
         if source.sensitivity == "private":
             return "private source"
         if neverstore.match(record, config.never_store):
             return "never-store"
         # The rules vault.yaml turns on, as intake applies them (DR-0190), so a held record reads as it would be staged.
         redacted, _ = Redactor.from_config(config.redaction).record(record)
-        return redacted.model_copy(update={"v": version(redacted), "run": ""})
+        redacted = redacted.model_copy(update={"v": version(redacted), "run": ""})
+        return "forgotten" if listed.covers(redacted) else redacted
 
     def _refresh_cuts(self) -> None:
         """The rids whose raw text holds a cut marker, from the run files this gate hasn't read yet; with each rid's

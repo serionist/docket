@@ -23,7 +23,7 @@ from docket.recall import DocView
 from docket.service.speech import line as speech_line
 from docket.service.state import Service
 from docket.service.writer import IndexBuildingError
-from docket.vault import holds
+from docket.vault import forgotten, holds
 from docket.vault.records import RID, is_native_id, owning_id, source_name_problem
 from docket.vault.spans import RawLookup, is_transcript
 from docket.vault.vault import Vault
@@ -48,7 +48,7 @@ def gather(vault: Vault, state: RecordingState) -> Facts:
     with recall.raw_lookup(vault) as lookup:
         record = lookup.latest(rid)
         if record is None:
-            return Facts(rid, tz, held=_held(vault, rid))
+            return Facts(rid, tz, held=_held(vault, rid), forgotten=forgotten.load(vault.root, vault.home).whole(rid))
         # A transcript is read with the recording it is under (DR-0391); one under none is a recording of its own.
         above = lookup.recordings(record) if is_transcript(record) else []
         recording = (lookup.latest(above[0]) if above else None) or record
@@ -90,6 +90,7 @@ def gather(vault: Vault, state: RecordingState) -> Facts:
 # The media reader's state, as the page says it: `ok` is stored, and plays once the page has a player.
 AUDIO: dict[reader.State, NoAudio] = {
     "ok": "stored",
+    "forgotten": "forgotten",
     "not-fetched": "not-fetched",
     "staged": "staged",
     "held": "held",

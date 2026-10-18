@@ -95,7 +95,18 @@ def test_a_held_recording_s_audio_waits(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "state",
-    ["not-fetched", "staged", "held", "withheld", "recut", "cut-by-characters", "not-downloaded", "no-key", "stored"],
+    [
+        "forgotten",
+        "not-fetched",
+        "staged",
+        "held",
+        "withheld",
+        "recut",
+        "cut-by-characters",
+        "not-downloaded",
+        "no-key",
+        "stored",
+    ],
 )
 def test_the_recording_page_says_why_it_plays_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str

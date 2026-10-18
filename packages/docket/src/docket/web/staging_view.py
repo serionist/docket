@@ -19,6 +19,7 @@ from urllib.parse import urlencode
 
 from starlette.datastructures import QueryParams
 
+from docket.copied import filled
 from docket.errors import DocketError
 from docket.vault import cuts as cutting
 from docket.vault.anchors import format_time
@@ -30,7 +31,6 @@ from docket.vault.redact import Redactor
 from docket.vault.releaselog import Releases
 from docket.vault.segments import segments
 from docket.vault.staging import Entry, Staged, State
-from docket.web.commands import filled
 
 PATH = "/staging"
 PANEL = "/staging/panel"

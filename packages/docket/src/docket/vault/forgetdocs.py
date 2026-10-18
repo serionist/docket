@@ -83,6 +83,18 @@ def _refs(doc: ProcessedDoc) -> list[tuple[int, DocRef]]:
     return [(n, ref) for n, line, role in doc.roles() if role == "content" for ref in trailing_anchors(line).refs]
 
 
+def citing(docs: Iterable[ProcessedDoc], cited: Collection[str]) -> set[str]:
+    """The ids of the docs among `docs` whose refs lead to one of `cited`, directly or through another of them: the
+    docs whose fate a change to those can change."""
+    refs = {doc.meta.id: {ref.doc for _, ref in _refs(doc)} for doc in docs}
+    found: set[str] = set()
+    frontier = set(cited)
+    while frontier:
+        frontier = {doc_id for doc_id, names in refs.items() if doc_id not in found and names & frontier}
+        found |= frontier
+    return found
+
+
 def anchored(doc: ProcessedDoc, raw: Raw) -> set[int]:
     """The content lines with a raw anchor on the family. A short anchor reads on the doc's one covered record."""
     if doc.meta.type == LEGACY:

@@ -28,7 +28,7 @@ from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.git import DOC_LINE, Git, Identity, SyncResult
 from docket.vault.home import Home, is_git_dir, stopped_convert
 from docket.vault.lock import VaultLock
-from docket.vault.rawlog import RUN_FILE, RawLog, parse_run_file
+from docket.vault.rawlog import RUN_FILE, RawLog, lines_of, parse_run_file, record_of
 from docket.vault.records import RawRecord
 
 log = logging.getLogger(__name__)
@@ -328,6 +328,18 @@ class Vault:
         if unmerged:
             raise UnmergedError(f"{', '.join(unmerged)} in {self.root} has a conflict; resolve it before Docket writes")
 
+    def blocked(self) -> str | None:
+        """Why Docket can't change the tree now, asked before a writer changes a tracked file it commits later: a
+        rebase, merge, cherry-pick or revert under way, a detached HEAD, or unmerged paths, each the owner's to finish
+        (DR-0528, DR-0597). A rebase a killed sync of ours left is undone first, as every write does. None when it
+        can."""
+        try:
+            self._recover()
+            self.refuse_unmerged()
+        except DocketError as e:
+            return str(e)
+        return None
+
     # -- checking ------------------------------------------------------------------------------------------------
 
     def check(self) -> list[Problem]:
@@ -337,7 +349,10 @@ class Vault:
         problems: list[Problem] = []
         raw = self.root / "raw"
         # A line a forget took is no record of its run's to count twice, and is never named (DR-0579).
-        reading = self.rawlog.listed().reading()
+        listed = self.rawlog.listed()
+        reading = listed.reading()
+        if listed.problem is not None:
+            problems.append(Problem(forgotten.FORGOTTEN, listed.problem))
         for path in sorted(raw.rglob("*")) if raw.is_dir() else []:
             if not path.is_file() or path.name == ".gitkeep":
                 continue
@@ -361,7 +376,12 @@ class Vault:
                         problems.append(Problem(f"{rel}:{n}", f"{record.rid} is in this run twice"))
                     seen.add((record.rid, record.v))
         problems.extend(
-            Problem(rel, "changed or deleted after it was committed; raw files are written once")
+            Problem(
+                rel,
+                "a forget took listed lines out and isn't committed yet; the next gate call commits it"
+                if self._forget_unfinished(listed, rel)
+                else "changed or deleted after it was committed; raw files are written once",
+            )
             for rel in self.git.changed_against_head("raw")
         )
         hidden: dict[tuple[str, str], list[str]] = {}
@@ -378,6 +398,21 @@ class Vault:
         problems.extend(Problem(rel, message) for rel, message in attribute_mismatches(self.root))
         problems.extend(self._doc_rev_problems())
         return problems
+
+    def _forget_unfinished(self, listed: forgotten.Forgotten, rel: str) -> bool:
+        """Whether a run file differs from HEAD's only by lines the forgotten list takes: a forget's apply whose commit
+        hasn't landed (DR-0581), never a raw file changed by hand."""
+        path = self.root / rel
+        if not listed.acts or not path.is_file():
+            return False
+        reading = listed.reading()
+        # A line that doesn't read as a record is kept, as the apply keeps it: only a listed line leaves a run file.
+        left = [
+            line
+            for line in lines_of(self.git.out("cat-file", "blob", f"HEAD:./{rel}"))
+            if not (line.strip() and (record := record_of(line)) is not None and reading.skips(record))
+        ]
+        return "".join(left) == path.read_bytes().decode("utf-8", errors="replace")
 
     def _doc_rev_problems(self) -> list[Problem]:
         """A doc rev that two commits claim: the user's own merge can bring one from each side, which Docket's sync

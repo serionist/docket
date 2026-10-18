@@ -16,6 +16,7 @@ from forget_kit import AT, forget, stored, write_raw_file
 
 from docket.documents import records as documents
 from docket.documents import scan
+from docket.forget import apply as forget_apply
 from docket.imports import notes
 from docket.vault import cursors, rawlog
 from docket.vault.config import SourceConfig
@@ -132,7 +133,9 @@ SAID = [
 ]
 
 
-def test_a_forgotten_family_gets_no_whisper_version_from_the_follow(tmp_path: Path) -> None:
+def test_a_forgotten_family_gets_no_whisper_version_from_the_follow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     config = make_config()
     config.sources = {"plaud": SourceConfig()}
     vault = Vault.init(tmp_path / "vault", config, "test-box")
@@ -147,15 +150,21 @@ def test_a_forgotten_family_gets_no_whisper_version_from_the_follow(tmp_path: Pa
     gate.stage([make_record(rid=CALL, kind="recording", title="Crane check", text="", **UNDER)])
     gate.stage([make_record(rid=transcript, kind="transcript", segments=SAID, text=said, **UNDER), heard])
     gate.promote()
-    forget(vault, rids=[CALL])
-    # A later version of the transcript, cut by hand: without the list, the follow would cut Whisper's to match.
+    # A later version of the transcript, cut by hand: without the list, the follow would cut Whisper's to match. It is
+    # staged before the forget, since intake drops it after.
     newer = [*SAID, {"start_ms": 30_000, "end_ms": 31_000, "speaker": "Ada Example", "text": "Bye."}]
     gate.stage(
         [make_record(rid=transcript, kind="transcript", segments=newer, text=said + "\nAda Example: Bye.", **UNDER)]
     )
     gate.classify(transcript, "work", cuts=[Cut(start=10_000, end=20_000, unit="ms")])
+    forget(vault, rids=[CALL])
+    # The apply off, so the listed lines stay in the run files as a merge brings one back: the cut scan reads them.
+    monkeypatch.setattr(forget_apply, "apply", lambda vault, keys, first=False: forget_apply.Applied())
+    # followed == 0 alone would hold through RawLookup too: the follow reads each family's latest version through it,
+    # and it skips the listed Whisper line.
     assert gate.promote().followed == 0
-    # The cut scan never read the forgotten Whisper transcript's marks, so the follow had no family to cut.
+    # What pins the cut scan's own skip: it never read the forgotten Whisper transcript's marks, so the follow had no
+    # family to cut.
     assert f"{CALL}/whisper" not in gate._seen.latest  # pyright: ignore[reportPrivateUsage]
     lines = [line for run in vault.rawlog.stamped() for line in run[0].path.read_text(encoding="utf-8").splitlines()]
     assert sum(f'"rid":"{CALL}/whisper"' in line for line in lines) == 1
@@ -211,6 +220,9 @@ PLACES = {
     ("vault/gate.py", "Gate._uncommitted_runs_with"): "looks for a rid in what the next commit takes, listed or not",
     ("documents/scan.py", "_Holdings.__init__"): "skips: the folder scan's holdings",
     ("imports/notes.py", "_latest"): "through RawLog.iter_records",
+    ("forget/apply.py", "apply"): "skips: takes the listed lines out of the run files that moved",
+    ("forget/plan.py", "_held"): "through RawLog.iter_records",
+    ("forget/plan.py", "_After.__init__"): "through RawLog.iter_records, under the list with the forget's line",
 }
 
 

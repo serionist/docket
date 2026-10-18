@@ -112,14 +112,14 @@ agrees in the issue or, under an autonomy grant, with its decision recorded as p
 - the vault's format: its layout, run-file names and where Docket's own files live (DR-0141), the raw record's version
   (DR-0020), `vault.yaml` (DR-0021), its `storage` (DR-0140), its redaction keys (DR-0192) and its `api_provider`
   (DR-0537), the vault's own `.gitattributes` (DR-0142), staging's files and states (DR-0024), the processed doc's
-  format (DR-0109), the anchor grammar (DR-0198), a transcript's segments as a record field (DR-0111), doc revisions as
-  the commits that wrote them (DR-0112), entity files (DR-0113), a transcript's text rendered by the core (DR-0120),
-  hold lists (DR-0121), release logs (DR-0200), a cut record's fidelity (DR-0126), a legacy note's old paths and import
-  hash (DR-0130), old paths as locators (DR-0131), each machine's cursor file (DR-0245), the curate log's path, lines
-  and keys (DR-0460, DR-0461), a folder source's rids, `<source>:<12 hex>` with `/page<n>`, `/slide<n>` and `/sheet<n>`
-  under them (DR-0482), media's paths, staged and stored, and its sidecar and withheld marks (DR-0547), the sidecar's
-  cuts and `_decided.jsonl`'s kinds (DR-0561), the media cut log and the sidecar's replaced keys (DR-0562), a Whisper
-  transcript's rid suffix `/whisper`, its engine string and its `via` (DR-0570), the forgotten list (DR-0579);
+  format (DR-0109, DR-0580), the anchor grammar (DR-0198), a transcript's segments as a record field (DR-0111), doc
+  revisions as the commits that wrote them (DR-0112), entity files (DR-0113), a transcript's text rendered by the core
+  (DR-0120), hold lists (DR-0121), release logs (DR-0200), a cut record's fidelity (DR-0126), a legacy note's old paths
+  and import hash (DR-0130), old paths as locators (DR-0131), each machine's cursor file (DR-0245), the curate log's
+  path, lines and keys (DR-0460, DR-0461), a folder source's rids, `<source>:<12 hex>` with `/page<n>`, `/slide<n>` and
+  `/sheet<n>` under them (DR-0482), media's paths, staged and stored, and its sidecar and withheld marks (DR-0547), the
+  sidecar's cuts and `_decided.jsonl`'s kinds (DR-0561), the media cut log and the sidecar's replaced keys (DR-0562), a
+  Whisper transcript's rid suffix `/whisper`, its engine string and its `via` (DR-0570), the forgotten list (DR-0579);
 - a source's mapper interface (DR-0119), and the names and keys of a source in `vault.yaml` (DR-0124, DR-0125),
   `folder` and `exclude` (DR-0481) and `media_folders` (DR-0548) among them;
 - the question file `docket eval` reads (DR-0290) and its speech file (DR-0571); the user config's `speech` (DR-0568);
@@ -130,8 +130,8 @@ agrees in the issue or, under an autonomy grant, with its decision recorded as p
 - the plugin's skill and hook names: `recall`, `setup`, `cuts` (DR-0207), `curate` (DR-0472), `brief` (DR-0555), `decision` (DR-0563), the SessionStart
   hook running `docket hook session-start` (DR-0161), and the PostToolUse hook running `docket hook post-tool-use`
   for `mcp__.*`, with its line prefixes (DR-0242);
-- the release's yes: only the owner releases a held recording, at their own console, on the OS prompt or a code typed
-  back where it has none (DR-0572), and no page, route or tool releases one (DR-0202, DR-0382). It reaches git for good.
+- the release's and the forget's yes: only the owner releases or forgets, at their own console, on the OS prompt or
+  a code typed back (DR-0572); no page, route or tool does either (DR-0202, DR-0382, DR-0577); both last for good.
 - the gate's loosening: pages make only the `vault.yaml` changes on DR-0506's list (a never-store value added, a
   redaction rule or pattern turned on, a source made stricter or turned off), held by `loosens()` and a scan; every
   other change is named, never made by a page, route or tool. A loosening applies only once committed, the gate

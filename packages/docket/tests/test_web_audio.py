@@ -118,7 +118,18 @@ def test_the_audio_is_served_by_exact_byte_ranges_and_never_cached(client: TestC
 
 
 @pytest.mark.parametrize(
-    "state", ["not-fetched", "staged", "held", "withheld", "recut", "cut-by-characters", "not-downloaded", "no-key"]
+    "state",
+    [
+        "forgotten",
+        "not-fetched",
+        "staged",
+        "held",
+        "withheld",
+        "recut",
+        "cut-by-characters",
+        "not-downloaded",
+        "no-key",
+    ],
 )
 def test_every_state_but_ok_plays_nothing_and_says_why(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, state: str

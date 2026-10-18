@@ -30,11 +30,12 @@ from pydantic import BaseModel, Field
 
 from docket.documents import records as documents
 from docket.errors import DocketError
+from docket.forget import apply as forget_apply
 from docket.index import flags, lookup
 from docket.index import update as index_update
 from docket.index.build import open_index
 from docket.index.lookup import ReadIndex
-from docket.vault import decision_form, legacy
+from docket.vault import decision_form, forgotten, legacy
 from docket.vault.anchors import (
     Anchor,
     AnchorError,
@@ -46,6 +47,7 @@ from docket.vault.anchors import (
     trailing_anchors,
 )
 from docket.vault.docstore import DocStore, PutResult
+from docket.vault.forgotten import Forgotten
 from docket.vault.processed import DOC_TYPES, ProcessedDoc, parse_doc
 from docket.vault.records import RawRecord
 from docket.vault.segments import segments
@@ -83,6 +85,8 @@ class DocView(BaseModel):
     old_paths: list[str] = Field(default_factory=list[str])
     text: str
     lines: list[DocLine]
+    # What a reader is told of the doc as a whole: a final decision a forget left with no evidence (DR-0580).
+    note: str | None = None
 
 
 class CitingLine(BaseModel):
@@ -236,6 +240,7 @@ class _Call:
         self.raw = RawLookup(vault.root, self._index)
         self._every: list[ProcessedDoc] | None = None
         self._supersedes: list[tuple[str, list[str]]] | None = None
+        self._listed: Forgotten | None = None
 
     def _ask(self) -> ReadIndex | None:
         index = self._index()
@@ -275,8 +280,38 @@ class _Call:
             return self.store.at_paths(index.covering(rid))
         return [d for d in self._all() if rid in d.meta.covers]
 
+    def listed(self) -> Forgotten:
+        """The forgotten list in force, read once for the call."""
+        if self._listed is None:
+            self._listed = forgotten.load(self.store.vault.root, self.store.vault.home)
+        return self._listed
+
+    def left(self, doc: ProcessedDoc) -> ProcessedDoc:
+        """A doc as the forget leaves it (DR-0580): the lines the docs' rule drops left out, so a doc the apply hasn't
+        rewritten yet reads as it will. One the rule removes is forgotten."""
+        listed = self.listed()
+        if not listed.digest:
+            return doc
+        skipped = forget_apply.skipped(self.store.vault.home)
+        fate = forget_apply.judge(self.store, [doc], forget_apply.Left(self.raw, listed, skipped), listed).get(
+            doc.meta.id
+        )
+        if fate is None:
+            return doc
+        if fate.doc is None:
+            raise DocketError(f"{doc.meta.id} was forgotten: no line of it is left")
+        return fate.doc
+
     def close(self) -> None:
         self._index.close()
+
+
+def absent(root: Path, rid: str) -> str:
+    """Why a rid reads as nothing: a forget took it, or the raw log never held it."""
+    listed = forgotten.at(root)
+    if listed.whole(rid) or listed.versioned(rid):
+        return f"{rid} was forgotten"
+    return f"{rid} isn't in the raw log"
 
 
 def _read(call: _Call, locator: str, view: View, around: int, rev: int | None) -> ReadResult:
@@ -289,11 +324,13 @@ def _read(call: _Call, locator: str, view: View, around: int, rev: int | None) -
     except AnchorError as e:
         raise DocketError(str(e)) from None
     if loc.kind != "record":
-        return _read_doc(call, _load(call.store, loc.kind, loc.value, rev), locator, view)
+        return _read_doc(call, call.left(_load(call.store, loc.kind, loc.value, rev)), locator, view)
     if rev is not None:
         raise DocketError("rev is a doc's revision; for a record, the raw view says how many versions it has")
     versions = call.raw.versions(loc.value)
     if not versions:
+        if call.listed().whole(loc.value) or call.listed().versioned(loc.value):
+            raise DocketError(f"{loc.value} was forgotten: nothing of it is kept")
         hint = " (for a position, write r:<rid>@mm:ss)" if "@" in loc.value or "#" in loc.value else ""
         raise DocketError(f"no record {loc.value} in the raw log{hint}")
     asked = versions[-1].rid
@@ -339,9 +376,9 @@ def _read_path(
     processed = (store.root / "processed").resolve()
     given = Path(os.path.normpath(store.root / path.replace("\\", "/")))
     if given.is_relative_to(processed) and given.is_file():
-        doc = _load(store, "path", str(given), rev)
+        doc = call.left(_load(store, "path", str(given), rev))
     else:
-        doc = _load(store, "doc", call.old_path(path), rev)
+        doc = call.left(_load(store, "doc", call.old_path(path), rev))
     result = _read_doc(call, doc, locator, view)
     result.resolved = doc.meta.id
     if at is None:
@@ -398,7 +435,7 @@ def _verify(call: _Call, doc: str, lines: list[int] | None, window: int) -> Veri
         raise DocketError(str(e)) from None
     if loc.kind == "record":
         raise DocketError(f"{doc} is a record; verify takes a doc: its id or its path")
-    found = _load(call.store, loc.kind, loc.value, None)
+    found = call.left(_load(call.store, loc.kind, loc.value, None))
     lookup = call.raw
     covers = found.meta.covers
     wanted = set(lines) if lines else None
@@ -541,7 +578,7 @@ def _verify_one(lookup: RawLookup, anchor: Anchor, covers: list[str], window: in
         return Span(rid="", anchor=anchor.token, problem="a short anchor needs a doc covering exactly one record")
     versions = lookup.versions(rid)
     if not versions:
-        return Span(rid=rid, anchor=anchor.token, problem=f"{rid} isn't in the raw log")
+        return Span(rid=rid, anchor=anchor.token, problem=absent(lookup.root, rid))
     record = documents.resolving(versions)
     found = span(anchor, record, len(versions), window=window, lookup=lookup)
     if record is not versions[-1]:
@@ -594,6 +631,7 @@ def _read_doc(call: _Call, doc: ProcessedDoc, locator: str, view: View) -> ReadR
             status=meta.status,
             current=None if meta.status is None else meta.status == "confirmed" and not superseded_by,
             old_paths=meta.old_paths,
+            note=decision_form.EVIDENCE_FORGOTTEN if decision_form.evidence_gone(doc) else None,
             text=doc.source,
             lines=[
                 DocLine(
@@ -608,7 +646,7 @@ def _read_doc(call: _Call, doc: ProcessedDoc, locator: str, view: View) -> ReadR
             if versions:
                 result.spans.append(span(Anchor(rid, "record"), versions[-1], len(versions)))
             else:
-                result.spans.append(Span(rid=rid, anchor=f"[r:{rid}]", problem=f"{rid} isn't in the raw log"))
+                result.spans.append(Span(rid=rid, anchor=f"[r:{rid}]", problem=absent(store.root, rid)))
     return result
 
 
