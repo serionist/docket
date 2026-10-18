@@ -34,150 +34,139 @@ def stage(name: str) -> pytest.MarkDecorator:
 
 # -- Windows -------------------------------------------------------------------------------------------------------
 
-windows_only = pytest.mark.skipif(sys.platform != "win32", reason="Windows' own API")
+# Defined on Windows only, where the type checker knows win32's names; elsewhere these tests don't exist.
+if sys.platform == "win32":
 
+    def test_hellos_availability_and_the_device_check_answer_on_windows() -> None:
+        from docket.osprompt import win32
 
-@windows_only
-def test_hellos_availability_and_the_device_check_answer_on_windows() -> None:
-    from docket.osprompt import win32
+        found = windows.availability(win32.Win32())
+        device = windows.has_device(win32.Win32())
+        assert windows.find_with(win32.Win32()) == windows.found_by(found, device)
 
-    found = windows.availability(win32.Win32())
-    device = windows.has_device(win32.Win32())
-    assert windows.find_with(win32.Win32()) == windows.found_by(found, device)
+    def test_a_request_on_a_runner_without_hello_is_never_a_yes() -> None:
+        """The interop call, Docket's own window, the polling and the close, on the runner, where no one is there."""
+        from docket.osprompt import win32
 
+        result = windows.verify(win32.Win32(), "Docket: a CI test", time.monotonic() + 30, threading.Event())
+        assert windows.answer(result) != osprompt.Verified()
 
-@windows_only
-def test_a_request_on_a_runner_without_hello_is_never_a_yes() -> None:
-    """The interop call, Docket's own window, the polling and the close, on the runner, where no one is there."""
-    from docket.osprompt import win32
+    def _readme_lines() -> str:
+        text = README.read_text(encoding="utf-8")
+        found = re.search(r"<!-- the Windows marker's lines -->\s*```powershell\n(.*?)```", text, re.S)
+        assert found is not None, "the README's Windows marker block"
+        return found.group(1)
 
-    result = windows.verify(win32.Win32(), "Docket: a CI test", time.monotonic() + 30, threading.Event())
-    assert windows.answer(result) != osprompt.Verified()
+    def _powershell(script: str) -> None:
+        subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script], check=True)
 
+    @pytest.fixture
+    def readme_marker() -> Iterator[Path]:
+        from docket.osprompt import win32
 
-def _readme_lines() -> str:
-    text = README.read_text(encoding="utf-8")
-    found = re.search(r"<!-- the Windows marker's lines -->\s*```powershell\n(.*?)```", text, re.S)
-    assert found is not None, "the README's Windows marker block"
-    return found.group(1)
+        folder = Path(win32.program_data(), "Docket")
+        assert not folder.exists(), "the runner's ProgramData must start without Docket's folder"
+        _powershell(_readme_lines())
+        try:
+            yield folder / marker.FILE
+        finally:
+            _powershell(f"Remove-Item -Recurse -Force '{folder}'")
 
+    def _token(
+        disable: Sequence[str] = ("S-1-5-32-544",), restrict: Sequence[str] = (), integrity: int = 0x2000
+    ) -> int:
+        """A copy of this process's token as UAC filters an admin's: DISABLE_MAX_PRIVILEGE, the SIDs given deny-only,
+        the integrity given; as an identification token, which AccessCheck takes."""
+        import ctypes
+        from ctypes import wintypes
 
-def _powershell(script: str) -> None:
-    subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script], check=True)
+        from docket.osprompt import win32
 
+        advapi32, kernel32 = win32.dll("advapi32"), win32.dll("kernel32")
 
-@pytest.fixture
-def readme_marker() -> Iterator[Path]:
-    from docket.osprompt import win32
+        class SidAndAttributes(ctypes.Structure):
+            _fields_ = [("Sid", ctypes.c_void_p), ("Attributes", wintypes.DWORD)]
 
-    folder = Path(win32.program_data(), "Docket")
-    assert not folder.exists(), "the runner's ProgramData must start without Docket's folder"
-    _powershell(_readme_lines())
-    try:
-        yield folder / marker.FILE
-    finally:
-        _powershell(f"Remove-Item -Recurse -Force '{folder}'")
+        def sids(texts: Sequence[str]) -> ctypes.Array[SidAndAttributes]:
+            out = (SidAndAttributes * max(len(texts), 1))()
+            for i, text in enumerate(texts):
+                sid = ctypes.c_void_p()
+                assert advapi32.ConvertStringSidToSidW(text, ctypes.byref(sid)), text
+                out[i].Sid = sid.value
+            return out
 
+        process = wintypes.HANDLE()
+        assert advapi32.OpenProcessToken(wintypes.HANDLE(kernel32.GetCurrentProcess()), 0xF01FF, ctypes.byref(process))
+        made = wintypes.HANDLE()
+        off, only = sids(disable), sids(restrict)
+        assert advapi32.CreateRestrictedToken(
+            process, 0x1, len(disable), off, 0, None, len(restrict), only if restrict else None, ctypes.byref(made)
+        ), ctypes.get_last_error()
+        label = sids([f"S-1-16-{integrity}"])
+        label[0].Attributes = 0x20  # SE_GROUP_INTEGRITY
+        size = ctypes.sizeof(SidAndAttributes) + advapi32.GetLengthSid(ctypes.c_void_p(label[0].Sid))
+        assert advapi32.SetTokenInformation(made, 25, label, size), ctypes.get_last_error()
+        copy = wintypes.HANDLE()
+        assert advapi32.DuplicateTokenEx(made, 0x0008, None, 1, 2, ctypes.byref(copy)), ctypes.get_last_error()
+        win32.close_handle(int(made.value or 0))
+        win32.close_handle(int(process.value or 0))
+        return int(copy.value or 0)
 
-def _token(disable: Sequence[str] = ("S-1-5-32-544",), restrict: Sequence[str] = (), integrity: int = 0x2000) -> int:
-    """A copy of this process's token as UAC filters an admin's: DISABLE_MAX_PRIVILEGE, the SIDs given deny-only, the
-    integrity given; as an identification token, which AccessCheck takes."""
-    import ctypes
-    from ctypes import wintypes
+    def test_the_readmes_marker_counts_judged_as_an_unelevated_owner(readme_marker: Path) -> None:
+        from docket.osprompt import win32
 
-    from docket.osprompt import win32
+        token = _token()
+        try:
+            assert marker.windows_verdict(token) == marker.Verdict(str(readme_marker), present=True, counts=True)
+        finally:
+            win32.close_handle(token)
+        facts = win32.entry_facts(str(readme_marker), None)
+        assert facts is not None
+        assert facts[0] == "S-1-5-32-544", "the README's lines make Administrators the file's owner"
+        # On the runner, an admin with UAC off: the root floor, owners and links only.
+        assert marker.here().counts
 
-    advapi32, kernel32 = win32.dll("advapi32"), win32.dll("kernel32")
+    @pytest.mark.parametrize(
+        ("change", "why"),
+        [
+            ("icacls '{folder}' /inheritance:e", "lets you add files"),
+            ("icacls '{file}' /setowner $env:USERNAME", "isn't owned by"),
+        ],
+        ids=["the inherited create right back", "owned by the runner's user"],
+    )
+    def test_a_readme_marker_changed_after_doesnt_count(readme_marker: Path, change: str, why: str) -> None:
+        from docket.osprompt import win32
 
-    class SidAndAttributes(ctypes.Structure):
-        _fields_ = [("Sid", ctypes.c_void_p), ("Attributes", wintypes.DWORD)]
+        _powershell(change.format(folder=readme_marker.parent, file=readme_marker))
+        token = _token()
+        try:
+            verdict = marker.windows_verdict(token)
+        finally:
+            win32.close_handle(token)
+        assert not verdict.counts
+        assert why in verdict.why
 
-    def sids(texts: Sequence[str]) -> ctypes.Array[SidAndAttributes]:
-        out = (SidAndAttributes * max(len(texts), 1))()
-        for i, text in enumerate(texts):
-            sid = ctypes.c_void_p()
-            assert advapi32.ConvertStringSidToSidW(text, ctypes.byref(sid)), text
-            out[i].Sid = sid.value
-        return out
+    @pytest.mark.parametrize(
+        ("token", "why"),
+        [
+            ({"restrict": ("S-1-1-0",)}, "a restricted token"),
+            ({"integrity": 0x1000}, "below Medium integrity"),
+            ({"disable": ("S-1-5-32-544", "S-1-5-32-545")}, "S-1-5-32-545 turned off"),
+        ],
+        ids=["restricted", "low integrity", "Users deny-only"],
+    )
+    def test_a_token_that_hides_the_owners_rights_refuses_the_readmes_marker(
+        readme_marker: Path, token: dict[str, object], why: str
+    ) -> None:
+        from docket.osprompt import win32
 
-    process = wintypes.HANDLE()
-    assert advapi32.OpenProcessToken(wintypes.HANDLE(kernel32.GetCurrentProcess()), 0xF01FF, ctypes.byref(process))
-    made = wintypes.HANDLE()
-    off, only = sids(disable), sids(restrict)
-    assert advapi32.CreateRestrictedToken(
-        process, 0x1, len(disable), off, 0, None, len(restrict), only if restrict else None, ctypes.byref(made)
-    ), ctypes.get_last_error()
-    label = sids([f"S-1-16-{integrity}"])
-    label[0].Attributes = 0x20  # SE_GROUP_INTEGRITY
-    size = ctypes.sizeof(SidAndAttributes) + advapi32.GetLengthSid(ctypes.c_void_p(label[0].Sid))
-    assert advapi32.SetTokenInformation(made, 25, label, size), ctypes.get_last_error()
-    copy = wintypes.HANDLE()
-    assert advapi32.DuplicateTokenEx(made, 0x0008, None, 1, 2, ctypes.byref(copy)), ctypes.get_last_error()
-    win32.close_handle(int(made.value or 0))
-    win32.close_handle(int(process.value or 0))
-    return int(copy.value or 0)
-
-
-@windows_only
-def test_the_readmes_marker_counts_judged_as_an_unelevated_owner(readme_marker: Path) -> None:
-    from docket.osprompt import win32
-
-    token = _token()
-    try:
-        assert marker.windows_verdict(token) == marker.Verdict(str(readme_marker), present=True, counts=True)
-    finally:
-        win32.close_handle(token)
-    facts = win32.entry_facts(str(readme_marker), None)
-    assert facts is not None
-    assert facts[0] == "S-1-5-32-544", "the README's lines make Administrators the file's owner"
-    # On the runner, an admin with UAC off: the root floor, owners and links only.
-    assert marker.here().counts
-
-
-@windows_only
-@pytest.mark.parametrize(
-    ("change", "why"),
-    [
-        ("icacls '{folder}' /inheritance:e", "lets you add files"),
-        ("icacls '{file}' /setowner $env:USERNAME", "isn't owned by"),
-    ],
-    ids=["the inherited create right back", "owned by the runner's user"],
-)
-def test_a_readme_marker_changed_after_doesnt_count(readme_marker: Path, change: str, why: str) -> None:
-    from docket.osprompt import win32
-
-    _powershell(change.format(folder=readme_marker.parent, file=readme_marker))
-    token = _token()
-    try:
-        verdict = marker.windows_verdict(token)
-    finally:
-        win32.close_handle(token)
-    assert not verdict.counts
-    assert why in verdict.why
-
-
-@windows_only
-@pytest.mark.parametrize(
-    ("token", "why"),
-    [
-        ({"restrict": ("S-1-1-0",)}, "a restricted token"),
-        ({"integrity": 0x1000}, "below Medium integrity"),
-        ({"disable": ("S-1-5-32-544", "S-1-5-32-545")}, "S-1-5-32-545 turned off"),
-    ],
-    ids=["restricted", "low integrity", "Users deny-only"],
-)
-def test_a_token_that_hides_the_owners_rights_refuses_the_readmes_marker(
-    readme_marker: Path, token: dict[str, object], why: str
-) -> None:
-    from docket.osprompt import win32
-
-    handle = _token(**token)  # pyright: ignore[reportArgumentType]
-    try:
-        verdict = marker.windows_verdict(handle)
-    finally:
-        win32.close_handle(handle)
-    assert not verdict.counts
-    assert why in verdict.why
+        handle = _token(**token)  # pyright: ignore[reportArgumentType]
+        try:
+            verdict = marker.windows_verdict(handle)
+        finally:
+            win32.close_handle(handle)
+        assert not verdict.counts
+        assert why in verdict.why
 
 
 # -- macOS ---------------------------------------------------------------------------------------------------------
