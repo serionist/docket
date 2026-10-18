@@ -1,0 +1,18 @@
+decisions:
+  - id: DR-0577
+    title: docket forget shows what it would take by default, and forgets only with --now at the owner's console, with a code typed back
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#182"]
+    description: "docket forget <rid>..., --never-store (each rid with a version in raw that a never-store list in force matches now) and --held (each rid in raw under a held id not released), one kind per call, --source narrowing the two lists, --vault as every command takes it. Without --now it is a dry run in any shell, Claude Code's too: it brings the index up to date, as a search does, and prints rids, doc ids, line numbers and counts, never a line's text, a title, a note's old path or a listed value, a doc id a never-store list names counted instead (DR-0558), and every time what forget can't reach. With --now it refuses before reading anything in Claude Code's shell, without a console on stdin and stdout, or through a pipe or a redirect (console.problem, act console.FORGET), shows the dry run's lines as its screen, and asks once for the whole forget: a code typed back (console.typed_back) until #143 merges, then console.confirm. Under the vault lock it works the plan out again and stops, writing nothing, when anything differs from the screen. A rid must be staged, in raw or have records under it; one already forgotten says so. No flag, variable, page, route or MCP tool forgets or answers the question, and only cli.py calls forget(), held by a scan as release() is (DR-0202). The Staging, Sync and Settings pages, and the CLI lines that said a record waits for docket forget, show the command, its arguments filled in only when every shell reads them as plain text, as the Staging page shows a release's (DR-0382)."
+    binds:
+      - Only cli.py calls forget(); a test scans for it.
+      - No page, route or MCP tool forgets or answers its question; the pages show the command.
+      - The dry run never prints a record's text or a doc line's.
+    not_chosen:
+      - "--yes, or a confirm parameter: Claude passes a flag as easily as the owner (DR-0202)."
+      - "The question by default, the dry run only on n: Claude Code's shell would get a refusal instead of the counts it shows the owner."
+      - "--dry-run, forgetting by default as docket doc redact does: a deleted key can't come back, so the short command is the safe one."
+      - "An MCP tool: nothing over MCP can give the owner's yes."

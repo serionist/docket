@@ -1,0 +1,19 @@
+decisions:
+  - id: DR-0579
+    title: state/forgotten.jsonl lists what was forgotten by hash, merged by union, and every clone obeys it
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#182"]
+    description: "state/forgotten.jsonl holds one JSON line per forget: schema_version 1; rids, the 32-hex rid hashes (staging's rid_hash) of the rids forgotten whole, each covering itself and every rid under it, every version, now and later; versions, objects {rid, key} with a rid's hash and staging's 32-hex key of one version, forgotten alone (a held rid's uncut copies), which a release's keep of that exact version beats, being the owner's later word at the console; media, the rid hashes no media is stored on again, each forgotten rid and every rid it sits under; keys, the 64-hex media key ids (DR-0549) every clone deletes; at, in UTC; machine. Hashes only: never a rid, a key or a wrapped key, so a later history rewrite leaves nothing readable in it. It is written through a temp file and a rename, committed alone before the forget changes anything else, and merged by the vault's own *.jsonl merge=union (DR-0142), so no attribute line is added and an older Docket's cursor reader skips it by its name. It is read from disk, as hold lists are, since it only takes out; a line on disk that HEAD lacks is committed by the next gate call. It fails closed as a release log does: a line that isn't one, or the file or state/ a link, stops every ingest and every gate call, named by its line number. Every reader of run files skips a listed line: RawLog, RawLookup's load, the index build, vault.status, the gate's cut scan and the notes import, their caches keyed by a run file's path, size and modification time. Intake drops a listed record in memory before every other rule, counted as forgotten, a rid forget's media dropped and withheld as for never-store; the sweep drops a listed staged version and its media; media's screen and reader refuse a listed or a media rid, the reader's state forgotten; docket media keys import skips a listed key; read and verify say a listed rid was forgotten. Every gate call on every clone applies the list first (DR-0581)."
+    binds:
+      - No key, wrapped key or plain rid enters the list.
+      - Every reader of run files skips a listed line; a scan holds it.
+      - A later Docket reads every earlier schema_version of the list.
+    not_chosen:
+      - "Plain rids: they stay in history after a rewrite, and a rid can name a channel or a host."
+      - "A list per source, as hold lists: a never-store forget spans sources, and the hash hides which already."
+      - "A .txt list with a union line of its own: every existing vault would need a .gitattributes edit."
+      - "A separate file for key ids: each forget writes both, and one line keeps a forget's parts together."
+      - "Obeying HEAD's list only: the line a failed commit left on disk must act already, and a commit by hand is the same floor (DR-0382)."

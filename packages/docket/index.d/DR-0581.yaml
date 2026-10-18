@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0581
+    title: A forget commits its list first, then applies it, and every gate call on every clone applies it again
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#182"]
+    description: "Under the vault lock, after the question and the plan worked out again: the list's line, through a temp file and a rename, fsynced; its commit alone (Forget: the list from <machine>); then the apply: this clone's listed keys deleted; staging's listed versions and media dropped with their keys, the family's rids withheld; listed lines out of the run files, a file left with none staying, empty, so another clone's rewrite of it merges by union instead of a modify/delete conflict; the stored media of listed and media rids out of the tree, each file's key read from its header first; doc lines dropped (DR-0580); this machine's cursor entries under listed rids dropped; each file whole through a temp file and a rename; one commit naming counts only, with the docs' Doc: lines. The lock is let go, then the index is rebuilt under its own lock, vectors carried by hash (DR-0115), since the vault lock's waiters give up after 60 s; a search brings the index up to date first, and every rebuild skips listed lines. Every gate call on every clone runs the apply first, so a crash at any step, a pull, a line a union merge brought back, or a clone's own run of the record before its pull is finished there, with one commit (Forget: applied on <machine>); until then every reader skips listed lines. The apply costs one stat with no list, and otherwise reads only what moved since <private>/forget/applied.json: the list's digest and the size and modification time of each run file, doc and media file it checked. docket vault check names a run file changed only by listed lines gone as a forget not finished. The forget ends by saying the text stays in the host repo's history (DR-0102) and printing, never running, a git filter-repo command over two files it writes in the private folder, never the tree: expressions that blank each forgotten raw line and dropped doc line by its rid, and the removed docs' paths; then to back up first, force-push and re-clone every other machine, the LFS server keeping its encrypted copies. A repo of its own is forgotten the same way until #58. Every dry run names what forget can't reach: key exports made before, the LFS copies, chunks sent to an API provider, the source itself, git history, other clones until their next gate call, and files outside the vault."
+    binds:
+      - "The apply is idempotent: the tree, staging and the key store follow the list."
+      - Docket never runs the history rewrite.
+    not_chosen:
+      - "A targeted delete in the index: every line after a removed one moves its byte offset (DR-0445), and a reply in a thread window re-chunks its thread."
+      - "The rebuild under the vault lock: the service's syncs would wait past the lock's 60 s."
+      - "Deleting a run file left empty: a modify/delete conflict in the owner's pull."
+      - "Applying on another clone only by a command: its keys would outlive the forget until the owner remembered."

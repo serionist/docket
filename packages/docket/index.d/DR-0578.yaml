@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0578
+    title: A forget takes a rid with everything under it and the audio it is in; a rid under a hold only by its versions in raw
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#182"]
+    description: "A rid takes itself and every rid nested under <rid>/, every version, staged or in raw: rid nesting only, as media's family (DR-0547), never a thread or a container, so a reply never takes its thread or its channel. It takes the media staged or stored on it and on each rid it sits under, as any drop of a version takes it, with every key of those files: a stored file's from its header, else its media cut log line; every key the cut log names for those rids, files a recut replaced included; a staged sidecar's. A stored file that is an LFS pointer with no cut log line naming its key stops the forget, naming git lfs pull for it. It takes the machine transcripts made from that media (<that rid>/whisper), which hold the same speech. A rid under a hold not released, by its rid as the ingest's held_in_raw counts it, takes only its versions in raw, the uncut copies stored before the hold: the hold stays, and docket hold release can let a cut version in. --never-store takes each rid with a version in raw a list in force matches (DR-0521), --held each rid in raw under a held id not released. What stays: entities, names and ids the owner curated (the dry run counts those no other record mentions); the curate log, names, counts and locators, never a snippet (DR-0460); hold lists and release logs, ids and times, a hold still covering what it covers by thread or container; the media cut log, hashes, key ids and times, where forget finds every key; staging's decided keys, the speech queue's tried file and the run history, hashes or ids on one clone; other machines' cursor files, which each machine prunes of its own retry and waiting entries under listed rids at its next gate call (DR-0245)."
+    binds:
+      - "A forget's family is rid nesting, as media's: never a thread or a container."
+      - A forget never takes a key it can't name on the list.
+    not_chosen:
+      - "The rid's ancestors' records too: a Slack message's rid sits under its channel's."
+      - "A held rid forgotten whole: its release could never let the cut version in."
+      - "Removing entities only the family mentions: an entity is a name the owner curated, and later records use it; a never-store list is the tool for a person."
