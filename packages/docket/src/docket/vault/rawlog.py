@@ -7,6 +7,9 @@ the same machine gets `.2`, `.3` before `.jsonl`, always after the highest count
 A run file holds at most 16 MiB of lines (DR-0488): a write past that goes on in the next files, each a run of its own
 by the same rule, in the records' order, so a host's file limit (GitHub's 100 MB) is never met and an older Docket
 reads them as it reads any runs. A record is never split; one larger than the cap is a file of its own.
+
+A line the forgotten list takes reads as gone here, wherever a merge left it (DR-0579), and what this log keeps of the
+files it read is keyed by their size and modification time too, since a forget changes a run file in place.
 """
 
 from __future__ import annotations
@@ -20,7 +23,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from docket.errors import DocketError
-from docket.vault.home import make_private
+from docket.vault import forgotten
+from docket.vault.forgotten import Forgotten
+from docket.vault.home import Home, make_private
 from docket.vault.lock import VaultLock
 from docket.vault.records import RawRecord, version
 
@@ -97,34 +102,61 @@ def run_stamps(root: Path, source: str) -> dict[str, tuple[int, int]]:
 
 
 class RawLog:
-    def __init__(self, root: Path, machine: str, lock: VaultLock, tmp_dir: Path | None = None) -> None:
+    def __init__(
+        self, root: Path, machine: str, lock: VaultLock, tmp_dir: Path | None = None, home: Home | None = None
+    ) -> None:
         self.root = root
         self.raw_dir = root / "raw"
         self.tmp_dir = tmp_dir or root / ".git" / "docket" / "tmp"
         self.machine = machine
         self.lock = lock
+        self.home = home
         self._seen: set[tuple[str, str]] = set()
-        self._read: set[Path] = set()
+        # Each run file read, with its size and modification time then, and the forgotten list it was read under.
+        self._read: dict[Path, tuple[int, int]] = {}
+        self._digest = ""
+        self._reading = forgotten.EMPTY.reading()
+
+    def listed(self) -> Forgotten:
+        """The forgotten list in force, which every read here obeys (DR-0579)."""
+        return forgotten.load(self.root, self.home) if self.home is not None else forgotten.at(self.root)
+
+    def stamped(self) -> list[tuple[RunFile, tuple[int, int]]]:
+        """Every run file in run order, with its size and modification time, listed with os.scandir as `run_stamps`
+        lists one source's (DR-0446)."""
+        found: list[tuple[RunFile, tuple[int, int]]] = []
+        try:
+            sources = [entry.name for entry in os.scandir(self.raw_dir) if entry.is_dir()]
+        except (FileNotFoundError, NotADirectoryError):
+            return found
+        for source in sources:
+            for rel, stamp in run_stamps(self.root, source).items():
+                run = parse_run_file(self.raw_dir, self.root / rel)
+                if run is not None:
+                    found.append((run, stamp))
+        return sorted(found, key=lambda f: f[0].order)
 
     def run_files(self) -> list[RunFile]:
-        files = (
-            [parse_run_file(self.raw_dir, p) for p in self.raw_dir.rglob("*.jsonl")] if self.raw_dir.is_dir() else []
-        )
-        return sorted((f for f in files if f is not None), key=lambda f: f.order)
+        return [run for run, _ in self.stamped()]
 
     def _refresh(self) -> None:
         """Read the run files this process hasn't seen, so another process's writes count as already in the log."""
-        runs = self.run_files()
-        if self._read - {run.path for run in runs}:
-            # A run file that was never committed was deleted by hand; its records are no longer in the log.
+        listed = self.listed()
+        runs = self.stamped()
+        stamps = {run.path: stamp for run, stamp in runs}
+        if listed.digest != self._digest or any(stamps.get(path) != stamp for path, stamp in self._read.items()):
+            # A run file deleted by hand, one a forget changed in place, or a list that moved: read everything again.
             self._seen.clear()
             self._read.clear()
-        for run in runs:
+            self._digest = listed.digest
+            self._reading = listed.reading()
+        for run, stamp in runs:
             if run.path in self._read:
                 continue
             for _, record in _lines(run.path):
-                self._seen.add((record.rid, record.v))
-            self._read.add(run.path)
+                if not self._reading.skips(record):
+                    self._seen.add((record.rid, record.v))
+            self._read[run.path] = stamp
 
     def contains(self, record: RawRecord) -> bool:
         self._refresh()
@@ -196,7 +228,8 @@ class RawLog:
         written again, and a file already written keeps its own."""
         self._write_new(target, "".join(lines))
         self._seen |= keys
-        self._read.add(target)
+        st = target.stat()
+        self._read[target] = (st.st_size, st.st_mtime_ns)
 
     def _write_new(self, target: Path, text: str) -> None:
         """A new file through a temp file and a rename; the temp file lives outside raw/, so it is never committed."""
@@ -215,9 +248,12 @@ class RawLog:
             tmp.unlink(missing_ok=True)
 
     def iter_records(self) -> Iterator[tuple[Path, int, RawRecord]]:
+        """Every record in run order, but those the forgotten list takes."""
+        reading = self.listed().reading()
         for run in self.run_files():
             for line, record in _lines(run.path):
-                yield run.path, line, record
+                if not reading.skips(record):
+                    yield run.path, line, record
 
     def read(self, rid: str) -> list[RawRecord]:
         """Every stored version of a record, in run order."""

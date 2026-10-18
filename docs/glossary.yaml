@@ -60,6 +60,9 @@ terms:
   - term: folder source
     definition: "A source whose records Docket reads itself from a folder vault.yaml names, read-only: each docx, xlsx, pptx, pdf, md or txt file as text, by page, slide and sheet, staged through the gate by docket scan. It has no mapper or tools, and only the primary machine scans it."
     see: [packages/docket/src/docket/documents/scan.py]
+  - term: forgotten list
+    definition: "state/forgotten.jsonl: one line per forget, what it took by hash only (rids forgotten whole, versions, a folder file's identity, media rids, key ids, a removed legacy note's old paths and body hash), merged by union. HEAD's lines and the disk's act together; every reader of raw skips a line it takes, and the index is built under its digest."
+    see: [packages/docket/src/docket/vault/forgotten.py]
   - term: gate
     definition: The one set of checks every change passes, `uv run gate`. The quick lane runs in seconds before every push; `gate full` is the merge rule.
     see: [tools/devkit/src/devkit/gate.py]

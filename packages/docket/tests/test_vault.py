@@ -260,7 +260,7 @@ def test_status_counts_records_runs_and_overlaps(tmp_path: Path, config: VaultCo
     vault.write_run("chat", [make_record(1), make_record(2)], RUN_AT)
     other = RawLog(vault.root, "other-box", vault.lock)
     other._seen = set()  # pyright: ignore[reportPrivateUsage] - a second machine that hadn't synced yet
-    other._read = {f.path for f in other.run_files()}  # pyright: ignore[reportPrivateUsage]
+    other._read = {run.path: stamp for run, stamp in other.stamped()}  # pyright: ignore[reportPrivateUsage]
     other.write_run("chat", [make_record(1)], RUN_AT)
     status = vault.status()
     assert status.records["chat"] == 3

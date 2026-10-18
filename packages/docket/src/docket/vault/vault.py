@@ -22,7 +22,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from docket.errors import DocketError
-from docket.vault import inforce
+from docket.vault import forgotten, inforce
 from docket.vault import machine as machines
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.git import DOC_LINE, Git, Identity, SyncResult
@@ -86,6 +86,7 @@ ATTRIBUTE_CHECKS = [
     ("processed/t/x.md", "filter", "unspecified"),
     ("state/holds/s.txt", "merge", "union"),
     ("state/releases/s.jsonl", "merge", "union"),
+    ("state/forgotten.jsonl", "merge", "union"),
     ("entities/_log/2026-01-m.jsonl", "merge", "union"),
     ("entities/_log/2026-01-m.jsonl", "eol", "lf"),
 ]
@@ -102,6 +103,7 @@ IGNORE_SAMPLES = [
     "state/cursors-m.yaml",
     "state/holds/s.txt",
     "state/releases/s.jsonl",
+    "state/forgotten.jsonl",
 ]
 
 
@@ -151,7 +153,7 @@ class Vault:
             lock_file=self.home.lock_file,
             clear_stale_index=not self.home.folder,
         )
-        self.rawlog = RawLog(root, self.machine, self.lock, self.home.tmp_dir)
+        self.rawlog = RawLog(root, self.machine, self.lock, self.home.tmp_dir, self.home)
 
     # -- finding and creating ------------------------------------------------------------------------------------
 
@@ -225,8 +227,10 @@ class Vault:
                 vault.git.lfs_install()
             started = vault.git.commit(written, "Start the vault")
             if started is not None:
-                # The settings in force read HEAD's vault.yaml: this commit's is the text just written (DR-0521).
+                # The settings in force read HEAD's vault.yaml: this commit's is the text just written (DR-0521). It
+                # holds no forgotten list, which every reader of raw asks about (DR-0579).
                 inforce.remember(home, started, config.dump())
+                forgotten.remember(home, started, "")
             return vault
         except BaseException:
             if created:
@@ -256,6 +260,7 @@ class Vault:
             commit = self.git.commit(everything, message)
             if commit is not None:
                 inforce.carry(self.home, commit, self.git.parents, paths)
+                forgotten.carry(self.home, commit, self.git.parents, paths)
             return commit
 
     @property
@@ -331,6 +336,8 @@ class Vault:
         hides a path the vault commits, an attribute that isn't the vault's own; a doc rev two commits claim."""
         problems: list[Problem] = []
         raw = self.root / "raw"
+        # A line a forget took is no record of its run's to count twice, and is never named (DR-0579).
+        reading = self.rawlog.listed().reading()
         for path in sorted(raw.rglob("*")) if raw.is_dir() else []:
             if not path.is_file() or path.name == ".gitkeep":
                 continue
@@ -347,6 +354,8 @@ class Vault:
                         record = RawRecord.model_validate(json.loads(line))
                     except (json.JSONDecodeError, ValidationError) as e:
                         problems.append(Problem(f"{rel}:{n}", f"not a raw record: {str(e).splitlines()[0]}"))
+                        continue
+                    if reading.skips(record):
                         continue
                     if (record.rid, record.v) in seen:
                         problems.append(Problem(f"{rel}:{n}", f"{record.rid} is in this run twice"))
@@ -399,9 +408,12 @@ class Vault:
                 f"Docket commits on {status.branch}, not {default.removeprefix('origin/')}, the remote's default"
             )
         runs_of: dict[tuple[str, str], set[str]] = {}
+        reading = self.rawlog.listed().reading()
         for run in self.rawlog.run_files():
             status.runs += 1
             for _, _, record in _records(run.path):
+                if reading.skips(record):
+                    continue
                 status.records[record.source] += 1
                 runs_of.setdefault((record.rid, record.v), set()).add(run.stem)
         status.seen_in_several_runs = sum(1 for runs in runs_of.values() if len(runs) > 1)

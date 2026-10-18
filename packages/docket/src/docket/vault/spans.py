@@ -16,6 +16,7 @@ from typing import NamedTuple, Protocol
 
 from pydantic import BaseModel, Field
 
+from docket.vault import forgotten
 from docket.vault.anchors import Anchor, encode_rid, format_anchor, format_time, normalize_newlines, paragraphs
 from docket.vault.rawlog import parse_run_file
 from docket.vault.records import RID, RawRecord
@@ -119,12 +120,16 @@ class RawLookup:
         folder = self.raw_dir / source
         runs = [parse_run_file(self.raw_dir, p) for p in folder.rglob("*.jsonl")] if folder.is_dir() else []
         by_rid: dict[str, list[RawRecord]] = {}
+        # What a forget took reads as gone, wherever a merge left its lines (DR-0579). A current index never holds
+        # them, so the placed route has nothing to skip.
+        reading = forgotten.at(self.root).reading()
         for run in sorted((r for r in runs if r is not None), key=lambda r: r.order):
             with run.path.open(encoding="utf-8", newline="\n") as f:
                 for line in f:
                     if line.strip():
                         record = RawRecord.model_validate(json.loads(line))
-                        by_rid.setdefault(record.rid, []).append(record)
+                        if not reading.skips(record):
+                            by_rid.setdefault(record.rid, []).append(record)
         self._sources[source] = by_rid
         return by_rid
 
