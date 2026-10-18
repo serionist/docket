@@ -13,7 +13,7 @@ decisions:
       - Each backend's calls into the system sit behind one function per call, which the tests fake; CI runs the real availability check on each system, and never a real prompt.
       - On Windows a test counts every interface acquired and released, and every async object closed, on the success, error and timeout paths.
       - "A test scans osprompt's Windows backend: every DLL is loaded with System32's search flag, and no ctypes.windll or cdll attribute is reached for."
-      - "On a timeout or Ctrl+C the verification is cancelled, pumped until the cancel lands and a little longer (at most 2 s), the windows Docket's own anchor owns are closed with WM_CLOSE, Hello's dialog among them, and only then is the operation closed and the anchor destroyed: on Windows 11 the dialog stayed up when the operation was closed straight after its cancel (#143's hardware check)."
+      - "On a timeout or Ctrl+C the verification is cancelled and pumped until the cancel lands and a little longer (at most 2 s), then closed and released, and the anchor destroyed. Windows may leave its dialog on screen even so: on Windows 11 neither the cancel, nor WM_CLOSE to the windows the anchor owns, nor destroying the anchor took it down (#143's hardware check). Docket has refused by then, nothing typed there counts, and the refusal says to cancel it."
     not_chosen:
       - "pywinrt's packages: winrt-runtime and one per namespace, compiled, and the projection lacks the interop interface a desktop process needs."
       - "pyobjc: pyobjc-core, Cocoa and Security, compiled and several MB, for one call."

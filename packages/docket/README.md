@@ -132,12 +132,14 @@ or your Mac's password, polkit (DR-0572 to DR-0575). The console code is asked o
 | Linux | polkit: your password, or a fingerprint through PAM; at the console when no desktop agent runs, as over SSH | you installed Docket's action, once: the line `docket vault status` prints, `sudo install -m 0644 <file> /usr/share/polkit-1/actions/` | the code |
 
 - `docket vault status` says which one this machine asks, and why. Nothing shows a prompt to find out.
+- Tried on real hardware so far: Windows 11 with a PIN, in Windows Terminal and conhost. Face recognition, SSH, macOS
+  and Linux follow the design and CI's checks, but no one has tried them on a real machine yet.
 - Once a prompt is set up, its no is a no: a cancel, two minutes without an answer, or no desktop to show it on (SSH to
   Windows or a Mac) writes nothing, and the code is never asked instead. Run the command at the machine.
-- After two minutes, or Ctrl+C, Docket takes its prompt down: a dialog still on screen after that is answered by
-  nothing, so close it.
-- Windows Hello's face recognition proves you are there, not that you agreed: a prompt you didn't start passes as soon
-  as the camera sees you. For a yes you have to give, use a fingerprint or your PIN, or turn face recognition off.
+- After two minutes, or Ctrl+C, Windows may leave its Hello dialog on screen. Docket has already refused, and
+  whatever you type into it changes nothing: cancel it.
+- Windows Hello's face recognition proves you are there, not that you agreed: a prompt you didn't start may pass as
+  soon as the camera sees you. For a yes you have to give, use a fingerprint or your PIN, or turn face recognition off.
 - A prompt you didn't start is not yours: cancel it.
 
 What it stops, and what it doesn't. A prompt says a person answered. It doesn't make Docket's own code tamper-proof: a

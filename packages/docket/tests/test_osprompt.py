@@ -145,7 +145,6 @@ class FakeApi:
         biometric: bool = False,
         fail: str | None = None,
         lands_after: int = 0,
-        dialogs: int = 1,
     ) -> None:
         self.statuses = statuses if statuses is not None else [windows.COMPLETED]
         self.value = value
@@ -163,7 +162,6 @@ class FakeApi:
         # Every call that winds an operation down, in order, for the timeout's sequence.
         self.log: list[str] = []
         self.lands_after = lands_after
-        self.dialogs = dialogs
         self.joined = 0
         self.lines: list[str] = []
         self._next = 100
@@ -232,11 +230,6 @@ class FakeApi:
         self.windows.append(1 if anchor == "own" else 2)
         return (1, True) if anchor == "own" else (2, False)
 
-    def dismiss(self, window: int) -> int:
-        assert window == 1, "only Docket's own window is dismissed"
-        self.log.append("dismiss")
-        return self.dialogs
-
     def destroy(self, window: int) -> None:
         self.windows.remove(window)
         self.log.append("destroy")
@@ -295,7 +288,7 @@ class Slow(FakeApi):
 def test_a_cancelled_operation_is_pumped_until_it_stops_then_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(osprompt, "TIMEOUT", -1.0)
     api = Slow(statuses=[windows.STARTED])
-    assert windows.ask_with(api, "x") == Refused("no answer in time, or cancelled")
+    assert windows.ask_with(api, "x") == Refused(windows.GAVE_UP)
     assert api.cancelled == 1
     assert api.balanced()
 
@@ -306,18 +299,17 @@ def quick_linger(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.usefixtures("quick_linger")
-def test_on_a_timeout_the_dialog_goes_before_the_operation_is_closed(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Hello's dialog stayed up when the operation was closed straight after its cancel (#143's hardware check):
-    cancel, pump until the cancel lands, close the dialog Docket's window owns, then close, release and destroy."""
+def test_on_a_timeout_the_cancel_lands_before_the_operation_is_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cancel, pump until the cancel lands and a little longer, then close and release, and destroy the anchor last.
+    Windows may still leave its dialog up (#143's hardware check), so the refusal says to cancel it."""
     monkeypatch.setattr(osprompt, "TIMEOUT", -1.0)
     api = FakeApi(statuses=[windows.STARTED], lands_after=2)
-    assert windows.ask_with(api, "x") == Refused("no answer in time, or cancelled")
+    assert windows.ask_with(api, "x") == Refused(windows.GAVE_UP)
     wound = api.log[api.log.index("cancel") :]
-    assert wound[:3] == ["cancel", "pump", "dismiss"]
-    assert wound[3] == "pump", "messages flow after the close, so the dialog takes it"
-    assert wound.index("close") < wound.index("destroy")
+    assert wound[:3] == ["cancel", "pump", "close"]
     assert wound[-1] == "destroy"
     assert api.balanced()
+    assert "cancel it" in windows.GAVE_UP
 
 
 class Watched(FakeApi):
@@ -346,25 +338,15 @@ def test_the_pump_runs_until_the_cancel_lands() -> None:
 
 
 @pytest.mark.usefixtures("quick_linger")
-def test_the_terminals_window_is_never_dismissed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(osprompt, "TIMEOUT", -1.0)
-    api = FakeApi(statuses=[windows.STARTED])
-    assert windows.ask_with(api, "x", anchor="foreign") == Refused("no answer in time, or cancelled")
-    assert "dismiss" not in api.log
-    assert api.cancelled == 1
-
-
-@pytest.mark.usefixtures("quick_linger")
 def test_a_cancel_that_never_lands_is_given_up_after_the_grace_and_still_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(windows, "CANCEL_GRACE", 0.05)
     monkeypatch.setattr(osprompt, "TIMEOUT", -1.0)
-    api = Stuck(statuses=[windows.STARTED], dialogs=0)
-    assert windows.ask_with(api, "x") == Refused("no answer in time, or cancelled")
+    api = Stuck(statuses=[windows.STARTED])
+    assert windows.ask_with(api, "x") == Refused(windows.GAVE_UP)
     wound = api.log[api.log.index("cancel") :]
-    assert wound[:3] == ["cancel", "pump", "dismiss"]
-    assert wound[3] == "close", "no dialog was found, so nothing more to wait for"
+    assert wound[:3] == ["cancel", "pump", "close"]
     assert api.balanced()
 
 
@@ -401,7 +383,7 @@ def test_verify_can_anchor_to_the_terminals_window_for_the_hardware_test() -> No
 def test_a_prompt_past_its_deadline_is_cancelled_closed_and_a_no(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(osprompt, "TIMEOUT", -1.0)
     api = FakeApi(statuses=[windows.STARTED])
-    assert windows.ask_with(api, "x") == Refused("no answer in time, or cancelled")
+    assert windows.ask_with(api, "x") == Refused(windows.GAVE_UP)
     assert api.cancelled == 1
     assert api.balanced()
     assert len(api.closed) == 1
@@ -444,7 +426,7 @@ def test_a_request_or_an_operation_without_async_info_is_a_failure() -> None:
 
 def test_an_operation_cancelled_by_windows_is_a_no() -> None:
     api = FakeApi(statuses=[windows.CANCELED])
-    assert windows.ask_with(api, "x") == Refused("no answer in time, or cancelled")
+    assert windows.ask_with(api, "x") == Refused(windows.GAVE_UP)
 
 
 @pytest.mark.parametrize(
