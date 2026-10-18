@@ -58,6 +58,9 @@ def test_an_add_is_its_golden_line_and_reads_back_the_same() -> None:
         ("undo", {"of": A}, ',"after":"@","of":"@"}'),
         ("renumber", {"number": 305}, ',"after":"@","number":305}'),
         ("done", {"note": "answered\u2029in chat"}, ',"after":"@","note":"answered\\u2029in chat"}'),
+        ("drop", {"note": "not ours"}, ',"after":"@","note":"not ours"}'),
+        ("reopen", {}, ',"after":"@"}'),
+        ("archive", {}, ',"after":"@"}'),
     ],
 )  # fmt: skip
 def test_each_kind_writes_its_own_keys_in_order(kind: str, keys: dict[str, Any], tail: str) -> None:
@@ -69,10 +72,32 @@ def test_each_kind_writes_its_own_keys_in_order(kind: str, keys: dict[str, Any],
 
 def test_a_key_a_field_or_a_kind_this_docket_doesnt_know_reads_and_is_kept() -> None:
     data = json.loads(made("set", fields={"due": "2026-10-21"}).text())
-    data |= {"op": "pin", "colour": "red", "fields": {"later": "x"}}
+    data |= {"op": "pin_item", "colour": "red", "fields": {"later": "x"}, "by": "scheduler", "via": "timer"}
     read = Op.model_validate_json(json.dumps(data))
-    assert (read.op, read.fields) == ("pin", {"later": "x"})
+    assert (read.op, read.fields, read.by, read.via) == ("pin_item", {"later": "x"}, "scheduler", "timer")
     assert "colour" not in read.text()
+
+
+def test_a_later_docket_s_field_may_hold_any_value_and_the_add_still_reads() -> None:
+    """A name this Docket doesn't know holds whatever a later Docket put there; only the names it knows must be text
+    or null, so an add carrying one still makes its item (DR-0611)."""
+    data = json.loads(made("add", number=1, fields=dict(ADD_FIELDS)).text())
+    data["fields"] |= {"estimate": 30, "tags": ["a", "b"], "parts": {"x": 1}}
+    read = Op.model_validate_json(json.dumps(data))
+    assert read.fields is not None and read.fields["estimate"] == 30
+    assert json.loads(read.text())["fields"]["tags"] == ["a", "b"]
+
+
+@pytest.mark.parametrize(
+    ("kind", "reads"), [("pin_item", True), ("pin2", False), ("pin-item", False), ("x" * 33, False)]
+)
+def test_an_op_s_kind_is_a_lowercase_word_of_letters_and_underscores(kind: str, reads: bool) -> None:
+    data = json.loads(made("done").text()) | {"op": kind}
+    if reads:
+        assert Op.model_validate_json(json.dumps(data)).op == kind
+    else:
+        with pytest.raises(ValidationError):
+            Op.model_validate_json(json.dumps(data))
 
 
 @pytest.mark.parametrize(
@@ -88,8 +113,10 @@ def test_a_key_a_field_or_a_kind_this_docket_doesnt_know_reads_and_is_kept() -> 
         {"id": "81JAB3W8Q4X5M2Z7K9R0T6YVNC"},
         {"op": "Add"},
         {"machine": "Desk"},
-        {"by": "me"},
-        {"via": "mail"},
+        {"by": "Me"},
+        {"via": ""},
+        {"fields": {**ADD_FIELDS, "title": 5}},
+        {"fields": {**ADD_FIELDS, "notes": ["a"]}},
         {"fields": {**ADD_FIELDS, "title": None}},
         {"fields": {**ADD_FIELDS, "due": "2026-13-01"}},
         {"fields": {**ADD_FIELDS, "due": "20261018"}},
@@ -144,11 +171,25 @@ def test_a_file_s_lines_read_by_number_and_those_that_dont_are_problems() -> Non
         op("log", 4, 1, note="x", day=date(2025, 10, 30)).text(),
         op("log", 5, 1, note="kept").text(),
     ]
-    lines, problems = ops.parse("\n".join(texts) + "\n", rel)
-    assert [(line.n, line.where, line.op.id) for line in lines] == [(1, f"{rel}:1", ulid(1)), (7, f"{rel}:7", ulid(5))]
-    assert [where for where, _ in problems] == [f"{rel}:{n}" for n in (3, 4, 5, 6)]
-    assert "belongs in ledger/ops/2026-09-desk.jsonl" in problems[1][1]
-    assert ops.parse(op("add", 1).text(), "ledger/ops/notes.txt")[1][0][1].startswith("belongs in")
+    read = ops.parse("\n".join(texts) + "\n", rel)
+    assert [(line.n, line.where, line.op.id) for line in read.lines] == [
+        (1, f"{rel}:1", ulid(1)),
+        (7, f"{rel}:7", ulid(5)),
+    ]
+    assert [where for where, _ in read.problems] == [f"{rel}:{n}" for n in (3, 4, 5, 6)]
+    assert "belongs in ledger/ops/2026-09-desk.jsonl" in read.problems[1][1]
+    assert ops.parse(op("add", 1).text(), "ledger/ops/notes.txt").problems[0][1].startswith("belongs in")
+
+
+def test_the_highest_id_counts_every_line_one_this_docket_can_t_read_included() -> None:
+    """A later Docket's line doesn't read here, yet its id still sets how low this clock may mint (DR-0612)."""
+    newer = json.loads(op("log", 9, 1, note="x").text()) | {"schema_version": 2}
+    texts = [op("add", 1).text(), json.dumps(newer), "[1]", '{"id": 5}', '{"id": "not an id"}', "{"]
+    assert ops.parse("\n".join(texts), "ledger/ops/2026-10-desk.jsonl").highest == ulid(9)
+    assert ops.parse("not json\n", "ledger/ops/2026-10-desk.jsonl").highest is None
+    misplaced = op("log", 12, 1, note="x", machine="laptop").text()
+    assert ops.parse(misplaced, "ledger/ops/2026-10-desk.jsonl").highest == ulid(12)
+    assert [ops.id_of(t) for t in texts[2:]] == [None, None, None, None]
 
 
 def test_every_machine_s_files_are_read_and_the_rest_are_problems(tmp_path: Path) -> None:
@@ -162,8 +203,10 @@ def test_every_machine_s_files_are_read_and_the_rest_are_problems(tmp_path: Path
     (folder / "notes.txt").write_text("", encoding="utf-8")
     (folder / "2026-11-desk.jsonl").mkdir()
     (folder / "2026-12-desk.jsonl").write_bytes(b"\xff\xfe")
+    (folder / "2026-09-desk.jsonl").write_text("\n", encoding="utf-8")
     read = ops.read_all(tmp_path)
     assert [line.op.id for line in read.lines] == [ulid(1), ulid(2)]
+    assert read.highest == ulid(2)
     assert sorted(read.problems) == [
         ("ledger/ops/2026-10-box-2.jsonl", "isn't an op file (<yyyy-mm>-<machine>.jsonl); skipped"),
         ("ledger/ops/2026-10-desk.jsonl:2", "isn't a ledger op of schema 1; skipped"),

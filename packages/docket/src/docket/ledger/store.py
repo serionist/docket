@@ -29,7 +29,7 @@ from zoneinfo import ZoneInfo
 from docket import console
 from docket.errors import DocketError
 from docket.ledger import check, ops
-from docket.ledger.fold import CLOSED, Folded, Item, Ledger, family, fold, fold_item, number_text
+from docket.ledger.fold import CLOSED, Folded, Item, Ledger, family, fold_item, load, number_text
 from docket.ledger.ops import DAYS, FIELDS, KINDS, OPS_DIR, REQUIRED, VERDICTS, By, Line, Op, Via
 from docket.vault.neverstore import matches_text, names_person
 from docket.vault.redact import Redactor
@@ -54,7 +54,9 @@ NUMBER = re.compile(r"^(?:A-?)?(\d{1,9})$", re.IGNORECASE)
 SLUG = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 ONE_LINE = ("title", "who", "source")
 TEXTS = ("description", "notes", "outcome")
-# A locator names where a thing is: a marker inside one would stop it finding it, so a match refuses the write.
+# Text is written redacted. Any other value can't hold a marker: a locator would stop finding its thing, and a kind,
+# a stream, a verdict or a day would stop being one, so a redaction rule's match there refuses the write (DR-0618).
+REDACTED = ("title", "who", "note", "notes", "description", "outcome", "label")
 LOCATORS = ("source", "ref")
 SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
@@ -104,7 +106,7 @@ def write(
     moment = now or datetime.now(UTC)
     with vault.writing():
         ops.folder(vault.root)
-        plan = _Write(vault, fold(ops.read_all(vault.root).lines), by, via, moment)
+        plan = _Write(vault, load(vault.root), by, via, moment)
         plan.renumber()
         for n, change in enumerate(changes, start=1):
             plan.change(n, change)
@@ -211,8 +213,8 @@ class _Write:
     # -- the text rules (DR-0618) -----------------------------------------------------------------------------------
 
     def screen(self, n: int, name: str, value: str) -> str:
-        """A value as it may be written: a text redacted, a locator as given. A never-store keyword, a person on the
-        people list in who, or a redaction rule's match in a locator refuses the write."""
+        """A value as it may be written: text redacted, anything else as given. A never-store keyword, a person on the
+        people list in who, or a redaction rule's match in a value that isn't text refuses the write."""
         lists = self.vault.config.never_store
         counts: Counter[str] = Counter()
         redacted = self.redactor.text(value, counts)
@@ -220,9 +222,12 @@ class _Write:
             self.refuse(n, f"{name} says something on the never-store keywords list; leave it out")
         if name == "who" and names_person(value, lists):
             self.refuse(n, "who names someone on the never-store people list; leave them out")
-        if name in LOCATORS and counts:
-            self.refuse(n, f"{name} matches the {min(counts)} redaction rule, and a locator can't hold a marker")
-        return value if name in LOCATORS else redacted
+        if name in REDACTED:
+            return redacted
+        if counts:
+            what = "locator" if name in LOCATORS else "day" if name in (*DAYS, "until") else name
+            self.refuse(n, f"{name} matches the {min(counts)} redaction rule, and a {what} can't hold a marker")
+        return value
 
     def note(self, n: int, value: object) -> str | None:
         if value is None:
@@ -306,6 +311,8 @@ class _Write:
             verdict = None if verdict in (None, "", "-") else verdict
             if verdict is not None and verdict not in VERDICTS:
                 self.refuse(n, f"verdict is one of {', '.join(VERDICTS)}, or - to clear it")
+            if verdict is not None:
+                self.screen(n, "verdict", verdict)
             if closed:
                 self.refuse(n, f"{label} is {item.state}; reopen it first")
             if item.state != "open" or item.triage != verdict:
@@ -314,9 +321,12 @@ class _Write:
             until = change.get("until")
             if not isinstance(until, str) or not _day(until) or date.fromisoformat(until) <= self.day:
                 self.refuse(n, "snooze needs until, a day after today (YYYY-MM-DD)")
+            self.screen(n, "until", until)
             if closed:
                 self.refuse(n, f"{label} is {item.state}; reopen it first")
-            self.emit("snooze", item_id, until=date.fromisoformat(until), note=note)
+            # A snooze to the day it is snoozed to already changes nothing, as a triage to its verdict doesn't.
+            if item.state != "snoozed" or item.until != date.fromisoformat(until):
+                self.emit("snooze", item_id, until=date.fromisoformat(until), note=note)
         elif kind in ("done", "drop"):
             if closed:
                 self.refuse(n, f"{label} is already {item.state}")
@@ -404,7 +414,7 @@ class _Write:
         said = list(dict.fromkeys(f"{op.op} {number_text(self.number_of(op.item))}" for op in self.new))
         summary = ", ".join(said)
         if len(summary) > SUMMARY:
-            summary = f"{len(self.new)} ops"
+            summary = f"{said[0]} and {len(self.new) - 1} more"
         return f"Ledger: {summary} on {self.vault.machine}"
 
 
@@ -450,7 +460,8 @@ def pending(vault: Vault) -> list[str]:
 
 def commit_ops(vault: Vault, new: Sequence[Op], message: str) -> str | None:
     """Append ops to their file and commit it. A write's ops fall in one month on one machine, so it replaces one
-    file through a temp file and a rename and lands whole or not at all (DR-0610); a failed commit puts it back."""
+    file through a temp file and a rename and lands whole or not at all (DR-0610); a commit that fails before it lands
+    puts the file back."""
     rels = sorted({ops.rel_of(op) for op in new})
     if len(rels) != 1:
         raise LedgerError(f"a write's ops fall in one month, and these span {len(rels)} files; nothing written")
@@ -464,9 +475,14 @@ def commit_ops(vault: Vault, new: Sequence[Op], message: str) -> str | None:
     text = before or ""
     sep = "\n" if text and not text.endswith("\n") else ""
     write_replacing(vault.home, path, text + sep + "".join(f"{op.text()}\n" for op in new), "ledger-ops")
+    head = vault.git.head_id()
     try:
         return vault.commit(sorted({rel, *also}), console.signed(message))
     except BaseException as e:
+        # A failure after the commit landed leaves its ops where HEAD holds them: putting the file back would make
+        # every committed line of the write look gone.
+        if vault.git.head_id() != head:
+            raise
         if not isinstance(e, UnmergedError):
             vault.git.run("reset", "-q", "--", rel, check=False)
         if before is None:

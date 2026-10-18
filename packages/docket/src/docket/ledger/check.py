@@ -26,8 +26,7 @@ def committed_kept(vault: Vault, rel: str) -> bool:
 
 def problems(vault: Vault) -> list[tuple[str, str]]:
     """The ledger's problems, each as (where, what)."""
-    read = ops.read_all(vault.root)
-    found = [*read.problems, *fold.fold(read.lines).problems]
+    found = list(fold.load(vault.root).problems)
     found += [
         (rel, "a committed op line changed or went; ops are written once, so put it back from git")
         for rel in vault.git.changed_against_head(ops.OPS_DIR)

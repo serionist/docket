@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import gc
+import json
 from datetime import date
+from pathlib import Path
 
+import pytest
 from ledger_kit import ADD_FIELDS, DAY, line, lines, op, ulid
 
+from docket.ledger import fold as fold_module
+from docket.ledger import load
 from docket.ledger.fold import Item, Ledger, Material, describe, fold, fold_item
-from docket.ledger.ops import Op
+from docket.ledger.ops import Op, parse
 
 
 def one(*made: Op) -> tuple[Item, Ledger]:
@@ -155,8 +161,8 @@ def test_an_undo_of_anything_but_an_earlier_op_of_its_item_is_left_out() -> None
         op("undo", 8, 1, of=ulid(7)),
     ]
     folded = fold_item(ulid(1), lines(*made[:6], made[7]))
-    # Read from the latest back: the undo of another item's add first.
-    assert [where.rsplit(":", 1)[1] for where, _ in folded.problems] == ["7", "5", "4", "3"]
+    # Every undo's target is checked first, in order.
+    assert [where.rsplit(":", 1)[1] for where, _ in folded.problems] == ["3", "4", "5", "7"]
     assert folded.item is not None
     assert (folded.item.state, folded.item.number, folded.undone) == ("done", None, {})
     assert ulid(3) not in [ln.op.id for ln in folded.lines]
@@ -210,3 +216,72 @@ def test_a_log_line_says_the_op_in_a_few_words_and_an_import_s_shows_none() -> N
         op("add", 1, via="import"), op("log", 2, 1, note="old entry", via="import"), op("done", 3, 1, via="import")
     )
     assert [e.line for e in item.log] == [None, "old entry", None]
+
+
+def test_a_bad_undo_is_named_even_when_a_later_undo_undid_it() -> None:
+    """The undo of another item's op is bad, and so is the undo that undid it: both are named and left out."""
+    made = [op("add", 1), op("add", 2), op("undo", 3, 1, of=ulid(2)), op("undo", 4, 1, of=ulid(3))]
+    ledger = fold(lines(*made))
+    assert [where.rsplit(":", 1)[1] for where, _ in ledger.problems] == ["3", "4"]
+    assert set(ledger.items) == {ulid(1), ulid(2)}
+    assert ledger.folds[ulid(1)].undone == {}
+
+
+def test_an_add_carrying_a_later_docket_s_field_still_makes_its_item() -> None:
+    data = json.loads(op("add", 1).text())
+    data["fields"]["estimate"] = 30
+    read = parse(json.dumps(data) + "\n" + op("log", 2, 1, note="x").text() + "\n", "ledger/ops/2026-10-desk.jsonl")
+    ledger = fold(read.lines)
+    assert (read.problems, ledger.problems) == ((), ())
+    assert ledger.items[ulid(1)].title == ADD_FIELDS["title"]
+    assert describe(op("set", 3, 1, fields={"estimate": 30})) == "estimate: 30"
+
+
+def test_only_the_add_an_item_stands_on_claims_a_number() -> None:
+    """Two adds with one id on two texts and two numbers: the first by text is the item and holds its number; the
+    other is idle and claims none."""
+    a = op("add", 1, number=5, fields={**ADD_FIELDS, "title": "A title"})
+    b = op("add", 1, number=7, fields={**ADD_FIELDS, "title": "B title"})
+    first = min(a, b, key=lambda o: o.text())
+    ledger = fold([line(a, 1), line(b, 2)])
+    item = ledger.items[ulid(1)]
+    assert (item.title, item.number) == (first.fields["title"], first.number)  # type: ignore[index]
+    assert ledger.holders == {first.number: (ulid(1),)}
+
+
+def test_a_redone_add_takes_its_number_back_from_an_item_another_clone_gave_it() -> None:
+    """An add undone, its number given again on a clone that never saw it held, then the add redone: the first claim
+    keeps the number, and the other item waits for its renumber."""
+    x, undo, y = op("add", 1, number=5), op("undo", 2, 1, of=ulid(1)), op("add", 3, number=5)
+    assert fold(lines(x, undo, y)).items[ulid(3)].number == 5
+    ledger = fold(lines(x, undo, y, op("undo", 4, 1, of=ulid(2))))
+    assert (ledger.items[ulid(1)].number, ledger.items[ulid(3)].number) == (5, None)
+    assert [i.id for i in ledger.clashes()] == [ulid(3)]
+
+
+def test_an_op_of_a_kind_this_docket_doesnt_know_on_no_item_is_named() -> None:
+    """A later object's ops must name an add's item too (DR-0611): one that names none is left out and named."""
+    assert fold(lines(op("meeting", 1))).problems[0][1] == "names an item no add made; left out"
+
+
+def test_load_reads_and_folds_the_vault_s_ledger_with_the_cyclic_collector_paused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    newer = json.loads(op("log", 9, 1, note="x").text()) | {"schema_version": 2}
+    path = tmp_path / "ledger/ops/2026-10-desk.jsonl"
+    path.parent.mkdir(parents=True)
+    path.write_text(f"{op('add', 1).text()}\n{json.dumps(newer)}\n", encoding="utf-8", newline="\n")
+    seen: list[bool] = []
+    real = fold_module.fold
+    monkeypatch.setattr(fold_module, "fold", lambda found: seen.append(gc.isenabled()) or real(found))
+    ledger = load(tmp_path)
+    assert (seen, gc.isenabled()) == ([False], True)
+    assert ledger.highest_id == ulid(9)
+    assert ledger.problems == (("ledger/ops/2026-10-desk.jsonl:2", "isn't a ledger op of schema 1; skipped"),)
+    gc.disable()
+    try:
+        load(tmp_path)
+        assert not gc.isenabled()
+    finally:
+        gc.enable()
+    assert fold_module.load(tmp_path / "none").highest_id is None

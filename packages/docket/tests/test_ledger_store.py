@@ -16,7 +16,8 @@ from docket.ledger import ops, store
 from docket.ledger.fold import Item, Ledger, fold
 from docket.ledger.ops import Op
 from docket.ledger.store import LedgerError, material_ref, write
-from docket.vault.config import VaultConfig
+from docket.vault import forgotten
+from docket.vault.config import RedactionPattern, VaultConfig
 from docket.vault.vault import UnmergedError, Vault
 
 FILE = "ledger/ops/2026-10-test-box.jsonl"
@@ -84,17 +85,21 @@ def test_a_dry_run_says_what_it_would_write_and_writes_nothing(vault: Vault) -> 
 
 
 def test_a_change_that_changes_nothing_writes_no_op(vault: Vault) -> None:
-    write(vault, [ADD, {"op": "triage", "item": "A-0001", "verdict": "me"}], now=NOW)
+    write(vault, [ADD, {**ADD, "op": "add"}, {"op": "triage", "item": "A-0001", "verdict": "me"}], now=NOW)
+    write(vault, [{"op": "snooze", "item": "A-0002", "until": "2026-10-25"}], now=NOW)
     nothing = write(
         vault,
         [
             {"op": "set", "item": "A-0001", "fields": {"title": ADD_FIELDS["title"], "due": None}},
             {"op": "triage", "item": "A-0001", "verdict": "me"},
+            {"op": "snooze", "item": "A-0002", "until": "2026-10-25"},
         ],
         now=NOW,
     )
     assert nothing == store.Written((), None, {})
     assert write(vault, [], now=NOW).ops == ()
+    (later_day,) = write(vault, [{"op": "snooze", "item": "A-0002", "until": "2026-10-26"}], now=NOW).ops
+    assert later_day.until == date(2026, 10, 26)
 
 
 def test_each_change_is_checked_against_the_items_as_the_write_leaves_them(vault: Vault) -> None:
@@ -105,6 +110,7 @@ def test_each_change_is_checked_against_the_items_as_the_write_leaves_them(vault
             {"op": "set", "item": "A-0001", "fields": {"due": "2026-10-21", "notes": "line one\r\n\nline two  \n"}},
             {"op": "snooze", "item": "A-0001", "until": "2026-10-25"},
             {"op": "triage", "item": "A-0001", "verdict": "claude"},
+            {"op": "triage", "item": "A-0001", "verdict": "-"},
             {"op": "material", "item": "A-0001", "ref": "docs/plan.md", "label": "the plan"},
             {"op": "material", "item": "A-0001", "ref": "docs/plan.md", "label": "the plan, v2"},
             {"op": "material", "item": "A-0001", "ref": "https://example.invalid/x"},
@@ -119,7 +125,7 @@ def test_each_change_is_checked_against_the_items_as_the_write_leaves_them(vault
     it = item(vault, 1)
     assert (it.state, it.archived, it.due, it.notes) == ("dropped", False, date(2026, 10, 21), "line one\n\nline two")
     assert [(m.ref, m.label) for m in it.materials] == [("docs/plan.md", "the plan, v2")]
-    assert message(vault) == "Ledger: 12 ops on test-box"
+    assert message(vault) == "Ledger: add A-0001 and 12 more on test-box"
 
 
 REFUSALS: list[tuple[dict[str, Any], str]] = [
@@ -403,3 +409,53 @@ def test_a_material_s_path_is_kept_from_the_repo_s_top(tmp_path: Path) -> None:
     assert material_ref(vault, str(outside)) == outside.as_posix()
     write(vault, [ADD, {"op": "material", "item": "A-0001", "ref": str(top / "notes" / "a.md")}], now=NOW)
     assert item(vault, 1).materials[0].ref == "notes/a.md"
+
+
+def test_a_value_that_isn_t_text_is_refused_on_a_redaction_match_and_text_is_redacted(vault: Vault) -> None:
+    """A kind, a stream, a verdict or a day can't hold a marker, as a locator can't: a pattern of the owner's that
+    matches one refuses the write, with the ledger's own refusal (DR-0618)."""
+    path = vault.root / "vault.yaml"
+    config = VaultConfig.load(path)
+    config.redaction.patterns = [
+        RedactionPattern(name="codename", pattern="kepler"),
+        RedactionPattern(name="october", pattern="2026-10-2"),
+        RedactionPattern(name="chasing", pattern="chase"),
+        RedactionPattern(name="task", pattern="tas[k]"),
+    ]
+    path.write_text(config.dump(), encoding="utf-8", newline="\n")
+    commit_config(vault.root)
+    vault = Vault.open(vault.root)
+    (add,) = write(vault, [{"op": "add", "fields": {**ADD_FIELDS, "title": "the kepler dates for Ada"}}], now=NOW).ops
+    assert add.fields is not None and add.fields["title"] == "the [redacted:codename] dates for Ada"
+    refused = [
+        ({"op": "add", "fields": {**ADD_FIELDS, "stream": "kepler-pilot"}}, "stream", "a stream"),
+        ({"op": "add", "fields": {**ADD_FIELDS, "due": "2026-10-21"}}, "due", "a day"),
+        ({"op": "add", "fields": {**ADD_FIELDS, "kind": "task"}}, "kind", "a kind"),
+        ({"op": "triage", "item": "A-0001", "verdict": "chase"}, "verdict", "a verdict"),
+        ({"op": "snooze", "item": "A-0001", "until": "2026-10-25"}, "until", "a day"),
+    ]
+    for change, name, what in refused:
+        with pytest.raises(
+            LedgerError, match=rf"{name} matches the \w+ redaction rule, and {what} can't hold a marker"
+        ):
+            write(vault, [change], now=NOW)
+
+
+def test_a_failure_after_the_commit_landed_leaves_the_ops_where_head_holds_them(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write(vault, [ADD], now=NOW)
+
+    def full(*_: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(forgotten, "carry", full)
+    with pytest.raises(OSError, match="disk full"):
+        write(vault, [{"op": "log", "item": "A-0001", "note": "landed"}], now=later(1))
+    monkeypatch.undo()
+    monkeypatch.setenv("DOCKET_MACHINE", "test-box")
+    assert message(vault) == "Ledger: log A-0001 on test-box"
+    assert sh(vault.root, "git", "status", "--porcelain").strip() == ""
+    assert [p for p in vault.check() if p.where.startswith("ledger")] == []
+    write(vault, [{"op": "log", "item": "A-0001", "note": "next"}], now=later(2))
+    assert [e.line for e in item(vault, 1).log] == ["added", "landed", "next"]

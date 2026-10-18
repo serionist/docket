@@ -148,3 +148,42 @@ def test_two_clones_that_pull_from_a_clock_ahead_still_mint_different_ids(
         *sorted(["desk", "live"], key=lambda note: (one if note == "desk" else two)[0].id),
     ]
     assert merged.problems == ()
+
+
+def test_clones_behind_a_clock_ahead_write_batches_clash_renumber_apart_and_still_merge_to_one_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two clones with one machine name pull from a laptop whose clock runs two hours ahead, and each writes a batch
+    of three; both give out A-0002. Merged one way and rebased the other, then each renumbering the clash on its own
+    next write and merging again, they hold one ledger with no problem left."""
+    desk = empty_vault(tmp_path, make_config())
+    store.write(desk, [add("Shared")], now=NOW)
+    laptop = clone(desk, tmp_path / "laptop", "laptop", monkeypatch)
+    (ahead,) = store.write(laptop, [{"op": "log", "item": "A-0001", "note": "ahead"}],
+                           now=NOW + timedelta(hours=2)).ops  # fmt: skip
+    a = clone(laptop, tmp_path / "a", "test-box", monkeypatch)
+    b = clone(laptop, tmp_path / "b", "test-box", monkeypatch)
+    same = NOW + timedelta(seconds=5)
+    wa = store.write(a, [add("A1"), {"op": "log", "item": "A-0001", "note": "a"}, {"op": "done", "item": "A-0001"}],
+                     now=same).ops  # fmt: skip
+    wb = store.write(b, [add("B1"), {"op": "log", "item": "A-0001", "note": "b"},
+                         {"op": "drop", "item": "A-0001", "note": "dup"}], now=same).ops  # fmt: skip
+    ids = [o.id for o in (*wa, *wb)]
+    assert len(set(ids)) == 6 and min(ids) > ahead.id
+    assert [ops.decode(o.id) - ops.decode(wa[0].id) for o in wa] == [0, 1, 2]
+    assert wa[0].number == wb[0].number == 2
+    git(a.root, "pull", "-q", "--no-rebase", "--no-edit", str(b.root), "main")
+    git(b.root, "pull", "-q", "--rebase", str(a.root), "main")
+    assert snapshot(fold(ops.read_all(a.root).lines)) == snapshot(fold(ops.read_all(b.root).lines))
+    assert len(fold(ops.read_all(a.root).lines).clashes()) == 1
+    store.write(a, [], now=same + timedelta(seconds=1))
+    store.write(b, [], now=same + timedelta(seconds=1))
+    git(a.root, "pull", "-q", "--no-rebase", "--no-edit", str(b.root), "main")
+    git(b.root, "pull", "-q", "--rebase", str(a.root), "main")
+    one, two = (fold(ops.read_all(v.root).lines) for v in (a, b))
+    assert snapshot(one) == snapshot(two)
+    assert one.problems == () and one.clashes() == []
+    assert sorted(i.number or 0 for i in one.items.values()) == [1, 2, 3]
+    # The close that sorts first stands; the other clone's is idle.
+    first_close = "done" if wa[2].id < wb[2].id else "dropped"
+    assert next(i.state for i in one.items.values() if i.title == "Shared") == first_close

@@ -1,4 +1,4 @@
-"""A ledger of a few years: 5,000 items and 50,000 ops read and folded in under a second (DR-0616).
+"""A ledger of a few years: 5,000 items and 50,000 ops read and folded by `load` in under a second (DR-0616).
 
 The ops are written as the writer writes them, a month file per machine, each item an add and nine changes. Wall
 time is asserted only when no tracer runs; the files are built before the clock starts.
@@ -14,8 +14,7 @@ import pytest
 from docket_testkit import traced
 from ledger_kit import ADD_FIELDS
 
-from docket.ledger import ops
-from docket.ledger.fold import fold
+from docket.ledger import load, ops
 from docket.ledger.ops import Op
 
 ITEMS = 5_000
@@ -58,7 +57,7 @@ def build(root: Path) -> None:
 def test_a_few_thousand_items_read_and_fold_in_under_a_second(tmp_path: Path) -> None:
     build(tmp_path)
     began = time.perf_counter()
-    ledger = fold(ops.read_all(tmp_path).lines)
+    ledger = load(tmp_path)
     elapsed = time.perf_counter() - began
     print(f"ledger fold: {elapsed:.2f} s for {ITEMS:,} items")
     assert len(ledger.items) == ITEMS

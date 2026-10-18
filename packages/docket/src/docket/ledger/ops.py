@@ -20,8 +20,9 @@
 
 Every op names one item, its add's id. An op's id is a ULID minted as a hybrid logical clock (DR-0612), and the
 ledger's order is the ids' order. A line that doesn't read is a problem and is skipped; a key, a name in `fields` or
-an op kind this Docket doesn't know is read and changes nothing, so a later Docket can add one in schema 1. Kinds,
-verdicts and streams are read as text. The format is a one-way door: a later one writes schema_version 2.
+an op kind this Docket doesn't know is read and changes nothing, so a later Docket can add one in schema 1; a name in
+`fields` this Docket knows holds text or null, one it doesn't any value. Kinds, verdicts, streams, `by` and `via` are
+read as text and checked when written. The format is a one-way door: a later one writes schema_version 2.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any, Literal, Self, cast
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator
 
@@ -69,12 +70,16 @@ KEY_ORDER = (
     "verdict", "until", "ref", "label", "remove", "of", "note",
 )  # fmt: skip
 
+# The writers this Docket writes and the ways in; a line is read with any word in them, as a later Docket may add one.
 By = Literal["user", "claude", "sync"]
 Via = Literal["cli", "page", "tool", "import"]
 Ulid = Annotated[str, StringConstraints(pattern=ULID.pattern)]
 # The file name holds the machine to the whole rule (machines.validate); a line only to its letters, read fast.
 MachineName = Annotated[str, StringConstraints(pattern=machines.NAME.pattern)]
-OpName = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z_]{0,31}$")]
+# An op's kind, and its by and via: a lowercase word of at most 32 letters and underscores (DR-0611).
+WORD = r"^[a-z][a-z_]{0,31}$"
+Word = Annotated[str, StringConstraints(pattern=WORD)]
+KNOWN_FIELDS = frozenset(FIELDS)
 
 
 def _add(op: Op) -> bool:
@@ -102,16 +107,17 @@ class Op(BaseModel):
     schema_version: Literal[1]
     id: Ulid
     item: Ulid
-    op: OpName
+    op: Word
     day: date
     at: datetime | None = None
     machine: MachineName
-    by: By
-    via: Via
+    by: Word
+    via: Word
     batch: Ulid | None = None
     after: Ulid | None = None
     number: Annotated[int, Field(ge=1)] | None = None
-    fields: dict[str, str | None] | None = None
+    # A name this Docket knows holds text or null; a later Docket's name may hold any JSON value, kept unread.
+    fields: dict[str, Any] | None = None
     verdict: str | None = None
     until: date | None = None
     ref: str | None = None
@@ -131,6 +137,9 @@ class Op(BaseModel):
             raise ValueError(f"{self.op} doesn't carry what it needs")
         fields = self.fields
         if fields:
+            for name, value in fields.items():
+                if value is not None and name in KNOWN_FIELDS and not isinstance(value, str):
+                    raise ValueError(f"{name} is text or null")
             for name in DAYS:
                 value = fields.get(name)
                 if value is not None and not (DAY.match(value) and is_day(value)):
@@ -224,10 +233,13 @@ class Line:
 
 @dataclass(frozen=True)
 class Read:
-    """Every line that reads, and a problem (where, what) for each one or file that doesn't."""
+    """Every line that reads, a problem (where, what) for each one or file that doesn't, and the highest op id any
+    line holds, one this Docket can't read or that sits in the wrong file included: the clock never mints below a
+    newer Docket's ops (DR-0612)."""
 
     lines: tuple[Line, ...]
     problems: tuple[tuple[str, str], ...]
+    highest: str | None = None
 
 
 def linked(path: Path) -> bool:
@@ -250,11 +262,22 @@ def text_of(path: Path, rel: str) -> str:
         raise DocketError(f"{rel} isn't UTF-8; fix or delete it, then write again") from None
 
 
-def parse(text: str, rel: str) -> tuple[list[Line], list[tuple[str, str]]]:
+def id_of(raw: str) -> str | None:
+    """The op id a line that doesn't read as an op still names, if it names one."""
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return None
+    found = cast(dict[str, object], data).get("id") if isinstance(data, dict) else None
+    return found if isinstance(found, str) and ULID.match(found) else None
+
+
+def parse(text: str, rel: str) -> Read:
     """The lines of an op file that read and sit in the right file, and a problem for each other one, by number.
     Lines are split on LF alone: an op's text never holds one."""
     lines: list[Line] = []
     problems: list[tuple[str, str]] = []
+    ids: list[str] = []
     # The file's month and machine, compared field by field: formatting each op's file name costs as much as reading it.
     m = FILE_NAME.match(rel.rsplit("/", 1)[-1])
     year, month, machine = (int(m.group(1)), int(m.group(2)), m.group(3)) if m else (0, 0, "")
@@ -265,12 +288,16 @@ def parse(text: str, rel: str) -> tuple[list[Line], list[tuple[str, str]]]:
             op = Op.model_validate_json(raw)
         except ValidationError:
             problems.append((f"{rel}:{n}", "isn't a ledger op of schema 1; skipped"))
+            unread = id_of(raw)
+            if unread is not None:
+                ids.append(unread)
             continue
+        ids.append(op.id)
         if op.day.month != month or op.day.year != year or op.machine != machine:
             problems.append((f"{rel}:{n}", f"belongs in {rel_of(op)}, by its day and machine; skipped"))
             continue
         lines.append(Line(op, raw, rel, n))
-    return lines, problems
+    return Read(tuple(lines), tuple(problems), max(ids, default=None))
 
 
 def _op_file(path: Path) -> bool:
@@ -292,6 +319,7 @@ def read_all(root: Path) -> Read:
         return Read((), ((OPS_DIR, "is a link; nothing in it is read"),))
     lines: list[Line] = []
     problems: list[tuple[str, str]] = []
+    ids: list[str] = []
     for child in sorted(path.iterdir()) if path.is_dir() else []:
         rel = f"{OPS_DIR}/{child.name}"
         if child.name == KEEP:
@@ -304,7 +332,9 @@ def read_all(root: Path) -> Read:
         except UnicodeDecodeError:
             problems.append((rel, "isn't UTF-8; skipped"))
             continue
-        found, bad = parse(text, rel)
-        lines += found
-        problems += bad
-    return Read(tuple(lines), tuple(problems))
+        found = parse(text, rel)
+        lines += found.lines
+        problems += found.problems
+        if found.highest is not None:
+            ids.append(found.highest)
+    return Read(tuple(lines), tuple(problems), max(ids, default=None))

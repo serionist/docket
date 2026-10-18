@@ -5,22 +5,26 @@ same ledger. Lines are taken by id; a line twice is one op, and one id on two te
 (DR-0612). Per item:
 
 1. Its add is the first add by id and text; an op with no add, or sorting before it, is left out.
-2. Undos are read from the latest back, each leaving out the op it names unless it is undone itself (DR-0614). An
-   undo naming an op that isn't an earlier one of its item, or a renumber, is left out. An undone add hides the item.
+2. Every undo's target is checked first: one naming an op that isn't an earlier one of its item, a renumber or a bad
+   undo is left out (DR-0614). Then undos are read from the latest back, each leaving out the op it names unless it
+   is undone itself. An undone add hides the item.
 3. The rest replay in order. An op that meets a state it can't change (a second done after a merge) is idle: it
    changes nothing and stays in the log. A kind, or a name in `fields`, this Docket doesn't know changes nothing.
 
-Numbers come last, across items (DR-0613): the claim, add or renumber, that sorts first keeps a number, and an item
-whose latest claim lost holds none until a renumber gives it one. A log line's words are made when they are read.
+Numbers come last, across items (DR-0613): the add an item stands on and its renumbers claim numbers, the claim that
+sorts first keeps one, and an item whose latest claim lost holds none until a renumber gives it one. A log line's
+words are made when they are read.
 """
 
 from __future__ import annotations
 
+import gc
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
+from pathlib import Path
 
-from docket.ledger.ops import DAYS, REQUIRED, Line, Op
+from docket.ledger.ops import DAYS, REQUIRED, Line, Op, read_all
 
 CLOSED = ("done", "dropped")
 # done and drop are one kind for the undo that also undoes what the undone op left idle (DR-0614).
@@ -269,23 +273,31 @@ def fold_item(item_id: str, lines: Sequence[Line]) -> Folded:
             continue
         kept.append(line)
     by_id = {line.op.id: line.op for line in kept}
-    undone: dict[str, str] = {}
+    # Every undo's target is checked first, in order, so a bad undo is named even when a later undo undid it, and an
+    # undo of a bad undo is bad too.
     bad: set[str] = set()
-    for line in reversed(kept):
+    for line in kept:
         op = line.op
-        if op.op != "undo" or op.id in undone:
+        if op.op != "undo":
             continue
         target = by_id.get(op.of or "")
-        if target is None or target.op == "renumber" or target.id >= op.id:
+        if target is None or target.op == "renumber" or target.id >= op.id or target.id in bad:
             problems.append(
                 (line.where, "an undo of an op that isn't an earlier one of its item, or of a renumber; left out")
             )
             bad.add(op.id)
-            continue
-        undone[target.id] = op.id
     if bad:
         kept = [line for line in kept if line.op.id not in bad]
-    claims = tuple((line.op.id, line.op.number or 0) for line in kept if line.op.op in ("add", "renumber"))
+    undone: dict[str, str] = {}
+    for line in reversed(kept):
+        op = line.op
+        if op.op == "undo" and op.id not in undone:
+            undone[op.of or ""] = op.id
+    # The add the item stands on claims its number, and each renumber after it; a second add with its id claims none.
+    claims = (
+        (add.op.id, add.op.number or 0),
+        *((ln.op.id, ln.op.number or 0) for ln in kept if ln.op.op == "renumber"),
+    )
     if add.op.id in undone:
         return Folded(None, tuple(kept), undone, frozenset(), claims, tuple(problems))
     item = _new(add.op)
@@ -357,3 +369,19 @@ def fold(lines: Iterable[Line]) -> Ledger:
         highest_id=max(first) if first else None,
         highest_number=max(every, default=0),
     )
+
+
+def load(root: Path) -> Ledger:
+    """The vault's ledger: every op file read and folded, the reading's problems first, and the highest id any line
+    holds, one this Docket can't read included (DR-0612). The cyclic collector is paused meanwhile: the read makes
+    tens of thousands of objects, none of them in a cycle, and each pass of it would walk them all again."""
+    was = gc.isenabled()
+    gc.disable()
+    try:
+        read = read_all(root)
+        ledger = fold(read.lines)
+    finally:
+        if was:
+            gc.enable()
+    highest = max((i for i in (ledger.highest_id, read.highest) if i is not None), default=None)
+    return replace(ledger, problems=read.problems + ledger.problems, highest_id=highest)
