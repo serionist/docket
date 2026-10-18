@@ -43,6 +43,13 @@ from docket.vault.vault import Vault
 TODAY = datetime.now(UTC).date()
 
 
+@pytest.fixture(autouse=True)
+def _today(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Today as each test starts, not as the module loaded: the service reads its clock when a run opens, and a test
+    run that crosses midnight UTC would otherwise put a retry a day older than the test means."""
+    monkeypatch.setattr(sys.modules[__name__], "TODAY", datetime.now(UTC).date())
+
+
 @pytest.fixture(scope="module")
 def template(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return sync_template(tmp_path_factory)
