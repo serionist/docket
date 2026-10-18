@@ -85,7 +85,8 @@ flowchart LR
   and turning a rule on never unredacts it; matches that overlap become one marker (DR-0525, DR-0526). Names are never redacted; the
   never-store lists keep them out (DR-0194).
 - Only then are records written to the raw log and committed. An unclassified record waits in staging; the app
-  shows how many.
+  shows how many. The one version that goes in unstaged is the gate's own cut of one already in raw, made at
+  promotion: a Whisper transcript following its family's cuts (DR-0596).
 - A held recording goes in only once its owner releases it, typing back a code at their own console for the cuts
   they confirm. The release log keeps those cuts, and the gate applies them to every version of the recording, on
   every machine (DR-0200 to DR-0203).
@@ -560,7 +561,8 @@ judgement.
    recording's people (DR-0570). Both are kept and indexed: a test on 38 minutes of Hungarian and English work calls
    showed large-v3 about as good as a commercial recorder's transcript and a little better on names, with different
    mistakes, so keeping both raises recall on names and numbers. The turbo model dropped numbers, so it is only for live
-   use.
+   use. A later cut of the family reaches it at the next promotion on a machine that runs the source: the gate writes
+   its next version, cut by text, in the same run (DR-0590, DR-0591).
 5. The two are reconciled in context: aligned by time, per recorder line; the doubtful spots found (the names, numbers
    and words they disagree on, and a name both heard alike close to one in the meeting), on each call and never
    stored, with no confidence kept (DR-0583); each spot gets its context (aliases, glossary,

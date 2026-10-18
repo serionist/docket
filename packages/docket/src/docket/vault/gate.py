@@ -1,4 +1,4 @@
-"""The staging gate: the only way a record reaches the raw log (DR-0015).
+"""The staging gate: the only way a record from a source reaches the raw log (DR-0596).
 
 Intake drops in memory what a private source or a never-store list names, so a dropped record never touches the disk,
 then redacts the rest and stages it: `ready` from a work source, `pending` from a mixed one or when the record was
@@ -13,6 +13,9 @@ counted. A hold beats a release.
 Media waits beside its record (DR-0547): every drop of a version deletes the staged media on its rid and on each rid it
 nests under first, and a drop for a never-store value or as private marks those rids withheld. Every sweep and every
 promotion runs media's four checks again and deletes what fails; promotion stores what passes once its record is in raw.
+
+A Whisper transcript follows its family's cuts at promotion (DR-0590): its next version, cut by text, goes in the run
+with the cut, unstaged, since it only takes text out of what raw holds (DR-0596).
 
 Nothing here names a dropped record: not a log line, not an error, not a file. Only counts leave the gate.
 """
@@ -35,6 +38,7 @@ from docket.media import layout as media_layout
 from docket.media import staged as media_staged
 from docket.media.keystore import KeyStore
 from docket.media.screen import Screen
+from docket.speech import follow
 from docket.vault import cuts as cutting
 from docket.vault import holds, inforce, neverstore, releaselog
 from docket.vault.config import CONFIG_FILE, VaultConfig
@@ -127,6 +131,8 @@ class PromoteResult:
     media: list[MediaRun] = field(default_factory=list["MediaRun"])
     media_dropped: int = 0
     media_held: list[str] = field(default_factory=list[str])
+    # Whisper transcripts cut to follow their families' cuts (DR-0590).
+    followed: int = 0
 
 
 @dataclass(frozen=True)
@@ -156,6 +162,7 @@ class Gate:
         self.vault = vault
         self.staging = Staging(vault.root, vault.home)
         self._cut_rids: set[str] = set()
+        self._seen = follow.Seen()
         self._read_runs: set[Path] = set()
         self._holds = holds.Holds()
         self._releases = releaselog.Releases()
@@ -324,16 +331,22 @@ class Gate:
                     result.held.append(self._hold(entry, str(e)))
                     continue
                 groups.setdefault(name, []).append((entry, final))
-            for name in sorted(groups):
-                result.runs.append(self._promote_source(name, groups[name]))
+            # One time for the runs and the follow, which writes a version only in a run that sorts after the one it
+            # cuts.
+            at = datetime.now(UTC)
+            extra = self._follow(config, groups, entries, redactor, source=source, at=at, result=result)
+            for name in sorted({*groups, *extra}):
+                result.runs.append(self._promote_source(name, groups.get(name, []), extra.get(name, []), at))
             self._promote_media(config, result)
             log.info(
-                "gate: promoted %d record(s) and %d media file(s), held %d, dropped %d, on hold %d",
+                "gate: promoted %d record(s) and %d media file(s), held %d, dropped %d, on hold %d, cut %d Whisper "
+                "transcript(s) to follow their families",
                 sum(r.written for r in result.runs),
                 sum(m.stored for m in result.media),
                 len(result.held),
                 result.dropped.total(),
                 result.on_hold,
+                result.followed,
             )
             return result
 
@@ -601,8 +614,85 @@ class Gate:
             if key != found.key:
                 self.keys.delete(key)
 
-    def _promote_source(self, name: str, items: list[tuple[Entry, RawRecord]]) -> SourceRun:
-        run = self.vault.rawlog.write_run(name, [final for _, final in items])
+    def _follow(
+        self,
+        config: VaultConfig,
+        groups: dict[str, list[tuple[Entry, RawRecord]]],
+        entries: list[Entry],
+        redactor: Redactor,
+        *,
+        source: str | None,
+        at: datetime,
+        result: PromoteResult,
+    ) -> dict[str, list[RawRecord]]:
+        """A Whisper transcript follows its family's cuts (DR-0590): a staged one this promotion takes is cut in its
+        place, and one in raw whose latest version doesn't hold them gets its next version, for its source's run. Only
+        for a source this machine runs, in force and not private, never under a hold, and never for a version a
+        never-store value matches (DR-0591): a withheld family or a private decision doesn't stop a version that only
+        takes text out of raw."""
+        sources = [n for n, entry in config.sources.items() if entry.sensitivity != "private" and source in (None, n)]
+        promoted = [item for items in groups.values() for item in items]
+        due = follow.due(self._seen, promoted, entries, self._releases, sources)
+        if due:
+            # The cursor file reaches the source contract, which imports the vault package: imported here, so a
+            # process that imports the contract first doesn't meet it half made.
+            from docket.vault import cursors  # noqa: PLC0415
+
+            # Only where the cursor file names the source; read only when something is due, so a promotion with
+            # nothing to follow reads no more than it did.
+            ran = cursors.read(self.vault.root, self.vault.machine)
+            # A version written now must sort after the one it cuts, or the uncut one stays latest: one stamped ahead
+            # (another clone's clock, or this minute by a name that sorts after) stays due for a later promotion.
+            stamp = (f"{at.astimezone(UTC):%Y-%m-%d}", f"{at.astimezone(UTC):%H%M}", self.vault.machine)
+            due = [d for d in due if d.rid.partition(":")[0] in ran and (d.at is None or d.at[0][:3] <= stamp)]
+        latest = self._latest([d.rid for d in due if d.key is None])
+        places = {entry.key: (name, n) for name, items in groups.items() for n, (entry, _) in enumerate(items)}
+        extra: dict[str, list[RawRecord]] = {}
+        for found in due:
+            if found.key is not None:
+                # Staged, its family's checks ran at the sweep (DR-0570), and a hold kept it out of the groups.
+                name, n = places[found.key]
+                entry, final = groups[name][n]
+                made, _ = redactor.record(follow.cut(final, found.ranges))
+                groups[name][n] = (entry, made)
+                # Counted only when written: the raw log takes a version once.
+                if not self.vault.rawlog.contains(made):
+                    result.followed += 1
+                continue
+            record = latest[found.rid]
+            if record is None or self._holds.covers(record):
+                continue
+            made, _ = redactor.record(follow.cut(record, found.ranges))
+            if not neverstore.match(made, config.never_store) and not self.vault.rawlog.contains(made):
+                extra.setdefault(made.source, []).append(made)
+                result.followed += 1
+        return extra
+
+    def _latest(self, rids: list[str]) -> dict[str, RawRecord | None]:
+        """Each rid's latest version in raw, read at the index's places while it is current for the source (DR-0446);
+        the index is held only for the reads, never through a write."""
+        if not rids:
+            return {}
+        from docket.index import lookup  # noqa: PLC0415 - the index's modules import the vault's, not the other way
+
+        index = lookup.open_read(self.vault)
+        try:
+            raw = RawLookup(self.vault.root, lambda: index)
+            return {rid: raw.latest(rid) for rid in rids}
+        finally:
+            if index is not None:
+                index.close()
+
+    def _promote_source(
+        self,
+        name: str,
+        items: list[tuple[Entry, RawRecord]],
+        extra: Sequence[RawRecord] = (),
+        run_at: datetime | None = None,
+    ) -> SourceRun:
+        # The versions the gate cut from raw go after the staged records, in the same run and commit (DR-0596).
+        written = [*(final for _, final in items), *extra]
+        run = self.vault.rawlog.write_run(name, written, run_at)
         files = f" in {len(run.paths)} run files" if len(run.paths) > 1 else ""
         what = f"{run.written} record(s){files}" if run.written else "an interrupted run"
         # Committed even when nothing new was written: a crash between an earlier write and its commit left the run
@@ -611,7 +701,7 @@ class Gate:
         self.staging.remember([(e.staged.record.rid, e.key) for e, _ in items if e.staged.cuts], "cut")
         for entry, _ in items:
             self.staging.delete(entry.path)
-        redactions = sum((markers(final) for _, final in items), Counter[str]())
+        redactions = sum((markers(final) for final in written), Counter[str]())
         return SourceRun(name, run.path, run.written, run.skipped, commit, redactions, run.paths)
 
     def _uncommitted_runs_with(self, rid: str) -> list[str]:
@@ -769,17 +859,19 @@ class Gate:
         return redacted.model_copy(update={"v": version(redacted), "run": ""})
 
     def _refresh_cuts(self) -> None:
-        """The rids whose raw text holds a cut marker, from the run files this gate hasn't read yet."""
+        """The rids whose raw text holds a cut marker, from the run files this gate hasn't read yet; with each rid's
+        `[cut]` spans and each machine transcript's latest marks, for the follow (DR-0590)."""
         for run in self.vault.rawlog.run_files():
             if run.path in self._read_runs:
                 continue
             with run.path.open(encoding="utf-8", newline="\n") as f:
-                for line in f:
-                    if CUT_MARKER not in line:
+                for n, line in enumerate(f):
+                    if CUT_MARKER not in line and TRANSCRIBED_VIA not in line:
                         continue
                     data: Any = json.loads(line)
                     if CUT_MARKER in str(data.get("text", "")):
                         self._cut_rids.add(str(data["rid"]))
+                    self._seen.add(data, (run.order, n))
             self._read_runs.add(run.path)
 
     # Last, so the name doesn't shadow the builtin in the annotations above it.

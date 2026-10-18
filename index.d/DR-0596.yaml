@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0596
+    title: Everything from a source reaches the raw log through the staging gate; the gate's own cut of a version in raw goes in at promotion
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#186"]
+    supersedes: [DR-0015]
+    description: "Everything from a source reaches the raw log through the staging gate. New records land in staging, on the local disk and never committed; the gate applies the never-store lists, the source rules, classification for sources that can be private, cuts and redaction, and only then writes a record to the raw log. One kind of version reaches raw without being staged: the gate's own cut of a version already in raw, or of a staged version it promotes in the same call, made at promotion with the redaction every promoted record gets. Today that is a Whisper transcript following its family's cuts (DR-0590). It holds nothing that wasn't in raw or promoted with it. This narrows DR-0015, under which staging was the only way in: staged, that cut would wait for the owner and leave the stretch in search (#186)."
+    binds:
+      - A private recording never reaches git, not even in history.
+      - "Nothing new from a source reaches raw unstaged: what the gate writes without staging is only a cut of a version already in raw, or of one it promotes in the same call."
+    not_chosen:
+      - "Staging the gate's cut: it would wait for the owner, as everything from a mixed source and every version of a cut record does; no classifier value fits it, and staging adds no check and no crash safety."
