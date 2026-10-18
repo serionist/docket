@@ -303,12 +303,12 @@ def release(vault: Vault, source: str, folder: Path, proposals: Sequence[Proposa
             report.held.append((native, proposal.held))
         elif native in held and native in granted:
             _take_off_again(vault, source, granted[native], place, report)
-            _stage(vault, source, native, records[native])
+            _stage(vault, source, records[native])
         elif native in granted:
             if not records[native]:
                 report.refused.append((native, "released already, and not in this folder"))
                 continue
-            _stage(vault, source, native, records[native])
+            _stage(vault, source, records[native])
             report.restaged.append(native)
         elif native not in held:
             report.refused.append((native, f"not held in {holds.HOLDS}/{source}.txt"))
@@ -342,7 +342,7 @@ def _release_one(vault: Vault, source: str, checked: _Checked, place: str, repor
             return
         releaselog.add(vault, source, line)
         holds.remove(vault, source, [native])
-    _stage(vault, source, native, checked.records, shown)
+    _stage(vault, source, checked.records, shown)
     report.released.append(native)
 
 
@@ -377,13 +377,13 @@ def _take_off_again(vault: Vault, source: str, granted: releaselog.Granted, plac
 
 
 def _stage(
-    vault: Vault, source: str, native: str, records: list[RawRecord], shown: frozenset[tuple[str, str]] = frozenset()
+    vault: Vault, source: str, records: list[RawRecord], shown: frozenset[tuple[str, str]] = frozenset()
 ) -> None:
     """Stage a released recording: the gate cuts it by its release and leaves out what the release doesn't keep.
     Only the versions this run showed the owner are classified work by them; anything else under the id (a version
-    staged elsewhere or earlier, or one staged again after a crash or a merge) waits as pending for a classification."""
-    if native in holds.read(vault.root, source):
-        return
+    staged elsewhere or earlier, or one staged again after a crash or a merge) waits as pending for a classification.
+    Each caller has taken the hold off or found none; a hold a merge brings back meanwhile, the gate's intake keeps
+    out."""
     gate = Gate(vault)
     gate.stage(records)
     if not shown:

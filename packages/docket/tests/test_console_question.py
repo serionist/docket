@@ -221,6 +221,7 @@ def test_an_uncommitted_credentials_off_is_asked_about_before_any_command_and_go
     vault: Vault, owner: Callable[..., AtConsole], capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     by_hand(vault, lambda c: c.model_copy(update={"never_store": NeverStore(people=["Ben Sample", "Cleo Test"])}))
+    by_hand(vault, memo(mapper=".claude/skills/sources/memo/mapper.py", tools=["list_memos", "get_memo"]))
     by_hand(vault, credentials(False))
     at = head(vault)
     monkeypatch.setenv("CLAUDECODE", "1")
@@ -234,6 +235,9 @@ def test_an_uncommitted_credentials_off_is_asked_about_before_any_command_and_go
     out = capsys.readouterr().out
     assert "vault.yaml has an edit that isn't in force until you commit it; it goes in first:" in out
     assert "  never_store.people: 1 taken off, 1 added\n" in out
+    # Every other change the edit holds is on the same screen, each as the file has it.
+    assert "  sources.memo.mapper: none -> .claude/skills/sources/memo/mapper.py\n" in out
+    assert "  sources.memo.tools: [] -> [list_memos, get_memo]\n" in out
     assert "  redaction.credentials: true -> false\n" in out
     assert "Dora" not in out and "Cleo" not in out
     assert "this command changes vault.yaml" not in out

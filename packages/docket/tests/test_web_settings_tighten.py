@@ -288,6 +288,25 @@ def test_a_change_docket_can_t_place_gets_the_line(
     assert path.read_text(encoding="utf-8") == mine
 
 
+def test_a_value_docket_can_t_take_off_in_place_is_left_to_the_owner(client: TestClient, vault: Vault) -> None:
+    """An alias anywhere in the file: no splice may change what else reads it (DR-0602), so the page says which line to
+    delete and writes nothing."""
+    path = vault.root / CONFIG_FILE
+    text = path.read_text(encoding="utf-8")
+    mine = text.replace("  chat:\n    enabled: true\n", "  chat:\n    enabled: &on true\n", 1)
+    mine = mine.replace("  memo:\n    enabled: true\n", "  memo:\n    enabled: *on\n", 1)
+    assert mine.count("&on") == mine.count("*on") == 1
+    path.write_text(mine, encoding="utf-8", newline="\n")
+    git(vault.root, "commit", "-qam", "An alias of mine")
+    at = sh(vault.root, "git", "rev-parse", "HEAD")
+    fields = {"act": "off", "list": "people", "value": "Cleo Test", "shown": shown(vault)}
+    answer = client.post(ADD, data=fields, headers=SAME)
+    assert answer.status_code == 200
+    assert "change it there: delete its line under never_store.people." in said(answer.text)
+    assert path.read_text(encoding="utf-8") == mine
+    assert sh(vault.root, "git", "rev-parse", "HEAD") == at
+
+
 @pytest.mark.parametrize(("headers", "status"), [({"Origin": "http://evil.example"}, 403), ({}, 403), (SAME, 303)])
 def test_every_post_passes_the_guard(client: TestClient, vault: Vault, headers: dict[str, str], status: int) -> None:
     assert client.post(RULE, data={"rule": "phone", "shown": shown(vault)}, headers=headers).status_code == status

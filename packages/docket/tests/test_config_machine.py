@@ -72,6 +72,17 @@ def test_media_hosts_from_before_any_https_host_is_read_and_ignored(tmp_path: Pa
     assert not config.written_by_docket(path.read_text(encoding="utf-8"))
 
 
+@pytest.mark.parametrize("written", ["work", "", "[get_memo]"])
+def test_a_source_that_isn_t_a_mapping_is_refused_by_name(tmp_path: Path, written: str) -> None:
+    """Old keys are taken out of a source's mapping only: anything else under its name is refused, as before."""
+    text = make_config().dump()
+    start, end = text.index("  chat:\n"), text.index("  calls:\n")
+    path = tmp_path / "vault.yaml"
+    path.write_text(f"{text[:start]}  chat: {written}\n{text[end:]}", encoding="utf-8")
+    with pytest.raises(DocketError, match=r"sources.chat: Input should be a valid dictionary"):
+        VaultConfig.load(path)
+
+
 def test_a_file_written_before_the_source_keys_reads_unchanged(tmp_path: Path) -> None:
     keys = ("mapper: null", "tools: []")
     text = "".join(f"{line}\n" for line in make_config().dump().splitlines() if line.strip() not in keys)

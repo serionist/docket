@@ -70,7 +70,7 @@ def isolated(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.Monke
     keyring.set_keyring(FailKeyring())
     monkeypatch.setenv("DOCKET_MACHINE", "test-box")
     monkeypatch.delenv("DOCKET_VAULT", raising=False)
-    # Claude Code sets it in the shells it runs, and a release refuses to run under it: tests set it where they mean to.
+    # Claude Code sets it in the shells it runs, and Docket's commits there say so: tests set it where they mean to.
     monkeypatch.delenv("CLAUDECODE", raising=False)
     for name in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
         monkeypatch.delenv(name, raising=False)
