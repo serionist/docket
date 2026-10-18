@@ -3,14 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from docket_testkit import make_config, sh
+from docket_testkit import empty_vault, git, make_config, sh
 from pydantic import ValidationError
 
 from docket import userconfig
 from docket.cli import main
 from docket.errors import DocketError
-from docket.vault import machine
-from docket.vault.config import SourceConfig, VaultConfig
+from docket.vault import machine, settings
+from docket.vault.config import CONFIG_FILE, SourceConfig, VaultConfig
 from docket.vault.home import Home
 
 
@@ -70,6 +70,31 @@ def test_media_hosts_from_before_any_https_host_is_read_and_ignored(tmp_path: Pa
     loaded = VaultConfig.load(path)
     assert loaded == config and "media_hosts" not in loaded.dump()
     assert not config.written_by_docket(path.read_text(encoding="utf-8"))
+
+
+def test_an_old_docket_form_with_hosts_listed_is_still_docket_s_own(tmp_path: Path) -> None:
+    """Docket wrote a source's hosts as a block list after its tools: such a file, its redaction block from before the
+    switches were split too, is Docket's form whatever hosts it lists, so the next write is whole and drops the key."""
+    config = make_config()
+    old = config.dump().replace("  tools: []\n", "  tools: []\n    media_hosts: []\n")
+    listed = old.replace("    media_hosts: []\n", "    media_hosts:\n    - media.example\n    - 42\n", 1)
+    assert config.written_by_docket(listed)
+    assert config.written_by_docket(listed.replace("  credentials: true\n  phone: false\n", "  builtin: true\n"))
+    assert not config.written_by_docket(listed.replace("    - 42\n", "    - 42   # mine\n"))
+    vault = empty_vault(tmp_path, config)
+    path = vault.root / CONFIG_FILE
+    path.write_text(listed, encoding="utf-8", newline="\n")
+    git(vault.root, "commit", "-qam", "An old vault.yaml")
+    phone = config.redaction.model_copy(update={"phone": True})
+    assert settings.rewrite(vault, lambda c: c.model_copy(update={"redaction": phone}), "Config: a", via="cli").changed
+    assert path.read_text(encoding="utf-8") == config.model_copy(update={"redaction": phone}).dump()
+
+
+@pytest.mark.parametrize(
+    "text", ["storage: [repo\n", "- storage\n", "storage: repo\n", "sources: 3\n", "sources:\n  chat: media_hosts\n"]
+)
+def test_a_text_that_doesn_t_read_as_settings_is_never_docket_s_form(text: str) -> None:
+    assert not make_config().written_by_docket(text)
 
 
 @pytest.mark.parametrize("written", ["work", "", "[get_memo]"])

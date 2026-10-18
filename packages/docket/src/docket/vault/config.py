@@ -363,25 +363,38 @@ class VaultConfig(_Model):
 
     def written_by_docket(self, text: str) -> bool:
         """Whether a vault.yaml's text is exactly what Docket writes for these settings, now, before the redaction
-        switches were split, or before `media_hosts` went (DR-0604), so Docket may rewrite it without losing anything
-        the user wrote by hand."""
-        if text == self.dump():
-            return True
+        switches were split, or before `media_hosts` went (DR-0604), whatever hosts it listed, so Docket may rewrite it
+        without losing anything the user wrote by hand: the hosts are read and ignored, and the rewrite drops them."""
+        written = self._written()
+        forms = [written]
         legacy = self.redaction.legacy()
-        if legacy is not None and text == _dump({**self._written(), "redaction": legacy}):
-            return True
-        return text == _dump(_with_hosts(self._written()))
+        if legacy is not None:
+            forms.append({**written, "redaction": legacy})
+        hosts = _listed_hosts(text)
+        forms += [_with_hosts(form, hosts) for form in forms]
+        return any(text == _dump(form) for form in forms)
 
 
-def _with_hosts(data: dict[str, Any]) -> dict[str, Any]:
-    """The settings as Docket wrote them while each source had `media_hosts`, an empty list after its tools."""
+def _listed_hosts(text: str) -> dict[str, Any]:
+    """Each source's `media_hosts` as a text lists them, by the source's name: none from a text that doesn't read as
+    settings."""
+    try:
+        sources: Any = yaml.load(text, Loader=UniqueKeyLoader)["sources"]  # noqa: S506 - a SafeLoader
+        return {str(name): entry["media_hosts"] for name, entry in sources.items() if "media_hosts" in entry}
+    except (yaml.YAMLError, TypeError, KeyError, AttributeError):
+        return {}
+
+
+def _with_hosts(data: dict[str, Any], hosts: dict[str, Any]) -> dict[str, Any]:
+    """The settings as Docket wrote them while each source had `media_hosts` after its tools: the hosts the file lists,
+    else an empty list."""
     sources: dict[str, Any] = {}
     for name, entry in cast(dict[str, dict[str, Any]], data["sources"]).items():
         out: dict[str, Any] = {}
         for key, value in entry.items():
             out[key] = value
             if key == "tools":
-                out["media_hosts"] = []
+                out["media_hosts"] = hosts.get(name, [])
         sources[name] = out
     return {**data, "sources": sources}
 
