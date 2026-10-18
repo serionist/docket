@@ -712,8 +712,10 @@ Sync, Staging, Curate and Settings; the navigation shows the pages still to come
   (`02:30` or `02:30-03:20`). A link that sets `at` lands on the first line it marks, without JavaScript.
 - A line's time plays the audio from its start. Without JavaScript the same link opens the page at the line, and
   the player starts there by itself.
-- The audio comes from `/recording/audio`: decrypted for each request, answered by exact byte ranges, never cached
-  (`Cache-Control: no-store`), and only while it reads ok. Nothing about it is logged but the route's name.
+- The audio comes from `/recording/audio`, in the browser's session only: the token never fetches it. It plays only
+  while the audio reads ok, checked on every request; one file's decrypted bytes stay in memory a minute for the
+  player's next range, answered exactly and never cached (`Cache-Control: no-store`). Nothing about it is logged but
+  the route's name.
 - Search's transcript hits, and its panel on a recording, link here at the hit's time.
 - A held recording shows only that it is held, with a link to the holds on the Staging page.
 - Keys: `?`.

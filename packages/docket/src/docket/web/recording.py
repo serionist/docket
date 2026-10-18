@@ -18,7 +18,7 @@ from starlette.responses import Response
 
 from docket import index, recall
 from docket.errors import DocketError
-from docket.media import layout, reader
+from docket.media import crypto, layout, reader
 from docket.recall import DocView
 from docket.service.speech import line as speech_line
 from docket.service.state import Service
@@ -107,6 +107,28 @@ def _with_speech(service: Service, facts: Facts) -> Facts:
     return dataclasses.replace(facts, speech=f"Whisper: {speech_line(found)}") if found is not None else facts
 
 
+def _audio_of(vault: Vault, rid: str, plain: audio.Plain, *, whole: bool) -> tuple[bytes | None, int, str] | str:
+    """A recording's audio for the player: its bytes (none for HEAD), its size and its type; or why not. The reader's
+    state comes first, every time, so kept bytes never outlive it."""
+    state = reader.state_of(vault, rid)
+    if state != "ok":
+        return state
+    # A file that reads ok is the one stored file, here and no LFS pointer.
+    path = layout.stored_files(vault.root, rid)[0]
+    ext = layout.ext_of(path)
+    if ext not in layout.AUDIO:
+        return "it isn't audio"
+    media_type = layout.TYPES[ext]
+    if not whole:
+        kept = plain.size(path)
+        return None, kept if kept is not None else crypto.plain_size(path), media_type
+    data = plain.get(path, lambda: reader.read(vault, rid).data)
+    if data is None:
+        # Its state changed between the two reads.
+        return "it no longer reads ok"
+    return data, len(data), media_type
+
+
 def _audio(vault: Vault, rid: str, lookup: RawLookup) -> NoAudio:
     return AUDIO[reader.state_of(vault, rid, raw=lookup)]
 
@@ -121,20 +143,29 @@ def _page(
 def router(service: Service) -> APIRouter:
     web = APIRouter()
 
-    @web.get("/recording/audio", include_in_schema=False)
+    plain = audio.Plain()
+
+    @web.api_route("/recording/audio", methods=["GET", "HEAD"], include_in_schema=False)
     async def recording_audio(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
-        """The recording's stored audio for the page's player (#159): decrypted through the reader, only while it
-        reads ok, and served by byte range with no caching. Nothing of it is logged."""
+        """The recording's stored audio for the page's player (#159, DR-0576): only while the reader says ok, read
+        again on every request; decrypted through it, kept a minute for the next range; served by byte range with no
+        caching. The browser's session only: the token never fetches it. Nothing of it is logged."""
+        if request.headers.get("authorization") is not None:
+            return audio.token_refused()
         rid = request.query_params.get("rid", "")
         if RID.match(rid) is None or not is_native_id(rid.partition(":")[2]):
             return audio.refused("give a recording's rid")
+        whole = request.method == "GET"
         try:
-            found = await asyncio.to_thread(lambda: reader.read(service.vault(), rid))
+            found = await asyncio.to_thread(_audio_of, service.vault(), rid, plain, whole=whole)
         except DocketError as e:
             return audio.refused(str(e))
-        if found.state != "ok" or found.data is None or found.ext not in layout.AUDIO or found.type is None:
-            return audio.refused(found.state if found.state != "ok" else "it isn't audio")
-        return audio.ranged(found.data, found.type, request.headers.get("range"))
+        if isinstance(found, str):
+            return audio.refused(found)
+        data, size, media_type = found
+        if data is None:
+            return audio.head(size, media_type)
+        return audio.ranged(data, media_type, request.headers.get("range"))
 
     @web.get("/recording", include_in_schema=False)
     async def recording_page(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]

@@ -5,8 +5,11 @@ the records are invented."""
 
 from __future__ import annotations
 
+import io
 import logging
+import os
 import re
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,13 +18,14 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from docket_testkit import make_record
-from docket_webkit import Element, a11y_problems, html_problems, parse, signed_in
+from docket_webkit import TOKEN, Element, a11y_problems, html_problems, parse, signed_in
 from recording_kit import TOUR, TOUR_POLISHED, WHISPER, recording_template, with_audio
 from starlette.datastructures import QueryParams
 from starlette.testclient import TestClient
 
 from docket.errors import DocketError
-from docket.media import reader
+from docket.media import crypto, layout, reader
+from docket.vault import holds
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.gate import Gate
 from docket.vault.records import RawRecord
@@ -79,6 +83,8 @@ def tree(client: TestClient, path: str) -> Element:
         ("bytes=5-2", 10, None),
         ("bytes=-", 10, None),
         ("items=0-3", 10, None),
+        ("bytes=" + "9" * 5000 + "-", 10, None),
+        ("bytes=0-" + "9" * 21, 10, None),
     ],
 )
 def test_a_range_is_read_as_the_rfc_reads_it(header: str | None, size: int, wanted: object) -> None:
@@ -103,6 +109,10 @@ def test_the_audio_is_served_by_exact_byte_ranges_and_never_cached(client: TestC
         assert part.content == data[start : end + 1] and part.headers["Content-Length"] == str(end - start + 1)
         assert part.headers["Content-Range"] == f"bytes {start}-{end}/{size}"
         assert part.headers["Cache-Control"] == "no-store"
+    huge = client.get(AUDIO, headers={"Range": "bytes=" + "9" * 5000 + "-"})
+    assert huge.status_code == 200 and huge.content == data, (
+        "a field past Python's digits is a Range that doesn't parse"
+    )
     past = client.get(AUDIO, headers={"Range": f"bytes={size}-"})
     assert past.status_code == 416 and past.headers["Content-Range"] == f"bytes */{size}" and past.content == b""
 
@@ -113,27 +123,98 @@ def test_the_audio_is_served_by_exact_byte_ranges_and_never_cached(client: TestC
 def test_every_state_but_ok_plays_nothing_and_says_why(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, state: str
 ) -> None:
-    monkeypatch.setattr(reader, "read", lambda *a, **k: reader.Media(state))  # type: ignore[arg-type]
-    refused = client.get(AUDIO)
-    assert refused.status_code == 404 and refused.text == f"no audio: {state}"
-    assert refused.headers["Cache-Control"] == "no-store"
+    monkeypatch.setattr(reader, "state_of", lambda *a, **k: state)
+    for refused in (client.get(AUDIO), client.head(AUDIO)):
+        assert refused.status_code == 404 and refused.headers["Cache-Control"] == "no-store"
+    assert client.get(AUDIO).text == f"no audio: {state}"
 
 
 def test_a_rid_a_file_that_isn_t_audio_and_a_reader_s_refusal_are_named(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     assert client.get("/recording/audio?rid=not%20a%20rid").text == "no audio: give a recording's rid"
-    monkeypatch.setattr(reader, "read", lambda *a, **k: reader.Media("ok", b"%PDF", "pdf"))
+    monkeypatch.setattr(reader, "state_of", lambda *a, **k: "ok")
+    monkeypatch.setattr(layout, "stored_files", lambda *a, **k: [Path("media/plaud/2026/10/x.pdf.age")])
     assert client.get(AUDIO).text == "no audio: it isn't audio"
 
-    def two(*_: object, **__: object) -> reader.Media:
+    def two(*_: object, **__: object) -> reader.State:
         raise DocketError(f"{TOUR} has 2 stored media files; one of them is a leftover to remove by hand")
 
-    monkeypatch.setattr(reader, "read", two)
+    monkeypatch.setattr(reader, "state_of", two)
     assert (
         client.get(AUDIO).text
         == f"no audio: {TOUR} has 2 stored media files; one of them is a leftover to remove by hand"
     )
+
+
+def test_a_file_that_stops_reading_ok_between_the_reader_s_two_looks_plays_nothing(
+    client: TestClient, stored: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(reader, "read", lambda *a, **k: reader.Media("held"))
+    assert client.get(AUDIO).text == "no audio: it no longer reads ok"
+
+
+def test_the_token_never_fetches_the_audio(client: TestClient, stored: Vault) -> None:
+    bearer = {"Authorization": f"Bearer {TOKEN}"}
+    assert client.get(AUDIO, headers=bearer).status_code == 403, "with the session too"
+    client.cookies.clear()
+    refused = client.get(AUDIO, headers=bearer)
+    assert refused.status_code == 403 and refused.text == "the audio plays in the browser, with its session"
+
+
+def test_one_file_is_decrypted_once_for_its_ranges_and_its_state_is_read_every_time(
+    client: TestClient, stored: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = crypto.decrypt
+    opened: list[int] = []
+
+    def counted(data: bytes, identity: str) -> bytes:
+        opened.append(len(data))
+        return real(data, identity)
+
+    monkeypatch.setattr(crypto, "decrypt", counted)
+    first = client.get(AUDIO, headers={"Range": "bytes=0-99"})
+    second = client.get(AUDIO, headers={"Range": "bytes=100-199"})
+    assert (first.status_code, second.status_code) == (206, 206)
+    size = int(first.headers["Content-Range"].rpartition("/")[2])
+    # The stored file is larger than what it decrypts to; a key file is a few hundred bytes.
+    assert len([n for n in opened if n > size]) == 1, "the file decrypted once for both ranges"
+    head = client.head(AUDIO)
+    assert head.status_code == 200 and head.headers["Content-Length"] == str(size) and head.content == b""
+    holds.add(stored, "plaud", ["rec-tour"])
+    assert client.get(AUDIO, headers={"Range": "bytes=200-299"}).text == "no audio: held", "kept bytes never outlive it"
+
+
+def test_kept_bytes_go_with_their_file_s_change_and_after_their_time(tmp_path: Path) -> None:
+    path = tmp_path / "a.webm.age"
+    path.write_bytes(b"one")
+    reads: list[str] = []
+
+    def read() -> bytes:
+        reads.append("read")
+        return path.read_bytes()
+
+    kept = audio.Plain(seconds=0.05)
+    assert kept.get(path, read) == b"one" and kept.get(path, read) == b"one" and reads == ["read"]
+    assert kept.size(path) == 3
+    path.write_bytes(b"two!")
+    os.utime(path, ns=(path.stat().st_atime_ns, path.stat().st_mtime_ns + 1_000_000))
+    assert kept.size(path) is None and kept.get(path, read) == b"two!" and len(reads) == 2
+    deadline = time.monotonic() + 5
+    while kept.size(path) is not None:
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+    assert kept.get(path, lambda: None) is None and kept.size(path) is None
+
+
+@pytest.mark.parametrize("size", [0, 1, 65_535, 65_536, 65_537, 200_000])
+def test_a_file_s_size_is_read_from_its_age_framing(tmp_path: Path, size: int) -> None:
+    secret, recipient = crypto.new_identity()
+    path = tmp_path / "f.age"
+    data = os.urandom(size)
+    with path.open("wb") as out:
+        crypto.encrypt(io.BytesIO(data), out, recipient)
+    assert crypto.plain_size(path) == size and crypto.decrypt(path.read_bytes(), secret) == data
 
 
 def test_the_audio_needs_the_session_and_leaves_nothing_in_the_log(
