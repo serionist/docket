@@ -10,7 +10,7 @@ from pathlib import Path
 import keyring
 import pytest
 import typer
-from docket_testkit import AtConsole, empty_vault, git, make_config, sh
+from docket_testkit import AtConsole, cant_place, empty_vault, git, make_config, sh
 from models_kit import FAKE_KEY, MemoryKeyring
 
 from docket import cli, console, userconfig
@@ -103,6 +103,7 @@ def test_the_commands_refuse_what_they_can_t_do(
     path = vault.root / "vault.yaml"
     path.write_text(path.read_text(encoding="utf-8") + "# mine\n", encoding="utf-8", newline="\n")
     git(vault.root, "commit", "-qm", "My comment", "--", "vault.yaml")
+    cant_place(monkeypatch)
     code, out, _ = run(capsys, "models", "allow", "none", "--vault", root)
     assert code == 1 and "set it there: no api_provider line" in out
 

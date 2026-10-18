@@ -235,13 +235,15 @@ def test_the_session_start_asks_for_a_backup_while_a_key_has_none() -> None:
     )
 
 
-def test_a_run_gains_the_media_step_only_where_media_can_come_from() -> None:
-    plain = SourceConfig()
-    assert steps(False, "run-1", plain) == STEPS.format(run="run-1")
-    assert steps(True, "run-1", plain) == FINAL_STEPS.format(run="run-1")
-    hosted = steps(False, "run-1", SourceConfig(media_hosts=["media.example"]))
-    assert hosted.startswith(STEPS.format(run="run-1"))
-    assert "8. Media: after closing" in hosted and "media_put(rid, url)" in hosted
+def test_a_run_gains_the_media_step_for_every_source_but_a_folder_one() -> None:
+    """With no host list to say a source has media, every source but a folder source gets the step, and its skill
+    says whether it gets audio (DR-0604)."""
+    folder = SourceConfig(folder="docs")
+    assert steps(False, "run-1", folder) == STEPS.format(run="run-1")
+    assert steps(True, "run-1", folder) == FINAL_STEPS.format(run="run-1")
+    plain = steps(False, "run-1", SourceConfig())
+    assert plain.startswith(STEPS.format(run="run-1"))
+    assert "8. Media: after closing" in plain and "media_put(rid, url)" in plain
     assert "6. Media: after closing" in steps(True, "run-1", SourceConfig(media_folders=["~/Downloads"]))
 
 

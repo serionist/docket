@@ -42,7 +42,6 @@
         <ul class="change-list">
           {% for c in s.changes %}
           <li class="change{% if c.looser %} looser{% endif %}">
-            {% if view.docket_form %}
             <form class="act-form" method="post" action="/settings/source">
               <input type="hidden" name="source" value="{{ s.name }}">
               <input type="hidden" name="act" value="{{ c.act }}">
@@ -50,14 +49,10 @@
               <button type="submit" class="button">{{ c.what }}{{ '…' if c.act == 'private' }}<span class="visually-hidden">: {{ s.name }}</span></button>
               <span>{{ c.effect }}.</span>
             </form>
-            {% else %}
-            <p><span class="change-what">{{ c.what }}</span>{% if c.looser %} <span class="badge">lets more in</span>{% endif %}: {{ c.effect }}. In vault.yaml, under <code>{{ c.where }}</code>:</p>
-            {{ paste(c.line, 'the line: ' ~ c.what ~ ', ' ~ s.name) }}
-            {% endif %}
           </li>
           {% endfor %}
         </ul>
-        <p>Its {{ 'folder and exclude' if s.folder else 'tools, mapper and media hosts' }} change in its entry, by hand: that lets more in, or changes what the service runs or reads. Its entry as Docket writes it, to change under <code>sources</code>:</p>
+        <p>Its {{ 'folder and exclude' if s.folder else 'tools, mapper and media folders' }} change in its entry, by hand: that lets more in, or changes what the service runs or reads. Its entry as Docket writes it, to change under <code>sources</code>:</p>
         <pre class="entry">{{ s.entry }}</pre>
       </details>
     </li>
@@ -87,7 +82,6 @@
       <ul class="values">
         {% for v in l.values %}
         <li><span class="value" dir="auto">{{ v.value }}</span> <code class="line" dir="auto" title="its line in vault.yaml">{{ v.line }}</code>
-          {% if view.docket_form %}
           <form class="act-form" method="post" action="/settings/never-store">
             <input type="hidden" name="act" value="off">
             <input type="hidden" name="list" value="{{ l.name }}">
@@ -95,7 +89,6 @@
             <input type="hidden" name="shown" value="{{ view.shown_hash }}">
             <button type="submit" class="button">Take it off<span class="visually-hidden">: {{ l.name }}</span></button>
           </form>
-          {% endif %}
         </li>
         {% endfor %}
       </ul>
@@ -105,7 +98,6 @@
       {% endif %}
       <details class="changes">
         <summary>Add to {{ l.name }}</summary>
-        {% if view.docket_form %}
         <form class="add-form" method="post" action="/settings/never-store">
           <input type="hidden" name="list" value="{{ l.name }}">
           <input type="hidden" name="shown" value="{{ view.shown_hash }}">
@@ -114,10 +106,6 @@
           <button type="submit" class="button">Add to {{ l.name }}</button>
         </form>
         <p>Docket asks once more first, naming what it would drop.</p>
-        {% else %}
-        <p>Add a line under <code>never_store:</code> <code>{{ l.name }}:</code> in vault.yaml, quoted as Docket writes it, such as:</p>
-        {{ paste(l.example, 'an example line for ' ~ l.name) }}
-        {% endif %}
       </details>
     </li>
     {% endfor %}
@@ -137,7 +125,7 @@
         {% if r.pattern %}<span class="badge">your pattern</span>{% endif %}
       </div>
       <p class="meta">{% if r.pattern %}<code dir="ltr">{{ r.what }}</code>{% else %}Redacts {{ r.what }}.{% endif %}</p>
-      {% if r.button and view.docket_form %}
+      {% if r.button %}
       <form class="act-form" method="post" action="/settings/redaction">
         <input type="hidden" name="rule" value="{{ r.name }}">
         <input type="hidden" name="state" value="{{ 'off' if r.on else 'on' }}">
@@ -150,7 +138,6 @@
       {{ paste(r.command, 'the command that turns ' ~ r.name ~ (' off' if r.on else ' on')) }}
       {% if r.on and not r.pattern and r.name == 'credentials' %}<p class="meta">Turning credentials off is yours to confirm: run it in your own terminal, where it shows the change and asks you.</p>{% endif %}
       {% endif %}
-      {% if r.line %}<p class="meta">vault.yaml isn't as Docket writes it, so the command prints the line instead: {{ r.line }}.</p>{% endif %}
     </li>
     {% endfor %}
   </ul>

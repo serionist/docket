@@ -409,7 +409,7 @@ class Gate:
             config = self._config()
             self._sweep(config)
             entry = config.sources.get(source)
-            if entry is None or not (entry.media_hosts or entry.media_folders):
+            if entry is None or entry.folder is not None:
                 return []
             root = self.vault.root
             with self._screen(config) as screen:

@@ -1,4 +1,4 @@
-"""The fetch over https against a local server (DR-0548): the hosts and addresses checked before connecting, each
+"""The fetch over https against a local server (DR-0604): any host, its addresses checked before connecting, each
 redirect checked again, no compression, the cap on the header and while reading. The test hosts resolve to the local
 server through the fetcher's resolver, and only the happy paths allow its loopback address."""
 
@@ -21,10 +21,8 @@ def server(tmp_path: Path) -> Iterator[Server]:
         yield found
 
 
-def body(
-    server: Server, url: str, hosts: tuple[str, ...] = (HOST,), *, max_bytes: int = MIB, redirects: int = 3
-) -> bytes:
-    response, conn = server.fetcher(max_bytes=max_bytes, redirects=redirects).open(url, hosts)
+def body(server: Server, url: str, *, max_bytes: int = MIB, redirects: int = 3) -> bytes:
+    response, conn = server.fetcher(max_bytes=max_bytes, redirects=redirects).open(url)
     try:
         reader = Capped(response, Limits(max_bytes=max_bytes))
         return b"".join(iter(reader.read, b""))
@@ -33,7 +31,7 @@ def body(
         conn.close()
 
 
-def test_a_listed_host_s_media_comes_unencoded_and_whole(server: Server) -> None:
+def test_a_host_s_media_comes_unencoded_and_whole(server: Server) -> None:
     assert body(server, server.url("/audio")) == server.body
     assert server.seen[-1]["accept-encoding"] == "identity"
     assert server.seen[-1]["user-agent"].startswith("docket/")
@@ -43,9 +41,8 @@ def test_a_redirect_is_followed_after_the_same_checks(server: Server) -> None:
     server.routes["/one"] = (302, {"Location": "/audio"}, b"")
     server.routes["/away"] = (301, {"Location": server.url("/audio", "other.example")}, b"")
     assert body(server, server.url("/one")) == server.body
-    assert body(server, server.url("/away"), (HOST, "other.example")) == server.body
-    with pytest.raises(DocketError, match=r"other.example isn't one of the source's media hosts"):
-        body(server, server.url("/away"))
+    # Any host: no list of them stands in the way (DR-0604).
+    assert body(server, server.url("/away")) == server.body
     server.routes["/plain"] = (302, {"Location": f"http://{HOST}:{server.port}/audio"}, b"")
     with pytest.raises(DocketError, match="over https only, not http"):
         body(server, server.url("/plain"))
@@ -70,7 +67,7 @@ def test_a_redirect_to_a_private_address_is_refused_before_connecting(server: Se
         context=server.context,
     )
     with pytest.raises(DocketError, match=r"inside.example resolves to an address media is never fetched from"):
-        real.open(server.url("/inside"), (HOST, "inside.example"))
+        real.open(server.url("/inside"))
     assert len(server.seen) == 1
 
 
@@ -81,19 +78,17 @@ def test_a_redirect_to_a_private_address_is_refused_before_connecting(server: Se
 def test_a_host_with_one_address_that_isn_t_allowed_is_refused(server: Server, addresses: list[str]) -> None:
     refusing = Fetcher(Limits(), resolver=lambda host, port: addresses, context=server.context)
     with pytest.raises(DocketError, match="resolves to an address media is never fetched from"):
-        refusing.open(server.url("/audio"), (HOST,))
+        refusing.open(server.url("/audio"))
     assert not server.seen
 
 
-def test_only_https_to_a_listed_host(server: Server) -> None:
+def test_only_https_to_a_named_host(server: Server) -> None:
     with pytest.raises(DocketError, match="over https only, not http"):
-        server.fetcher().open(f"http://{HOST}/audio", (HOST,))
+        server.fetcher().open(f"http://{HOST}/audio")
     with pytest.raises(DocketError, match="over https only, not a bare path"):
-        server.fetcher().open("/etc/passwd", (HOST,))
-    with pytest.raises(DocketError, match=r"other.example isn't one of the source's media hosts"):
-        server.fetcher().open(server.url("/audio", "other.example"), (HOST,))
-    with pytest.raises(DocketError, match="that URL isn't one"):
-        server.fetcher().open("https:///audio", (HOST,))
+        server.fetcher().open("/etc/passwd")
+    with pytest.raises(DocketError, match="that URL names no host"):
+        server.fetcher().open("https:///audio")
 
 
 def test_compression_an_error_and_a_length_over_the_cap_are_refused(server: Server) -> None:
@@ -123,8 +118,8 @@ def test_a_url_s_secret_never_reaches_an_error(server: Server) -> None:
 def test_a_host_that_doesn_t_answer_is_named(server: Server, tmp_path: Path) -> None:
     closed = Fetcher(Limits(connect=2), resolver=lambda host, port: ["127.0.0.1"], is_allowed=lambda a: True)
     with pytest.raises(DocketError, match=f"couldn't fetch from {HOST}"):
-        closed.open(f"https://{HOST}:1/audio", (HOST,))
+        closed.open(f"https://{HOST}:1/audio")
     # The server's certificate isn't one the system trusts: refused like any other failure.
     untrusted = Fetcher(Limits(), resolver=lambda host, port: ["127.0.0.1"], is_allowed=lambda a: True)
     with pytest.raises(DocketError, match="SSLCertVerificationError"):
-        untrusted.open(server.url("/audio"), (HOST,))
+        untrusted.open(server.url("/audio"))

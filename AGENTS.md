@@ -121,7 +121,7 @@ agrees in the issue or, under an autonomy grant, with its decision recorded as p
   sidecar's cuts and `_decided.jsonl`'s kinds (DR-0561), the media cut log and the sidecar's replaced keys (DR-0562), a
   Whisper transcript's rid suffix `/whisper`, its engine string and its `via` (DR-0570), the forgotten list (DR-0579);
 - a source's mapper interface (DR-0119), and the names and keys of a source in `vault.yaml` (DR-0124, DR-0125),
-  `folder` and `exclude` (DR-0481) and `media_folders` (DR-0548) among them;
+  `folder` and `exclude` (DR-0481) and `media_folders` (DR-0604) among them, `media_hosts` read and ignored;
 - the question file `docket eval` reads (DR-0290) and its speech file (DR-0571); the user config's `speech` (DR-0568);
 - the media key export's file, `schema_version` 1, which users keep as their backup (DR-0550);
 - the MCP tools' names and parameters: `search`, `read`, `verify` and `doc_put` (DR-0150), `run_open` and `ingest`

@@ -29,7 +29,7 @@ sources:
 
 Then commit `vault.yaml`: a source added by hand applies once it is committed.
 
-Audio is optional. Once a real run shows the host Plaud's audio links point at, `docket media host add plaud <host>` in your own terminal lets `media_put` fetch from it, and each run's steps gain the media step.
+Audio is optional: each run's steps end with the media step, and `media_put` fetches a recording's audio from the https link Plaud gives, every address it resolves to checked.
 
 Then run its tests where it was copied: `pytest .claude/skills/sources/plaud/tests`. The tests that go through
 Docket's own checks run only where `docket` can be imported, and are left out elsewhere.

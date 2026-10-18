@@ -67,7 +67,7 @@ def test_each_source_s_changes_come_stricter_first_each_with_its_line() -> None:
     config.sources = {
         "memo": SourceConfig(),
         "notes": SourceConfig(sensitivity="private"),
-        "dormant": SourceConfig(enabled=False, media_hosts=["media.example"], media_folders=["~/Downloads"]),
+        "dormant": SourceConfig(enabled=False, media_folders=["~/Downloads"]),
         "documents": SourceConfig(folder="docs"),
     }
     sources = {s.name: s for s in view(config, *[SourceFacts(n, e) for n, e in config.sources.items()]).sources}
@@ -87,7 +87,6 @@ def test_each_source_s_changes_come_stricter_first_each_with_its_line() -> None:
     assert notes[2].effect == "lets it in: every record is kept without a look"
     dormant = sources["dormant"]
     assert [(c.what, c.line, c.looser) for c in dormant.changes][-1] == ("Turn it on", "enabled: true", True)
-    assert ("Media hosts", "media.example") in dormant.facts
     assert ("Media folders", "~/Downloads") in dormant.facts
     assert ("Tools", "none: nothing syncs live") in dormant.facts
     documents = sources["documents"]
@@ -100,7 +99,6 @@ def test_each_source_s_changes_come_stricter_first_each_with_its_line() -> None:
                 "sensitivity": "work",
                 "mapper": None,
                 "tools": [],
-                "media_hosts": [],
                 "folder": "docs",
             }
         }
@@ -147,10 +145,8 @@ def test_each_rule_names_the_command_that_turns_it_the_other_way() -> None:
     assert rules["ticket"].what == "TCK"
     assert found.credentials_off == redaction.CREDENTIALS_OFF
     assert found.names.startswith("Names are never redacted")
-    assert all(r.line is None for r in found.rules)
     by_hand = view(config, docket_form=False)
-    assert {r.name: r.line for r in by_hand.rules}["phone"] == "phone: false, under redaction:"
-    assert "never rewritten" in by_hand.form
+    assert "each change below edits it in place and keeps them" in by_hand.form
 
 
 def test_a_value_a_shell_would_act_on_stays_its_placeholder() -> None:

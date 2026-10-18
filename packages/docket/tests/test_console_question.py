@@ -11,7 +11,16 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from docket_testkit import AtConsole, FakePrompt, consuming_project, empty_vault, git, make_config, sh
+from docket_testkit import (
+    AtConsole,
+    FakePrompt,
+    cant_place,
+    consuming_project,
+    empty_vault,
+    git,
+    make_config,
+    sh,
+)
 from pydantic import Field
 
 from docket import console, osprompt
@@ -167,9 +176,20 @@ def test_a_commit_of_vault_yaml_while_asked_writes_nothing_and_of_another_file_d
     assert cli(vault, credentials(False)).changed
 
 
-def test_a_hand_edited_file_gets_its_line_and_no_code_but_is_still_refused_in_claude_code(
+def test_a_hand_edited_file_is_asked_about_and_edited_in_place(vault: Vault, owner: Callable[..., AtConsole]) -> None:
+    path = vault.root / CONFIG_FILE
+    path.write_text(text(vault) + "# my own note\n", encoding="utf-8")
+    git(vault.root, "commit", "-qm", "a note of mine", "--", CONFIG_FILE)
+    person = owner("code")
+    assert cli(vault, credentials(False)).changed
+    assert len(person.prompts) == 1
+    assert text(vault).endswith("# my own note\n") and "credentials: false" in text(vault)
+
+
+def test_a_change_docket_can_t_place_gets_its_line_and_no_code_but_is_still_refused_in_claude_code(
     vault: Vault, owner: Callable[..., AtConsole], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    cant_place(monkeypatch)
     path = vault.root / CONFIG_FILE
     path.write_text(text(vault) + "# my own note\n", encoding="utf-8")
     git(vault.root, "commit", "-qm", "a note of mine", "--", CONFIG_FILE)

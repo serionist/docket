@@ -9,7 +9,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from docket_testkit import git, make_record, sh
+from docket_testkit import cant_place, git, make_record, sh
 from docket_webkit import OURS, a11y_problems, html_problems, parse
 from httpx2 import Response
 from settings_kit import edit_config, settings_template, settings_vault
@@ -257,20 +257,34 @@ def test_any_other_uncommitted_edit_goes_in_first(client: TestClient, vault: Vau
     assert subjects(vault)[:2] == ["Config: redaction phone on", "Config: vault.yaml as edited"]
 
 
-def test_a_hand_edited_file_shows_no_button_and_a_post_gets_the_line(client: TestClient, vault: Vault) -> None:
+def test_a_hand_edited_file_keeps_its_buttons_and_is_edited_in_place(client: TestClient, vault: Vault) -> None:
     path = vault.root / CONFIG_FILE
     mine = path.read_text(encoding="utf-8").replace("sources:\n", "sources:   # mine\n", 1)
     path.write_text(mine, encoding="utf-8", newline="\n")
+    git(vault.root, "commit", "-qam", "A comment of mine")
     page = parse(client.get("/settings").text)
-    assert not page.find_all("input", name="rule")
-    assert not page.find_all("input", name="act")
+    assert page.find_all("input", name="rule") and page.find_all("input", name="act")
+    answer = client.post(SOURCE, data={"source": "memo", "act": "off", "shown": shown(vault)}, headers=SAME)
+    assert answer.headers["location"] == "/settings?done=memo-off"
+    assert "sources:   # mine\n" in path.read_text(encoding="utf-8")
+    assert not config(vault).sources["memo"].enabled
+
+
+def test_a_change_docket_can_t_place_gets_the_line(
+    client: TestClient, vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cant_place(monkeypatch)
+    path = vault.root / CONFIG_FILE
+    mine = path.read_text(encoding="utf-8").replace("sources:\n", "sources:   # mine\n", 1)
+    path.write_text(mine, encoding="utf-8", newline="\n")
     rule = client.post(RULE, data={"rule": "phone", "shown": shown(vault)}, headers=SAME)
     off = client.post(SOURCE, data={"source": "memo", "act": "off", "shown": shown(vault)}, headers=SAME)
-    private = client.post(SOURCE, data={"source": "memo", "act": "private", "shown": shown(vault)}, headers=SAME)
+    private = client.post(
+        SOURCE, data={"source": "memo", "act": "private", "shown": shown(vault), "confirmed": "1"}, headers=SAME
+    )
     assert "change it there: phone: true, under redaction:." in said(rule.text)
     assert "change it there: enabled: false, under sources.memo." in said(off.text)
-    assert "sensitivity: private" in said(private.text)
-    assert not parse(private.text).find_all("form")
+    assert "change it there: sensitivity: private, under sources.memo." in said(private.text)
     assert path.read_text(encoding="utf-8") == mine
 
 

@@ -76,16 +76,13 @@ def test_a_file_from_the_drop_folder_goes_once_stored(tmp_path: Path) -> None:
         media.put(vault, POLISHED, path=str(outside))
 
 
-def test_a_url_from_a_media_host_is_fetched_encrypted_and_staged(tmp_path: Path) -> None:
+def test_a_url_is_fetched_encrypted_and_staged(tmp_path: Path) -> None:
     vault = media_vault(tmp_path)
     with https_server(tmp_path, audio(60_000)) as server:
         stored = media.put(vault, CALL, url=server.url("/audio?X-Signature=s3cr3t"), fetcher=server.fetcher())
         assert stored.bytes == 60_000
         in_raw(vault)
         assert reader.read(vault, CALL).data == server.body
-        # A host not listed for the source is refused before anything is fetched.
-        with pytest.raises(DocketError, match=r"other.example isn't one of the source's media hosts"):
-            media.put(vault, POLISHED, url=server.url("/audio", "other.example"), fetcher=server.fetcher())
         # Over the cap: the reason, and no temp file left behind.
         with pytest.raises(DocketError, match="over the cap"):
             media.put(vault, POLISHED, url=server.url("/audio"), fetcher=server.fetcher(max_bytes=10_000))

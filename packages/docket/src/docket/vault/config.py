@@ -77,7 +77,8 @@ class Owner(_Model):
 
 
 TOOL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
-HOST = re.compile(r"^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$")
+# A source's key from before media came from any https host (DR-0604): read and ignored, never written.
+OLD_SOURCE_KEYS = frozenset({"media_hosts"})
 
 
 class SourceConfig(_Model):
@@ -89,9 +90,7 @@ class SourceConfig(_Model):
     mapper: str | None = None
     # The tools the capture hook posts for this source, by their own names, without the host's prefix.
     tools: list[str] = Field(default_factory=list[str])
-    # The hosts media_put may fetch this source's media from, over https.
-    media_hosts: list[str] = Field(default_factory=list[str])
-    # The folders media_put may take this source's media from (DR-0548): relative to the consuming repo or under ~/,
+    # The folders media_put may take this source's media from (DR-0604): relative to the consuming repo or under ~/,
     # as a folder source's folder is written. Written only when set.
     media_folders: list[str] = Field(default_factory=list[str])
     # A folder source (DR-0481): the folder docket scan reads, relative to the consuming repo or under ~/, and fnmatch
@@ -121,13 +120,13 @@ class SourceConfig(_Model):
                 )
         return value
 
-    @field_validator("media_hosts")
+    @model_validator(mode="before")
     @classmethod
-    def _hosts(cls, value: list[str]) -> list[str]:
-        for host in value:
-            if not HOST.match(host):
-                raise ValueError(f"{host!r} isn't a host name: lowercase, with no scheme, port or path")
-        return value
+    def _old_keys(cls, data: object) -> object:
+        """An old key, read and ignored, so a vault.yaml that still has one reads as before (DR-0604)."""
+        if not isinstance(data, dict):
+            return data
+        return {k: v for k, v in cast(dict[str, Any], data).items() if k not in OLD_SOURCE_KEYS}
 
     @field_validator("media_folders")
     @classmethod
@@ -161,8 +160,8 @@ class SourceConfig(_Model):
             if self.exclude:
                 raise ValueError("exclude goes with folder: it leaves paths of a folder source out")
             return self
-        if self.mapper is not None or self.tools or self.media_hosts:
-            raise ValueError("a folder source has no mapper, tools or media_hosts: docket scan reads its folder")
+        if self.mapper is not None or self.tools:
+            raise ValueError("a folder source has no mapper or tools: docket scan reads its folder")
         if self.sensitivity == "mixed":
             raise ValueError(
                 "a folder source is work: mixed would hold every page on the Staging page one by one; keep work, and "
@@ -363,12 +362,28 @@ class VaultConfig(_Model):
         return data
 
     def written_by_docket(self, text: str) -> bool:
-        """Whether a vault.yaml's text is exactly what Docket writes for these settings, now or before the redaction
-        switches were split, so Docket may rewrite it without losing anything the user wrote by hand."""
+        """Whether a vault.yaml's text is exactly what Docket writes for these settings, now, before the redaction
+        switches were split, or before `media_hosts` went (DR-0604), so Docket may rewrite it without losing anything
+        the user wrote by hand."""
         if text == self.dump():
             return True
         legacy = self.redaction.legacy()
-        return legacy is not None and text == _dump({**self._written(), "redaction": legacy})
+        if legacy is not None and text == _dump({**self._written(), "redaction": legacy}):
+            return True
+        return text == _dump(_with_hosts(self._written()))
+
+
+def _with_hosts(data: dict[str, Any]) -> dict[str, Any]:
+    """The settings as Docket wrote them while each source had `media_hosts`, an empty list after its tools."""
+    sources: dict[str, Any] = {}
+    for name, entry in cast(dict[str, dict[str, Any]], data["sources"]).items():
+        out: dict[str, Any] = {}
+        for key, value in entry.items():
+            out[key] = value
+            if key == "tools":
+                out["media_hosts"] = []
+        sources[name] = out
+    return {**data, "sources": sources}
 
 
 def yaml_problem(error: yaml.YAMLError) -> str:

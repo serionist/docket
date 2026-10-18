@@ -622,10 +622,10 @@ change lands on whoever uses that vendor, while the core still checks every rid 
   by its path, the list of sources coming from `vault.yaml` (DR-0168).
 - Plaud is the reference source, under `examples/sources/plaud` and tested in CI: an example to copy, not a
   dependency. The wheel carries a byte-identical copy for `--example` (DR-0167).
-- Audio is handed over by path or URL, and the service fetches it only within limits (DR-0548):
+- Audio is handed over by path or URL, and the service fetches it only within limits (DR-0604):
   - a path under a folder `vault.yaml` names for the source (`media_folders`) or Docket's own drop folder;
-  - a URL over https, to a host `vault.yaml` lists for that source, every address it resolves to public and none an
-    IPv6 form of an IPv4 one, the connection made to a checked address;
+  - a URL over https, to any host, every address it resolves to public and none an IPv6 form of an IPv4 one, the
+    connection made to a checked address; a source's old `media_hosts` key is read and ignored;
   - 3 redirects at most, each checked again, no compression, and a size cap.
 - Media passes the gate's checks at the put, again after the fetch, at every sweep and at promotion, and goes with any
   drop of a version of its record (DR-0547). A release's cuts and a transcript cut by time are cut out of the audio,

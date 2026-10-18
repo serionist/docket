@@ -68,8 +68,8 @@ How this run goes:
 MEDIA_STEP = """
 {n}. Media: after closing, for each recording this run staged and each id the media line names, whose audio the
    skill says how to get, call media_put(rid, url) with the https URL the source gave, or media_put(rid, path) with a
-   file in a media folder. Docket cuts what must be cut. A refusal says why (held, a host not listed): note it and go
-   on with the next."""
+   file in a media folder. Docket cuts what must be cut. A refusal says why (held, an address never fetched from): note
+   it and go on with the next."""
 
 FINAL_STEPS = """\
 How this final run goes:
@@ -398,9 +398,10 @@ async def run_open(
 
 
 def steps(final: bool, run: str, entry: SourceConfig) -> str:
-    """The run's steps; with a media host or folder for the source, the media step after the close."""
+    """The run's steps; for every source but a folder source, the media step after the close (DR-0604): its skill
+    says whether it gets audio."""
     text = (FINAL_STEPS if final else STEPS).format(run=run)
-    if entry.media_hosts or entry.media_folders:
+    if entry.folder is None:
         text += MEDIA_STEP.format(n=6 if final else 8)
     return text
 

@@ -1,8 +1,8 @@
 """vault.yaml's one writer, the changes a page makes, and the lines to paste.
 
-`rewrite` is the general entry: under the vault lock it reads vault.yaml, asks for the change, and rewrites and commits
-the file only when its text is what Docket writes for it, so no comment or layout of the user's is lost (DR-0166,
-DR-0193, DR-0602). `docket redaction set`, `docket source new` and every page write through it.
+`rewrite` is the general entry: under the vault lock it reads vault.yaml, asks for the change, and commits the file
+rewritten whole when its text is what Docket writes for it, or edited in place, its comments and layout kept, when it
+isn't (DR-0602). `docket redaction set`, `docket source new` and every page write through it.
 
 It makes any change its caller asks for, the CLI's and a page's alike (DR-0601): the owner says yes before the command,
 at their own terminal or in chat to Claude. The one change kept at the owner's console is turning credentials redaction
@@ -16,6 +16,7 @@ import unicodedata
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal, cast
 
 import yaml
@@ -23,7 +24,7 @@ from pydantic import ValidationError
 
 from docket import console
 from docket.errors import DocketError
-from docket.vault import inforce, neverstore
+from docket.vault import inforce, neverstore, yamledit
 from docket.vault.config import CONFIG_FILE, SourceConfig, UniqueKeyLoader, VaultConfig, write_config
 from docket.vault.neverstore import ListName
 from docket.vault.vault import Vault
@@ -112,8 +113,9 @@ def rewrite(
     command's `warnings` and asked through `console.confirm`, outside the vault lock. On a yes the file and HEAD's
     vault.yaml are read again, and anything is written only when both are as asked about. A page's is refused.
 
-    A change is written only when the file is exactly what Docket writes for it, now or in the form before the
-    redaction switches were split; an uncommitted edit goes in first, in a commit of its own. The change is read back
+    A file in Docket's form, now or before the redaction switches were split, is rewritten whole; any other is edited in
+    place, and only when that reads back as exactly the settings asked for, else nothing is written and the caller
+    gives the line (DR-0602). An uncommitted edit goes in first, in a commit of its own. The change is read back
     through the schema, written through a temp file and a rename, and committed alone; a failure puts the file back."""
     path = vault.root / CONFIG_FILE
     with vault.writing():
@@ -128,11 +130,11 @@ def rewrite(
         change_off = credentials_off(before, after)
         if via == "page" and change_off:
             raise CredentialsOffError(CREDENTIALS_OFF_HERE)
-        updated = after.dump()
-        _reads_back(updated)
+        _reads_back(after.dump())
         if via == "cli" and change_off:
             _at_console()
-        if not before.written_by_docket(text):
+        updated = after.dump() if before.written_by_docket(text) else _in_place(text, before, after, path)
+        if updated is None:
             return Rewritten(by_hand=True)
         held = _weigh(vault, before, text)
         if held.credentials_off and via == "page":
@@ -158,6 +160,17 @@ def rewrite(
             raise StaleError("vault.yaml changed while you were asked, so nothing was written; run the command again")
         message = _message(message, via, change_off)
         return _write(vault, text, updated, message, held, via=via, edit_confirmed=held.credentials_off)
+
+
+def _in_place(text: str, before: VaultConfig, after: VaultConfig, path: Path) -> str | None:
+    """The file edited in place, its comments and layout kept (DR-0602), when that reads back as exactly `after`."""
+    patched = yamledit.patch(text, before, after)
+    if patched is None:
+        return None
+    try:
+        return patched if VaultConfig.parse(patched, path) == after else None
+    except DocketError:
+        return None
 
 
 def _at_console(edit: str | None = None) -> None:

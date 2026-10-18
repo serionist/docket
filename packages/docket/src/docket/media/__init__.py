@@ -10,7 +10,7 @@
 | `staged` | staged media beside its record: the withheld marks, deleting with a drop, orphans, promotion |
 | `put` | `media_put`: the checks, the fetch, the checks again, then the file into staging |
 | `reader` | the one reader: the bytes in memory, or why not |
-| `sources` | a source's media hosts and folders in vault.yaml: adding asks at the console, removing doesn't |
+| `sources` | a source's media folders in vault.yaml, added or removed through its one writer |
 | `status` | `docket media status`, by counts |
 
 Nothing here writes a plain copy of a media file, logs a URL or names a dropped record.

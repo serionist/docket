@@ -24,7 +24,7 @@ from filelock import FileLock
 
 from docket import osprompt
 from docket.errors import DocketError
-from docket.vault import forgotten, inforce
+from docket.vault import forgotten, inforce, yamledit
 from docket.vault.config import CONFIG_FILE, NeverStore, Owner, RedactionPattern, SourceConfig, VaultConfig
 from docket.vault.home import Home
 from docket.vault.records import RawRecord, version
@@ -141,6 +141,12 @@ def git_calls(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[str]]:
         yield calls
     finally:
         monkeypatch.setattr(subprocess, "run", real)
+
+
+def cant_place(monkeypatch: pytest.MonkeyPatch) -> None:
+    """vault.yaml's in-place editor finds no place for any change, as for a file with an alias in it: the change is
+    left to the user, with its line (DR-0602)."""
+    monkeypatch.setattr(yamledit, "patch", lambda text, before, after: None)
 
 
 def make_config(storage: Literal["repo", "folder"] = "repo", **owner: Any) -> VaultConfig:

@@ -199,15 +199,14 @@ def _sources(before: Mapping[str, SourceConfig], after: Mapping[str, SourceConfi
 
 
 def _source(before: SourceConfig, after: SourceConfig) -> SourceConfig:
-    """The stricter sensitivity, off if either is off, the tools, media hosts and media folders `after` still lists,
-    and for a folder source the exclude entries added. A run takes its tools when it opens and a capture from any other
-    marks it short; media comes only from a host or folder both list (DR-0548); exclude is fnmatch with no negation,
-    so an entry only leaves paths out. Every other key stays `before`'s."""
+    """The stricter sensitivity, off if either is off, the tools and media folders `after` still lists, and for a
+    folder source the exclude entries added. A run takes its tools when it opens and a capture from any other marks it
+    short; a path's media comes only from a folder both list (DR-0604); exclude is fnmatch with no negation, so an
+    entry only leaves paths out. Every other key stays `before`'s."""
     update: dict[str, object] = {
         "sensitivity": max(before.sensitivity, after.sensitivity, key=RANK.__getitem__),
         "enabled": before.enabled and after.enabled,
         "tools": [tool for tool in after.tools if tool in before.tools],
-        "media_hosts": [host for host in after.media_hosts if host in before.media_hosts],
         "media_folders": [folder for folder in after.media_folders if folder in before.media_folders],
     }
     if before.folder is not None:

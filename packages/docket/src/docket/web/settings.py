@@ -105,7 +105,7 @@ def gather(service: Service) -> Facts:
     )
 
 
-BY_HAND = "vault.yaml has comments or a layout of your own, so it is left as it is; change it there"
+BY_HAND = "vault.yaml has a layout Docket can't edit for this, so it is left as it is; change it there"
 STALE = "vault.yaml changed since the page showed it, so nothing was written. Here it is as it stands now."
 # What a source's button may ask for (DR-0601).
 ACTS = ("work", "mixed", "private", "off", "on")
@@ -130,18 +130,17 @@ def _with(config: VaultConfig, name: ListName, value: str) -> VaultConfig:
     return config.model_copy(update={"never_store": lists.model_copy(update={name: [*getattr(lists, name), value]})})
 
 
-def _staged(service: Service, name: ListName, value: str) -> tuple[int, str, bool, bool]:
+def _staged(service: Service, name: ListName, value: str) -> tuple[int, str, bool]:
     """On the writer thread, so no write runs between the read and the count: what the value would drop from staging,
-    vault.yaml's hash and form as read, and whether an edit not committed yet goes in first. One that turns credentials
+    vault.yaml's hash as read, and whether an edit not committed yet goes in first. One that turns credentials
     redaction off is refused here already, as the add would refuse it (DR-0601)."""
     vault = service.vault()
     data = (vault.root / CONFIG_FILE).read_bytes()
     text = data.decode("utf-8")
     config = vault.written
-    docket_form = config.written_by_docket(text)
-    takes_in = edit_to_take_in(vault, config, text) if docket_form else False
+    takes_in = edit_to_take_in(vault, config, text)
     dropped = Gate(vault).would_drop(_with(config, name, value))
-    return dropped["never-store"], file_hash(data), docket_form, takes_in
+    return dropped["never-store"], file_hash(data), takes_in
 
 
 def _stored(service: Service, name: ListName, value: str) -> tuple[Reach | None, str | None]:
@@ -154,9 +153,9 @@ def _stored(service: Service, name: ListName, value: str) -> tuple[Reach | None,
         return None, "the index is busy being brought up to date; look again in a moment"
 
 
-def _private_staged(service: Service, source: str) -> tuple[int, str, bool, bool]:
-    """On the writer thread: what making a source private would drop from staging, and vault.yaml's hash, form and
-    whether an edit not committed yet goes in first, refused here already when it turns credentials redaction off."""
+def _private_staged(service: Service, source: str) -> tuple[int, str, bool]:
+    """On the writer thread: what making a source private would drop from staging, and vault.yaml's hash and whether
+    an edit not committed yet goes in first, refused here already when it turns credentials redaction off."""
     vault = service.vault()
     data = (vault.root / CONFIG_FILE).read_bytes()
     text = data.decode("utf-8")
@@ -164,13 +163,12 @@ def _private_staged(service: Service, source: str) -> tuple[int, str, bool, bool
     entry = config.sources.get(source)
     if entry is None:
         raise DocketError(f"no source {source} in vault.yaml")
-    docket_form = config.written_by_docket(text)
-    takes_in = edit_to_take_in(vault, config, text) if docket_form else False
+    takes_in = edit_to_take_in(vault, config, text)
     private = config.model_copy(
         update={"sources": {**config.sources, source: entry.model_copy(update={"sensitivity": "private"})}}
     )
     before, after = Gate(vault).would_drop(config), Gate(vault).would_drop(private)
-    return after["private"] - before["private"], file_hash(data), docket_form, takes_in
+    return after["private"] - before["private"], file_hash(data), takes_in
 
 
 def _change(service: Service, source: str, act: str, shown: str) -> Written:
@@ -215,17 +213,18 @@ def router(service: Service) -> APIRouter:
         return templating.page("settings/page.html", page, status=status, referrer=templating.POSTS_FORMS)
 
     async def private(request: Request, source: str, *, status: int = 200, stale: bool = False) -> Response:
-        staged, shown, docket_form, takes_in = await service.writer.run(lambda: _private_staged(service, source))
+        staged, shown, takes_in = await service.writer.run(lambda: _private_staged(service, source))
         view = settings_view.build_source_confirm(
-            source, staged=staged, shown=shown, docket_form=docket_form, stale=stale, takes_in=takes_in
+            source, staged=staged, shown=shown, docket_form=True, stale=stale, takes_in=takes_in
         )
         context = shell(service, request, f"Make {source} private", current="settings") | {"confirm": view}
         return templating.page("settings/private.html", context, status=status, referrer=templating.POSTS_FORMS)
 
     async def confirm(
-        request: Request, name: ListName, value: str, *, status: int = 200, stale: bool = False
+        request: Request, name: ListName, value: str, *, status: int = 200, stale: bool = False, by_hand: bool = False
     ) -> Response:
-        staged, shown, docket_form, takes_in = await service.writer.run(lambda: _staged(service, name, value))
+        """The add's own question; `by_hand` when the add couldn't place the value, which gives the line instead."""
+        staged, shown, takes_in = await service.writer.run(lambda: _staged(service, name, value))
         stored, why = await asyncio.to_thread(_stored, service, name, value)
         view = settings_view.build_confirm(
             name,
@@ -234,7 +233,7 @@ def router(service: Service) -> APIRouter:
             stored=stored,
             why=why,
             shown=shown,
-            docket_form=docket_form,
+            docket_form=not by_hand,
             stale=stale,
             takes_in=takes_in,
         )
@@ -281,7 +280,7 @@ def router(service: Service) -> APIRouter:
             except StaleError:
                 return await confirm(request, name, value, status=409, stale=True)
             if added.written.by_hand:
-                return await confirm(request, name, value)
+                return await confirm(request, name, value, by_hand=True)
             return _done(name, 0 if added.already else 1)
 
         async def taken_off(form: QueryParams) -> Response:

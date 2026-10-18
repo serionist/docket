@@ -229,12 +229,12 @@ def test_an_export_leaves_a_listed_key_out_and_an_import_skips_one(
     listed = "cd" * 32
     keys.add(listed, keys.get(kept).identity, "media/plaud/x")  # type: ignore[union-attr]
     target = tmp_path / "keys.age"
-    owner("code", "WXYZ")
+    owner("WXYZ")
     # The export before the forget holds both, as a backup made before one does.
     done = backup.export(first, target)
     assert (done.keys, done.forgotten, done.kept) == (2, 0, True)
     forget(first, keys=[listed])
-    owner("code", "WXYZ")
+    owner("WXYZ")
     capsys.readouterr()
     assert main(["media", "keys", "export", str(tmp_path / "after.age"), "--vault", str(first.root)]) == 0
     out = capsys.readouterr().out

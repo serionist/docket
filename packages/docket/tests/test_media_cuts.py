@@ -22,6 +22,7 @@ from docket.media.keystore import KeyStore
 from docket.media.ranges import Needed
 from docket.service.sync import RunOpened, opened_text
 from docket.vault import holds, releaselog
+from docket.vault.config import CONFIG_FILE, SourceConfig, VaultConfig
 from docket.vault.cuts import Cut
 from docket.vault.gate import Gate
 from docket.vault.records import RawRecord
@@ -338,11 +339,14 @@ def media_confirm(vault: Vault) -> int:
     return confirm.confirm(vault, CALL)
 
 
-def test_the_run_names_cut_recordings_without_audio_only_where_media_comes_from(tmp_path: Path) -> None:
-    vault = media_vault(tmp_path, hosts=())
-    in_raw(vault)
-    release(vault, (2000, 4000))
-    assert Gate(vault).media_due("plaud") == [], "no host or folder: nowhere to put audio from"
+def test_the_run_names_cut_recordings_without_audio_for_every_source_but_a_folder_one(tmp_path: Path) -> None:
+    vault = media_vault(tmp_path)
+    path = vault.root / CONFIG_FILE
+    config = VaultConfig.load(path)
+    config.sources["docs"] = SourceConfig(folder="docs")
+    path.write_text(config.dump(), encoding="utf-8", newline="\n")
+    vault.commit([CONFIG_FILE], "Config: a folder source")
+    assert Gate(Vault.open(vault.root)).media_due("docs") == [], "a folder source puts no audio"
     assert Gate(vault).media_due("nosuch") == []
     hosted = media_vault(tmp_path / "hosted")
     release(hosted, (2000, 4000))

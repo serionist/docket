@@ -161,13 +161,13 @@ def test_redaction_names_each_rule_with_its_command_and_what_it_does(client: Tes
     assert "<pattern> is cost$" in said(off)
 
 
-def test_a_hand_edited_vault_yaml_is_named_and_each_rule_shows_its_line(client: TestClient, vault: Vault) -> None:
+def test_a_hand_edited_vault_yaml_is_named_and_keeps_its_buttons(client: TestClient, vault: Vault) -> None:
     path = vault.root / "vault.yaml"
     mine = path.read_text(encoding="utf-8").replace("redaction:\n", "redaction:   # mine\n", 1)
     path.write_text(mine, encoding="utf-8", newline="\n")
     html = page(client)
-    assert "has comments or a layout of your own, so it is never rewritten" in said(html)
-    assert "the command prints the line instead: phone: true, under redaction:." in said(html)
+    assert "each change below edits it in place and keeps them" in said(html)
+    assert parse(html).find_all("input", name="rule")
     assert path.read_text(encoding="utf-8") == mine
 
 

@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from docket_testkit import AtConsole, git, host_repo, make_config, sh
+from docket_testkit import AtConsole, cant_place, git, host_repo, make_config, sh
 
 from docket.cli import main
 from docket.errors import DocketError
@@ -217,9 +217,13 @@ def test_a_linked_sources_folder_that_leads_elsewhere_is_refused(tmp_path: Path,
     assert (vault.root / "vault.yaml").read_bytes() == before
 
 
-def test_a_vault_yaml_with_the_user_s_own_lines_is_left_alone(
-    owner: Callable[..., AtConsole], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+def test_a_vault_yaml_with_the_user_s_own_lines_gets_the_entry_where_docket_can_t_place_it(
+    owner: Callable[..., AtConsole],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    cant_place(monkeypatch)
     top = host_repo(tmp_path)
     vault = folder_vault_in(top)
     path = vault.root / "vault.yaml"
@@ -229,8 +233,8 @@ def test_a_vault_yaml_with_the_user_s_own_lines_is_left_alone(
     assert path.read_text(encoding="utf-8") == mine
     assert skills(top, "zebra-notes").is_dir()
     out = capsys.readouterr().out
-    assert "vault.yaml has comments or a layout of your own, so it is left as it is; add under sources:" in out
-    block = out.split("add under sources:\n", 1)[1].split("tests    ", 1)[0]
+    assert "vault.yaml has a layout Docket can't edit for this; add the source under sources:" in out
+    block = out.split("add the source under sources:\n", 1)[1].split("tests    ", 1)[0]
     pasted = mine.replace("sources:   # mine, keep it\n", "sources:   # mine, keep it\n" + block, 1)
     path.write_text(pasted, encoding="utf-8", newline="\n")
     assert VaultConfig.load(path).sources["zebra-notes"] == SourceConfig(
@@ -241,10 +245,10 @@ def test_a_vault_yaml_with_the_user_s_own_lines_is_left_alone(
 def test_an_entry_already_there_keeps_what_the_flags_don_t_set(owner: Callable[..., AtConsole], tmp_path: Path) -> None:
     top = host_repo(tmp_path)
     config = make_config("folder")
-    config.sources["zebra-notes"] = SourceConfig(sensitivity="private", tools=["get_note"], media_hosts=["a.example"])
+    config.sources["zebra-notes"] = SourceConfig(sensitivity="private", tools=["get_note"])
     vault = Vault.init(top / "vault", config, "test-box")
     kept = scaffold.new_source(vault, "zebra-notes").entry
-    assert (kept.sensitivity, kept.tools, kept.media_hosts) == ("private", ["get_note"], ["a.example"])
+    assert (kept.sensitivity, kept.tools) == ("private", ["get_note"])
     assert kept.mapper == ".claude/skills/sources/zebra-notes/mapper.py"
     calls = scaffold.new_source(Vault.open(vault.root), "calls", sensitivity="work", tools=["list_calls"]).entry
     assert (calls.sensitivity, calls.tools) == ("work", ["list_calls"])

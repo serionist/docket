@@ -22,7 +22,7 @@
   <a class="button" href="/settings">Back, adding nothing</a>
 </form>
 {% else %}
-<p>vault.yaml has comments or a layout of your own, so it is left as it is: add this line under <code>never_store:</code> <code>{{ confirm.name }}:</code> by hand.</p>
+<p>vault.yaml has a layout Docket can't edit for this, so it is left as it is: add this line under <code>never_store:</code> <code>{{ confirm.name }}:</code> by hand.</p>
 {{ paste(confirm.line, 'the line that adds it') }}
 <p><a href="/settings">Back to Settings</a></p>
 {% endif %}

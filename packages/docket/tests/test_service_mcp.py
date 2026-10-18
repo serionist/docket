@@ -254,8 +254,8 @@ def test_media_put_stages_a_record_s_file_and_refuses_what_the_gate_keeps_out(tm
         refused = call(found, "media_put", {"rid": "plaud:rec-zzz", "url": "https://media.example/a"})
         assert refused.is_error
         assert "no record plaud:rec-zzz is staged or in raw" in text_of(refused)
-        unlisted = call(found, "media_put", {"rid": CALL, "url": "https://elsewhere.example/a"})
-        assert unlisted.is_error and "isn't one of the source's media hosts" in text_of(unlisted)
+        inside = call(found, "media_put", {"rid": CALL, "url": "https://127.0.0.1/a"})
+        assert inside.is_error and "resolves to an address media is never fetched from" in text_of(inside)
     finally:
         found.writer.close()
 

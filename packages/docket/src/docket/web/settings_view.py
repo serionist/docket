@@ -187,8 +187,6 @@ class Rule:
     command: str
     note: str
     looser: bool
-    # The vault.yaml line the command would print, for a file Docket won't rewrite.
-    line: str | None
     # A page's button turns it the other way: a built-in rule, or a pattern whose name is its own, but credentials off,
     # which only the owner's console turns (DR-0601).
     button: bool = False
@@ -239,7 +237,7 @@ def build(facts: Facts, state: SettingsState) -> SettingsView:
     vault = filled(str(facts.root), "vault", unfilled)
     sources = [_source(s) for s in facts.sources]
     lists = [_list(name, getattr(config.never_store, name), state.values) for name in LISTS]
-    rules = _rules(config, vault, facts.docket_form, unfilled)
+    rules = _rules(config, vault, unfilled)
     models = _models(facts)
     on = sum(1 for s in facts.sources if s.entry.enabled)
     values = sum(n.count for n in lists)
@@ -256,8 +254,8 @@ def build(facts: Facts, state: SettingsState) -> SettingsView:
         )
     else:
         form = (
-            "vault.yaml has comments or a layout of your own, so it is never rewritten: each change below is the line "
-            "to change by hand, and Docket's commands print it too."
+            "vault.yaml has comments or a layout of your own: each change below edits it in place and keeps them. A "
+            "change Docket can't place there is left to you, with the line to change by hand."
         )
     return SettingsView(
         lead=lead,
@@ -334,8 +332,6 @@ def _source(facts: SourceFacts) -> SourceView:
     else:
         shown.append(("Tools", ", ".join(entry.tools) or "none: nothing syncs live"))
         shown.append(("Mapper", entry.mapper or "none"))
-        if entry.media_hosts:
-            shown.append(("Media hosts", ", ".join(entry.media_hosts)))
         if entry.media_folders:
             shown.append(("Media folders", ", ".join(entry.media_folders)))
     changes: list[Change] = []
@@ -385,7 +381,7 @@ def _list(name: str, values: list[str], shown: bool) -> NeverList:
     return NeverList(name, len(values), MATCHES[name], item_line(EXAMPLES[name]), listed, ASKS[name])
 
 
-def _rules(config: VaultConfig, vault: str, docket_form: bool, unfilled: list[tuple[str, str]]) -> list[Rule]:
+def _rules(config: VaultConfig, vault: str, unfilled: list[tuple[str, str]]) -> list[Rule]:
     settings = config.redaction
     found = [
         (redaction.CREDENTIALS, False, settings.credentials, redaction.BUILTIN[redaction.CREDENTIALS]),
@@ -401,12 +397,11 @@ def _rules(config: VaultConfig, vault: str, docket_form: bool, unfilled: list[tu
             note = redaction.CREDENTIALS_OFF if name == redaction.CREDENTIALS else TURNED_OFF
         else:
             note = redaction.TURNED_ON
-        line = None if docket_form else redaction.by_hand(name, not on, pattern)
         named = f'"{rule}"' if pattern else rule
         command = f'docket redaction set {named} {turn} --vault "{vault}"'
         own = not pattern or (names.count(name) == 1 and name not in BUILTIN_RULES)
         button = own and not (on and name == redaction.CREDENTIALS)
-        rules.append(Rule(name, pattern, on, what, command, note, looser=on, line=line, button=button))
+        rules.append(Rule(name, pattern, on, what, command, note, looser=on, button=button))
     return rules
 
 

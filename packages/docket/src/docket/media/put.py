@@ -122,7 +122,7 @@ def fetch(
         stream, taken = open_path(path, roots, bounds)
         closing = stream.close
     else:
-        response, conn = (fetcher or Fetcher(bounds)).open(url or "", entry.media_hosts)
+        response, conn = (fetcher or Fetcher(bounds)).open(url or "")
         stream = response
 
         def closing() -> None:

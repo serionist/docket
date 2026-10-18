@@ -140,7 +140,6 @@ def new_folder_source(vault: Vault, name: str, given: Path) -> NewFolderSource:
         entry = SourceConfig(
             enabled=kept.enabled,
             sensitivity=kept.sensitivity,
-            media_hosts=kept.media_hosts,
             folder=folder,
             exclude=kept.exclude,
         )
@@ -190,7 +189,6 @@ def _entry(
             sensitivity=level,
             mapper="/".join([*SKILLS, name, "mapper.py"]),
             tools=tools or kept_tools or list(reference.tools if reference else ()),
-            media_hosts=existing.media_hosts if existing is not None else [],
         )
     except ValidationError as e:
         raise DocketError(f"source {name}: " + "; ".join(str(err["msg"]) for err in e.errors())) from None

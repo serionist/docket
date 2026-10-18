@@ -70,7 +70,7 @@ once you commit it, and `docket vault status` says when one waits (DR-0521).
 |---|---|
 | `sources.<name>.sensitivity` | `work` goes through, `mixed` waits in staging to be classified, `private` is dropped |
 | `sources.<name>.mapper` | the source's mapper, relative to the repo that holds the vault: `.claude/skills/sources/<name>/mapper.py` |
-| `sources.<name>.tools`, `media_hosts`, `media_folders` | the tools the capture hook posts for the source, and where `media_put` may take its media from: hosts over https, folders under `~/` or in the repo |
+| `sources.<name>.tools`, `media_folders` | the tools the capture hook posts for the source, and the folders under `~/` or in the repo `media_put` may take its media from; an old `media_hosts` key is read and ignored |
 | `never_store.people` | drops a record whose author, any recipient, or any id in its source's payload equals an entry: an exact address (`kid@example.invalid`, also inside `Kid <kid@example.invalid>`) or the source's user id (`U0KID`); case doesn't matter |
 | `never_store.containers` | drops a record from a channel, chat or folder: its id, with or without the source's prefix (`slack:C0FAMILY` or `C0FAMILY`) |
 | `never_store.keywords` | drops a record that says the words anywhere, title, text, attachment names or payload, as whole words: case, accents and curly apostrophes don't matter (`kovacs` matches `Kovács`, not `kovacsfalva`), and any punctuation may join the words; a keyword of two or more words also matches them joined by a case change or by nothing (`dora example` matches `dora-example`, `dora_example`, `DoraExample` and `doraexample`), while a one-word keyword never matches inside a word (`Max` leaves `maxRetries` alone); a name behind an encoding matches too: percent-encoded, once or wrapped again as a Safe Link does (`Dora%2520Example`), behind HTML entities, in Latin-1, or as `%u` and `\u` escapes |
@@ -342,11 +342,10 @@ its record is in raw; the next `docket staging promote` stores it in `media/` in
 | From | Taken when |
 |---|---|
 | a path | it is under one of the source's `media_folders`, or Docket's drop folder (`docket media drop` prints it), whose files are deleted once stored |
-| a URL | https, to a host in the source's `media_hosts`, every address it resolves to public; at most 3 redirects, each checked again |
+| a URL | https, to any host, every address it resolves to public; at most 3 redirects, each checked again (DR-0604) |
 
 - A file is 512 MiB at most; `media.max_bytes` in Docket's `config.yaml` sets this machine's cap.
-- `docket media host add <source> <host>` and `docket media folder add` let more in, so they ask at your console;
-  `remove` writes at once.
+- `docket media folder add <source> <folder>` and `remove` change a source's folders and commit `vault.yaml`.
 - Media follows its record: a version of it dropped (private, never-store, left out by a release) takes the media with
   it, and a held recording, or one whose transcript named a never-store value, gets none.
 - A put needs this machine to have synced the source once: what the gate dropped is remembered per clone.

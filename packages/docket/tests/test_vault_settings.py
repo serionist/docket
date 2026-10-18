@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from docket_testkit import empty_vault, git, make_config, sh
+from docket_testkit import cant_place, empty_vault, git, make_config, sh
 from pydantic import Field
 
 from docket.cli import main
@@ -35,7 +35,7 @@ BASE = VaultConfig(
             sensitivity="mixed",
             mapper=".claude/skills/sources/calls/mapper.py",
             tools=["list_calls"],
-            media_hosts=["media.example"],
+            media_folders=["~/Recordings"],
         ),
         "memo": SourceConfig(),
         "notes": SourceConfig(sensitivity="private"),
@@ -136,8 +136,8 @@ CASES: list[tuple[str, Change, bool]] = [
     ("a tool removed", source("calls", tools=[]), False),
     ("a tool swapped", source("calls", tools=["get_call"]), True),
     ("the mapper changed", source("calls", mapper=".claude/skills/sources/calls/other.py"), True),
-    ("a media host added", source("calls", media_hosts=["media.example", "cdn.example"]), True),
-    ("a media host removed", source("calls", media_hosts=[]), False),
+    ("a media folder added", source("calls", media_folders=["~/Recordings", "~/Calls"]), True),
+    ("a media folder removed", source("calls", media_folders=[]), False),
     ("a media folder added", source("calls", media_folders=["~/Downloads"]), True),
     ("the folder changed", source("documents", folder="~/Work"), True),
     ("an exclude added", source("documents", exclude=["archive/*", "*.tmp"]), False),
@@ -313,7 +313,19 @@ def test_no_change_writes_nothing(tmp_path: Path) -> None:
     assert sh(vault.root, "git", "rev-parse", "HEAD") == head
 
 
-def test_a_hand_edited_file_is_left_as_it_is(tmp_path: Path) -> None:
+def test_a_hand_edited_file_is_edited_in_place(tmp_path: Path) -> None:
+    vault = make_vault(tmp_path)
+    mine = text(vault).replace("sources:\n", "sources:   # mine\n", 1)
+    (vault.root / "vault.yaml").write_text(mine, encoding="utf-8", newline="\n")
+    git(vault.root, "commit", "-qam", "A comment of mine")
+    done = settings.rewrite(vault, source("memo", enabled=False), "Config: source memo off", via="page")
+    assert done.changed
+    assert text(vault).startswith(mine.split("memo:", 1)[0])
+    assert VaultConfig.load(vault.root / "vault.yaml").sources["memo"].enabled is False
+
+
+def test_a_change_the_editor_can_t_place_is_left_as_it_is(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cant_place(monkeypatch)
     vault = make_vault(tmp_path)
     mine = text(vault).replace("sources:\n", "sources:   # mine\n", 1)
     (vault.root / "vault.yaml").write_text(mine, encoding="utf-8", newline="\n")
@@ -413,7 +425,10 @@ def test_a_file_changed_since_the_page_showed_it_is_refused(tmp_path: Path) -> N
     assert text(vault) == before
 
 
-def test_a_hand_edited_file_is_never_rewritten_by_an_add(tmp_path: Path) -> None:
+def test_a_change_the_editor_can_t_place_is_never_made_by_an_add(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cant_place(monkeypatch)
     vault = make_vault(tmp_path)
     mine = text(vault).replace("never_store:\n", "never_store:   # mine\n", 1)
     (vault.root / CONFIG_FILE).write_text(mine, encoding="utf-8", newline="\n")

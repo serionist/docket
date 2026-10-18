@@ -80,15 +80,15 @@ Unreleased in the same PR.
   dependency.
 - Media: `docket media put` and the `media_put` tool keep a record's audio or file, encrypted with a key of its own
   as it is read, beside its record until the record is in raw, then in `media/` in LFS. A path comes from a folder you
-  name or Docket's drop folder, a URL only over https from a host you name. A
+  name or Docket's drop folder, a URL only over https. A
   held recording, one cut or released with cuts, or one the gate dropped for a never-store value gets no media yet.
   Keys stay on this machine, in the system keychain or, by your choice, a private file; the Recording page says when
   the audio waits, isn't downloaded, or has no key here.
 - Media keys on a second machine, and their backup: `docket media keys export <file>` writes every key of a clone
   into one file sealed with a passphrase it draws and shows once, and `docket media keys import <file>` adds them on
   another machine; both only in your own terminal. The newest export is the backup, and `docket media status`,
-  `docket vault status` and the session start count the keys no export holds yet. A source with a media host or
-  folder gets a media step in each run, and the Plaud skill says how to turn its audio on.
+  `docket vault status` and the session start count the keys no export holds yet. Every source but a folder source
+  gets a media step in each run, and the Plaud skill says how to turn its audio on.
 - The Recording page, `/recording` in the web app: a recording's summary beside its transcript, each anchor a link
   that marks the lines it points at, with the recording and the line in the address. Search's transcript hits open
   there. No audio is stored yet, and the page says so.
@@ -221,6 +221,10 @@ Unreleased in the same PR.
 
 ### Changed
 
+- `media_put` fetches a URL from any https host, every address it resolves to still checked: `docket media host` is
+  gone, and a source's `media_hosts` key in `vault.yaml` is read and ignored. A `vault.yaml` with comments or a layout
+  of your own is now edited in place, its comments and order kept, by every command and the Settings page; only a
+  change Docket can't place there is still a line to make by hand.
 - Claude acts with your OK in chat: it releases a held recording with the cuts it showed you, changes `vault.yaml`,
   confirms or rejects a decision with the new `docket decision set`, and confirms old cuts, by running the commands
   you would, after your yes. Each commit it makes says `by Claude, with the owner's OK in chat`. The Settings page

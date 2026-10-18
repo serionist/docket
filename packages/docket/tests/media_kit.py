@@ -152,7 +152,6 @@ def media_vault(
     tmp_path: Path,
     *,
     sensitivity: str = "work",
-    hosts: tuple[str, ...] = (HOST,),
     folders: tuple[str, ...] = (),
     store: bool = True,
 ) -> Vault:
@@ -161,7 +160,6 @@ def media_vault(
     config.sources = {
         "plaud": SourceConfig(
             sensitivity=sensitivity,  # pyright: ignore[reportArgumentType]
-            media_hosts=list(hosts),
             media_folders=list(folders),
         ),
         "chat": SourceConfig(),
