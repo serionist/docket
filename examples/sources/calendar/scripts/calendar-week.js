@@ -1,15 +1,17 @@
-// docket:calendar-week/1: the Outlook on the web week view on screen, read only. No clicks, nothing typed.
+// docket:calendar-week/2: the Outlook on the web week view on screen, read only. No clicks, nothing typed.
 // Paste it whole as javascript_tool's text. When the last string is "more<TAB><n>", run it again with <n> in place of
-// the 0 on the last line. mapper.py reads only results whose first string is the version line.
+// the 0 on the last line. mapper.py reads only results whose first string is a version line it knows.
 //
-// One string per event, tab-separated (a tab never occurs inside a field: whitespace is collapsed):
+// One string per event, tab-separated:
 //   ev  <strings it takes>  <id>  <start>  <end>  <response>  <organiser>  <organiser address>  <place>  <aria-label>
 // The id is the event's data-calitemid. Start, end, response, organiser and place come from the event's own data
 // behind the element, which the label leaves out (the response, the address, a past day's place); start and end
 // fall back to the label's times in this browser's time zone. A line over 900 characters goes on in "+<TAB>..."
 // strings, since Chrome cuts a string at about 1,000. Links, query strings and passcodes are taken out.
+// In every field ¤ is ¤¤, = is ¤e and a tab ¤t, since Chrome blocks a string holding = with & or ; (an occurrence's id
+// ends in =, and a booked room's place reads "Room; Microsoft Teams Meeting"). That is all /2 changes from /1.
 await (async (FROM) => {
-  const VERSION = 'docket:calendar-week/1';
+  const VERSION = 'docket:calendar-week/2';
   const MAX_STRINGS = 95; // Chrome keeps 100 items of an array
   const MAX_CHARS = 30000; // the capture hook keeps a result under 50,000 characters, JSON escapes included
   const PIECE = 900;
@@ -30,6 +32,8 @@ await (async (FROM) => {
     .replace(/\b(passcode|password|pwd|pin)\b\s*[:=]?\s*\S+/gi, '$1 (removed)')
     .replace(/\s+/g, ' ')
     .trim();
+  // After clean(), so a field reads back exactly as /1 had it.
+  const esc = (s) => String(s).replace(/¤/g, '¤¤').replace(/=/g, '¤e').replace(/\t/g, '¤t');
 
   const rangeText = () => {
     for (const e of document.querySelectorAll('button, span, div, h1, h2')) {
@@ -118,7 +122,7 @@ await (async (FROM) => {
       clean(address),
       clean(loc),
       label,
-    ].join('\t');
+    ].map(esc).join('\t');
     const k = Math.max(1, Math.ceil(body.length / PIECE));
     const pieces = [];
     for (let i = 0; i < k; i++) pieces.push((i ? '+\t' : 'ev\t' + k + '\t') + body.slice(i * PIECE, (i + 1) * PIECE));
@@ -126,7 +130,7 @@ await (async (FROM) => {
   }
 
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
-  const out = [VERSION, ['week', clean(range), rows.length, FROM, fromData, zone].join('\t')];
+  const out = [VERSION, ['week', clean(range), rows.length, FROM, fromData, zone].map(esc).join('\t')];
   let used = out.join('').length;
   let i = FROM;
   for (; i < rows.length; i++) {

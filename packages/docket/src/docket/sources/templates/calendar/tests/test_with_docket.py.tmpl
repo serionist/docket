@@ -15,10 +15,14 @@ from typing import Any
 
 import pytest
 from calendar_payloads import (
+    BLOCKED_IN_V1,
+    EQUALS,
     EVENTS,
     NEXT_WEEK,
     OFFSITE,
     PLANNING,
+    RD_SYNC,
+    ROOM_OCC,
     STANDUP,
     STANDUP_MON,
     SYNC_FRI,
@@ -55,6 +59,13 @@ GOLDEN = {
     rid(PLANNING): "sha256:e2d953a457b595682eaf0b85b4257b38b3fb0063bdffb16445d69c23d0244e2a",
     rid(OFFSITE): "sha256:bcccf1b219fedcd68321c94fac29c041bf592853333dfb18d4ab86c5be1e32ee",
 }
+# The events Chrome blocked under /1 (a booked room beside Teams, an `&`, an `=`), as /1 would have mapped them had they
+# come through, and as /2 does.
+GOLDEN_BLOCKED_IN_V1 = {
+    rid(ROOM_OCC): "sha256:722643d0cfd304fe4421b761e5a35d4186c81b947a330cc9dc585945d6fa7a0c",
+    rid(RD_SYNC): "sha256:b2d29eb9141469a4889a8f5ee2153ce59b18875364daccbdaf26a5075461afbc",
+    rid(EQUALS): "sha256:58c853fe0dcff586fa6fc31338e4bd1036b3419e08b4101a7b093cc6976eb8b9",
+}
 
 
 def checked(mapper: ModuleType, run: Run, holds: list[str] | None = None) -> dict[str, RawRecord]:
@@ -66,6 +77,13 @@ def test_the_core_accepts_every_record_and_pins_one_version_per_shape(mapper: Mo
     assert len(records) == len(EVENTS)
     assert {r: version(records[r]) for r in GOLDEN} == GOLDEN
     assert records[rid(STANDUP_MON)].ts == datetime(2026, 10, 19, 7, 0, tzinfo=UTC)
+
+
+def test_v1_and_v2_give_every_event_the_same_pinned_version(mapper: ModuleType) -> None:
+    for version_ in (1, 2):
+        records = checked(mapper, Run().script(week(*EVENTS, *BLOCKED_IN_V1, version=version_)))
+        assert {r: version(records[r]) for r in GOLDEN} == GOLDEN
+        assert {r: version(records[r]) for r in GOLDEN_BLOCKED_IN_V1} == GOLDEN_BLOCKED_IN_V1
 
 
 def test_a_derived_rid_passes_the_core_s_checks(mapper: ModuleType) -> None:

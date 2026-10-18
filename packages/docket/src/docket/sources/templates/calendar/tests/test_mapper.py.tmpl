@@ -1,5 +1,5 @@
 """The calendar mapper on its own: plain JSON in, plain JSON out, no Docket needed. Every payload is invented, in the
-shape scripts/calendar-week.js returns."""
+shape scripts/calendar-week.js returns: /2, escaped, unless a test says /1."""
 
 from __future__ import annotations
 
@@ -11,13 +11,18 @@ from typing import Any
 
 from calendar_payloads import (
     BEN,
+    BLOCKED,
+    BLOCKED_IN_V1,
     DORA,
+    EQUALS,
     EVENTS,
     NEXT_WEEK,
     OFFSITE,
     PLANNING,
+    RD_SYNC,
     REVIEW,
     REVIEW_MOVED,
+    ROOM_OCC,
     STANDUP,
     STANDUP_MON,
     STANDUP_TUE,
@@ -28,6 +33,7 @@ from calendar_payloads import (
     WEEK,
     Event,
     Run,
+    chrome,
     hooked,
     live_week,
     occurrence_id,
@@ -64,7 +70,7 @@ def test_the_script_s_strings_are_found_in_every_shape_a_result_can_take(mapper:
 
 
 def test_a_javascript_result_without_the_version_line_is_passed_over_without_a_word(mapper: ModuleType) -> None:
-    run = Run().click().click(["docket:calendar-week/2", "week\t..."]).add("javascript_tool", hooked(42))
+    run = Run().click().click(["docket:calendar-week/3", "week\t..."]).add("javascript_tool", hooked(42))
     out = mapper.map_run(run.add("javascript_tool", "undefined").payload())
     assert out == {"contract": 1, "records": [], "set_aside": [], "waiting": [], "held": []}
 
@@ -328,3 +334,57 @@ def test_a_header_or_line_that_doesn_t_read_is_set_aside(mapper: ModuleType) -> 
     no_start = replace(STANDUP_MON, start="")
     out = mapper.map_run(Run().script(week(no_start)).payload())
     assert [(s["id"], s["reason"]) for s in out["set_aside"]] == [(rest(STANDUP_MON.id), "no-start")]
+
+
+# -- /2: every field escaped, since Chrome blocks a string holding = with & or ; ---------------------------------------
+
+
+def test_v2_reads_back_exactly_as_v1_for_every_event(mapper: ModuleType) -> None:
+    for e in (*EVENTS, *BLOCKED_IN_V1, SYNC_FRI_CANCELLED, replace(STANDUP_MON, past=True, data=False)):
+        plain = mapper.map_run(Run().script(week(e, version=1)).payload())
+        escaped = mapper.map_run(Run().script(week(e)).payload())
+        assert escaped == plain
+
+
+def test_what_chrome_blocked_under_v1_comes_through_whole_under_v2(mapper: ModuleType) -> None:
+    v1 = chrome(week(*BLOCKED_IN_V1, STANDUP_TUE, version=1))
+    assert v1.count(BLOCKED) == 3
+    lost = mapper.map_run(Run().script(v1).payload())
+    assert [r["rid"] for r in lost["records"]] == [rid(STANDUP_TUE)]
+    assert [s["reason"] for s in lost["set_aside"]] == ["blocked"] * 3
+    v2 = week(*BLOCKED_IN_V1, STANDUP_TUE)
+    assert chrome(v2) == v2 and not any("=" in s for s in v2)
+    records = by_rid(mapper.map_run(Run().script(chrome(v2)).payload()))
+    assert sorted(records) == sorted(rid(e) for e in (*BLOCKED_IN_V1, STANDUP_TUE))
+    room = records[rid(ROOM_OCC)]
+    assert (
+        room["text"]
+        == f"10:00 to 11:00, Wednesday, October 21, 2026\nWhere: Lab 2 (east wing); {TEAMS}\nResponse: none"
+    )
+    assert room["native"]["id"] == ROOM_OCC.id and ROOM_OCC.id.endswith("=")
+    assert room["thread"] is not None and room["native"]["item"] == "occurrence"
+    assert records[rid(RD_SYNC)]["title"] == "R&D sync"
+    equals = records[rid(EQUALS)]
+    assert equals["title"] == "Budget = plan B; rates ¤e and ¤¤ as typed"
+    assert "Where: Room A=1; Room B" in equals["text"]
+    assert equals["native"]["label"] == EQUALS.label()
+
+
+def test_an_escaped_id_is_unescaped_before_it_names_an_event_set_aside(mapper: ModuleType) -> None:
+    long = replace(ROOM_OCC, subject=("Rig bring-up " + "with a long agenda " * 60).strip())
+    strings = week(long, replace(EQUALS, when="sometime"))
+    assert strings[3].startswith("+\t")
+    strings[3] = BLOCKED
+    out = mapper.map_run(Run().script(strings).payload())
+    assert [(s["id"], s["reason"]) for s in out["set_aside"]] == [
+        (rest(long.id), "blocked"),
+        (rest(EQUALS.id), "bad-label"),
+    ]
+
+
+def test_unescape_reads_left_to_right(mapper: ModuleType) -> None:
+    assert mapper.unescape("a¤eb") == "a=b"
+    assert mapper.unescape("¤¤e") == "¤e"
+    assert mapper.unescape("¤¤¤e") == "¤="
+    assert mapper.unescape("x¤ty") == "x\ty"
+    assert mapper.unescape("¤x and a lone ¤") == "¤x and a lone ¤"

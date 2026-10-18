@@ -5,8 +5,13 @@ Standard library only: Docket runs this file in its own process and reads the JS
 rid and computes every version; this file never does either.
 
 Every `javascript_tool` call of a run is captured, the week paging's clicks too. Only a result whose first string is
-`docket:calendar-week/1` is the script's; every other one is passed over without a word. The script gives a header
-line and one line per event (the script names the fields), a long line going on in `+<TAB>` strings.
+`docket:calendar-week/1` or `/2` is the script's; every other one is passed over without a word. The script gives a
+header line and one line per event (the script names the fields), a long line going on in `+<TAB>` strings.
+
+`/2` escapes every field: `¤` as `¤¤`, `=` as `¤e`, a tab as `¤t`, as the mail and Teams scripts do, since Chrome
+blocks a string holding `=` with `&` or `;` (an occurrence's id ends in `=`, and a booked room's place reads
+`Room; Microsoft Teams Meeting`). The mapper unescapes a `/2` field and then maps it exactly as a `/1` one, so an event
+that reads the same gives the same record, and the same version, under either.
 
 One record per occurrence, kind `event`:
 
@@ -29,7 +34,7 @@ import binascii
 import hashlib
 import json
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -38,7 +43,10 @@ CONTRACT = 1
 SOURCE = "calendar"
 VIA = "owa-week-view"
 TOOL = "javascript_tool"
-VERSION = "docket:calendar-week/1"
+PLAIN = "docket:calendar-week/1"
+ESCAPED = "docket:calendar-week/2"
+VERSIONS = frozenset({PLAIN, ESCAPED})
+ESCAPES = {"¤": "¤", "e": "=", "t": "\t"}
 # An event line's fields after `ev` and its string count: id, start, end, response, organiser, address, place, label.
 FIELDS = 8
 
@@ -147,25 +155,27 @@ def _capture(capture: dict[str, Any], held: set[str], out: Out) -> None:
     if items is None:
         # A click, a scroll or another script of the run: nothing of the calendar's.
         return
-    week = _week(items[1]) if len(items) > 1 else None
+    # A /2 field is unescaped first; a /1 field is read as it came.
+    decode = unescape if items[0] == ESCAPED else _same
+    week = _week(items[1], decode) if len(items) > 1 else None
     if week is None:
         out.aside(None, "bad-header", TOOL, "week")
         return
-    for line in _lines(items[2:], out):
+    for line in _lines(items[2:], out, decode):
         record = _record(line, week, capture, held, out)
         if record is not None:
             # Captures come in order, so the latest read of an event wins.
             out.latest[record["rid"]] = record
 
 
-def _week(text: str) -> Week | None:
-    parts = text.split("\t")
+def _week(text: str, decode: Callable[[str], str]) -> Week | None:
+    parts = [decode(p) for p in text.split("\t")]
     if len(parts) != 6 or parts[0] != "week" or not all(p.isdigit() for p in parts[2:5]):
         return None
     return Week(parts[1], parts[5])
 
 
-def _lines(items: list[str], out: Out) -> Iterator[Line]:
+def _lines(items: list[str], out: Out, decode: Callable[[str], str]) -> Iterator[Line]:
     """Each event's line, its `+` strings joined to it. An event Chrome blocked or cut is set aside, by its id when its
     first string came through."""
     pending: list[str] = []
@@ -174,15 +184,15 @@ def _lines(items: list[str], out: Out) -> Iterator[Line]:
         if item.endswith("[TRUNCATED]") and not item.startswith("["):
             # Chrome cut this string short: the event it belongs to can't be read whole.
             if item.startswith("+\t") and pending:
-                out.aside(_first_id(pending), "cut-short", TOOL, "line")
+                out.aside(_first_id(pending, decode), "cut-short", TOOL, "line")
             elif item.startswith("ev\t"):
-                yield from _finish(pending, expected, got, out)
-                out.aside(_first_id([item[3:].partition("\t")[2]]), "cut-short", TOOL, "line")
+                yield from _finish(pending, expected, got, out, decode)
+                out.aside(_first_id([item[3:].partition("\t")[2]], decode), "cut-short", TOOL, "line")
             else:
                 out.aside(None, "cut-short", TOOL, "line")
             pending, expected, got = [], 0, 0
         elif item.startswith("ev\t"):
-            yield from _finish(pending, expected, got, out)
+            yield from _finish(pending, expected, got, out, decode)
             pending, expected, got = [], 0, 0
             count, sep, rest = item[3:].partition("\t")
             if not sep or not count.isdigit() or int(count) < 1:
@@ -200,7 +210,7 @@ def _lines(items: list[str], out: Out) -> Iterator[Line]:
         elif item.startswith("[BLOCKED"):
             # Chrome put this in place of a string: the next piece of the open event, or a whole event.
             if pending and got < expected:
-                out.aside(_first_id(pending), "blocked", TOOL, "line")
+                out.aside(_first_id(pending, decode), "blocked", TOOL, "line")
                 pending, expected, got = [], 0, 0
             else:
                 out.aside(None, "blocked", TOOL, "line")
@@ -209,24 +219,44 @@ def _lines(items: list[str], out: Out) -> Iterator[Line]:
             out.aside(None, "cut-short", TOOL, "array")
         else:
             out.aside(None, "bad-line", TOOL, "line")
-    yield from _finish(pending, expected, got, out)
+    yield from _finish(pending, expected, got, out, decode)
 
 
-def _finish(pending: list[str], expected: int, got: int, out: Out) -> Iterator[Line]:
+def _finish(pending: list[str], expected: int, got: int, out: Out, decode: Callable[[str], str]) -> Iterator[Line]:
     if not pending:
         return
-    fields = "".join(pending).split("\t")
+    # Split on the tabs between fields first: a /2 field's own tab is `¤t` until it is unescaped.
+    fields = [decode(f) for f in "".join(pending).split("\t")]
     if got != expected:
-        out.aside(_first_id(pending), "cut-short", TOOL, "line")
+        out.aside(_first_id(pending, decode), "cut-short", TOOL, "line")
     elif len(fields) != FIELDS:
-        out.aside(_first_id(pending), "bad-line", TOOL, "line")
+        out.aside(_first_id(pending, decode), "bad-line", TOOL, "line")
     else:
         yield Line(*fields)
 
 
-def _first_id(pending: list[str]) -> str | None:
-    first = "".join(pending).split("\t", 1)[0]
+def _first_id(pending: list[str], decode: Callable[[str], str]) -> str | None:
+    first = decode("".join(pending).split("\t", 1)[0])
     return rest_id(first) if first else None
+
+
+def unescape(text: str) -> str:
+    """A /2 field as the page had it: `¤¤` is `¤`, `¤e` is `=`, `¤t` a tab, read left to right, so `¤¤e` is `¤e` and
+    never `¤=`. A `¤` before anything else stays as it is."""
+    out: list[str] = []
+    n = 0
+    while n < len(text):
+        if text[n] == "¤" and n + 1 < len(text) and text[n + 1] in ESCAPES:
+            out.append(ESCAPES[text[n + 1]])
+            n += 2
+            continue
+        out.append(text[n])
+        n += 1
+    return "".join(out)
+
+
+def _same(text: str) -> str:
+    return text
 
 
 # -- one event -------------------------------------------------------------------------------------------------------
@@ -384,9 +414,9 @@ def _unlinked(text: str) -> str:
 
 
 def strings(result: Any) -> list[str] | None:
-    """The script's strings: the first array of strings in the result whose first one is the version line."""
+    """The script's strings: the first array of strings in the result whose first one is a version line it knows."""
     for found in _candidates(result, 0):
-        if isinstance(found, list) and found and found[0] == VERSION and all(isinstance(s, str) for s in found):
+        if isinstance(found, list) and found and found[0] in VERSIONS and all(isinstance(s, str) for s in found):
             return found
     return None
 
@@ -431,6 +461,6 @@ def _in_text(text: str, depth: int) -> Iterator[Any]:
             value = decoder.raw_decode(text, start)[0]
         except ValueError:
             continue
-        if isinstance(value, list) and value and value[0] == VERSION:
+        if isinstance(value, list) and value and value[0] in VERSIONS:
             yield value
             return

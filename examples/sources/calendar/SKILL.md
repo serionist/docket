@@ -53,7 +53,7 @@ run to its close before another opens in the same session, or run each source in
 | Read | How |
 |---|---|
 | this week | navigate to `https://outlook.cloud.microsoft/calendar/view/week`. A date in the URL doesn't move the week: OWA redirects back to this one |
-| a week | `scripts/calendar-week.js`, pasted whole as `javascript_tool`'s text. It waits up to 6 s for the view to settle and returns the version line, a header and one string per event |
+| a week | `scripts/calendar-week.js`, pasted whole as `javascript_tool`'s text. It waits up to 6 s for the view to settle and returns the version line (`docket:calendar-week/2`), a header and one string per event |
 | another week | the paging snippet below with `previous week`, `next week` or `today`: it clicks OWA's week button, never an event, and returns the range before and after |
 | a later part | when the last string is `more<TAB><n>`, run the script again with `<n>` in place of the 0 on its last line. Seen once: weeks of 30 to 60 events, about 14 to 20 KB, came back in one part each |
 
@@ -72,7 +72,8 @@ await (async (to) => {
 
 The header is `week<TAB><range shown><TAB><events><TAB><from><TAB><events whose data was read><TAB><time zone>`. Each
 event string is `ev`, how many strings it takes, then its id, start, end, response, organiser, address, place and
-aria-label. The id, the label, and the event's own data behind the element are all the script reads. The labels'
+aria-label. The id, the label, and the event's own data behind the element are all the script reads. In every field
+`¤` is `¤¤`, `=` is `¤e` and a tab `¤t`, as in the mail and Teams scripts, so no string holds an `=`. The labels'
 wording is OWA's in English; another display language needs the script's and the mapper's patterns changed together.
 
 ### How the page behaves
@@ -97,13 +98,15 @@ Seen on one tenant's OWA. Microsoft changes the page; the script's header counts
 - Day numbers can be padded (`October 09`); the script and the mapper take both.
 - A declined occurrence drops out of the week view at once, so its record keeps its last version; the decline is in Sent
   Items. A multi-day all-day placeholder moved out of the weeks read just vanishes; the update mail says where it went.
-- Chrome cuts a string at about 1,000 characters and an array at 100 items, and blocks a string that looks like a query
-  string or a long base64 run. The script returns at most 95 strings and 30,000 characters, a long event in `+<TAB>`
-  strings of 900, links and query strings taken out. A blocked or cut string is set aside by the mapper.
-- A known gap, seen once: the script's `clean()` doesn't escape `;` or `=`, and an occurrence's id ends in `=`, so a
-  `;` in the place or label (`Microsoft Teams Meeting; Room 4.12`) is enough for Chrome to block the whole event line
-  as "Cookie/query string data". The mapper sets each aside as `blocked`, so they make no record. The fix belongs in
-  `clean()` (escape them as the mail scripts do, `=` as `¤e`), with a new version line the mapper learns first.
+- Chrome cuts a string at about 1,000 characters and an array at 100 items, and blocks a string that holds `=` with
+  `&` or `;` ("Cookie/query string data") or a long base64 run. The script returns at most 95 strings and 30,000
+  characters, a long event in `+<TAB>` strings of 900, links and query strings taken out, `=` escaped. A blocked or cut
+  string is set aside by the mapper.
+- Fixed in `/2`: `/1` didn't escape `=`, and an occurrence's id ends in `=`, so an occurrence whose place or label held
+  a `;` (a booked room beside Teams: `Microsoft Teams Meeting; <room>`) or an `&` (`R&D sync`) had its whole line
+  blocked and made no record. `/2` escapes every field as above. The mapper reads `/1` and `/2`: a `/2` field is
+  unescaped and mapped as `/1` maps it, so an event that reads the same keeps its version (pinned in
+  `tests/test_with_docket.py`).
 
 ## The window
 
@@ -165,6 +168,7 @@ Every record the lookback reads again gets a new version when the mapper's outpu
 
 - Keep the output stable: change it only for a real change in what the calendar says.
 - Pin golden versions in the tests, as `tests/test_with_docket.py` does, so a change shows before it runs.
-- A change to what the script returns gets a new version line (`docket:calendar-week/2`), and the mapper learns it before
-  the script ships.
+- A change to what the script returns gets a new version line (next, `docket:calendar-week/3`), and the mapper learns it
+  before the script ships. It keeps reading the older lines, so a capture made before the change still maps, and the
+  same event gives the same version under both, as `/1` and `/2` do.
 - Pull the project on every machine before its next sync, so two machines never map one event two ways.

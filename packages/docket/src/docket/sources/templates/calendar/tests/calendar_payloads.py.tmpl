@@ -16,7 +16,9 @@ from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from typing import Any
 
-VERSION = "docket:calendar-week/1"
+VERSION = "docket:calendar-week/2"
+V1 = "docket:calendar-week/1"
+BLOCKED = "[BLOCKED: Cookie/query string data]"
 # OWA writes a week's range with an en dash.
 WEEK = "2026, October 18\u201324"
 NEXT_WEEK = "2026, October 25\u201331"
@@ -52,6 +54,16 @@ def rest(shown: str) -> str:
     return shown.replace("+", "-").replace("/", "_")
 
 
+def esc(field: str) -> str:
+    """A field as /2 writes it: `¤` as `¤¤`, `=` as `¤e`, a tab as `¤t`."""
+    return field.replace("¤", "¤¤").replace("=", "¤e").replace("\t", "¤t")
+
+
+def chrome(strings: list[str]) -> list[str]:
+    """What Chrome hands back, as far as its query-string filter goes: a string holding `=` with `&` or `;` blocked."""
+    return [BLOCKED if "=" in s and ("&" in s or ";" in s) else s for s in strings]
+
+
 @dataclass(frozen=True)
 class Event:
     """One event as the week view shows it: its label's parts and what the script reads from the event's own data."""
@@ -85,15 +97,16 @@ class Event:
             parts.append(self.kind)
         return ", ".join(parts)
 
-    def pieces(self) -> list[str]:
-        """The event's strings, as the script cuts them."""
+    def pieces(self, version: int = 2) -> list[str]:
+        """The event's strings, as the script cuts them; /2 escapes each field first."""
         name, address = self.organiser or ("", "")
         fields = [self.id, self.start, self.end]
         if self.data:
             fields += [self.response, name, address, self.place]
         else:
             fields += ["", "", "", ""]
-        body = "\t".join([*fields, self.label()])
+        fields.append(self.label())
+        body = "\t".join(esc(f) if version == 2 else f for f in fields)
         k = max(1, -(-len(body) // PIECE))
         return [("+\t" if i else f"ev\t{k}\t") + body[i * PIECE : (i + 1) * PIECE] for i in range(k)]
 
@@ -168,13 +181,47 @@ SYNC_FRI = Event(
 SYNC_FRI_CANCELLED = replace(SYNC_FRI, subject="Canceled: Weekly test sync", show_as="Free")
 EVENTS = (STANDUP_MON, STANDUP_TUE, REVIEW_MOVED, PLANNING, OFFSITE, SYNC_FRI)
 
+# What Chrome blocked under /1, since an occurrence's id ends in `=`: a booked room beside Teams, an `&`, an `=`.
+ROOM = "room-series"
+ROOM_OCC = Event(
+    occurrence_id(ROOM, date(2026, 10, 21)),
+    "Rig bring-up",
+    "10:00 to 11:00, Wednesday, October 21, 2026",
+    "2026-10-21T08:00:00Z",
+    "2026-10-21T09:00:00Z",
+    DORA,
+    place=f"Lab 2 (east wing); {TEAMS}",
+)
+RD_SYNC = replace(
+    ROOM_OCC,
+    id=occurrence_id("rd-series", date(2026, 10, 22)),
+    subject="R&D sync",
+    when="15:00 to 15:30, Thursday, October 22, 2026",
+    start="2026-10-22T13:00:00Z",
+    end="2026-10-22T13:30:00Z",
+    place=TEAMS,
+    organiser=RITA,
+)
+EQUALS = replace(
+    ROOM_OCC,
+    id=occurrence_id("equals-series", date(2026, 10, 23)),
+    subject="Budget = plan B; rates ¤e and ¤¤ as typed",
+    when="9:30 to 10:00, Friday, October 23, 2026",
+    start="2026-10-23T07:30:00Z",
+    end="2026-10-23T08:00:00Z",
+    place="Room A=1; Room B",
+    organiser=BEN,
+)
+BLOCKED_IN_V1 = (ROOM_OCC, RD_SYNC, EQUALS)
 
-def week(*events: Event, range_: str = WEEK, start: int = 0, more: int | None = None) -> list[str]:
+
+def week(*events: Event, range_: str = WEEK, start: int = 0, more: int | None = None, version: int = 2) -> list[str]:
     """The script's strings for a week: the version line, the header, each event's strings, and `more` when cut."""
     data = sum(1 for e in events if e.data)
-    out = [VERSION, "\t".join(["week", range_, str(len(events)), str(start), str(data), ZONE])]
+    header = ["week", range_, str(len(events)), str(start), str(data), ZONE]
+    out = [VERSION if version == 2 else V1, "\t".join(esc(h) if version == 2 else h for h in header)]
     for e in events:
-        out += e.pieces()
+        out += e.pieces(version)
     if more is not None:
         out.append(f"more\t{more}")
     return out
