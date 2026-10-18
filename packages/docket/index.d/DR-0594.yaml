@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0594
+    title: A forget writes the history rewrite for a fresh clone, by each line's own rid field or token and each removed doc's blobs, and never runs it
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#182"]
+    description: "The forget ends by saying the text stays in the host repo's history and that Docket never rewrites it (DR-0102). It writes two files to <private>/forget/<stamp>/, never the tree, the stamp a UTC time with no colon (20261018T091402Z) so the folder is valid on Windows, neither holding text from the family. lines.txt holds git filter-repo --replace-text expressions, each blanking one line and keeping its newline: a raw run file's line matched by its leading {\"rid\":\"<rid>\" field, the rid and the rids under it for a whole forget and the rid with its \"v\" for a version, so a kept reply whose thread names the rid, curate locators, cursor ids and a held rid's released cut version never match; a dropped doc line matched by its own [r: token on the family or its pinned [d:...=<hash>] ref to a dropped line, so a dependent goes too. blobs.txt holds, for --strip-blobs-with-ids, the blob of every rev of each removed doc and each removed media file's pointer, not their paths, so a doc rebuilt later at a removed path survives. When the files are written, HEAD's tree holds no line they match. The printed lines say, in order: back the repo up; clone it with git clone --no-local into a fresh folder and run git filter-repo there, never in the working repo, which filter-repo refuses as not fresh and whose --force would risk the owner's uncommitted work; force-push its branches from the fresh clone, then re-clone every machine, this one too; the remote keeps commits a force-push left behind, reachable by their ids, on GitHub until its support purges them, and in forks and pull request refs; other branches keep the text, with no list line to keep it out of their trees; run it before writing on these records again, since a later line with the same token is blanked too; and git filter-repo isn't Docket's dependency. A repo of its own gets the same until #58."
+    binds:
+      - Docket never runs the history rewrite.
+      - The rewrite's files hold no text from the family, and leave HEAD's tree as it is when written.
+    not_chosen:
+      - "An expression on the rid anywhere in a blob: it blanks a kept reply whose thread names the rid, curate locators, cursor ids, a held rid's released cut version and lines outside the vault."
+      - "Removing docs by path with --invert-paths: a doc rebuilt later at that path goes from history too."
+      - "Running filter-repo on the working repo: it refuses a clone that isn't fresh, and --force there risks the owner's uncommitted work."
+      - "Matching a dropped doc line by its whole text: the file would hold the text the forget took out."

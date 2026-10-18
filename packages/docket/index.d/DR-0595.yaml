@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0595
+    title: "A listed key leaves every clone: at its gate calls, its reader and its service's start, out of its exports, and by a keys-only line for its own files"
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#182"]
+    description: A listed key leaves every clone, gate call or not. The apply at every gate call deletes the listed keys this clone holds (DR-0581). A clone that only searches and plays makes no gate call, so the media reader, before it opens a key, deletes a listed one and answers forgotten, and the service deletes every listed key it holds at its start. docket media keys export leaves listed keys out of the file and out of exported.json, so the new backup the README asks for after a forget holds none, and docket media keys import skips listed keys, each counted. When an apply removes a clone's own stored file for a listed rid, a file whose key id no line names, it deletes that key and appends a line with only that key id to state/forgotten.jsonl, committed with the apply's commit, so every clone that imported that clone's export deletes it too. This is the keys-only line retention will write.
+    binds:
+      - No export holds a listed key, and no import adds one.
+      - A key an apply deletes goes on the list.
+    not_chosen:
+      - "Deleting keys at gate calls only: a clone that only searches and plays keeps them, and exports them into the new backup."
+      - "Deleting a clone's own file's key unlisted: the clones that imported its export keep it."
