@@ -2,8 +2,9 @@
 runs the jobs one at a time, each under the machine's speech lock, so a job the CLI runs waits its turn too.
 
 After each index update, on CUDA only, the thread queues by itself the newest recordings whose stored audio reads ok
-and that have no Whisper transcript yet (`job.due`), each at most once while the service runs: a sync's audio, once
-promoted, gets its transcript. On a CPU nothing is queued by itself. The speech choice is read when the service starts.
+and that have no Whisper transcript yet (`job.due`), each at most once while the service runs, and never a stored file
+this engine staged nothing from for good, which the state folder keeps across restarts: a sync's audio, once promoted,
+gets its transcript. On a CPU nothing is queued by itself. The speech choice is read when the service starts.
 The log holds counts, never a rid or a text (DR-0155).
 """
 
@@ -78,7 +79,7 @@ class SpeechQueue:
         *,
         chosen: Callable[[], Speech | str] = setup.chosen,
         run: Run = job.transcribe,
-        due: Callable[[Vault], list[str]] = job.due,
+        due: Callable[[Vault, str], list[str]] = job.due,
     ) -> None:
         self._vault = vault
         self._chosen = chosen
@@ -95,6 +96,7 @@ class SpeechQueue:
         # The rids the service queued by itself once: a job that stages nothing isn't queued again by itself.
         self._auto: set[str] = set()
         self._scan = False
+        self._engine = ""
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
@@ -102,6 +104,7 @@ class SpeechQueue:
         self.speech = self._chosen()
         if isinstance(self.speech, str):
             return
+        self._engine = self.speech.model.engine
         self._thread = threading.Thread(target=self._loop, name="docket-speech", daemon=True)
         self._thread.start()
 
@@ -168,7 +171,7 @@ class SpeechQueue:
 
     def _queue_due(self) -> None:
         try:
-            found = self._due(self._vault())
+            found = self._due(self._vault(), self._engine)
         except (DocketError, OSError) as e:
             log.warning("speech: looking for recordings to transcribe failed: %s", type(e).__name__)
             return

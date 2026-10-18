@@ -478,9 +478,11 @@ is off until you install it.
 - The service runs one job at a time, under the machine's lock, so a job in a terminal waits its turn. Each job's
   place and outcome show in `docket service status` and on the recording's page. After each index update, on CUDA
   only, it queues by itself the 20 newest recordings whose stored audio reads ok and that have no Whisper transcript,
-  each once while it runs: a sync's audio, once promoted, gets its transcript.
-- The speech file `docket eval speech` reads is yours, kept outside the repo like the question file:
-  `schema_version: 1` and `stretches`, each `at: "r:<rid>@mm:ss-mm:ss"`, the `text` as it was said and its `names`.
+  each once while it runs: a sync's audio, once promoted, gets its transcript. A file that staged nothing for good,
+  such as one with no speech, is passed over after a restart too, so older recordings get their turn.
+- The speech file `docket eval speech` reads is yours, kept outside any repo, which it refuses: `schema_version: 1`
+  and `stretches`, each `at: "r:<rid>@mm:ss-mm:ss"`, the `text` as it was said and its `names`. A name it added of
+  an entity a never-store list holds is counted as hidden, never shown.
 - Only audio stored and cut by everything its records need is transcribed, and the checks run again before the
   transcript is staged: a hold, a never-store match or a new cut that came meanwhile stages nothing. Cut stretches
   read `[cut]`.

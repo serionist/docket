@@ -78,7 +78,7 @@ def runner() -> Runner:
 
 @pytest.fixture
 def queue(runner: Runner) -> Iterator[SpeechQueue]:
-    found = SpeechQueue(lambda: NO_VAULT, chosen=lambda: CUDA, run=runner, due=lambda v: [])
+    found = SpeechQueue(lambda: NO_VAULT, chosen=lambda: CUDA, run=runner, due=lambda v, e: [])
     found.start()
     yield found
     for gate in runner.hold.values():
@@ -145,7 +145,8 @@ def test_without_speech_the_queue_is_off_and_says_why() -> None:
 def test_after_an_update_cuda_queues_what_is_due_once_and_a_cpu_nothing(runner: Runner) -> None:
     asked: list[object] = []
 
-    def due(vault: Vault) -> list[str]:
+    def due(vault: Vault, engine: str) -> list[str]:
+        assert engine == CUDA.model.engine
         asked.append(vault)
         return ["plaud:new", "plaud:old"]
 
@@ -167,7 +168,7 @@ def test_after_an_update_cuda_queues_what_is_due_once_and_a_cpu_nothing(runner: 
 
 
 def test_a_scan_that_fails_queues_nothing(runner: Runner) -> None:
-    def broken(vault: Vault) -> list[str]:
+    def broken(vault: Vault, engine: str) -> list[str]:
         raise DocketError("the index can't be read")
 
     found = SpeechQueue(lambda: NO_VAULT, chosen=lambda: CUDA, run=runner, due=broken)
@@ -196,7 +197,7 @@ def faked(monkeypatch: pytest.MonkeyPatch, runner: Runner) -> Runner:
     """Every service made from here runs the stand-in job, with speech on CUDA."""
 
     def made(vault: Callable[[], Vault]) -> SpeechQueue:
-        return SpeechQueue(vault, chosen=lambda: CUDA, run=runner, due=lambda v: [])
+        return SpeechQueue(vault, chosen=lambda: CUDA, run=runner, due=lambda v, e: [])
 
     monkeypatch.setattr(service_state, "SpeechQueue", made)
     return runner

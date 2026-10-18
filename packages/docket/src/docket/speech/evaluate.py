@@ -12,7 +12,8 @@ For each stretch the recording's transcripts are read (its own segments, and eve
 engine: the segments whose middle falls in the stretch, `[cut]` left out. Word and character error rates come after
 lowercasing and stripping punctuation, keeping diacritics. The name error rate is the share of the listed names missing
 from an engine's text, accents and case folded; the names it added are the entities' names and aliases in its text that
-the corrected text lacks. The vault is only read.
+the corrected text lacks, an entity a never-store list holds counted and never named. A file inside a git work tree is
+refused. The vault is only read.
 """
 
 from __future__ import annotations
@@ -31,7 +32,8 @@ from docket.errors import DocketError
 from docket.vault import neverstore
 from docket.vault.anchors import AnchorError, parse_anchor
 from docket.vault.cuts import CUT_MARKER
-from docket.vault.entities import load_entities
+from docket.vault.entities import Entity, load_entities
+from docket.vault.git import toplevel
 from docket.vault.records import RawRecord
 from docket.vault.spans import RawLookup
 from docket.vault.vault import Vault
@@ -68,6 +70,8 @@ class EngineScore(BaseModel):
     names_missed: int
     name_error: float | None
     added: list[str]
+    # Names it added of entities a never-store list holds: counted, never shown.
+    hidden: int = 0
 
 
 class SpeechReport(BaseModel):
@@ -102,7 +106,12 @@ def says(text: str, name: str) -> bool:
 
 
 def load(path: Path) -> list[Stretch]:
-    """A speech file's stretches; it is only read."""
+    """A speech file's stretches; it is only read. It holds real speech corrected by hand, so one inside a git work
+    tree, where a commit could take it, is refused."""
+    if toplevel(path.resolve().parent) is not None:
+        raise SpeechFileError(
+            f"{path} is inside a git work tree, where a commit could take it; keep your speech file outside any repo"
+        )
     try:
         text = path.read_text(encoding="utf-8-sig")
     except FileNotFoundError:
@@ -162,6 +171,11 @@ class _Tally:
     names: int = 0
     missed: int = 0
     added: set[str] = field(default_factory=set[str])
+    hidden: set[str] = field(default_factory=set[str])
+
+
+def _forms(entity: Entity) -> list[str]:
+    return [f for f in (*entity.names.values(), *(a.text for a in entity.aliases)) if f]
 
 
 def _engine(record: RawRecord) -> str:
@@ -187,8 +201,11 @@ def transcripts(lookup: RawLookup, rid: str) -> list[RawRecord]:
 
 def run(vault: Vault, path: Path, stretches: Iterable[Stretch]) -> SpeechReport:
     lookup = RawLookup(vault.root)
+    lists = vault.config.never_store
     entities = load_entities(vault.root).entities
-    known = sorted({form for e in entities for form in (*e.names.values(), *(a.text for a in e.aliases)) if form})
+    held = [e for e in entities if neverstore.person_listed(e, lists) or neverstore.slug_listed(e.id, lists)]
+    known = sorted({form for e in entities if e not in held for form in _forms(e)})
+    hidden = sorted({form for e in held for form in _forms(e)})
     tallies: dict[str, _Tally] = {}
     unmatched: list[int] = []
     asked = list(stretches)
@@ -211,6 +228,7 @@ def run(vault: Vault, path: Path, stretches: Iterable[Stretch]) -> SpeechReport:
             tally.names += len(stretch.names)
             tally.missed += sum(1 for name in stretch.names if not says(text, name))
             tally.added |= {name for name in known if says(text, name) and not says(stretch.text, name)}
+            tally.hidden |= {name for name in hidden if says(text, name) and not says(stretch.text, name)}
     engines = [
         EngineScore(
             engine=engine,
@@ -222,6 +240,7 @@ def run(vault: Vault, path: Path, stretches: Iterable[Stretch]) -> SpeechReport:
             names_missed=t.missed,
             name_error=t.missed / t.names if t.names else None,
             added=sorted(t.added),
+            hidden=len(t.hidden),
         )
         for engine, t in sorted(tallies.items())
     ]
@@ -236,8 +255,9 @@ def lines(report: SpeechReport) -> list[str]:
         missed = f"{e.name_error:.1%}" if e.name_error is not None else "-"
         out.append(f"{e.engine:<46}{e.stretches:>4}{e.words:>7}{e.wer:>8.1%}{e.cer:>8.1%}{e.names:>7}{missed:>8}")
     for e in report.engines:
-        if e.added:
-            out.append(f"added     {e.engine}: {', '.join(e.added)}")
+        said = [*e.added, *([f"{e.hidden} hidden (a never-store list holds them)"] if e.hidden else [])]
+        if said:
+            out.append(f"added     {e.engine}: {', '.join(said)}")
     if report.unmatched:
         out.append(f"no transcript reached stretch(es) {', '.join(str(n) for n in report.unmatched)}")
     return out
