@@ -251,6 +251,7 @@ def test_only_the_release_and_the_writer_ask_at_the_console() -> None:
         "media/backup.py",
         "media/confirm.py",
         "cli.py",
+        "forget/now.py",
     }
     from_cli = {node.func.attr for rel, module in _modules() if rel == "cli.py" for node in ast.walk(module)
                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)

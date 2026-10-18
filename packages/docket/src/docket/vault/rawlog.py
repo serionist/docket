@@ -1,4 +1,5 @@
-"""The raw log: one JSONL file per source per sync run per machine, written once and never changed (DR-0014).
+"""The raw log: one JSONL file per source per sync run per machine, written once and never changed but by a forget,
+which takes its listed lines out and leaves a file with none, empty (DR-0014, DR-0581).
 
 `raw/<source>/<yyyy>/<mm>/<yyyy-mm-dd>T<hhmm>-<machine>.jsonl`, in UTC; a second run of a source in the same minute on
 the same machine gets `.2`, `.3` before `.jsonl`, always after the highest counter that minute has. A record whose

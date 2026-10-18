@@ -8,6 +8,11 @@ Unreleased in the same PR.
 
 ### Added
 
+- `docket forget <rid>...`, `--never-store` or `--held` takes records out of the vault for good, on every clone: their
+  lines, the doc lines built on them, their audio and its keys. Without `--now` it only counts what it would take;
+  `--now` runs in your own terminal, after a code you type back. The text stays in your repo's history: the forget
+  writes a `git filter-repo` rewrite for a fresh clone and never runs it. Update Docket on every machine before your
+  first forget, and make a new key export right after one.
 - `docket reconcile spots <rid>` lists where a recording's transcript and Whisper's disagree on a name, a number or a
   word: at most 40 spots, names and numbers first, each with both lines, none in a cut stretch or naming someone a
   never-store list holds. `docket reconcile list` shows the recordings with spots to decide. Both only read, on the

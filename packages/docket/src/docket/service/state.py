@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from docket import __version__, index, userconfig
 from docket.errors import DocketError
+from docket.forget import apply as forget_apply
 from docket.index import IndexStatus
 from docket.media.keystore import KeyStore
 from docket.service.history import RunHistory
@@ -92,6 +93,15 @@ class Service:
 
     def _home(self) -> Home:
         return self.vault().home
+
+    def drop_forgotten_keys(self) -> int:
+        """The media keys on the forgotten list this clone holds, deleted at the service's start, so a clone that only
+        searches and plays loses them too (DR-0595). A vault that doesn't open, or a list that doesn't read, leaves it
+        to the reader and the next gate call."""
+        try:
+            return forget_apply.drop_listed_keys(self.vault())
+        except (DocketError, OSError):
+            return 0
 
     def vault(self) -> Vault:
         """The vault, opened for this call, so an edit to vault.yaml applies at once."""

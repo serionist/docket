@@ -5,7 +5,7 @@ passphrase mode under a passphrase Docket draws and shows once; the owner moves 
 passphrase on the other machine. Both run only at the owner's own console: Claude Code's shell, a pipe or a redirect is
 refused, since whoever has the file and the passphrase opens every media file the clone stored. The export asks the OS
 prompt first, or the code where there is none, since every key leaves the clone; the import's passphrase is its factor
-(DR-0575).
+(DR-0575). A key on the forgotten list is left out of an export and skipped by an import, each counted (DR-0595).
 
 The file's format is a door, pinned by its `schema_version`: a later Docket reads every earlier version.
 
@@ -29,6 +29,7 @@ from docket import console
 from docket.errors import DocketError
 from docket.media import crypto
 from docket.media.keystore import KeyStore
+from docket.vault import forgotten
 from docket.vault.git import toplevel
 from docket.vault.vault import Vault
 
@@ -64,12 +65,16 @@ class Exported:
     kept: bool
     # The owner said no before anything was written (DR-0575).
     declined: bool = False
+    # Keys on the forgotten list, left out of the file (DR-0595).
+    forgotten: int = 0
 
 
 @dataclass(frozen=True)
 class Imported:
     added: int
     had: int
+    # Keys on the forgotten list the file held, not added.
+    forgotten: int = 0
 
 
 def draw() -> str:
@@ -138,8 +143,11 @@ def export(vault: Vault, target: Path, keys: KeyStore | None = None) -> Exported
         raise DocketError("this clone holds no media keys yet, so there is nothing to export")
     if target.exists():
         raise _taken(target)
+    # A key a forget listed never travels, and the backup made after a forget holds none (DR-0595).
+    listed = forgotten.load(vault.root, vault.home).keys
+    left_out = [key_id for key_id in store.ids() if key_id in listed]
     found: list[BundleKey] = []
-    for key_id in store.ids():
+    for key_id in (k for k in store.ids() if k not in listed):
         key = store.get(key_id)
         if key is None:
             raise DocketError(
@@ -166,9 +174,9 @@ def export(vault: Vault, target: Path, keys: KeyStore | None = None) -> Exported
     if console.ask("Type the passphrase's last four letters to confirm you kept it: ").strip().upper() != last:
         target.unlink(missing_ok=True)
         console.say("That isn't its last four letters; the file is deleted, since nothing could open it.")
-        return Exported(len(found), kept=False)
-    store.mark_exported([k.id for k in found])
-    return Exported(len(found), kept=True)
+        return Exported(len(found), kept=False, forgotten=len(left_out))
+    store.mark_exported([k.id for k in found], without=listed)
+    return Exported(len(found), kept=True, forgotten=len(left_out))
 
 
 def read_bundle(text: str) -> Bundle:
@@ -195,13 +203,18 @@ def import_keys(vault: Vault, source: Path, keys: KeyStore | None = None) -> Imp
         raise DocketError(f"{source}: {e}") from None
     store = keys or KeyStore(vault.home)
     store.ensure()
-    added = had = 0
+    # An export made before a forget holds its keys: they never come back (DR-0595).
+    listed = forgotten.load(vault.root, vault.home).keys
+    added = had = skipped = 0
     for key in bundle.keys:
+        if key.id in listed:
+            skipped += 1
+            continue
         if store.has(key.id):
             had += 1
             continue
         store.add(key.id, key.identity, key.path)
         added += 1
     # An export holds them all: lose this clone, and the same file brings them back.
-    store.mark_exported([k.id for k in bundle.keys])
-    return Imported(added, had)
+    store.mark_exported([k.id for k in bundle.keys if k.id not in listed], without=listed)
+    return Imported(added, had, skipped)

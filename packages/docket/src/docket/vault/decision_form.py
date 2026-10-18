@@ -30,6 +30,8 @@ SUBJECT_TYPES = ("project", "topic", "stream")
 # What a decision's title says before the decision while it isn't confirmed, so no reader takes it as decided.
 PREFIX = {"proposed": "Proposed: ", "rejected": "Rejected: "}
 EDITED = "edited on disk, not taken in"
+# What the decisions tool, the Briefs page and `read` say of a final decision a forget left with no evidence (DR-0580).
+EVIDENCE_FORGOTTEN = "its evidence was forgotten"
 NOT_CONFIRMED = "a Decisions line cites no confirmed decision"
 CITE_ONE = (
     "a Decisions line cites one current decision and nothing else, as - <its title> <its cite>; the decisions tool "
@@ -195,6 +197,17 @@ def status_rev(doc: ProcessedDoc, pick: str, by: str) -> str:
         "rev": meta.rev + 1,
     }
     return replace(_titled(doc, status), meta=meta.model_copy(update=links)).render()
+
+
+def evidence_gone(doc: ProcessedDoc) -> bool:
+    """Whether a confirmed or rejected decision was left by a forget with nothing but its title and links: no covers
+    and no content line (DR-0580)."""
+    return (
+        doc.meta.type == "decision"
+        and doc.meta.status in FINAL
+        and not doc.meta.covers
+        and not any(role == "content" for _, _, role in doc.roles())
+    )
 
 
 def edited(on_disk: str, committed: str | None) -> bool:

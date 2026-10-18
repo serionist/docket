@@ -116,6 +116,8 @@ class Forgotten:
     old_paths: frozenset[str] = frozenset()
     import_hashes: frozenset[str] = frozenset()
     missing: int = 0
+    # The lines on disk HEAD lacks: in force already, and committed by the next gate call.
+    pending: int = 0
     root: Path | None = field(default=None, compare=False)
 
     @property
@@ -175,10 +177,11 @@ class Forgotten:
             import_hash is not None and import_hash in self.import_hashes
         )
 
-    def covers(self, record: RawRecord) -> bool:
+    def covers(self, record: RawRecord, *, versions: bool = True) -> bool:
         """Whether the list takes a record: by its rid or a rid it sits under, by a folder file's identity, or by its
         version, unless a release keeps that exact version, the owner's later word at the console. A folder file's parts
-        follow their file only in a `Reading`, which sees the file's line before theirs."""
+        follow their file only in a `Reading`, which sees the file's line before theirs. Without `versions`, by its rid
+        and identity alone: intake asks of a version only once a release has cut it and redaction made it."""
         if not self.acts:
             return False
         if self.whole(record.rid):
@@ -186,7 +189,7 @@ class Forgotten:
         found = identity_of(record) if self.files else None
         if found is not None and found in self.files:
             return True
-        if not self.versions:
+        if not self.versions or not versions:
             return False
         v = record.v or version(record)
         return (rid_hash(record.rid), key_of(record.rid, v)) in self.versions and not self._kept(record, v)
@@ -224,7 +227,7 @@ class Reading:
         """The folder files whose parts this pass takes from here on."""
         return frozenset(self._files)
 
-    def skips(self, record: RawRecord) -> bool:
+    def skips(self, record: RawRecord, *, versions: bool = True) -> bool:
         listed = self.listed
         if not listed.acts:
             return False
@@ -236,10 +239,10 @@ class Reading:
                     self._files.discard(record.rid)
             elif documents.file_of(record.rid) in self._files:
                 return True
-        return listed.covers(record)
+        return listed.covers(record, versions=versions)
 
 
-def fold(lines: Sequence[Forget], missing: int = 0, root: Path | None = None) -> Forgotten:
+def fold(lines: Sequence[Forget], missing: int = 0, root: Path | None = None, pending: int = 0) -> Forgotten:
     return Forgotten(
         rids=frozenset(rid for line in lines for rid in line.rids),
         versions=frozenset((v.rid, v.key) for line in lines for v in line.versions),
@@ -249,6 +252,7 @@ def fold(lines: Sequence[Forget], missing: int = 0, root: Path | None = None) ->
         old_paths=frozenset(path for line in lines for path in line.old_paths),
         import_hashes=frozenset(found for line in lines for found in line.import_hashes),
         missing=missing,
+        pending=pending,
         root=root,
     )
 
@@ -319,8 +323,10 @@ def load(root: Path, home: Home | None) -> Forgotten:
     if home is not None and commit is not None:
         committed = parse(committed_text(root, home, commit), f"HEAD:{FORGOTTEN}")
     have = {line.line() for line in disk}
+    held = {line.line() for line in committed}
     missing = [line for line in committed if line.line() not in have]
-    found = fold([*disk, *missing], len(missing), root)
+    pending = sum(1 for line in disk if line.line() not in held) if home is not None else 0
+    found = fold([*disk, *missing], len(missing), root, pending)
     _LOADED[root] = (key, found)
     return found
 

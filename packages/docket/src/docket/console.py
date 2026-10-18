@@ -1,7 +1,7 @@
 """The owner's yes at their own console, for a release (DR-0202), a vault.yaml change that isn't only stricter
-(DR-0517, DR-0518), a recording's decisions confirmed as cuts and an export of the media keys (DR-0575): refused in
-Claude Code's shell and without a console on stdin and stdout, then the screen, then the OS prompt where this machine
-has one set up, or a code drawn fresh and typed back where it hasn't (DR-0572).
+(DR-0517, DR-0518), a recording's decisions confirmed as cuts, an export of the media keys (DR-0575) and a forget
+(DR-0577): refused in Claude Code's shell and without a console on stdin and stdout, then the screen, then the OS
+prompt where this machine has one set up, or a code drawn fresh and typed back where it hasn't (DR-0572).
 
 `confirm` is the one question. Once a prompt is set up, only its verified answer is a yes: a cancel, a failure or no
 answer in time is a no, and the code is never asked then (DR-0574). The entry points that ask take no answer as a
@@ -29,6 +29,7 @@ CODE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"
 CODE_LENGTH = 4
 RELEASE = "a release"
 LOOSENING = "a vault.yaml change that isn't only stricter"
+FORGET = "a forget"
 
 Answer = Literal["yes", "no", "stop"]
 

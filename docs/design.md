@@ -159,6 +159,8 @@ sequenceDiagram
   - A mismatch `verify` shows becomes a `correction` doc (each line the raw's anchor and a ref to the line it
     corrects), then the doc's next rev, which is what flags the dependents; the correction counts as not applied until
     that line changes (DR-0543).
+  - A forget drops a line's dependents instead of flagging them: a line built on a line the forget drops goes with
+    it in the doc's next rev, to a fixed point, so nothing of what was forgotten stays flagged in a brief (DR-0580).
 
 ### 3.4 Tasks
 
@@ -414,21 +416,24 @@ the earlier ones (DR-0112).
 
 ### 5.5 Retention and forgetting
 
-Prevention first: the gate keeps private, uncut and unredacted content out of git. Retention per source (for example
-audio for a year, text forever): for media, expiry deletes the file's key. `docket forget <rid | query>` deletes the
-media keys, so the audio is gone for real, rebuilds the index and the docs that cited the record, and shows what it
-will touch first. What it does to the text depends on where the vault lives:
+Prevention first: the gate keeps private, uncut and unredacted content out of git. What gets in anyway leaves with
+`docket forget`, on every clone, and for good. Retention by age is phase 3: it will write the list's keys-only lines.
 
-| Vault | The text |
+| Part | What |
 |---|---|
-| a repo of its own | the raw file's whole history is rewritten without the record (`git filter-repo`, from any machine) and force-pushed |
-| a folder of the user's repo | the record leaves the current tree and a tombstone makes rebuilds skip it; Docket says plainly that the text stays in the host repo's history and shows the rewrite command for the user to run |
+| the command | `docket forget <rid>...`, `--never-store` or `--held`: a dry run by default, in counts and line numbers; `--now` forgets at the owner's own console, after a code typed back, never in Claude Code's shell, a pipe or a redirect (DR-0577) |
+| the family | a rid and every rid under it, the audio on it and on the rids it sits under with every key, and the Whisper transcripts of that audio; a held rid and a folder file by their versions, a folder file by its identity too (DR-0578) |
+| the list | `state/forgotten.jsonl`, hashes only, merged by union, committed alone first: every reader of raw skips its lines, intake drops what it lists, and media's screen and reader refuse a rid it holds (DR-0579) |
+| the index | built under the list's digest, refused under another until rebuilt; a forget rebuilds it after the vault lock (DR-0593) |
+| the apply | the list against the tree, staging and the key store: raw lines, audio and its keys, doc lines and what was built on them, cursor entries, in one commit. Every gate call on every clone runs it first (DR-0581) |
+| docs | a line anchored on what was forgotten goes, and every line built on it; an empty doc goes, but a confirmed or rejected decision keeps its title and links (DR-0580) |
+| keys | deleted on this clone at once, on the others at their next gate call, read or service start; kept out of every export and import made from then on (DR-0595) |
+| history | the text stays in the history of the repo the vault lives in: Docket never rewrites it, and writes the `git filter-repo` files for a fresh clone, checked read-only against HEAD by `docket forget --check-rewrite` (DR-0594) |
 
-Docket never rewrites or force-pushes a repo it shares with the user's own work.
-
-The forgotten list, `state/forgotten.jsonl`, keeps by hash what a forget took: every reader of raw skips its lines,
-wherever a merge left them, and the index is built under its digest, refused under another until it is rebuilt
-(DR-0579, DR-0593).
+What a forget can't reach, which every dry run names: key exports made before, the LFS server's encrypted copies,
+chunks an API provider was sent, the source itself, other clones until their next gate call, and files outside the
+vault that quote it. Docket never rewrites or force-pushes a repo, its own or the user's: a repo of its own takes the
+same rewrite until #58.
 
 ## 6. Keywords and aliases
 

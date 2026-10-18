@@ -38,9 +38,19 @@ Mode = Literal["start", "recording", "held", "missing", "other"]
 # Why there is no audio to play, each with the sentence the page says: the media reader's states (DR-0551), and
 # `stored` while the page has no player. A closed list, so every reason has its words and its test.
 NoAudio = Literal[
-    "not-fetched", "staged", "held", "withheld", "recut", "cut-by-characters", "not-downloaded", "no-key", "stored"
+    "forgotten",
+    "not-fetched",
+    "staged",
+    "held",
+    "withheld",
+    "recut",
+    "cut-by-characters",
+    "not-downloaded",
+    "no-key",
+    "stored",
 ]
 NO_AUDIO: dict[NoAudio, str] = {
+    "forgotten": "This recording was forgotten: its audio is gone, and none is stored for it again.",
     "not-fetched": "No audio stored yet: none has been put for this recording. A cut recording's audio is put "
     "again, cut, at its source's next run.",
     "staged": "The audio waits at the gate with its record, and is stored at the next promotion.",
@@ -65,6 +75,8 @@ class Facts:
     tz: ZoneInfo
     record: RawRecord | None = None
     held: bool = False
+    # A rid the raw log doesn't hold because a forget took it (DR-0579).
+    forgotten: bool = False
     recording: RawRecord | None = None
     transcripts: tuple[RawRecord, ...] = ()
     attached: str | None = None
@@ -300,7 +312,16 @@ def _shown(facts: Facts) -> RawRecord | None:
 
 
 def _absent(facts: Facts) -> RecordingView:
-    """A rid the raw log doesn't hold: held back, or unknown."""
+    """A rid the raw log doesn't hold: forgotten, held back, or unknown."""
+    if facts.forgotten:
+        return RecordingView(
+            mode="missing",
+            rid=facts.rid,
+            title=facts.rid,
+            message="This recording was forgotten: nothing of it is kept in the vault.",
+            link="/search",
+            link_label="Search what is kept",
+        )
     if facts.held:
         source = facts.rid.partition(":")[0]
         return RecordingView(

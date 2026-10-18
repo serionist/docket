@@ -123,7 +123,15 @@ def report(
                 contradicted_by=contradicted.get(meta.id, []),
                 flagged=len({f.line for f in found if f.doc == meta.id}),
                 cite=format_ref(meta.id, meta.rev, now.title_line) if now.current and now.title_line else None,
-                note=decision_form.EDITED if final and decision_form.edited(on_disk, committed.get(rel)) else None,
+                note=_note(doc, edited=final and decision_form.edited(on_disk, committed.get(rel))),
             )
         )
     return out
+
+
+def _note(doc: ProcessedDoc, *, edited: bool) -> str | None:
+    """What the tool says of a decision beside its state: a final one edited on disk (`edited`), or one a forget left
+    with no evidence (DR-0580)."""
+    if edited:
+        return decision_form.EDITED
+    return decision_form.EVIDENCE_FORGOTTEN if decision_form.evidence_gone(doc) else None

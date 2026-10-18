@@ -337,7 +337,10 @@ class Vault:
         problems: list[Problem] = []
         raw = self.root / "raw"
         # A line a forget took is no record of its run's to count twice, and is never named (DR-0579).
-        reading = self.rawlog.listed().reading()
+        listed = self.rawlog.listed()
+        reading = listed.reading()
+        if listed.problem is not None:
+            problems.append(Problem(forgotten.FORGOTTEN, listed.problem))
         for path in sorted(raw.rglob("*")) if raw.is_dir() else []:
             if not path.is_file() or path.name == ".gitkeep":
                 continue
@@ -361,7 +364,12 @@ class Vault:
                         problems.append(Problem(f"{rel}:{n}", f"{record.rid} is in this run twice"))
                     seen.add((record.rid, record.v))
         problems.extend(
-            Problem(rel, "changed or deleted after it was committed; raw files are written once")
+            Problem(
+                rel,
+                "a forget took listed lines out and isn't committed yet; the next gate call commits it"
+                if self._forget_unfinished(listed, rel)
+                else "changed or deleted after it was committed; raw files are written once",
+            )
             for rel in self.git.changed_against_head("raw")
         )
         hidden: dict[tuple[str, str], list[str]] = {}
@@ -378,6 +386,20 @@ class Vault:
         problems.extend(Problem(rel, message) for rel, message in attribute_mismatches(self.root))
         problems.extend(self._doc_rev_problems())
         return problems
+
+    def _forget_unfinished(self, listed: forgotten.Forgotten, rel: str) -> bool:
+        """Whether a run file differs from HEAD's only by lines the forgotten list takes: a forget's apply whose commit
+        hasn't landed (DR-0581), never a raw file changed by hand."""
+        path = self.root / rel
+        if not listed.acts or not path.is_file():
+            return False
+        reading = listed.reading()
+        left = [
+            line
+            for line in self.git.out("cat-file", "blob", f"HEAD:./{rel}").splitlines(keepends=True)
+            if not (line.strip() and reading.skips(RawRecord.model_validate(json.loads(line))))
+        ]
+        return "".join(left) == path.read_text(encoding="utf-8")
 
     def _doc_rev_problems(self) -> list[Problem]:
         """A doc rev that two commits claim: the user's own merge can bring one from each side, which Docket's sync

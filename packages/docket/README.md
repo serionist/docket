@@ -298,7 +298,7 @@ Records Docket must not stage yet, such as backfilled recordings with stretches 
 - A held record gets no record on any route; it is only counted.
 - When an ingest stops because a held record waits in staging, delete the files it names, then run it again.
 - `docket staging classify` refuses a held record, work or private, and `promote` leaves it waiting.
-- A held record already in raw is named on every ingest; it waits for `docket forget`.
+- A held record already in raw is named on every ingest; `docket forget --held` takes it out, by its versions.
 - A recording's id in `never_store.containers` keeps it out for good, held or not.
 
 ### Releasing a held recording
@@ -395,6 +395,37 @@ The newest export holds every key, so it is the backup. Keep the file and the pa
 after new media is stored. The count trusts that every export you made is still where you put it; Docket can't see a
 lost stick. Export to a folder outside any repo: one inside a git work tree is refused, since a commit could take it.
 The passphrase opens the file however you type it, with or without the dashes.
+
+## Forgetting
+
+`docket forget` takes a record out of the vault for good, on every clone: its lines, the doc lines built on it, its
+audio and the audio's keys (DR-0577 to DR-0581, DR-0593 to DR-0595). Update Docket on every machine before your first
+forget: an older one reads what a merge brings back until a newer one's gate call takes it out.
+
+| Command | Takes |
+|---|---|
+| `docket forget <rid>...` | each rid and everything under it, the audio it is in with every key, and its Whisper transcripts |
+| `docket forget --never-store [--source <name>]` | each record in raw a never-store list in force matches now |
+| `docket forget --held [--source <name>]` | each record in raw under a hold not released, by its versions, so the release still lets its cut version in |
+| `docket forget --check-rewrite <folder>` | nothing: checks the history rewrite a forget wrote leaves HEAD as it is |
+
+- Without `--now` it only says what it would take: counts, run files and doc line numbers, never a doc's id or a
+  line's text, so it runs in Claude Code's shell too. `--now` runs in your own terminal only, shows the ids, and
+  forgets once you type back the code.
+- A forget writes `state/forgotten.jsonl`, hashes only, and commits it first. Every read, search and gate call obeys it
+  at once, on every clone after its pull; the next gate call there takes the lines, audio and keys out too.
+- A folder file is taken by its content: move it out of the folder too, since a forget never writes there.
+- A confirmed or rejected decision whose evidence was all forgotten keeps its title, and says so.
+
+What a forget can't reach, which every dry run names: key exports made before (make a new one right after, then
+destroy the old), the LFS server's encrypted copies, chunks sent to an API provider, the source itself, and files
+outside the vault that quote it.
+
+The text stays in your repo's history: Docket never rewrites it. The forget writes `git filter-repo` files to its
+private folder and prints how to use them: check them with `--check-rewrite`, back the repo up, run filter-repo in a
+fresh `git clone --no-local`, force-push from there, and clone again on every machine. The remote keeps the commits a
+force-push left behind until its host purges them, forks keep theirs, and other branches keep the text. Each folder
+holds every earlier forget's files on that clone: run only the newest.
 
 ## Processed docs
 

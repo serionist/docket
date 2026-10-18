@@ -4,6 +4,7 @@ can't be.
 | State | When |
 |---|---|
 | `ok` | the stored file and its key are here: `read` gives the bytes |
+| `forgotten` | the rid, or a rid under it, was forgotten whole, or the stored file's key is on the forgotten list |
 | `not-fetched` | no media for the rid, staged or stored; a cut recording's is put, cut, at the next run |
 | `staged` | it waits at the gate with its record |
 | `held` | a hold covers the rid, stored or not |
@@ -13,7 +14,8 @@ can't be.
 | `not-downloaded` | an LFS pointer is in place of the stored file |
 | `no-key` | the stored file is here, its key isn't, or this machine can't open the key's seal |
 
-`state_of` answers without decrypting. Nothing plain is written to disk.
+`state_of` answers without decrypting. Nothing plain is written to disk. A key on the forgotten list is deleted here
+before anything could open it, so a clone that only plays its media loses it too (DR-0595).
 """
 
 from __future__ import annotations
@@ -29,14 +31,23 @@ from docket.media import ranges as cut_ranges
 from docket.media import staged as media_staged
 from docket.media.keystore import KeyStore
 from docket.media.screen import Refusal, refusal
-from docket.vault import holds, releaselog
+from docket.vault import forgotten, holds, releaselog
 from docket.vault.records import owning_id
 from docket.vault.spans import RawLookup
 from docket.vault.staging import Entry, Staging, rid_hash
 from docket.vault.vault import Vault
 
 State = Literal[
-    "ok", "not-fetched", "staged", "held", "withheld", "recut", "cut-by-characters", "not-downloaded", "no-key"
+    "ok",
+    "forgotten",
+    "not-fetched",
+    "staged",
+    "held",
+    "withheld",
+    "recut",
+    "cut-by-characters",
+    "not-downloaded",
+    "no-key",
 ]
 # What a stored file's cuts say against its family's: enough, too few, or none can be enough.
 Cuts = Literal["ok", "recut", "cut-by-characters"]
@@ -58,6 +69,19 @@ def _stored(vault: Vault, rid: str) -> Path | None:
     if len(found) > 1:
         raise DocketError(f"{rid} has {len(found)} stored media files; one of them is a leftover to remove by hand")
     return found[0] if found else None
+
+
+def _forgotten(vault: Vault, rid: str, path: Path | None, keys: KeyStore) -> bool:
+    """Whether the rid's media was forgotten: the rid, or a rid under it, forgotten whole, or its stored file's key
+    listed, which this clone deletes now, before anything opens it (DR-0595)."""
+    listed = forgotten.load(vault.root, vault.home)
+    if not (listed.rids or listed.media or listed.keys):
+        return False
+    key = media_staged.key_of(path) if path is not None and listed.keys else None
+    if key is not None and key in listed.keys:
+        keys.delete(key)
+        return True
+    return listed.media_refused(rid)
 
 
 def _held(vault: Vault, rid: str) -> bool:
@@ -94,6 +118,9 @@ def state_of(vault: Vault, rid: str, keys: KeyStore | None = None, raw: RawLooku
     """Why a rid's media can or can't be played here, from the files, the logs and the key store, without
     decrypting. A stored file under a hold, or cut by less than its family needs now, isn't played."""
     path = _stored(vault, rid)
+    store = keys or KeyStore(vault.home)
+    if _forgotten(vault, rid, path, store):
+        return "forgotten"
     if path is not None:
         if _held(vault, rid):
             return "held"
@@ -107,7 +134,6 @@ def state_of(vault: Vault, rid: str, keys: KeyStore | None = None, raw: RawLooku
             return cut
         if crypto.is_pointer(path):
             return "not-downloaded"
-        store = keys or KeyStore(vault.home)
         return "ok" if store.has(crypto.key_id(path)) else "no-key"
     if layout.staged_files(vault.root, rid):
         return "staged"
@@ -121,7 +147,9 @@ def kept_out(vault: Vault, rid: str, lookup: RawLookup, staging: Staging, entrie
     it."""
     staged = [e.staged.record for e in entries if layout.in_family(rid, e.staged.record.rid)]
     records = [*staged, *(r for other in lookup.nested(rid) for r in lookup.versions(other))]
-    found = refusal(rid, vault.config, records, staging.decided(), media_staged.read_withheld(vault.root))
+    listed = forgotten.load(vault.root, vault.home)
+    withheld = media_staged.read_withheld(vault.root)
+    found = refusal(rid, vault.config, records, staging.decided(), withheld, listed=listed)
     return found if found is not None and found[0] != "off" else None
 
 
