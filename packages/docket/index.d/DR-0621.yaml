@@ -1,16 +1,19 @@
 decisions:
   - id: DR-0621
-    title: "A meeting's event and a stream's name are keys set by its add: the adds of one key are one object, the first by id holding it and each later one folding in as a set"
+    title: "A meeting's event and a stream's name are keys set by its add: the adds of one key are one object, and a keyed meeting add may continue one meeting that has no key"
     status: proposed
     at: "2026-10-19"
     by: Claude (autonomy grant)
     cost: one-way
     sources: ["#199"]
-    description: "DR-0105 keys a meeting by its calendar event, so a second add for one event, which only two clones apart can write, must not make a second meeting. The adds that carry one key, a meeting's event or a stream's name, fold as one object: the first by id is its id; each later one folds in as a set of its fields at its place in the order, and the number it claimed stays one the object held before (DR-0613), so it still finds the object. Ops naming any of them are the object's, an undo among them too. An undone add is left out, and the object stands while one of its adds does. A key is set by the add only, never by a set, so which ops are one object is known before anything folds. A meeting with no event, one from before the calendar or added by hand, is its own. The writer never writes a second add for a key the ledger holds; it writes a set. The export (#215) gives an old meeting the event of a calendar record that matches its time and subject, its fields as they were, and leaves one with no match keyless."
+    description: "DR-0105 keys a meeting by its calendar event, so a second add for one event, which only two clones apart can write, must not make a second meeting. The adds that carry one key, a meeting's event or a stream's name, fold as one object in id order: each later one folds in as a set of its fields at its place. A meeting with no event, one from before the calendar or added by hand, is its own until a keyed add continues it: a meeting add with an event may carry continues, the id of one meeting with none, which then joins the key's object, its id and its number being the object's. The writer writes such an add, whether the ledger holds the key or not, when a calendar record matches an unkeyed meeting by time and subject (#200, as todo.py updated the meeting with the same start and subject) or when the owner joins two on the Meetings page, and gives it that meeting's number. One key continues one meeting and one meeting is continued by one key: the first such add by id wins, and a later one's continues is left out and named by docket vault check. With nothing continued, the object's id and number are its first add's. A later add's number finds the object only while no other object's add holds it (DR-0613): it never takes a number from another object and never causes a renumber, and one another object holds is simply not the meeting's. Keys and continues are set by adds only, never by a set, so which ops are one object is known before anything folds. Ops naming any of the adds are the object's, an undo among them too. An undone add is left out and the object stands while one of its adds does; the writer's undo of a meeting's add undoes every add of its object in the same write. The writer never writes a second add for a key the ledger holds except to continue a meeting; it writes a set. The owner's export script, outside Docket (roadmap step 15), gives an old meeting the event and series of a calendar record that matches its time and subject, its other fields as they were, and leaves one with no match keyless, for #200 to continue."
     binds:
-      - A key is set by its object's add only.
-      - The first add of a key by id holds it; a later one folds in as a set, its number still finding the object.
+      - Keys and continues are set by an add only.
+      - The adds of one key are one object; a continued meeting's id and number are the object's, else its first add's.
+      - A later add's number never takes a number another object holds.
     not_chosen:
       - "A key set later by a set: which ops are one object would depend on the fold, and an undone set would split a meeting."
       - "The later add refused as a problem: the second clone's points and prep on it would be lost."
-      - "Matching on start time plus subject: DR-0105 rules it out."
+      - "Matching on start time plus subject in the fold: DR-0105 rules it out; the match is the writer's, recorded as continues."
+      - "No way to join an unkeyed meeting: one the export couldn't match, or one added by hand before its invite came, would get a keyed twin, its prep left on the old one."
+      - "A later add's number claiming as an add does: two clones adding one week with numbering shifted by one would renumber every meeting of it."
