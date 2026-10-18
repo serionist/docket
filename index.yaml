@@ -163,11 +163,12 @@ decisions:
     not_chosen: [One file per source appended forever., SQLite as the store.]
   - id: DR-0015
     title: Everything reaches the raw log through a staging gate
-    status: decided
+    status: superseded
     at: "2026-10-14"
     by: Soma Osvay
     cost: medium
     sources: [docs/design.md]
+    superseded_by: [DR-0596]
     description: New records land in staging, on the local disk and never committed. The gate applies the never-store lists, the source rules, classification for sources that can be private, cuts and redaction; only then is a record written to the raw log.
     binds: ["A private recording never reaches git, not even in history."]
   - id: DR-0016

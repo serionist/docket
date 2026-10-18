@@ -1,4 +1,4 @@
-"""The staging gate: the only way a record reaches the raw log (DR-0015).
+"""The staging gate: the only way a record from a source reaches the raw log (DR-0596).
 
 Intake drops in memory what a private source or a never-store list names, so a dropped record never touches the disk,
 then redacts the rest and stages it: `ready` from a work source, `pending` from a mixed one or when the record was
