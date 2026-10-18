@@ -20,7 +20,10 @@ from docket.index import SearchResult
 from docket.media import put as media
 from docket.media.keystore import KeyStore
 from docket.recall import ReadResult, VerifyResult
+from docket.service.speech import SpeechJob
+from docket.service.speech import line as speech_line
 from docket.service.state import Service
+from docket.speech import job
 from docket.vault.docstore import PutResult
 
 View = Literal["summary", "raw", "both"]
@@ -110,6 +113,14 @@ async def doc_put(service: Service, text: str) -> tuple[PutResult, str]:
     result = await service.writer.run(lambda: recall.doc_put(service.vault(), text))
     service.updater.poke()
     return result, render.text(render.put(result))
+
+
+async def transcribe(service: Service, rid: str) -> tuple[SpeechJob, str]:
+    """Queued in the service and answered at once with the job's place (DR-0571); its outcome shows in the service's
+    status and on the recording's page. A rid the job would refuse is refused now."""
+    job.checked(rid)
+    found = await asyncio.to_thread(service.speech.add, rid)
+    return found, f"{rid}: {speech_line(found)}"
 
 
 class MediaPut(BaseModel):

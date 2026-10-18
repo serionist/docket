@@ -8,6 +8,11 @@ Unreleased in the same PR.
 
 ### Added
 
+- The `transcribe` tool queues a recording for Whisper in the service, one job at a time, and `docket transcribe`
+  queues there too when the service runs; the job's place and outcome show in `docket service status` and on the
+  recording's page. On an NVIDIA GPU the service transcribes the newest stored recordings by itself after each index
+  update. `docket eval speech <file>` scores each engine's transcripts against stretches you corrected by hand: word,
+  character and name error rates.
 - Speech to text on your own machine: `docket models install --speech` sets up Whisper large-v3 (3.09 GB, MIT;
   `--speech-model tiny` for a quick try), and `docket transcribe <rid>` turns a recording's stored audio into a
   transcript of its own, staged at the gate beside the recorder's. On an NVIDIA GPU it installs NVIDIA's cuBLAS under

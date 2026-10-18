@@ -35,6 +35,7 @@
 <section class="audio" aria-labelledby="audio-title" data-why="{{ view.audio.why }}">
   <h2 id="audio-title" class="visually-hidden">Audio</h2>
   {{ notice('info', view.audio.message) }}
+  {% if view.audio.speech %}<p class="speech-job">{{ view.audio.speech }}</p>{% endif %}
 </section>
 {% for p in view.problems %}{{ notice('warn', p) }}{% endfor %}
 <div class="recording-columns">

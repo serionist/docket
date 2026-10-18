@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from docket_testkit import make_record
 from filelock import FileLock
 from media_kit import CALL, POLISHED, SAID, call, in_raw, media_vault, tone
 
@@ -387,3 +388,19 @@ def test_a_source_turned_off_keeps_its_waiting_whisper_transcript(tmp_path: Path
     change_config(vault, lambda c: setattr(c.sources["plaud"], "enabled", False))
     Gate(vault).list()
     assert staged(vault)
+
+
+def test_what_the_service_queues_by_itself_is_stored_audio_that_reads_ok_without_a_transcript(tmp_path: Path) -> None:
+    vault = stored_vault(tmp_path / "one")
+    # A second recording with no audio stored is never due.
+    Gate(vault).stage([make_record(rid="plaud:rec-b", source="plaud", kind="recording", text="", container=None)])
+    in_raw(vault)
+    assert job.due(vault) == [CALL]
+    assert job.due(vault, limit=0) == []
+    assert transcribe(vault, tmp_path).staged
+    assert job.due(vault) == [], "staged"
+    Gate(vault).promote()
+    assert job.due(vault) == [], "in raw"
+    held = stored_vault(tmp_path / "held")
+    holds.add(held, "plaud", ["rec-a"])
+    assert job.due(held) == []

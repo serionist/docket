@@ -24,7 +24,7 @@ from pathlib import Path
 
 from filelock import FileLock, Timeout
 
-from docket import userconfig
+from docket import recall, userconfig
 from docket.errors import DocketError
 from docket.media import crypto, cutter, layout, reader
 from docket.media.ranges import Range
@@ -36,7 +36,7 @@ from docket.vault.gate import Gate, StageResult
 from docket.vault.records import RID, TRANSCRIBED_VIA, RawRecord, Segment, is_native_id
 from docket.vault.segments import normalize, render
 from docket.vault.spans import RawLookup
-from docket.vault.staging import Staging
+from docket.vault.staging import Staging, rid_hash
 from docket.vault.vault import Vault
 
 SUFFIX = "/whisper"
@@ -47,6 +47,8 @@ CUT_MARKER = "[cut]"
 # as the audio, so these leave room; never under ten minutes, for the model's load.
 FACTOR = {"cuda": 0.5, "cpu": 3.0}
 LEAST_LIMIT = 600.0
+# How many recordings the service queues by itself after an index update, newest first, on CUDA only (DR-0571).
+AUTO = 20
 # Why a recording's audio can't be transcribed, by the reader's state (DR-0551).
 WHY: dict[reader.State, str] = {
     "not-fetched": "no audio is stored for it",
@@ -117,8 +119,45 @@ def machine_lock(*, wait: bool) -> Generator[None]:
         lock.release()
 
 
+def checked(rid: str) -> str:
+    """A recording's rid as a job takes it, or why not: a rid, and not a Whisper transcript's."""
+    if RID.match(rid) is None or not is_native_id(rid.partition(":")[2]):
+        raise DocketError(f"{rid!r} isn't a rid: <source>:<id>")
+    if rid.endswith(SUFFIX):
+        raise DocketError(f"{rid} is a Whisper transcript; give its recording's rid")
+    return rid
+
+
 def whisper_rid(rid: str) -> str:
     return f"{rid}{SUFFIX}"
+
+
+def due(vault: Vault, limit: int = AUTO) -> list[str]:
+    """The newest recordings, at most `limit`, whose stored audio reads ok and that have no Whisper transcript staged
+    or in raw, from the sources this machine ingests: what the service queues by itself after an index update on CUDA
+    (DR-0571). Raw is read at its places, and a recording without a stored file costs no read."""
+    ingested = cursors.read(vault.root, vault.machine)
+    staged = {e.staged.record.rid for e in Staging(vault.root, vault.home).scan().entries}
+    found: list[tuple[datetime, str]] = []
+    with recall.raw_lookup(vault) as lookup:
+        for source in sorted(s for s in ingested if s in vault.config.sources):
+            folder = vault.root / layout.STORED / source
+            stored: set[str] = set()
+            if folder.is_dir():
+                stored = {p.name.split(".", 1)[0] for p in folder.glob(f"*/*/*{layout.SUFFIX}")}
+            taken = 0
+            for rid in lookup.of_kind(source, "recording"):
+                if taken >= limit:
+                    break
+                made = whisper_rid(rid)
+                if rid_hash(rid) not in stored or made in staged or lookup.has(made):
+                    continue
+                latest = lookup.latest(rid)
+                if latest is None or reader.state_of(vault, rid, raw=lookup) != "ok":
+                    continue
+                found.append((latest.ts, rid))
+                taken += 1
+    return [rid for _, rid in sorted(found, reverse=True)[:limit]]
 
 
 def transcribe(
@@ -132,10 +171,7 @@ def transcribe(
     decoder: Sequence[str] | None = None,
 ) -> Outcome:
     """One recording transcribed and staged, or why nothing was staged. `worker` and `decoder` are a test's commands."""
-    if RID.match(rid) is None or not is_native_id(rid.partition(":")[2]):
-        raise DocketError(f"{rid!r} isn't a rid: <source>:<id>")
-    if rid.endswith(SUFFIX):
-        raise DocketError(f"{rid} is a Whisper transcript; give its recording's rid")
+    checked(rid)
     chosen = speech if speech is not None else setup.chosen()
     if isinstance(chosen, str):
         raise DocketError(chosen)

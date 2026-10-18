@@ -460,20 +460,27 @@ The reranker:
 
 ### Speech to text
 
-`docket transcribe <rid>` turns a recording's stored audio into a transcript of its own with Whisper, on this machine,
-and stages it at the gate beside the recorder's as `<rid>/whisper` (DR-0567 to DR-0570). It is off until you install
-it.
+`docket transcribe <rid>`, or the `transcribe` tool, turns a recording's stored audio into a transcript of its own with
+Whisper, on this machine, and stages it at the gate beside the recorder's as `<rid>/whisper` (DR-0567 to DR-0571). It
+is off until you install it.
 
 | Command | Does |
 |---|---|
 | `docket models install --speech [--speech-model large-v3\|tiny] [--device auto\|cpu\|cuda]` | builds the speech environment with uv, fetches Whisper's pinned files (large-v3 3.09 GB, tiny 76 MB, both MIT) and times it once |
-| `docket transcribe <rid> [--wait]` | decodes the stored audio, transcribes it and stages the transcript; one job at a time on a machine, and `--wait` waits for one running |
+| `docket transcribe <rid> [--here] [--wait]` | with the service running for the vault, queues the job there and says its place; otherwise, or with `--here`, decodes, transcribes and stages it in this terminal, `--wait` waiting for a job running |
+| `docket eval speech <file>` | each engine's transcripts against stretches you corrected by hand: word, character and name error rates, and the names each added; writes nothing |
 | `docket models remove --speech` | deletes the speech environment, Whisper's files and the choice; a plain `docket models remove` takes them too |
 
 - On an NVIDIA GPU it installs NVIDIA's cuBLAS 12 under NVIDIA's terms, about 1.2 GB of packages, and needs about
   4.5 GB of the GPU's memory while it transcribes, besides search's 2 to 3 GB: 8 GB runs both, 6 GB only by turns,
   and under 6 GB the install says to use the CPU. On an RTX 5090 an hour of audio takes about two and a half minutes.
 - On a CPU an hour of audio takes about an hour, so it transcribes only when you ask.
+- The service runs one job at a time, under the machine's lock, so a job in a terminal waits its turn. Each job's
+  place and outcome show in `docket service status` and on the recording's page. After each index update, on CUDA
+  only, it queues by itself the 20 newest recordings whose stored audio reads ok and that have no Whisper transcript,
+  each once while it runs: a sync's audio, once promoted, gets its transcript.
+- The speech file `docket eval speech` reads is yours, kept outside the repo like the question file:
+  `schema_version: 1` and `stretches`, each `at: "r:<rid>@mm:ss-mm:ss"`, the `text` as it was said and its `names`.
 - Only audio stored and cut by everything its records need is transcribed, and the checks run again before the
   transcript is staged: a hold, a never-store match or a new cut that came meanwhile stages nothing. Cut stretches
   read `[cut]`.
