@@ -14,6 +14,7 @@ import shutil
 import threading
 import time
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -35,6 +36,8 @@ from docket.service.client import call_json
 from docket.service.token import Tokens
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.vault import Vault
+from docket.web import settings as settings_routes
+from docket.web.settings_view import Facts
 
 BROWSER = os.environ.get("DOCKET_TEST_BROWSER", "")
 pytestmark = pytest.mark.skipif(not BROWSER, reason="drives a real browser: DOCKET_TEST_BROWSER=chrome or msedge")
@@ -566,6 +569,45 @@ def test_the_settings_page_says_when_an_edit_isn_t_in_force(settings_service: tu
         page.reload()
         _fits(page, ".notice")
         page.screenshot(path=str(shots / "settings-waiting-390.png"), full_page=True)
+        browser.close()
+
+
+# Windows paths as the page gets them: backslashes and no hyphen, so no place a line may break.
+WINDOWS = r"C:\Users\AdaExampleSampleName"
+CONFIG = WINDOWS + r"\AppData\Local\docket\config.yaml"
+HERE = WINDOWS + r"\Documents\SharedProjectDocuments"
+
+
+def test_windows_paths_wrap_on_the_settings_page_at_phone_width(
+    settings_service: tuple[int, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each element that shows a path wraps it anywhere, so the page never scrolls sideways at 390 px (#193). CI runs
+    on Linux, whose paths have slashes to break at, so the paths are made Windows-shaped here."""
+    port, token = settings_service
+    shots = Path(os.environ.get("DOCKET_TEST_SCREENSHOTS") or tmp_path)
+    shots.mkdir(parents=True, exist_ok=True)
+    real = settings_routes.gather
+
+    def windows(service: Any) -> Facts:
+        facts = real(service)
+        sources = [replace(s, here=HERE) if s.entry.folder else s for s in facts.sources]
+        root = Path(WINDOWS + r"\Projects\AdaExampleNotes\vault")
+        return replace(facts, root=root, config_path=Path(CONFIG), sources=sources)
+
+    monkeypatch.setattr(settings_routes, "gather", windows)
+    link = client.call("POST", "/api/session", token=token, at=port)
+    assert link is not None
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel=None if BROWSER == "chromium" else BROWSER)
+        page = browser.new_page(viewport={"width": 390, "height": 844})
+        base = f"http://127.0.0.1:{port}"
+        page.goto(f"{link.body['url']}&next=/settings")
+        page.wait_for_url(f"{base}/settings")
+        page.evaluate("document.querySelectorAll('details').forEach(d => { d.open = true; })")
+        expect(page.locator("main")).to_contain_text(CONFIG)
+        expect(page.locator("#source-documents")).to_contain_text(HERE)
+        _fits(page, "#source-documents", "section[aria-labelledby='models-title']")
+        page.screenshot(path=str(shots / "settings-windows-390.png"), full_page=True)
         browser.close()
 
 

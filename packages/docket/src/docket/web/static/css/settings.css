@@ -30,6 +30,8 @@
 
   .changes { font-size: var(--text-sm); }
   .changes summary { cursor: pointer; color: var(--accent); }
+  /* A path, such as the config file's: a Windows one is all backslashes, where no line may break. */
+  .changes code { overflow-wrap: anywhere; }
   .changes[open] summary { margin-bottom: var(--space-2); }
   .changes > p { margin-top: var(--space-2); }
   .change-list { display: grid; gap: var(--space-3); }
