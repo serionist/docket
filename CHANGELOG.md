@@ -8,6 +8,10 @@ Unreleased in the same PR.
 
 ### Added
 
+- `docket reconcile spots <rid>` lists where a recording's transcript and Whisper's disagree on a name, a number or a
+  word: at most 40 spots, names and numbers first, each with both lines, none in a cut stretch or naming someone a
+  never-store list holds. `docket reconcile list` shows the recordings with spots to decide. Both only read, on the
+  machine that ingests the recording's source.
 - The Recording page plays a recording's stored audio from any line, and shows Whisper's transcript beside the
   recorder's, a row per stretch of time, a cut stretch cut in both. The audio is decrypted on this machine for each
   request and never cached; audio that isn't stored, waits at the gate, is held, cut since, kept out by a never-store

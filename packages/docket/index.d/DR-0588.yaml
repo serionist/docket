@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0588
+    title: A fix whose recorder line is gone and whose anchor overlaps a cut is listed as cut, without its texts
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#183"]
+    description: "Refines DR-0582's cut rule for what spots lists, found building #183's first PR. Cutting a transcript removes the segments the cut overlaps (cuts.py), so a recorder line cut after its fix was written is no longer there to test by its own times. Such a fix is listed as cut, without its texts, when its recorder anchor's span overlaps a cut; with its line still there, the line's own times decide, as DR-0582 has it, and a line ending at 12:11.4 beside a cut at 12:11.6 stays. The anchor decides only that the fix's texts aren't shown: it never applies a fix or takes a put, and a fix with no line applies nowhere anyway."
+    binds: ["No text of a fix whose stretch was cut since is listed, whichever transcript was cut."]
+    not_chosen:
+      - "Listing it as no longer matching: its texts, from a stretch the owner cut, would be shown."

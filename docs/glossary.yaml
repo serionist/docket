@@ -160,6 +160,10 @@ terms:
   - term: settings in force
     definition: "What the gate and every job that decides what gets in obey: HEAD's vault.yaml with every part of an uncommitted edit that only keeps more out. The rest of the edit waits until it is committed, and docket vault status and the Settings page say so."
     see: [packages/docket/src/docket/vault/inforce.py]
+  - term: spot
+    definition: A place where a recording's transcript and Whisper's disagree on a name, a number or a word, in one recorder line, its two texts widened until the recorder's stands once there. Worked out from raw on each call and never stored; none sits in a cut stretch, and one naming someone a never-store list holds is counted, never shown.
+    see: [packages/docket/src/docket/reconcile/spots.py]
+    close_terms: [correction (a doc line's fix)]
   - term: staging gate
     definition: "The checks every record passes on its way from a connector to the raw log: the never-store lists, the source rules, classification, cuts and redaction. Records wait in the vault's staging/ folder, never committed."
     see: [packages/docket/src/docket/vault/gate.py]

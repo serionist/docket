@@ -50,6 +50,24 @@ def test_each_reason_the_source_and_its_text_give(tmp_path: Path) -> None:
     assert screen(vault, config).why(CALL) is None
 
 
+def test_off_is_the_reason_only_when_nothing_else_refuses(tmp_path: Path) -> None:
+    # Off lets a family go on where its callers allow it, so a never-store value or a withheld mark must still say so.
+    vault = media_vault(tmp_path)
+    config = vault.config
+    plaud = config.sources["plaud"]
+    off = config.model_copy(
+        update={"sources": {**config.sources, "plaud": plaud.model_copy(update={"enabled": False})}}
+    )
+    said = off.model_copy(update={"never_store": off.never_store.model_copy(update={"keywords": ["load test"]})})
+    assert screen(vault, off).family(CALL) == ("off", "source plaud is off in vault.yaml")
+    assert screen(vault, said).family(CALL) == ("never-store", f"a record of {CALL} matches a never-store value")
+    media_staged.withhold(vault.root, CALL)
+    assert screen(vault, off).family(CALL) == (
+        "never-store",
+        f"a version of {CALL} or a record under it was dropped for a never-store value or as private",
+    )
+
+
 def test_a_rid_that_isn_t_one_nests_nothing(tmp_path: Path) -> None:
     assert RawLookup(tmp_path).nested("not a rid") == []
 

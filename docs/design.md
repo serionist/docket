@@ -561,8 +561,9 @@ judgement.
    showed large-v3 about as good as a commercial recorder's transcript and a little better on names, with different
    mistakes, so keeping both raises recall on names and numbers. The turbo model dropped numbers, so it is only for live
    use.
-5. The two are reconciled in context: aligned by time; the doubtful spots found (disagreements, low-confidence words,
-   words close to an alias or a name in the meeting, numbers); each spot gets its context (aliases, glossary,
+5. The two are reconciled in context: aligned by time, per recorder line; the doubtful spots found (the names, numbers
+   and words they disagree on, and a name both heard alike close to one in the meeting), on each call and never
+   stored, with no confidence kept (DR-0583); each spot gets its context (aliases, glossary,
    attendees, past conversations found by search); Claude decides each spot and returns a list of corrections, not a
    rewrite; low-confidence corrections wait for the user. Every correction is kept with its evidence.
 6. Corrections teach Whisper, cheapest first: a vocabulary per meeting; a correction confirmed several times

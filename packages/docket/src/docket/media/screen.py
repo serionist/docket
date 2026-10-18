@@ -126,16 +126,16 @@ def refusal(
     rid: str, config: VaultConfig, records: Sequence[RawRecord], decided: Decided, withheld: frozenset[str]
 ) -> Refusal | None:
     """Why nothing of a rid's family may be kept now, by the source and the owner's decisions, or None: the source not
-    in force, off or private; a version of a record of it (`records`, staged or in raw) matching a never-store value;
-    the rid withheld; a private decision on a record of it (DR-0547, DR-0561). The screen and the reader both ask it."""
+    in force or private; a version of a record of it (`records`, staged or in raw) matching a never-store value; the
+    rid withheld; a private decision on a record of it (DR-0547, DR-0561); else the source off. Off comes last: its
+    callers let a family that is only off go on, and one an off source holds can still be withheld. The screen and
+    the reader both ask it."""
     source = layout.source_of(rid)
     entry = config.sources.get(source)
     if entry is None:
         return "private", f"source {source} isn't in vault.yaml in force"
     if entry.sensitivity == "private":
         return "private", f"source {source} is private: nothing from it is stored"
-    if not entry.enabled:
-        return "off", f"source {source} is off in vault.yaml"
     if any(neverstore.match(record, config.never_store) for record in records):
         return "never-store", f"a record of {rid} matches a never-store value"
     if rid_hash(rid) in withheld:
@@ -149,4 +149,6 @@ def refusal(
             f"{rid} or a record under it was classified private by hand, or decided before Docket kept which "
             f"each decision was; if each was a cut, `docket media confirm-cuts {rid}` in your own terminal",
         )
+    if not entry.enabled:
+        return "off", f"source {source} is off in vault.yaml"
     return None
