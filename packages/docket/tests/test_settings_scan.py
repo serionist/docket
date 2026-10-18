@@ -1,7 +1,7 @@
-"""The door's scan over the whole package (DR-0506), as test_release.py scans for the release's writers: vault.yaml is
-written in one place, its general entry is called by the CLI's two writers alone, those writers by the command line
-alone, the web and the service import from vault.settings only what pages may use, and write vault.yaml no other
-way: no settings dumped whole, no file write in code that names the file."""
+"""vault.yaml's one writer, scanned over the whole package (DR-0602): the file is written in one place, its general
+entry is called by the writers listed here, and the web and the service write it no other way: no settings dumped
+whole, no file write in code that names the file. And the console's yes is asked for the one change that keeps it,
+turning credentials redaction off (DR-0599)."""
 
 from __future__ import annotations
 
@@ -103,45 +103,18 @@ def test_vault_yaml_is_written_only_by_its_one_writer() -> None:
     assert {c for c in _calls("_write") if c[0] == "vault/settings.py"} == {("vault/settings.py", "rewrite")}
 
 
-def test_the_writer_s_general_entry_is_called_only_by_the_cli_s_two_writers_and_the_stricter_operations() -> None:
+def test_the_writer_s_general_entry_is_called_by_these_writers() -> None:
     assert _calls("rewrite") == {
         ("vault/redaction.py", "set_rule"),
         ("sources/scaffold.py", "_register"),
         ("models/api.py", "allow"),
         ("vault/settings.py", "add_listed"),
-        ("vault/settings.py", "rule_on"),
-        ("vault/settings.py", "stricter"),
-        ("vault/settings.py", "turn_off"),
+        ("vault/settings.py", "take_off_listed"),
+        ("vault/settings.py", "set_rule"),
+        ("vault/settings.py", "set_sensitivity"),
+        ("vault/settings.py", "set_enabled"),
         ("media/sources.py", "set_media_list"),
     }
-
-
-def test_the_writers_that_can_loosen_are_called_only_by_the_command_line() -> None:
-    for name in ("set_rule", "new_source", "new_folder_source", "set_media_list"):
-        assert {rel for rel, _ in _calls(name)} == {"cli.py"}, name
-    # `docket models allow`: the api provider's opt-in (DR-0537), whose every change loosens.
-    assert _attribute_calls("api_models", "allow") == {("cli.py", "models_allow")}
-
-
-def test_pages_and_the_service_import_only_what_pages_may_use() -> None:
-    for rel, module in _modules():
-        if not rel.startswith(("web/", "service/")):
-            continue
-        for node in ast.walk(module):
-            if isinstance(node, ast.ImportFrom):
-                names = {a.name for a in node.names}
-                if node.module == "docket.vault.settings":
-                    assert names <= settings.FOR_PAGES, (rel, names - settings.FOR_PAGES)
-                assert not (node.module == "docket.vault" and "settings" in names), rel
-                assert not (node.module == "docket.sources" and "scaffold" in names), rel
-                assert node.module != "docket.sources.scaffold", rel
-                assert node.module != "docket.media.sources", rel
-                assert not (node.module == "docket.media" and "sources" in names), rel
-                assert not (node.module == "docket.vault.redaction" and "set_rule" in names), rel
-                assert not (node.module == "docket.vault.config" and "write_config" in names), rel
-            if isinstance(node, ast.Import):
-                imported = {a.name for a in node.names}
-                assert not imported & {"docket.vault.settings", "docket.sources.scaffold"}, rel
 
 
 def test_pages_and_the_service_write_vault_yaml_no_other_way() -> None:
@@ -210,14 +183,9 @@ def read(vault, CONFIG_FILE):
     assert _direct_writes(tmp_path / "docket") == []
 
 
-def test_what_pages_may_import_is_there_and_never_the_general_entry() -> None:
-    assert "rewrite" not in settings.FOR_PAGES
-    assert all(hasattr(settings, name) for name in settings.FOR_PAGES)
-
-
 def test_outside_the_writer_only_init_writes_vault_yaml_as_a_file() -> None:
     """A new vault's first vault.yaml is Vault.init's; every later change is rewrite's, through write_config, so a
-    command added later can't write the file around the console's question (DR-0517)."""
+    command added later can't write the file around the one writer (DR-0602)."""
     found = {
         (rel, node.name)
         for rel, module in _modules()
@@ -241,17 +209,18 @@ def _importers(name: str) -> set[str]:
     return importers
 
 
-def test_only_the_release_and_the_writer_ask_at_the_console() -> None:
-    """No page, route or tool asks the owner's question or answers it (DR-0518), and media keys leave the clone only
-    from the console's command (DR-0550). The CLI reads only which yes this machine asks, for docket vault status."""
-    assert _importers("console") == {
-        "sources/release.py",
-        "vault/settings.py",
-        "models/api.py",
-        "media/backup.py",
-        "media/confirm.py",
-        "cli.py",
-        "forget/now.py",
+def test_only_credentials_off_asks_at_the_console() -> None:
+    """The console's yes is asked for the two steps that keep it, turning credentials redaction off and a forget
+    (DR-0599): no page, route or tool asks it or answers it. The console still refuses where a secret is typed or
+    shown, the media keys' export and import and the api provider's key, and the CLI reads which yes this machine asks,
+    for docket vault status."""
+    assert _attribute_calls("console", "confirm") == {("vault/settings.py", "rewrite"), ("forget/now.py", "forget")}
+    assert _attribute_calls("console", "typed_back") == set()
+    assert _attribute_calls("console", "problem") == {
+        ("vault/settings.py", "_at_console"),
+        ("models/api.py", "at_console"),
+        ("media/backup.py", "_at_console"),
+        ("forget/now.py", "refuse"),
     }
     from_cli = {node.func.attr for rel, module in _modules() if rel == "cli.py" for node in ast.walk(module)
                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
@@ -270,11 +239,6 @@ def test_only_the_release_and_the_writer_ask_at_the_console() -> None:
         )
     }
     assert exporters == {"cli.py"}
-    # The api provider's machine choice and key only refuse outside the owner's console (DR-0539): no code is asked.
-    asked = {node.func.attr for rel, module in _modules() if rel == "models/api.py" for node in ast.walk(module)
-             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-             and isinstance(node.func.value, ast.Name) and node.func.value.id == "console"}  # fmt: skip
-    assert asked == {"problem"}
 
 
 def _attribute_calls(owner: str, name: str) -> set[tuple[str, str]]:

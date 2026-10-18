@@ -42,7 +42,7 @@
         <ul class="change-list">
           {% for c in s.changes %}
           <li class="change{% if c.looser %} looser{% endif %}">
-            {% if c.act and view.docket_form %}
+            {% if view.docket_form %}
             <form class="act-form" method="post" action="/settings/source">
               <input type="hidden" name="source" value="{{ s.name }}">
               <input type="hidden" name="act" value="{{ c.act }}">
@@ -86,7 +86,17 @@
       {% if l.values %}
       <ul class="values">
         {% for v in l.values %}
-        <li><span class="value" dir="auto">{{ v.value }}</span> <code class="line" dir="auto" title="its line in vault.yaml">{{ v.line }}</code></li>
+        <li><span class="value" dir="auto">{{ v.value }}</span> <code class="line" dir="auto" title="its line in vault.yaml">{{ v.line }}</code>
+          {% if view.docket_form %}
+          <form class="act-form" method="post" action="/settings/never-store">
+            <input type="hidden" name="act" value="off">
+            <input type="hidden" name="list" value="{{ l.name }}">
+            <input type="hidden" name="value" value="{{ v.value }}">
+            <input type="hidden" name="shown" value="{{ view.shown_hash }}">
+            <button type="submit" class="button">Take it off<span class="visually-hidden">: {{ l.name }}</span></button>
+          </form>
+          {% endif %}
+        </li>
         {% endfor %}
       </ul>
       {% else %}
@@ -112,7 +122,7 @@
     </li>
     {% endfor %}
   </ul>
-  <p class="meta">A value is committed in vault.yaml as you write it: it is in your repo's history, and goes wherever the vault is pushed. Taking one off lets in what it kept out, from the next sync: delete its line by hand.</p>
+  <p class="meta">A value is committed in vault.yaml as you write it: it is in your repo's history, and goes wherever the vault is pushed. Taking one off lets in what it kept out, from the next sync: show the values to take one off.</p>
 </section>
 
 <section class="part" aria-labelledby="redaction-title">
@@ -127,17 +137,18 @@
         {% if r.pattern %}<span class="badge">your pattern</span>{% endif %}
       </div>
       <p class="meta">{% if r.pattern %}<code dir="ltr">{{ r.what }}</code>{% else %}Redacts {{ r.what }}.{% endif %}</p>
-      {% if r.can_turn_on and view.docket_form %}
+      {% if r.button and view.docket_form %}
       <form class="act-form" method="post" action="/settings/redaction">
         <input type="hidden" name="rule" value="{{ r.name }}">
+        <input type="hidden" name="state" value="{{ 'off' if r.on else 'on' }}">
         <input type="hidden" name="shown" value="{{ view.shown_hash }}">
-        <button type="submit" class="button">Turn it on<span class="visually-hidden">: {{ r.name }}</span></button>
+        <button type="submit" class="button">{{ 'Turn it off' if r.on else 'Turn it on' }}<span class="visually-hidden">: {{ r.name }}</span></button>
         <span>{{ r.note }}.</span>
       </form>
       {% else %}
       <p><span class="change-what">{{ 'Turn it off' if r.on else 'Turn it on' }}</span>{% if r.looser %} <span class="badge">lets more in</span>{% endif %}: {{ r.note }}.</p>
       {{ paste(r.command, 'the command that turns ' ~ r.name ~ (' off' if r.on else ' on')) }}
-      {% if r.looser %}<p class="meta">It is yours to confirm: run it in your own terminal, where it shows the change and asks you to type back a code.</p>{% endif %}
+      {% if r.on and not r.pattern and r.name == 'credentials' %}<p class="meta">Turning credentials off is yours to confirm: run it in your own terminal, where it shows the change and asks you.</p>{% endif %}
       {% endif %}
       {% if r.line %}<p class="meta">vault.yaml isn't as Docket writes it, so the command prints the line instead: {{ r.line }}.</p>{% endif %}
     </li>

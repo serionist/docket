@@ -1,4 +1,5 @@
-"""The OS prompt: the owner's yes from the system itself, where this machine has one set up (DR-0572 to DR-0575).
+"""The OS prompt: the owner's yes from the system itself, where this machine has one set up (DR-0572 to DR-0574,
+DR-0599).
 
 `find()` says, without showing anything, what this machine asks:
 

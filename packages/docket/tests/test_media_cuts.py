@@ -1,5 +1,5 @@
 """Released and hand-cut recordings get their audio, cut (DR-0561, DR-0562): the ranges at the put, staged audio whose
-cuts grew taken and put again, kind-less decisions confirmed at the owner's console, the timeline checks, the cut log
+cuts grew taken and put again, kind-less decisions confirmed on the owner's yes, the timeline checks, the cut log
 committed with the media, and the run's media line. Audio is a tone the test makes; records are invented."""
 
 from __future__ import annotations
@@ -305,53 +305,22 @@ def test_a_version_cut_after_kinds_or_on_another_machine_isn_t_evidence(
     assert "on another machine, which this one's decisions don't cover" in capsys.readouterr().out
 
 
-def test_confirm_cuts_asks_at_the_console_and_n_changes_nothing(
-    tmp_path: Path, owner: Callable[..., AtConsole], capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+def test_confirm_cuts_from_claude_code_s_shell_asks_nothing_and_shows_the_evidence(
+    tmp_path: Path,
+    os_prompt: Callable[..., FakePrompt],
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """On the owner's yes in chat, given before the command (DR-0599): no prompt and no code; the evidence it printed
+    stays the record of what was confirmed."""
     vault = _hand_cut(tmp_path)
     _strip_kinds(vault)
-    owner("n")
-    assert main(["media", "confirm-cuts", CALL, "--vault", str(vault.root)]) == 0
-    assert "cuts     nothing confirmed" in capsys.readouterr().out
+    hello = os_prompt()
     monkeypatch.setenv("CLAUDECODE", "1")
-    from docket import console
-
-    monkeypatch.setattr(console, "problem", lambda act: f"{act} asks you at a console: Claude Code's shell can't")
-    with pytest.raises(DocketError, match="Claude Code's shell"):
-        media_confirm(vault)
-
-
-def test_confirm_cuts_asks_the_os_prompt_where_there_is_one(
-    tmp_path: Path, owner: Callable[..., AtConsole], os_prompt: Callable[..., FakePrompt]
-) -> None:
-    """A confirmation lets audio in for good, so it asks the OS prompt (DR-0575); its no confirms nothing."""
-    from docket import osprompt
-
-    vault = _hand_cut(tmp_path)
-    _strip_kinds(vault)
-    hello = os_prompt(osprompt.Refused("cancelled"), osprompt.Verified())
-    owner("", "")
-    assert media_confirm(vault) == 0
-    assert media_confirm(vault) > 0
-    assert hello.acts == ["confirm a recording's decisions were cuts"] * 2
-
-
-def test_confirm_cuts_refuses_when_the_decisions_change_while_asked(
-    tmp_path: Path, owner: Callable[..., AtConsole]
-) -> None:
-    vault = _hand_cut(tmp_path)
-    _strip_kinds(vault)
-    staging = Staging(vault.root, vault.home)
-
-    def meanwhile() -> str:
-        with staging.decided_file.open("a", encoding="utf-8") as out:
-            out.write(json.dumps({"rid": rid_hash(POLISHED), "key": "b" * 64}) + "\n")
-        prompt = owner_said.prompts[-1]
-        return prompt[prompt.index("Type ") + 5 : prompt.index("Type ") + 9].lower()
-
-    owner_said = owner(meanwhile)
-    with pytest.raises(DocketError, match="changed while you were asked"):
-        media_confirm(vault)
+    assert main(["media", "confirm-cuts", CALL, "--vault", str(vault.root)]) == 0
+    out = capsys.readouterr().out
+    assert out.index("decision(s) without a kind") < out.index("decision(s) marked as cuts")
+    assert hello.acts == []
 
 
 def test_a_private_decision_beside_a_release_cut_version_refuses(tmp_path: Path) -> None:

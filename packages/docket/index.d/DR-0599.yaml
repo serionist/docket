@@ -6,7 +6,7 @@ decisions:
     by: Soma Osvay
     cost: one-way
     sources: ["#191", "18 Oct, in chat"]
-    supersedes: [DR-0518, DR-0520]
+    supersedes: [DR-0518, DR-0520, DR-0575]
     description: "The design's trust model: one user on their own machine with their own Claude. Claude classifies, releases a held recording, changes vault.yaml, confirms or rejects a decision and confirms old cuts after the owner says yes in chat, by running the command the owner would run. Docket checks nothing for that yes: no flag, token, marker or prompt. The skills ask for it, and Claude Code's own permission prompt shows each acting command a skill doesn't pre-approve. Two steps keep the console's yes, console.confirm (#178): docket forget --now (#182) and turning redaction.credentials off (DR-0601). docket hold release, every other vault.yaml change, docket media confirm-cuts and docket models install --api stop asking and stop refusing Claude Code's shell. docket models key and docket media keys export and import stay at the console without a question: a secret is typed or shown there once, and it stays out of Claude's session log. Every commit an act makes says who: a body line \"by Claude, with the owner's OK in chat\" when the command ran in Claude Code's shell (CLAUDECODE set), \"via page\" for a page's, nothing more for the owner's own terminal. The line is a label, never a check: nothing is refused on it."
     binds:
       - A step that asks at the console comes only by the maintainer's decision; no guard is added to stop Claude.

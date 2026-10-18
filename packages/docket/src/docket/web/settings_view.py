@@ -1,5 +1,6 @@
-"""The Settings page's parts (DR-0505, DR-0506, DR-0510 to DR-0512): what vault.yaml says about the sources, the
-never-store lists and redaction, what this machine's models are, and for every change its command or its line.
+"""The Settings page's parts (DR-0505, DR-0601, DR-0510 to DR-0512): what vault.yaml says about the sources, the
+never-store lists and redaction, what this machine's models are, and for every change its button, its command or its
+line.
 
 `SettingsState` is the URL. `build` and `build_confirm` take the facts the route gathered and do no I/O, so every rule
 here is tested on invented settings. The never-store values are in the view only when the URL asks for them
@@ -31,9 +32,9 @@ ADD = "/settings/never-store"
 SHOWS = ("lists",)
 # What the last post did, by kind and count only: never a value (DR-0512).
 DONE = re.compile(
-    r"^(?:listed-(?P<list>people|containers|keywords)-(?P<count>[01])"
-    r"|(?P<rule>credentials|phone|pattern)-on"
-    r"|(?P<source>[a-z0-9][a-z0-9._-]*)-(?P<act>mixed|private|off))$"
+    r"^(?:(?P<listed>listed|unlisted)-(?P<list>people|containers|keywords)-(?P<count>[01])"
+    r"|(?P<rule>credentials|phone|pattern)-(?P<state>on|off)"
+    r"|(?P<source>[a-z0-9][a-z0-9._-]*)-(?P<act>work|mixed|private|off|on))$"
 )
 # Past this share of the index's chunks, a keyword's confirm view warns that it takes work too.
 BROAD = 0.05
@@ -127,7 +128,7 @@ class Facts:
     service: list[str] = field(default_factory=list[str])
     service_errors: list[str] = field(default_factory=list[str])
     vectors: list[VectorCoverage] = field(default_factory=list[VectorCoverage])
-    # vault.yaml's hash as read, which the page's forms carry back (DR-0507).
+    # vault.yaml's hash as read, which the page's forms carry back (DR-0602).
     shown: str = ""
 
 
@@ -143,8 +144,8 @@ class Change:
     where: str
     effect: str
     looser: bool
-    # What a page's button posts for it, for a change pages make (DR-0506); None for one named only.
-    act: str | None = None
+    # What a page's button posts for it (DR-0601).
+    act: str
 
 
 @dataclass(frozen=True)
@@ -188,8 +189,9 @@ class Rule:
     looser: bool
     # The vault.yaml line the command would print, for a file Docket won't rewrite.
     line: str | None
-    # Off, and named so a page can turn it on: a built-in rule, or a pattern whose name is its own.
-    can_turn_on: bool = False
+    # A page's button turns it the other way: a built-in rule, or a pattern whose name is its own, but credentials off,
+    # which only the owner's console turns (DR-0601).
+    button: bool = False
 
 
 @dataclass(frozen=True)
@@ -248,10 +250,9 @@ def build(facts: Facts, state: SettingsState) -> SettingsView:
     )
     if facts.docket_form:
         form = (
-            "vault.yaml is as Docket writes it: a change that keeps more out has its button here, and every change "
-            "that lets more in is a command to run in your own terminal, which asks you to type back a code, or a "
-            "line to change by hand, which applies once you commit it. vault.yaml is committed, so a change reaches "
-            "your other machines with the vault."
+            "vault.yaml is as Docket writes it: each change has its button here, committed as made, or its command, "
+            "which Claude can run for you; turning credentials redaction off is the one you confirm in your own "
+            "terminal. vault.yaml is committed, so a change reaches your other machines with the vault."
         )
     else:
         form = (
@@ -289,16 +290,25 @@ def done_line(done: str | None, config: VaultConfig) -> str | None:
         return None
     if found.group("rule"):
         what = {"credentials": "Credentials", "phone": "Phone numbers", "pattern": "Your pattern's matches"}
+        rule = what[found.group("rule")]
+        if found.group("state") == "off":
+            return f"{rule} are no longer redacted, from the next sync; markers already stored stay."
         on = redaction.TURNED_ON[:1].upper() + redaction.TURNED_ON[1:]
-        return f"{what[found.group('rule')]} are redacted from now on. {on}."
+        return f"{rule} are redacted from now on. {on}."
     if found.group("source"):
         source = found.group("source")
         return {
             "private": f"{source} is private: nothing from it is stored, and what waited from it in staging is gone.",
             "mixed": f"{source} is mixed: each record from it waits on the Staging page for work or private.",
+            "work": f"{source} is work: its records are stored without a look.",
             "off": f"{source} is off: its syncs and scans stop, and what waits from it stays.",
+            "on": f"{source} is on: its syncs and scans start again.",
         }[found.group("act")]
     name, count = found.group("list"), found.group("count")
+    if found.group("listed") == "unlisted":
+        if count == "0":
+            return f"The {name} list didn't hold that, so nothing changed."
+        return f"Took one value off {name}, and committed vault.yaml: from the next sync, what it kept out comes in."
     if count == "0":
         return f"The {name} list held that already, so nothing changed."
     travels = "your own push" if config.storage == "folder" else "docket sync"
@@ -334,8 +344,7 @@ def _source(facts: SourceFacts) -> SourceView:
             if level != entry.sensitivity:
                 looser = RANK[level] < RANK[entry.sensitivity]
                 effect = SENSITIVITY_EFFECT[(entry.sensitivity, level)]
-                act = None if looser else level
-                changes.append(Change(f"Make it {level}", key_line("sensitivity", level), where, effect, looser, act))
+                changes.append(Change(f"Make it {level}", key_line("sensitivity", level), where, effect, looser, level))
     if entry.enabled:
         changes.append(
             Change(
@@ -349,7 +358,14 @@ def _source(facts: SourceFacts) -> SourceView:
         )
     else:
         changes.append(
-            Change("Turn it on", key_line("enabled", True), where, "lets it in again: its syncs and scans start", True)
+            Change(
+                "Turn it on",
+                key_line("enabled", True),
+                where,
+                "lets it in again: its syncs and scans start",
+                True,
+                "on",
+            )
         )
     changes.sort(key=lambda c: c.looser)
     return SourceView(
@@ -389,7 +405,8 @@ def _rules(config: VaultConfig, vault: str, docket_form: bool, unfilled: list[tu
         named = f'"{rule}"' if pattern else rule
         command = f'docket redaction set {named} {turn} --vault "{vault}"'
         own = not pattern or (names.count(name) == 1 and name not in BUILTIN_RULES)
-        rules.append(Rule(name, pattern, on, what, command, note, looser=on, line=line, can_turn_on=not on and own))
+        button = own and not (on and name == redaction.CREDENTIALS)
+        rules.append(Rule(name, pattern, on, what, command, note, looser=on, line=line, button=button))
     return rules
 
 
@@ -411,10 +428,10 @@ def _models(facts: Facts) -> ModelsView:
         Command("Then restart the service, which reads its models when it starts", "docket service install"),
         Command("Remove them; keyword search goes on", "docket models remove"),
         Command(
-            "Or Voyage AI's API instead, in your own terminal: this machine's choice, its key, then the vault's yes",
+            "Or Voyage AI's API instead: this machine's choice, its key, then the vault's yes",
             "docket models install --api",
         ),
-        Command("The key, kept in this machine's keychain", "docket models key voyage"),
+        Command("The key, typed in your own terminal and kept in this machine's keychain", "docket models key voyage"),
         Command("Allow this vault's text to go to Voyage AI", "docket models allow voyage"),
         Command("First, where the service's worker holds the files", "docket service stop"),
     ]
@@ -526,7 +543,7 @@ def build_source_confirm(
         else f"Nothing of {source} waits in staging now."
     ]
     lines.append(f"From the next sync, nothing from {source} is stored; its records already stored stay in raw.")
-    lines.append("Making it mixed or work again is a line to change in vault.yaml by hand: it lets more in.")
+    lines.append("Making it mixed or work again is a button on the Settings page: it lets more in.")
     if takes_in:
         lines.append("Your edit of vault.yaml that isn't committed yet goes in first, as a commit of its own.")
     return SourceConfirm(

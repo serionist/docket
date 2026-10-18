@@ -97,7 +97,7 @@ terms:
     definition: "What read takes: a doc's id or path, or a record part such as r:<rid>@12:08, the same in brackets, or a bare rid."
     see: [packages/docket/src/docket/vault/anchors.py]
   - term: loosening
-    definition: "Any vault.yaml change loosens() flags: everything but a change that only keeps more out (a never-store value added, a rule turned on, a new pattern, a source made stricter, turned off or removed, an exclude added, a tool removed). A value taken off, a rule turned off, a source added, made looser or turned on, its mapper, hosts or folder, the owner's settings and any key added later. What it lets in reaches git for good, so no page makes one, the CLI makes one only at the owner's console on the OS prompt or a code typed back, and one made by hand applies once committed."
+    definition: "Any vault.yaml change that isn't only stricter: a value taken off, a rule turned off, a source added, made looser or turned on, its mapper or folder, the owner's settings and any key added later. The CLI and the pages make one on the owner's yes, the commit saying who; turning credentials redaction off asks at the owner's console, and one made by hand applies once committed. What it lets in reaches git for good."
     see: [packages/docket/src/docket/vault/inforce.py]
   - term: mapper
     definition: "A source's code in the consuming project, map_run(run) in .claude/skills/sources/<source>/mapper.py: a run's captures and manifest in, records in the core's shape out, as plain JSON. Docket runs it in its own process and checks what it returns."
@@ -121,7 +121,7 @@ terms:
     definition: Something users or their stored data depend on, such as a name, the vault's format or an MCP tool. It changes only with the maintainer's agreement, in a PR that names it.
     see: [AGENTS.md]
   - term: OS prompt
-    definition: "The system's own yes, which only a person answers: Windows Hello, LocalAuthentication on macOS (Touch ID, an Apple Watch or the login password), or polkit on Linux. Where a machine has one set up, a release, a loosening, confirm-cuts and the key export ask it at the owner's console, and its no is never answered by the code instead; where it has none, the console code is asked."
+    definition: "The system's own yes, which only a person answers: Windows Hello, LocalAuthentication on macOS (Touch ID, an Apple Watch or the login password), or polkit on Linux. Where a machine has one set up, turning credentials redaction off and forgetting for real ask it at the owner's console, and its no is never answered by the code instead; where it has none, the console code is asked."
     see: [packages/docket/src/docket/osprompt/__init__.py]
     close_terms: [console code]
   - term: processed doc
@@ -138,7 +138,7 @@ terms:
     definition: "A source Docket keeps working and tested in CI as an example to copy, never a dependency: Plaud, under examples/sources/plaud. docket source new --example copies it."
     see: [examples/sources/plaud/SKILL.md]
   - term: release
-    definition: "Letting a held recording into the vault with the cuts its owner confirmed: they answer the OS prompt, or where the machine has none type back a code, at their own console for each recording; the release line is committed, then the id leaves the hold list."
+    definition: "Letting a held recording into the vault with the cuts its owner said yes to, at their own terminal or in chat to Claude, who runs docket hold release: the release line is committed, then the id leaves the hold list."
     see: [packages/docket/src/docket/sources/release.py]
   - term: release log
     definition: "state/releases/<source>.jsonl in the vault: each released id with its cuts in milliseconds and the records kept as they read, merged by union. The gate cuts a released recording by it wherever it is staged."

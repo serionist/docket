@@ -10,6 +10,7 @@ decisions:
     binds:
       - A later Docket reads every earlier bundle's schema_version.
       - "Amended by #143 (DR-0575): the export asks the OS prompt, or the code, before it writes the file; the import's passphrase stays its factor."
+      - "Amended by #191 (DR-0599): the export asks no OS prompt or code; both stay at the owner's console, for the passphrase shown or typed there."
     not_chosen:
       - "Machines syncing keys over the network: both online at once, and a new listening surface."
       - "A passphrase the owner types: drawn letters are stronger, and Claude never sees them."

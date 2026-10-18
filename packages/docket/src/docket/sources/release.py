@@ -1,15 +1,14 @@
-"""Releasing held recordings (#31): a held recording goes into staging already cut, only after its owner types back a
-code at a console, and leaves the hold list after its release is committed.
+"""Releasing held recordings (#31): a held recording goes into staging already cut, on its owner's yes, given at their
+own terminal or in chat to Claude, who runs the command (DR-0600); it leaves the hold list after its release is
+committed.
 
 - `show()`: a held recording as the source's mapper reads it from an import folder, that one hold lifted in memory,
   each record through the gate's intake checks (DR-0204). It writes nothing.
-- `release()`: checks each proposal, shows its screen, asks for the code, and on it commits the release line, then
-  the hold's removal, then stages the records through the gate, which cuts them (DR-0202, DR-0203).
+- `release()`: checks each proposal, shows its screen, then commits the release line, then the hold's removal, then
+  stages the records through the gate, which cuts them (DR-0600, DR-0203).
 - `load_proposals()`: the proposals file the cuts skill writes (DR-0206).
 
-The question and its checks live here, and `release()` has no parameter that answers it, so a Python caller, a pipe
-or Claude Code's shell gets a refusal, not a release. None of this stops a process running as the user on purpose: it
-makes a release a deliberate act, which the cuts skill forbids Claude.
+Nothing here asks: the owner's yes comes before the command, and the cuts skill shows the cuts in chat first (DR-0605).
 """
 
 from __future__ import annotations
@@ -71,7 +70,6 @@ class ReleaseReport:
     restaged: list[str] = field(default_factory=list[str])
     held: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     refused: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
-    stopped: bool = False
 
 
 @dataclass(frozen=True)
@@ -89,20 +87,16 @@ class _Checked:
 
 # -- the console --------------------------------------------------------------------------------------------------
 
-# The question and its checks are docket.console's (DR-0518). These two names stay, each only a call through, for the
-# reference source's tests a project copied, which stand in for the owner under them.
+# A release asks nothing (DR-0600). These two names stay, unused, for the reference source's tests a project copied
+# before #191, which patch them.
 
 
-def _console_problem() -> str | None:
-    return console.problem(console.RELEASE)
+def _console_problem() -> str | None:  # pyright: ignore[reportUnusedFunction]
+    return None
 
 
-def _ask(prompt: str) -> str:
+def _ask(prompt: str) -> str:  # pyright: ignore[reportUnusedFunction]
     return console.ask(prompt)
-
-
-# Docket's own `_ask`, to tell a copied test's stand-in from it.
-_OWN_ASK = _ask
 
 
 # -- reading a held recording ----------------------------------------------------------------------------------------
@@ -285,15 +279,11 @@ def _cut_lines(checked: _Checked, span: Cut, said: list[Segment]) -> list[str]:
 
 
 def release(vault: Vault, source: str, folder: Path, proposals: Sequence[Proposal]) -> ReleaseReport:
-    """Release held recordings, one question each. Refused, before anything is read, without the owner at a
-    console."""
-    problem = _console_problem()
-    if problem is not None:
-        raise DocketError(problem)
+    """Release held recordings, each after its screen. Run on the owner's yes, which comes before the command."""
     report = ReleaseReport()
     # A line or a list a crash left on disk uncommitted reaches git before anything else is decided on it, each read
-    # first, so one that doesn't parse is refused, never committed. A conflict in the vault refuses here, before the
-    # owner sees a screen or types a code: the release's own commits would refuse it after (DR-0528).
+    # first, so one that doesn't parse is refused, never committed. A conflict in the vault refuses here, before any
+    # screen: the release's own commits would refuse it after (DR-0528).
     with vault.writing():
         vault.refuse_unmerged()
         releaselog.read(vault.root, source)
@@ -312,8 +302,7 @@ def release(vault: Vault, source: str, folder: Path, proposals: Sequence[Proposa
         if proposal.held is not None:
             report.held.append((native, proposal.held))
         elif native in held and native in granted:
-            if not _take_off_again(vault, source, granted[native], place, report):
-                return report
+            _take_off_again(vault, source, granted[native], place, report)
             _stage(vault, source, native, records[native])
         elif native in granted:
             if not records[native]:
@@ -330,33 +319,15 @@ def release(vault: Vault, source: str, folder: Path, proposals: Sequence[Proposa
                 report.held.append((native, checked))
                 console.say(f"{native}  ({place})  stays held: {checked}")
                 continue
-            if not _release_one(vault, source, checked, place, report):
-                return report
+            _release_one(vault, source, checked, place, report)
     return report
 
 
-def _question(lines: list[str], what: str, native: str) -> str:
-    """Show the screen and ask: "yes" for the OS prompt's yes or the code typed back, "no", or "stop" (DR-0572)."""
-    do, keep, kept = f"{what} {native}", "keep it held", f"{native} stays held"
-    if _ask is not _OWN_ASK:
-        # A project's copy of the reference source's tests stands in for the owner under `_ask` and types the code
-        # back; it can't answer an OS prompt, so it gets the code, as before #143. Only a patch of Docket's own code
-        # gets here, the floor DR-0202 accepts.
-        return console.typed_back(lines, do, keep, kept, asker=_ask)
-    return console.confirm(lines, do, keep, kept, act="release a held recording", asker=_ask)
-
-
-def _release_one(vault: Vault, source: str, checked: _Checked, place: str, report: ReleaseReport) -> bool:
-    """One recording's screen, question and release. False when the owner stops."""
+def _release_one(vault: Vault, source: str, checked: _Checked, place: str, report: ReleaseReport) -> None:
+    """One recording's screen, then its release."""
     native = checked.proposal.id
-    answer = _question(_screen(checked, place), "release", native)
-    if answer == "stop":
-        report.stopped = True
-        report.held.append((native, "stopped before it"))
-        return False
-    if answer == "no":
-        report.held.append((native, "not confirmed"))
-        return True
+    for shown_line in _screen(checked, place):
+        console.say(shown_line)
     line = Release(
         id=native,
         cuts=[LoggedCut(start=c.start, end=c.end) for c in checked.spans],
@@ -368,12 +339,11 @@ def _release_one(vault: Vault, source: str, checked: _Checked, place: str, repor
     with vault.writing():
         if native not in holds.read(vault.root, source) or native in releaselog.read(vault.root, source):
             report.held.append((native, "its hold or release changed since the screen; run the release again"))
-            return True
+            return
         releaselog.add(vault, source, line)
         holds.remove(vault, source, [native])
     _stage(vault, source, native, checked.records, shown)
     report.released.append(native)
-    return True
 
 
 def _shown(gate: Gate, checked: _Checked) -> frozenset[tuple[str, str]]:
@@ -396,22 +366,14 @@ def _shown(gate: Gate, checked: _Checked) -> frozenset[tuple[str, str]]:
     return frozenset(out)
 
 
-def _take_off_again(vault: Vault, source: str, granted: releaselog.Granted, place: str, report: ReleaseReport) -> bool:
+def _take_off_again(vault: Vault, source: str, granted: releaselog.Granted, place: str, report: ReleaseReport) -> None:
     first = granted.first
-    lines = [
-        f"{granted.id}  ({place})",
-        f"  released {first.at:%Y-%m-%d %H:%M} UTC on {first.machine}, and held again: a merge brought the hold back",
-    ]
-    answer = _question(lines, "take the hold off", granted.id)
-    if answer == "stop":
-        report.stopped = True
-        return False
-    if answer == "yes":
-        holds.remove(vault, source, [granted.id])
-        report.taken_off.append(granted.id)
-    else:
-        report.held.append((granted.id, "not confirmed"))
-    return True
+    console.say(f"{granted.id}  ({place})")
+    console.say(
+        f"  released {first.at:%Y-%m-%d %H:%M} UTC on {first.machine}, and held again: a merge brought the hold back"
+    )
+    holds.remove(vault, source, [granted.id])
+    report.taken_off.append(granted.id)
 
 
 def _stage(

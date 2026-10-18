@@ -1,20 +1,21 @@
-"""The Settings page: `/settings` is always a whole page (DR-0505); `/settings/never-store` adds a never-store value,
-`/settings/redaction` turns a redaction rule on, and `/settings/source` makes a source stricter or turns it off: the
-changes on DR-0506's list, and no other.
+"""The Settings page: `/settings` is always a whole page (DR-0505); `/settings/never-store` adds a never-store value
+or takes one off, `/settings/redaction` turns a redaction rule on or off, and `/settings/source` sets a source's
+sensitivity or turns it on or off, each way (DR-0601). Turning credentials redaction off is the one change no page
+makes: the writer refuses it, and the page names its command.
 
 `GET` reads vault.yaml, the user's config, the runner's mapper check, this machine's models and the service's own models
-state, in this process and never through `/api`, and writes nothing. Pages make only the changes on DR-0506's list,
-each through vault.yaml's one writer and its `loosens` check; every other change is named here, as its command or its
-line. A value the URL can't hold, or a `DocketError`, is the page's own error state; anything else is logged as its type
-and frames and answered with the error page, as on the other pages (DR-0170).
+state, in this process and never through `/api`, and writes nothing. Every change goes through vault.yaml's one writer;
+what has no button is named here, as its command or its line. A value the URL can't hold, or a `DocketError`, is the
+page's own error state; anything else is logged as its type and frames and answered with the error page, as on the
+other pages (DR-0170).
 
 An add is two plain form posts the Guard checks (DR-0152), on the service's writer thread, as Staging's and Curate's
 writes are (DR-0381, DR-0473): the first answers the confirm view, naming what the value drops now and what already
 stored holds it (DR-0509); the second, carrying the hash of the vault.yaml the view was built from, adds it and answers
-a 303 whose `done` names the list and a count. The value travels only in the posts' bodies: never in a URL, the log or
-a commit message (DR-0508). A rule turned on, a source made mixed or turned off is one post; a source made private
-asks once more, naming what waits from it. Each carries the hash of the vault.yaml the page read, so a page older than
-the file writes nothing (409), and a post sent twice is no write.
+a 303 whose `done` names the list and a count. The value travels only in the posts' bodies: never in a URL, the log or a
+commit message (DR-0508). A value taken off, a rule turned on or off, a source's sensitivity or its on and off is one
+post; a source made private asks once more, naming what waits from it. Each carries the hash of the vault.yaml the page
+read, so a page older than the file writes nothing (409), and a post sent twice is no write.
 """
 
 from __future__ import annotations
@@ -49,9 +50,10 @@ from docket.vault.settings import (
     edit_to_take_in,
     file_hash,
     key_line,
-    rule_on,
-    stricter,
-    turn_off,
+    set_enabled,
+    set_rule,
+    set_sensitivity,
+    take_off_listed,
 )
 from docket.vault.settings import Rewritten as Written
 from docket.web import settings_view, templating
@@ -105,8 +107,8 @@ def gather(service: Service) -> Facts:
 
 BY_HAND = "vault.yaml has comments or a layout of your own, so it is left as it is; change it there"
 STALE = "vault.yaml changed since the page showed it, so nothing was written. Here it is as it stands now."
-# What a source's button may ask for: only these, each stricter or off (DR-0506).
-ACTS = ("mixed", "private", "off")
+# What a source's button may ask for (DR-0601).
+ACTS = ("work", "mixed", "private", "off", "on")
 
 
 def _context(
@@ -130,8 +132,8 @@ def _with(config: VaultConfig, name: ListName, value: str) -> VaultConfig:
 
 def _staged(service: Service, name: ListName, value: str) -> tuple[int, str, bool, bool]:
     """On the writer thread, so no write runs between the read and the count: what the value would drop from staging,
-    vault.yaml's hash and form as read, and whether an edit not committed yet goes in first. An edit that lets more in
-    is refused here already, as the add would refuse it (DR-0507)."""
+    vault.yaml's hash and form as read, and whether an edit not committed yet goes in first. One that turns credentials
+    redaction off is refused here already, as the add would refuse it (DR-0601)."""
     vault = service.vault()
     data = (vault.root / CONFIG_FILE).read_bytes()
     text = data.decode("utf-8")
@@ -154,7 +156,7 @@ def _stored(service: Service, name: ListName, value: str) -> tuple[Reach | None,
 
 def _private_staged(service: Service, source: str) -> tuple[int, str, bool, bool]:
     """On the writer thread: what making a source private would drop from staging, and vault.yaml's hash, form and
-    whether an edit not committed yet goes in first, refused here already when it lets more in."""
+    whether an edit not committed yet goes in first, refused here already when it turns credentials redaction off."""
     vault = service.vault()
     data = (vault.root / CONFIG_FILE).read_bytes()
     text = data.decode("utf-8")
@@ -171,11 +173,14 @@ def _private_staged(service: Service, source: str) -> tuple[int, str, bool, bool
     return after["private"] - before["private"], file_hash(data), docket_form, takes_in
 
 
-def _tighten(service: Service, source: str, act: str, shown: str) -> Written:
-    """A source made stricter or turned off, on the writer thread; then the sweep, so what the source's new setting
-    forbids leaves staging at once and what it now asks about waits again."""
+def _change(service: Service, source: str, act: str, shown: str) -> Written:
+    """A source's sensitivity set, or the source turned on or off, on the writer thread; then the sweep, so what the
+    source's new setting forbids leaves staging at once and what it now asks about waits again."""
     vault = service.vault()
-    written = turn_off(vault, source, shown=shown) if act == "off" else stricter(vault, source, act, shown=shown)
+    if act in ("off", "on"):
+        written = set_enabled(vault, source, act == "on", shown=shown)
+    else:
+        written = set_sensitivity(vault, source, act, shown=shown)
     if written.changed:
         Gate(vault).list()
     return written
@@ -263,6 +268,8 @@ def router(service: Service) -> APIRouter:
                 return await whole(request, SettingsState(), status=400, problem=str(e))
 
         async def posted(form: QueryParams) -> Response:
+            if form.get("act") == "off":
+                return await taken_off(form)
             name, value = _list_name(form.get("list")), checked_value(form.get("value") or "")
             if form.get("confirmed") != "1":
                 if neverstore.holds(service.vault().written.never_store, name, value):
@@ -277,26 +284,41 @@ def router(service: Service) -> APIRouter:
                 return await confirm(request, name, value)
             return _done(name, 0 if added.already else 1)
 
+        async def taken_off(form: QueryParams) -> Response:
+            name, value, shown = _list_name(form.get("list")), form.get("value") or "", form.get("shown") or ""
+            try:
+                taken = await service.writer.run(lambda: take_off_listed(service.vault(), name, value, shown=shown))
+            except StaleError:
+                return await whole(request, SettingsState(show="lists"), status=409, warning=STALE)
+            if taken.written.by_hand:
+                warning = f"{BY_HAND}: delete its line under never_store.{name}."
+                return await whole(request, SettingsState(show="lists"), warning=warning)
+            return _done(name, 0 if taken.already else 1, off=True)
+
         return await templating.safely(request, "/settings/never-store", answer, lambda: failed_page(request))
 
     @web.post("/settings/redaction", include_in_schema=False)
-    async def redaction_on(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
+    async def redaction_change(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
         async def answer() -> Response:
             form = await templating.read_form(request)
             if isinstance(form, Response):
                 return form
             rule, shown = form.get("rule") or "", (form.get("shown") or "").strip()
+            state = form.get("state") or "on"
+            if state not in ("on", "off"):
+                return await whole(request, SettingsState(), status=400, problem="a rule is turned on or off")
+            on = state == "on"
             try:
-                written = await service.writer.run(lambda: rule_on(service.vault(), rule, shown=shown))
+                written = await service.writer.run(lambda: set_rule(service.vault(), rule, on, shown=shown))
             except StaleError:
                 return await whole(request, SettingsState(), status=409, warning=STALE)
             except DocketError as e:
                 return await whole(request, SettingsState(), status=400, problem=str(e))
             if written.by_hand:
-                line = redaction.by_hand(rule, True, rule not in BUILTIN_RULES)
+                line = redaction.by_hand(rule, on, rule not in BUILTIN_RULES)
                 return await whole(request, SettingsState(), warning=f"{BY_HAND}: {line}.")
             kind = rule if rule in BUILTIN_RULES else "pattern"
-            return RedirectResponse(SettingsState(done=f"{kind}-on").url(done=True), status_code=303)
+            return RedirectResponse(SettingsState(done=f"{kind}-{state}").url(done=True), status_code=303)
 
         return await templating.safely(request, "/settings/redaction", answer, lambda: failed_page(request))
 
@@ -316,18 +338,18 @@ def router(service: Service) -> APIRouter:
             if source_name_problem(source) is not None:
                 raise DocketError("source is a source's name from vault.yaml")
             if act not in ACTS:
-                raise DocketError("a page makes a source mixed or private, or turns it off; the rest is by hand")
+                raise DocketError("a page makes a source work, mixed or private, or turns it on or off")
             if act == "private" and form.get("confirmed") != "1":
                 return await private(request, source)
             shown = (form.get("shown") or "").strip()
             try:
-                written = await service.writer.run(lambda: _tighten(service, source, act, shown))
+                written = await service.writer.run(lambda: _change(service, source, act, shown))
             except StaleError:
                 if act == "private":
                     return await private(request, source, status=409, stale=True)
                 return await whole(request, SettingsState(), status=409, warning=STALE)
             if written.by_hand:
-                line = key_line("enabled", False) if act == "off" else key_line("sensitivity", act)
+                line = key_line("enabled", act == "on") if act in ("off", "on") else key_line("sensitivity", act)
                 return await whole(request, SettingsState(), warning=f"{BY_HAND}: {line}, under sources.{source}.")
             return RedirectResponse(SettingsState(done=f"{source}-{act}").url(done=True), status_code=303)
 
@@ -336,6 +358,6 @@ def router(service: Service) -> APIRouter:
     return web
 
 
-def _done(name: ListName, count: int) -> Response:
-    done = SettingsState(done=f"listed-{name}-{count}")
+def _done(name: ListName, count: int, *, off: bool = False) -> Response:
+    done = SettingsState(done=f"{'unlisted' if off else 'listed'}-{name}-{count}")
     return RedirectResponse(done.url(done=True), status_code=303)

@@ -124,7 +124,7 @@ def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def owner(monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[..., AtConsole]]:
-    """The owner at their own console, for a release or a vault.yaml change that isn't only stricter: no refusal, and
+    """The owner at their own console, for turning credentials redaction off: no refusal, and
     each question answered from the script given."""
 
     def at_console(*answers: str | Callable[[], str]) -> AtConsole:

@@ -1,4 +1,4 @@
-"""The Settings page's parts on invented settings (DR-0505, DR-0506, DR-0510 to DR-0512): the URL, each source's
+"""The Settings page's parts on invented settings (DR-0505, DR-0601, DR-0510 to DR-0512): the URL, each source's
 changes stricter first with their lines, the never-store values only when asked, the rules' commands, the models."""
 
 from __future__ import annotations
@@ -218,7 +218,7 @@ def test_done_holds_a_list_and_a_count_and_never_reaches_a_link() -> None:
     state = SettingsState.read({"done": "listed-keywords-1", "show": "lists"})
     assert state.url() == "/settings?show=lists"
     assert state.url(done=True) == "/settings?show=lists&done=listed-keywords-1"
-    for bad in ("listed-keywords-2", "listed-Dora-1", "phone-maybe", "Calls-private", "calls-work", "-off"):
+    for bad in ("listed-keywords-2", "listed-Dora-1", "phone-maybe", "Calls-private", "calls-loose", "-off"):
         with pytest.raises(SettingsStateError, match="done says what the last change did"):
             SettingsState.read({"done": bad})
     config = make_config()
@@ -276,7 +276,7 @@ def test_a_rule_s_and_a_source_s_done_say_how_things_stand() -> None:
     assert (done_line("memo-mixed", config) or "").startswith("memo is mixed: each record from it waits")
 
 
-def test_a_rule_that_is_off_and_its_own_can_be_turned_on_from_the_page() -> None:
+def test_a_rule_of_its_own_name_turns_either_way_from_the_page_but_credentials_off() -> None:
     config = make_config()
     config.redaction = Redaction(
         credentials=False,
@@ -288,7 +288,7 @@ def test_a_rule_that_is_off_and_its_own_can_be_turned_on_from_the_page() -> None
             RedactionPattern(name="live", pattern="L"),
         ],
     )
-    turned = [(r.name, r.can_turn_on) for r in view(config).rules]
+    turned = [(r.name, r.button) for r in view(config).rules]
     assert turned == [
         ("credentials", True),
         ("phone", True),
@@ -296,11 +296,13 @@ def test_a_rule_that_is_off_and_its_own_can_be_turned_on_from_the_page() -> None
         ("twin", False),
         ("twin", False),
         ("phone", False),
-        ("live", False),
+        ("live", True),
     ]
+    config.redaction = Redaction()
+    assert [(r.name, r.button) for r in view(config).rules] == [("credentials", False), ("phone", True)]
 
 
-def test_a_stricter_change_carries_what_its_button_posts() -> None:
+def test_each_change_carries_what_its_button_posts() -> None:
     config = make_config()
     config.sources = {"memo": SourceConfig(), "notes": SourceConfig(sensitivity="private", enabled=False)}
     found = {s.name: s for s in view(config).sources}
@@ -309,7 +311,7 @@ def test_a_stricter_change_carries_what_its_button_posts() -> None:
         ("Make it mixed", "mixed"),
         ("Turn it off", "off"),
     ]
-    assert [c.act for c in found["notes"].changes] == [None, None, None]
+    assert [c.act for c in found["notes"].changes] == ["mixed", "work", "on"]
 
 
 def test_making_a_source_private_names_what_waits_and_what_goes_in_first() -> None:
@@ -317,7 +319,7 @@ def test_making_a_source_private_names_what_waits_and_what_goes_in_first() -> No
     assert asked.lines == [
         "It drops 2 records of memo waiting in staging now.",
         "From the next sync, nothing from memo is stored; its records already stored stay in raw.",
-        "Making it mixed or work again is a line to change in vault.yaml by hand: it lets more in.",
+        "Making it mixed or work again is a button on the Settings page: it lets more in.",
         "Your edit of vault.yaml that isn't committed yet goes in first, as a commit of its own.",
     ]
     assert asked.line == "sensitivity: private"

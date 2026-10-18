@@ -6,8 +6,8 @@ and the versions in raw each could be. Only a version this clone promoted cut by
 clone's alone while raw is shared; a version cut by the release alone (its every `[cut]` span inside the release's
 cuts) leaves no decision, and one for each `cut` decision the rid already has is spoken for. When a rid has more
 kind-less decisions than versions left, at least one was a private classification, and nothing is confirmed.
-Otherwise the owner types back a code at their own console, and each of those keys gets a `cut` line. Claude Code's
-shell, a pipe or a redirect is refused (DR-0518).
+Otherwise each of those keys gets a `cut` line. It asks nothing: the owner says yes before the command, at their own
+terminal or in chat to Claude, who runs it (DR-0599).
 """
 
 from __future__ import annotations
@@ -24,9 +24,6 @@ from docket.vault.rawlog import RUN_FILE
 from docket.vault.spans import RawLookup
 from docket.vault.staging import Staging, rid_hash
 from docket.vault.vault import Vault
-
-ACT = "a confirmation that a recording's decisions were cuts"
-
 
 Version = tuple[str, tuple[Range, ...]]
 
@@ -113,37 +110,20 @@ def lines(found: list[Evidence]) -> list[str]:
 
 
 def confirm(vault: Vault, rid: str) -> int:
-    """Show the evidence; on the code, mark each kind-less decision of the family a cut. How many were marked."""
-    problem = console.problem(ACT)
-    if problem is not None:
-        raise DocketError(problem)
-    found = evidence(vault, rid)
-    if not found:
-        raise DocketError(f"no record of {rid} has a decision without a kind; there is nothing to confirm")
-    shown = lines(found)
-    short = [item for item in found if not item.matches]
-    if short:
-        for line in shown:
-            console.say(line)
-        names = ", ".join(item.rid for item in short)
-        raise DocketError(
-            f"{names}: more decisions without a kind than versions this machine cut by hand that no cut decision "
-            "accounts for, so at least one was a private classification; the audio stays out"
-        )
-    screen = [*shown, "", "Each of these was a cut, and none a private classification?"]
-    answer = console.confirm(
-        screen,
-        "confirm they were cuts",
-        "leave them as they are",
-        "nothing was confirmed",
-        act="confirm a recording's decisions were cuts",
-    )
-    if answer != "yes":
-        return 0
+    """Show the evidence, then mark each kind-less decision of the family a cut. How many were marked."""
     with vault.lock:
-        again = evidence(vault, rid)
-        if again != found:
-            raise DocketError(f"{rid}'s decisions changed while you were asked; run it again")
+        found = evidence(vault, rid)
+        if not found:
+            raise DocketError(f"no record of {rid} has a decision without a kind; there is nothing to confirm")
+        for line in lines(found):
+            console.say(line)
+        short = [item for item in found if not item.matches]
+        if short:
+            names = ", ".join(item.rid for item in short)
+            raise DocketError(
+                f"{names}: more decisions without a kind than versions this machine cut by hand that no cut decision "
+                "accounts for, so at least one was a private classification; the audio stays out"
+            )
         Staging(vault.root, vault.home).append_decided(
             [(rid_hash(item.rid), key) for item in found for key in item.keys], "cut"
         )

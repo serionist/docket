@@ -1,5 +1,5 @@
-"""A decision's status has one writer (DR-0564), scanned over the whole package as test_settings_scan.py scans for
-vault.yaml's: `DocStore.decide`, which only the Briefs page's click calls, writes the next rev
+"""A decision's status has one writer (DR-0603), scanned over the whole package as test_settings_scan.py scans for
+vault.yaml's: `DocStore.decide`, which the Briefs page's click and `docket decision set` call, writes the next rev
 `decision_form.status_rev` builds, and nothing else calls either. doc_put writes proposed decisions only, and the
 take-in refuses a status edited by hand; test_decisions.py holds those."""
 
@@ -30,6 +30,6 @@ def _calls(name: str) -> set[tuple[str, str]]:
     return found
 
 
-def test_only_the_briefs_page_s_click_writes_a_decision_s_status() -> None:
-    assert _calls("decide") == {("web/briefs.py", "router")}
+def test_only_the_briefs_page_s_click_and_the_command_write_a_decision_s_status() -> None:
+    assert _calls("decide") == {("web/briefs.py", "router"), ("cli.py", "decision_set")}
     assert _calls("status_rev") == {("vault/docstore.py", "DocStore")}

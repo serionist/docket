@@ -12,6 +12,7 @@ decisions:
       - A held recording's text is never shown in the web app.
       - Loosening the console's yes, a release from any page, route or tool, is a one-way door on AGENTS.md's list (DR-0202).
       - "The OS prompt this left to an issue of its own is #143's (DR-0572 to DR-0575)."
+      - "Amended by #191 (DR-0600): the commands are run by the owner or by Claude on the owner's yes, and the page says so; no page releases still."
     not_chosen:
       - "The code shown and typed back in the page: Claude in Chrome or Playwright does that in normal use."
       - "The code in a desktop notification: a shell reads the notification history, a screen-reading agent sees it, and a headless session shows nothing."

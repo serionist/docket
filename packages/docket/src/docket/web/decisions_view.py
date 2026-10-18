@@ -7,9 +7,9 @@
 | Rejected | folded |
 
 A proposed decision is only ever under Waiting, never among the decided (DR-0565). The buttons post to
-`/briefs/decision`, the only writer of a decision's status (DR-0564): Confirm and Reject, or for a candidate that
-contradicts a decision, the three picks. A line a never-store list now names is shown as hidden, and the report already
-leaves out a decision a list holds (DR-0558). `part` takes what was read and does no I/O.
+`/briefs/decision`, one of the two callers of a decision's one writer (DR-0603): Confirm and Reject, or for a candidate
+that contradicts a decision, the three picks. A line a never-store list now names is shown as hidden, and the report
+already leaves out a decision a list holds (DR-0558). `part` takes what was read and does no I/O.
 """
 
 from __future__ import annotations

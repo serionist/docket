@@ -18,6 +18,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from docket import console
 from docket.errors import DocketError
 from docket.vault import releaselog
 from docket.vault.records import RawRecord, is_native_id, owning_id, source_name_problem
@@ -168,7 +169,7 @@ def remove(vault: Vault, source: str, ids: Iterable[str]) -> int:
         off = current & gone
         if off:
             _replace(vault, path, sorted(current - off))
-        commit_pending(vault, source, f"Holds: {source}, {len(off)} released on {vault.machine}")
+        commit_pending(vault, source, console.signed(f"Holds: {source}, {len(off)} released on {vault.machine}"))
         return len(off)
 
 

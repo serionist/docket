@@ -1,7 +1,6 @@
 """A source's media hosts and folders in vault.yaml (DR-0548), changed through vault.yaml's one writer.
 
-Adding one lets more in, so `settings.rewrite` asks at the owner's console first (DR-0517); removing one keeps more out
-and is written at once. A page makes neither change (DR-0506): it shows the command.
+Each is made on the owner's yes, at their own terminal or in chat to Claude, and committed saying who (DR-0601).
 """
 
 from __future__ import annotations

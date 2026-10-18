@@ -1,5 +1,5 @@
 """Releasing held recordings on temp projects, with an invented mapper for an invented `rec` source: show writes
-nothing; a release asks for a code, commits its log line and then the hold's removal, and stages the recording cut;
+nothing; a release asks nothing, commits its log line and then the hold's removal, and stages the recording cut;
 whatever fails a check stays held while the batch goes on. Then `docket hold list`, `show` and `release` end to end."""
 
 from __future__ import annotations
@@ -16,9 +16,9 @@ from typing import Any
 
 import pytest
 import typer
-from docket_testkit import COMMIT_CALLS, AtConsole, FakePrompt, copy_project, git_calls, sh, template_project
+from docket_testkit import COMMIT_CALLS, FakePrompt, copy_project, git_calls, sh, template_project
 
-from docket import osprompt
+from docket import console
 from docket.cli import app, main
 from docket.errors import DocketError
 from docket.sources import release as releasing
@@ -172,34 +172,25 @@ def test_show_names_what_intake_drops_without_printing_it(vault: Vault, folder: 
     assert not any("cabin" in line for line in lines)
 
 
-def test_with_an_os_prompt_a_release_is_its_yes_and_a_no_keeps_it_held(
-    vault: Vault,
-    folder: Path,
-    owner: Callable[..., AtConsole],
-    os_prompt: Callable[..., FakePrompt],
-    capsys: pytest.CaptureFixture[str],
+def test_a_release_asks_nothing_and_from_claude_s_shell_its_commits_say_so(
+    vault: Vault, folder: Path, os_prompt: Callable[..., FakePrompt], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The OS prompt answers the release where this machine has one; its no keeps the recording held (DR-0572)."""
+    """A release runs on the owner's yes, given before the command (DR-0600): no prompt and no code, in Claude Code's
+    shell too, and its two commits say Claude ran it (DR-0599)."""
     ingest(vault, folder)
-    hello = os_prompt(osprompt.Refused("cancelled"), osprompt.Verified())
-    person = owner("", "")
-    report = releasing.release(vault, "rec", folder, [cut_01()])
-    assert report.released == []
-    assert report.held == [("rec-cut-01", "not confirmed")]
-    assert "Fake Hello didn't confirm it (cancelled); rec-cut-01 stays held" in capsys.readouterr().out
-    assert "rec-cut-01" in holds.read(vault.root, "rec")
+    hello = os_prompt()
+    monkeypatch.setenv("CLAUDECODE", "1")
     report = releasing.release(vault, "rec", folder, [cut_01()])
     assert report.released == ["rec-cut-01"]
-    assert hello.acts == ["release a held recording", "release a held recording"]
-    assert all(p.startswith("Press Enter to release rec-cut-01 with Fake Hello") for p in person.prompts)
+    assert hello.acts == []
+    assert sh(vault.root, "git", "log", "-2", "--format=%B").count(console.BY_CLAUDE) == 2
     assert "rec-cut-01" not in holds.read(vault.root, "rec")
 
 
 def test_a_confirmed_release_commits_the_log_then_the_hold_and_stages_the_recording_cut(
-    vault: Vault, folder: Path, owner: Callable[..., AtConsole], capsys: pytest.CaptureFixture[str]
+    vault: Vault, folder: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     ingest(vault, folder)
-    person = owner("code")
     capsys.readouterr()
     report = releasing.release(vault, "rec", folder, [cut_01()])
     assert report.released == ["rec-cut-01"]
@@ -214,8 +205,6 @@ def test_a_confirmed_release_commits_the_log_then_the_hold_and_stages_the_record
     assert "  recording   rec:rec-cut-01: kept as it reads here" in out
     assert "    title     Supplier sync \\x1b]52;c;aGk=\\x07" in out
     assert "\x1b" not in out
-    assert len(person.prompts) == 1
-    assert person.prompts[0].endswith("to release rec-cut-01, n to keep it held, q to stop: ")
     # Two commits, the log's first, naming no id; the hold off the list.
     assert subjects(vault)[:2] == ["Holds: rec, 1 released on test-box", "Releases: rec, 1 added on test-box"]
     assert not any("rec-cut" in s for s in subjects(vault)[:2])
@@ -245,13 +234,10 @@ def test_a_confirmed_release_commits_the_log_then_the_hold_and_stages_the_record
     assert "rec:rec-cut-01/summary" not in stored
 
 
-def test_a_release_makes_these_git_calls(
-    vault: Vault, folder: Path, owner: Callable[..., AtConsole], monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_release_makes_these_git_calls(vault: Vault, folder: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Every git call of one release, in order (#132): a call added later fails here with its name."""
     ingest(vault, folder)
     opened = Vault.open(vault.root)
-    owner("code")
     with git_calls(monkeypatch) as calls:
         assert releasing.release(opened, "rec", folder, [cut_01()]).released == ["rec-cut-01"]
     hold, log = "-- state/holds/rec.txt", "-- state/releases/rec.jsonl"
@@ -275,11 +261,9 @@ def test_a_release_makes_these_git_calls(
     ]
 
 
-def test_a_release_during_a_conflict_refuses_before_any_question(
-    vault: Vault, folder: Path, owner: Callable[..., AtConsole]
-) -> None:
+def test_a_release_during_a_conflict_refuses_before_any_screen(vault: Vault, folder: Path) -> None:
     # An unmerged path, as a stash pop that conflicts leaves one: stages 1 to 3 and no *_HEAD file. The release's
-    # commits would refuse it only after the owner typed the code and its log line was on disk (#132, DR-0528).
+    # commits would refuse it only after its screen and its log line on disk (#132, DR-0528).
     ingest(vault, folder)
     rel = "conflict.txt"
     blob = sh(vault.root, "git", "hash-object", "-w", "--", "vault.yaml").strip()
@@ -291,29 +275,12 @@ def test_a_release_during_a_conflict_refuses_before_any_question(
     assert proc.returncode == 0
     assert sh(vault.root, "git", "ls-files", "-u")
     before = snapshot(vault), releaselog.read(vault.root, "rec")
-    person = owner("code")
     with pytest.raises(DocketError, match=f"{rel} in .* has a conflict; resolve it before Docket writes"):
         releasing.release(Vault.open(vault.root), "rec", folder, [cut_01()])
-    assert person.prompts == []
     assert (snapshot(vault), releaselog.read(vault.root, "rec")) == before
 
 
-@pytest.mark.parametrize("answer", ["y", "yes", "n", "ABC", "q"])
-def test_anything_but_the_code_writes_nothing(
-    vault: Vault, folder: Path, owner: Callable[..., AtConsole], answer: str
-) -> None:
-    ingest(vault, folder)
-    before = snapshot(vault)
-    owner(answer, answer)
-    report = releasing.release(vault, "rec", folder, [cut_01(), Proposal("rec-cut-02", ("0:12-0:35",))])
-    assert snapshot(vault) == before
-    assert report.released == []
-    assert report.stopped == (answer == "q")
-
-
-def test_what_fails_a_check_stays_held_and_writes_nothing_while_the_batch_goes_on(
-    vault: Vault, folder: Path, owner: Callable[..., AtConsole]
-) -> None:
+def test_what_fails_a_check_stays_held_and_writes_nothing_while_the_batch_goes_on(vault: Vault, folder: Path) -> None:
     ingest(vault, folder)
     # A recording imported before its hold arrived is in raw, uncut.
     (folder / "rec-raw-05.json").write_text(json.dumps(recording("rec-raw-05")), encoding="utf-8")
@@ -323,7 +290,6 @@ def test_what_fails_a_check_stays_held_and_writes_nothing_while_the_batch_goes_o
         gate.classify(entry.key, "work")
     gate.promote()
     holds.add(vault, "rec", ["rec-raw-05", "rec-missing"])
-    owner("code")
     proposals = [
         Proposal("rec-cut-02"),
         Proposal("rec-cut-02", ("120-340",)),
@@ -360,98 +326,75 @@ def test_what_fails_a_check_stays_held_and_writes_nothing_while_the_batch_goes_o
     assert set(releaselog.read(vault.root, "rec")) == {"rec-cut-01"}
 
 
-def test_a_keep_intake_drops_stays_held(vault: Vault, folder: Path, owner: Callable[..., AtConsole]) -> None:
+def test_a_keep_intake_drops_stays_held(vault: Vault, folder: Path) -> None:
     ingest(vault, folder)
     config = vault.root / "vault.yaml"
     config.write_text(
         config.read_text(encoding="utf-8").replace("  keywords: []", "  keywords:\n  - supplier"), encoding="utf-8"
     )
-    owner("code")
     report = releasing.release(vault, "rec", folder, [cut_01()])
     assert report.held == [("rec-cut-01", "keep rec:rec-cut-01: intake drops it (never-store)")]
 
 
-def test_a_hold_or_log_that_changes_while_the_owner_reads_stops_that_id(
-    vault: Vault, folder: Path, owner: Callable[..., AtConsole]
+def test_a_hold_or_log_that_changes_after_the_screen_stops_that_id(
+    vault: Vault, folder: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ingest(vault, folder)
+    shown = releasing._shown
 
-    def meanwhile() -> str:
-        # Another machine's change arrives while the owner reads: the hold is gone from the list.
+    def meanwhile(gate: Gate, checked: Any) -> Any:
+        # Another machine's change arrives after the screen: the hold is gone from the list.
         (vault.root / HOLDS / "rec.txt").write_text("rec-cut-02\nrec-cut-03\n", encoding="utf-8")
-        return "code"
+        return shown(gate, checked)
 
-    owner(meanwhile)
+    monkeypatch.setattr(releasing, "_shown", meanwhile)
     report = releasing.release(vault, "rec", folder, [cut_01()])
     assert report.held == [("rec-cut-01", "its hold or release changed since the screen; run the release again")]
     assert releaselog.read(vault.root, "rec") == {}
     assert not any(s.startswith("Releases:") for s in subjects(vault))
 
 
-def test_a_line_left_uncommitted_is_committed_and_a_rerun_only_takes_the_hold_off(
-    vault: Vault, folder: Path, owner: Callable[..., AtConsole]
-) -> None:
+def test_a_line_left_uncommitted_is_committed_and_a_rerun_only_takes_the_hold_off(vault: Vault, folder: Path) -> None:
     ingest(vault, folder)
     # A crash after the line was written and before its commit: held and released on disk.
     line = Release(id="rec-cut-01", cuts=[LoggedCut(start=10_000, end=40_000)], at=datetime.now(UTC), machine="m")
     path = vault.root / RELEASES / "rec.jsonl"
     path.parent.mkdir(parents=True)
     path.write_text(line.line() + "\n", encoding="utf-8")
-    person = owner("code")
     report = releasing.release(vault, "rec", folder, [cut_01()])
     assert report.taken_off == ["rec-cut-01"]
-    assert person.prompts[0].endswith("to take the hold off rec-cut-01, n to keep it held, q to stop: ")
     assert subjects(vault)[:2] == ["Holds: rec, 1 released on test-box", "Releases: rec, the log committed on test-box"]
     assert len(releaselog.read(vault.root, "rec")["rec-cut-01"].lines) == 1
     assert staged(vault)["rec:rec-cut-01/transcript"][:2] == ("pending", None)
 
 
-def test_a_hold_brought_back_gets_one_question_and_no_new_line(
-    vault: Vault, folder: Path, owner: Callable[..., AtConsole], capsys: pytest.CaptureFixture[str]
+def test_a_hold_brought_back_comes_off_with_no_new_line(
+    vault: Vault, folder: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     ingest(vault, folder)
-    owner("code")
     releasing.release(vault, "rec", folder, [cut_01()])
     (vault.root / HOLDS / "rec.txt").write_text("rec-cut-01\nrec-cut-02\n", encoding="utf-8")
-    for answer, held in (("n", True), ("q", True), ("code", False)):
-        person = owner(answer)
-        capsys.readouterr()
-        report = releasing.release(vault, "rec", folder, [cut_01()])
-        assert ("rec-cut-01" in holds.read(vault.root, "rec")) == held
-        assert report.stopped == (answer == "q")
-        assert len(person.prompts) == 1
+    capsys.readouterr()
+    report = releasing.release(vault, "rec", folder, [cut_01()])
+    assert report.taken_off == ["rec-cut-01"]
+    assert "rec-cut-01" not in holds.read(vault.root, "rec")
     assert "and held again: a merge brought the hold back" in capsys.readouterr().out
     assert len(releaselog.read(vault.root, "rec")["rec-cut-01"].lines) == 1
 
 
-def test_released_and_off_the_hold_with_nothing_staged_is_staged_without_a_question(
-    vault: Vault, folder: Path, owner: Callable[..., AtConsole]
-) -> None:
+def test_released_and_off_the_hold_with_nothing_staged_is_staged_again(vault: Vault, folder: Path) -> None:
     ingest(vault, folder)
     # A crash after the hold's commit, before the records were staged.
     line = Release(id="rec-cut-01", cuts=[LoggedCut(start=10_000, end=40_000)], at=datetime.now(UTC), machine="m")
     releaselog.add(vault, "rec", line)
     holds.remove(vault, "rec", ["rec-cut-01"])
-    person = owner()
     report = releasing.release(vault, "rec", folder, [cut_01(), Proposal("rec-cut-09", ("0:12-0:35",))])
     assert report.restaged == ["rec-cut-01"]
-    assert person.prompts == []
     assert staged(vault)["rec:rec-cut-01/transcript"][:2] == ("pending", None)
     empty = folder.parent / "empty"
     empty.mkdir()
     report = releasing.release(vault, "rec", empty, [cut_01()])
     assert report.refused == [("rec-cut-01", "released already, and not in this folder")]
-
-
-def test_nothing_is_read_without_the_owner_at_a_console(
-    vault: Vault, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    missing = tmp_path / "missing"
-    with pytest.raises(DocketError, match=r"a release asks you at a console"):
-        releasing.release(vault, "rec", missing, [cut_01()])
-    monkeypatch.setenv("CLAUDECODE", "1")
-    with pytest.raises(DocketError, match=r"this shell is Claude Code's \(CLAUDECODE is set\)"):
-        releasing.release(vault, "rec", missing, [cut_01()])
 
 
 @pytest.mark.parametrize(
@@ -462,11 +405,10 @@ def test_nothing_is_read_without_the_owner_at_a_console(
     ],
 )
 def test_a_log_or_list_that_doesn_t_read_is_refused_before_it_is_committed(
-    vault: Vault, folder: Path, owner: Callable[..., AtConsole], case: tuple[str, str, str]
+    vault: Vault, folder: Path, case: tuple[str, str, str]
 ) -> None:
     rel, broken, message = case
     ingest(vault, folder)
-    person = owner("code")
     head = sh(vault.root, "git", "rev-parse", "HEAD")
     path = vault.root / rel
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -474,30 +416,22 @@ def test_a_log_or_list_that_doesn_t_read_is_refused_before_it_is_committed(
     with pytest.raises(DocketError, match=message):
         releasing.release(vault, "rec", folder, [cut_01()])
     assert sh(vault.root, "git", "rev-parse", "HEAD") == head
-    assert person.prompts == []
 
 
-def test_a_disabled_source_stops_before_the_question(
-    vault: Vault, folder: Path, owner: Callable[..., AtConsole]
-) -> None:
+def test_a_disabled_source_stops_before_the_screen(vault: Vault, folder: Path) -> None:
     ingest(vault, folder)
     path = vault.root / "vault.yaml"
     config = VaultConfig.load(path)
     config.sources["rec"] = config.sources["rec"].model_copy(update={"enabled": False})
     path.write_text(config.dump(), encoding="utf-8")
     before = snapshot(vault)
-    person = owner("code")
     with pytest.raises(DocketError, match=r"'rec' is disabled in vault\.yaml"):
         releasing.release(vault, "rec", folder, [cut_01()])
-    assert person.prompts == []
     assert snapshot(vault) == before
 
 
-def test_show_refuses_an_id_released_already_and_held_again(
-    vault: Vault, folder: Path, owner: Callable[..., AtConsole]
-) -> None:
+def test_show_refuses_an_id_released_already_and_held_again(vault: Vault, folder: Path) -> None:
     ingest(vault, folder)
-    owner("code")
     releasing.release(vault, "rec", folder, [cut_01()])
     (vault.root / HOLDS / "rec.txt").write_text("rec-cut-01\nrec-cut-02\n", encoding="utf-8")
     with pytest.raises(DocketError, match="rec-cut-01 was released already and is held again") as e:
@@ -505,9 +439,7 @@ def test_show_refuses_an_id_released_already_and_held_again(
     assert "docket hold release rec rec-cut-01 --from <folder>" in str(e.value)
 
 
-def test_only_the_versions_the_owner_was_shown_are_classified_by_them(
-    vault: Vault, folder: Path, owner: Callable[..., AtConsole]
-) -> None:
+def test_only_the_versions_the_owner_was_shown_are_classified_by_them(vault: Vault, folder: Path) -> None:
     # A version of the transcript staged before its hold arrived, as on another machine: never on this screen.
     variant = RawRecord.model_validate(
         {
@@ -523,7 +455,6 @@ def test_only_the_versions_the_owner_was_shown_are_classified_by_them(
     )
     Gate(vault).stage([variant])
     holds.add(vault, "rec", ["rec-cut-01"])
-    owner("code")
     assert releasing.release(vault, "rec", folder, [cut_01()]).released == ["rec-cut-01"]
     versions = sorted(
         (e.staged.state, e.staged.classified_by)
@@ -543,7 +474,7 @@ def test_only_the_versions_the_owner_was_shown_are_classified_by_them(
     ],
 )
 def test_a_transcript_the_gate_won_t_stage_is_not_classified_and_the_release_goes_on(
-    vault: Vault, tmp_path: Path, owner: Callable[..., AtConsole], second: list[dict[str, Any]], keyword: str | None
+    vault: Vault, tmp_path: Path, second: list[dict[str, Any]], keyword: str | None
 ) -> None:
     folder = tmp_path / "two"
     folder.mkdir()
@@ -555,7 +486,6 @@ def test_a_transcript_the_gate_won_t_stage_is_not_classified_and_the_release_goe
         config.never_store.keywords.append(keyword)
         path.write_text(config.dump(), encoding="utf-8")
     ingest(vault, folder)
-    owner("code")
     proposal = Proposal("rec-two-06", ("0:12-0:35",), ("rec:rec-two-06",))
     assert releasing.release(vault, "rec", folder, [proposal]).released == ["rec-two-06"]
     got = staged(vault)
@@ -570,14 +500,13 @@ def test_show_needs_a_folder(vault: Vault, folder: Path) -> None:
 
 
 def test_a_long_cut_shows_its_edges_and_a_count_and_a_dropped_record_is_named(
-    vault: Vault, folder: Path, owner: Callable[..., AtConsole], capsys: pytest.CaptureFixture[str]
+    vault: Vault, folder: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     ingest(vault, folder)
     config = vault.root / "vault.yaml"
     config.write_text(
         config.read_text(encoding="utf-8").replace("  keywords: []", "  keywords:\n  - supplier"), encoding="utf-8"
     )
-    owner("n")
     capsys.readouterr()
     releasing.release(vault, "rec", folder, [Proposal("rec-cut-01", ("0:05-1:05",))])
     out = capsys.readouterr().out
@@ -588,7 +517,7 @@ def test_a_long_cut_shows_its_edges_and_a_count_and_a_dropped_record_is_named(
     assert "Supplier" not in out
 
 
-def test_nothing_answers_the_question_for_the_owner() -> None:
+def test_only_the_command_line_releases() -> None:
     assert list(inspect.signature(releasing.release).parameters) == ["vault", "source", "folder", "proposals"]
     src = Path(releasing.__file__).resolve().parents[1]
     callers = sorted(
@@ -600,7 +529,7 @@ def test_nothing_answers_the_question_for_the_owner() -> None:
 
 
 def test_only_the_release_writes_a_release_line_or_takes_a_hold_off() -> None:
-    """No page, route or tool releases (DR-0382): only the console's release writes the log and takes a hold off."""
+    """No page, route or tool releases (DR-0382): only the release writes the log and takes a hold off."""
     src = Path(releasing.__file__).resolve().parents[1]
     writers: dict[str, set[str]] = {}
     for path in src.rglob("*.py"):
@@ -675,12 +604,11 @@ def run(capsys: pytest.CaptureFixture[str], *args: str) -> tuple[int, str, str]:
 
 
 def test_list_prints_ids_only_and_marks_a_hold_brought_back(
-    vault: Vault, folder: Path, owner: Callable[..., AtConsole], capsys: pytest.CaptureFixture[str]
+    vault: Vault, folder: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = str(vault.root)
     assert run(capsys, "hold", "list", "--vault", root)[1] == "nothing held\n"
     assert main(["ingest", "rec", str(folder), "--vault", root]) == 0
-    owner("code")
     assert (
         main(["hold", "release", "rec", "rec-cut-01", "--from", str(folder), "--cut", "0:12-0:35", "--vault", root])
         == 0
@@ -705,22 +633,8 @@ def test_show_prints_the_recording_escaped(vault: Vault, folder: Path, capsys: p
     assert "  [0:10-0:20] Ada Example: First, my weekend plans." in out
 
 
-def test_release_refuses_claude_code_s_shell_and_a_process_without_a_console_before_reading(
-    vault: Vault, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    args = ["hold", "release", "rec", "rec-cut-01", "--from", str(tmp_path / "missing"), "--cut", "0:12-0:35"]
-    code, _, err = run(capsys, *args, "--vault", str(vault.root))
-    assert code == 2
-    assert "a release asks you at a console" in err
-    monkeypatch.setenv("CLAUDECODE", "1")
-    code, _, err = run(capsys, *args, "--vault", str(vault.root))
-    assert code == 2
-    assert "this shell is Claude Code's (CLAUDECODE is set)" in err
-    assert "isn't a folder" not in err
-
-
-def test_release_with_a_piped_y_keeps_it_held_and_the_code_releases_it(
-    vault: Vault, folder: Path, owner: Callable[..., AtConsole], capsys: pytest.CaptureFixture[str]
+def test_release_on_the_command_line_releases_and_says_what_comes_next(
+    vault: Vault, folder: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = str(vault.root)
     assert main(["ingest", "rec", str(folder), "--vault", root]) == 0
@@ -736,19 +650,11 @@ def test_release_with_a_piped_y_keeps_it_held_and_the_code_releases_it(
         "--keep",
         "rec:rec-cut-01",
     ]
-    owner("y")
-    code, out, _ = run(capsys, *args, "--vault", root)
-    assert code == 0
-    assert "that isn't the code; rec-cut-01 stays held" in out
-    assert "held       rec-cut-01  not confirmed" in out
-    assert "rec-cut-01" in holds.read(vault.root, "rec")
-    owner("code")
     code, out, _ = run(capsys, *args, "--vault", root)
     assert code == 0
     assert "released   rec-cut-01" in out
     assert "next       docket staging promote" in out
     assert "rec-cut-01" not in holds.read(vault.root, "rec")
-    owner()
     code, out, _ = run(capsys, *args, "--vault", root)
     assert "staged     rec-cut-01  released already" in out
     code, out, _ = run(capsys, "hold", "release", "rec", "rec-open-04", "--from", str(folder), "--vault", root)
@@ -756,7 +662,7 @@ def test_release_with_a_piped_y_keeps_it_held_and_the_code_releases_it(
 
 
 def test_release_takes_a_proposals_file_or_an_id_never_both(
-    vault: Vault, folder: Path, tmp_path: Path, owner: Callable[..., AtConsole], capsys: pytest.CaptureFixture[str]
+    vault: Vault, folder: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = str(vault.root)
     assert main(["ingest", "rec", str(folder), "--vault", root]) == 0
@@ -773,19 +679,13 @@ def test_release_takes_a_proposals_file_or_an_id_never_both(
     assert (code, "not both" in err) == (2, True)
     code, _, err = run(capsys, *base)
     assert (code, "name the held id to release, or give --proposals" in err) == (2, True)
-    owner("q")
     code, out, _ = run(capsys, *base, "--proposals", str(proposals))
     assert "  note        the weekend plans" in out
-    assert "held       rec-cut-01  stopped before it" in out
-    assert "stopped    the rest stay held" in out
-    owner("code")
-    code, out, _ = run(capsys, *base, "--proposals", str(proposals))
     assert out.splitlines()[-3:] == [
         "released   rec-cut-01",
         "held       rec-cut-03  no transcript to cut by time",
         "next       docket staging promote",
     ]
-    owner()
     proposals.write_text("source: rec\nrecordings:\n  - id: rec-cut-02\n    held: later\n", encoding="utf-8")
     assert run(capsys, *base, "--proposals", str(proposals))[1] == "held       rec-cut-02  later\n"
 

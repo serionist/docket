@@ -131,7 +131,7 @@ def test_a_media_host_or_folder_added_by_hand_waits_and_one_removed_applies_at_o
         ["~/In"],
     )
     assert found.waiting
-    assert inforce.loosens(found.config, found.written)
+    assert inforce.effective(found.config, found.written) != found.written
     edit(vault, source("calls", calls.model_copy(update={"media_hosts": [], "media_folders": []})))
     found = Vault.open(vault.root)
     assert (found.config.sources["calls"].media_hosts, found.config.sources["calls"].media_folders) == ([], [])

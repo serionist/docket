@@ -83,7 +83,7 @@
   {% for h in held %}
   <article class="held">
     <h3 class="held-head"><span class="source">{{ h.source }}</span> <span class="meta">{{ h.ids|length }} recording{{ "s" if h.ids|length != 1 else "" }} held{% if h.on_hold %}; {{ h.on_hold }} staged record{{ "s" if h.on_hold != 1 else "" }} on hold, which stop{{ "s" if h.on_hold == 1 else "" }} every ingest of {{ h.source }}{% endif %}</span></h3>
-    <p class="hint">A release is yours to confirm: run the command in your own terminal, where it shows each cut and asks you to type back a code. Claude can place the cuts for you:</p>
+    <p class="hint">A release goes in on your yes: Claude places the cuts, shows them to you and runs the release, or you run the command yourself. Hand them to Claude with:</p>
     {{ paste(h.paste, 'the words that hand ' ~ h.source ~ "'s held recordings to Claude") }}
     {% if h.unfilled %}
     <dl class="unfilled">

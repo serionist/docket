@@ -4,7 +4,6 @@ this folder copied into a temp project the way a user copies it."""
 from __future__ import annotations
 
 import json
-import re
 import shutil
 import subprocess
 from datetime import UTC, datetime, timedelta
@@ -35,7 +34,6 @@ from docket.cli import main
 from docket.imports.notes import import_notes
 from docket.service.app import ServiceApp, create_app
 from docket.service.state import Settings
-from docket.sources import release as releasing
 from docket.sources.contract import check_output
 from docket.vault.config import Owner, SourceConfig, VaultConfig
 from docket.vault.gate import Gate
@@ -217,7 +215,7 @@ def test_docket_ingest_imports_a_backfill_through_the_example(
 
 
 def test_a_held_recording_goes_in_only_with_the_cuts_its_owner_confirms(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     vault = project_with_the_example(tmp_path)
     stretch = [
@@ -256,9 +254,7 @@ def test_a_held_recording_goes_in_only_with_the_cuts_its_owner_confirms(
     assert "on hold    2" in capsys.readouterr().out
     assert not any("rec-cut" in e.staged.record.rid for e in Gate(vault).list().entries)
 
-    # The owner at the console, typing back the code each question shows.
-    monkeypatch.setattr(releasing, "_console_problem", lambda: None)
-    monkeypatch.setattr(releasing, "_ask", lambda prompt: re.findall(r"Type ([A-Z]{4}) to", prompt)[0])
+    # On the owner's yes, which comes before the command: the release asks nothing.
     release = ["hold", "release", "plaud", "--from", str(folder), "--vault", root]
     assert main([*release, "rec-cut-01", "--cut", "0:12-0:35", "--keep", "plaud:rec-cut-01"]) == 0
     assert main([*release, "rec-cut-03", "--cut", "0:01-0:02"]) == 0

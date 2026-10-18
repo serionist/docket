@@ -149,7 +149,6 @@ def test_source_new_takes_a_vault_found_in_the_config_or_the_environment_only_wh
     owner: Callable[..., AtConsole], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     # Project A's folder vault is the default; the user works in project B.
-    owner("code", "code", "code", "code")  # each loosening below is typed back at the console (DR-0517)
     (tmp_path / "a").mkdir()
     (tmp_path / "b").mkdir()
     a = host_repo(tmp_path / "a")

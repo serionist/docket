@@ -296,8 +296,8 @@ class VaultConfig(_Model):
     never_store: NeverStore = Field(default_factory=NeverStore)
     redaction: Redaction = Field(default_factory=Redaction)
     # The API provider this vault's text may go to for embeddings and reranking (#89, DR-0537); none when absent. A
-    # key added later to the settings in force: it applies once committed, and turning it either way asks at the
-    # owner's console (DR-0517, DR-0521).
+    # key added later to the settings in force: it applies once committed (DR-0521), by a write of Docket's or the
+    # owner's own commit (DR-0601).
     api_provider: Literal["voyage"] | None = None
     # Files Docket writes in the consuming repo from the entities (DR-0552); none when absent. A key added later too,
     # written only when set (`_written`).

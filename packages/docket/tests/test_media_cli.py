@@ -3,13 +3,13 @@ writer (adding asks at the console, removing doesn't), the key store's opt-in, a
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from docket_testkit import AtConsole, git, sh
+from docket_testkit import git, sh
 from media_kit import CALL, audio, in_raw, media_vault
 
+from docket import console
 from docket.cli import main
 from docket.media import crypto, layout
 from docket.media import put as media
@@ -94,33 +94,28 @@ def test_the_drop_folder_is_printed_and_made(tmp_path: Path, capsys: pytest.Capt
     assert code == 0 and Path(out.strip()) == media.drop_folder() and media.drop_folder().is_dir()
 
 
-def test_adding_a_host_or_folder_asks_at_the_console_and_removing_doesn_t(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], owner: Callable[..., AtConsole]
+def test_adding_or_removing_a_host_or_folder_asks_nothing_and_says_who(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     vault = media_vault(tmp_path)
     root = str(vault.root)
-    # Claude Code's shell can't add one: adding lets more in.
-    code, out = run(capsys, "media", "host", "add", "plaud", "files.example", "--vault", root)
-    assert code == 2 and "your own terminal" in out
-    person = owner("code", "n", "code")
-    code, out = run(capsys, "media", "host", "add", "plaud", "files.example", "--vault", root)
+    # Claude, on the owner's yes in chat (DR-0599): written at once, the commit saying so.
+    monkeypatch.setenv("CLAUDECODE", "1")
+    _, out = run(capsys, "media", "host", "add", "plaud", "files.example", "--vault", root)
     assert "media    media host files.example added to plaud" in out
-    code, out = run(capsys, "media", "folder", "add", "plaud", "~/Downloads", "--vault", root)
-    assert "media    media folder not changed: the code wasn't typed back" in out
-    code, out = run(capsys, "media", "folder", "add", "plaud", "~/Downloads", "--vault", root)
+    assert console.BY_CLAUDE in sh(vault.root, "git", "log", "-1", "--format=%B")
+    monkeypatch.delenv("CLAUDECODE")
+    _, out = run(capsys, "media", "folder", "add", "plaud", "~/Downloads", "--vault", root)
     assert "media    media folder ~/Downloads added to plaud" in out
-    assert len(person.prompts) == 3
     assert sources(vault)["plaud"] == (["media.example", "files.example"], ["~/Downloads"])
-    code, out = run(capsys, "media", "host", "add", "plaud", "files.example", "--vault", root)
+    _, out = run(capsys, "media", "host", "add", "plaud", "files.example", "--vault", root)
     assert "media    plaud has media host files.example already" in out
-    # Removing keeps more out: written at once, nothing asked.
-    code, out = run(capsys, "media", "host", "remove", "plaud", "files.example", "--vault", root)
+    _, out = run(capsys, "media", "host", "remove", "plaud", "files.example", "--vault", root)
     assert "media    media host files.example removed from plaud" in out
-    code, out = run(capsys, "media", "folder", "remove", "plaud", "~/Downloads", "--vault", root)
+    _, out = run(capsys, "media", "folder", "remove", "plaud", "~/Downloads", "--vault", root)
     assert "removed from plaud" in out
-    code, out = run(capsys, "media", "folder", "remove", "plaud", "~/Downloads", "--vault", root)
+    _, out = run(capsys, "media", "folder", "remove", "plaud", "~/Downloads", "--vault", root)
     assert "media    plaud has no media folder ~/Downloads already" in out
-    assert len(person.prompts) == 3
     assert sources(vault)["plaud"] == (["media.example"], [])
     subjects = sh(vault.root, "git", "log", "--format=%s").splitlines()
     assert subjects[0] == "Config: plaud, a media folder removed"

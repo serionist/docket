@@ -1,6 +1,6 @@
-"""Adding a never-store value from the Settings page (DR-0507 to DR-0509): two form posts, the second only after a view
-naming what the value drops now and what already stored holds it; the list only grows; the value travels in the posts'
-bodies alone, never in a URL, the log or a commit message. Invented people only: Dora Example, Cleo Test."""
+"""Adding a never-store value from the Settings page (DR-0508, DR-0509, DR-0602): two form posts, the second only after
+a view naming what the value drops now and what already stored holds it; the list only grows; the value travels in the
+posts' bodies alone, never in a URL, the log or a commit message. Invented people only: Dora Example, Cleo Test."""
 
 from __future__ import annotations
 

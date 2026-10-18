@@ -3,8 +3,7 @@
 An edit of vault.yaml not committed yet keeps more out at once and lets more in only once committed. `effective` is
 HEAD's settings with every part of the working file that only keeps more out put in, field by field, each checked
 against what the gate and the jobs do with it; everything else stays HEAD's, so a key a later schema adds waits too.
-`loosens` is the same rule seen from the other side: a change loosens when the settings in force under it aren't the
-change itself (DR-0506). One rule, so the page's door, the take-in, the console's question and the gate never drift.
+Every write of Docket's that changes vault.yaml commits such an edit first (DR-0601), so it is in force from there.
 """
 
 from __future__ import annotations
@@ -137,12 +136,6 @@ def effective(committed: VaultConfig, file: VaultConfig) -> VaultConfig:
             "sources": _sources(committed.sources, file.sources),
         }
     )
-
-
-def loosens(before: VaultConfig, after: VaultConfig) -> bool:
-    """Whether `after` is anything but `before` with changes that only keep more out: a page makes none such (DR-0506),
-    the CLI makes one only at the owner's console (DR-0517), and one made by hand applies only once committed."""
-    return effective(before, after) != after
 
 
 def _grown(before: list[str], after: list[str]) -> list[str]:

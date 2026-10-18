@@ -1,6 +1,6 @@
 """The Staging page's parts (DR-0380 to DR-0384): what waits at the staging gate by source and age, an open record as
-promotion would write it, the cuts chosen on it, and the held recordings with the commands that release them at the
-owner's console.
+promotion would write it, the cuts chosen on it, and the held recordings with the commands that release them, run by
+the owner or by Claude on their yes (DR-0600).
 
 `StagingState` is the URL. `build_list`, `build_panel` and `build_held` take what the gate and the vault said and do
 no I/O, so every rule here is tested on invented records. Nothing here releases a hold or shows a held recording's
@@ -649,7 +649,7 @@ def build_panel(shown: Shown, redactor: Redactor, state: StagingState) -> Panel:
         n = len(released)
         notes.append(
             f"Its recording's release cuts {n} utterance{_s(n)}, marked below: they go whatever is checked, as you "
-            "confirmed them at your console."
+            "confirmed them for the release."
         )
     problem: str | None = None
     chosen: list[Cut] = []
@@ -807,8 +807,8 @@ def build_held(
     root: str,
     on_hold: Mapping[str, int],
 ) -> list[HeldSource]:
-    """Each source's held ids and the commands that read and release one at the owner's console (DR-0382): ids only,
-    never anything from an import folder."""
+    """Each source's held ids and the commands that read and release one (DR-0382, DR-0600): ids only, never anything
+    from an import folder."""
     out: list[HeldSource] = []
     for source in sorted(holds.ids):
         if state.source not in (None, source) or not holds.of(source):

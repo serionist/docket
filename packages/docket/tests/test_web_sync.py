@@ -140,7 +140,7 @@ def test_a_source_off_or_without_tools_needs_nothing(client: TestClient, vault: 
     set_config(vault, lambda c: setattr(c.sources["memo"], "tools", []))
     empty = " ".join(text_of(page(client), "empty-line"))
     assert "No source syncs live yet" in empty
-    assert "in your own terminal, then list its tools in vault.yaml and commit it" in empty
+    assert "then list its tools in vault.yaml and commit it" in empty
 
 
 def test_a_private_source_with_tools_needs_nothing(client: TestClient, vault: Vault) -> None:

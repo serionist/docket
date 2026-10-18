@@ -127,16 +127,16 @@ agrees in the issue or, under an autonomy grant, with its decision recorded as p
 - the MCP tools' names and parameters: `search`, `read`, `verify` and `doc_put` (DR-0150), `run_open` and `ingest`
   (DR-0241), `media_put` (DR-0547), `briefs` (DR-0556), `decisions` (DR-0565), `transcribe` (DR-0571), and the
   plugin's server key `docket` that prefixes them (DR-0160);
-- the plugin's skill and hook names: `recall`, `setup`, `cuts` (DR-0207), `curate` (DR-0472), `brief` (DR-0555), `decision` (DR-0563), the SessionStart
+- the plugin's skill and hook names: `recall`, `setup`, `cuts` (DR-0605), `curate` (DR-0472), `brief` (DR-0555), `decision` (DR-0563), the SessionStart
   hook running `docket hook session-start` (DR-0161), and the PostToolUse hook running `docket hook post-tool-use`
   for `mcp__.*`, with its line prefixes (DR-0242);
-- the release's and the forget's yes: only the owner releases or forgets, at their own console, on the OS prompt or
-  a code typed back (DR-0572); no page, route or tool does either (DR-0202, DR-0382, DR-0577); both last for good.
-- the gate's loosening: pages make only the `vault.yaml` changes on DR-0506's list (a never-store value added, a
-  redaction rule or pattern turned on, a source made stricter or turned off), held by `loosens()` and a scan; every
-  other change is named, never made by a page, route or tool. A loosening applies only once committed, the gate
-  obeying HEAD's `vault.yaml` plus what an edit only tightens (DR-0521), and the CLI makes or takes in one only at
-  the owner's console, on the OS prompt or a code typed back (DR-0517, DR-0572). What it lets in reaches git for good.
+- the release's yes: `docket hold release` lets a held recording in on its owner's yes, at their own terminal or in
+  chat to Claude, the cuts shown first; no page, route or tool releases one (DR-0600, DR-0382). It lasts for good.
+- the forget's yes: only the owner forgets, at their own console, on the OS prompt or a code typed back (DR-0572); no
+  page, route or tool forgets (DR-0577). It lasts for good.
+- the gate's settings: the CLI and the pages make any `vault.yaml` change, each commit saying who; turning
+  `redaction.credentials` off asks at the owner's console (DR-0572) and no page makes it (DR-0601); an uncommitted
+  edit lets more in only once committed, the gate obeying HEAD's `vault.yaml` plus what it only tightens (DR-0521).
 
 Each lands with its decision entry, marked `cost: one-way`.
 

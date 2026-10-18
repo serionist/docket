@@ -1,20 +1,20 @@
 ---
 name: decision
-description: Propose decision candidates from the notes and minutes, and go through the waiting ones with the user. A candidate stays proposed until the user confirms or rejects it on the Briefs page. Use when the user asks to log, find or review decisions on a project, topic or stream, asks what was decided, or after a sync when the user wants the new notes' decisions proposed.
+description: Propose decision candidates from the notes and minutes, and go through the waiting ones with the user. A candidate stays proposed until the user confirms or rejects it, in chat or on the Briefs page. Use when the user asks to log, find or review decisions on a project, topic or stream, asks what was decided, or after a sync when the user wants the new notes' decisions proposed.
 allowed-tools: mcp__plugin_docket_docket__decisions mcp__plugin_docket_docket__search mcp__plugin_docket_docket__read mcp__plugin_docket_docket__verify
 ---
 
 # Decisions
 
 A decision is a processed doc about one thing decided, on a project, topic or stream entity:
-`decision:<yyyy-mm-dd>-<words>`, the day it was said. You propose candidates; only the user confirms or rejects one,
-with a click on the Briefs page. Not everything said is a decision: "let's do X" can be a wish, an opinion or a
-question.
+`decision:<yyyy-mm-dd>-<words>`, the day it was said. You propose candidates; only the user confirms or rejects one:
+their word in chat, which you write with `docket decision set`, or their click on the Briefs page. Not everything said
+is a decision: "let's do X" can be a wish, an opinion or a question.
 
 ## Two rules
 
-- **Only the user decides.** Never write a decision as confirmed or rejected, never say a proposed one is decided, and
-  never edit a decision's file. Docket refuses all three; auto mode and allow rules change nothing here.
+- **Only the user decides.** Set a decision only on the user's own word for it, never say a proposed one is decided
+  before they said so, and never edit a decision's file: `doc_put` and the take-in refuse a status or a link.
 - **Only when asked.** Propose candidates when the user asks, never on your own after a sync: say how many wait, once.
 
 ## Proposing
@@ -52,8 +52,8 @@ question.
    - `subject` is the project, topic or stream entity it is on; `entities` holds it too, and the people who decided.
    - The title is `# Proposed: <the decision, one sentence>`.
    - Each line cites what it was built from: a note's line by the `cite` `verify` gives, or the raw's own anchor.
-   - `replaces` and `contradicts` name current decisions on the same subject, by id. Never `supersedes`: the Briefs
-     page writes it when the user confirms.
+   - `replaces` and `contradicts` name current decisions on the same subject, by id. Never `supersedes`: Docket
+     writes it when the user confirms.
 5. **Put** each with `doc_put`. It isn't pre-approved, so Claude Code asks the user. A refusal says why: a statement a
    rejected decision already cites isn't proposed again.
 
@@ -66,9 +66,18 @@ question.
 | 1 | the charging dashboard ships before the pilot | fleet-management | Ben, fleet review, 13 Oct | confirm | said as settled, and no one disagreed |
 | 2 | the pilot starts in November | fleet-management | Cleo, 14 Oct | reject | a wish: "it would be good if" |
 
-A candidate that contradicts or replaces a current decision goes first, with both side by side. Then give the link to
-the Briefs page for the subject, `/briefs?brief=brief:<subject>`, where the user confirms, rejects or picks. Don't ask
-for their answer in chat: their click is the answer.
+A candidate that contradicts or replaces a current decision goes first, with both side by side. Ask for the user's
+answer for each, or give the link to the Briefs page for the subject, `/briefs?brief=brief:<subject>`, where they
+confirm, reject or pick themselves. On their answer for one, and only for that one, write it:
+
+```
+docket decision set <id> <confirm|reject|replace|stand|unrelated> --rev <rev> --vault <path>
+```
+
+- `--rev` is the rev the table showed, from `decisions`; a decision that moved since is refused, and you show it again.
+- One that contradicts a decision takes `replace` (the new one replaces it), `stand` (the old one stands) or
+  `unrelated` (both stand); any other takes `confirm` or `reject`.
+- It isn't pre-approved, so Claude Code asks the user too. The commit says you ran it with their OK.
 
 ## Rules
 

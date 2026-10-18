@@ -60,7 +60,7 @@ class NewSource:
     registered: bool
     block: str | None
     commit: str | None
-    # Not added: the owner didn't type the code back, and the folder written for it is gone again.
+    # Not added: the owner didn't confirm the uncommitted edit it would take in, and the folder is gone again.
     declined: bool = False
 
 

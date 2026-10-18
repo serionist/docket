@@ -533,7 +533,7 @@ def test_the_settings_page_in_a_browser(settings_service: tuple[int, str], tmp_p
 
 def test_the_settings_page_says_when_an_edit_isn_t_in_force(settings_service: tuple[int, str], tmp_path: Path) -> None:
     """An edit of vault.yaml by hand that lets more in waits for its commit (DR-0521): the page says so at the top,
-    naming no value, and a loosening command is for the owner's own terminal (DR-0517)."""
+    naming no value, and says what the file now holds (DR-0601)."""
     port, token = settings_service
     shots = Path(os.environ.get("DOCKET_TEST_SCREENSHOTS") or tmp_path)
     shots.mkdir(parents=True, exist_ok=True)
@@ -550,7 +550,7 @@ def test_the_settings_page_says_when_an_edit_isn_t_in_force(settings_service: tu
         page.goto(f"{link.body['url']}&next=/settings")
         page.wait_for_url(f"{base}/settings")
         expect(page.locator(".notice").first).to_contain_text("vault.yaml has an edit that isn't in force")
-        expect(page.locator("main")).to_contain_text("run it in your own terminal")
+        expect(page.locator("main")).to_contain_text("Credentials are not redacted")
         expect(page.locator("main")).not_to_contain_text("Dora #2")
         page.screenshot(path=str(shots / "settings-waiting.png"), full_page=True)
         page.set_viewport_size({"width": 390, "height": 844})

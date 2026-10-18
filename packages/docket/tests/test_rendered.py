@@ -18,7 +18,7 @@ from docket.vault.config import CONFIG_FILE, NeverStore, RenderedFile, VaultConf
 from docket.vault.entities import load_entities
 from docket.vault.entitystore import EntityStore, load_changes
 from docket.vault.host import Probe
-from docket.vault.inforce import loosens
+from docket.vault.inforce import effective
 from docket.vault.rendered import people, render_all, written_by_docket
 from docket.vault.vault import Vault
 
@@ -184,8 +184,9 @@ def test_the_key_is_a_later_key_in_force_only_once_committed(tmp_path: Path) -> 
     made = folder_vault(tmp_path)
     before = made.config
     after = before.model_copy(update={"rendered": [RenderedFile(kind="people", path="people.md")]})
-    assert loosens(before, after)
-    assert not loosens(after, before.model_copy(update={"rendered": after.rendered}))
+    assert effective(before, after) != after
+    back = before.model_copy(update={"rendered": after.rendered})
+    assert effective(after, back) == back
     waiting = set_rendered(made, *after.rendered, commit=False)
     assert waiting.config.rendered == []
     assert waiting.waiting

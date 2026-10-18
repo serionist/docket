@@ -330,7 +330,7 @@ def _absent(facts: Facts) -> RecordingView:
             title=facts.rid,
             message=(
                 f"{facts.rid} is held: it has stretches you left out, so nothing of it is stored yet. /docket:cuts "
-                "goes through its cuts with you, and you release it in your own terminal."
+                "goes through its cuts with you and releases it on your yes."
             ),
             link=f"/staging?source={source}",
             link_label=f"Held {source} recordings on the Staging page",

@@ -1,7 +1,7 @@
-"""Turning a redaction rule on, and making a source stricter or turning it off, from the Settings page (DR-0506,
-DR-0507, DR-0509): one post each, a source made private only after a view naming what waits from it; each through
-vault.yaml's one writer and `loosens()`, refused when the page is older than the file, no write when sent twice.
-Invented records only: Ada Example, Ben Sample."""
+"""Turning a redaction rule on or off, setting a source's sensitivity, turning it on or off, and taking a never-store
+value off, from the Settings page (DR-0601, DR-0602, DR-0509): one post each, a source made private only after a view
+naming what waits from it; each through vault.yaml's one writer, credentials off refused, refused when the page is
+older than the file, no write when sent twice. Invented records only: Ada Example, Ben Sample."""
 
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ from docket.web.templating import PAGE_CSP
 
 SAME = {"Origin": OURS, "Sec-Fetch-Site": "same-origin"}
 RULE = "/settings/redaction"
+ADD = "/settings/never-store"
 SOURCE = "/settings/source"
 
 
@@ -84,7 +85,7 @@ def test_a_rule_is_turned_on_in_one_post_and_twice_is_one_write(client: TestClie
     form = parse(client.get("/settings").text).find("input", name="rule").parent
     assert form is not None
     fields = {i.attrs["name"]: i.attrs["value"] for i in form.find_all("input")}
-    assert fields == {"rule": "phone", "shown": shown(vault)}
+    assert fields == {"rule": "phone", "state": "on", "shown": shown(vault)}
     answer = client.post(RULE, data=fields, headers=SAME)
     assert answer.status_code == 303
     assert answer.headers["location"] == "/settings?done=phone-on"
@@ -95,6 +96,24 @@ def test_a_rule_is_turned_on_in_one_post_and_twice_is_one_write(client: TestClie
     assert subjects(vault).count("Config: redaction phone on") == 1
     done = said(checked(client.get(answer.headers["location"])))
     assert "Phone numbers are redacted from now on. Run docket doc redact" in done
+    off = client.post(RULE, data={"rule": "phone", "state": "off", "shown": shown(vault)}, headers=SAME)
+    assert off.headers["location"] == "/settings?done=phone-off"
+    assert not config(vault).redaction.phone
+    assert "Phone numbers are no longer redacted, from the next sync" in said(client.get(off.headers["location"]).text)
+
+
+def test_credentials_off_is_never_a_post(client: TestClient, vault: Vault) -> None:
+    """The one change no page makes (DR-0601): the page names its command, and a crafted post is refused."""
+    html = client.get("/settings").text
+    assert not any(i.attrs.get("value") == "credentials" for i in parse(html).find_all("input", name="rule"))
+    assert "docket redaction set credentials off" in said(html)
+    before = (vault.root / CONFIG_FILE).read_bytes()
+    answer = client.post(RULE, data={"rule": "credentials", "state": "off", "shown": shown(vault)}, headers=SAME)
+    assert answer.status_code == 400
+    assert "yours to confirm at your own console" in said(answer.text)
+    bad = client.post(RULE, data={"rule": "phone", "state": "maybe", "shown": shown(vault)}, headers=SAME)
+    assert bad.status_code == 400
+    assert (vault.root / CONFIG_FILE).read_bytes() == before
 
 
 def test_a_pattern_is_turned_on_and_its_name_stays_out_of_the_url(client: TestClient, vault: Vault) -> None:
@@ -159,8 +178,7 @@ def test_a_page_older_than_the_file_writes_nothing(client: TestClient, vault: Va
 @pytest.mark.parametrize(
     ("fields", "said_back"),
     [
-        ({"source": "memo", "act": "work"}, "a page makes a source mixed or private, or turns it off"),
-        ({"source": "memo", "act": "on"}, "a page makes a source mixed or private, or turns it off"),
+        ({"source": "memo", "act": "looser"}, "a page makes a source work, mixed or private, or turns it on or off"),
         ({"source": "attic", "act": "off"}, "no source attic in vault.yaml"),
         ({"source": "../x", "act": "off"}, "source is a source's name from vault.yaml"),
         ({"source": "documents", "act": "mixed"}, "the change doesn't fit vault.yaml"),
@@ -176,20 +194,44 @@ def test_a_change_pages_don_t_make_is_refused_and_writes_nothing(
     assert (vault.root / CONFIG_FILE).read_bytes() == before
 
 
-def test_a_looser_sensitivity_by_a_crafted_post_is_refused(client: TestClient, vault: Vault) -> None:
-    edit_config(vault, sources={**config(vault).sources, "memo": SourceConfig(sensitivity="private")})
-    git(vault.root, "commit", "-qam", "memo private by hand")
-    before = (vault.root / CONFIG_FILE).read_bytes()
-    answer = client.post(SOURCE, data={"source": "memo", "act": "mixed", "shown": shown(vault)}, headers=SAME)
-    assert answer.status_code == 400
-    assert "a page makes a source only stricter" in said(answer.text)
+def test_a_looser_sensitivity_and_a_source_turned_on_are_one_post_each(client: TestClient, vault: Vault) -> None:
+    edit_config(vault, sources={**config(vault).sources, "memo": SourceConfig(sensitivity="private", enabled=False)})
+    git(vault.root, "commit", "-qam", "memo private and off by hand")
+    for act in ("mixed", "work", "on"):
+        answer = client.post(SOURCE, data={"source": "memo", "act": act, "shown": shown(vault)}, headers=SAME)
+        assert answer.headers["location"] == f"/settings?done=memo-{act}"
+    memo = config(vault).sources["memo"]
+    assert (memo.sensitivity, memo.enabled) == ("work", True)
+    assert subjects(vault)[:3] == ["Config: source memo on", "Config: source memo work", "Config: source memo mixed"]
+    assert "memo is on: its syncs and scans start again." in said(client.get("/settings?done=memo-on").text)
+    assert "memo is work: its records are stored without a look." in said(client.get("/settings?done=memo-work").text)
     rules = client.post(RULE, data={"rule": "nope", "shown": shown(vault)}, headers=SAME)
     assert rules.status_code == 400
     assert "no redaction rule by that name" in said(rules.text)
-    assert (vault.root / CONFIG_FILE).read_bytes() == before
 
 
-def test_an_uncommitted_edit_that_lets_more_in_is_refused_at_each_step(client: TestClient, vault: Vault) -> None:
+def test_a_never_store_value_is_taken_off_in_one_post_naming_no_value(client: TestClient, vault: Vault) -> None:
+    page = parse(client.get("/settings?show=lists").text)
+    forms = [f for f in page.find_all("form", action="/settings/never-store") if f.find_all("input", name="act")]
+    fields = {i.attrs["name"]: i.attrs["value"] for i in forms[0].find_all("input")}
+    assert fields == {"act": "off", "list": "people", "value": "Cleo Test", "shown": shown(vault)}
+    hidden = parse(client.get("/settings").text).find_all("form", action="/settings/never-store")
+    assert not [f for f in hidden if f.find_all("input", name="act")]
+    answer = client.post(ADD, data=fields, headers=SAME)
+    assert answer.headers["location"] == "/settings?done=unlisted-people-1"
+    assert config(vault).never_store.people == ["Dora #2"]
+    assert subjects(vault)[0] == "Config: never-store people, 1 taken off"
+    assert "Cleo" not in sh(vault.root, "git", "log", "-1", "--format=%B")
+    assert "Took one value off people" in said(client.get(answer.headers["location"]).text)
+    again = client.post(ADD, data=fields, headers=SAME)
+    assert again.headers["location"] == "/settings?done=unlisted-people-0"
+    assert "The people list didn't hold that" in said(client.get(again.headers["location"]).text)
+    stale = client.post(ADD, data=fields | {"value": "Dora #2"}, headers=SAME)
+    assert stale.status_code == 409
+    assert config(vault).never_store.people == ["Dora #2"]
+
+
+def test_an_uncommitted_credentials_off_is_refused_at_each_step(client: TestClient, vault: Vault) -> None:
     path = vault.root / CONFIG_FILE
     edited = path.read_text(encoding="utf-8").replace("credentials: true", "credentials: false", 1)
     path.write_text(edited, encoding="utf-8", newline="\n")
@@ -201,9 +243,18 @@ def test_an_uncommitted_edit_that_lets_more_in_is_refused_at_each_step(client: T
     ]
     for answer in answers:
         assert answer.status_code == 400
-        assert settings.UNCOMMITTED_LOOSENING in said(answer.text)
+        assert settings.UNCOMMITTED_CREDENTIALS_OFF in said(answer.text)
     assert path.read_text(encoding="utf-8") == edited
     assert sh(vault.root, "git", "rev-parse", "HEAD") == at
+
+
+def test_any_other_uncommitted_edit_goes_in_first(client: TestClient, vault: Vault) -> None:
+    path = vault.root / CONFIG_FILE
+    edited = path.read_text(encoding="utf-8").replace("sensitivity: mixed", "sensitivity: work", 1)
+    path.write_text(edited, encoding="utf-8", newline="\n")
+    answer = client.post(RULE, data={"rule": "phone", "shown": shown(vault)}, headers=SAME)
+    assert answer.status_code == 303
+    assert subjects(vault)[:2] == ["Config: redaction phone on", "Config: vault.yaml as edited"]
 
 
 def test_a_hand_edited_file_shows_no_button_and_a_post_gets_the_line(client: TestClient, vault: Vault) -> None:
