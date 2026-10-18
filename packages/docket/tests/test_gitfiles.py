@@ -206,8 +206,10 @@ def test_a_reftable_repo_is_unknown_and_a_write_asks_git_as_before(
     with git_calls(monkeypatch) as calls:
         recall.doc_put(vault, note())
     # The branch test at each check and the new commit's id are asked of git, as before #132; git's identity was
-    # asked when the fixture committed through this same vault.
+    # asked when the fixture committed through this same vault. HEAD's id is asked once more by the put's raw lookup,
+    # for the forgotten list in force (DR-0579).
     assert calls == [
+        "rev-parse --verify --quiet HEAD",
         "rev-parse --abbrev-ref HEAD",
         "log --no-show-signature --format=%H%x1f%B%x1e -- processed/recording-note/2026/10/2026-10-14-supplier-call.md",
         "rev-parse --abbrev-ref HEAD",

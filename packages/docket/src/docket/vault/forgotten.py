@@ -43,8 +43,6 @@ FORGOTTEN = "state/forgotten.jsonl"
 # HEAD's list by the commit that holds it, so no git call is made while HEAD stays. Disposable: one that doesn't read
 # is a miss.
 CACHE = "committed-forgotten.json"
-# A folder file's identity as the list holds it: the key `native` keeps it under, and its value (DR-0483).
-IDENTITY_KEYS = (documents.BYTES_HASH, documents.TEXT_HASH)
 
 Hash = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{32}$")]
 KeyId = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
@@ -89,11 +87,12 @@ class Forget(_Model):
 
 
 def identity_of(record: RawRecord) -> str | None:
-    """A folder file record's identity as the list holds it, `sha256:<hex>` or `redacted_sha256:<hex>`; None for any
-    other record, a part or a gone version."""
+    """A folder file record's identity as the list holds it, the key `native` keeps it under and its value (DR-0483):
+    `sha256:<hex>` or `redacted_sha256:<hex>`; None for any other record, a part or a gone version. The folder source's
+    names are read here, not when this module loads: importing them first imports the vault, which imports this."""
     if not documents.is_folder(record) or record.kind != documents.FILE_KIND or documents.is_gone(record):
         return None
-    for key in IDENTITY_KEYS:
+    for key in (documents.BYTES_HASH, documents.TEXT_HASH):
         value = record.native.get(key)
         if isinstance(value, str):
             return f"{key}:{value}"
