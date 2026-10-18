@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0601
+    title: The CLI and the pages make any vault.yaml change, each commit saying who; turning credentials off asks at the owner's console and no page makes it
+    status: decided
+    at: "2026-10-18"
+    by: Soma Osvay
+    cost: one-way
+    sources: ["#191", "18 Oct, in chat"]
+    supersedes: [DR-0506, DR-0517, DR-0519]
+    description: "settings.rewrite makes the change its caller asks for, CLI or page; loosens() no longer refuses or asks. docket redaction set, docket source new with or without --folder, docket media folder add and remove, and docket models allow commit without a question. The Settings page makes each of its changes both ways: a source to any sensitivity, on or off; a redaction rule on or off; a never-store value added or taken off, the value only in the post's body and the commit naming the list and a count (DR-0508); a source made private still asks once more, since it drops what waits. Turning redaction.credentials off is the one change kept at the console: the CLI asks console.confirm with its warning and commits \"confirmed at the console\"; a page refuses it, naming the command. An edit of vault.yaml not committed yet is committed first, on its own, by any write, CLI or page, unasked, unless it turns credentials off, which the CLI asks about in the same question and a page refuses. The settings in force stay as DR-0521 has them: an uncommitted edit lets more in only once committed, now by any of Docket's writes as well as the owner's own commit. A media folder, a new source and the api provider stay commands, since each takes a typed path or name."
+    binds:
+      - inforce.loosens goes with its last caller; effective stays the settings in force's one rule.
+    not_chosen:
+      - "DR-0506's list kept for pages: the web app is the owner's, and may change settings both ways."
+      - "Dropping the settings in force with the question: what the gate obeys stays as it is in this change."

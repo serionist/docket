@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0604
+    title: Media is fetched over https from any host with every address checked; media_hosts is read and ignored, and docket media host goes
+    status: decided
+    at: "2026-10-18"
+    by: Soma Osvay
+    cost: one-way
+    sources: ["#191", "18 Oct, in chat"]
+    supersedes: [DR-0548]
+    description: "A URL must be https, to any host. Every address the host resolves to must be global and not an IPv6 form of an IPv4 address (the ranges DR-0548 lists, refused outright); the connection goes to a checked address with the host as SNI, ignoring proxies; at most 3 redirects, each checked the same way; Accept-Encoding: identity, and another Content-Encoding refused; media.max_bytes, 512 MiB by default, on Content-Length and while reading; 15 s to connect, 60 s idle, 15 minutes in all; a URL is never logged, stored or put in an error. The gate's media checks at the put, after the fetch and at promotion stay, and media is stored only once its record is in raw. A path must still resolve under one of the source's media_folders or Docket's drop folder: media_folders stays, since it keeps a put to the local folders the owner chose. A source's media_hosts key is accepted as any list and dropped as vault.yaml is read, so a file that has one never refuses; Docket never writes it, and the in-place writer leaves the line where the user has it (DR-0602). docket media host add and remove go. The run's media step and media line (DR-0561) are given for every source that isn't a folder source; the source's skill says whether it gets audio."
+    binds: [An older vault.yaml with media_hosts reads as before; a test holds it.]
+    not_chosen:
+      - "The list kept without its question: nobody needs a list Claude may add to, and the address checks are what keep a fetch off the machine's own network."
+      - "Dropping media_folders too: a path put reads local files, and the list keeps it to the folders the owner chose."
+      - "Refusing media_hosts in vault.yaml: every vault with a media source would stop reading."

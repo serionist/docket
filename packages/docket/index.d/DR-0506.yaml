@@ -1,11 +1,12 @@
 decisions:
   - id: DR-0506
     title: "Pages make only these vault.yaml changes: a never-store value added, a redaction rule or pattern turned on, a source made stricter or turned off; every other change is named"
-    status: proposed
+    status: superseded
     at: "2026-10-16"
     by: Claude (autonomy grant)
     cost: one-way
     sources: ["#73"]
+    superseded_by: [DR-0601]
     description: "The Settings page, and any later page, route or MCP tool, makes only the changes on this list, each of which keeps more out: a value added to a never-store list; credentials or phone turned on; one of the user's patterns turned on with nothing else of it changed; a source's sensitivity made stricter (work to mixed to private); a source turned off. Every other vault.yaml change is a loosening and is named, never made: docket redaction set <rule> off with the warning it prints, docket source new for a new source, a folder source too, or the line to change by hand. A key added to vault.yaml later is named too until a decision moves it onto the list. A typed confirmation stops no agent: Claude reaches a session through docket open or the token (DR-0152), and a browser agent reads and types what a page asks, with no prompt of Claude Code's in between. In Claude Code's shell the command or the edit passes the user's own prompts and allow rules. It is not a wall, as DR-0202 isn't: Claude can still run the command or edit the file, and the skills forbid it; #134 gives the CLI's loosening commands the release's console check. What a loosening lets in reaches raw, every clone and git history, as a release does."
     binds:
       - vault/settings.py's loosens(before, after) is the list as an allowlist, and every write with via page passes it inside the writer.

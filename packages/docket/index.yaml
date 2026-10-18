@@ -915,11 +915,12 @@ decisions:
       - "Staging the record uncut with the cuts beside it: every machine would ask about each later pull again; cut at intake, a pull matches what is staged or in raw and is skipped."
   - id: DR-0202
     title: Only the owner releases, at a console, by typing back a code
-    status: proposed
+    status: superseded
     at: "2026-10-15"
     by: Claude (autonomy grant)
     cost: one-way
     sources: ["#31"]
+    superseded_by: [DR-0600]
     description: "docket hold release asks its own question inside docket.sources.release, and release() has no parameter that answers it. Before it reads the folder it refuses when CLAUDECODE is set (the shell is Claude Code's) and without a console on both stdin and stdout: on Windows GetConsoleMode must succeed on both handles, since a redirect from NUL passes isatty there; elsewhere both must be terminals. The yes is a four-letter random code drawn fresh for each recording, shown and typed back; n keeps the recording held, q stops, and anything else keeps it held. No flag, environment variable or MCP tool skips the question, and no MCP tool releases a hold. The release line records the yes: when, and on which machine."
     binds:
       - Inside the package only cli.py calls release(); a test scans for it.

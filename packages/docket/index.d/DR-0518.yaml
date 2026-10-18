@@ -1,11 +1,12 @@
 decisions:
   - id: DR-0518
     title: One console check for the release and the loosening, in docket/console.py
-    status: proposed
+    status: superseded
     at: "2026-10-17"
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#134"]
+    superseded_by: [DR-0599]
     description: "The release's console part moves from sources/release.py to docket/console.py, its behaviour and wording unchanged: CLAUDECODE refused first; then stdin and stdout must both be a console, GetConsoleMode on both handles on Windows, since a redirect from NUL passes isatty there, and isatty elsewhere; a code of four letters with no I or O, drawn fresh for each question; the end of input stops. sources/release.py and vault/settings.py call it through the module, so a test stands in for the owner by patching one place. The refusal names what asks, a release or a change that lets more into the vault, and says to run the command in the owner's own terminal with nothing piped in or out, in Git Bash's own window through winpty."
     binds:
       - Only sources/release.py and vault/settings.py import docket.console; a test scans for it, so no page, route or tool asks or answers.
