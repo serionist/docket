@@ -35,6 +35,9 @@ Then run its tests where it was copied: `python -m pytest .claude/skills/sources
 through Docket's own checks run only where `docket` can be imported. The copy is the project's own from then on:
 change the route as your workspace needs, and keep its tests passing.
 
+A session or agent holds one open run: opening another, of any source, drops the one before. Run this source's
+run to its close before another opens in the same session, or run each source in its own agent.
+
 ## Access
 
 - The Slack plugin's tools, `mcp__plugin_slack_slack__*`, their schemas loaded with one ToolSearch. Your own user id

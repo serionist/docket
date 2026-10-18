@@ -46,8 +46,6 @@ class Reference:
     lookback_days: int | None = None
 
 
-# The browser routes share javascript_tool: a session's hook posts a capture to the open run that lists the tool, so
-# their skills say to run one at a time in a session.
 REFERENCES: dict[str, Reference] = {
     "plaud": Reference("mixed", ("list_files", "get_file", "get_transcript", "get_note")),
     "slack": Reference("work", ("slack_read_channel", "slack_read_thread")),

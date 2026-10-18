@@ -15,7 +15,7 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 | `docket staging classify <ref> work\|private` | work makes it ready, `--cut 120-340` (characters) or `--cut 12:30-14:05` (a time) cuts a stretch; private drops it |
 | `docket staging promote` | writes every ready record to the raw log, cut and redacted, one run per source, and commits; a record on hold stays in staging |
 | `docket ingest <source> <folder>` | imports payloads fetched earlier through the source's mapper: the folder's `hold.txt` first, then its JSON files; every record goes to staging, nothing on hold; `--hold <file>` adds more ids to hold, `--final` tells the mapper not to wait for more, `--mapper-errors` prints the mapper's own errors |
-| `docket source new <name>` | writes a source's skill, mapper and tests into `.claude/skills/sources/<name>/` of the repo that holds the vault, from Docket's blank template, or `--example` for a reference source (Plaud), and adds the source to `vault.yaml` with `--sensitivity`, its `--tool`s and `--lookback-days`; never over a folder that exists; `--folder <folder>` adds a folder source instead; it commits `vault.yaml`, run on your yes |
+| `docket source new <name>` | writes a source's skill, mapper and tests into `.claude/skills/sources/<name>/` of the repo that holds the vault, from Docket's blank template, or `--example` for one of the example sources (`plaud`, `slack`, `teams`, `outlook`, `calendar`; see Example sources), and adds the source to `vault.yaml` with `--sensitivity`, its `--tool`s and `--lookback-days`; never over a folder that exists; `--folder <folder>` adds a folder source instead; it commits `vault.yaml`, run on your yes |
 | `docket render` | writes the people directory and the glossary from the entities, at the paths `vault.yaml`'s `rendered` names in the repo that holds the vault; never commits them; leaves a file edited by hand and says so, and writes nothing into a repo anyone can read; exit 1 when a file was left or refused. It runs after each curate write too |
 | `docket scan [source]` | reads a folder source's folder, read-only, and stages each new or changed document's text; every folder source turned on without a name; `--accept-gone` when most files the vault held are missing on purpose |
 | `docket doc put <file or ->` | store a processed doc as its next rev, redacted first, saying on which lines; refused, with every problem and its line, when the frontmatter is wrong, an anchor doesn't resolve, the doc changed since the rev it carries, or it says something on the never-store keywords list (then only the lines are named) |
@@ -238,8 +238,10 @@ project under its own name, with its sensitivity, tools and lookback in `vault.y
   Docket never updates it; a newer example is in the repo to compare with.
 - The browser routes are for a tenant no MCP server reaches. Their page notes were learned on one tenant, and a quirk
   seen once says so. Where an MCP server reaches the source, start from the blank template instead.
-- The three browser examples all capture `javascript_tool`, and a session's capture hook posts to the open run that
-  lists the tool: run one of them at a time in a session, or each in its own agent.
+- A session or agent holds one open run: opening another, of any source, drops the one before. Run sources one after
+  another in a session, or each in its own agent.
+- With two or more copied, `python -m pytest .claude/skills/sources` stops at collection, since every folder has a
+  `tests/test_mapper.py`: run each folder's tests on its own, or all of them with `--import-mode=importlib`.
 
 ## Folder sources
 
