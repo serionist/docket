@@ -57,7 +57,7 @@ if sys.platform == "win32":  # pragma: no cover - Windows' own API; test_ospromp
         "kernel32": (("GetCurrentProcess", wintypes.HANDLE), ("GetConsoleWindow", wintypes.HWND),
                      ("CreateFileW", wintypes.HANDLE)),
         "user32": (("GetForegroundWindow", wintypes.HWND), ("GetAncestor", wintypes.HWND),
-                   ("CreateWindowExW", wintypes.HWND)),
+                   ("GetWindow", wintypes.HWND), ("CreateWindowExW", wintypes.HWND)),
         "tbs": (("Tbsi_GetDeviceInfo", ctypes.c_uint32),),
         "advapi32": (("GetSidSubAuthorityCount", ctypes.POINTER(ctypes.c_ubyte)),
                      ("GetSidSubAuthority", ctypes.POINTER(wintypes.DWORD)), ("GetSecurityInfo", wintypes.DWORD)),
@@ -69,6 +69,8 @@ if sys.platform == "win32":  # pragma: no cover - Windows' own API; test_ospromp
     WS_POPUP = 0x80000000
     WS_EX_TOOLWINDOW = 0x00000080
     GA_ROOTOWNER = 3
+    GW_OWNER = 4
+    WM_CLOSE = 0x0010
     QS_ALLINPUT = 0x04FF
     PM_REMOVE = 1
     ASFW_ANY = 0xFFFFFFFF
@@ -208,6 +210,23 @@ if sys.platform == "win32":  # pragma: no cover - Windows' own API; test_ospromp
             if not hwnd:
                 raise _fail("CreateWindowExW")
             return int(hwnd), True
+
+        def dismiss(self, window: int) -> int:
+            """Close each window Docket's anchor owns, Hello's dialog among them, as its own close button would: it can
+            only cancel. How many there were."""
+            user32 = dll("user32")
+            found: list[int] = []
+
+            @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+            def each(hwnd: int | None, _: int) -> bool:
+                if hwnd and int(user32.GetWindow(wintypes.HWND(hwnd), GW_OWNER) or 0) == window:
+                    found.append(int(hwnd))
+                return True
+
+            user32.EnumWindows(each, 0)
+            for hwnd in found:
+                user32.PostMessageW(wintypes.HWND(hwnd), WM_CLOSE, 0, 0)
+            return len(found)
 
         def destroy(self, window: int) -> None:
             dll("user32").DestroyWindow(wintypes.HWND(window))

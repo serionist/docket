@@ -144,6 +144,8 @@ class FakeApi:
         tpm: bool | Exception = False,
         biometric: bool = False,
         fail: str | None = None,
+        lands_after: int = 0,
+        dialogs: int = 1,
     ) -> None:
         self.statuses = statuses if statuses is not None else [windows.COMPLETED]
         self.value = value
@@ -158,6 +160,10 @@ class FakeApi:
         self.cancelled = 0
         self.windows: list[int] = []
         self.calls: list[str] = []
+        # Every call that winds an operation down, in order, for the timeout's sequence.
+        self.log: list[str] = []
+        self.lands_after = lands_after
+        self.dialogs = dialogs
         self.joined = 0
         self.lines: list[str] = []
         self._next = 100
@@ -193,6 +199,7 @@ class FakeApi:
     def release(self, ptr: int) -> None:
         assert ptr in self.live, ptr
         self.live.remove(ptr)
+        self.log.append("release")
 
     def check_availability(self, statics: int) -> int:
         self._maybe_fail("check")
@@ -211,10 +218,12 @@ class FakeApi:
 
     def cancel(self, info: int) -> None:
         self.cancelled += 1
-        self.statuses = [windows.CANCELED]
+        self.log.append("cancel")
+        self.statuses = [*[windows.STARTED] * self.lands_after, windows.CANCELED]
 
     def close(self, info: int) -> None:
         self.closed.append(info)
+        self.log.append("close")
 
     def results(self, op: int) -> int:
         return self.value
@@ -223,11 +232,18 @@ class FakeApi:
         self.windows.append(1 if anchor == "own" else 2)
         return (1, True) if anchor == "own" else (2, False)
 
+    def dismiss(self, window: int) -> int:
+        assert window == 1, "only Docket's own window is dismissed"
+        self.log.append("dismiss")
+        return self.dialogs
+
     def destroy(self, window: int) -> None:
         self.windows.remove(window)
+        self.log.append("destroy")
 
     def pump(self, ms: int) -> None:
-        pass
+        if self.log and self.log[-1] != "pump":
+            self.log.append("pump")
 
     def tpm(self) -> bool:
         if isinstance(self._tpm, Exception):
@@ -272,6 +288,7 @@ class Slow(FakeApi):
 
     def cancel(self, info: int) -> None:
         self.cancelled += 1
+        self.log.append("cancel")
         self.statuses = [windows.STARTED, windows.CANCELED]
 
 
@@ -280,6 +297,74 @@ def test_a_cancelled_operation_is_pumped_until_it_stops_then_closed(monkeypatch:
     api = Slow(statuses=[windows.STARTED])
     assert windows.ask_with(api, "x") == Refused("no answer in time, or cancelled")
     assert api.cancelled == 1
+    assert api.balanced()
+
+
+@pytest.fixture
+def quick_linger(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(windows, "CANCEL_LINGER", 0.01)
+
+
+@pytest.mark.usefixtures("quick_linger")
+def test_on_a_timeout_the_dialog_goes_before_the_operation_is_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hello's dialog stayed up when the operation was closed straight after its cancel (#143's hardware check):
+    cancel, pump until the cancel lands, close the dialog Docket's window owns, then close, release and destroy."""
+    monkeypatch.setattr(osprompt, "TIMEOUT", -1.0)
+    api = FakeApi(statuses=[windows.STARTED], lands_after=2)
+    assert windows.ask_with(api, "x") == Refused("no answer in time, or cancelled")
+    wound = api.log[api.log.index("cancel") :]
+    assert wound[:3] == ["cancel", "pump", "dismiss"]
+    assert wound[3] == "pump", "messages flow after the close, so the dialog takes it"
+    assert wound.index("close") < wound.index("destroy")
+    assert wound[-1] == "destroy"
+    assert api.balanced()
+
+
+class Watched(FakeApi):
+    """Each status read after the cancel, kept."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.after: list[int] = []
+
+    def status(self, info: int) -> int:
+        state = super().status(info)
+        if "cancel" in self.log:
+            self.after.append(state)
+        return state
+
+
+@pytest.mark.usefixtures("quick_linger")
+def test_the_pump_runs_until_the_cancel_lands() -> None:
+    api = Watched(statuses=[windows.STARTED], lands_after=3)
+    cancel = threading.Event()
+    cancel.set()
+    assert windows.verify(api, "x", float("inf"), cancel) is None
+    assert api.after == [windows.STARTED] * 3 + [windows.CANCELED]
+    assert api.log.count("pump") >= 1
+    assert api.balanced()
+
+
+@pytest.mark.usefixtures("quick_linger")
+def test_the_terminals_window_is_never_dismissed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(osprompt, "TIMEOUT", -1.0)
+    api = FakeApi(statuses=[windows.STARTED])
+    assert windows.ask_with(api, "x", anchor="foreign") == Refused("no answer in time, or cancelled")
+    assert "dismiss" not in api.log
+    assert api.cancelled == 1
+
+
+@pytest.mark.usefixtures("quick_linger")
+def test_a_cancel_that_never_lands_is_given_up_after_the_grace_and_still_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(windows, "CANCEL_GRACE", 0.05)
+    monkeypatch.setattr(osprompt, "TIMEOUT", -1.0)
+    api = Stuck(statuses=[windows.STARTED], dialogs=0)
+    assert windows.ask_with(api, "x") == Refused("no answer in time, or cancelled")
+    wound = api.log[api.log.index("cancel") :]
+    assert wound[:3] == ["cancel", "pump", "dismiss"]
+    assert wound[3] == "close", "no dialog was found, so nothing more to wait for"
     assert api.balanced()
 
 
@@ -327,13 +412,14 @@ class Stuck(FakeApi):
 
     def cancel(self, info: int) -> None:
         self.cancelled += 1
+        self.log.append("cancel")
 
 
 def test_a_cancel_mid_prompt_waits_for_it_to_wind_down(monkeypatch: pytest.MonkeyPatch) -> None:
     cancel = threading.Event()
     cancel.set()
     api = Stuck(statuses=[windows.STARTED])
-    monkeypatch.setattr(osprompt, "WIND_DOWN", 0.0)
+    monkeypatch.setattr(windows, "CANCEL_GRACE", 0.0)
     assert windows.verify(api, "x", float("inf"), cancel) is None
     assert api.balanced()
 

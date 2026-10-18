@@ -11,6 +11,8 @@ interfaces and their IIDs are the SDK's (`UserConsentVerifierInterop.idl`, `wind
 - each answer is an `IAsyncOperation`, polled through `IAsyncInfo` while the thread pumps its window's messages.
 
 The dialog is anchored to an invisible window Docket makes over the console's window, never Windows Terminal's own.
+On a cancel or a timeout the operation is cancelled and pumped until the cancel lands, the windows Docket's anchor
+owns are closed, Hello's dialog among them, and only then is the operation closed and the anchor destroyed.
 Every DLL loads from System32 only. Face recognition is presence, not consent, and is accepted (the README's table).
 """
 
@@ -19,6 +21,7 @@ from __future__ import annotations
 import sys
 import threading
 import time
+from collections.abc import Callable
 from enum import IntEnum
 from typing import Literal, Protocol
 
@@ -38,6 +41,11 @@ STARTED, COMPLETED, CANCELED = 0, 1, 2
 # How long the availability check may take, which shows nothing.
 CHECK_TIMEOUT = 10.0
 PUMP_MS = 50
+# After a cancel: the most time the operation gets to leave Started, and how long messages go on flowing after it does,
+# so the cancel reaches Hello's own dialog before the operation is closed. Hello's status turns Canceled on this side
+# at once; on Windows 11 the dialog stayed up when the operation was closed straight after (#143's hardware check).
+CANCEL_GRACE = 2.0
+CANCEL_LINGER = 0.5
 
 Anchor = Literal["own", "foreign"]
 
@@ -86,6 +94,7 @@ class Api(Protocol):
     def close(self, info: int) -> None: ...
     def results(self, op: int) -> int: ...
     def window(self, anchor: Anchor) -> tuple[int, bool]: ...
+    def dismiss(self, window: int) -> int: ...
     def destroy(self, window: int) -> None: ...
     def pump(self, ms: int) -> None: ...
     def tpm(self) -> bool: ...
@@ -144,19 +153,25 @@ def verify(api: Api, line: str, deadline: float, cancel: threading.Event, anchor
         try:
             interop = api.factory(INTEROP)
             try:
-                return wait(api, api.request(interop, window, line), deadline, cancel)
+                # Only Docket's own window is dismissed: the terminal's owns windows of its own.
+                dismiss = (lambda: api.dismiss(window)) if owned else None
+                return wait(api, api.request(interop, window, line), deadline, cancel, dismiss)
             finally:
                 api.release(interop)
         finally:
+            # Last, once the operation is closed: the anchor goes after the dialog it owns.
             if owned:
                 api.destroy(window)
     finally:
         api.uninit()
 
 
-def wait(api: Api, op: int, deadline: float, cancel: threading.Event) -> int | None:
-    """An async operation's value, pumping messages while it runs; None once cancelled or past the deadline. The
-    operation is closed and every interface released on every path."""
+def wait(
+    api: Api, op: int, deadline: float, cancel: threading.Event, dismiss: Callable[[], int] | None = None
+) -> int | None:
+    """An async operation's value, pumping messages while it runs; None once cancelled or past the deadline. A
+    cancelled operation is cancelled, pumped until the cancel lands, its dialog dismissed (`dismiss`), and only then
+    closed; every interface is released on every path."""
     try:
         info = api.query(op, ASYNC_INFO)
         if info is None:
@@ -166,6 +181,8 @@ def wait(api: Api, op: int, deadline: float, cancel: threading.Event) -> int | N
                 if cancel.is_set() or time.monotonic() > deadline:
                     api.cancel(info)
                     _settle(api, info)
+                    if dismiss is not None and dismiss():
+                        _pump_for(api, CANCEL_LINGER)
                     return None
                 api.pump(PUMP_MS)
             if state == COMPLETED:
@@ -181,9 +198,17 @@ def wait(api: Api, op: int, deadline: float, cancel: threading.Event) -> int | N
 
 
 def _settle(api: Api, info: int) -> None:
-    """Give a cancelled operation a moment to leave Started, since Close is refused while it runs."""
-    end = time.monotonic() + osprompt.WIND_DOWN
+    """Pump while a cancelled operation leaves Started, since Close is refused while it runs, then a little longer, so
+    the cancel reaches Hello's dialog: at most CANCEL_GRACE in all."""
+    end = time.monotonic() + CANCEL_GRACE
     while api.status(info) == STARTED and time.monotonic() < end:
+        api.pump(PUMP_MS)
+    _pump_for(api, min(CANCEL_LINGER, max(end - time.monotonic(), 0.0)))
+
+
+def _pump_for(api: Api, seconds: float) -> None:
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
         api.pump(PUMP_MS)
 
 
