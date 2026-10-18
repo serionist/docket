@@ -68,6 +68,24 @@ def judge(measures: dict[str, Measure], floors: dict[str, int]) -> tuple[list[st
     return failures, rise
 
 
+def below(measures: dict[str, Measure], floors: dict[str, int]) -> set[str]:
+    """The modules under their floors."""
+    return {module for module, m in measures.items() if module in floors and m.percent + 1e-9 < floors[module]}
+
+
+def missing(report: dict[str, Any], modules: set[str]) -> list[str]:
+    """Each file of these modules with lines no test ran, and the lines: what a floor's failure points at, on a system
+    whose run can't be repeated here."""
+    files: dict[str, Any] = report.get("files") or {}
+    out: list[str] = []
+    for path, data in sorted(files.items()):
+        numbers: list[Any] = data.get("missing_lines") or []
+        lines = [str(n) for n in numbers]
+        if lines and module_of(path) in modules:
+            out.append(f"  {Path(path).as_posix()}: line {', '.join(lines)}")
+    return out
+
+
 def load_floors(root: Path) -> dict[str, int]:
     data: Any = json.loads((root / FLOORS).read_text(encoding="utf-8"))
     return {str(k): int(v) for k, v in data.items() if not str(k).startswith("$")}

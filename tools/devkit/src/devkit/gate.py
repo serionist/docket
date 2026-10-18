@@ -363,8 +363,11 @@ def step_tests(ctx: Ctx) -> Outcome:
     code, lines = _run(ctx, cmd, env=env)
     if code != 0:
         return Outcome.fail(*lines[-80:])
-    measures = coverage.measure(json.loads(report.read_text(encoding="utf-8")))
-    failures, rise = coverage.judge(measures, coverage.load_floors(ctx.root))
+    data = json.loads(report.read_text(encoding="utf-8"))
+    measures = coverage.measure(data)
+    floors = coverage.load_floors(ctx.root)
+    failures, rise = coverage.judge(measures, floors)
+    failures += coverage.missing(data, coverage.below(measures, floors))
     eval_failures, eval_line = evalfloors.check(ctx.root, ctx.base)
     failures += eval_failures
     if failures:

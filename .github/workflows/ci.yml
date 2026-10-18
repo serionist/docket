@@ -164,12 +164,19 @@ jobs:
         run: >-
           uv pip install --dry-run --require-hashes --python 3.12 --target "${{ runner.temp }}/cuda-resolve"
           -r packages/docket/src/docket/models/requirements-cuda.txt
-      # Only the model files: the environment is rebuilt each run, since it points at the runner's own Python.
+      - name: The speech CUDA environment resolves
+        if: matrix.name != 'macOS'
+        run: >-
+          uv pip install --dry-run --require-hashes --python 3.12 --target "${{ runner.temp }}/speech-resolve"
+          -r packages/docket/src/docket/models/requirements-speech-cuda.txt
+      # Only the model files, Whisper tiny's with the embedder's: the environments are rebuilt each run, since they
+      # point at the runner's own Python. The key moves only when a catalogue pins another file, and the install skips
+      # each file whose sha256 already matches, so the hub is asked only on a miss.
       - name: The model files
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/docket-models/files
-          key: docket-models-${{ hashFiles('packages/docket/src/docket/models/catalogue.py') }}
+          key: docket-models-${{ hashFiles('packages/docket/src/docket/models/catalogue.py', 'packages/docket/src/docket/speech/catalogue.py') }}
       # The runner context, which names the temp folder, reaches steps only.
       - name: The models
         env:
@@ -187,6 +194,20 @@ jobs:
           DOCKET_MODELS_DIR: ${{ runner.temp }}/docket-models
           DOCKET_CONFIG_DIR: ${{ runner.temp }}/docket-config
         run: uv run docket models status --check
+      # Whisper tiny on the CPU, transcribing an invented clip the system's own voice speaks (SAPI on Windows, `say` on
+      # macOS, espeak-ng on Linux): its words come back, and a stretch the transcript was cut at has none (DR-0569).
+      - name: A voice for the speech test
+        if: matrix.name == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -y -q espeak-ng
+      - name: Whisper tiny
+        env:
+          DOCKET_MODELS_DIR: ${{ runner.temp }}/docket-models
+          DOCKET_CONFIG_DIR: ${{ runner.temp }}/docket-config
+        run: uv run docket models install --speech --speech-model tiny --device cpu
+      - name: Speech to text on an invented clip
+        env:
+          DOCKET_TEST_SPEECH: ${{ runner.temp }}/docket-models
+        run: uv run pytest -q -rs -s -p no:cacheprovider packages/docket/tests/test_speech_live.py
       # The vector stage and the index's vectors with the fake embedder, never skipped here.
       - name: Vectors in search
         env:

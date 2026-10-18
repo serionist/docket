@@ -40,7 +40,7 @@ from docket.vault import holds, inforce, neverstore, releaselog
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.cuts import CUT_MARKER, Cut
 from docket.vault.host import Lfs, lfs_state
-from docket.vault.records import RawRecord, version
+from docket.vault.records import TRANSCRIBED_VIA, RawRecord, version
 from docket.vault.redact import Redactor, markers
 from docket.vault.spans import RawLookup
 from docket.vault.staging import Classifier, Decided, Entry, Scan, Staged, Staging, State, key_of, retry, rid_hash
@@ -344,6 +344,20 @@ class Gate:
             self._sweep(config)
             with self._screen(config) as screen:
                 return screen.why(rid)
+
+    def settings(self) -> VaultConfig:
+        """The settings in force now, as each gate call reads them (DR-0521), for a job that screens by them outside
+        the gate: the speech prompt's (DR-0569)."""
+        return self._config()
+
+    def family_plan(self, rid: str) -> Needed | str:
+        """The ranges a rid's stored media was cut by and a transcript of it must be cut by, or why nothing of it may be
+        made now: media's checks, with its stored file standing (DR-0569)."""
+        with self.vault.lock:
+            config = self._config()
+            self._sweep(config)
+            with self._screen(config) as screen:
+                return screen.plan(rid, committing=True)
 
     def media_plan(self, rid: str) -> Needed | str:
         """The ranges a put of media for a rid must cut, or why it can't be staged now: after a sweep, under the lock
@@ -684,10 +698,24 @@ class Gate:
                 )
             ):
                 self.staging.write(staged.model_copy(update={"state": "pending"}))
+        self._sweep_transcribed(config, dropped)
         self._media_sweep(config)
         if dropped:
             log.info("gate: swept %d record(s) out of staging", dropped.total())
         return dropped
+
+    def _sweep_transcribed(self, config: VaultConfig, dropped: Counter[str]) -> None:
+        """Drop each staged machine transcript whose family nothing may be kept of now, as media follows its family
+        (DR-0570): its people were copied when it was made, so a speaker named later reaches it only this way."""
+        made = [e for e in self.staging.scan().entries if e.staged.record.via.startswith(TRANSCRIBED_VIA)]
+        if not made:
+            return
+        with self._screen(config) as screen:
+            gone = [(e, screen.family(e.staged.record.rid.rpartition("/")[0] or e.staged.record.rid)) for e in made]
+        for entry, refused in gone:
+            if refused is not None and refused[0] != "off":
+                self.staging.delete(entry.path)
+                dropped[refused[0]] += 1
 
     def _by_hand(self, record: RawRecord, decided: Decided, cut_in_staging: set[str]) -> bool:
         """Whether a record was decided by hand: here (classified private, or cut), on any machine (a cut version in

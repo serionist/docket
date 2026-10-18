@@ -204,6 +204,13 @@ def test_the_panel_shows_a_record_as_promotion_would_write_it_and_says_so() -> N
     assert plain.notes == [] and PHONE in plain.title
 
 
+def test_a_transcript_s_people_read_as_its_speakers_and_a_message_s_as_its_recipients() -> None:
+    talk = build_panel(shown(transcript(to=["Ada Example", "Ben Sample"])), CREDENTIALS, state(f"open={OPENED}"))
+    assert ("speakers", "Ada Example, Ben Sample") in talk.facts
+    note = build_panel(shown(mail(to=["ben@example.invalid"])), CREDENTIALS, state(f"open={OPENED}"))
+    assert ("to", "ben@example.invalid") in note.facts
+
+
 def test_the_preview_names_the_utterances_that_go_an_overlapping_one_included() -> None:
     panel = build_panel(shown(transcript()), CREDENTIALS, state(f"open={OPENED}&u=2"))
     assert panel.utterances is not None

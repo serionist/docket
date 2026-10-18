@@ -179,6 +179,9 @@ terms:
   - term: waiting set
     definition: The ids a source's mapper said wait for something more (a summary, a transcript, a fetch), asked for again on later runs and, after a week, in a final run that never moves the mark.
     see: [packages/docket/src/docket/vault/cursors.py]
+  - term: Whisper transcript
+    definition: "A transcript Docket made on this machine from a recording's stored audio with Whisper: <recording rid>/whisper, beside the recorder's, with the recording's people in to, [cut] where the audio was cut, and via docket transcribe <the stored file's key id>. Made only from audio that reads ok, and staged at the gate like any record."
+    see: [packages/docket/src/docket/speech/job.py]
   - term: withheld mark
     definition: "The hash of a rid, in staging/_withheld.jsonl, left when a version on or under it was dropped for a never-store value or classified private: a later media_put for that rid is refused. One clone's, never in git, never removed."
     see: [packages/docket/src/docket/media/staged.py]

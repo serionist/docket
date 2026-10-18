@@ -20,6 +20,9 @@ def main() -> None:
     args = sys.argv[1:]
     mode = args[args.index("--mode") + 1]
     memory = int(args[args.index("--memory") + 1])
+    # A library's chatter on stderr, as FFmpeg's may be: the parent reads it and drops it, on every system.
+    sys.stderr.write("a decoder's warning, read and dropped\n")
+    sys.stderr.flush()
     if mode == "silent":
         time.sleep(60)
     if mode == "other":

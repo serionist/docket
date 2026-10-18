@@ -15,11 +15,15 @@ the ranges to silence, in milliseconds, already padded and merged. FFmpeg opens 
 protocol alone, so no playlist or reference in it reaches anything else (DR-0560). The audio is decoded a frame at a
 time to 48 kHz mono, the samples in each range set to zero, and encoded as WebM Opus as it goes, so memory stays flat
 for a long call. Nothing is removed: every time in the transcript still points at the same moment.
+
+A request with `"mode": "pcm"` decodes for speech instead (DR-0569): 16 kHz mono float32, little-endian and raw,
+written as it decodes, with no ranges, since a transcript is made only from audio stored cut.
 """
 
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import math
 import os
@@ -33,6 +37,8 @@ from typing import Any, BinaryIO, TextIO, cast
 from docket.childproc import limit_memory
 
 RATE = 48_000
+# What the speech worker takes: Whisper's own rate.
+PCM_RATE = 16_000
 BIT_RATE = 32_000
 # The first sound: the first 50 ms window louder than -45 dBFS.
 WINDOW = RATE // 20
@@ -128,10 +134,14 @@ def cut(request: dict[str, Any]) -> dict[str, Any]:
     try:
         if demuxer is None:
             raise NotReadError("type", "it isn't audio Docket can cut")
-        ranges = [(int(start), int(end)) for start, end in request["cuts"]]
-        max_samples = int(request["max_ms"]) * RATE // 1000
+        pcm = request.get("mode") == "pcm"
+        ranges = [] if pcm else [(int(start), int(end)) for start, end in request["cuts"]]
+        max_samples = int(request["max_ms"]) * (PCM_RATE if pcm else RATE) // 1000
         try:
-            done = _decode(av, source, demuxer, output=output, ranges=ranges, max_samples=max_samples)
+            if pcm:
+                done = _pcm(av, source, demuxer, output=output, max_samples=max_samples)
+            else:
+                done = _decode(av, source, demuxer, output=output, ranges=ranges, max_samples=max_samples)
         except av.error.FFmpegError as e:
             raise NotReadError("damaged", f"it doesn't decode as {request['format']} ({type(e).__name__})") from None
         size = Path(output).stat().st_size
@@ -170,6 +180,36 @@ def _decode(
     if cutter.position == 0:
         raise NotReadError("no-audio", "it holds no audio")
     return {**facts, "duration_ms": cutter.position * 1000 // RATE, "onset_ms": cutter.onset}
+
+
+def _pcm(av: Any, source: str, demuxer: str, *, output: str, max_samples: int) -> dict[str, Any]:
+    """The audio as 16 kHz mono float32 for the speech worker, written a frame at a time."""
+    with av.open(source, "r", format=demuxer, options={"protocol_whitelist": "file"}) as found:
+        stream = next((s for s in found.streams if s.type == "audio"), None)
+        if stream is None:
+            raise NotReadError("no-audio", "it holds no audio")
+        context = stream.codec_context
+        resampler = av.AudioResampler(format="flt", layout="mono", rate=PCM_RATE)
+        written = 0
+        with Path(output).open("wb") as out:
+
+            def take(frame: Any) -> None:
+                nonlocal written
+                n = int(frame.samples)
+                if written + n > max_samples:
+                    raise NotReadError("long", f"it runs longer than {max_samples // PCM_RATE // 3600} hours")
+                out.write(bytes(frame.planes[0])[: n * 4])
+                written += n
+
+            # None last flushes what the resampler holds.
+            decoded = (frame for packet in found.demux(stream) for frame in packet.decode())
+            for frame in itertools.chain(decoded, [None]):
+                for done in resampler.resample(frame):
+                    take(done)
+        facts = {"codec": str(context.name), "rate": int(context.sample_rate or 0)}
+    if written == 0:
+        raise NotReadError("no-audio", "it holds no audio")
+    return {**facts, "channels": 1, "bit_rate": None, "duration_ms": written * 1000 // PCM_RATE, "onset_ms": None}
 
 
 def _write(out: BinaryIO, line: dict[str, Any]) -> None:

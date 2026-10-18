@@ -13,6 +13,7 @@ import signal
 import subprocess
 import sys
 import time
+from array import array
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -117,14 +118,35 @@ def test_the_onset_is_the_first_sound_and_nothing_is_cut_without_ranges(tmp_path
     ],
     ids=["type", "no-audio", "video", "damaged", "zeros", "long", "size"],
 )
+@pytest.mark.parametrize("mode", ["cut", "pcm"])
 def test_what_the_child_won_t_cut_it_names(
-    tmp_path: Path, fmt: str, data: bytes | str, over: dict[str, Any], reason: str
+    tmp_path: Path, fmt: str, data: bytes | str, over: dict[str, Any], *, reason: str, mode: str
 ) -> None:
     source = tmp_path / "in"
     made = {"tone": lambda: tone(3.0), "empty": lambda: tone(0.0, fmt="flac"), "video": video}
     source.write_bytes(made[data]() if isinstance(data, str) else data)
-    answer = child.cut(request(source, tmp_path / "out.webm", fmt, [], **over))
+    answer = child.cut(request(source, tmp_path / "out.webm", fmt, [], mode=mode, **over))
     assert answer["not_read"]["reason"] == reason
+
+
+def test_the_pcm_mode_decodes_for_speech_at_16_khz_mono_float(home: Home) -> None:
+    """For the speech worker (DR-0569): the stored file's audio as raw float32, written beside it in the folder."""
+    source = cutter.plain_file(home, ".mp3")
+    source.write_bytes(tone(4.0, start=1.0))
+    done = cutter.decode_pcm(home, source, "mp3")
+    samples = array("f")
+    samples.frombytes(done.path.read_bytes())
+    assert done.path.suffix == ".f32" and done.path.parent == cutter.folder(home)
+    assert (done.channels, done.onset_ms, done.bit_rate) == (1, None, None)
+    assert abs(len(samples) - 4 * 16_000) < 2000 and done.duration_ms == len(samples) * 1000 // 16_000
+    assert max(abs(x) for x in samples[:14_000]) < 0.01, "silent before the tone"
+    assert 0.4 < max(abs(x) for x in samples[32_000:48_000]) < 0.6, "the tone at half scale"
+    cutter.done_with(source, done.path)
+    bad = cutter.plain_file(home, ".mp3")
+    bad.write_bytes(b"ID3\x04" + bytes(4000))
+    with pytest.raises(DocketError, match="the audio wasn't decoded for speech: it doesn't decode as mp3"):
+        cutter.decode_pcm(home, bad, "mp3")
+    assert [p.name for p in cutter.folder(home).iterdir()] == [bad.name]
 
 
 def test_a_playlist_named_as_audio_reaches_nothing(tmp_path: Path) -> None:

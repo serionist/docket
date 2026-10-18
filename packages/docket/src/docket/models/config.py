@@ -15,7 +15,7 @@ import sys
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal, Protocol, cast
 
 import yaml
 from platformdirs import user_cache_path, user_data_path
@@ -49,6 +49,16 @@ DEFAULT_MONTHLY_TOKENS = 50_000_000
 RERANK_ON_SECONDS = 0.6
 MARKER = "docket-models.json"
 ENV_VAR = "DOCKET_MODELS_DIR"
+
+
+class Hosted(Protocol):
+    """A model on Hugging Face at a pinned revision: what its files' paths are built from."""
+
+    @property
+    def repo(self) -> str: ...
+
+    @property
+    def revision(self) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -173,10 +183,14 @@ def _root() -> Path | None:
     return Path(env) if env else None
 
 
-def env_dir(device: Device) -> Path:
+def models_dir() -> Path:
+    """Where the models' environments live: the embedder's and the speech worker's."""
     root = _root()
-    base = root if root is not None else user_data_path("docket", appauthor=False) / "models"
-    return base / f"env-{device}"
+    return root if root is not None else user_data_path("docket", appauthor=False) / "models"
+
+
+def env_dir(device: Device) -> Path:
+    return models_dir() / f"env-{device}"
 
 
 def files_dir() -> Path:
@@ -188,16 +202,16 @@ def env_python(env: Path) -> Path:
     return env / "Scripts" / "python.exe" if sys.platform == "win32" else env / "bin" / "python"
 
 
-def file_path(model: Embedder | Reranker, file: ModelFile) -> Path:
+def file_path(model: Hosted, file: ModelFile) -> Path:
     return files_dir().joinpath(*model.repo.split("/"), model.revision, *file.path.split("/"))
 
 
-def requirements(device: Device) -> str:
-    """The environment's hashed requirements, as shipped in the wheel."""
+def requirements(device: str) -> str:
+    """An environment's hashed requirements, as shipped in the wheel: a device's, or `speech-<device>`'s."""
     return resources.files("docket.models").joinpath(f"requirements-{device}.txt").read_text(encoding="utf-8")
 
 
-def requirements_hash(device: Device) -> str:
+def requirements_hash(device: str) -> str:
     return hashlib.sha256(requirements(device).encode("utf-8")).hexdigest()
 
 

@@ -262,7 +262,7 @@ flowchart TB
 
 | Feature | NVIDIA GPU | Apple silicon | CPU only | No models |
 |---|---|---|---|---|
-| Speech | faster-whisper large-v3, float16, about 10x real time | whisper.cpp or mlx-whisper | the source's own transcript; turbo int8 overnight as an optional extra | the source's own transcript |
+| Speech | faster-whisper large-v3, float16: 26x real time on an RTX 5090 (DR-0567) | the CPU's, when asked; whisper.cpp or mlx-whisper unmeasured | the source's own transcript; large-v3 int8 when asked, about real time on 8 threads | the source's own transcript |
 | Embeddings | multilingual-e5-small on ONNX Runtime's CUDA provider (DR-0331, DR-0334) | the same on the CPU, until MPS or CoreML is measured | the same on the CPU | keyword search only |
 | Reranker | bge-reranker-v2-m3, the top 50 (DR-0450, DR-0455) | the CPU's | mmarco-mMiniLMv2-L12-H384-v1, the top 30, on where the install timed it within 0.6 s (about 8 cores or more) | rank fusion only |
 
@@ -270,9 +270,10 @@ flowchart TB
 
 **Stack:** Python 3.12 and uv; SQLite with FTS5 (and sqlite-vec for vectors); JSONL for the raw log; age for media
 encryption; Pydantic for schemas; the MCP Python SDK; FastAPI with server-rendered HTML and HTMX (no front-end build);
-faster-whisper; ONNX Runtime with tokenizers for the embedder, in an environment `docket models install` builds
-(DR-0331, DR-0332); pypdf, openpyxl and Docket's own docx and pptx readers on defusedxml for documents' text, in a child
-process with limits (DR-0484, DR-0485). MCP servers it launches are pinned to a version.
+faster-whisper on CTranslate2, in an environment `docket models install --speech` builds (DR-0567); ONNX Runtime with
+tokenizers for the embedder, in an environment `docket models install` builds (DR-0331, DR-0332); pypdf, openpyxl and
+Docket's own docx and pptx readers on defusedxml for documents' text, in a child process with limits (DR-0484, DR-0485).
+MCP servers it launches are pinned to a version.
 
 ## 5. The data layer
 
@@ -550,13 +551,16 @@ The app transcribes, because it needs a local model; skills translate, reconcile
 judgement.
 
 1. Audio arrives with the recording, decoded by our own code.
-2. VAD, then Whisper large-v3 in float16, the language forced where it's known. Hungarian gets a short vocabulary for
-   the meeting (its attendees and project).
+2. VAD, then Whisper large-v3 in float16, the language forced where it's known, only from audio stored and cut by
+   everything its records need (DR-0569). Hungarian gets a short vocabulary for the meeting (its attendees and
+   project), screened against the never-store lists. Measured on an RTX 5090: 26x real time, the model loaded in
+   2.3 s; on a CPU in int8, 1.7x on 8 threads.
 3. Optional: diarization and speaker names from enrolled voices.
-4. The transcript is redacted and stored as its own record next to the recorder's. Both are kept and indexed: a test
-   on 38 minutes of Hungarian and English work calls showed large-v3 about as good as a commercial recorder's
-   transcript and a little better on names, with different mistakes, so keeping both raises recall on names and
-   numbers. The turbo model dropped numbers, so it is only for live use.
+4. The transcript is redacted and stored as its own record next to the recorder's, `<rid>/whisper`, carrying the
+   recording's people (DR-0570). Both are kept and indexed: a test on 38 minutes of Hungarian and English work calls
+   showed large-v3 about as good as a commercial recorder's transcript and a little better on names, with different
+   mistakes, so keeping both raises recall on names and numbers. The turbo model dropped numbers, so it is only for live
+   use.
 5. The two are reconciled in context: aligned by time; the doubtful spots found (disagreements, low-confidence words,
    words close to an alias or a name in the meeting, numbers); each spot gets its context (aliases, glossary,
    attendees, past conversations found by search); Claude decides each spot and returns a list of corrections, not a

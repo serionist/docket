@@ -292,6 +292,7 @@ cut is stored as it came.
 | cut after its audio was stored | the stored file isn't played (`recut`); the run names it, and the new file takes its place, the old one's key deleted here once the new one is committed |
 | held | no audio until the release, and a stored file isn't played; then the next run puts it, cut |
 | a record cut by characters | no audio, and a stored file stays unplayed: no cut of the audio can match; the Recording page and `docket media status` say so |
+| a version dropped for a never-store value or as private, its own transcript's or Whisper's | a stored file isn't played (`withheld`); a source only turned off still plays |
 | decided by hand before Docket kept which way | no audio until `docket media confirm-cuts <rid>`, in your own terminal, shows each decision against the versions cut by hand and you confirm they were cuts |
 
 - The cutting runs in a child process with a memory cap and 15 minutes; uncut audio is plain only in a folder of
@@ -456,6 +457,33 @@ The reranker:
 - `docket search` reranks as the service does when the service answers it. On its own (no service for the vault,
   `--no-update`) it reranks on the CPU only; on a GPU machine it goes without, and its line says so.
   `docket eval` reranks where the service does, with no time limit, and says how many questions went without it.
+
+### Speech to text
+
+`docket transcribe <rid>` turns a recording's stored audio into a transcript of its own with Whisper, on this machine,
+and stages it at the gate beside the recorder's as `<rid>/whisper` (DR-0567 to DR-0570). It is off until you install
+it.
+
+| Command | Does |
+|---|---|
+| `docket models install --speech [--speech-model large-v3\|tiny] [--device auto\|cpu\|cuda]` | builds the speech environment with uv, fetches Whisper's pinned files (large-v3 3.09 GB, tiny 76 MB, both MIT) and times it once |
+| `docket transcribe <rid> [--wait]` | decodes the stored audio, transcribes it and stages the transcript; one job at a time on a machine, and `--wait` waits for one running |
+| `docket models remove --speech` | deletes the speech environment, Whisper's files and the choice; a plain `docket models remove` takes them too |
+
+- On an NVIDIA GPU it installs NVIDIA's cuBLAS 12 under NVIDIA's terms, about 1.2 GB of packages, and needs about
+  4.5 GB of the GPU's memory while it transcribes, besides search's 2 to 3 GB: 8 GB runs both, 6 GB only by turns,
+  and under 6 GB the install says to use the CPU. On an RTX 5090 an hour of audio takes about two and a half minutes.
+- On a CPU an hour of audio takes about an hour, so it transcribes only when you ask.
+- Only audio stored and cut by everything its records need is transcribed, and the checks run again before the
+  transcript is staged: a hold, a never-store match or a new cut that came meanwhile stages nothing. Cut stretches
+  read `[cut]`.
+- The transcript carries the recording's people, its recipients and the recorder's speakers, so a never-store name
+  drops it as it drops the recorder's. A never-store word Whisper hears drops it too, and from then on the stored
+  audio isn't played.
+- A Hungarian recording gets its people's and projects' names as a prompt. An entity a never-store list holds by any
+  of its names, aliases or ids stays out whole, and so does a name a redaction rule would change.
+- Nothing leaves the machine: the worker runs offline, and the prompt and the transcript are never logged. The choice
+  is this machine's, in your config's `speech:` section.
 
 ### Through Voyage AI's API
 

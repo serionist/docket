@@ -25,6 +25,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from docket.media import cutlog, layout
 from docket.media import ranges as cut_ranges
@@ -73,26 +74,12 @@ class Screen:
         raw_own = self.raw.versions(rid)
         if not own and not raw_own:
             return f"no record {rid} is staged or in raw; media follows its record, so stage the record first"
-        source = layout.source_of(rid)
-        entry = self.config.sources.get(source)
-        if entry is None:
-            return f"source {source} isn't in vault.yaml in force"
-        if not entry.enabled:
-            return f"source {source} is off in vault.yaml"
-        if entry.sensitivity == "private":
-            return f"source {source} is private: nothing from it is stored"
+        refused = self.family(rid)
+        if refused is not None:
+            return refused[1]
         staged = [e for e in self.staged if layout.in_family(rid, e.staged.record.rid)]
         raw = [r for other in self._family_in_raw(rid) for r in self.raw.versions(other)]
         records = [*(e.staged.record for e in staged), *raw]
-        if any(neverstore.match(record, self.config.never_store) for record in records):
-            return f"a record of {rid} matches a never-store value"
-        if rid_hash(rid) in self.withheld:
-            return f"a version of {rid} or a record under it was dropped for a never-store value or as private"
-        if any(self.decided.private(rid_hash(other)) for other in {rid, *(record.rid for record in records)}):
-            return (
-                f"{rid} or a record under it was classified private by hand, or decided before Docket kept which "
-                f"each decision was; if each was a cut, `docket media confirm-cuts {rid}` in your own terminal"
-            )
         latest = (own or raw_own)[-1]
         if self.holds.covers(latest):
             return f"{rid} is on hold: its media waits until the hold is released"
@@ -110,6 +97,13 @@ class Screen:
             return f"media for {rid} is stored already"
         return needed
 
+    def family(self, rid: str) -> Refusal | None:
+        """Why nothing of a rid's family may be kept now (`refusal`). Media follows it, and so does a machine transcript
+        staged under it, except while its source is only off (DR-0570)."""
+        staged = [e.staged.record for e in self.staged if layout.in_family(rid, e.staged.record.rid)]
+        records = [*staged, *(r for other in self._family_in_raw(rid) for r in self.raw.versions(other))]
+        return refusal(rid, self.config, records, self.decided, self.withheld)
+
     def cut_by(self, rid: str, path: Path) -> tuple[Range, ...]:
         """What the rid's stored file was cut by: the cut log's line for its key (DR-0562); none for a file stored as it
         was put, one whose key no line names, or one that isn't here to read."""
@@ -122,3 +116,37 @@ class Screen:
         if rid not in self._nested:
             self._nested[rid] = self.raw.nested(rid)
         return self._nested[rid]
+
+
+# Why nothing of a family may be kept, by kind: dropped as private, for a never-store value, or its source only off.
+Refusal = tuple[Literal["private", "never-store", "off"], str]
+
+
+def refusal(
+    rid: str, config: VaultConfig, records: Sequence[RawRecord], decided: Decided, withheld: frozenset[str]
+) -> Refusal | None:
+    """Why nothing of a rid's family may be kept now, by the source and the owner's decisions, or None: the source not
+    in force, off or private; a version of a record of it (`records`, staged or in raw) matching a never-store value;
+    the rid withheld; a private decision on a record of it (DR-0547, DR-0561). The screen and the reader both ask it."""
+    source = layout.source_of(rid)
+    entry = config.sources.get(source)
+    if entry is None:
+        return "private", f"source {source} isn't in vault.yaml in force"
+    if entry.sensitivity == "private":
+        return "private", f"source {source} is private: nothing from it is stored"
+    if not entry.enabled:
+        return "off", f"source {source} is off in vault.yaml"
+    if any(neverstore.match(record, config.never_store) for record in records):
+        return "never-store", f"a record of {rid} matches a never-store value"
+    if rid_hash(rid) in withheld:
+        return (
+            "never-store",
+            f"a version of {rid} or a record under it was dropped for a never-store value or as private",
+        )
+    if any(decided.private(rid_hash(other)) for other in {rid, *(record.rid for record in records)}):
+        return (
+            "private",
+            f"{rid} or a record under it was classified private by hand, or decided before Docket kept which "
+            f"each decision was; if each was a cut, `docket media confirm-cuts {rid}` in your own terminal",
+        )
+    return None
