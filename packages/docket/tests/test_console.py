@@ -85,6 +85,36 @@ def test_the_release_keeps_its_two_names_for_a_copied_reference_test(monkeypatch
 # -- the OS prompt (DR-0572) ----------------------------------------------------------------------------------------
 
 
+@pytest.fixture
+def at_a_console(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A console on stdin and stdout, outside Claude Code's shell: confirm's own check passes."""
+    monkeypatch.setattr(console, "is_console", lambda stream: True)
+
+
+def test_confirm_refuses_in_claude_codes_shell_and_without_a_console_on_its_own(
+    os_prompt: Callable[..., FakePrompt], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A caller that forgot the console's check still gets it: before the screen and before any prompt."""
+    hello = os_prompt(osprompt.Verified())
+    monkeypatch.setattr(console, "ask", lambda prompt: "")
+    monkeypatch.setattr(console, "is_console", lambda stream: False)
+    with pytest.raises(DocketError, match="the step to do a thing asks you at a console"):
+        console.confirm(["the screen"], "make this change", "leave it", "it stays", act="do a thing")
+    monkeypatch.setattr(console, "is_console", lambda stream: True)
+    monkeypatch.setenv("CLAUDECODE", "1")
+    with pytest.raises(DocketError, match=r"this shell is Claude Code's \(CLAUDECODE is set\): the step to do a thing"):
+        console.confirm(["the screen"], "make this change", "leave it", "it stays", act="do a thing")
+    assert hello.acts == []
+    assert capsys.readouterr().out == ""
+
+
+def test_a_real_pipe_is_no_console_for_confirm() -> None:
+    """Stdin and stdout as pytest leaves them, captured: no console, so confirm refuses with nothing asked."""
+    with pytest.raises(DocketError, match="asks you at a console"):
+        console.confirm([], "make this change", "leave it", "it stays", act="do a thing")
+
+
+@pytest.mark.usefixtures("at_a_console")
 def test_with_a_prompt_set_up_enter_and_its_yes_are_the_only_yes(
     os_prompt: Callable[..., FakePrompt], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -97,6 +127,7 @@ def test_with_a_prompt_set_up_enter_and_its_yes_are_the_only_yes(
     assert capsys.readouterr().out == "the screen\n"
 
 
+@pytest.mark.usefixtures("at_a_console")
 def test_a_prompt_that_doesnt_confirm_is_a_no_and_never_asks_the_code(
     os_prompt: Callable[..., FakePrompt], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -109,6 +140,7 @@ def test_a_prompt_that_doesnt_confirm_is_a_no_and_never_asks_the_code(
     assert "Fake Hello didn't confirm it (cancelled); it stays" in capsys.readouterr().out
 
 
+@pytest.mark.usefixtures("at_a_console")
 @pytest.mark.parametrize(("typed", "answer", "said"), [("n", "no", False), ("q", "stop", False), ("y", "no", True)])
 def test_anything_but_enter_asks_no_prompt(
     typed: str, answer: str, said: bool, os_prompt: Callable[..., FakePrompt], capsys: pytest.CaptureFixture[str]
@@ -121,6 +153,7 @@ def test_anything_but_enter_asks_no_prompt(
     assert ("that isn't Enter; it stays" in capsys.readouterr().out) == said
 
 
+@pytest.mark.usefixtures("at_a_console")
 def test_without_a_prompt_the_screen_says_why_and_the_code_is_asked(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -129,6 +162,7 @@ def test_without_a_prompt_the_screen_says_why_and_the_code_is_asked(
     assert capsys.readouterr().out == "the screen\nthe console code: no OS prompt in tests\n"
 
 
+@pytest.mark.usefixtures("at_a_console")
 def test_a_machine_that_cant_ask_refuses_before_the_screen(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
