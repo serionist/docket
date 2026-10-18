@@ -13,6 +13,7 @@ import pytest
 from docket_testkit import AtConsole, FakePrompt, git
 from media_kit import CALL, POLISHED, audio, dbfs, decoded, https_server, in_raw, media_vault, tone
 
+from docket import index
 from docket.cli import main
 from docket.errors import DocketError
 from docket.media import cutlog, cutter, layout, reader
@@ -20,7 +21,7 @@ from docket.media import put as media
 from docket.media import staged as media_staged
 from docket.media.keystore import KeyStore
 from docket.media.ranges import Needed
-from docket.service.sync import RunOpened, opened_text
+from docket.service.sync import RunOpened, media_for, opened_text
 from docket.vault import holds, releaselog
 from docket.vault.config import CONFIG_FILE, SourceConfig, VaultConfig
 from docket.vault.cuts import Cut
@@ -359,6 +360,42 @@ def test_the_run_names_cut_recordings_without_audio_for_every_source_but_a_folde
     )  # fmt: skip
     assert "media    1: rec-a" in opened_text(opened)
     assert "media    none" in opened_text(opened.model_copy(update={"media": []}))
+
+
+def test_only_a_source_that_can_have_audio_gets_the_media_step_and_its_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mail or chat gets no media step and no media_due scan under the lock: the index and staging are asked first. A
+    skill that puts audio, a recording staged or in raw, or a media folder gets the step (DR-0604); the skill's word
+    gives a new Plaud source's first run the step for what it stages."""
+    scanned: list[str] = []
+    real = Gate.media_due
+
+    def due(gate: Gate, source: str, **limits: int) -> list[str]:
+        scanned.append(source)
+        return real(gate, source, **limits)
+
+    monkeypatch.setattr(Gate, "media_due", due)
+    vault = media_vault(tmp_path)
+    # No index yet: it can't say, so media_due's scan decides; plaud's recording waits in staging.
+    assert (media_for(vault, "chat", skill_puts=False), scanned) == ((False, []), ["chat"])
+    assert media_for(vault, "plaud", skill_puts=False) == (True, [])
+    in_raw(vault)
+    index.rebuild(vault)
+    scanned.clear()
+    assert (media_for(vault, "chat", skill_puts=False), scanned) == ((False, []), [])
+    assert (media_for(vault, "chat", skill_puts=True), scanned) == ((True, []), []), "nothing to name yet"
+    assert (media_for(vault, "plaud", skill_puts=False), scanned) == ((True, []), ["plaud"]), "in raw now"
+    path = vault.root / CONFIG_FILE
+    config = VaultConfig.load(path)
+    config.sources["chat"] = SourceConfig(media_folders=["~/Calls"])
+    config.sources["docs"] = SourceConfig(folder="docs")
+    path.write_text(config.dump(), encoding="utf-8", newline="\n")
+    vault.commit([CONFIG_FILE], "Config: a media folder and a folder source")
+    scanned.clear()
+    assert media_for(Vault.open(vault.root), "chat", skill_puts=False) == (True, [])
+    assert media_for(Vault.open(vault.root), "docs", skill_puts=True) == (False, [])
+    assert scanned == ["chat"]
 
 
 def test_a_cut_put_past_the_cap_or_failing_its_encryption_leaves_nothing(

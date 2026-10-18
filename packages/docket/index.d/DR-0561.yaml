@@ -11,7 +11,7 @@ decisions:
       - "A hold still refuses media and deletes what is staged: a held recording keeps no text either."
       - "Uncut audio is never encrypted into staging when the ranges are known: cut first, then encrypted."
       - "Amended by #143 (DR-0575): docket media confirm-cuts asks the OS prompt, or the code where the machine has none."
-      - "Amended by #191: docket media confirm-cuts asks nothing and runs on the owner's yes (DR-0599); the media line and the media step are given for every source that isn't a folder source (DR-0604)."
+      - "Amended by #191: docket media confirm-cuts asks nothing and runs on the owner's yes (DR-0599); the media line and the media step are given for a source whose skill puts audio, with media folders, or with a recording staged or in raw, never a folder source (DR-0604)."
     not_chosen:
       - "Counting decisions against cut versions in raw: a release's cuts leave no decision, so an old private classification beside a release-cut version would pass."
       - "Cutting staged audio in place when its cuts grow: it would hold the vault's lock for minutes; a put again costs one download."

@@ -949,6 +949,17 @@ def kept(vault: Vault, source: str, since: datetime, until: datetime) -> list[st
     return [str(row[0]) for row in rows]
 
 
+def holds_kind(vault: Vault, source: str, kind: str) -> bool:
+    """Whether raw holds a record of a source whose latest version is of this kind, from the index: one query, so a run
+    asks it before any scan of raw."""
+    conn = open_index(vault)
+    try:
+        row = conn.execute("SELECT 1 FROM records WHERE source = ? AND kind = ? LIMIT 1", (source, kind)).fetchone()
+    finally:
+        conn.close()
+    return row is not None
+
+
 def stored_under(vault: Vault, source: str, natives: Iterable[str]) -> set[str]:
     """The native ids under which raw holds a record of a source: its rid, thread or container is `<source>:<id>` or
     sits under it."""

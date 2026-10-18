@@ -25,7 +25,6 @@ from docket.media.keystore import KeyStore
 from docket.service.install import ServiceStatus
 from docket.service.state import Service, Settings
 from docket.service.sync import FINAL_STEPS, STEPS, steps
-from docket.vault.config import SourceConfig
 from docket.vault.vault import Vault
 
 PASSPHRASE = "ABCD-EFGH-JKLM-NPQR-STUV-WXYZ"  # noqa: S105 - an invented passphrase
@@ -235,16 +234,13 @@ def test_the_session_start_asks_for_a_backup_while_a_key_has_none() -> None:
     )
 
 
-def test_a_run_gains_the_media_step_for_every_source_but_a_folder_one() -> None:
-    """With no host list to say a source has media, every source but a folder source gets the step, and its skill
-    says whether it gets audio (DR-0604)."""
-    folder = SourceConfig(folder="docs")
-    assert steps(False, "run-1", folder) == STEPS.format(run="run-1")
-    assert steps(True, "run-1", folder) == FINAL_STEPS.format(run="run-1")
-    plain = steps(False, "run-1", SourceConfig())
+def test_a_run_with_media_gains_the_media_step_after_the_close() -> None:
+    assert steps(False, "run-1", media=False) == STEPS.format(run="run-1")
+    assert steps(True, "run-1", media=False) == FINAL_STEPS.format(run="run-1")
+    plain = steps(False, "run-1", media=True)
     assert plain.startswith(STEPS.format(run="run-1"))
     assert "8. Media: after closing" in plain and "media_put(rid, url)" in plain
-    assert "6. Media: after closing" in steps(True, "run-1", SourceConfig(media_folders=["~/Downloads"]))
+    assert "6. Media: after closing" in steps(True, "run-1", media=True)
 
 
 def test_a_hidden_answer_comes_from_getpass_and_the_end_of_input_stops(monkeypatch: pytest.MonkeyPatch) -> None:

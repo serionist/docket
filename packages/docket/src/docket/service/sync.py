@@ -30,7 +30,6 @@ from docket.sources import local, runner
 from docket.sources.contract import TOKEN, Manifest, MapperRefusedError, Skipped, Window
 from docket.sources.runner import MapperFailedError
 from docket.vault import cursors, holds, inforce, releaselog
-from docket.vault.config import SourceConfig
 from docket.vault.gate import Gate
 from docket.vault.lock import LockBusyError
 from docket.vault.vault import Vault
@@ -47,6 +46,10 @@ KEPT_CHARS = 8_000
 HELD_CHARS = 1_500
 WAITING_CHARS = 3_000
 RETRY_CHARS = 3_000
+# The kind of record whose audio a run's media step puts (DR-0561).
+RECORDING = "recording"
+# What a source's skill names when it says how to put a recording's audio.
+PUTS_MEDIA = "media_put"
 
 STEPS = """\
 How this run goes:
@@ -170,7 +173,8 @@ def _since(text: str | None, zone: ZoneInfo, now: datetime) -> datetime | None:
     return moment
 
 
-def _skill(vault: Vault, source: str) -> Path:
+def _skill(vault: Vault, source: str) -> tuple[Path, str]:
+    """The source's SKILL.md and its text, refused without the marker line live runs need."""
     folder = runner.skill_folder(runner.consuming_repo(vault.root), vault.root, source)
     skill = folder / "SKILL.md"
     if not skill.is_file():
@@ -185,7 +189,7 @@ def _skill(vault: Vault, source: str) -> Path:
         else:
             fix = f"copy the marker line and the run sections from Docket's blank template, {BLANK}, into yours"
         raise DocketError(f"{skill} is from before live runs: {fix}")
-    return skill
+    return skill, text
 
 
 def _checked_source(vault: Vault, source: str) -> list[str]:
@@ -277,20 +281,22 @@ class Ready:
     # Another machine's cursor file left out, for the run's notes.
     notes: list[str]
     held: frozenset[str]
+    # The skill says how to put a recording's audio: it names media_put, as the Plaud reference's Audio row does.
+    puts_media: bool = False
 
 
 def preflight(vault: Vault, source: str) -> Ready:
     """`run_open`'s checks before any work, which the Sync page runs too (DR-0304): the source in `vault.yaml`, its
     skill with the marker line, this machine's cursor file, no held record waiting in staging."""
     tools = _checked_source(vault, source)
-    skill = _skill(vault, source)
+    skill, text = _skill(vault, source)
     own = cursors.read(vault.root, vault.machine).get(source)
     everyone, notes = cursors.read_others(vault.root, vault.machine)
     others = {m: c[source] for m, c in everyone.items() if source in c}
     held = holds.read(vault.root, source)
     released = frozenset(releaselog.read(vault.root, source))
     ingesting.check_staging(vault, source, held, held & released)
-    return Ready(tools=tools, skill=skill, own=own, others=others, notes=notes, held=held)
+    return Ready(tools, skill, own, others, notes, held, puts_media=PUTS_MEDIA in text)
 
 
 def owed(vault: Vault, source: str, ready: Ready, now: datetime, *, final: bool) -> cursors.Handover:
@@ -373,6 +379,7 @@ async def run_open(
             agent=agent,
             backfill=since is not None,
         )
+        puts, due = media_for(vault, source, skill_puts=ready.puts_media)
         service.runs.open(run)
         return RunOpened(
             run=run.id,
@@ -389,21 +396,50 @@ async def run_open(
             waiting=[Due(id=w.id, why=w.for_, since=w.since) for w in waiting],
             retry=[Due(id=r.id, why=r.reason, since=r.since) for r in retry],
             notes=notes,
-            steps=steps(final, run.id, vault.config.sources[source]),
-            media=Gate(vault).media_due(source),
+            steps=steps(final, run.id, media=puts),
+            media=due,
         )
 
     opened = await service.writer.run(build)
     return opened, opened_text(opened)
 
 
-def steps(final: bool, run: str, entry: SourceConfig) -> str:
-    """The run's steps; for every source but a folder source, the media step after the close (DR-0604): its skill
-    says whether it gets audio."""
+def steps(final: bool, run: str, *, media: bool) -> str:
+    """The run's steps; with `media`, the media step after the close."""
     text = (FINAL_STEPS if final else STEPS).format(run=run)
-    if entry.folder is None:
+    if media:
         text += MEDIA_STEP.format(n=6 if final else 8)
     return text
+
+
+def media_for(vault: Vault, source: str, *, skill_puts: bool) -> tuple[bool, list[str]]:
+    """Whether a run of the source gets the media step, and the recordings its media line names (DR-0604): a source
+    whose skill puts audio, with media folders, or that has had a recording, staged or in raw; never a folder source,
+    nor mail or chat, which have none of these. The cheap checks come first, the index and then staging, and
+    media_due's scan under the lock only for a source with media folders or a recording."""
+    entry = vault.config.sources[source]
+    if entry.folder is not None:
+        return False, []
+    recorded = _recorded(vault, source)
+    if recorded is False and not entry.media_folders:
+        # No recording to name yet: the step only where the skill says how to put what this run stages.
+        return skill_puts, []
+    due = Gate(vault).media_due(source)
+    return skill_puts or bool(entry.media_folders) or bool(recorded) or bool(due), due
+
+
+def _recorded(vault: Vault, source: str) -> bool | None:
+    """Whether the source has had a recording: in raw, as the index has it, or in staging. None when the index can't
+    say and staging holds none, so media_due's own scan decides."""
+    try:
+        known: bool | None = index.holds_kind(vault, source, RECORDING)
+    except DocketError:
+        known = None
+    if known:
+        return True
+    if any(e.staged.record.kind == RECORDING for e in Gate(vault).list(source=source).entries):
+        return True
+    return known
 
 
 def _list(values: Sequence[str]) -> str:
