@@ -1,6 +1,13 @@
 {% extends "base.html" %}
 {% from "macros.html" import notice, locator, copy %}
 {# The Recording page: every link here is a plain link, so the page works the same without JavaScript (DR-0544). #}
+{% macro segment(seg) %}
+<li class="segment{% if seg.mark %} mark{% endif %}{% if seg.cut %} cut{% endif %}"{% if seg.target %} id="at"{% endif %}{% if seg.start %} data-start="{{ seg.start }}"{% endif %}>
+  <a class="time" href="{{ seg.url }}" title="{{ 'Play from this line' if seg.start else 'Link to this line' }}">{{ seg.at }}</a>
+  <span class="speaker" dir="auto">{{ seg.speaker }}</span>
+  <span class="text" dir="auto">{% if seg.mark %}<mark>{{ seg.text }}</mark>{% else %}{{ seg.text }}{% endif %}</span>
+</li>
+{% endmacro %}
 {% block main %}
 <div class="recording">
 {% if problem %}
@@ -34,11 +41,17 @@
 </header>
 <section class="audio" aria-labelledby="audio-title" data-why="{{ view.audio.why }}">
   <h2 id="audio-title" class="visually-hidden">Audio</h2>
+  {% if view.player %}
+  {# The browser's own player: it plays and seeks without JavaScript, from the line `at` marks (#t=). #}
+  <audio id="player" class="player" controls preload="none" src="{{ view.player }}">The audio plays in a browser that plays it.</audio>
+  <p class="meta">{{ view.audio.message }}</p>
+  {% else %}
   {{ notice('info', view.audio.message) }}
+  {% endif %}
   {% if view.audio.speech %}<p class="speech-job">{{ view.audio.speech }}</p>{% endif %}
 </section>
 {% for p in view.problems %}{{ notice('warn', p) }}{% endfor %}
-<div class="recording-columns">
+<div class="recording-columns{% if view.pair %} paired{% endif %}">
   <section class="column summary-column" aria-labelledby="summary-title">
     <h2 id="summary-title">Summary</h2>
     {% if view.docs|length > 1 or (view.docs and not view.docs[0].on) %}
@@ -78,20 +91,39 @@
     {% endif %}
     {% if t.problem %}{{ notice('warn', t.problem) }}{% endif %}
     <ol class="segments">
-      {% for seg in t.segments %}
-      <li class="segment{% if seg.mark %} mark{% endif %}"{% if seg.target %} id="at"{% endif %}>
-        <a class="time" href="{{ seg.url }}" title="Link to this line">{{ seg.at }}</a>
-        <span class="speaker" dir="auto">{{ seg.speaker }}</span>
-        <span class="text" dir="auto">{% if seg.mark %}<mark>{{ seg.text }}</mark>{% else %}{{ seg.text }}{% endif %}</span>
-      </li>
-      {% endfor %}
+      {% for seg in t.segments %}{{ segment(seg) }}{% endfor %}
     </ol>
+  </section>
+  {% else %}
+  {% if view.pair %}
+  {# The recorder's transcript and Whisper's, a row per stretch of time, so what each heard sits side by side. #}
+  <section class="column transcript-column pair-column" aria-labelledby="pair-title">
+    <h2 id="pair-title">Transcripts</h2>
+    {% if view.others %}
+    <p class="meta">Also transcribed: {% for o in view.others %}<a href="{{ o.url }}">{{ locator(o.rid) }}</a>{{ ', ' if not loop.last }}{% endfor %}</p>
+    {% endif %}
+    {% if view.pair.left.problem %}{{ notice('warn', view.pair.left.problem) }}{% endif %}
+    <table class="aligned">
+      <caption class="visually-hidden">The recorder's transcript and Whisper's, aligned by time</caption>
+      <thead>
+        <tr><th scope="col">The recorder's<span class="meta">{{ view.pair.left.meta }}</span></th><th scope="col">Whisper's<span class="meta">{{ view.pair.right.meta }}</span></th></tr>
+      </thead>
+      <tbody>
+        {% for row in view.pair.rows %}
+        <tr>
+          <td>{% if row.left %}<ol class="segments">{% for seg in row.left %}{{ segment(seg) }}{% endfor %}</ol>{% endif %}</td>
+          <td>{% if row.right %}<ol class="segments">{% for seg in row.right %}{{ segment(seg) }}{% endfor %}</ol>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </section>
   {% else %}
   <section class="column transcript-column" aria-labelledby="transcript-title-1">
     <h2 id="transcript-title-1">Transcript</h2>
     <p class="empty-note">{{ view.no_transcript }}</p>
   </section>
+  {% endif %}
   {% endfor %}
 </div>
 {% endif %}

@@ -15,6 +15,7 @@ import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 import pytest
@@ -24,7 +25,7 @@ from curate_kit import curate_vault
 from decisions_kit import BRIEF, decisions_template
 from docket_testkit import index_template
 from playwright.sync_api import Page, expect, sync_playwright
-from recording_kit import CRANE, NOTE, recording_template
+from recording_kit import CRANE, NOTE, TOUR, recording_template, with_audio
 from settings_kit import settings_template
 from staging_kit import staging_vault
 from sync_kit import as_structured, as_text, memo, sync_template
@@ -33,6 +34,7 @@ from docket.service import client, server
 from docket.service.client import call_json
 from docket.service.token import Tokens
 from docket.vault.config import CONFIG_FILE, VaultConfig
+from docket.vault.vault import Vault
 
 BROWSER = os.environ.get("DOCKET_TEST_BROWSER", "")
 pytestmark = pytest.mark.skipif(not BROWSER, reason="drives a real browser: DOCKET_TEST_BROWSER=chrome or msedge")
@@ -558,6 +560,10 @@ def test_the_settings_page_says_when_an_edit_isn_t_in_force(settings_service: tu
         browser.close()
 
 
+def _seeking(request: Any) -> bool:
+    return "/recording/audio" in request.url and request.failure == "net::ERR_ABORTED"
+
+
 def test_the_recording_page_in_a_browser(recording_service: tuple[int, str], tmp_path: Path) -> None:
     port, token = recording_service
     shots = Path(os.environ.get("DOCKET_TEST_SCREENSHOTS") or tmp_path)
@@ -572,7 +578,8 @@ def test_the_recording_page_in_a_browser(recording_service: tuple[int, str], tmp
         page = browser.new_page(viewport={"width": 1440, "height": 900})
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: errors.append(str(e)))
-        page.on("requestfailed", lambda r: errors.append(f"request failed: {r.method} {r.url} ({r.failure})"))
+        # A media element cancels its own requests as it seeks and reads ahead: that isn't a failure.
+        page.on("requestfailed", lambda r: None if _seeking(r) else errors.append(f"request failed: {r.url}"))
         page.on(
             "response", lambda r: errors.append(f"{r.status} {r.request.method} {r.url}") if r.status >= 400 else None
         )
@@ -608,6 +615,21 @@ def test_the_recording_page_in_a_browser(recording_service: tuple[int, str], tmp
         page.reload()
         assert page.evaluate("document.documentElement.dataset.theme") == "dark"
         page.screenshot(path=str(shots / "recording-dark.png"), full_page=True)
+        page.click('[data-action="theme"]')
+
+        # The tour's audio stored, and Whisper's transcript beside the recorder's: a line's time plays from there.
+        with_audio(Vault.open(tmp_path / "vault"))
+        tour = f"{base}/recording?rid={TOUR}"
+        page.goto(tour)
+        expect(page.locator("table.aligned tbody tr")).to_have_count(4)
+        expect(page.locator("table.aligned tbody tr:nth-child(3) li.segment.cut")).to_have_count(2)
+        page.click("table.aligned tbody tr:nth-child(2) td:first-child a.time")
+        page.wait_for_function(
+            "() => { const p = document.getElementById('player'); return p && !p.paused && p.currentTime >= 20; }"
+        )
+        assert page.url == f"{tour}&at=00:20#at"
+        expect(page.locator("li.segment.playing")).to_contain_text("The new gate opens on Friday.")
+        page.screenshot(path=str(shots / "recording-player.png"), full_page=True)
         assert not errors, errors
         browser.close()
 
@@ -625,6 +647,12 @@ def test_the_recording_page_in_a_browser(recording_service: tuple[int, str], tmp
         expect(plain.locator("li.segment.mark")).to_have_text([re.compile("01:20")])
         expect(plain.locator(".summary-column .line.cited")).to_have_count(1)
         plain.screenshot(path=str(shots / "recording-no-script.png"), full_page=True)
+        # The player starts at the line its link opens, by its own #t=.
+        plain.goto(tour)
+        plain.click("table.aligned tbody tr:nth-child(2) td:first-child a.time")
+        plain.wait_for_url(f"{tour}&at=00:20#at")
+        expect(plain.locator("#player")).to_have_attribute("src", re.compile(r"#t=20\.000$"))
+        plain.screenshot(path=str(shots / "recording-player-no-script.png"), full_page=True)
         scriptless.close()
 
 

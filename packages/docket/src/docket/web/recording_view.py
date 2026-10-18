@@ -1,10 +1,11 @@
 """What the Recording page shows, worked out from what the raw log and the docs hold (DR-0545): the recording's summary
 beside its transcript, each summary line's anchors linked to the transcript lines they point at, and why there is no
-audio to play.
+audio to play, or the player, starting at the line the URL marks.
 
 | The rid | Shows |
 |---|---|
 | a recording, or a transcript | its summary beside one transcript: the rid's, else the summary's, else the first |
+| a recording Whisper transcribed | the same, with Whisper's transcript beside it, aligned by time, once raw holds it |
 | a held recording | that it is held and nothing of it is stored, with where its hold is listed |
 | a record that isn't a recording | that it isn't, with a link to it on the Search page |
 | nothing the raw log holds | that there is no such recording |
@@ -15,13 +16,16 @@ docs is data: the templates escape it, and no link is made from it.
 
 from __future__ import annotations
 
+import bisect
 from dataclasses import dataclass, field
 from typing import Literal
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 from docket.recall import DocView
 from docket.vault.anchors import Anchor, format_anchor, format_time
-from docket.vault.records import RawRecord
+from docket.vault.cuts import CUT_MARKER
+from docket.vault.records import TRANSCRIBED_VIA, RawRecord
 from docket.vault.segments import Segment, segments
 from docket.vault.spans import problem
 from docket.web.panel import Style, anchored_rid, frontmatter_end, line_parts
@@ -48,7 +52,7 @@ NO_AUDIO: dict[NoAudio, str] = {
     "cut-by-characters": "A record of it was cut by characters, so its audio can't be cut to match; it stays unplayed.",
     "not-downloaded": "The audio is stored but not downloaded to this machine: git lfs pull fetches it.",
     "no-key": "The audio is stored, but this machine has no key to open it.",
-    "stored": "The audio is stored here; playing it from this page comes next.",
+    "stored": "A line's time plays the audio from there.",
 }
 
 
@@ -124,7 +128,10 @@ class SegmentView:
     text: str
     mark: bool
     # The first line `at` marks carries the id every link setting `at` names.
-    target: bool
+    target: bool = False
+    # Where the player starts for this line, in seconds; none for a cut stretch, which is silent.
+    start: str | None = None
+    cut: bool = False
 
 
 @dataclass(frozen=True)
@@ -133,6 +140,23 @@ class TranscriptView:
     meta: str
     segments: list[SegmentView]
     problem: str | None
+
+
+@dataclass(frozen=True)
+class PairRow:
+    """One stretch of time: the recorder's lines in it, and Whisper's whose middle falls in them."""
+
+    left: list[SegmentView]
+    right: list[SegmentView]
+
+
+@dataclass(frozen=True)
+class PairView:
+    """The recorder's transcript and Whisper's side by side, aligned by time (DR-0570)."""
+
+    left: TranscriptView
+    right: TranscriptView
+    rows: list[PairRow]
 
 
 @dataclass(frozen=True)
@@ -160,6 +184,9 @@ class RecordingView:
     others: list[OtherTranscript] = field(default_factory=list[OtherTranscript])
     no_transcript: str = ""
     problems: list[str] = field(default_factory=list[str])
+    # The player's source, with the line `at` marks as its start (`#t=`), when the audio reads ok.
+    player: str | None = None
+    pair: PairView | None = None
 
 
 def is_recording(record: RawRecord, transcripts: tuple[RawRecord, ...]) -> bool:
@@ -222,12 +249,45 @@ def build(facts: Facts, state: RecordingState) -> RecordingView:
     if shown is None:
         view.no_transcript = "No transcript of this recording is in the raw log yet."
     else:
-        view.transcripts = [_transcript(page, shown)]
+        partner = _partner(facts, shown)
+        if partner is None:
+            view.transcripts = [_transcript(page, shown)]
+        else:
+            view.pair = _pair(page, shown, partner)
+        paired = {shown.rid, *([partner.rid] if partner is not None else [])}
         view.others = [
-            OtherTranscript(t.rid, state.but(rid=t.rid).link()) for t in facts.transcripts if t.rid != shown.rid
+            OtherTranscript(t.rid, state.but(rid=t.rid).link()) for t in facts.transcripts if t.rid not in paired
         ]
+    if facts.audio == "stored" and facts.recording is not None:
+        view.player = _player(facts.recording.rid, segs, page.marked)
     _summary(page, view)
     return view
+
+
+def is_whisper(record: RawRecord) -> bool:
+    """A transcript Docket made with Whisper (DR-0570)."""
+    return record.via.startswith(TRANSCRIBED_VIA)
+
+
+def _partner(facts: Facts, shown: RawRecord) -> RawRecord | None:
+    """The transcript shown beside the one the page shows: Whisper's beside the recorder's, or the recorder's the
+    summary covers beside Whisper's. Only what raw holds: a Whisper transcript still staged isn't shown."""
+    if is_whisper(shown):
+        covered = facts.summary.covers if facts.summary is not None else []
+        recorders = [t for t in facts.transcripts if not is_whisper(t)]
+        return next((t for t in recorders if t.rid in covered), recorders[0] if recorders else None)
+    return next((t for t in facts.transcripts if is_whisper(t)), None)
+
+
+def _player(rid: str, segs: list[Segment], marked: set[int]) -> str:
+    """The audio's URL, starting at the first line `at` marks, so playing starts there without JavaScript too."""
+    url = f"/recording/audio?{urlencode({'rid': rid})}"
+    first = min(marked, default=None)
+    return url if first is None else f"{url}#t={_seconds(segs[first].start_ms)}"
+
+
+def _seconds(ms: int) -> str:
+    return f"{ms // 1000}.{ms % 1000:03d}"
 
 
 def _shown(facts: Facts) -> RawRecord | None:
@@ -264,28 +324,75 @@ def _absent(facts: Facts) -> RecordingView:
     )
 
 
+def _line(state: RecordingState, s: Segment, *, mark: bool, target: bool, named: bool = True) -> SegmentView:
+    """A transcript line; `named` false for Whisper's, which names no speaker (there is no diarization)."""
+    cut = s.text == CUT_MARKER
+    return SegmentView(
+        at=format_time(s.start_ms // 1000),
+        url=state.but(at=time_at(s.start_ms // 1000)).link(),
+        speaker="" if cut or not named else s.speaker or "?",
+        text=s.text,
+        mark=mark,
+        target=target,
+        start=None if cut else _seconds(s.start_ms),
+        cut=cut,
+    )
+
+
 def _transcript(page: _Shown, shown: RawRecord) -> TranscriptView:
     state, segs, marked = page.state, page.segs, page.marked
     first = min(marked, default=None)
-    lines = [
-        SegmentView(
-            at=format_time(s.start_ms // 1000),
-            url=state.but(at=time_at(s.start_ms // 1000)).link(),
-            speaker=s.speaker or "?",
-            text=s.text,
-            mark=i in marked,
-            target=i == first,
-        )
-        for i, s in enumerate(segs)
-    ]
+    lines = [_line(state, s, mark=i in marked, target=i == first) for i, s in enumerate(segs)]
+    return TranscriptView(shown.rid, _meta(shown, segs), lines, _outside(state, shown, marked))
+
+
+def _meta(record: RawRecord, segs: list[Segment]) -> str:
     said = "1 line" if len(segs) == 1 else f"{len(segs)} lines"
-    meta = ", ".join(p for p in (shown.rid, shown.engine, said) if p)
-    outside = None
-    if state.at is not None and not marked:
-        outside = problem(Anchor(shown.rid, "time", state.at.start, state.at.end), shown) or (
-            f"no line of {shown.rid} is at {state.at_text}"
-        )
-    return TranscriptView(shown.rid, meta, lines, outside)
+    return ", ".join(p for p in (record.rid, record.engine, said) if p)
+
+
+def _outside(state: RecordingState, shown: RawRecord, marked: set[int]) -> str | None:
+    if state.at is None or marked:
+        return None
+    return problem(Anchor(shown.rid, "time", state.at.start, state.at.end), shown) or (
+        f"no line of {shown.rid} is at {state.at_text}"
+    )
+
+
+def _pair(page: _Shown, shown: RawRecord, partner: RawRecord) -> PairView:
+    """The two side by side, the recorder's on the left: each row a line of the left with the right's lines whose
+    middle falls in it; a right line in a gap of the left's gets a row of its own. A cut stretch sits in one row, cut
+    in both, as Whisper's `[cut]` spans the stretch the recorder's was cut at."""
+    state = page.state
+    left, right = (partner, shown) if is_whisper(shown) else (shown, partner)
+    lsegs, rsegs = segments(left), segments(right)
+    lmarks = page.marked if left is shown else _marked(lsegs, state)
+    rmarks = page.marked if right is shown else _marked(rsegs, state)
+    first = min(lmarks, default=None)
+    second = min(rmarks, default=None) if first is None else None
+    lines = [_line(state, s, mark=i in lmarks, target=i == first) for i, s in enumerate(lsegs)]
+    other = [_line(state, s, mark=j in rmarks, target=j == second, named=False) for j, s in enumerate(rsegs)]
+    rows: list[tuple[int, list[SegmentView], list[SegmentView]]] = [
+        (s.start_ms, [lines[i]], []) for i, s in enumerate(lsegs)
+    ]
+    starts = [s.start_ms for s in lsegs]
+    for j, s in enumerate(rsegs):
+        mid = (s.start_ms + s.end_ms) // 2
+        k = bisect.bisect_right(starts, mid) - 1
+        if k >= 0 and mid < max(lsegs[k].end_ms, lsegs[k].start_ms + 1):
+            rows[k][2].append(other[j])
+        else:
+            rows.append((s.start_ms, [], [other[j]]))
+    rows.sort(key=lambda r: r[0])
+    return PairView(
+        TranscriptView(left.rid, _meta(left, lsegs), [], _outside(state, left, lmarks)),
+        TranscriptView(right.rid, _meta(right, rsegs), [], None),
+        [PairRow(a, b) for _, a, b in rows],
+    )
+
+
+def _marked(segs: list[Segment], state: RecordingState) -> set[int]:
+    return _marks(segs, state.at) if state.at is not None else set[int]()
 
 
 def _summary(page: _Shown, view: RecordingView) -> None:

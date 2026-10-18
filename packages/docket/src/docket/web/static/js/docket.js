@@ -1,6 +1,7 @@
-/* Docket's own script: the keys, the theme and keys switches, focus around the panel, copying a locator, and the
-   reload into the sign-in page when a session ends. Loaded as a file under the page CSP: no inline script, no eval.
-   The keys are the ones docket/web/pages.py lists; the page works without this script, by its links alone. */
+/* Docket's own script: the keys, the theme and keys switches, focus around the panel, copying a locator, playing a
+   recording from a line, and the reload into the sign-in page when a session ends. Loaded as a file under the page
+   CSP: no inline script, no eval. The keys are the ones docket/web/pages.py lists; the page works without this
+   script, by its links alone. */
 (() => {
   "use strict";
 
@@ -168,6 +169,26 @@
     } else {
       announce();
     }
+  });
+
+  // On the Recording page a line's time plays the audio from there. Without this script the same link opens the page
+  // at the line, and the player starts there by itself (#t=).
+  function play(link) {
+    const player = document.getElementById("player");
+    const line = link.closest(".segment[data-start]");
+    if (!player || !line) return false;
+    player.currentTime = Number(line.dataset.start);
+    player.play().catch(() => toast("The audio didn't start"));
+    for (const other of document.querySelectorAll(".segment.playing")) other.classList.remove("playing");
+    line.classList.add("playing");
+    history.replaceState(null, "", link.href);
+    return true;
+  }
+
+  document.addEventListener("click", (event) => {
+    const link = event.target.closest(".segment a.time");
+    if (!link || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    if (play(link)) event.preventDefault();
   });
 
   // A session that ended: htmx doesn't swap the 401 in, and the reload shows the whole sign-in page.

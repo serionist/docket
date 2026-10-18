@@ -7,6 +7,7 @@ transcript and its notes as three records. Built once per session; each test cop
 | `plaud:rec-labels` | a call no doc covers |
 | `plaud:rec-old` | a call only a legacy note covers |
 | `plaud:rec-held` | held: on the hold list, nothing in the raw log |
+| `plaud:rec-tour` | a call with a stretch cut; `with_audio` stores its audio, cut, and Whisper's transcript |
 | `mail:<crane-1@harbour.example>` | a mail, not a recording |
 """
 
@@ -18,10 +19,16 @@ from typing import Any
 
 import pytest
 from docket_testkit import make_config, make_record, template_with
+from media_kit import tone
 
 from docket import recall
-from docket.vault import holds
+from docket.media import crypto, layout
+from docket.media import put as media
+from docket.media.keystore import KeyStore
+from docket.vault import cursors, holds
 from docket.vault.config import SourceConfig
+from docket.vault.cuts import CUT_MARKER
+from docket.vault.gate import Gate
 from docket.vault.processed import DocMeta, ProcessedDoc
 from docket.vault.records import RawRecord
 from docket.vault.vault import Vault
@@ -32,6 +39,23 @@ RAW = f"{CRANE}/transaction"
 LABELS = "plaud:rec-labels"
 OLD = "plaud:rec-old"
 HELD = "plaud:rec-held"
+TOUR = "plaud:rec-tour"
+TOUR_POLISHED = f"{TOUR}/transaction_polish"
+WHISPER = "whisper-large-v3@edaa852 faster-whisper-1.2.1"
+TOURED = [
+    ("Ada Example", "Welcome to the yard tour."),
+    ("Ben Sample", "The new gate opens on Friday."),
+    ("Ben Sample", "We talked about something else here."),
+    ("Ada Example", "The fence is done by the end of the month."),
+]
+# What Whisper heard: its own lines and boundaries, none in the cut stretch but its [cut] over it.
+HEARD = [
+    (500, 9_000, "Welcome to the yard tour."),
+    (10_000, 18_000, "Thanks for coming."),
+    (20_500, 38_000, "The new gate opens on Friday."),
+    (40_000, 59_000, "[cut]"),
+    (60_500, 78_000, "The fence is done by the end of the month."),
+]
 MAIL = "mail:<crane-1@harbour.example>"
 MINUTES = "minutes:2026-10-12-harbour-crane-check"
 NOTE = "recording-note:2026-10-12-harbour-crane-check"
@@ -87,6 +111,49 @@ def doc(doc_id: str, covers: list[str], body: list[str]) -> str:
     return "---\n" + "\n".join(head) + "\n---\n\n" + "\n".join(body) + "\n"
 
 
+def tour() -> list[RawRecord]:
+    """A call whose third line was cut by hand: its transcript keeps `[cut]` over the stretch."""
+    under = {"source": "plaud", "container": TOUR, "thread": TOUR, "author": None}
+    when = datetime(2026, 10, 14, 8, 30, tzinfo=UTC)
+    said = lines(TOURED)
+    said[2] = {"start_ms": 40_000, "end_ms": 59_000, "text": CUT_MARKER}
+    text = "\n".join(f"{s['speaker']}: {s['text']}" if s.get("speaker") else s["text"] for s in said)
+    return [
+        make_record(rid=TOUR, kind="recording", title="Yard tour", text="", ts=when, **under),
+        make_record(
+            rid=TOUR_POLISHED,
+            kind="transcript",
+            segments=said,
+            text=text,
+            ts=when,
+            engine="plaud/transaction_polish",
+            fidelity="cut",
+            **under,
+        ),
+    ]
+
+
+def with_audio(vault: Vault) -> None:
+    """The tour's audio stored, cut where its transcript is, and Whisper's transcript of it in raw: a key store in a
+    file of this test's own, so each test that copies the vault does this itself."""
+    KeyStore(vault.home).init("file")
+    cursors.save(vault, "plaud", cursors.Cursor())
+    drop = media.drop_folder()
+    drop.mkdir(parents=True, exist_ok=True)
+    (drop / "tour.mp3").write_bytes(tone(80.0))
+    media.put(vault, TOUR, path=str(drop / "tour.mp3"))
+    Gate(vault).promote()
+    [stored] = layout.stored_files(vault.root, TOUR)
+    under = {"source": "plaud", "container": TOUR, "thread": TOUR, "author": None}
+    heard = [{"start_ms": s, "end_ms": e, "text": text} for s, e, text in HEARD]
+    whisper = make_record(
+        rid=f"{TOUR}/whisper", kind="transcript", segments=heard, text="\n".join(h["text"] for h in heard),
+        ts=datetime(2026, 10, 14, 8, 30, tzinfo=UTC), engine=WHISPER, via=f"docket transcribe {crypto.key_id(stored)}",
+        fidelity="derived", to=["Ada Example", "Ben Sample"], **under,
+    )  # fmt: skip
+    vault.write_run("plaud", [whisper])
+
+
 def build_recording_vault(root: Path) -> Vault:
     config = make_config()
     config.sources = {"plaud": SourceConfig(sensitivity="mixed"), "mail": SourceConfig()}
@@ -96,6 +163,7 @@ def build_recording_vault(root: Path) -> Vault:
         *call(CRANE, "Harbour crane check", SAID, 12, "transaction_polish", "transaction"),
         *call(LABELS, "Pallet labels", labels, 13, "transaction_polish"),
         *call(OLD, "Yard walk", labels, 5, "transaction_polish"),
+        *tour(),
     ]
     vault.write_run("plaud", records)
     mail = make_record(

@@ -110,6 +110,22 @@ def header(head: bytes) -> bytes:
     return head[: end + 1]
 
 
+# age's STREAM: after the header a 16-byte nonce, then the payload in 64 KiB chunks, each sealed with a 16-byte tag.
+NONCE = 16
+CHUNK = 64 * 1024
+TAG = 16
+
+
+def plain_size(path: Path) -> int:
+    """What an age file decrypts to, in bytes, from its framing alone: the last chunk may be short, and an empty
+    payload is one empty chunk."""
+    with path.open("rb") as f:
+        head = f.read(MAX_HEADER)
+    payload = path.stat().st_size - len(header(head)) - NONCE
+    chunks = max(1, -(-payload // (CHUNK + TAG)))
+    return payload - chunks * TAG
+
+
 def key_id(path: Path) -> str:
     """The key id of an age file: the sha256 of its header."""
     with path.open("rb") as f:
