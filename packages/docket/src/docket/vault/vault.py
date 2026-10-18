@@ -89,6 +89,8 @@ ATTRIBUTE_CHECKS = [
     ("state/forgotten.jsonl", "merge", "union"),
     ("entities/_log/2026-01-m.jsonl", "merge", "union"),
     ("entities/_log/2026-01-m.jsonl", "eol", "lf"),
+    ("ledger/ops/2026-01-m.jsonl", "merge", "union"),
+    ("ledger/ops/2026-01-m.jsonl", "eol", "lf"),
 ]
 # A path in each place the vault commits; no ignore rule may match one.
 IGNORE_SAMPLES = [
@@ -345,7 +347,11 @@ class Vault:
     def check(self) -> list[Problem]:
         """What would make the vault untrustworthy: a raw file that doesn't parse, a record twice in one run, a raw
         file changed or deleted after it was committed, a file in raw/ that isn't a run file; an ignore rule that
-        hides a path the vault commits, an attribute that isn't the vault's own; a doc rev two commits claim."""
+        hides a path the vault commits, an attribute that isn't the vault's own; a doc rev two commits claim; what
+        the ledger's check names (DR-0617)."""
+        # The ledger's modules import the vault, so its check is imported when it runs.
+        from docket.ledger import check as ledger  # noqa: PLC0415
+
         problems: list[Problem] = []
         raw = self.root / "raw"
         # A line a forget took is no record of its run's to count twice, and is never named (DR-0579).
@@ -397,6 +403,7 @@ class Vault:
             problems.append(Problem(rels[0], f"an ignore rule hides it{more} from git ({rule}){hint}"))
         problems.extend(Problem(rel, message) for rel, message in attribute_mismatches(self.root))
         problems.extend(self._doc_rev_problems())
+        problems.extend(Problem(where, message) for where, message in ledger.problems(self))
         return problems
 
     def _forget_unfinished(self, listed: forgotten.Forgotten, rel: str) -> bool:

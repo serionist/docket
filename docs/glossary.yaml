@@ -87,9 +87,15 @@ terms:
     see: [packages/docket/src/docket/vault/home.py]
     close_terms:
       - consuming project (the repo the plugin and source skills run in; often the same repo)
+  - term: item number
+    definition: "An item's A- number, as A-0302: held by its add op, one past the highest any item has held, and renumbered only after two clones gave out one number."
+    see: [packages/docket/src/docket/ledger/fold.py]
   - term: key store
     definition: One clone's media keys, sealed in its private folder, with the seal in the OS keychain or, where the owner opted in on that machine, in a file in Docket's per-user state folder.
     see: [packages/docket/src/docket/media/keystore.py]
+  - term: ledger
+    definition: "The items owed and awaited, with their history: a JSON line per change in the vault's ledger/ops/<yyyy-mm>-<machine>.jsonl, folded into each item's state and log."
+    see: [packages/docket/src/docket/ledger/ops.py]
   - term: legacy note
     definition: "A processed doc of type legacy-note made from a note that existed before Docket: its body is the note's text, it may cover no record, and it keeps the note's old paths so references to them still resolve."
     see: [old path]
@@ -120,6 +126,9 @@ terms:
   - term: one-way door
     definition: Something users or their stored data depend on, such as a name, the vault's format or an MCP tool. It changes only with the maintainer's agreement, in a PR that names it.
     see: [AGENTS.md]
+  - term: op
+    definition: "One change to the ledger, one JSON line: its ULID id, the item it names, who made it, its kind and that kind's keys. Written once; an undo is an op too."
+    see: [packages/docket/src/docket/ledger/ops.py]
   - term: OS prompt
     definition: "The system's own yes, which only a person answers: Windows Hello, LocalAuthentication on macOS (Touch ID, an Apple Watch or the login password), or polkit on Linux. Where a machine has one set up, turning credentials redaction off and forgetting for real ask it at the owner's console, and its no is never answered by the code instead; where it has none, the console code is asked."
     see: [packages/docket/src/docket/osprompt/__init__.py]

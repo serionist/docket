@@ -174,6 +174,11 @@ archiving after closing. Every item's source resolves to a raw record; the histo
 Marco went unanswered"); time-driven changes (rollover, archiving) are written as explicit ops, so rebuilding gives the
 same result on any day.
 
+- Each change to an item is an op: one JSON line in `ledger/ops/<yyyy-mm>-<machine>.jsonl`, written once and merged
+  by union, saying who made it, `user`, `claude` or `sync` (DR-0610, DR-0611). An item folds from its own ops.
+- Undo is an op that leaves one op out of the fold, and an undone undo puts it back; archive is a flag on a closed
+  item that keeps its history (DR-0614, DR-0615). `docket vault check` names what the fold leaves out (DR-0617).
+
 - Meetings come from the calendar. The core turns its records into meeting ops keyed by the event's own id (iCalUId or
   the provider's id), plus the occurrence's original start for a recurring event, so a moved, renamed or cancelled
   meeting updates the same meeting; nothing is matched on start time plus subject.
@@ -254,9 +259,10 @@ flowchart TB
   most 90 seconds, under the plugin's 120-second tool timeout, and writes through the writer (DR-0244).
 - Any number of machines; git is the source of truth. Each machine's index is a cache, rebuilt from the repo. Raw
   run files carry the machine's name, cursors are kept per machine, the machine that harvested a record processes it,
-  and a record seen twice is dropped by id and content hash. Ledger ids are ULIDs (with short numbers handed out when
-  the ops are folded); op order uses hybrid logical clocks; shared JSONL files merge with `merge=union`. Scheduled
-  jobs run on the machine marked primary in `vault.yaml`.
+  and a record seen twice is dropped by id and content hash. Ledger ops' ids are ULIDs minted as a hybrid logical
+  clock, which gives the ops their order; an item's id is its add's, and its short number is held by that add, so a
+  merge never moves it (DR-0612, DR-0613); shared JSONL files merge with `merge=union`. Scheduled jobs run on the
+  machine marked primary in `vault.yaml`.
 - A commit is local and never touches the network. In a repo of its own, `docket sync` fetches, rebases with
   autostash and pushes; on a conflict it aborts and keeps the local commits.
 - Docket's commits, and sync's fetch and rebase, run none of the repo's hooks, in both modes: a hook can't rewrite or
@@ -303,7 +309,8 @@ vault/
   entities/<type>/<slug>.yaml    the keyword layer                                          -> plain git
   entities/_log/<yyyy-mm>-<machine>.jsonl
                                  each change to entities, each rejection and undo           -> plain git
-  ledger/ops/<yyyy-mm>-<machine>.jsonl                                                      -> plain git
+  ledger/ops/<yyyy-mm>-<machine>.jsonl
+                                 each change to the ledger, written once, merged by union   -> plain git
   state/cursors-<machine>.yaml   each machine's mark, lookback, retry and waiting per source -> plain git
   state/holds/<source>.txt       ids a source must not stage yet, merged by union           -> plain git
   state/releases/<source>.jsonl  held ids the owner let in, with their cuts, merged by union -> plain git

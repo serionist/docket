@@ -2,8 +2,7 @@
 
 Docket is a personal memory and task manager that Claude works in: everything kept raw and processed in the user's own
 git repo (the vault), searched and run from a local service with a web app and an MCP endpoint, maintained by a Claude
-Code plugin. This file is the router for anyone who changes the repo, person or agent. The gate keeps it under 150
-lines.
+Code plugin. This file is the router for anyone who changes the repo, person or agent. The gate caps it at 150 lines.
 
 ## Docs
 
@@ -119,7 +118,8 @@ agrees in the issue or, under an autonomy grant, with its decision recorded as p
   path, lines and keys (DR-0460, DR-0461), a folder source's rids, `<source>:<12 hex>` with `/page<n>`, `/slide<n>` and
   `/sheet<n>` under them (DR-0482), media's paths, staged and stored, and its sidecar and withheld marks (DR-0547), the
   sidecar's cuts and `_decided.jsonl`'s kinds (DR-0561), the media cut log and the sidecar's replaced keys (DR-0562), a
-  Whisper transcript's rid suffix `/whisper`, its engine string and its `via` (DR-0570), the forgotten list (DR-0579);
+  Whisper transcript's rid suffix `/whisper`, its engine string and its `via` (DR-0570), the forgotten list (DR-0579),
+  the ledger's op files and lines, their kinds, undo and archive, op ids and item numbers (DR-0610 to DR-0615);
 - a source's mapper interface (DR-0119), and its name and keys in `vault.yaml` (DR-0124, DR-0125), among them `folder`,
   `exclude` (DR-0481), `media_folders` (DR-0604) and `lookback_days` (DR-0606), `media_hosts` read and ignored;
 - the question file `docket eval` reads (DR-0290) and its speech file (DR-0571); the user config's `speech` (DR-0568);
