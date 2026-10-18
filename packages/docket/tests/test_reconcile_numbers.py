@@ -96,3 +96,14 @@ def test_english_a_before_a_scale_word_is_one_and_and_after_one_goes_on() -> Non
     assert numbers.reading("ten, and a", "en") == (10, "and", "a")
     # Not in Hungarian: there `a` is the article.
     assert numbers.reading("a száz", "hu") == ("a", 100)
+
+
+def test_and_never_joins_two_numbers_of_one_scale() -> None:
+    # Two thousand and three thousand are two numbers, as 2,000 and 3,000 are: never five thousand.
+    assert numbers.reading("two thousand and three thousand", "en") == (2000, "and", 3000)
+    assert numbers.reading("two thousand and three thousand", "en") == numbers.reading("2,000 and 3,000", "en")
+    assert numbers.reading("two thousand and three thousand", "en") != numbers.reading("five thousand", "en")
+    # A smaller scale after it still goes on, and so does a larger one after hundreds alone.
+    assert numbers.values("one million and two hundred thousand", "en") == (1_200_000,)
+    assert numbers.values("two hundred and fifty thousand", "en") == (250_000,)
+    assert numbers.values("two thousand and three hundred", "en") == (2300,)

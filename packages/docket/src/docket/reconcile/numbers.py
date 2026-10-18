@@ -88,6 +88,8 @@ class _Number:
     last: str = ""
     words: int = 0
     alone: bool = False
+    # The smallest scale of a thousand or more in `total`: a later one must be smaller to belong to this number.
+    least: int | None = None
 
     def takes(self, value: int) -> bool:
         if value >= 100:
@@ -98,6 +100,7 @@ class _Number:
         if value >= 1000:
             self.total += Fraction(self.below or 1) * value
             self.below = Fraction(0)
+            self.least = value if self.least is None else min(self.least, value)
         elif value == 100:
             self.below = Fraction(self.below or 1) * value
         else:
@@ -112,6 +115,21 @@ class _Number:
     @property
     def value(self) -> Fraction:
         return self.total + self.below
+
+
+def _scale_after(words: list[tuple[str, ...] | None], joins: list[bool], at: int, vocab: dict[str, int]) -> int | None:
+    """The largest scale of a thousand or more in the number words joined after the word at `at`."""
+    found: list[int] = []
+    j = at + 1
+    while j < len(words) and joins[j] and (parts := words[j]) is not None:
+        found += [vocab[p] for p in parts if vocab[p] >= 1000]
+        j += 1
+    return max(found, default=None)
+
+
+def _below(number: _Number, scale: int | None) -> bool:
+    """Whether a scale belongs to a number: none at all, or smaller than every one it has."""
+    return scale is None or number.least is None or scale < number.least
 
 
 def _items(text: str, lang: str | None, skip: frozenset[str]) -> Iterator[tuple[Item, bool]]:
@@ -130,11 +148,17 @@ def _items(text: str, lang: str | None, skip: frozenset[str]) -> Iterator[tuple[
         after = words[i + 1] if i + 1 < len(found) and joins[i + 1] else None
         if english and parts is None and after is not None:
             # English's `a` before a scale word is one (a hundred), and its `and` after one goes on below a hundred
-            # (two hundred and fifty).
+            # (two hundred and fifty), unless what follows reaches a scale the number already has: two thousand and
+            # three thousand are two numbers, as 2,000 and 3,000 are.
             if written == "a" and vocab[after[0]] >= 100:
                 parts, joined = ("one",), False
             elif (
-                written == "and" and number is not None and number.last == "scale" and joined and vocab[after[0]] < 100
+                written == "and"
+                and number is not None
+                and number.last == "scale"
+                and joined
+                and vocab[after[0]] < 100
+                and _below(number, _scale_after(words, joins, i, vocab))
             ):
                 continue
         if number is not None and (parts is None or not joined or not number.takes(vocab[parts[0]])):

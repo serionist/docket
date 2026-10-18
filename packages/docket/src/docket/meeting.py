@@ -26,34 +26,53 @@ def forms(entity: Entity, *, asr: bool = True) -> list[str]:
     return names + [a.text for a in entity.aliases if a.kind == "asr" or not asr]
 
 
-# A word as a form and the records' text are compared: folded, so case and accents never decide.
+# Forms and the records' text are compared folded, so case and accents never decide.
 WORD = re.compile(r"\w+")
-
-
-def _words(text: str) -> tuple[str, ...]:
-    return tuple(WORD.findall(neverstore.fold(text)))
+# What isn't a word or a space: it ends a run of words, so a full stop or a symbol is never read across (Ben. Sample).
+MARK = re.compile(r"[^\w\s]+")
 
 
 def entities(records: Sequence[RawRecord], known: Iterable[Entity], config: VaultConfig) -> list[Entity]:
     """The meeting's entities, each once: its people first, then their projects, then those its records name. The
-    records' text is folded and cut into runs of words once, and each form is looked up among the runs of its length,
-    so a vault of a thousand entities costs what a few do."""
+    records' text is folded once and cut into runs of words with only spaces between them, and a form of words alone
+    is looked up among the runs of its length, so a vault of a thousand entities costs what a few do. A form that holds
+    punctuation (.NET, C#, AT&T) is found as written, its marks and all."""
     known = list(known)
     people = {neverstore.fold(p) for r in records for p in (r.author, *r.to) if p}
     people |= {neverstore.fold(s.speaker) for r in records for s in r.segments or [] if s.speaker}
     chosen: list[Entity] = [e for e in known if any(neverstore.fold(f) in people for f in forms(e, asr=False))]
     related = {i for e in chosen for i in e.related.get("project", ())}
     chosen += [e for e in known if e.id in related and e.type == "project"]
-    named = {e.id: [w for f in forms(e, asr=False) if (w := _words(f))] for e in known}
-    said = _runs(" ".join(f"{r.title or ''} {r.text}" for r in records), {len(w) for ws in named.values() for w in ws})
-    chosen += [e for e in known if any(w in said for w in named[e.id])]
+    folded = neverstore.fold(" ".join(f"{r.title or ''} {r.text}" for r in records))
+    plain: dict[str, list[tuple[str, ...]]] = {}
+    marked: dict[str, list[str]] = {}
+    for e in known:
+        for form in (neverstore.fold(f).strip() for f in forms(e, asr=False)):
+            if MARK.search(form):
+                marked.setdefault(e.id, []).append(form)
+            elif words := tuple(WORD.findall(form)):
+                plain.setdefault(e.id, []).append(words)
+    said = _runs(folded, {len(w) for ws in plain.values() for w in ws})
+    chosen += [
+        e
+        for e in known
+        if any(w in said for w in plain.get(e.id, ())) or any(_says(folded, f) for f in marked.get(e.id, ()))
+    ]
     return [e for e in {e.id: e for e in chosen}.values() if not listed(e, config)]
 
 
-def _runs(text: str, lengths: set[int]) -> set[tuple[str, ...]]:
-    """Every run of words a text holds, of the lengths asked."""
-    words = _words(text)
-    return {words[i : i + n] for n in lengths for i in range(len(words) - n + 1)}
+def _runs(folded: str, lengths: set[int]) -> set[tuple[str, ...]]:
+    """Every run of words a folded text holds, of the lengths asked, with nothing but spaces between its words."""
+    out: set[tuple[str, ...]] = set()
+    for piece in MARK.split(folded):
+        words = tuple(WORD.findall(piece))
+        out |= {words[i : i + n] for n in lengths for i in range(len(words) - n + 1)}
+    return out
+
+
+def _says(folded: str, form: str) -> bool:
+    """Whether a folded text says a folded form as written, punctuation and all, as a whole word."""
+    return re.search(rf"(?<!\w){re.escape(form)}(?!\w)", folded) is not None
 
 
 def glossary(known: Iterable[Entity], config: VaultConfig) -> list[Entity]:

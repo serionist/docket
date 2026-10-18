@@ -70,3 +70,40 @@ def test_forms_are_the_names_then_the_asr_aliases_or_every_alias() -> None:
     assert meeting.forms(DORA) == ["Dóra Minta", "Dóri"]
     assert meeting.forms(RITA) == ["Rita Sample"]
     assert meeting.forms(RITA, asr=False) == ["Rita Sample", "Rita S."]
+
+
+SPELLED = [
+    entity("dotnet", ".NET", "term"),
+    entity("csharp", "C#", "term"),
+    entity("ada-e", "Ada E."),
+    entity("ben-sample", "Ben Sample"),
+    entity("mo", "Mo"),
+    entity("anne-marie", "Anne-Marie Lund"),
+    entity("at-t", "AT&T", "customer"),
+]
+
+
+def test_a_name_is_read_with_only_spaces_between_its_words_and_one_with_punctuation_as_written() -> None:
+    def said(text: str) -> list[str]:
+        record = make_record(rid="calls:x", source="calls", kind="transcript", text=text, author=None, to=[])
+        return [e.id for e in meeting.entities([record], SPELLED, make_config())]
+
+    # Nothing here says a name: a full stop ends a run of words, and a name's own marks must be there.
+    for text in (
+        "the net margin is low",
+        "plan c is fine",
+        "thanks Ben. Sample size next",
+        "Ada E said so",
+        "Anne Marie Lund came",
+        "at t minus five",
+    ):
+        assert said(text) == [], text
+    assert said("Mo Salah called") == ["mo"]
+    assert said("we met Ben  Sample") == ["ben-sample"]
+    assert said("we moved to .NET 8, C# too; AT&T called, and Ada E. and Anne-Marie Lund came") == [
+        "dotnet",
+        "csharp",
+        "ada-e",
+        "anne-marie",
+        "at-t",
+    ]
