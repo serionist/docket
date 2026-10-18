@@ -1,11 +1,11 @@
 decisions:
   - id: DR-0617
-    title: docket vault check checks the ledger's files, lines, ids, numbers and attributes
+    title: docket vault check checks the ledger's files, lines, ids, numbers and attributes, and what changed against HEAD
     status: proposed
     at: "2026-10-18"
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#198"]
-    description: "It names: a file in ledger/ops/ not named <yyyy-mm>-<machine>.jsonl, a link, or not UTF-8; a line that isn't an op of schema 1, or sits in another month's or machine's file, by its line number; one op id twice with other content; an op on an item with no add, or sorting before its add; an undo naming another item's op, or a renumber; a number two items hold, which the next write fixes; a committed line changed or gone, since ops are written once; and attributes on ledger/ops/ other than merge=union and eol=lf. The fold leaves out the same lines, so the check and the index agree."
+    description: "It names: a file in ledger/ops/ not named <yyyy-mm>-<machine>.jsonl, a link, or not UTF-8; a line that doesn't read, or sits in another month's or machine's file, by its line number; one op id on two texts; an op on an item with no add, or sorting before its add; an undo naming another item's op, or a renumber; a number two items hold, which the next write fixes; a committed line changed or gone, the working tree against HEAD, that the forgotten list doesn't explain (a forget's apply, #212), since ops are written once; and attributes on ledger/ops/ other than merge=union and eol=lf. Comparing against HEAD alone, a commit that removes lines, such as #202's revert before it runs again, is no problem. The fold leaves out the lines the check names, except one id on two texts, whose lines it keeps, ordered by their text (DR-0612)."
     not_chosen:
       - "Every field held to todo.py's rules when read: the writer holds those, and a later Docket may add a value."

@@ -6,7 +6,7 @@ decisions:
     by: Claude (autonomy grant)
     cost: one-way
     sources: ["#198"]
-    description: "undo carries of, the id of an op on the same item. The fold reads the undos from the latest back, each leaving out the op it names unless it is undone itself, then replays the rest in order: undoing an edit keeps every later one, and undoing an undo is a redo. An undone add hides the item and its ops. A renumber can't be undone. A write is undone whole by one undo per op of its batch, in one write. The sync's ops undo like anyone's, which is what lets the sync write straight into the ledger. The log shows an undone op marked, and the undo's own line."
+    description: "undo carries of, the id of an op on the same item. The fold reads the undos from the latest back, each leaving out the op it names unless it is undone itself, then replays the rest in order: undoing an edit keeps every later one, and undoing an undo is a redo. An undone add hides the item and its ops. A renumber can't be undone. The writer's undo also undoes, in the same write, the ops of the same kind on the same item that the undone op had left with nothing to do, such as a second done from another machine, so that one doesn't take over once the first is gone. A write is undone whole by one undo per op of its batch, in one write. The sync's ops undo like anyone's, which is what lets the sync write straight into the ledger. The log shows an undone op marked, and the undo's own line."
     binds:
       - An undo names an op of its own item; one naming another item's op, or a renumber, is a problem and is left out.
     not_chosen:

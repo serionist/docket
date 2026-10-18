@@ -6,7 +6,8 @@ decisions:
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#198"]
-    description: "title, who, note, notes, description, outcome and a material's label go through vault.yaml's redaction rules, a match written as its marker, and through the never-store lists: a keyword in the text, or who naming someone on the people list, refuses the whole write, naming the op and the field and never the value, as a doc is held (DR-0195). A source and a material's ref are locators and are left alone, as a record's ids are. The import (#202) goes through the same writer, so the old ledger's text gets the same rules."
+    description: "title, who, note, notes, description, outcome and a material's label go through vault.yaml's redaction rules, a match written as its marker, and through the never-store lists: a keyword in the text, or who naming someone on the people list, refuses the whole write, naming the op and the field and never the value, as a doc is held (DR-0195). A source and a material's ref are locators, so no marker is ever written inside one: each is checked against the redaction rules, credentials among them, and a match, such as a URL with a token= query or a user:password@ host, refuses the whole write, as a put refuses a doc whose by matches (DR-0195). The import (#202) goes through the same writer, so the old ledger's text gets the same rules."
     binds: ["Every op goes through one writer, ledger/store.py; a scan holds it."]
     not_chosen:
       - "Text as given: the ledger quotes chats and mail, and would be the one place a credential got past the gate."
+      - "A marker inside a source or a ref: the locator would no longer find its record or file."
