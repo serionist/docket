@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0613
+    title: An item's id is its add op's ULID; its A- number is held by the add, one past the highest any item has held, renumbered only after a clash
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#198"]
+    description: "An item's id is its add op's ULID, for good. Its number is in the add op: one past the highest number any item has held, renumbered ones included, shown as A- and at least four digits. todo.py numbers the same way from meta.next_id, so imported items keep their numbers and new ones carry on. Two clones apart can give out one number. The add that sorts first keeps it, and the next write on any machine that sees the clash writes a renumber op for the other, which docket vault check names until then. The number then finds the item that holds it and says which item held it before, so a number written in a note or a chat is never quietly another item's. A number is never given out twice. Meetings' M- numbers take the same rule in #199. This replaces the design's numbers handed out when the ops are folded."
+    binds:
+      - "Item ids and numbers are stored in ops, notes and chats: their shapes never change."
+      - A number is never given out twice, to a new item or by a renumber.
+    not_chosen:
+      - "Numbers handed out by the fold, the design's first line: a merge would move a number already written somewhere to another item."
+      - "Number blocks or prefixes per machine: gaps or two shapes, and a list of machines to keep."
+      - "Numbers given out only by the primary machine: a laptop apart couldn't add an item."

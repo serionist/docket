@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0610
+    title: "The ledger's ops are ledger/ops/<yyyy-mm>-<machine>.jsonl, committed: a JSON line per change, written once, merged by union"
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#198"]
+    description: "Every change to the ledger is one JSON line of ledger/ops/<yyyy-mm>-<machine>.jsonl: the month of the op's day, and the machine that wrote it, as DR-0141's layout and the curate log (DR-0460) have it. A line once written never changes. A write replaces its machine's month file through a temp file in the private folder and a rename (write_replacing), so a batch lands whole or not at all, and commits it as Ledger: <verbs and numbers> on <machine>, numbers only and never a title, signed by console.who() (DR-0599). Lines a crash left uncommitted are ops already, and go in with the next write's commit. Two clones write their own files; when a merge meets one file from two sides, the vault's *.jsonl merge=union (DR-0142) keeps both. The fold orders every op by its id (DR-0612), so any merge order gives one ledger, and a line twice, as a union can leave it, is one op. A file in ledger/ops/ is UTF-8 and never a link."
+    binds:
+      - The folder and the file names are part of the vault's layout (DR-0141).
+      - A committed line never changes; docket vault check reports one changed or gone.
+    not_chosen:
+      - "A file per day: a thousand files a few years on, for nothing a month file can't do."
+      - "One shared file: two machines append to it at once, and every merge meets it from both sides."
+      - "Appending in place: a crash part way through a batch would leave half of it."

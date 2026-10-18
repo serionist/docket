@@ -1,0 +1,13 @@
+decisions:
+  - id: DR-0612
+    title: An op's id is a ULID ordered as a hybrid logical clock, and the ledger's order is the ids' order
+    status: proposed
+    at: "2026-10-18"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#198"]
+    description: "A hybrid logical clock in ULID form. A new op's id is a fresh ULID from the clock, or, when that isn't above the highest op id the ledger holds, that id plus one, the ULID read as a 128-bit number; each op of a batch is above the one before. So an op written after a pull sorts after every op it pulled, whatever the two clocks say, and the 80 random bits keep two clones, or two worktrees with one machine name, from minting one id. The fold orders every op by id; at keeps the wall time, for showing. The import (#202) is the one writer whose ids may sort before ops already there: its items are new, and each of their ops sorts after its own add."
+    binds: [Every op of an item sorts after its add; one that doesn't is a problem and is left out.]
+    not_chosen:
+      - "The curate log's <yyyymmddThhmmss>-<machine>-<n>: two worktrees on one host share a machine name and could mint one id, and a clock behind would order an edit before the one it followed."
+      - "Wall time alone: a machine whose clock is behind would lose every edit it makes after a pull."
