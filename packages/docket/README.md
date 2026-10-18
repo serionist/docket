@@ -699,7 +699,7 @@ Sync, Staging, Curate and Settings; the navigation shows the pages still to come
 ### The Recording page
 
 `/recording?rid=<rid>` puts a recording's summary beside its transcript, and plays its audio from any line
-(DR-0544, DR-0545, DR-0572). It only reads.
+(DR-0544, DR-0545, DR-0576). It only reads.
 
 | Part | Shows |
 |---|---|

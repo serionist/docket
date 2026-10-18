@@ -1,5 +1,5 @@
 decisions:
-  - id: DR-0572
+  - id: DR-0576
     title: The Recording page plays stored audio by byte range through the reader, and shows Whisper's transcript beside the recorder's
     status: proposed
     at: "2026-10-18"
