@@ -10,7 +10,7 @@ approved_at:
 
 `/docket:sync` runs each live source in an agent of its own through `run_open`, then writes what they found into the
 ledger in one `ledger_batch` by `sync`; `/docket:tasks` opens the Queue page and works the queue in chat, one item at a
-time. Both are markdown under `plugin/skills/`, with no new tool, op or command. Two PRs, the sync first.
+time. Both are markdown under `plugin/skills/`; the one code change is a writer screen. Two PRs, the sync first.
 
 ## Goal
 
@@ -24,41 +24,44 @@ time. Both are markdown under `plugin/skills/`, with no new tool, op or command.
 
 | Step | Who | What |
 |---|---|---|
-| sources | the skill | `docket ledger day --json`'s `syncs`: every live source in `vault.yaml` (tools listed, on, not private), or those named as arguments, each with its skill under `.claude/skills/sources/<name>/`; the service down, it stops and says so |
-| agents | one per source, launched in one message | `fork.md` filled with the source, the vault and the day; each reads the open items itself with `ledger` |
-| run | each agent | `run_open`, the source's `SKILL.md` and its `sync.md` when there is one, `ingest` and the final run, as the run's steps say |
+| sources | the skill | `docket ledger day --json`'s `syncs`: every live source in `vault.yaml` (tools listed, on, not private), or those named as arguments, an unknown name refused with the live ones listed; each skill under `.claude/skills/sources/<name>/`; the service down, it stops and says so |
+| run | one agent per source, launched in one message | `fork.md` filled with the source, the vault and the day; the open items read with `ledger`; `run_open`, the source's `SKILL.md` and its `sync.md` when there is one, `ingest` and the final run, as the run's steps say; the cursors replace the old state file |
 | classify, promote | each agent, its own source | a mixed source's records plainly work or plainly private, a non-work stretch cut, `--by claude`, an unsure one left for the Staging page; then `docket staging promote --source`, so its rids resolve and the calendar's records make their meetings (#224) |
-| notes | a recording source's agent | a `recording-note` per work recording with `doc_put`, #211's method: the vendor's summary and the whole transcript read, every line anchored, `sync.md`'s layout |
-| find | each agent | over what its run read, older context from `search` and `read`: the return block |
-| reconcile | the skill | a fresh `ledger` snapshot, then one `ledger_batch`, `dry_run` first |
-| summary | the skill | the old summary's groups in chat; the owner goes through them |
+| notes | a recording source's agent | a `recording-note` with `doc_put`, #211's method, for each work recording the run brought and each in the window already in raw with no note: the vendor's summary and the whole transcript read, every line anchored, `sync.md`'s layout; then the open points of its meeting, which the `meetings` view finds near its start, answered |
+| find | each agent | over what its run read, older context from `search` and `read`, owed asks 40 working days back while the ledger holds no item: the return block |
+| reconcile, summary | the skill | a fresh `ledger` snapshot, then one `ledger_batch`, `dry_run` first, a write refused after a clean dry run taking a fresh snapshot and another dry run; then the old summary's groups in chat, which replace the harvest files with the raw |
 
-- An agent reads its source only inside its run, so what it reports is what Docket keeps; a run that stops short
-  leaves its mark, the others go on. Cursors replace the old state file; the raw and the summary, the harvest files.
-- No quick mode: a run reads a day back for chat and mail. The owed check covers the run's window, or 40 working days
-  of the vault while the ledger holds no item.
+- A line rests only on records in raw after the agent's own promotion: never a pending, private, dropped or held one,
+  nor an anchor inside a cut. The agent `read`s every rid it reports and drops a line whose rid doesn't open.
+- The ledger writer refuses an op whose `source` or a material's `ref` sits in a never-store container
+  (`neverstore.in_container` on the record's container or thread), beside its keyword and people screens (DR-0690).
+- A run that stops short leaves its mark; the others go on. No quick mode. The owed check covers the run's window.
+- The project's CLAUDE.md, which the skill reads, holds the owner's drafting routes and rules, the `who` convention,
+  stream hints and how to link meetings that share a slot. The plugin adds two rules: `who` is the name the ledger
+  already uses for that person (`ledger` view `list`, `who=`), and drafts follow the project's drafting notes.
 
 ### The return block (DR-0687)
 
-Each agent returns this and nothing else long, about 800 words. A locator is a rid, built as the source's `SKILL.md`
-says under "What it makes", with its anchor; `read` opens it.
+Each agent returns this and nothing else long, about 800 words. RUN replaces the old DOCKET line; FILE goes.
 
 ```
 RUN:      <source> | <run> | captures <n> | ready <n>, pending <n> | skipped <n> | mark moved yes/no | <a note>
-OWED:     <who> | <rid> | <asked, a day> | <the ask, short> | <why still open> | today / this week / whenever
-INVITES:  <organiser> | <event rid> | <when> | <clashes>
-WAITING:  <who> | <rid> | <since> | <what the owner waits for>
-CLOSES:   <A- ref> | done / moot | <rid of the evidence> | <how, one line>
-MEETINGS: <M- ref> | response=declined / cancelled | <rid of the evidence>
+OWED:     <who> | <locator> | <asked, a day> | <the ask, short> | <why still open> | today / this week / whenever
+INVITES:  <organiser> | <the event's or the invite mail's rid> | <when> | <clashes>
+WAITING:  <who> | <locator> | <since> | <what the owner waits for>
+CLOSES:   <A- ref> | done / moot | <locator of the evidence> | <how, one line>
+MEETINGS: <M- ref> | <field>=<value>; ... | <locator of the evidence>
+STREAMS:  <stream> | where / next | <the news, one line> | <locator>
 NOTES:    <doc id> | <recording rid> | <start> | <end> | <M- ref when its content names one>
-MINUTES:  <M- ref> | <point id> | answered / dropped / open | <the answer, one line> | <rid@mm:ss>
-OUTCOME:  <M- ref> | <2 to 4 short lines: what was decided, who does what> | <rid>
+MINUTES:  <M- ref> | <point id> | answered / dropped / open | <the answer, one line> | <locator>
+OUTCOME:  <M- ref> | <2 to 4 short lines: what was decided, who does what> | <locator>
 LEARNED:  SKILL.md / sync.md | <what differs from it, for next time>
 ```
 
-- RUN replaces the old DOCKET line; FILE goes with the harvest files. MEETINGS no longer makes meetings: the calendar's
-  records do at promotion, keyed by event (DR-0647); it carries what the calendar can't show, a decline seen in mail.
-- A recording's agent answers the open points of its meeting, which the `meetings` view finds near its start.
+- A locator is one `read` opens: a rid with its anchor, built as the source's "What it makes" says, or a doc id or old
+  path with its line or time. One `read` can't open: `search` its words around its day.
+- MEETINGS sets `response`, `attendees`, and `start` and `end` for a move seen only in mail (the calendar still makes
+  meetings, DR-0647). Invites with no response come from the calendar's agent, which ones matter from the mail agent.
 
 ### The reconcile (DR-0689)
 
@@ -67,36 +70,33 @@ names), then the batch is written. No proposal queue: the summary names the batc
 
 | Order | Ops | Rule |
 |---|---|---|
-| closes | `done`, `drop` | only on a CLOSES line, its rid in `note`; nothing closes for being old |
-| asks | `log`, `set`, `add` | OWED, INVITES and WAITING, one item per real ask: an open one gets a `log` with the new rid and a moved due; a new one an `add`, untriaged (the Inbox), `source` the rid the answer goes to, the other rids in `note`, `opened` the ask's day, `due` only a real date, a `stream` the ledger holds |
-| meetings | `set` | each MEETINGS line |
+| closes | `done`, `drop` | only on a CLOSES line, its locator in `note`; nothing closes for being old |
+| asks | `log`, `set`, `add` | OWED, INVITES and WAITING, one item per real ask: an open one gets a `log` with the new locator and a moved due; an item a CLOSES line closes gets a `log` for an ask made before the evidence, an `add` only for one after; a new one an `add`, untriaged (the Inbox), `who` the ledger's name, `source` where the answer goes, the other locators in `note`, `opened` the ask's day, `due` only a real date, a `stream` the ledger holds |
+| meetings | `set` | each MEETINGS line's fields |
 | links | `material`, `fields.meeting` | DR-0651: a recording on the meeting the `meetings` view finds 10 minutes either side of its start, by content when two match; an ask from someone in a meeting, made during it or up to 120 minutes after; never a cancelled meeting or focus time |
 | minutes | `point_set`, `set` | each MINUTES line by point id, then OUTCOME as the meeting's `outcome`; the vendor summary's guessed owners and dates stay out |
 | rollover | `rollover` | rolls what is due; a meeting it names, over with open points and nowhere to go, goes in the summary |
 | prep | `point` with `proposed`, `add` | the next 5 working days' meetings the owner presents in or owns a part of, customer meetings, new series: `suggest`'s items the owner would raise, each a question for that call, none the dry run shows rolled in; none for dailies; a prep `add` only for real work before the call |
-| streams | `set` on a stream | only when the news moves where it stands or its next step |
+| streams | `set` on a stream | only from STREAMS lines |
 | archive | `archive` | last, with no item |
 
-### The summary in chat (DR-0690)
+### The summary in chat (DR-0689)
 
 | Group | What |
 |---|---|
 | Meetings and prep | each meeting the owner has to do something for, with its open items and points, those proposed this run marked; the outcomes written |
-| Today; This week; Whenever | open items by due: today or overdue, this week, the rest |
-| Invites; Waiting on others | as the old summary listed them |
-| After the list | what changed and what the sync closed by itself; sources that didn't run and why; the rollover's leftovers; LEARNED lines written and where; the batch to undo; stale briefs and proposed decisions, once |
+| Today; This week; Whenever; Invites; Waiting on others | open items by due (today or overdue, this week, the rest), then invites and waits, as the old summary listed them |
+| After the list | what changed and what the sync closed by itself; sources that didn't run and why; how many records wait on the Staging page; the rollover's leftovers; LEARNED lines written and where; the batch to undo; stale briefs and proposed decisions, once |
 
 - The owner answers in free text ("12 done, 14 drop, draft 3"), written as one batch `by: user`, or says "let's do
-  tasks". Nothing is drafted before that, and the agents stay read-only.
-- A message is a draft: a chat's draft tool, never its send; a mail left as a draft, sent only on the owner's word for
-  that mail, never where the owner's rules say drafts only.
+  tasks". Nothing is drafted before that, and the agents stay read-only. A message is a draft: a chat's draft tool,
+  never its send; a mail left as a draft, sent only on the owner's word for that mail, never where their rules forbid.
 
 ### /docket:tasks (#209, DR-0691)
 
 | Step | What |
 |---|---|
-| open | `docket open /queue`; a sync the session start names as due, said once |
-| triage | the owner's, on the page (keys 1 to 4, done, drop, snooze) or in chat as one batch `by: user`; Claude reads ahead and waits for "go" |
+| open, triage | `docket open /queue`, a sync the session start names as due said once; the owner triages on the page (keys 1 to 4, done, drop, snooze) or in chat as one batch `by: user`; Claude reads ahead and waits for "go" |
 | order | `ledger` view `queue`: the `me` items in one line, then discuss, claude, chase, each by due, one at a time |
 | each item | `show`; its source and log locators read only as far as the facts need, a recording's summary and transcript around the moment; whether it already happened; three to five lines and the next step |
 | by verdict | discuss: talk, one short question round for a crisp choice; claude: draft or do it, a draft only the owner can send logged and triaged `me`; chase: the nudge drafted and logged, triage cleared; a prep item: points on its meeting, `keep` for proposed ones, `done` with "n points on M-"; a point that is work: `point_item` |
@@ -105,36 +105,38 @@ names), then the batch is written. No proposal queue: the summary names the batc
 
 - The page and chat share only the ledger: the page reloads within 5 s of an op file changing (#203), and Claude
   reads the queue and each item again before it writes. Without the service: `docket ledger queue`, `show`, `batch`.
-- Files: `sync/SKILL.md` with a worked batch, `sync/fork.md`, the agent's prompt, and `tasks/SKILL.md`. Each
-  pre-approves reads only (DR-0605): `ledger`, `search`, `read`, `verify`; the sync `docket ledger day` and `docket
-  staging list` and `show`, tasks `docket open`.
+- Files: `sync/SKILL.md`, `sync/fork.md` (the agent's prompt), `tasks/SKILL.md`, each pre-approving reads only
+  (DR-0605): `ledger`, `search`, `read`, `verify`, `docket ledger day`, `docket staging list` and `show`, `docket open`.
 
 ## Doors and data
 
 Set for good, each PR's title naming its part, `cost: one-way`:
 
 - the skill names `sync` and `tasks` (DR-0685), on AGENTS.md's skill line;
-- the return block's labels, each line gaining fields only at its end (DR-0687);
+- the return block's eleven labels, each line gaining fields only at its end (DR-0687);
 - a source's `sync.md`, optional, beside its `SKILL.md`: the owner's lore for finding there (what counts as an ask,
   evidence, names it mishears, a note's layout), LEARNED lines about the route going to `SKILL.md` (DR-0688).
 
-`medium`: DR-0686, DR-0689 to DR-0691; `cheap`: DR-0692. Not doors: the wording, `fork.md`. Data: none.
+`medium`: DR-0686, DR-0689 to DR-0691; `cheap`: DR-0692. Not doors: the wording, `fork.md`, CLAUDE.md. Data: none.
 
 The cut-over (DR-0692): the owner's old skills keep their names and descriptions, so "sync" and "let's do tasks" still
-reach them, and each body becomes one line, "Run `/docket:sync` (the Skill tool, `docket:sync`) with the same
-arguments". The old fork files' lore moves into each source's `sync.md`; a week later the old skills go.
+reach them, and each body becomes one line, "Run `/docket:sync` (the Skill tool) with the same arguments", the old
+`mail` naming the mail and calendar sources and `quick` dropped with a line saying so. The old bodies' lore moves into
+the project's CLAUDE.md, the forks' into each source's `sync.md`; a week later the old skills go.
 
 ## Steps
 
-1. PR 1, "Add the plugin's sync skill: reconcile into the ledger (one-way door)" (#210): `sync/SKILL.md`, `fork.md`,
-   tests, docs; DR-0685's `sync`, DR-0686 to DR-0690, DR-0692.
+1. PR 1, "Add the plugin's sync skill: reconcile into the ledger (one-way door)" (#210): the writer screen in
+   `TextRules`, `sync/SKILL.md`, `fork.md`, tests, docs; DR-0685's `sync`, DR-0686 to DR-0690, DR-0692. Before its
+   rehearsal, Claude writes the live clone's `sync.md` files from the old fork prompts, the owner's step.
 2. PR 2, "Add the plugin's tasks skill (one-way door)" (#209): `tasks/SKILL.md`, tests, docs; DR-0685, DR-0691.
 
-Sync first: it stands on main as it is, and its summary is where tasks starts; tasks, second, can name #204's `/queue`
-(still waiting, it opens `/ledger` and #204's PR changes that line).
+Sync first: it stands on main, its summary is where tasks starts, and tasks gets #204's `/queue` (else `/ledger`).
 
 ## Tests
 
+- `test_ledger_store.py`: a `source` or a material `ref` in a never-store container, by container and by thread,
+  refused naming the field and never the value; one outside it written; the import's dry run names it.
 - `test_plugin_files.py`: each skill pre-approves only the reads above; every `docket` command and option the skills
   and `fork.md` name exists; every op and view they name is in `ledger-batch.json` and the tool's views; the block's
   labels in `SKILL.md` and `fork.md` equal the test's list; AGENTS.md names both skills.
@@ -143,17 +145,30 @@ Sync first: it stands on main as it is, and its summary is where tasks starts; t
 
 ## Docs
 
-`plugin/README.md`'s table gains both skills and loses "arrive in later phases"; the package README's Live runs names
-`/docket:sync` and `sync.md`; `docs/design.md`'s Claude first section; AGENTS.md's door lines; `plugin.json`'s version
-per PR (CV-0012); a CHANGELOG line per PR; DR-0685 to DR-0692, proposed by Claude.
+`plugin/README.md`'s table gains both skills, losing "arrive in later phases"; the package README's Live runs and
+`docs/design.md`'s Claude first and Tasks sections; AGENTS.md's door lines; `plugin.json`'s version per PR (CV-0012);
+a CHANGELOG line per PR; DR-0685 to DR-0692, proposed by Claude.
 
 ## Risks
 
 - As the old sync: agents share one browser, a tab each; Claude classifies plain cases only. Accepted.
-- A rid built wrong stays a locator `read` can't open: an agent reads one rid of each shape before it reports. Accepted.
-- Two agents promoting at once wait on the vault's lock: a promote that times out runs again a minute later. Accepted.
+- Every rid reported costs a `read`, dozens a sync; two promotes wait on the vault's lock, retried later. Accepted.
 - A proposed point repeating one rollover carries: the dry run shows the rolled copies first. Resolved.
 
 ## Plan review
 
-Not yet: `review-plan` writes this.
+Round 1, 19 Oct, of a682400: one blocker, three majors, seven minors, all fixed here by the lead's calls.
+
+| Id | Severity | Finding | Status |
+|---|---|---|---|
+| P1 | blocker | lines could rest on records Docket doesn't keep: never-store containers, unsure, private, cut or held ones | fixed: raw after the agent's promotion only, no anchor in a cut, every rid read, the Staging count in the summary; the writer screen (DR-0690) |
+| P2 | major | no input for stream moves | fixed: a STREAMS label; the streams row reads only it |
+| P3 | major | meetings lost what mail fed them | fixed: MEETINGS takes `response`, `attendees`, `start` and `end`; INVITES takes the invite mail's rid; who reports invites |
+| P4 | major | the old skill bodies' lore had no home | fixed: the project's CLAUDE.md, not a door (DR-0692); `who` and drafting rules in the plugin |
+| P5 | minor | an ask on an item being closed | fixed: a `log` if asked before the evidence, an `add` if after |
+| P6 | minor | recordings in raw with no note were skipped | fixed: the recording agent covers them |
+| P7 | minor | the rehearsal had no `sync.md` files | fixed: written from the old fork prompts first, the owner's step |
+| P8 | minor | the old `mail` and `quick` arguments, unknown names | fixed: mapped or dropped in the pointer; an unknown name refused |
+| P9 | minor | a locator `read` can't open | fixed: `search` its words around its day |
+| P10 | minor | "locator" undefined | fixed: what one `read` opens |
+| P11 | minor | a write refused after a clean dry run | fixed: a fresh snapshot and another dry run |

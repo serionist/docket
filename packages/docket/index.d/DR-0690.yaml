@@ -1,13 +1,12 @@
 decisions:
   - id: DR-0690
-    title: The sync ends with the old summary in chat and drafts nothing before the owner has gone through it
+    title: The ledger writer refuses an op whose source or a material's ref sits in a never-store container
     status: proposed
     at: "2026-10-19"
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#210"]
-    description: "The summary is read from the ledger after the write: Meetings and prep (each meeting the owner has something to do for, with its open items and open points, those proposed this run marked, and the outcomes the sync wrote), Today (due today or overdue), This week, Whenever, Invites and Waiting on others, a line each; then what changed and what the sync closed by itself, the sources that didn't run and why, the meetings rollover left with nowhere to go, the LEARNED lines written and where, the batch to undo, and the stale briefs and proposed decisions, said once. The owner answers in free text, written as one batch by user, or hands over to /docket:tasks. Nothing is drafted before that. A message is a draft: a chat's draft tool, never its send; a mail left as a draft and sent only on the owner's word for that one mail, never where the owner's own rules say drafts only. The agents stay read-only on every source."
-    binds:
-      - No message is sent without the owner's word for it, and none where their rules say drafts only.
+    description: "Beside the keyword and people screens of the text rules (DR-0618, DR-0627), the writer refuses an op whose source, or a material's ref, points at a record whose container or thread is on vault.yaml's never-store containers list, by neverstore.in_container: the container and thread the index holds for the locator's rid, else the rid's own text up to each slash. The refusal names the field, never the value. A sync agent reports no such record (DR-0686); this holds when one does, and for every writer: the pages, the CLI and the import, whose dry run names an old item it would refuse. It ships in #210's first PR."
+    binds: [No ledger op's source or material ref points into a never-store container.]
     not_chosen:
-      - "Harvest files or digests as a sync's record: the raw holds what was read, and the summary says what it meant."
+      - "Leaving it to the sync skill: the pages, the CLI and the import write ops too, and the keyword and people screens already sit in the writer."
