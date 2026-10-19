@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from docket_testkit import PLAUD, POLISHED, git, make_config, make_record, plaud_records
+from docket_testkit import PLAUD, POLISHED, copied, git, make_config, make_record, plaud_records
 from forget_kit import forget
 
 from docket import decisions, recall
@@ -50,8 +50,13 @@ def cite(vault: Vault, doc_id: str, text: str) -> str:
 @pytest.fixture
 def vault(tmp_path: Path) -> Vault:
     """A note on the transcript and a chat message, a digest built on both of its lines, and a confirmed decision
-    whose one line cites the note's transcript line and which replaced an earlier one."""
-    found = Vault.init(tmp_path / "vault", make_config(), "test-box")
+    whose one line cites the note's transcript line and which replaced an earlier one: built once per run, each test a
+    copy (DR-0531)."""
+    return Vault.open(copied(tmp_path, _build_vault, f"{__name__}.vault"))
+
+
+def _build_vault(folder: Path) -> Path:
+    found = Vault.init(folder / "vault", make_config(), "test-box")
     recording, polished, summary = plaud_records("transaction_polish")
     found.write_run("plaud", [recording, polished, summary], AT)
     found.write_run("chat", [make_record(1)], AT)
@@ -69,7 +74,7 @@ def vault(tmp_path: Path) -> Vault:
     said = [f"- Said on the call. {cite(found, NOTE, TEN)}"]
     recall.doc_put(found, doc(DECISION, [], said, *decided, "replaces:", f"  - {OLD}", title="Proposed: ten million"))
     store.decide(DECISION, 1, "confirm")
-    return found
+    return found.root
 
 
 def apply(vault: Vault) -> forget_apply.Applied:

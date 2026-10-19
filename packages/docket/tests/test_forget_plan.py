@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from docket_testkit import THREAD, make_record
+from docket_testkit import THREAD, copied, make_record
 from media_kit import CALL, POLISHED, audio, call, in_raw, media_vault
 
 from docket import recall
@@ -55,10 +55,8 @@ def doc(doc_id: str, covers: list[str], lines: list[str]) -> str:
     )
 
 
-@pytest.fixture
-def vault(tmp_path: Path) -> Vault:
-    """The call in raw with a Whisper transcript, its audio stored, a note on its transcript, and a chat thread."""
-    found = media_vault(tmp_path)
+def _build_vault(folder: Path) -> Path:
+    found = media_vault(folder)
     put(found)
     in_raw(found)
     found.write_run("plaud", [whisper()])
@@ -66,7 +64,14 @@ def vault(tmp_path: Path) -> Vault:
                              enumerate(THREAD)])  # fmt: skip
     recall.doc_put(found, doc(NOTE, [POLISHED], [f"- The crane passed. [r:{POLISHED}@0:01]", "- A summary line."
                                                  f" [r:{POLISHED}@0:12]"]))  # fmt: skip
-    return found
+    return found.root
+
+
+@pytest.fixture
+def vault(tmp_path: Path) -> Vault:
+    """The call in raw with a Whisper transcript, its audio stored, a note on its transcript, and a chat thread: built
+    once per run, each test a copy (DR-0531)."""
+    return Vault.open(copied(tmp_path, _build_vault, f"{__name__}.vault"))
 
 
 # -- the family --------------------------------------------------------------------------------------------------------
