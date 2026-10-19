@@ -229,7 +229,8 @@ class Counts(BaseModel):
 
 
 class Change(BaseModel):
-    """One op in a history: its log line, and the undo that left it out."""
+    """One op in a history: its log line, the undo that left it out, and its kind, the op's name (add, set, triage,
+    renumber, undo and the rest), so a page can offer an undo only where one applies (DR-0660)."""
 
     id: str
     day: date
@@ -238,6 +239,7 @@ class Change(BaseModel):
     via: str
     line: str
     undone_by: str | None
+    kind: str
 
 
 class MaterialRow(BaseModel):
@@ -703,7 +705,8 @@ class _Reader:
             materials=[MaterialRow(ref=m.ref, label=m.label) for m in item.materials],
             also=[f"{named} by {other}, {index_ledger.now_held(held)}" for other, held in shown.also],
             chased=chased, snoozes=snoozes, due_moves=due_moves, reopens=reopens,
-            history=[Change(id=c.id, day=c.day, at=c.at, by=c.by, via=c.via, line=c.line, undone_by=c.undone_by)
+            history=[Change(id=c.id, day=c.day, at=c.at, by=c.by, via=c.via, line=c.line, undone_by=c.undone_by,
+                            kind=c.kind)
                      for c in shown.history],
         )  # fmt: skip
         return LedgerRead(view="show", today=self.today, counts=Counts(items=1), items=[row], detail=detail)
@@ -780,14 +783,14 @@ class _Reader:
     def history(self, table: str, adds: Sequence[str]) -> list[Change]:
         """A meeting's or a stream's history: the lines of its adds that show, oldest first."""
         sql = (
-            f"SELECT id, day, at, by, via, line, undone_by FROM {table} WHERE item IN ({{marks}}) "  # noqa: S608
+            f"SELECT id, day, at, by, via, line, undone_by, kind FROM {table} WHERE item IN ({{marks}}) "  # noqa: S608
             "AND line IS NOT NULL"
         )
         rows = sorted(self.select(sql, adds), key=lambda r: r[0])
         return [
             Change(id=i, day=date.fromisoformat(day), at=None if at is None else datetime.fromisoformat(at), by=by,
-                   via=via, line=line, undone_by=undone)
-            for i, day, at, by, via, line, undone in rows
+                   via=via, line=line, undone_by=undone, kind=kind)
+            for i, day, at, by, via, line, undone, kind in rows
         ]  # fmt: skip
 
 

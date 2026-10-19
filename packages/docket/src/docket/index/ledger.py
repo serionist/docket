@@ -786,7 +786,8 @@ class Held:
 
 @dataclass(frozen=True)
 class Change:
-    """One op in an item's history as `docket ledger show` lists it: its log line, and the undo that left it out."""
+    """One op in an item's history as `docket ledger show` lists it: its log line, the undo that left it out, and its
+    kind, the op's name."""
 
     id: str
     day: date
@@ -795,6 +796,7 @@ class Change:
     via: str
     line: str
     undone_by: str | None
+    kind: str
 
 
 @dataclass(frozen=True)
@@ -852,9 +854,9 @@ def _shown(
         hidden = conn.execute("SELECT 1 FROM item_numbers WHERE item = ? LIMIT 1", (item_id,)).fetchone()
         raise DocketError(f"{item_id} was undone" if hidden else f"no item {item_id}")
     history = tuple(
-        Change(op_id, date.fromisoformat(day), at and datetime.fromisoformat(at), by, via, line, undone)
-        for op_id, day, at, by, via, line, undone in conn.execute(
-            "SELECT id, day, at, by, via, line, undone_by FROM item_log WHERE item = ? AND line IS NOT NULL "
+        Change(op_id, date.fromisoformat(day), at and datetime.fromisoformat(at), by, via, line, undone, kind)
+        for op_id, day, at, by, via, line, undone, kind in conn.execute(
+            "SELECT id, day, at, by, via, line, undone_by, kind FROM item_log WHERE item = ? AND line IS NOT NULL "
             "ORDER BY id, version",
             (item_id,),
         )

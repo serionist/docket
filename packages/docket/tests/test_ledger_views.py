@@ -485,6 +485,10 @@ def test_show_gives_an_item_whole_with_its_counts_and_history(conn: sqlite3.Conn
     )  # fmt: skip
     assert views.lines(found, TZ)[:2] == [f"A-0003  {LONG}", f"id           {ulid(6)}"]
     assert f"description  {SHOWN} description" in views.lines(found, TZ)
+    # Each change names its op, so a page offers an undo only where one applies.
+    undone = ask(conn, "show", ref="A-6").detail
+    assert undone is not None
+    assert [c.kind for c in undone.history] == ["add", "triage", "undo", "set", "snooze", "reopen"]
 
 
 def test_show_gives_a_meeting_whole_with_its_points_ids_answers_items_and_history(conn: sqlite3.Connection) -> None:
@@ -495,6 +499,7 @@ def test_show_gives_a_meeting_whole_with_its_points_ids_answers_items_and_histor
     assert (detail.kind, detail.where, detail.attendees, detail.notes) == (
         "meeting", "Room 3", ["Ada Example", "Ben Example", f"{SHOWN} Person"], f"{SHOWN} meeting notes",
     )  # fmt: skip
+    assert [c.kind for c in detail.history] == ["meeting", "point", "point", "point_set", "point"]
     assert [(p.ref, p.id, p.answer) for p in by_number.points] == [
         ("M-0001#1", ulid(21), None), ("M-0001#2", ulid(22), f"{SHOWN} answer"), ("M-0001#3", ulid(24), None),
     ]  # fmt: skip
@@ -596,7 +601,10 @@ def test_a_meeting_number_none_holds_now_names_who_held_it(tmp_path: Path) -> No
         f"M-0005 isn't held now; it was held by {ulid(1)} (now M-0009), {ulid(3)} (waiting for a new number); name "
         "the meeting by its id"
     )
-    assert views.read(conn, Ask(view="show", ref="M-9"), TZ, AT).meetings[0].id == ulid(1)
+    renumbered = views.read(conn, Ask(view="show", ref="M-9"), TZ, AT)
+    assert renumbered.meetings[0].id == ulid(1)
+    assert renumbered.detail is not None
+    assert [c.kind for c in renumbered.detail.history] == ["meeting", "renumber"]
 
 
 @pytest.mark.parametrize(

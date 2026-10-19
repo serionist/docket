@@ -2420,6 +2420,9 @@
             "id": {
               "type": "string"
             },
+            "kind": {
+              "type": "string"
+            },
             "line": {
               "type": "string"
             },
@@ -2444,7 +2447,8 @@
             "by",
             "via",
             "line",
-            "undone_by"
+            "undone_by",
+            "kind"
           ],
           "type": "object"
         },
