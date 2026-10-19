@@ -2,4 +2,4 @@
 # wheels, under NVIDIA's own licences. Compiled with hashes by `uv run devkit models-lock`, never by hand.
 onnxruntime-gpu[cuda,cudnn]==1.30.0; sys_platform == "win32" or sys_platform == "linux"
 tokenizers==0.23.2
-numpy==2.5.3
+numpy==2.5.4
