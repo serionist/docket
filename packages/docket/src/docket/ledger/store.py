@@ -39,9 +39,9 @@ A forget's apply writes its masks through `write_masks`, the one change a commit
 commits an op file a stopped apply left masked, its lines' ids listed, as it commits one a stopped write left (DR-0696).
 After a forget (DR-0696): a source, a ref or an anchor naming a rid forgotten whole or a listed legacy note's old path
 is refused, naming the field, a hash check that keeps new ops from needing a mask; and on a shell, an item or a meeting
-whose making op the list holds (DR-0694), a text field or a log is refused, naming its number, and any op's note is
-written as `[forgotten]`, so a drop, an archive and a sync's due archives still go. The rollover leaves a shell's
-points where they are, and a shell's point makes no item.
+whose making op the list holds (DR-0694), a text field or a log is refused, naming its number, and any op's note and
+outcome are written as `[forgotten]`, so a drop, an archive, a close with an outcome and a sync's due archives still
+go. The rollover leaves a shell's points where they are, and a shell's point makes no item.
 """
 
 from __future__ import annotations
@@ -677,10 +677,14 @@ class _Write:
         return meeting_text(self.meeting_number(item_id)) if meeting else number_text(self.number_of(item_id))
 
     def on_shell(self, label: str, kind: str, keys: dict[str, Any]) -> dict[str, Any]:
-        """An op's keys on a shell: a log or any text refused, naming the shell; a note written as the marker, so a
-        drop, an archive and a sync's due archives still go (DR-0696)."""
+        """An op's keys on a shell: a log or any other text refused, naming the shell; a note and an outcome written as
+        the marker, so a drop, an archive, a close with an outcome and a sync's due archives still go, and a sync's
+        batch closing a shell among other items never fails on it (DR-0696)."""
         if kind == "log":
             self.refuse(self.n, f"{label} is a shell a forget left; it takes no log")
+        fields = cast(dict[str, Any], keys.get("fields") or {})
+        if fields.get("outcome") is not None:
+            keys = {**keys, "fields": {**fields, "outcome": ops.MARK}}
         texts = _texts(keys)
         if texts:
             self.refuse(self.n, f"{label} is a shell a forget left; it takes no {texts[0]}")

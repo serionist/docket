@@ -164,7 +164,10 @@ def test_this_machine_s_cursor_entries_on_a_forgotten_rid_go(vault: Vault) -> No
 # -- crashes and merges -------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("step", ["keys", "staging", "media", "recorded", "written", "committed"])
+STEPS = ["keys", "staging", "media", "recorded", "listed", "written", "committed"]
+
+
+@pytest.mark.parametrize("step", STEPS)
 def test_a_crash_at_each_step_is_finished_by_the_next_gate_call(
     vault: Vault, monkeypatch: pytest.MonkeyPatch, step: str
 ) -> None:
@@ -679,7 +682,7 @@ def test_the_apply_masks_each_listed_op_in_every_machine_s_op_file_in_its_one_co
     assert (again.ops, again.commit) == (0, None)
 
 
-@pytest.mark.parametrize("step", ["keys", "staging", "media", "recorded", "written", "committed"])
+@pytest.mark.parametrize("step", STEPS)
 def test_a_crash_at_each_step_reads_masked_meanwhile_and_the_next_gate_call_finishes_the_ops(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, step: str
 ) -> None:
@@ -698,6 +701,34 @@ def test_a_crash_at_each_step_reads_masked_meanwhile_and_the_next_gate_call_fini
     assert clean(vault) and vault.check() == []
     for o in (log, desk):
         assert SAID not in git(vault.root, "show", f"HEAD:{ledger_ops.rel_of(o)}")
+
+
+@pytest.mark.parametrize(("step", "meanwhile"), [("recorded", SAID), ("listed", MARK)])
+def test_a_crash_before_the_ops_only_line_or_between_it_and_the_masks_is_finished_by_the_next_gate_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, step: str, meanwhile: str
+) -> None:
+    """The add listed alone: the rule finds the shell's log no line names, lists it on an ops-only line, then writes
+    the masks (DR-0694, DR-0696)."""
+    vault = empty_vault(tmp_path, make_config())
+    (add,) = ledger_store.write(vault, [{"op": "add", "fields": dict(ADD_FIELDS)}], now=NOW).ops
+    (log,) = ledger_store.write(vault, [{"op": "log", "item": "A-0001", "note": SAID}], now=NOW).ops
+    forget(vault, ops=[add.id])
+
+    def crash(at: str) -> None:
+        if at == step:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(forget_apply, "_reached", crash)
+    with pytest.raises(KeyboardInterrupt):
+        forget_apply.apply(vault, KeyStore(vault.home))
+    # Until the line lists it, the log reads as written, as a clone's own op from before its pull does; no mask yet.
+    assert notes_read(vault) == [meanwhile]
+    assert SAID in (vault.root / ledger_ops.rel_of(log)).read_text(encoding="utf-8")
+    monkeypatch.setattr(forget_apply, "_reached", lambda at: None)
+    Gate(vault).list()
+    assert log.id in forgotten.load(vault.root, vault.home).ops and notes_read(vault) == [MARK]
+    assert SAID not in git(vault.root, "show", f"HEAD:{ledger_ops.rel_of(log)}")
+    assert clean(vault) and vault.check() == []
 
 
 def test_a_twin_a_merge_brought_back_reads_as_one_op_and_goes_at_the_next_gate_call(tmp_path: Path) -> None:

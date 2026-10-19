@@ -468,10 +468,11 @@ forget: an older one reads what a merge brings back until a newer one's gate cal
 - The forget names the ops to mask: one anchoring on what it takes, a material or a source naming it, and every op of
   an item or a meeting built on it, which stays as a shell with its number, its points' copies with it when their
   words were raised there. A copy rolled into a shell from a live meeting goes alone, and the chain after it keeps
-  its words. The screens name each shell, each object that lost a link, and each open point left on a shell, by
-  number only. Text naming a record in plain words, with no anchor or locator, is out of its reach.
+  its words. The screens name each shell, an open one to drop (an item open, a meeting with an open point), each
+  object that lost a link, and each open point left on a shell, by number only. Text naming a record in plain words,
+  with no anchor or locator, is out of its reach.
 - After a forget the ledger refuses text or a log on a shell, and a source, a ref or an anchor naming what was
-  forgotten; a drop or an archive on a shell still goes, its note `[forgotten]`.
+  forgotten; a drop, an archive or a close with an outcome on a shell still goes, its note and outcome `[forgotten]`.
 
 What a forget can't reach, which every dry run names: key exports made before (make a new one right after, then
 destroy the old), the LFS server's encrypted copies, chunks sent to an API provider, the source itself, and files

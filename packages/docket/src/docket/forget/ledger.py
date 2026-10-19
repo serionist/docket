@@ -11,13 +11,16 @@ apply, which finds a clone's own ops from before its pull.
 
 A point is masked for its own words when it was raised on a shell, when an anchor matched it or a `point_set` setting
 its text, or when a `point_set` on a shell set its text there. Any other copy rolled into a shell goes as that shell's
-op, and the chain beyond it keeps its words. A shell's adds digest their event alike (DR-0693), so an unlisted add of
-that event, a merge's, is the shell's too. Only an op whose line a mask changes is named: one with no text has nothing
-to hide, and a listed one is masked already.
+op, and the chain beyond it keeps its words. A meeting is never joined to a shell by its event: another clone's add
+of a forgotten event reads on the family itself, and an add of a kept one is that record's meeting, which the calendar
+step brings back. Only an op whose line a mask changes is named: one with no text has nothing to hide, and a listed one
+is masked already.
 
-What it finds is said by number, never a word: the shells it leaves, the open items among them to drop, each object
-that lost a material or a link and kept its text, and each open point on a shell rolled in from a live meeting, to
-raise again. Streams are counted, their names being words.
+What it finds is said by number, never a word: the shells it leaves, the open ones among them to drop, an item open or a
+meeting with an open point, which the day's lists would show for good, each object that lost a material or a link and
+kept its text, and each open point on a shell rolled in from a live meeting, to raise again. Streams are counted, their
+names being words. A doc an earlier forget's commit removed reads as removed, so a clone's own op naming it from
+before its pull is found.
 """
 
 from __future__ import annotations
@@ -62,8 +65,9 @@ class Docs(Protocol):
 @dataclass(frozen=True)
 class Found:
     """What the rule masks that no list line names yet, each op whose line a mask changes; then, by number, the shells
-    those leave, the open items among them, each object that lost a material or a link and kept its text, each open
-    point on a new shell rolled in from a live meeting, and how many stream ops lost their text."""
+    those leave, the open ones among them (an item open, a meeting with an open point), each object that lost a
+    material or a link and kept its text, each open point on a new shell rolled in from a live meeting, and how many
+    stream ops lost their text."""
 
     new: frozenset[str] = frozenset()
     shells: tuple[str, ...] = ()
@@ -106,7 +110,7 @@ def tokens(text: str) -> tuple[list[str], list[DocRef]]:
     return anchors, refs
 
 
-def _doc_of(path: str) -> str | None:
+def doc_of(path: str) -> str | None:
     """The doc a path names by its file in the vault, as `doc_path` lays it out."""
     m = DOC_FILE.search(path)
     if m is None:
@@ -144,7 +148,7 @@ class _Judge:
         if found.kind == "doc":
             return self.docs.removed(found.value)
         path = found.value.replace("\\", "/").removeprefix("./")
-        doc_id = _doc_of(path)
+        doc_id = doc_of(path)
         return (doc_id is not None and self.docs.removed(doc_id)) or self.listed.legacy({found.value, path}, None)
 
 
@@ -174,12 +178,6 @@ class _Rule:
             self.ledger: Ledger = folding.fold(lines)
         objects = self.ledger.objects
         self.meetings = {obj_id: f.adds for obj_id, f in objects.folds.items() if f.kind == "meeting"}
-        self.events: dict[str, str] = {}
-        for adds in self.meetings.values():
-            for add_id in adds:
-                event = (self.op(add_id).fields or {}).get("event")
-                if isinstance(event, str):
-                    self.events[add_id] = ops.masked_locator(event)
         self.points = {op_id for op_id, found in self.texts.items() if found[0].op.op == "point"}
 
     def op(self, op_id: str) -> Op:
@@ -216,18 +214,12 @@ class _Rule:
     # -- shells and chains -----------------------------------------------------------------------------------------
 
     def shells(self, masked: Collection[str]) -> dict[str, str]:
-        """Each add of a shell with the shell's id: an item whose add is masked, a meeting with a masked add, and a
-        meeting whose add's event digests as a shell's does."""
+        """Each add of a shell with the shell's id: an item whose add is masked, and a meeting with a masked add. A
+        meeting of a shell's event is never joined to it by the event: another clone's add of a forgotten event reads
+        on the family itself, and an add of a kept one is that record's own meeting, brought back."""
         out = {item_id: item_id for item_id in self.ledger.folds if item_id in masked}
-        events: set[str] = set()
-        made: set[str] = set()
         for obj_id, adds in self.meetings.items():
             if any(add_id in masked for add_id in adds):
-                out.update(dict.fromkeys(adds, obj_id))
-                made.add(obj_id)
-                events.update(self.events[a] for a in adds if a in self.events)
-        for obj_id, adds in self.meetings.items():
-            if obj_id not in made and any(self.events.get(a) in events for a in adds):
                 out.update(dict.fromkeys(adds, obj_id))
         return out
 
@@ -322,7 +314,12 @@ class _Rule:
         shells = set(shell.values())
         made = sorted({shell[a] for a in shell if a in new}, key=self.label)
         items = self.ledger.items
-        open_ = [self.label(i) for i in made if i in items and items[i].state in OPEN]
+        meetings = self.ledger.objects.meetings
+        # An open item, or a meeting with an open point, which no archive takes: what the day's lists show for good.
+        open_ = [
+            self.label(i) for i in made
+            if (i in items and items[i].state in OPEN) or (i in meetings and meetings[i].open_points())
+        ]  # fmt: skip
         lost: dict[str, Counter[str]] = {}
         streams = 0
         for op_id in new:
@@ -397,8 +394,10 @@ def suspect(raw: str, listed: Forgotten) -> bool:
     """Whether a line an op file gained since the last apply may be one the rule masks, from the list alone and read
     as JSON only when its text says it may: an op on an object, a point or a copy whose op the list holds, or an anchor
     or a locator on a rid the list holds whole, by a version or by its media, or on a listed old path. Only then is the
-    whole ledger read and judged again (DR-0694). A `[d:` ref isn't looked at: the clone that wrote it before its pull
-    judges it there, its list having moved, and the ops-only line it writes reaches every clone."""
+    whole ledger read and judged again (DR-0694). A line a mask leaves as it is never is: the rule lists only lines a
+    mask changes, so a shell's drop, triage or snooze doesn't make every later write's gate call a match. A `[d:` ref
+    isn't looked at: the clone that wrote it before its pull judges it there, its list having moved, and the ops-only
+    line it writes reaches every clone."""
     held = listed.ops
     rids = bool(listed.rids or listed.versions or listed.media or listed.old_paths)
     named = any(found in held for found in NAMED.findall(raw)) if held else False
@@ -411,7 +410,7 @@ def suspect(raw: str, listed: Forgotten) -> bool:
     if not isinstance(data, dict):
         return False
     line = cast(dict[str, Any], data)
-    if _held(line.get("id"), held):
+    if _held(line.get("id"), held) or ops.mask(raw) == raw:
         return False
     fields = cast(dict[str, Any], line["fields"]) if isinstance(line.get("fields"), dict) else {}
     if any(_held(value, held) for value in (line.get("item"), line.get("point"), fields.get("from"))):

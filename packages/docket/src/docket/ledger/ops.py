@@ -400,12 +400,6 @@ def _located(value: Any) -> Any:
     return _digested(value) if isinstance(value, str) else _marked(value)
 
 
-def masked_locator(text: str) -> str:
-    """A locator as a mask writes it: how a meeting's event reads once its add is masked, so a forget's rule tells an
-    add of a shell's event from another's (DR-0694)."""
-    return _digested(text)
-
-
 def masked_fields(fields: dict[str, Any]) -> dict[str, Any]:
     """An op's fields as its mask leaves them: what the writer asks of a change to a shell (DR-0696)."""
     out: dict[str, Any] = {}

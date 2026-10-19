@@ -17,7 +17,8 @@ A key the apply deletes that no line names, a stored file's this clone made befo
 (DR-0595), so the clones that imported its export delete it too. So does an op the ledger's rule masks that no line
 names: the rule is matched again over every op line once the list's digest moved, and over the whole ledger when a
 line an op file gained looks like one it masks, so a clone's own op from before its pull, or one a pull brought, is
-found (DR-0694). A stream whose ops it masked has its STATUS.md rendered again once the lock is let go (DR-0695).
+found, a doc an earlier forget's commit removed reading as removed (DR-0694). A stream whose ops it masked has its
+STATUS.md rendered again once the lock is let go (DR-0695).
 
 Keys and staging are this clone's own and go at once. The tree waits while git is in the middle of something the owner
 runs, a rebase, a merge, a detached HEAD or unmerged paths, since its commit would be refused and the owner's
@@ -68,6 +69,8 @@ log = logging.getLogger(__name__)
 FOLDER = "forget"
 APPLIED = "applied.json"
 SCHEMA_VERSION = 1
+# A forget's commits, its own and every clone's apply's, as git's grep finds them in a message.
+FORGET_COMMIT = "^Forget: "
 
 Stamp = tuple[int, int]
 # A stored media file's size and modification time, and its key id as its header named it then: None for a header that
@@ -598,10 +601,31 @@ def _ledger(
     return out
 
 
+def removed_before(vault: Vault) -> frozenset[str]:
+    """The docs a forget's commit on HEAD deleted, its subject `Forget:`, that the tree doesn't hold again, by id: on
+    a clone that pulled that forget, its apply removes none of them, yet a material or a source naming one, written
+    there before the pull, reads on the family all the same (DR-0694). Read only when the rule is matched again; none
+    when git can't say, a repo with no commit."""
+    git = vault.git
+    proc = git.run(
+        "log", "--no-show-signature", "--no-renames", "--diff-filter=D", "--name-only", "--format=", "-z",
+        f"--grep={FORGET_COMMIT}", "HEAD", "--", "processed", check=False,
+    )  # fmt: skip
+    found: set[str] = set()
+    for name in proc.stdout.split("\0") if proc.returncode == 0 else ():
+        rel = name.strip("\n").removeprefix(git.prefix)
+        doc_id = forget_ledger.doc_of(rel)
+        if doc_id is not None and not (vault.root / rel).exists():
+            found.add(doc_id)
+    return frozenset(found)
+
+
 def _matched(vault: Vault, listed: Forgotten, raw: forgetdocs.Raw, removed: Iterable[str]) -> forget_ledger.Found:
-    """The ledger's rule over every op line, against raw and the docs as the list leaves them (DR-0694)."""
+    """The ledger's rule over every op line, against raw and the docs as the list leaves them: those this apply
+    removes, and those an earlier forget's commit did (DR-0694)."""
     lines = ledger_ops.read_all(vault.root, masked=listed.ops).lines
-    return forget_ledger.match(lines, raw, listed, Judged(DocStore(vault), raw, listed, removed))
+    gone = {*removed, *removed_before(vault)}
+    return forget_ledger.match(lines, raw, listed, Judged(DocStore(vault), raw, listed, gone))
 
 
 def _cursor(vault: Vault, listed: Forgotten) -> str | None:
@@ -736,6 +760,7 @@ def _apply(vault: Vault, keys: KeyStore, listed: Forgotten, key: str, *, first: 
             found = Forget(keys=unlisted, ops=ledger.new, at=datetime.now(UTC), machine=vault.machine)
             forgotten.write_line(vault, found)
             done.listed_keys, done.listed_ops = len(unlisted), len(ledger.new)
+        _reached("listed")
         for rel, text in writes:
             path = root / rel
             if text is None:

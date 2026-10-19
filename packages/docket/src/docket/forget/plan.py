@@ -40,7 +40,7 @@ from docket.copied import filled
 from docket.documents import records as documents
 from docket.errors import DocketError
 from docket.forget import ledger as forget_ledger
-from docket.forget.apply import Judged, judge, logged_keys
+from docket.forget.apply import Judged, judge, logged_keys, removed_before
 from docket.index.build import open_index
 from docket.ledger import ops as ledger_ops
 from docket.media import layout
@@ -490,7 +490,8 @@ def _docs(vault: Vault, plan: Plan, listed: Forgotten) -> None:
                     )
                 )
     _unreadable(plan, docs)
-    removed = {c.id for c in plan.docs if c.removed}
+    # The docs this forget removes, and those an earlier one's commit did, as the apply's match again reads them.
+    removed = {*(c.id for c in plan.docs if c.removed), *removed_before(vault)}
     lines = ledger_ops.read_all(vault.root, masked=listed.ops).lines
     plan.ledger = forget_ledger.match(lines, after, after.listed, Judged(store, after, after.listed, removed))
 

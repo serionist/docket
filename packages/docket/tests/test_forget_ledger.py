@@ -228,6 +228,24 @@ def test_a_material_naming_a_doc_the_forget_removes_by_id_or_path_goes(vault: Va
     assert plan.ledger.kept == (f"{number}: 2 material links removed; the rest kept",)
 
 
+def test_a_doc_an_earlier_forget_s_commit_removed_reads_as_removed_until_the_tree_holds_it_again(
+    vault: Vault, owner: Callable[..., AtConsole]
+) -> None:
+    recall.doc_put(
+        vault,
+        f"---\nid: {NOTE}\ntype: recording-note\ncovers:\n  - {POLISHED}\nby: claude-test, sync 2026-10-14\n---\n\n"
+        f"# Supplier sync\n\n{TEN}\n",
+    )
+    number = add(vault, source=OTHER)
+    forget_now_at(vault, owner, POLISHED)
+    assert forget_apply.removed_before(vault) == {NOTE}
+    # A link written after, as another clone's from before its pull would be: the next forget's plan names it.
+    write(vault, {"op": "material", "item": number, "ref": NOTE, "label": "linked after"})
+    assert found(vault, CHAT).new == frozenset(ids_of(vault, "linked after"))
+    (vault.root / NOTE_PATH).write_text("---\nid: x\n---\n", encoding="utf-8")
+    assert forget_apply.removed_before(vault) == frozenset()
+
+
 # -- shells ------------------------------------------------------------------------------------------------------------
 
 
@@ -240,10 +258,35 @@ def test_a_meeting_whose_calendar_record_is_forgotten_is_a_shell_with_its_points
     )
     other = weekly(vault, 2)
     plan = plan_of(vault, event(1))
-    assert plan.ledger.shells == (number,) and plan.ledger.open == ()
+    # Its open point would keep it in the day's lists: named to drop on both screens.
+    assert plan.ledger.shells == (number,) and plan.ledger.open == (number,)
+    for screen in (False, True):
+        assert f"drop      {number} is a shell left open, to drop" in planning.lines(plan, screen=screen)
     assert plan.ledger.new == frozenset(ids_of(vault, "Weekly 1:1", event(1)) | ids_of(vault, "The venue")
                                         | ids_of(vault, "Agreed the dates"))  # fmt: skip
     assert other not in plan.ledger.shells
+
+
+def test_a_meeting_the_calendar_step_brings_back_after_an_anchor_made_a_shell_keeps_its_points(
+    vault: Vault, owner: Callable[..., AtConsole]
+) -> None:
+    shell = weekly(vault, 1, notes=f"Agreed [r:{CHAT}]")
+    forget_now_at(vault, owner, CHAT)
+    # The record is kept: the calendar step reads it again and, the shell's event reading masked, makes a new meeting.
+    start = datetime(2026, 8, 3, 9, tzinfo=UTC)
+    fields = {"subject": "Weekly 1:1", "start": f"{start:%Y-%m-%dT%H:%M}+00:00", "end": "2026-08-03T09:30+00:00",
+              "event": event(1)}  # fmt: skip
+    (outcome,) = store.write_calendar(vault, [store.Event(event(1), fields)], via="cli", now=NOW).outcomes
+    assert outcome.what == "added" and outcome.meeting is not None and outcome.meeting != shell
+    write(vault, {"op": "point", "item": outcome.meeting, "fields": {"text": "The venue, again"}})
+    kept = ids_of(vault, "The venue, again") | ids_of(vault, '"op":"meeting"', event(1))
+    assert len(kept) == 2
+    # A later forget's plan, and its apply's match again, leave the new meeting and the owner's point alone.
+    later = found(vault, OTHER)
+    assert later.new == frozenset() and later.shells == ()
+    forget_now_at(vault, owner, OTHER)
+    assert points_of(vault, outcome.meeting) == [("The venue, again", "open")]
+    assert not kept & forgotten.load(vault.root, vault.home).ops
 
 
 def test_a_version_forget_takes_what_its_versions_alone_held(vault: Vault) -> None:
@@ -326,7 +369,6 @@ def test_the_forget_masks_the_ops_and_the_writer_refuses_text_on_its_shells(
         "log": {"op": "log", "item": number, "note": "Ada again"},
         "notes": {"op": "set", "item": number, "fields": {"notes": "Again"}},
         "ref": {"op": "material", "item": number, "ref": "https://example.invalid/x"},
-        "outcome": {"op": "done", "item": number, "outcome": "Booked"},
     }
     for name, change in refused.items():
         with pytest.raises(RefusedError, match=f"{number} is a shell a forget left; it takes no {name}"):
@@ -336,6 +378,25 @@ def test_the_forget_masks_the_ops_and_the_writer_refuses_text_on_its_shells(
     assert [o.note for o in dropped.ops] == [MARK]
     archived = write(vault, {"op": "archive", "note": "Archived by the sync"}, now=NOW + timedelta(days=15))
     assert [(o.op, o.note) for o in archived.ops] == [("archive", MARK)]
+    assert vault.check() == []
+
+
+def test_a_batch_closing_a_shell_with_an_outcome_beside_ten_other_items_goes_its_outcome_the_marker(
+    vault: Vault, owner: Callable[..., AtConsole]
+) -> None:
+    shell = add(vault, source=CHAT)
+    others = [add(vault, source=OTHER, title=f"Book the venue, round {n}") for n in range(10)]
+    forget_now_at(vault, owner, CHAT)
+    closes = [{"op": "done", "item": number, "outcome": f"Booked, round {n}", "note": "Closed by the sync"}
+              for n, number in enumerate([*others[:5], shell, *others[5:]])]  # fmt: skip
+    written = write(vault, *closes)
+    items = ledger_load(vault.root).items
+    assert {item.state for item in items.values()} == {"done"}
+    (shell_id,) = [item_id for item_id, item in items.items() if folding.number_text(item.number or 0) == shell]
+    said = [(o.op, o.note, (o.fields or {}).get("outcome")) for o in written.ops if o.item == shell_id]
+    assert said == [("set", None, MARK), ("done", MARK, None)]
+    kept = [(o.fields or {}).get("outcome") for o in written.ops if o.op == "set" and o.item != shell_id]
+    assert kept == [f"Booked, round {n}" for n in range(11) if n != 5]
     assert vault.check() == []
 
 
@@ -464,11 +525,14 @@ def read_as(*made: ops.Op, listed: Collection[str]) -> list[ops.Line]:
     return list(ops.parse(text, ops.rel_of(made[0]), frozenset(listed)).lines)
 
 
-def test_an_unlisted_add_of_a_shell_s_event_another_clone_made_is_the_shell_s_too() -> None:
+def test_an_unlisted_add_of_a_shell_s_event_is_masked_only_when_the_event_reads_on_the_family() -> None:
     shell, twin, other = meeting(10, event(1)), meeting(20, event(1), notes="From the desk"), meeting(30, event(2))
     read = read_as(shell, twin, other, listed=[ulid(10)])
-    got = forget_ledger.match(read, Raw(), Forgotten(ops=frozenset({ulid(10)})), Docs())
-    assert got.new == frozenset({ulid(20)})
+    listed = Forgotten(ops=frozenset({ulid(10)}))
+    # Another clone's add of a forgotten event reads on the family itself.
+    assert forget_ledger.match(read, Raw([event(1)]), listed, Docs()).new == frozenset({ulid(20)})
+    # One of a kept event is that record's own meeting, brought back: never joined to the shell by its event.
+    assert forget_ledger.match(read, Raw(), listed, Docs()).new == frozenset()
 
 
 def test_a_legacy_note_s_listed_old_path_and_a_marker_read_as_they_should() -> None:
@@ -487,6 +551,13 @@ def test_a_hidden_shell_is_named_by_its_last_claim_and_a_hidden_meeting_by_its_f
     keyed = meeting(10, event(1))
     undo_meeting = op("undo", 11, 10, of=ulid(10))
     assert matched(keyed, undo_meeting, gone=[event(1)]).shells == ("M-0010",)
+
+
+def test_a_meeting_shell_is_named_to_drop_only_while_it_holds_an_open_point() -> None:
+    held, answered = meeting(10, event(1)), meeting(20, event(2))
+    made = (held, point(11, 10), answered, point(21, 20), point_set(22, 20, 21, state="answered"))
+    got = matched(*made, gone=[event(1), event(2)])
+    assert got.shells == ("M-0010", "M-0020") and got.open == ("M-0010",)
 
 
 def test_heads_walk_back_through_shells_to_the_live_meeting_a_point_came_from() -> None:
@@ -583,7 +654,11 @@ SUSPECTS = [
     (op("log", 3, 1, note="plain").text(), True),
     (op("log", 3, 2, note="plain").text(), False),
     (point(3, 2, **{"from": ulid(1)}).text(), True),
-    (point_set(3, 2, 1, state="answered").text(), True),
+    (point_set(3, 2, 1, state="answered", answer="Tuesday").text(), True),
+    # A mask leaves these as they are, so the rule never lists them: a shell's drop, its triage, a point's state.
+    (point_set(3, 2, 1, state="answered").text(), False),
+    (op("drop", 3, 1, note=MARK).text(), False),
+    (op("triage", 3, 1, verdict="chase").text(), False),
     (op("log", 3, 2, note=f"Said [r:{CHAT}@0:01]").text(), True),
     (op("log", 3, 2, note=f"Said [r:{OTHER}] [d:{NOTE}@1#2]").text(), False),
     (op("log", 1, 1, note="listed").text(), False),

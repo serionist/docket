@@ -1,11 +1,12 @@
 """A ledger of a few years: 5,000 items and 50,000 ops, and 2,000 meetings with 20,000 point ops, read and folded by
 `load`, 500 of its ops read as a forget's masks (DR-0695), in under a second and a half; a clone's match again over
-it, 500 of its items shells, in under two and a half (DR-0694); all of it folded into the
-index's tables in under two seconds; one op more, on an item or a meeting, as a write leaves it, read into them in a
-tenth of a second; a write touching one meeting planned in a tenth of a second, reading only its part (DR-0616,
-DR-0628, DR-0633, DR-0635); a snapshot of it, every item open, read from the tables with its lines in a fifth of a
-second (DR-0638); the day's route on a vault holding it in half a second (DR-0672); and all of it as `docket ledger
-show --all --json` gives it, stamped, with its JSON, in under two seconds (DR-0659).
+it, 500 of its items shells, in under two and a half, and a write's next gate call there, the list unmoved, in a
+quarter of a second, matching nothing (DR-0694); all of it folded into the index's tables in under two seconds; one
+op more, on an item or a meeting, as a write leaves it, read into them in a tenth of a second; a write touching one
+meeting planned in a tenth of a second, reading only its part (DR-0616, DR-0628, DR-0633, DR-0635); a snapshot of
+it, every item open, read from the tables with its lines in a fifth of a second (DR-0638); the day's route on a vault
+holding it in half a second (DR-0672); and all of it as `docket ledger show --all --json` gives it, stamped, with its
+JSON, in under two seconds (DR-0659).
 
 The ops are written as the writer writes them, a month file per machine, each item an add and nine changes, each
 meeting four points answered and a point rolled from the meeting before it in its weekly series of fifty. Wall time
@@ -24,13 +25,15 @@ from collections.abc import Collection
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
-from docket_testkit import Best, best_of, empty_vault, make_config, traced
+from docket_testkit import Best, best_of, empty_vault, git, make_config, traced
 from ledger_kit import CHANGES, ITEMS, MEETINGS, SERIES, build
 from starlette.testclient import TestClient
 
+from docket.forget import apply as forget_apply
 from docket.forget import ledger as forget_ledger
 from docket.index import build as index_build
 from docket.index import ledger as ledger_index
@@ -38,13 +41,17 @@ from docket.index.ledger import Held
 from docket.index.schema import LEDGER_TABLES
 from docket.ledger import load, ops, store, views, whole
 from docket.ledger.ops import Op
+from docket.media.keystore import KeyStore
 from docket.service.app import create_app
 from docket.service.state import Settings
+from docket.vault import forgotten
 from docket.vault.anchors import DocRef
-from docket.vault.forgotten import Forgotten
+from docket.vault.forgotten import Forget, Forgotten
 
 FOLD_SECONDS = 1.5
 MATCH_SECONDS = 2.5
+# A write's next gate call, the list unmoved: the file the write grew scanned, the ledger never matched (DR-0694).
+GATE_AFTER_WRITE_SECONDS = 0.25
 # A full rebuild runs only on a schema bump or a forget, never on the daily path (DR-0635).
 REBUILD_SECONDS = 2.0
 CATCH_UP_SECONDS = 0.1
@@ -126,6 +133,48 @@ def test_a_clone_s_match_again_over_that_ledger_with_500_shells_listed_takes_und
     assert len(listed.ops) == 500 and len(run.result.new) == 2_000 and run.result.shells == ()
     if not traced():
         assert run.seconds < MATCH_SECONDS, f"matching took {run.seconds:.2f} s, over {MATCH_SECONDS} s"
+
+
+@pytest.mark.perf
+def test_a_write_s_next_gate_call_with_500_shells_listed_scans_the_file_it_grew_and_matches_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The apply a gate call runs after a write, the list unmoved (DR-0694): the 500 shells' ops with text masked and
+    listed by an apply before, a log appended to a month file that holds their triage, snooze, done and reopen ops,
+    which a mask doesn't change; the file it grew is scanned, the ledger never matched again. Uncommitted, so git's
+    commit isn't timed."""
+    vault = empty_vault(tmp_path, make_config())
+    build(vault.root)
+    git(vault.root, "add", "--", ops.OPS_DIR)
+    git(vault.root, "commit", "-qm", "The perf ledger")
+    every = [line.op for line in ops.read_all(vault.root, masked=frozenset()).lines]
+    listed = sorted(o.id for o in every if o.op == "add")[::10][:500]
+    forgotten.append(vault, Forget(ops=listed, at=datetime(2026, 12, 1, tzinfo=UTC), machine="test-box"))
+    first = forget_apply.apply(vault, KeyStore(vault.home))
+    assert (first.ops, first.listed_ops) == (2_500, 2_000)
+    matched: list[str] = []
+    real = forget_apply._matched  # pyright: ignore[reportPrivateUsage]
+
+    def counted(*given: Any) -> forget_ledger.Found:
+        matched.append("again")
+        return real(*given)
+
+    monkeypatch.setattr(forget_apply, "_matched", counted)
+    # The newest op of a live item in a month file that holds a shell's triage.
+    shells = set(listed)
+    rel = ops.rel_of(next(o for o in every if o.item in shells and o.op == "triage"))
+    written = [next(o for o in reversed(every) if ops.rel_of(o) == rel and o.op == "reopen" and o.item not in shells)]
+
+    def wrote() -> None:
+        written.append(one_more(vault.root, written[-1], "log", note="one more"))
+
+    run = best_of(3, lambda _: forget_apply.apply(vault, KeyStore(vault.home)), wrote)
+    print(f"a write's next gate call: {run.seconds * 1000:.0f} ms ({run.runs('ms')}), 500 shells listed")
+    assert matched == [] and run.result.ops == 0 and run.result.commit is None
+    if not traced():
+        assert run.seconds < GATE_AFTER_WRITE_SECONDS, (
+            f"a write's next gate call took {run.seconds:.2f} s, over {GATE_AFTER_WRITE_SECONDS} s"
+        )
 
 
 def caught_up(conn: sqlite3.Connection, root: Path) -> int:

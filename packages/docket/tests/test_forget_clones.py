@@ -11,12 +11,13 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from docket_testkit import AtConsole, empty_vault, git, make_config, make_record, sh
+from docket_testkit import POLISHED as TRANSCRIPT
+from docket_testkit import AtConsole, empty_vault, git, make_config, make_record, plaud_records, sh
 from forget_kit import forget
 from ledger_kit import ADD_FIELDS, NOW
 from media_kit import CALL, POLISHED, audio, call, in_raw, media_vault
 
-from docket import index
+from docket import index, recall
 from docket.errors import DocketError
 from docket.forget import now as forget_now
 from docket.ledger import ops as ledger_ops
@@ -258,3 +259,37 @@ def test_ops_a_pull_brought_from_before_the_other_clone_s_gate_call_are_masked_h
     assert said(first) == []
     assert git(first.root, "log", "-1", "--format=%s").strip() == "Forget: applied on test-box"
     assert first.check() == []
+
+
+NOTE = "recording-note:2026-10-14-supplier-sync"
+NOTE_PATH = "processed/recording-note/2026/10/2026-10-14-supplier-sync.md"
+LINKED = "The supplier sync"
+
+
+def test_a_clone_s_own_op_naming_a_doc_a_pulled_forget_removed_is_masked_at_its_next_gate_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, owner: Callable[..., AtConsole]
+) -> None:
+    first = empty_vault(tmp_path, make_config())
+    first.write_run("plaud", plaud_records("transaction_polish"))
+    recall.doc_put(
+        first,
+        f"---\nid: {NOTE}\ntype: recording-note\ncovers:\n  - {TRANSCRIPT}\nby: claude-test, sync 2026-10-14\n---\n\n"
+        f"# Supplier sync\n\n- Ten million, signed by Friday. [r:{TRANSCRIPT}@10:42]\n",
+    )
+    store.write(first, [{"op": "add", "fields": dict(ADD_FIELDS)}], now=NOW)
+    with_remote(tmp_path, first)
+    second = clone(tmp_path, monkeypatch)
+    # B links the note by its id and by its path before it pulls A's forget, which removes it.
+    store.write(second, [
+        {"op": "material", "item": "A-0001", "ref": NOTE, "label": f"{LINKED}, by id"},
+        {"op": "material", "item": "A-0001", "ref": NOTE_PATH, "label": f"{LINKED}, by path"},
+    ], now=NOW)  # fmt: skip
+    forget_now_at(first, owner, TRANSCRIPT)
+    push(first)
+    assert second.sync().rebased and not (second.root / NOTE_PATH).exists()
+    Gate(second).list()
+    materials = {line.op.id for line in ledger_ops.read_all(second.root).lines if line.op.op == "material"}
+    assert len(materials) == 2 and materials <= forgotten.load(second.root, second.home).ops
+    assert not [line for _, path in ledger_ops.listing(second.root)[0] for line in _lines(path) if LINKED in line]
+    assert git(second.root, "log", "-1", "--format=%s").strip() == "Forget: applied on other-box"
+    assert second.check() == []
