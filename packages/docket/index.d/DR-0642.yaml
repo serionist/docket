@@ -1,12 +1,12 @@
 decisions:
   - id: DR-0642
-    title: add refuses an item that looks like an open one, as todo.py does, unless force is true
+    title: add refuses an item that looks like an open one unless force is true, and meeting a keyless double
     status: proposed
     at: "2026-10-19"
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#201"]
-    description: "An open or snoozed item, or one an earlier add of the batch made, with the same source, or the same who (case aside) and at least 60% of the shorter title's words of four letters or more in the other, refuses the add, naming it and its title; force: true adds it anyway. Other open items with the same source are named in the result. The sync's dedupe leans on it today."
+    description: "todo.py's rule: an add is refused when an open or snoozed item, or one an earlier add of the batch made, has (the same source or the same who, case aside) and shares at least 60% of the shorter title's words of four letters or more; the refusal names it and its title, and force: true adds it anyway. The same source alone refuses nothing: the result names those items. A meeting change with no event and no continues is refused when a meeting that stands has its start and, spaces and case aside, its subject, naming that meeting, so a meeting added again from a mail invite doesn't double; an event keys the rest (DR-0621). The sync's dedupe leans on both today."
     not_chosen:
       - "No check: dedupe is the sync's judgement, but this is the net it has today."
       - "A warning only: a batch that doesn't read it adds the duplicate."

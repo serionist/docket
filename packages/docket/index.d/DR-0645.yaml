@@ -6,6 +6,6 @@ decisions:
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#201"]
-    description: "docket ledger batch [FILE] [--by] [--dry-run] reads a JSON array, or JSON lines with blank lines and # comments, as todo.py read them, from FILE or stdin, UTF-8 with or without a BOM, and writes through the same writer via cli. docket ledger snapshot, show, queue, list, meetings and suggest take the view's parameters as options and print its text, or with --json its result model. Each goes to the vault directly, under its lock, as docket ledger show does, so it works with the service down."
+    description: "docket ledger batch [FILE] [--by] [--dry-run] reads a JSON array, or JSON lines with blank lines and # comments, as todo.py read them, from FILE or stdin, UTF-8 with or without a BOM, and writes through the same writer via cli; it exits 1 when anything is refused. docket ledger snapshot, show, queue, list, meetings and suggest take the view's parameters as options and print its text, or with --json its result model with every row, no k, so the week in step can diff every item. Each goes to the vault directly, under its lock, as docket ledger show does, so it works with the service down."
     not_chosen:
       - "The CLI through the service: the service may be down, and the vault lock already makes one writer."
