@@ -18,7 +18,7 @@ from docket.cli import main
 from docket.index import build, rebuild
 from docket.index import ledger as ledger_index
 from docket.index.schema import SCHEMA_VERSION
-from docket.ledger import fold, store
+from docket.ledger import fold, store, views
 from docket.vault import forgotten
 from docket.vault.vault import Vault
 
@@ -31,6 +31,12 @@ def vault(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Vault:
     v = empty_vault(tmp_path, make_config())
     monkeypatch.setenv("DOCKET_VAULT", str(v.root))
     return v
+
+
+@pytest.fixture(autouse=True)
+def clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A read's today, so an item's days open don't hang on the day the tests run."""
+    monkeypatch.setattr(views, "now", lambda: NOW)
 
 
 @pytest.fixture
@@ -179,6 +185,7 @@ def test_show_names_an_item_by_its_number_or_its_id_with_its_fields_and_history(
         "outcome      sent them",
         "material     docs/plan.md  the plan",
         "material     https://example.invalid/x",
+        "counts       open 0 days; chased 1 time, snoozed 0 times, due moved 1 time, reopened 0 times",
         "history      2026-10-18 11:14  user via page  added",
         "             2026-10-18 11:14  user via page  due: 2026-10-21; description edited; notes edited; "
         "outcome: sent them",
@@ -263,7 +270,10 @@ def test_a_number_none_holds_now_names_who_held_it(
         ("A-0003", "A-0003 was undone"),
         (ulid(3), f"{ulid(3)} was undone"),
         (ulid(40), f"no item {ulid(40)}"),
-        ("B-1", "'B-1' isn't an item: name one by its A- number or its id"),
+        (
+            "B-1",
+            "'B-1' isn't an item, a meeting or a stream: name one by its A- or M- number, its id, or a stream's name",
+        ),
     ],
 )
 def test_show_refuses_what_names_no_item(

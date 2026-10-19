@@ -2287,6 +2287,882 @@
     }
   },
   {
+    "name": "ledger",
+    "input_schema": {
+      "properties": {
+        "k": {
+          "default": 50,
+          "maximum": 500,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "reply",
+                "decision",
+                "task",
+                "invite",
+                "waiting"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "state": {
+          "default": "open",
+          "enum": [
+            "open",
+            "snoozed",
+            "done",
+            "dropped",
+            "all"
+          ],
+          "type": "string"
+        },
+        "stream": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "until": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "view": {
+          "default": "snapshot",
+          "enum": [
+            "snapshot",
+            "show",
+            "queue",
+            "list",
+            "meetings",
+            "suggest"
+          ],
+          "type": "string"
+        },
+        "who": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "output_schema": {
+      "$defs": {
+        "Change": {
+          "properties": {
+            "at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "by": {
+              "type": "string"
+            },
+            "day": {
+              "format": "date",
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "line": {
+              "type": "string"
+            },
+            "undone_by": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "via": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "day",
+            "at",
+            "by",
+            "via",
+            "line",
+            "undone_by",
+            "kind"
+          ],
+          "type": "object"
+        },
+        "Counts": {
+          "properties": {
+            "chased": {
+              "default": 0,
+              "type": "integer"
+            },
+            "chased_items": {
+              "default": 0,
+              "type": "integer"
+            },
+            "done": {
+              "default": 0,
+              "type": "integer"
+            },
+            "dropped": {
+              "default": 0,
+              "type": "integer"
+            },
+            "items": {
+              "default": 0,
+              "type": "integer"
+            },
+            "median_days_to_done": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "meetings": {
+              "default": 0,
+              "type": "integer"
+            },
+            "open": {
+              "default": 0,
+              "type": "integer"
+            },
+            "overdue": {
+              "default": 0,
+              "type": "integer"
+            },
+            "points_open": {
+              "default": 0,
+              "type": "integer"
+            },
+            "snoozed": {
+              "default": 0,
+              "type": "integer"
+            },
+            "streams": {
+              "default": 0,
+              "type": "integer"
+            },
+            "triage": {
+              "additionalProperties": {
+                "type": "integer"
+              },
+              "default": {},
+              "type": "object"
+            },
+            "untriaged": {
+              "default": 0,
+              "type": "integer"
+            },
+            "woke": {
+              "default": 0,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "Detail": {
+          "properties": {
+            "added_by": {
+              "type": "string"
+            },
+            "also": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "attendees": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "chased": {
+              "default": 0,
+              "type": "integer"
+            },
+            "claimed": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "due_moves": {
+              "default": 0,
+              "type": "integer"
+            },
+            "event": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "history": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/Change"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "item",
+                "meeting",
+                "stream"
+              ],
+              "type": "string"
+            },
+            "materials": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/MaterialRow"
+              },
+              "type": "array"
+            },
+            "notes": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "outcome": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "reopens": {
+              "default": 0,
+              "type": "integer"
+            },
+            "series": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "snoozes": {
+              "default": 0,
+              "type": "integer"
+            },
+            "where": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "kind",
+            "added_by"
+          ],
+          "type": "object"
+        },
+        "ItemRow": {
+          "properties": {
+            "archived": {
+              "type": "boolean"
+            },
+            "closed": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "days": {
+              "type": "integer"
+            },
+            "due": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "late": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "meeting": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "number": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "opened": {
+              "format": "date",
+              "type": "string"
+            },
+            "ref": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            },
+            "stream": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "triage": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "until": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "who": {
+              "type": "string"
+            },
+            "why": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "woke": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "ref",
+            "id",
+            "number",
+            "kind",
+            "title",
+            "who",
+            "stream",
+            "source",
+            "meeting",
+            "opened",
+            "due",
+            "state",
+            "until",
+            "closed",
+            "triage",
+            "archived",
+            "days",
+            "late"
+          ],
+          "type": "object"
+        },
+        "MaterialRow": {
+          "properties": {
+            "label": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "ref": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ref",
+            "label"
+          ],
+          "type": "object"
+        },
+        "MeetingRow": {
+          "properties": {
+            "archived": {
+              "type": "boolean"
+            },
+            "end": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "items": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "number": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "organiser": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "points_open": {
+              "type": "integer"
+            },
+            "ref": {
+              "type": "string"
+            },
+            "response": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "start": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "stream": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "subject": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ref",
+            "id",
+            "number",
+            "subject",
+            "start",
+            "end",
+            "organiser",
+            "stream",
+            "response",
+            "archived",
+            "points_open",
+            "items"
+          ],
+          "type": "object"
+        },
+        "PointRow": {
+          "properties": {
+            "answer": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "from": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "id": {
+              "type": "string"
+            },
+            "item": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "meeting": {
+              "type": "string"
+            },
+            "n": {
+              "type": "integer"
+            },
+            "proposed": {
+              "type": "boolean"
+            },
+            "ref": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "to": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "ref",
+            "id",
+            "meeting",
+            "n",
+            "state",
+            "text",
+            "item",
+            "proposed"
+          ],
+          "type": "object"
+        },
+        "StreamRow": {
+          "properties": {
+            "deadline": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "next": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "ref": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "updated": {
+              "format": "date",
+              "type": "string"
+            },
+            "where": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "ref",
+            "id",
+            "name",
+            "status",
+            "next",
+            "deadline",
+            "where",
+            "updated"
+          ],
+          "type": "object"
+        }
+      },
+      "properties": {
+        "counts": {
+          "$ref": "#/$defs/Counts"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Detail"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "items": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ItemRow"
+          },
+          "type": "array"
+        },
+        "meetings": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/MeetingRow"
+          },
+          "type": "array"
+        },
+        "points": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PointRow"
+          },
+          "type": "array"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "streams": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/StreamRow"
+          },
+          "type": "array"
+        },
+        "today": {
+          "format": "date",
+          "type": "string"
+        },
+        "until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "view": {
+          "enum": [
+            "snapshot",
+            "show",
+            "queue",
+            "list",
+            "meetings",
+            "suggest"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "view",
+        "today",
+        "counts"
+      ],
+      "type": "object"
+    },
+    "annotations": {
+      "read_only_hint": true,
+      "open_world_hint": false
+    }
+  },
+  {
     "name": "ledger_batch",
     "input_schema": {
       "properties": {

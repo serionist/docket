@@ -125,8 +125,8 @@ agrees in the issue or, under an autonomy grant, with its decision recorded as p
 - the question file `docket eval` reads (DR-0290) and its speech file (DR-0571); the user config's `speech` (DR-0568);
 - the media key export's file, `schema_version` 1, which users keep as their backup (DR-0550);
 - the MCP tools' names and parameters: `search`, `read`, `verify` and `doc_put` (DR-0150), `run_open` and `ingest`
-  (DR-0241), `media_put` (DR-0547), `briefs` (DR-0556), `decisions` (DR-0565), `transcribe` (DR-0571), `ledger_batch`
-  with its ops, keys and `$name` (DR-0637, DR-0639, DR-0640), and the plugin's server key `docket` (DR-0160);
+  (DR-0241), `media_put` (DR-0547), `briefs` (DR-0556), `decisions` (DR-0565), `transcribe` (DR-0571), `ledger` and
+  `ledger_batch`: views, ops, keys, `$name`, results (DR-0637 to DR-0640, DR-0660); the server key `docket` (DR-0160);
 - the plugin's skill and hook names: `recall`, `setup`, `cuts` (DR-0605), `curate` (DR-0472), `brief` (DR-0555), `decision` (DR-0563), the SessionStart
   hook running `docket hook session-start` (DR-0161), and the PostToolUse hook running `docket hook post-tool-use`
   for `mcp__.*`, with its line prefixes (DR-0242);

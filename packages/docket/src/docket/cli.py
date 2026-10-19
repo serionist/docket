@@ -28,12 +28,12 @@ from docket.forget import plan as forget_plan
 from docket.forget import rewrite as forget_rewrite
 from docket.imports import notes
 from docket.index import flags as index_flags
-from docket.index import ledger as index_ledger
 from docket.index.build import db_path, ledger_tables
 from docket.index.embedpass import fill
 from docket.ledger import batch as ledger_batches
 from docket.ledger import ops as ledger_ops
 from docket.ledger import store as ledger_store
+from docket.ledger import views as ledger_views
 from docket.media import backup as media_backup
 from docket.media import confirm as media_confirm
 from docket.media import sources as media_sources
@@ -136,7 +136,10 @@ reconcile_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(reconcile_app, name="reconcile")
-ledger_app = typer.Typer(help="The ledger: items owed and awaited, each with its history.", no_args_is_help=True)
+ledger_app = typer.Typer(
+    help="The ledger: items owed and awaited, meetings with their talking points, and streams, each with its history.",
+    no_args_is_help=True,
+)
 app.add_typer(ledger_app, name="ledger")
 
 # How often the embedding pass says how far it got.
@@ -2025,16 +2028,99 @@ def reconcile_list(vault: VaultOption = None) -> None:
     say_all(render.reconcile(spots.listing(found), ZoneInfo(found.config.owner.time_zone)))
 
 
+LedgerSince = Annotated[str | None, typer.Option("--since", help="From this date, the whole day, or this time.")]
+LedgerUntil = Annotated[str | None, typer.Option("--until", help="Up to this date, the whole day, or this time.")]
+LedgerJson = Annotated[bool, typer.Option("--json", help="The result's every field and every row, as JSON.")]
+
+
+def _ledger_read(vault: Path | None, ask: ledger_views.Ask, as_json: bool) -> None:
+    """A read of the ledger as the `ledger` tool reads it, from the vault directly, so it works with the service down:
+    the index's tables brought up to date under the index's lock, or the op files folded in memory (DR-0645)."""
+    v = find_vault(vault)
+    tz = ZoneInfo(v.config.owner.time_zone)
+    with ledger_tables(v) as conn:
+        found = ledger_views.read(conn, ask, tz, ledger_views.now())
+    if as_json:
+        # ASCII only: a title's text can't put a terminal code on the screen.
+        typer.echo(json.dumps(found.model_dump(mode="json"), indent=2))
+    else:
+        say_all(ledger_views.lines(found, tz))
+
+
+@ledger_app.command("snapshot")
+def ledger_snapshot(
+    since: LedgerSince = None, until: LedgerUntil = None, as_json: LedgerJson = False, vault: VaultOption = None
+) -> None:
+    """The open and snoozed items, each with its source, a snooze whose day has come counted open; the meetings not
+    archived from yesterday to six days after today, or with an open point, with their points; and the streams.
+    Counts first."""
+    _ledger_read(vault, ledger_views.Ask(view="snapshot", since=since, until=until), as_json)
+
+
 @ledger_app.command("show")
 def ledger_show(
-    item: Annotated[str, typer.Argument(help="The item: its A- number, or its id.")], vault: VaultOption = None
+    ref: Annotated[str, typer.Argument(help="An item's A- number, a meeting's M- number, an id, or a stream's name.")],
+    as_json: LedgerJson = False,
+    vault: VaultOption = None,
 ) -> None:
-    """An item as its ops leave it: its fields, its state, and its history, every change in order with who made it
-    and how. A number other items have held too names them. Reads the index's ledger, brought up to date first."""
-    v = find_vault(vault)
-    with ledger_tables(v) as conn:
-        shown = index_ledger.find(conn, item)
-    say_all(render.ledger_item(shown, ZoneInfo(v.config.owner.time_zone)))
+    """One item, meeting or stream as its ops leave it: its fields, notes, materials, a meeting's points with their
+    ids and its items, an item's counts, and its history, every change in order with who made it and how. A number
+    others have held too names them."""
+    _ledger_read(vault, ledger_views.Ask(view="show", ref=ref), as_json)
+
+
+@ledger_app.command("queue")
+def ledger_queue(as_json: LedgerJson = False, vault: VaultOption = None) -> None:
+    """The open items to work through: the untriaged first, a snooze whose day has come among them, then by triage
+    (discuss, claude, me, chase), each by due."""
+    _ledger_read(vault, ledger_views.Ask(view="queue"), as_json)
+
+
+@ledger_app.command("list")
+def ledger_list(
+    *,
+    who: Annotated[str | None, typer.Option("--who", help="Items whose who holds this, case aside.")] = None,
+    stream: Annotated[str | None, typer.Option("--stream", help="Items in this stream.")] = None,
+    kind: Annotated[str | None, typer.Option("--kind", help="reply, decision, task, invite or waiting.")] = None,
+    state: Annotated[
+        str,
+        typer.Option("--state", help="open (and snoozed past its day), snoozed (still asleep), done, dropped or all."),
+    ] = "open",
+    since: Annotated[str | None, typer.Option("--since", help="Opened on this day or after.")] = None,
+    until: Annotated[str | None, typer.Option("--until", help="Opened on this day or before.")] = None,
+    k: Annotated[
+        int, typer.Option("-k", min=1, max=ledger_views.MAX_K, help="How many rows the text lists; --json lists all.")
+    ] = ledger_views.K,
+    as_json: LedgerJson = False,
+    vault: VaultOption = None,
+) -> None:
+    """The items matching every filter, with counts over all of them: by state, overdue, chased, and the median days
+    to done. How many asks to Ada went unanswered is --who Ada --kind waiting --state all --since a day."""
+    ask = ledger_views.Ask(
+        view="list", who=who, stream=stream, kind=kind, state=state, since=since, until=until,
+        k=None if as_json else k,
+    )  # fmt: skip
+    _ledger_read(vault, ask, as_json)
+
+
+@ledger_app.command("meetings")
+def ledger_meetings(
+    since: LedgerSince = None, until: LedgerUntil = None, as_json: LedgerJson = False, vault: VaultOption = None
+) -> None:
+    """The meetings overlapping a window, today to six days after by default: a window of minutes around a time finds
+    the meeting a recording was made in."""
+    _ledger_read(vault, ledger_views.Ask(view="meetings", since=since, until=until), as_json)
+
+
+@ledger_app.command("suggest")
+def ledger_suggest(
+    meeting: Annotated[str, typer.Argument(help="The meeting: its M- number, or its id.")],
+    as_json: LedgerJson = False,
+    vault: VaultOption = None,
+) -> None:
+    """The open items worth raising in a meeting, each with why: those linked to it, then replies, waits and decisions
+    on someone in it, then waits in its stream; 15 at most. Writes nothing."""
+    _ledger_read(vault, ledger_views.Ask(view="suggest", ref=meeting), as_json)
 
 
 @ledger_app.command("batch")

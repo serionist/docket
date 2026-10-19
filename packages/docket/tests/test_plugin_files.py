@@ -91,7 +91,8 @@ def frontmatter(skill: str) -> dict[str, str]:
 def test_recall_brief_and_decision_pre_approve_only_docket_s_read_only_tools() -> None:
     golden = json.loads((REPO / "packages/docket/tests/fixtures/mcp-tools.json").read_text(encoding="utf-8"))
     read_only = {t["name"] for t in golden if t["annotations"]["read_only_hint"]}
-    assert read_only == {"search", "read", "verify", "briefs", "decisions"}
+    # The ledger's reads are read-only too, so the sync and tasks skills can pre-approve them (DR-0637).
+    assert read_only == {"search", "read", "verify", "briefs", "decisions", "ledger"}
     # The plugin's name, then the server's key in .mcp.json: the names Claude Code gives a plugin's tools.
     prefix = "mcp__plugin_docket_docket__"
     for skill, tools in (

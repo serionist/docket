@@ -109,6 +109,7 @@ def test_the_tools_names_parameters_results_and_annotations_match_the_golden_fil
         "ingest": True,
         "media_put": True,
         "transcribe": True,
+        "ledger": True,
         "ledger_batch": True,
     }
 
@@ -356,3 +357,35 @@ def test_a_refused_change_is_a_tool_error_and_a_dry_run_lists_every_refusal(serv
     assert [c["refused"] for c in dry.structured_content["changes"]] == ["no item A-0009", "no item A-0010"]
     assert call(service, "ledger_batch", {"ops": [LEDGER_ADD], "by": "me"}).is_error
     assert call(service, "ledger_batch", {"ops": ["add"]}).is_error
+
+
+def test_ledger_reads_what_ledger_batch_wrote_as_lines_and_rows(service: Service) -> None:
+    """The read-only tool on the service's index: a snapshot by default, show, and a refusal as a tool error. The clock
+    is the real one, so the meeting comes in by its open point, whatever the day the test runs."""
+    meeting = {"subject": "Weekly pilot sync", "start": "2026-10-01T09:00+02:00", "end": "2026-10-01T09:30+02:00"}
+    batch = [
+        {**LEDGER_ADD, "as": "x"}, {"op": "triage", "item": "$x", "verdict": "chase"},
+        {"op": "meeting", "fields": meeting, "as": "m"},
+        {"op": "point", "item": "$m", "fields": {"text": "The pilot's dates", "item": "$x"}, "as": "p"},
+    ]  # fmt: skip
+    done = call(service, "ledger_batch", {"ops": batch})
+    assert not done.is_error and done.structured_content is not None, text_of(done)
+    point = done.structured_content["ids"]["p"]
+    snapshot = call(service, "ledger", {})
+    assert not snapshot.is_error and snapshot.structured_content is not None, text_of(snapshot)
+    data = snapshot.structured_content
+    assert (data["view"], [i["ref"] for i in data["items"]], [p["id"] for p in data["points"]]) == (
+        "snapshot", ["A-0001"], [point],
+    )  # fmt: skip
+    lines = text_of(snapshot).splitlines()
+    assert lines[0].startswith("1 open, 0 snoozed, 0 overdue; 1 meeting, 1 point open; 0 streams")
+    assert f"  #1 open The pilot's dates -> A-0001 {point}" in lines
+    shown = call(service, "ledger", {"view": "show", "ref": "A-0001"})
+    assert shown.structured_content is not None
+    assert (text_of(shown).splitlines()[0], shown.structured_content["detail"]["chased"]) == (
+        "A-0001  Send Ada the dates", 1,
+    )  # fmt: skip
+    refused = call(service, "ledger", {"view": "queue", "who": "Ada"})
+    assert refused.is_error and text_of(refused).endswith("queue takes nothing more, not who")
+    assert call(service, "ledger", {"view": "everything"}).is_error
+    assert call(service, "ledger", {"view": "list", "k": 501}).is_error
