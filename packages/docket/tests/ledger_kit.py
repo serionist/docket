@@ -82,13 +82,23 @@ def rebuilt(root: Path) -> Rows:
         conn.close()
 
 
-def caught_up(vault: Vault) -> Rows:
-    """The index's ledger tables brought up to date from the op files, as a write brings them."""
+def catch_up(vault: Vault) -> int:
+    """Bring the index's ledger tables up to date from the op files, as a write brings them; how many lines it read."""
     conn = sqlite3.connect(db_path(vault), isolation_level=None)
     try:
         conn.execute("BEGIN IMMEDIATE")
-        ledger_index.update(conn, vault.root)
+        read = ledger_index.update(conn, vault.root)
         conn.execute("COMMIT")
+        return read
+    finally:
+        conn.close()
+
+
+def caught_up(vault: Vault) -> Rows:
+    """The index's ledger tables, brought up to date from the op files."""
+    catch_up(vault)
+    conn = sqlite3.connect(db_path(vault))
+    try:
         return tables(conn)
     finally:
         conn.close()

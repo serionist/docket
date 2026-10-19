@@ -1,5 +1,6 @@
 """Two clones' ops merge into one ledger (DR-0610, DR-0612): any order of lines folds the same, and real clones merged
-or rebased by git meet no conflict, a clock behind and a shared machine name included."""
+or rebased by git meet no conflict, a clock behind and a shared machine name included; each clone's index follows
+its merge as a rebuild would (DR-0616)."""
 
 from __future__ import annotations
 
@@ -10,8 +11,9 @@ from typing import Any
 
 import pytest
 from docket_testkit import empty_vault, git, make_config, sh
-from ledger_kit import ADD_FIELDS, DAY, NOW
+from ledger_kit import ADD_FIELDS, DAY, NOW, catch_up, caught_up, rebuilt
 
+from docket.index import rebuild
 from docket.ledger import ops, store
 from docket.ledger.fold import Ledger, fold
 from docket.ledger.ops import Line, Op
@@ -121,6 +123,34 @@ def test_two_clones_with_one_machine_name_merge_and_rebase_with_no_conflict(
     assert [e.line for e in one.items[twos[1]].log][-2:] == ["first's", "second's"]
     assert one.items[next(i for i in one.items if one.items[i].number == 1)].state == "done"
     assert [p for p in first.check() if p.where.startswith(("ledger", "A-"))] == []
+
+
+def test_each_clone_s_index_follows_a_union_merge_as_a_rebuild_would(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two clones with one machine name both give out A-0002 and close A-0001. The second merges the first: its file
+    only grew, its own lines then the first's. The first pulls that merge: its file gained lines in the middle, so it
+    folds again whole. Each clone's index then holds what a rebuild of its files gives, the clash included."""
+    first = empty_vault(tmp_path, make_config())
+    store.write(first, [add("Before the clone")], now=NOW)
+    second = clone(first, tmp_path / "second", "test-box", monkeypatch)
+    for v in (first, second):
+        rebuild(v)
+    store.write(first, [add("From the first"), {"op": "done", "item": "A-0001"}], now=NOW + timedelta(minutes=1))
+    store.write(second, [add("From the second"), {"op": "drop", "item": "A-0001", "note": "dup"}],
+                now=NOW + timedelta(minutes=2))  # fmt: skip
+    for v in (first, second):
+        assert caught_up(v) == rebuilt(v.root)
+    git(second.root, "pull", "-q", "--no-rebase", "--no-edit", "origin", "main")
+    # The first's two ops, read after the second's own: the file only grew.
+    assert catch_up(second) == 2
+    merged = caught_up(second)
+    assert merged == rebuilt(second.root)
+    assert [row[1] for row in merged["items"]].count(None) == 1
+    git(first.root, "pull", "-q", "--ff-only", str(second.root), "main")
+    # The second's two ops came in before the first's own: every line is read again.
+    assert catch_up(first) == 5
+    assert caught_up(first) == rebuilt(first.root)
 
 
 def test_two_clones_that_pull_from_a_clock_ahead_still_mint_different_ids(
