@@ -13,7 +13,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from docket_testkit import copied, empty_vault, git, make_config, make_record, sh
+from docket_testkit import copied_with_seals, empty_vault, git, make_config, make_record, sh
 from forget_kit import forget, line, stored
 from ledger_kit import ADD_FIELDS, NOW, write_ops
 from media_kit import CALL, POLISHED, audio, call, in_raw, media_vault
@@ -57,7 +57,7 @@ def _build_vault(folder: Path) -> Path:
 def vault(tmp_path: Path) -> Vault:
     """The call in raw with its audio stored and its key here, and two chat messages beside it: built once per run,
     each test a copy (DR-0531)."""
-    return Vault.open(copied(tmp_path, _build_vault, f"{__name__}.vault"))
+    return Vault.open(copied_with_seals(tmp_path, _build_vault, f"{__name__}.vault"))
 
 
 def key_of(vault: Vault) -> str:

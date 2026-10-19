@@ -15,7 +15,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from docket_testkit import AtConsole, FakePrompt, copied, git, make_record
+from docket_testkit import AtConsole, FakePrompt, copied_with_seals, git, make_record
 from media_kit import CALL, POLISHED, audio, call, in_raw, media_vault
 
 from docket import cli, console, index, osprompt, recall
@@ -61,7 +61,7 @@ def _build_vault(folder: Path) -> Path:
 def vault(tmp_path: Path) -> Vault:
     """The call in raw with its audio stored, and a note on its transcript: built once per run, each test a copy
     (DR-0531)."""
-    return Vault.open(copied(tmp_path, _build_vault, f"{__name__}.vault"))
+    return Vault.open(copied_with_seals(tmp_path, _build_vault, f"{__name__}.vault"))
 
 
 def run(vault: Vault, *args: str) -> int:

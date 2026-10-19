@@ -6,10 +6,13 @@ each in a child of its own, so the share that runs this file spreads them over i
 from __future__ import annotations
 
 import json
+import pkgutil
 import subprocess
 import sys
 
 import pytest
+
+import docket
 
 CHUNKS = 4
 
@@ -41,6 +44,13 @@ KNOWN = [
     "docket.media.screen",
     "docket.media.status",
 ]
+
+
+def test_every_known_cycle_names_a_module_that_still_exists() -> None:
+    # Each chunk holds only the known names among its own modules, so a name no chunk has, a module since removed or
+    # renamed, would pass every chunk: the list is held against all the modules once, here.
+    names = {m.name for m in pkgutil.walk_packages(docket.__path__, "docket.")}
+    assert [name for name in KNOWN if name not in names] == []
 
 
 @pytest.mark.parametrize("chunk", range(CHUNKS))

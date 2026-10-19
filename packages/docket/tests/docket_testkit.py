@@ -24,8 +24,9 @@ from typing import Any, Literal, overload
 import pytest
 from filelock import FileLock
 
-from docket import osprompt
+from docket import osprompt, paths
 from docket.errors import DocketError
+from docket.service.system import write_private
 from docket.vault import forgotten, inforce, yamledit
 from docket.vault.config import CONFIG_FILE, NeverStore, Owner, RedactionPattern, SourceConfig, VaultConfig
 from docket.vault.home import Home
@@ -307,11 +308,16 @@ def digest(*parts: str) -> str:
     return hashlib.sha256("\0".join(parts).encode()).hexdigest()[:12]
 
 
+def _name(key: str) -> str:
+    """A template's folder name: a readable tail, short enough for Windows' path limit, and the whole key's digest, so
+    two keys never share one."""
+    return re.sub(r"[^A-Za-z0-9_.-]", "-", key)[-32:].lstrip(".-") + "-" + digest(key)
+
+
 def _template(build: Callable[[Path], Path], key: str, factory: pytest.TempPathFactory | None) -> tuple[Path, str]:
     """The folder a template was built in and the path in it `build` returned: built by the first worker to ask, under
     a lock, the tests' isolation and a git home of its own; the others wait and reuse it (DR-0531)."""
-    # A readable tail, short enough for Windows' path limit, and the whole key's digest, so two keys never share one.
-    name = re.sub(r"[^A-Za-z0-9_.-]", "-", key)[-32:].lstrip(".-") + "-" + digest(key)
+    name = _name(key)
     templates = templates_folder(factory or _FACTORY[0])
     templates.mkdir(parents=True, exist_ok=True)
     folder, done = templates / name, templates / f"{name}.done"
@@ -346,6 +352,23 @@ def copied(tmp_path: Path, build: Callable[[Path], Path], key: str) -> Path:
     for repo in _repos(folder):
         _fit(folder, tmp_path / repo.relative_to(folder), tmp_path)
     return tmp_path / rel
+
+
+# Where a file media key store keeps its seal: Docket's state folder, outside the vault (KeyStore._seal_file).
+SEALS = "media-stores"
+# A template build's state folder, under its home (isolated_git).
+STATE = "docket-state"
+
+
+def copied_with_seals(tmp_path: Path, build: Callable[[Path], Path], key: str) -> Path:
+    """A copy of a template whose build made a media key store, with the store's seal written where this test's Docket
+    reads it, as a build in the test would have left it: the seal lives in the state folder, outside the vault, so a
+    copy alone holds keys it can't open. Written as the store writes it, so only this user can read it."""
+    made = copied(tmp_path, build, key)
+    seals = templates_folder(_FACTORY[0]) / f"{_name(key)}.home" / STATE / SEALS
+    for seal in sorted(seals.iterdir()) if seals.is_dir() else []:
+        write_private(paths.state_dir() / SEALS / seal.name, seal.read_text(encoding="utf-8"))
+    return made
 
 
 def _repos(folder: Path) -> list[Path]:
@@ -1122,7 +1145,7 @@ def isolated_git(mp: pytest.MonkeyPatch, home: Path) -> None:
     mp.setenv("GIT_CONFIG_GLOBAL", str(home / "gitconfig"))
     mp.setenv("GIT_CONFIG_NOSYSTEM", "1")
     mp.setenv("DOCKET_CONFIG_DIR", str(home / "docket"))
-    mp.setenv("DOCKET_STATE_DIR", str(home / "docket-state"))
+    mp.setenv("DOCKET_STATE_DIR", str(home / STATE))
     mp.setenv("PYTHON_KEYRING_BACKEND", "keyring.backends.fail.Keyring")
     mp.setenv("DOCKET_MACHINE", "test-box")
     mp.delenv("DOCKET_VAULT", raising=False)

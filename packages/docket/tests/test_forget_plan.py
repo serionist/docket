@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from docket_testkit import THREAD, copied, make_record
+from docket_testkit import THREAD, copied_with_seals, make_record
 from media_kit import CALL, POLISHED, audio, call, in_raw, media_vault
 
 from docket import recall
@@ -71,7 +71,7 @@ def _build_vault(folder: Path) -> Path:
 def vault(tmp_path: Path) -> Vault:
     """The call in raw with a Whisper transcript, its audio stored, a note on its transcript, and a chat thread: built
     once per run, each test a copy (DR-0531)."""
-    return Vault.open(copied(tmp_path, _build_vault, f"{__name__}.vault"))
+    return Vault.open(copied_with_seals(tmp_path, _build_vault, f"{__name__}.vault"))
 
 
 # -- the family --------------------------------------------------------------------------------------------------------
