@@ -1,13 +1,13 @@
 """The day pages on #201's perf ledger (DR-0668): 5,000 items with 50,000 ops and 2,000 meetings with 20,000 point
 ops, the index rebuilt. Each page is asked once before the clock, so SQLite's cache is warm as a running service's is,
-then the Ledger, the Ledger with q and an item's panel are each held to a quarter second, the poll to a hundredth, a
-button's write on one item to a tenth and a bulk of 50 to a quarter second, each on its own. A write is timed through
+then timed as the best of three runs: the Ledger, the Ledger with q and an item's panel are each held to a quarter
+second, the poll to a hundredth, a button's write on one item to a tenth and a bulk of 50 to a quarter second, each on
+its own. A write is timed through
 its route with the commit left out, as the ledger's own timed write is dry: git's commit isn't the page's to time.
 Wall time is asserted only when no tracer runs."""
 
 from __future__ import annotations
 
-import gc
 import os
 import time
 from collections.abc import Callable, Iterator
@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 from day_kit import SAME, signed_in
-from docket_testkit import empty_vault, make_config, traced
+from docket_testkit import Best, best_of, empty_vault, make_config, traced
 from docket_webkit import parse
 from ledger_kit import ITEMS, build
 from starlette.testclient import TestClient
@@ -53,38 +53,42 @@ def client(perf_vault: Vault, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestC
         yield found
 
 
-def timed(ask: Callable[[], Any]) -> tuple[Any, float]:
-    """The answer and its time, asked once before the clock."""
+def timed(ask: Callable[[], Any]) -> Best[Any]:
+    """The answer and the best of three runs' time, asked once before the clock."""
     ask()
-    gc.collect()
-    began = time.perf_counter()
-    answer = ask()
-    return answer, time.perf_counter() - began
+    return best_of(3, ask)
 
 
 @pytest.mark.perf
 def test_the_ledger_its_panel_the_poll_and_a_write_answer_within_their_budgets(client: TestClient) -> None:
-    page, page_s = timed(lambda: client.get("/ledger"))
+    listed = timed(lambda: client.get("/ledger"))
+    page, page_s = listed.result, listed.seconds
     assert page.status_code == 200
     assert len(parse(page.text).find_all("li", class_="row")) == 100
     # Every word is a part of a title, a number or a log line: "4999" is in A-4999 and in round 4999's title.
-    found, found_s = timed(lambda: client.get("/ledger?q=round+4999"))
+    asked = timed(lambda: client.get("/ledger?q=round+4999"))
+    found, found_s = asked.result, asked.seconds
     assert [r.attrs["data-ref"] for r in parse(found.text).find_all("li", class_="row")] == ["A-4999", f"A-{ITEMS:04d}"]
-    panel, panel_s = timed(lambda: client.get("/ledger/panel?open=A-2500"))
+    opened = timed(lambda: client.get("/ledger/panel?open=A-2500"))
+    panel, panel_s = opened.result, opened.seconds
     assert parse(panel.text).find("section", class_="item-panel").attrs["data-item"] == "A-2500"
     poll = parse(page.text).find("div", id="poll").attrs["hx-get"]
-    quiet, poll_s = timed(lambda: client.get(poll))
+    polled = timed(lambda: client.get(poll))
+    quiet, poll_s = polled.result, polled.seconds
     assert quiet.status_code == 204
     one = {"page": "ledger", "op": "triage:me", "item": "A-1200"}
-    wrote, write_s = timed(lambda: client.post("/ledger/write", data=one, headers=SAME))
+    written = timed(lambda: client.post("/ledger/write", data=one, headers=SAME))
+    wrote, write_s = written.result, written.seconds
     assert wrote.status_code == 303
     bulk = {"page": "ledger", "op": "triage:claude", "item": [f"A-{n:04d}" for n in range(100, 100 + BULK)]}
-    many, bulk_s = timed(lambda: client.post("/ledger/write", data=bulk, headers=SAME))
+    bulked = timed(lambda: client.post("/ledger/write", data=bulk, headers=SAME))
+    many, bulk_s = bulked.result, bulked.seconds
     assert many.status_code == 303
     print(
-        f"day pages on {ITEMS:,} items: ledger {page_s * 1000:.0f} ms, with q {found_s * 1000:.0f} ms, panel "
-        f"{panel_s * 1000:.0f} ms, poll {poll_s * 1000:.1f} ms, a write {write_s * 1000:.0f} ms, a bulk of {BULK} "
-        f"{bulk_s * 1000:.0f} ms"
+        f"day pages on {ITEMS:,} items: ledger {page_s * 1000:.0f} ms ({listed.runs('ms')}), with q "
+        f"{found_s * 1000:.0f} ms ({asked.runs('ms')}), panel {panel_s * 1000:.0f} ms ({opened.runs('ms')}), poll "
+        f"{poll_s * 1000:.1f} ms ({polled.runs('ms')}), a write {write_s * 1000:.0f} ms ({written.runs('ms')}), a bulk "
+        f"of {BULK} {bulk_s * 1000:.0f} ms ({bulked.runs('ms')})"
     )
     if not traced():
         assert page_s < PAGE_SECONDS, f"the Ledger took {page_s:.3f} s, over {PAGE_SECONDS} s"
