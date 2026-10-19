@@ -1,9 +1,9 @@
 ---
 title: Add the plugin's sync and tasks skills (one-way doors)
 issue: "#209, #210"
-status: draft
-approved_by:
-approved_at:
+status: approved
+approved_by: claude (autonomy grant)
+approved_at: 2026-10-19
 ---
 
 # Add the plugin's sync and tasks skills
@@ -28,17 +28,16 @@ time. Both are markdown under `plugin/skills/`; the one code change is a writer 
 | run | one agent per source, launched in one message | `fork.md` filled with the source, the vault and the day; the open items read with `ledger`; `run_open`, the source's `SKILL.md` and its `sync.md` when there is one, `ingest` and the final run, as the run's steps say; the cursors replace the old state file |
 | classify, promote | each agent, its own source | a mixed source's records plainly work or plainly private, a non-work stretch cut, `--by claude`, an unsure one left for the Staging page; then `docket staging promote --source`, so its rids resolve and the calendar's records make their meetings (#224) |
 | notes | a recording source's agent | a `recording-note` with `doc_put`, #211's method, for each work recording the run brought and each in the window already in raw with no note: the vendor's summary and the whole transcript read, every line anchored, `sync.md`'s layout; then the open points of its meeting, which the `meetings` view finds near its start, answered |
-| find | each agent | over what its run read, older context from `search` and `read`, owed asks 40 working days back while the ledger holds no item: the return block |
-| reconcile, summary | the skill | a fresh `ledger` snapshot, then one `ledger_batch`, `dry_run` first, a write refused after a clean dry run taking a fresh snapshot and another dry run; then the old summary's groups in chat, which replace the harvest files with the raw |
+| find | each agent | over what its run read and the window's recordings in raw with no note yet, so their asks and outcomes come too; older context from `search` and `read`; owed asks 40 working days back while the ledger holds no item: the return block |
+| reconcile, summary | the skill | a fresh `ledger` snapshot, then one `ledger_batch`, `dry_run` first, a write refused after a clean dry run taking a fresh snapshot and another dry run; an item's old source `read` can't open searched by its words around its day; then the old summary's groups in chat, which replace the harvest files with the raw |
 
-- A line rests only on records in raw after the agent's own promotion: never a pending, private, dropped or held one,
-  nor an anchor inside a cut. The agent `read`s every rid it reports and drops a line whose rid doesn't open.
-- The ledger writer refuses an op whose `source` or a material's `ref` sits in a never-store container
-  (`neverstore.in_container` on the record's container or thread), beside its keyword and people screens (DR-0690).
+- A line rests only on records in raw after the agent's own promotion, or docs in the vault: never a pending, private,
+  dropped or held record, nor an anchor inside a cut. The agent `read`s every rid it reports.
+- The ledger writer refuses an op whose `source` or a material's `ref`, its `r:` and anchor stripped, sits in a
+  never-store container: Slack's and Teams' by the rid's text, any source's through the index (DR-0690).
 - A run that stops short leaves its mark; the others go on. No quick mode. The owed check covers the run's window.
-- The project's CLAUDE.md, which the skill reads, holds the owner's drafting routes and rules, the `who` convention,
-  stream hints and how to link meetings that share a slot. The plugin adds two rules: `who` is the name the ledger
-  already uses for that person (`ledger` view `list`, `who=`), and drafts follow the project's drafting notes.
+- The project's CLAUDE.md holds the owner's drafting rules, `who` convention, stream hints and shared-slot links. The
+  plugin's two rules: `who` is the ledger's name for the person (`ledger` `list`, `who=`); drafts follow those notes.
 
 ### The return block (DR-0687)
 
@@ -51,7 +50,7 @@ INVITES:  <organiser> | <the event's or the invite mail's rid> | <when> | <clash
 WAITING:  <who> | <locator> | <since> | <what the owner waits for>
 CLOSES:   <A- ref> | done / moot | <locator of the evidence> | <how, one line>
 MEETINGS: <M- ref> | <field>=<value>; ... | <locator of the evidence>
-STREAMS:  <stream> | where / next | <the news, one line> | <locator>
+STREAMS:  <stream> | <field>=<value>; ... | <the news, one line> | <locator>
 NOTES:    <doc id> | <recording rid> | <start> | <end> | <M- ref when its content names one>
 MINUTES:  <M- ref> | <point id> | answered / dropped / open | <the answer, one line> | <locator>
 OUTCOME:  <M- ref> | <2 to 4 short lines: what was decided, who does what> | <locator>
@@ -59,9 +58,10 @@ LEARNED:  SKILL.md / sync.md | <what differs from it, for next time>
 ```
 
 - A locator is one `read` opens: a rid with its anchor, built as the source's "What it makes" says, or a doc id or old
-  path with its line or time. One `read` can't open: `search` its words around its day.
+  path with its line or time. A line whose locator doesn't open is dropped.
 - MEETINGS sets `response`, `attendees`, and `start` and `end` for a move seen only in mail (the calendar still makes
-  meetings, DR-0647). Invites with no response come from the calendar's agent, which ones matter from the mail agent.
+  meetings, DR-0647); STREAMS sets `status`, `where`, `next` and `deadline`. Invites with no response come from the
+  calendar's agent, which ones matter from the mail agent.
 
 ### The reconcile (DR-0689)
 
@@ -98,7 +98,7 @@ names), then the batch is written. No proposal queue: the summary names the batc
 |---|---|
 | open, triage | `docket open /queue`, a sync the session start names as due said once; the owner triages on the page (keys 1 to 4, done, drop, snooze) or in chat as one batch `by: user`; Claude reads ahead and waits for "go" |
 | order | `ledger` view `queue`: the `me` items in one line, then discuss, claude, chase, each by due, one at a time |
-| each item | `show`; its source and log locators read only as far as the facts need, a recording's summary and transcript around the moment; whether it already happened; three to five lines and the next step |
+| each item | `show`; its source and log locators read only as far as the facts need, a recording's summary and transcript around the moment, a locator `read` can't open searched by its words around its day; whether it already happened; three to five lines and the next step |
 | by verdict | discuss: talk, one short question round for a crisp choice; claude: draft or do it, a draft only the owner can send logged and triaged `me`; chase: the nudge drafted and logged, triage cleared; a prep item: points on its meeting, `keep` for proposed ones, `done` with "n points on M-"; a point that is work: `point_item` |
 | record | one `ledger_batch` per item before the next, `by: claude` for what Claude did, `by: user` for what the owner decided: `log`, `done` with `outcome`, `drop`, `snooze`, `triage`, `set` of due, a `material` for a draft ("draft, not sent"), `notes` for work that goes on |
 | end | three lines: closed, drafts waiting and where, what is left; the page stays open |
@@ -119,10 +119,9 @@ Set for good, each PR's title naming its part, `cost: one-way`:
 
 `medium`: DR-0686, DR-0689 to DR-0691; `cheap`: DR-0692. Not doors: the wording, `fork.md`, CLAUDE.md. Data: none.
 
-The cut-over (DR-0692): the owner's old skills keep their names and descriptions, so "sync" and "let's do tasks" still
-reach them, and each body becomes one line, "Run `/docket:sync` (the Skill tool) with the same arguments", the old
-`mail` naming the mail and calendar sources and `quick` dropped with a line saying so. The old bodies' lore moves into
-the project's CLAUDE.md, the forks' into each source's `sync.md`; a week later the old skills go.
+The cut-over (DR-0692): the owner's old skills keep their names and descriptions, each body one line, "Run
+`/docket:sync` (the Skill tool) with the same arguments", old `mail` naming the mail and calendar sources, `quick`
+dropped with a line saying so; the old bodies' lore goes to CLAUDE.md, the forks' to `sync.md`; a week on, they go.
 
 ## Steps
 
@@ -135,25 +134,23 @@ Sync first: it stands on main, its summary is where tasks starts, and tasks gets
 
 ## Tests
 
-- `test_ledger_store.py`: a `source` or a material `ref` in a never-store container, by container and by thread,
-  refused naming the field and never the value; one outside it written; the import's dry run names it.
-- `test_plugin_files.py`: each skill pre-approves only the reads above; every `docket` command and option the skills
-  and `fork.md` name exists; every op and view they name is in `ledger-batch.json` and the tool's views; the block's
-  labels in `SKILL.md` and `fork.md` equal the test's list; AGENTS.md names both skills.
+- `test_ledger_store.py`: a `source` or a material `ref` in a never-store container, by container and by thread, with
+  `r:` and an anchor, refused naming the field, never the value; one outside it written; the import's dry run names
+  it; a mail locator in a listed conversation written, its rid not carrying the id and its dropped record never indexed.
+- `test_plugin_files.py`: reads-only pre-approvals; every `docket` command, option, op and view the skills and
+  `fork.md` name exists; the block's labels equal the test's list; AGENTS.md names both skills.
 - Each skill's worked batch, invented people, through `docket ledger batch --dry-run` on the fixture vault: no refusal.
 - Before each merge, a rehearsal on the live clone's imported ledger beside the old skill, the same day.
 
 ## Docs
 
-`plugin/README.md`'s table gains both skills, losing "arrive in later phases"; the package README's Live runs and
-`docs/design.md`'s Claude first and Tasks sections; AGENTS.md's door lines; `plugin.json`'s version per PR (CV-0012);
-a CHANGELOG line per PR; DR-0685 to DR-0692, proposed by Claude.
+`plugin/README.md`'s skills; the package README's Live runs; `docs/design.md`'s Claude first and Tasks; AGENTS.md's
+doors; `plugin.json` (CV-0012) and a CHANGELOG line per PR; DR-0685 to DR-0692, proposed by Claude.
 
 ## Risks
 
 - As the old sync: agents share one browser, a tab each; Claude classifies plain cases only. Accepted.
 - Every rid reported costs a `read`, dozens a sync; two promotes wait on the vault's lock, retried later. Accepted.
-- A proposed point repeating one rollover carries: the dry run shows the rolled copies first. Resolved.
 
 ## Plan review
 
@@ -172,3 +169,6 @@ Round 1, 19 Oct, of a682400: one blocker, three majors, seven minors, all fixed 
 | P9 | minor | a locator `read` can't open | fixed: `search` its words around its day |
 | P10 | minor | "locator" undefined | fixed: what one `read` opens |
 | P11 | minor | a write refused after a clean dry run | fixed: a fresh snapshot and another dry run |
+
+Round 2, 19 Oct, of 5311411: approved, five minors folded in: DR-0690's stripped forms, narrowed bind and mail test;
+STREAMS in MEETINGS' form; the search fallback moved to tasks and the reconcile; docs in the vault; unnoted recordings.

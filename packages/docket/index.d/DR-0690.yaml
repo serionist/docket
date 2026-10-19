@@ -6,7 +6,8 @@ decisions:
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#210"]
-    description: "Beside the keyword and people screens of the text rules (DR-0618, DR-0627), the writer refuses an op whose source, or a material's ref, points at a record whose container or thread is on vault.yaml's never-store containers list, by neverstore.in_container: the container and thread the index holds for the locator's rid, else the rid's own text up to each slash. The refusal names the field, never the value. A sync agent reports no such record (DR-0686); this holds when one does, and for every writer: the pages, the CLI and the import, whose dry run names an old item it would refuse. It ships in #210's first PR."
-    binds: [No ledger op's source or material ref points into a never-store container.]
+    description: "Beside the keyword and people screens of the text rules (DR-0618, DR-0627), the writer refuses an op whose source, or a material's ref, points into a container on vault.yaml's never-store containers list, by neverstore.in_container. A leading r: and any @ or #n anchor are stripped first. Then the rid's own text is matched up to each slash, which finds a Slack or Teams rid, since those carry their channel or chat; and for any source, the container and thread the index holds for that rid. A mail rid doesn't carry its conversation, which is what a mail never-store entry names, and a record the gate dropped never reaches the index, so a mail locator into a listed conversation is written: it names nothing Docket keeps, and the sync's agents report only kept records (DR-0686). The refusal names the field, never the value. It holds for every writer, the pages, the CLI and the import, whose dry run names an old item it would refuse. It ships in #210's first PR."
+    binds:
+      - No ledger op's source or material ref points into a never-store container that its rid's text shows, for Slack and Teams, or that the index holds for it, for any source.
     not_chosen:
       - "Leaving it to the sync skill: the pages, the CLI and the import write ops too, and the keyword and people screens already sit in the writer."
