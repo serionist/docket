@@ -35,6 +35,7 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 | `docket ledger list` | the items by `--who` (a part of the name), `--stream`, `--kind`, `--state open\|snoozed\|done\|dropped\|all` (open takes a snooze whose day has come, snoozed only those still asleep) and the day they opened (`--since`, `--until`), with counts over all of them: by state, overdue, chased and the median days to done; `-k` rows of text, 50 by default |
 | `docket ledger meetings` | the meetings overlapping a window, today to six days on by default; minutes around a time find the meeting a recording was made in |
 | `docket ledger suggest <M->` | the open items worth raising in a meeting, each with why; it writes nothing |
+| `docket ledger day` | your day, as the session start says it: each live source's last sync and the ones due, a status file a hand edit holds, the queue's counts with the discuss and claude rows, today's meetings still to come and the next working day's with their open points and items, then what is overdue or due today, replies owed, decisions and tasks due this week, invites, waits over three days and the streams not closed; an item listed once among those; at most 45 lines, each cut section keeping its count; `--json` gives every row |
 | `docket ledger batch [file or -]` | the ledger's changes in one write, every one or none, as the `ledger_batch` tool makes them: a JSON array or JSON lines with `#` comments; `--by user\|claude\|sync` unless an op says, `as` on an add, a meeting, a point or a point's item naming it for a later op's `$name`; `--dry-run` first, which lists every change it would refuse and exits 1 if any |
 | `docket ledger calendar [--since DAY]` | the meetings caught up with the calendar's event records in raw, by sync: what a stopped step left pending first, sets included, then each record from DAY (14 days back by default), adding a meeting or joining the old one with its start and subject, never setting one, in writes of about 200 records, whole days each; `--dry-run` first names the joins and the near misses |
 | `docket ledger import <file or ->` | a ledger brought in with its history from the op lines an export wrote, `via: import`, a month per commit; every old A- and M- number kept, Docket's own renumbered; what the ledger holds already is skipped, so a rerun adds nothing twice, and an op from elsewhere on its objects refuses it; `--dry-run` first counts items by kind and state, log entries, meetings, points and their roll chains, the sources `read` can't resolve and the old meetings `docket ledger calendar` would join after it, `--json` for an export to compare; `--revert` deletes every op file in one commit, until the old ledger retires, and every clone pulls that before it writes again |
@@ -829,7 +830,9 @@ Claude Code connects through the Docket plugin, or by hand:
 ```
 
 The plugin's session-start hook runs `docket hook session-start`, which prints the service's state, the vault's and
-the port check as the JSON Claude Code reads (DR-0163). Its capture hook runs `docket hook post-tool-use` after every
+the port check as the JSON Claude Code reads (DR-0163), then your day as the service reads it (`GET /api/day`): whole
+in a session whose own repo is the vault's, one line of counts in any other, and a line naming `docket ledger day`
+when the service is down or slow (DR-0670 to DR-0672). Its capture hook runs `docket hook post-tool-use` after every
 MCP call: with no run open it reads one small file and returns (DR-0242). Both are hidden from `docket --help`: they
 are for the plugin, not for people.
 

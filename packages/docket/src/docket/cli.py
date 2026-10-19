@@ -2143,6 +2143,22 @@ def ledger_suggest(
     _ledger_read(vault, ledger_views.Ask(view="suggest", ref=meeting), as_json)
 
 
+@ledger_app.command("day")
+def ledger_day_command(as_json: LedgerJson = False, vault: VaultOption = None) -> None:
+    """Your day, as the session start says it: the syncs due, the queue, today's and the next working day's meetings
+    with their points and items, what is overdue, the replies owed, decisions and tasks due this week, invites, waits
+    and streams, in at most 45 lines. From the vault directly, so it works with the service down; writes nothing."""
+    from docket.ledger import day as ledger_day  # noqa: PLC0415
+
+    found = find_vault(vault)
+    today = ledger_day.read(found, ledger_views.now())
+    if as_json:
+        # ASCII only: a title's text can't put a terminal code on the screen.
+        typer.echo(today.model_dump_json(indent=2))
+    else:
+        say_all([line.text for line in ledger_day.lines(today)])
+
+
 @ledger_app.command("batch")
 def ledger_batch(
     source: Annotated[
@@ -2255,12 +2271,20 @@ def hook_session_start() -> None:
     from docket import hooks  # noqa: PLC0415
     from docket.service import install  # noqa: PLC0415
 
+    tokens = _tokens()
+
     def status() -> install.ServiceStatus:
-        tokens = _tokens()
         return install.status(_installer(tokens), tokens)
 
+    def day(st: install.ServiceStatus, room: int) -> client.Answer | None:
+        try:
+            token: str | None = tokens.read()
+        except DocketError:
+            token = None
+        return client.call("GET", f"/api/day?room={room}", token=token, at=st.port, timeout=hooks.DAY_SECONDS)
+
     # ASCII on the wire, whatever the console's code page: JSON escapes every other character.
-    typer.echo(json.dumps(hooks.session_start(status, os.environ)))
+    typer.echo(json.dumps(hooks.session_start(status, os.environ, day)))
 
 
 @hook_app.command("post-tool-use")

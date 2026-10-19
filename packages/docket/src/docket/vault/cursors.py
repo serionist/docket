@@ -18,7 +18,7 @@ The rules a run follows (DR-0607, DR-0247):
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -78,6 +78,8 @@ class Cursor:
 
 
 Cursors = dict[str, Cursor]
+# A machine's mark of a source: the machine, and the time its syncs reached.
+Mark = tuple[str, datetime]
 
 
 # -- reading ---------------------------------------------------------------------------------------------------------
@@ -386,6 +388,32 @@ def window(
         marks.append(cursor.mark)
     start = (max(marks) if marks else now) - timedelta(days=lookback(own, lookback_days))
     return Window(since=since if since is not None else start, until=now, default_since=start, notes=notes)
+
+
+# -- when a source is due a sync (DR-0304) ---------------------------------------------------------------------------
+
+# A source no machine synced for this long is due a sync.
+DUE_AFTER = timedelta(days=1)
+
+
+def marks(source: str, own: Cursors, others: Mapping[str, Cursors], machine: str, now: datetime) -> list[Mark]:
+    """Each machine's mark of a source, this one's named `machine`, newest first; a mark from a clock ahead of this
+    one left out."""
+    found: list[Mark] = []
+    mine = own.get(source)
+    if mine is not None and mine.mark is not None:
+        found.append((machine, mine.mark))
+    for other, theirs in others.items():
+        cursor = theirs.get(source)
+        if cursor is not None and cursor.mark is not None:
+            found.append((other, cursor.mark))
+    return sorted(((m, t) for m, t in found if t <= now), key=lambda p: p[1], reverse=True)
+
+
+def due(found: Sequence[Mark], now: datetime) -> bool:
+    """Whether a source is due a sync by its marks, newest first: no machine's is under a day old, or none has one.
+    The Sync page and the day also leave out a source with a run open."""
+    return not found or now - found[0][1] >= DUE_AFTER
 
 
 @dataclass(frozen=True)

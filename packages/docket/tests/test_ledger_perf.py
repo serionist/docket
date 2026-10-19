@@ -1,8 +1,9 @@
 """A ledger of a few years: 5,000 items and 50,000 ops, and 2,000 meetings with 20,000 point ops, read and folded by
 `load` in under a second and a half; all of it folded into the index's tables in under two seconds; one op more, on an
 item or a meeting, as a write leaves it, read into them in a tenth of a second; a write touching one meeting planned in
-a tenth of a second, reading only its part (DR-0616, DR-0628, DR-0633, DR-0635); and a snapshot of it, every item
-open, read from the tables with its lines in a tenth of a second (DR-0638).
+a tenth of a second, reading only its part (DR-0616, DR-0628, DR-0633, DR-0635); a snapshot of it, every item open,
+read from the tables with its lines in a tenth of a second (DR-0638); and the day's route on a vault holding it in half
+a second (DR-0672).
 
 The ops are written as the writer writes them, a month file per machine, each item an add and nine changes, each
 meeting four points answered and a point rolled from the meeting before it in its weekly series of fifty. Wall time
@@ -24,6 +25,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from docket_testkit import Best, best_of, empty_vault, make_config, traced
 from ledger_kit import ADD_FIELDS
+from starlette.testclient import TestClient
 
 from docket.index import build as index_build
 from docket.index import ledger as ledger_index
@@ -31,6 +33,8 @@ from docket.index.ledger import Held
 from docket.index.schema import LEDGER_TABLES
 from docket.ledger import load, ops, store, views
 from docket.ledger.ops import Op
+from docket.service.app import create_app
+from docket.service.state import Settings
 
 ITEMS = 5_000
 MEETINGS = 2_000
@@ -42,6 +46,7 @@ REBUILD_SECONDS = 2.0
 CATCH_UP_SECONDS = 0.1
 WRITE_SECONDS = 0.1
 SNAPSHOT_SECONDS = 0.1
+DAY_SECONDS = 0.5
 CHANGES = ("log", "triage", "set", "log", "snooze", "triage", "log", "done", "reopen")
 
 
@@ -292,3 +297,30 @@ def test_a_snapshot_of_a_ledger_that_size_reads_from_the_index_in_a_tenth_of_a_s
     if not traced():
         elapsed = timed["snapshot"].seconds
         assert elapsed < SNAPSHOT_SECONDS, f"a snapshot took {elapsed:.2f} s, over {SNAPSHOT_SECONDS} s"
+
+
+@pytest.mark.perf
+def test_the_day_s_route_on_a_vault_holding_a_ledger_that_size_answers_in_half_a_second(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GET /api/day as the session start's hook asks it, on a vault with that ledger and its index built: the vault
+    opened, the snapshot of every open item and the day's meetings, the cursor files, the status files and the
+    calendar's backlog, the day cut to its room. Asked once before the clock starts, as a running service has been."""
+    vault = empty_vault(tmp_path, make_config())
+    build(vault.root)
+    index_build.rebuild(vault)
+    monkeypatch.setattr(views, "now", lambda: datetime(2026, 6, 1, 8, tzinfo=UTC))
+    token = "t0ken-for-tests-only"  # noqa: S105 - an invented token
+    app = create_app(Settings(port=8741, vault=vault.root, token=lambda: token, store="the system keychain"))
+    headers = {"Authorization": f"Bearer {token}"}
+    with TestClient(app, base_url="http://127.0.0.1:8741") as client:
+        client.get("/api/day", params={"room": 43}, headers=headers)
+        gc.collect()
+        began = time.perf_counter()
+        answer = client.get("/api/day", params={"room": 43}, headers=headers)
+        elapsed = time.perf_counter() - began
+    print(f"the day's route: {elapsed * 1000:.0f} ms for {ITEMS:,} open items and {MEETINGS:,} meetings")
+    assert answer.status_code == 200, answer.text
+    assert len(answer.json()["lines"]) <= 43
+    if not traced():
+        assert elapsed < DAY_SECONDS, f"the day's route took {elapsed:.2f} s, over {DAY_SECONDS} s"
