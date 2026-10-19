@@ -265,6 +265,10 @@ Unreleased in the same PR.
 
 ### Changed
 
+- The ledger obeys the forgotten list: an op a forget masked reads `[forgotten]` where its words were, in every read,
+  `show`, the index and an import run again, its number and history kept, and the next gate call on each clone writes
+  the mask into the op files. A forgotten list that doesn't read now stops the ledger's reads and writes too. Update
+  Docket on every machine before the next forget: an older one stops on a list that names an op.
 - `media_put` fetches a URL from any https host, every address it resolves to still checked: `docket media host` is
   gone, and a source's `media_hosts` key in `vault.yaml` is read and ignored. A `vault.yaml` with comments or a layout
   of your own is now edited in place, its comments and order kept, by every command and the Settings page; only a

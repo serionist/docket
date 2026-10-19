@@ -9,11 +9,13 @@ Each add's id is 2000-01-01 plus its number in milliseconds (DR-0658), before an
 of the file holds against a claim Docket made first (DR-0613); a file whose adds aren't is refused.
 
 The ledger may hold the file's ops, each line for line as the import would write it, which are skipped, so a rerun
-writes nothing and an import stopped after a month finishes; and objects of its own that name none of the file's,
-such as the calendar step's meetings (DR-0647). An op from elsewhere naming one of the file's objects, or a held line
-with another text, refuses the import: revert first (DR-0656). So does a problem `docket vault check` would name in
-the fold of the result that the ledger didn't have already, and a number one of the file's objects would lose; one
-the ledger's own object loses goes through, and the import's last write renumbers that object (DR-0613).
+writes nothing and an import stopped after a month finishes, an op the forgotten list masks masked before the text
+rules see it, then compared and written so, and no rerun after a forget brings its text back or stops on it (DR-0696);
+and objects of its own that name none of the file's, such as the calendar step's meetings (DR-0647). An op from
+elsewhere naming one of the file's objects, or a held line with another text, refuses the import: revert first
+(DR-0656). So does a problem `docket vault check` would name in the fold of the result that the ledger didn't have
+already, and a number one of the file's objects would lose; one the ledger's own object loses goes through, and the
+import's last write renumbers that object (DR-0613).
 
 The months are written oldest first, each one write through `store.py` and one commit. Old meetings come in keyless,
 and `docket ledger calendar` joins them afterwards (DR-0655); the dry run shows those joins by running the catch-up's
@@ -25,7 +27,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any, cast
@@ -38,6 +40,7 @@ from docket.ledger import calendar, fold, ops, store
 from docket.ledger.fold import Ledger, number_text
 from docket.ledger.meetings import Meeting, ObjectFold, meeting_text
 from docket.ledger.ops import Line, Op
+from docket.vault import forgotten
 from docket.vault.vault import Vault
 
 # The keys the writer sets, never the export (DR-0653).
@@ -129,12 +132,13 @@ def plan(vault: Vault, text: str, name: str, *, report: bool = False) -> Plan:
     """The import of `text` as it would be written, each refusal by its line, and with `report` the dry run's counts.
     Lines that don't read are refused before anything is folded: the fold of a file missing them would only name what
     hangs on them."""
+    listed = forgotten.load(vault.root, vault.home).ops
     with fold.paused():
-        read = _read(vault, text, name)
+        read = _read(vault, text, name, listed)
     refusals = read.refusals
     if refusals:
         return Plan((), 0, tuple(refusals))
-    held = ops.read_all(vault.root)
+    held = ops.read_all(vault.root, masked=listed)
     texts: dict[str, set[str]] = {}
     for line in held.lines:
         texts.setdefault(line.op.id, set()).add(line.text)
@@ -175,9 +179,10 @@ def plan(vault: Vault, text: str, name: str, *, report: bool = False) -> Plan:
 # -- reading the file ---------------------------------------------------------------------------------------------
 
 
-def _read(vault: Vault, text: str, name: str) -> _Lines:
+def _read(vault: Vault, text: str, name: str, masked: Collection[str]) -> _Lines:
     """Each line as an op the import would write: the writer's keys set, its values screened, read as DR-0611 reads
-    it. Two lines of one id are one op when they say the same, and are refused when they don't."""
+    it; one whose id `masked` holds is cleaned and masked before it is screened. Two lines of one id are one op when
+    they say the same, and are refused when they don't."""
     out = _Lines()
     given: dict[str, tuple[int, dict[str, Any]]] = {}
     for n, raw in enumerate(text.split("\n"), start=1):
@@ -212,7 +217,11 @@ def _read(vault: Vault, text: str, name: str) -> _Lines:
         if item in before:
             filled["after"] = before[item]
         try:
-            op = ops.read_op(json.dumps(_screened(rules, filled), ensure_ascii=False))
+            if op_id in masked:
+                # Masked before any rule sees it, so what a forget took can't stop the import that brings its op back,
+                # and cleaned first, as the writer cleaned it, so its locators digest as the ledger's mask does.
+                filled = json.loads(ops.mask(json.dumps(_screened(filled, rules.cleaned))))
+            op = ops.read_op(json.dumps(_screened(filled, rules.text), ensure_ascii=False))
         except store.TextRefusedError as e:
             out.refusals.append(f"{name}:{n}: {e}")
             continue
@@ -245,23 +254,23 @@ def _refused_keys(data: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _screened(rules: _Screen, data: Mapping[str, Any]) -> dict[str, Any]:
-    """A line's values as the writer would write them: text cleaned and redacted, every other value screened, ids as
-    they are."""
+def _screened(data: Mapping[str, Any], text: Callable[[str, str], str | None]) -> dict[str, Any]:
+    """A line's values as the writer would write them, each text value through `text`: `_Screen.text`, which cleans,
+    redacts and screens it, or `_Screen.cleaned`, which only cleans it; ids as they are."""
     out = dict(data)
     for key in ("note", "label", "ref", "verdict", "until"):
         value = out.get(key)
         if isinstance(value, str):
-            out[key] = rules.text(key, value)
+            out[key] = text(key, value)
     fields = out.get("fields")
     if isinstance(fields, dict):
         screened: dict[str, Any] = {}
         for key, value in cast(dict[str, Any], fields).items():
             if key == "attendees" and isinstance(value, list):
-                names = [rules.text("attendee", v) if isinstance(v, str) else v for v in cast(list[Any], value)]
+                names = [text("attendee", v) if isinstance(v, str) else v for v in cast(list[Any], value)]
                 screened[key] = [v for v in names if v is not None]
             elif isinstance(value, str) and key not in IDS:
-                screened[key] = rules.text(key, value)
+                screened[key] = text(key, value)
             else:
                 screened[key] = value
         out["fields"] = screened
@@ -276,12 +285,18 @@ class _Screen:
         self.rules = store.TextRules(vault)
         self.seen: dict[tuple[str, str], tuple[str | None, str | None]] = {}
 
+    @staticmethod
+    def cleaned(name: str, value: str) -> str | None:
+        """A value cleaned as its name is, as the writer cleans it, before any rule: None when nothing is left."""
+        if name in ONE_LINE:
+            return store.one_line(value) or None
+        return store.clean_text(value) if name in store.TEXTS else value or None
+
     def text(self, name: str, value: str) -> str | None:
         """A value as the writer writes it, cleaned as its name is and screened (`store.TextRules`)."""
         found = self.seen.get((name, value))
         if found is None:
-            cleaned = store.clean_text(value) if name in store.TEXTS else value
-            text = store.one_line(value) if name in ONE_LINE else cleaned
+            text = self.cleaned(name, value)
             try:
                 found = (self.rules.screen(name, text) if text else None, None)
             except store.TextRefusedError as e:

@@ -454,10 +454,12 @@ forget: an older one reads what a merge brings back until a newer one's gate cal
 - Without `--now` it only says what it would take: counts, run files and doc line numbers, never a doc's id or a
   line's text, so it runs in Claude Code's shell too. `--now` runs in your own terminal only, shows the ids, and
   forgets on your OS prompt's yes, or a code typed back where the machine has none.
-- A forget writes `state/forgotten.jsonl`, hashes only, and commits it first. Every read, search and gate call obeys it
+- A forget writes `state/forgotten.jsonl`, hashes and op ids only, and commits it first. Every read, search and gate call obeys it
   at once, on every clone after its pull; the next gate call there takes the lines, audio and keys out too.
 - A folder file is taken by its content: move it out of the folder too, since a forget never writes there.
 - A confirmed or rejected decision whose evidence was all forgotten keeps its title, and says so.
+- A ledger op the list names keeps its place, number and history, and reads `[forgotten]` where its words were, in
+  every read at once; the next gate call writes that into the op files, every machine's, and commits them.
 
 What a forget can't reach, which every dry run names: key exports made before (make a new one right after, then
 destroy the old), the LFS server's encrypted copies, chunks sent to an API provider, the source itself, and files

@@ -1,7 +1,7 @@
 """Ops have one writer, `ledger/store.py` (DR-0618), scanned over the whole package as test_decision_writer_scan.py
 scans for a decision's status: only the store's three writes commit ops, `write`, the calendar step's `write_calendar`
-(#200) and the import's `write_import` (#202), only the store writes a file in the ledger's package, and the op folder
-is spelled only where the layout names it."""
+(#200) and the import's `write_import` (#202), only the store writes a file in the ledger's package, only the forget's
+apply writes masks through it (#212), and the op folder is spelled only where the layout names it."""
 
 from __future__ import annotations
 
@@ -33,10 +33,16 @@ def test_only_the_writer_commits_ops() -> None:
     }  # fmt: skip
 
 
+def test_only_the_forget_s_apply_writes_masks() -> None:
+    """The one change a committed line takes is to its mask, by the apply, which lists it first (DR-0693)."""
+    assert _uses("write_masks") == {("forget/apply.py", "apply")}
+
+
 def test_only_the_store_writes_a_file_in_the_ledger_s_package() -> None:
     assert {where for where in _uses("write_replacing") if where[0].startswith("ledger/")} == {
         ("ledger/store.py", "commit_ops"),
         ("ledger/store.py", "_save_calendar_pending"),
+        ("ledger/store.py", "write_masks"),
     }
     for path in sorted((SRC / "ledger").glob("*.py")):
         if path.name != "store.py":

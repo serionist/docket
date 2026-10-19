@@ -2,10 +2,11 @@
 
 `state/forgotten.jsonl` is committed, one JSON line per forget: the rid hashes forgotten whole, each version forgotten
 alone by its rid's hash and staging's key, a folder file's identity as `native` holds it, the rids no media is stored on
-again, the media key ids every clone deletes, and a removed legacy note's old paths' hashes and `import_hash`; when, and
-on which machine. Hashes only, never a rid, a path or a key: a history rewrite takes the raw lines out of history, and
-the list stays in it for good. Two machines can append at once, so the list merges by the vault's own
-`*.jsonl merge=union`, and a merge can only list more.
+again, the media key ids every clone deletes, a removed legacy note's old paths' hashes and `import_hash`, and the
+ids of the ledger ops it masked, written only when it masked one (DR-0695); when, and on which machine. Hashes and op
+ids only, never a rid, a path or a key: a history rewrite takes the raw lines out of history, and the list stays in it
+for good. An op id holds a time and random bits, never words, and its masked line keeps it anyway. Two machines can
+append at once, so the list merges by the vault's own `*.jsonl merge=union`, and a merge can only list more.
 
 In force are HEAD's lines and the disk's together, as the settings in force read vault.yaml (DR-0521): a line on disk
 that HEAD lacks acts at once, and a line HEAD has that the disk lacks still acts and is named, and the list is never
@@ -47,6 +48,8 @@ Hash = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{32}$")]
 KeyId = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 Identity = Annotated[str, StringConstraints(pattern=r"^(?:sha256|redacted_sha256):[0-9a-f]{64}$")]
 ImportHash = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
+# A ledger op's id, a ULID as the op line holds it (`docket.ledger.ops.ULID`, which imports this module).
+OpId = Annotated[str, StringConstraints(pattern=r"^[0-7][0-9A-HJKMNP-TV-Z]{25}$")]
 
 
 class _Model(BaseModel):
@@ -71,6 +74,8 @@ class Forget(_Model):
     keys: list[KeyId] = Field(default_factory=list[KeyId])
     old_paths: list[Hash] = Field(default_factory=list[Hash])
     import_hashes: list[ImportHash] = Field(default_factory=list[ImportHash])
+    # The ledger ops masked (DR-0695): a Docket from before #212 fails closed on the key, as it can't mask them.
+    ops: list[OpId] = Field(default_factory=list[OpId])
     at: datetime
     machine: str = Field(min_length=1)
 
@@ -82,7 +87,11 @@ class Forget(_Model):
         return value.astimezone(UTC)
 
     def line(self) -> str:
-        return json.dumps(self.model_dump(mode="json"), ensure_ascii=False, separators=(",", ":"))
+        """The line, `ops` left out when it masked none: an older Docket still reads each forget that masks no op."""
+        data = self.model_dump(mode="json")
+        if not self.ops:
+            del data["ops"]
+        return json.dumps(data, ensure_ascii=False, separators=(",", ":"))
 
 
 def identity_of(record: RawRecord) -> str | None:
@@ -115,6 +124,7 @@ class Forgotten:
     keys: frozenset[str] = frozenset()
     old_paths: frozenset[str] = frozenset()
     import_hashes: frozenset[str] = frozenset()
+    ops: frozenset[str] = frozenset()
     missing: int = 0
     # The lines on disk HEAD lacks: in force already, and committed by the next gate call.
     pending: int = 0
@@ -128,7 +138,8 @@ class Forgotten:
     @cached_property
     def digest(self) -> str:
         """What the index is built under (DR-0593): the sha256 of what the build reads, sorted, so a merge that only
-        reorders lines changes nothing; never the keys, which change no row. Empty when it reads nothing."""
+        reorders lines changes nothing; never the keys, which change no row. The masked ops count once there are any
+        (DR-0695), so a list without them keeps the digest it had. Empty when it reads nothing."""
         read: dict[str, list[str] | list[list[str]]] = {
             "rids": sorted(self.rids),
             "versions": sorted([rid, key] for rid, key in self.versions),
@@ -137,6 +148,8 @@ class Forgotten:
             "old_paths": sorted(self.old_paths),
             "import_hashes": sorted(self.import_hashes),
         }
+        if self.ops:
+            read["ops"] = sorted(self.ops)
         if not any(read.values()):
             return ""
         return hashlib.sha256(canonical_json(read).encode("utf-8")).hexdigest()
@@ -251,6 +264,7 @@ def fold(lines: Sequence[Forget], missing: int = 0, root: Path | None = None, pe
         keys=frozenset(key for line in lines for key in line.keys),
         old_paths=frozenset(path for line in lines for path in line.old_paths),
         import_hashes=frozenset(found for line in lines for found in line.import_hashes),
+        ops=frozenset(op for line in lines for op in line.ops),
         missing=missing,
         pending=pending,
         root=root,
@@ -276,7 +290,10 @@ def list_path(root: Path) -> Path:
 
 
 def parse(text: str, where: str) -> list[Forget]:
-    """The forgets in the list's text. A bad line is named by its number only, like a release log's."""
+    """The forgets in the list's text. A bad line is named by its number only, like a release log's, with its two
+    causes: a newer Docket's line, such as one naming the ops it masked to a Docket from before #212, which this one
+    can't obey until it is updated, or a damaged one, which git gives back. Deleting a line is never the fix: a line
+    HEAD holds acts all the same."""
     out: list[Forget] = []
     for n, line in enumerate(text.splitlines(), start=1):
         if not line.strip():
@@ -284,7 +301,10 @@ def parse(text: str, where: str) -> list[Forget]:
         try:
             out.append(Forget.model_validate_json(line))
         except ValidationError:
-            problem = f"{where}: line {n} isn't a forget; fix or delete it (the forgotten list fails closed)"
+            problem = (
+                f"{where}: line {n} isn't a forget this Docket reads. Written by a newer Docket: update this one; "
+                f"damaged: git checkout -- {FORGOTTEN} (the forgotten list fails closed)"
+            )
             raise DocketError(problem) from None
     return out
 

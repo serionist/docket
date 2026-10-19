@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import gc
 import re
-from collections.abc import Generator, Iterable, Sequence
+from collections.abc import Collection, Generator, Iterable, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import date
@@ -492,12 +492,13 @@ def paused() -> Generator[None]:
             gc.enable()
 
 
-def load(root: Path, files: list[FileRead] | None = None) -> Ledger:
+def load(root: Path, files: list[FileRead] | None = None, masked: Collection[str] | None = None) -> Ledger:
     """The vault's ledger: every op file read and folded, the reading's problems first, and the highest id any line
-    holds, one this Docket can't read included (DR-0612), with the collector paused. With `files`, each file read
-    is added to it, as the index keeps them (DR-0616)."""
+    holds, one this Docket can't read included (DR-0612), with the collector paused; each op `masked` holds, the
+    forgotten list's when none is given, read as its mask (DR-0695). With `files`, each file read is added to it, as
+    the index keeps them (DR-0616)."""
     with paused():
-        read = read_all(root, files)
+        read = read_all(root, files, masked)
         ledger = fold(read.lines)
     highest = max((i for i in (ledger.highest_id, read.highest) if i is not None), default=None)
     return replace(ledger, problems=read.problems + ledger.problems, highest_id=highest)

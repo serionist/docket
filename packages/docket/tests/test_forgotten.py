@@ -5,6 +5,7 @@ data only; lines go in through the list's own append."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from datetime import datetime
@@ -18,11 +19,14 @@ from docket.documents import records as documents
 from docket.errors import DocketError
 from docket.vault import forgotten, releaselog
 from docket.vault.forgotten import FORGOTTEN, Forget, Forgotten, Version
+from docket.vault.records import canonical_json
 from docket.vault.releaselog import Kept, LoggedCut, Release
 from docket.vault.vault import Vault
 
 BYTES = "c0" * 32
 TEXT = "d1" * 32
+# A ledger op's id, as the list's ops hold it.
+OP_ID = "01M574M6WG8AN9QJRCB9EM7JMK"
 
 
 @pytest.fixture
@@ -50,6 +54,18 @@ def test_a_line_holds_hashes_only_and_reads_back(vault: Vault) -> None:
     assert json.loads(found.line())["schema_version"] == 1
 
 
+def test_a_line_names_the_ledger_ops_it_masked_only_when_it_masked_one(vault: Vault) -> None:
+    """A forget that masks no op writes the line a Docket from before #212 reads; one that does, the line it fails
+    closed on, as it can't mask (DR-0695)."""
+    forget(vault, rids=[PLAUD])
+    forget(vault, ops=[OP_ID])
+    text = (vault.root / FORGOTTEN).read_text(encoding="utf-8")
+    first, second = text.splitlines()
+    assert "ops" not in json.loads(first) and json.loads(second)["ops"] == [OP_ID]
+    assert [found.line() for found in forgotten.parse(text, FORGOTTEN)] == [first, second]
+    assert listed(vault).ops == {OP_ID}
+
+
 def test_a_time_needs_its_zone_and_is_kept_in_utc() -> None:
     with pytest.raises(ValueError, match="time zone"):
         Forget(at=datetime(2026, 10, 18, 9, 0), machine="m")
@@ -65,6 +81,7 @@ def test_a_time_needs_its_zone_and_is_kept_in_utc() -> None:
         '{"files": ["md5:00"], "at": "2026-10-18T09:00:00Z", "machine": "m"}',
         '{"at": "2026-10-18T09:00:00Z", "machine": "m", "later": true}',
         '{"at": "2026-10-18T09:00:00Z", "machine": ""}',
+        '{"ops": ["A-0001"], "at": "2026-10-18T09:00:00Z", "machine": "m"}',
     ],
 )
 def test_a_line_that_isn_t_a_forget_stops_every_reader_named_by_its_number(vault: Vault, bad: str) -> None:
@@ -74,6 +91,10 @@ def test_a_line_that_isn_t_a_forget_stops_every_reader_named_by_its_number(vault
     with pytest.raises(DocketError, match=r"state/forgotten.jsonl: line 2 isn't a forget") as raised:
         listed(vault)
     assert "plaud" not in str(raised.value)
+    # A newer Docket's line or a damaged one: the advice names both, and deleting the line is never it.
+    said = str(raised.value)
+    assert "Written by a newer Docket: update this one" in said
+    assert f"damaged: git checkout -- {FORGOTTEN}" in said and "delete" not in said
     with pytest.raises(DocketError, match="line 2"):
         vault.rawlog.read(PLAUD)
 
@@ -313,6 +334,17 @@ def test_the_digest_holds_what_the_build_reads_and_never_the_keys(vault: Vault) 
         digest = listed(vault).digest
     forget(vault, import_hashes=["sha256:" + "a1" * 32])
     assert listed(vault).digest != digest
+    digest = listed(vault).digest
+    forget(vault, ops=[OP_ID])
+    assert listed(vault).digest != digest
+
+
+def test_a_list_that_masks_no_op_keeps_the_digest_it_had_before_ops_were_listed() -> None:
+    found = forgotten.fold([line(rids=[PLAUD], old_paths=["a.md"])])
+    before = {"rids": sorted(found.rids), "versions": [], "files": [], "media": [],
+              "old_paths": sorted(found.old_paths), "import_hashes": []}  # fmt: skip
+    assert found.digest == hashlib.sha256(canonical_json(before).encode("utf-8")).hexdigest()
+    assert forgotten.fold([line(ops=[OP_ID])]).digest != ""
 
 
 def test_a_merge_that_only_reorders_lines_changes_no_digest(vault: Vault) -> None:

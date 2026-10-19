@@ -2,21 +2,29 @@
 commit; a crash at each step finished by the next gate call, with nothing of the family read meanwhile, no file or key
 gone before its path is on record; the tree waiting while git is in the middle of something, keys and staging gone; a
 line a union merge or a pull brought back taken out again; a record's line separators; a key no line named put on a
-keys-only line; and no run file, doc or media file read when nothing moved. Lines are written by hand here, as
+keys-only line; no run file, doc or media file read when nothing moved; and the ledger's listed ops masked in every
+machine's op file, a twin a merge brought back dropped (DR-0693, DR-0695). Lines are written by hand here, as
 `docket forget` writes them; invented data only."""
 
 from __future__ import annotations
 
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from docket_testkit import git, make_record, sh
+from docket_testkit import empty_vault, git, make_config, make_record, sh
 from forget_kit import forget, line, stored
+from ledger_kit import ADD_FIELDS, NOW, write_ops
 from media_kit import CALL, POLISHED, audio, call, in_raw, media_vault
 
 from docket.errors import DocketError
 from docket.forget import apply as forget_apply
+from docket.ledger import check
+from docket.ledger import load as ledger_load
+from docket.ledger import ops as ledger_ops
+from docket.ledger import store as ledger_store
+from docket.ledger.ops import MARK, Op
 from docket.media import layout, reader
 from docket.media import put as media
 from docket.media import staged as media_staged
@@ -619,3 +627,140 @@ def test_a_whole_rid_s_line_back_without_head_moving_has_the_docs_and_media_walk
     done = forget_apply.apply(vault, KeyStore(vault.home))
     assert done.records == 1 and walks == ["docs"]
     assert run.read_bytes() == b"" and clean(vault)
+
+
+# -- the ledger's op files -------------------------------------------------------------------------------------------
+
+SAID = "Ada said Tuesday at the venue"
+
+
+def ledger_vault(tmp_path: Path) -> tuple[Vault, Op, Op]:
+    """An item with a log line of this machine's and one in another machine's op file, both committed and listed."""
+    found = empty_vault(tmp_path, make_config())
+    ledger_store.write(found, [{"op": "add", "fields": dict(ADD_FIELDS)}], now=NOW)
+    (log,) = ledger_store.write(found, [{"op": "log", "item": "A-0001", "note": SAID}], now=NOW).ops
+    (desk_id,) = ledger_ops.mint(log.id, NOW, 1)
+    desk = replace(log, id=desk_id, batch=desk_id, after=log.id, machine="desk", note=f"{SAID}, from the desk")
+    (rel,) = write_ops(found.root, [desk])
+    git(found.root, "add", "--", rel)
+    git(found.root, "commit", "-q", "-m", "Ledger: a log line on desk", "--", rel)
+    forget(found, ops=[log.id, desk.id])
+    return found, log, desk
+
+
+def notes_read(vault: Vault) -> list[str]:
+    """Each log line's note as the ledger folds it: a line twice is one op."""
+    folded = ledger_load(vault.root).folds.values()
+    return sorted(line.op.note or "" for one in folded for line in one.lines if line.op.op == "log")
+
+
+def ledger_problems(vault: Vault) -> list[tuple[str, str]]:
+    return [(p.where, p.message) for p in vault.check() if p.where.startswith("ledger")]
+
+
+def test_the_apply_masks_each_listed_op_in_every_machine_s_op_file_in_its_one_commit(tmp_path: Path) -> None:
+    vault, log, desk = ledger_vault(tmp_path)
+    done = forget_apply.apply(vault, KeyStore(vault.home))
+    assert done.ops == 2 and done.commit is not None
+    assert subjects(vault)[0] == "Forget: applied on test-box"
+    named = git(vault.root, "show", "--name-only", "--format=", "HEAD").split()
+    assert sorted(named) == sorted([ledger_ops.rel_of(log), ledger_ops.rel_of(desk)])
+    for o in (log, desk):
+        text = (vault.root / ledger_ops.rel_of(o)).read_text(encoding="utf-8")
+        assert SAID not in text and ledger_ops.mask(o.text()) in text.splitlines()
+    assert notes_read(vault) == [MARK, MARK]
+    assert clean(vault) and vault.check() == []
+    again = forget_apply.apply(vault, KeyStore(vault.home))
+    assert (again.ops, again.commit) == (0, None)
+
+
+@pytest.mark.parametrize("step", ["keys", "staging", "media", "recorded", "written", "committed"])
+def test_a_crash_at_each_step_reads_masked_meanwhile_and_the_next_gate_call_finishes_the_ops(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, step: str
+) -> None:
+    vault, log, desk = ledger_vault(tmp_path)
+
+    def crash(at: str) -> None:
+        if at == step:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(forget_apply, "_reached", crash)
+    with pytest.raises(KeyboardInterrupt):
+        forget_apply.apply(vault, KeyStore(vault.home), first=True)
+    assert notes_read(vault) == [MARK, MARK]
+    monkeypatch.setattr(forget_apply, "_reached", lambda at: None)
+    Gate(vault).list()
+    assert clean(vault) and vault.check() == []
+    for o in (log, desk):
+        assert SAID not in git(vault.root, "show", f"HEAD:{ledger_ops.rel_of(o)}")
+
+
+def test_a_twin_a_merge_brought_back_reads_as_one_op_and_goes_at_the_next_gate_call(tmp_path: Path) -> None:
+    vault, _, desk = ledger_vault(tmp_path)
+    forget_apply.apply(vault, KeyStore(vault.home))
+    rel = ledger_ops.rel_of(desk)
+    path = vault.root / rel
+    masked = ledger_ops.mask(desk.text())
+    # A union merge of the forget's mask with the desk's own append brings the text back beside it.
+    path.write_text(f"{masked}\n{desk.text()}\n", encoding="utf-8", newline="\n")
+    git(vault.root, "commit", "-q", "-m", "Merge the desk's ledger", "--", rel)
+    assert notes_read(vault) == [MARK, MARK]
+    assert ledger_problems(vault) == [(f"{rel}:2", check.UNMASKED)]
+    Gate(vault).list()
+    assert path.read_text(encoding="utf-8") == f"{masked}\n"
+    assert subjects(vault)[0] == "Forget: applied on test-box"
+    assert clean(vault) and vault.check() == []
+
+
+def test_a_write_after_a_stopped_apply_commits_its_masks_with_its_own_ops(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault, log, desk = ledger_vault(tmp_path)
+
+    def crash(at: str) -> None:
+        if at == "written":
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(forget_apply, "_reached", crash)
+    with pytest.raises(KeyboardInterrupt):
+        forget_apply.apply(vault, KeyStore(vault.home))
+    assert sorted(ledger_problems(vault)) == sorted(
+        (ledger_ops.rel_of(o), check.MASKED) for o in (log, desk)
+    )  # fmt: skip
+    ledger_store.write(vault, [{"op": "log", "item": "A-0001", "note": "Booked"}], now=NOW)
+    named = git(vault.root, "show", "--name-only", "--format=", "HEAD").split()
+    assert sorted(named) == sorted([ledger_ops.rel_of(log), ledger_ops.rel_of(desk)])
+    assert clean(vault) and vault.check() == []
+
+
+def test_nothing_moved_reads_no_op_file_and_one_written_since_is_read_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault, log, _ = ledger_vault(tmp_path)
+    forget_apply.apply(vault, KeyStore(vault.home))
+    read: list[str] = []
+    real = Path.read_bytes
+
+    def watched(path: Path) -> bytes:
+        if "ledger" in path.parts:
+            read.append(path.name)
+        return real(path)
+
+    monkeypatch.setattr(Path, "read_bytes", watched)
+    done = forget_apply.apply(vault, KeyStore(vault.home))
+    assert read == [] and done.commit is None
+    ledger_store.write(vault, [{"op": "log", "item": "A-0001", "note": "Booked"}], now=NOW)
+    read.clear()
+    forget_apply.apply(vault, KeyStore(vault.home))
+    assert read == [Path(ledger_ops.rel_of(log)).name]
+
+
+def test_an_op_file_that_isn_t_utf8_is_left_as_it_is(tmp_path: Path) -> None:
+    vault, _, desk = ledger_vault(tmp_path)
+    bad = vault.root / "ledger/ops/2026-10-other.jsonl"
+    data = b"\xff\xfe" + desk.text().encode("utf-8") + b"\n"
+    bad.write_bytes(data)
+    done = forget_apply.apply(vault, KeyStore(vault.home))
+    assert done.ops == 2 and bad.read_bytes() == data
+    assert check.unmasked(vault.root, {desk.id}) == []
+    assert ("ledger/ops/2026-10-other.jsonl", "isn't UTF-8; skipped") in ledger_problems(vault)

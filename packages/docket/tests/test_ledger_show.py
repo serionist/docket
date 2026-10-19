@@ -15,6 +15,7 @@ from docket_testkit import empty_vault, make_config
 from ledger_kit import ADD_FIELDS, NOW, caught_up, op, rebuilt, tables, ulid, write_ops
 
 from docket.cli import main
+from docket.errors import DocketError
 from docket.index import build, rebuild
 from docket.index import ledger as ledger_index
 from docket.index.schema import SCHEMA_VERSION
@@ -108,19 +109,23 @@ def test_an_index_of_another_build_or_busy_past_the_wait_leaves_the_write_to_a_f
     assert done.after is not None
 
 
-def test_a_forgotten_list_that_doesn_t_read_leaves_the_write_and_show_to_a_fold_in_memory(
+def test_a_forgotten_list_that_doesn_t_read_stops_the_write_and_show_naming_its_line(
     indexed: Vault, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """With no index the write goes through, so with one it does too: the index's digest can't be known, and a write
-    never depends on the cache (DR-0619)."""
+    """Every reader of the ledger reads a listed op as its mask (DR-0695), so with the list unread, the index's tables
+    and a fold in memory alike could show what a forget masked: the ledger fails closed, as every reader of raw does
+    (DR-0579), and nothing is written."""
     store.write(indexed, [ADD], now=NOW)
     before = index_rows(indexed)
+    path = indexed.root / "ledger/ops/2026-10-test-box.jsonl"
+    text = path.read_text(encoding="utf-8")
     forgotten.list_path(indexed.root).write_text("not a forget\n", encoding="utf-8")
-    (log,) = store.write(indexed, [{"op": "log", "item": "A-0001", "note": "still written"}], now=NOW).ops
-    assert log.after == log.item
+    with pytest.raises(DocketError, match="line 1 isn't a forget"):
+        store.write(indexed, [{"op": "log", "item": "A-0001", "note": "never written"}], now=NOW)
+    assert path.read_text(encoding="utf-8") == text
     assert index_rows(indexed) == before
-    code, out, _ = show(capsys, "A-0001")
-    assert code == 0 and out[-1].endswith("claude via cli  still written")
+    code, _, err = show(capsys, "A-0001")
+    assert code != 0 and "line 1 isn't a forget" in err
 
 
 def test_a_failure_while_the_index_catches_up_lets_its_lock_go(indexed: Vault, monkeypatch: pytest.MonkeyPatch) -> None:

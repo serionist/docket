@@ -1,4 +1,5 @@
-"""`docket vault check` on the ledger (DR-0617): what it names in the op files, and that a sound ledger passes."""
+"""`docket vault check` on the ledger (DR-0617, DR-0696): what it names in the op files, that a sound ledger passes,
+and after a forget, a line changed to its mask explained by its op's id on the list and one not masked yet named."""
 
 from __future__ import annotations
 
@@ -6,10 +7,12 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from docket_testkit import empty_vault, make_config, sh
+from docket_testkit import empty_vault, git, make_config, sh
+from forget_kit import forget
 from ledger_kit import ADD_FIELDS, NOW, meeting, op, ulid, write_ops
 
-from docket.ledger import check, store
+from docket.ledger import check, ops, store
+from docket.ledger.ops import Op
 from docket.vault.vault import Vault
 
 FILE = "ledger/ops/2026-10-test-box.jsonl"
@@ -105,3 +108,48 @@ def test_op_files_that_lose_the_vault_s_union_merge_are_named(vault: Vault) -> N
     assert len(named) == 1
     assert "merge" in named[0].message
     assert sh(vault.root, "git", "check-attr", "merge", "--", "ledger/ops/2026-01-m.jsonl").strip().endswith("unset")
+
+
+# -- after a forget (DR-0696) ---------------------------------------------------------------------------------------
+
+
+def logged(vault: Vault) -> tuple[Op, str]:
+    """An item with a log line, committed: the log's op and the file's text."""
+    store.write(vault, [{"op": "add", "fields": dict(ADD_FIELDS)}], now=NOW)
+    (log,) = store.write(vault, [{"op": "log", "item": "A-0001", "note": "Asked Ada"}], now=NOW).ops
+    return log, (vault.root / FILE).read_text(encoding="utf-8")
+
+
+def test_a_line_changed_to_its_mask_is_a_forget_not_committed_only_once_its_op_is_listed(vault: Vault) -> None:
+    log, text = logged(vault)
+    path = vault.root / FILE
+    masked = text.replace(log.text(), ops.mask(log.text()))
+    path.write_text(masked, encoding="utf-8", newline="\n")
+    assert ledger_problems(vault) == [(FILE, check.CHANGED)]
+    with pytest.raises(store.LedgerError, match="lost or changed a committed op line"):
+        store.write(vault, [{"op": "log", "item": "A-0001", "note": "Booked"}], now=NOW)
+    forget(vault, ops=[log.id])
+    assert ledger_problems(vault) == [(FILE, check.MASKED)]
+    # Changed to anything but its mask, it is named as before.
+    path.write_text(text.replace("Asked Ada", "Asked Ben"), encoding="utf-8", newline="\n")
+    assert (FILE, check.CHANGED) in ledger_problems(vault)
+    # As committed, its text there: a forget not finished, by its line.
+    path.write_text(text, encoding="utf-8", newline="\n")
+    assert ledger_problems(vault) == [(f"{FILE}:2", check.UNMASKED)]
+    # A write after a stopped apply commits the mask with its own op.
+    path.write_text(masked, encoding="utf-8", newline="\n")
+    store.write(vault, [{"op": "log", "item": "A-0001", "note": "Booked"}], now=NOW)
+    assert ledger_problems(vault) == []
+
+
+def test_a_twin_a_merge_committed_gone_beside_its_mask_is_explained(vault: Vault) -> None:
+    log, text = logged(vault)
+    forget(vault, ops=[log.id])
+    path = vault.root / FILE
+    path.write_text(f"{text}{ops.mask(log.text())}\n", encoding="utf-8", newline="\n")
+    git(vault.root, "commit", "-q", "-m", "Merge the forget", "--", FILE)
+    assert ledger_problems(vault) == [(f"{FILE}:2", check.UNMASKED)]
+    kept = text.replace(f"{log.text()}\n", "")
+    path.write_text(f"{kept}{ops.mask(log.text())}\n", encoding="utf-8", newline="\n")
+    assert ledger_problems(vault) == [(FILE, check.MASKED)]
+    assert check.committed_kept(vault, FILE, {log.id}) and not check.committed_kept(vault, FILE)

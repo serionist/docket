@@ -1,10 +1,10 @@
 """A ledger of a few years: 5,000 items and 50,000 ops, and 2,000 meetings with 20,000 point ops, read and folded by
-`load` in under a second and a half; all of it folded into the index's tables in under two seconds; one op more, on an
-item or a meeting, as a write leaves it, read into them in a tenth of a second; a write touching one meeting planned in
-a tenth of a second, reading only its part (DR-0616, DR-0628, DR-0633, DR-0635); a snapshot of it, every item open,
-read from the tables with its lines in a tenth of a second (DR-0638); the day's route on a vault holding it in
-half a second (DR-0672); and all of it as `docket ledger show --all --json` gives it, stamped, with its JSON, in
-under two seconds (DR-0659).
+`load`, 500 of its ops read as a forget's masks (DR-0695), in under a second and a half; all of it folded into the
+index's tables in under two seconds; one op more, on an item or a meeting, as a write leaves it, read into them in a
+tenth of a second; a write touching one meeting planned in a tenth of a second, reading only its part (DR-0616,
+DR-0628, DR-0633, DR-0635); a snapshot of it, every item open, read from the tables with its lines in a tenth of a
+second (DR-0638); the day's route on a vault holding it in half a second (DR-0672); and all of it as `docket ledger
+show --all --json` gives it, stamped, with its JSON, in under two seconds (DR-0659).
 
 The ops are written as the writer writes them, a month file per machine, each item an add and nine changes, each
 meeting four points answered and a point rolled from the meeting before it in its weekly series of fifty. Wall time
@@ -134,9 +134,14 @@ def one_more(root: Path, last: Op, kind: str, **keys: object) -> Op:
 @pytest.mark.perf
 def test_a_few_thousand_items_and_meetings_read_and_fold_in_a_second_and_a_half(tmp_path: Path) -> None:
     build(tmp_path)
-    fold = best_of(3, lambda: load(tmp_path))
+    logs = [line.op.id for line in ops.read_all(tmp_path, masked=frozenset()).lines if line.op.op == "log"]
+    # A forget's 500 masked ops, read as their masks (DR-0695).
+    listed = frozenset(logs[::30][:500])
+    fold = best_of(3, lambda: load(tmp_path, masked=listed))
     ledger, elapsed = fold.result, fold.seconds
     print(f"ledger fold: {elapsed:.2f} s ({fold.runs()}) for {ITEMS:,} items and {MEETINGS:,} meetings")
+    masked = [line.op.note for one in ledger.folds.values() for line in one.lines if line.op.id in listed]
+    assert len(listed) == 500 and masked == [ops.MARK] * 500
     assert (len(ledger.items), len(ledger.meetings)) == (ITEMS, MEETINGS)
     assert {item.state for item in ledger.items.values()} == {"open"}
     open_points = [p.text for m in ledger.meetings.values() for p in m.open_points()]

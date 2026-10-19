@@ -11,6 +11,7 @@ the next call. Until then every reader skips what the list takes.
 | media | each stored file on a rid the list's `media` holds or forgotten whole, or whose key is listed, and its keys |
 | docs | the lines the docs' rule drops, each doc as `forgetdocs` leaves it, its hand edit taken in first; empty, gone |
 | cursors | this machine's retry and waiting entries on a rid forgotten whole (DR-0245) |
+| ledger | each listed op's line in every machine's op file, as its mask; a twin masking made, a union merge's, gone |
 
 A key the apply deletes that no line names, a stored file's this clone made before its pull, goes on a keys-only line
 (DR-0595), so the clones that imported its export delete it too.
@@ -22,9 +23,9 @@ runs, a rebase, a merge, a detached HEAD or unmerged paths, since its commit wou
 Each file is written whole through a temp file and a rename, and all of them go in one commit. The paths, and the docs'
 revs, are recorded before anything in the tree changes, so a crash or a failed commit leaves them for the next call to
 commit. With no list the apply costs a stat; otherwise `<private>/forget/applied.json` keeps the list it applied, the
-HEAD it last walked the docs and media at, and the size and modification time each run file, doc, media file and cursor
-file had when it was read, a media file's key with it, so only what moved since is read again. Nothing it keeps or
-reports names a record.
+HEAD it last walked the docs and media at, and the size and modification time each run file, doc, media file, cursor
+file and op file had when it was read, a media file's key with it, so only what moved since is read again. Nothing it
+keeps or reports names a record. Op files are read raw and written through the ledger's one writer (DR-0693, DR-0695).
 """
 
 from __future__ import annotations
@@ -40,6 +41,8 @@ from pathlib import Path
 from typing import Any
 
 from docket.errors import DocketError
+from docket.ledger import ops as ledger_ops
+from docket.ledger import store as ledger_store
 from docket.media import cutlog, layout
 from docket.media import staged as media_staged
 from docket.media.keystore import KeyStore
@@ -78,6 +81,8 @@ class Applied:
     media: int = 0
     docs: int = 0
     removed: int = 0
+    # Ledger op lines written as their masks.
+    ops: int = 0
     # Docs the rule changes that stay as they are: a hand edit its take-in refuses, or a final decision edited on disk.
     left: list[str] = field(default_factory=list[str])
     # Keys this clone held that no line named, now on a keys-only line.
@@ -90,9 +95,9 @@ class Applied:
 @dataclass
 class _State:
     """`applied.json`: the list as it was applied, keys too; the HEAD the docs and media were last walked at; the
-    stamps of what it read, each taken before the read; the docs it left, watched on every call; the folder files whose
-    parts it takes from here on; the hashes of the rids whose lines it took; and the paths written but not committed,
-    with the revs of the docs among them."""
+    stamps of what it read, each taken before the read, op files only once the list masks an op; the docs it left,
+    watched on every call; the folder files whose parts it takes from here on; the hashes of the rids whose lines it
+    took; and the paths written but not committed, with the revs of the docs among them."""
 
     applied: str = ""
     # The digest of what raw and the docs are judged by: a keys-only line leaves it as it was (DR-0593).
@@ -102,6 +107,7 @@ class _State:
     docs: dict[str, Stamp] = field(default_factory=dict[str, Stamp])
     media: dict[str, MediaStamp] = field(default_factory=dict[str, MediaStamp])
     cursor: Stamp | None = None
+    ledger: dict[str, Stamp] = field(default_factory=dict[str, Stamp])
     left: dict[str, Stamp | None] = field(default_factory=dict[str, Stamp | None])
     files: list[str] = field(default_factory=list[str])
     skipped: list[str] = field(default_factory=list[str])
@@ -119,6 +125,7 @@ class _State:
                 "docs": self.docs,
                 "media": self.media,
                 "cursor": self.cursor,
+                "ledger": self.ledger,
                 "left": self.left,
                 "files": sorted(self.files),
                 "skipped": sorted(self.skipped),
@@ -166,6 +173,8 @@ def _read_state(home: Home) -> _State:
             docs=_stamps(data["docs"]),
             media=_media_of(data["media"]),
             cursor=None if cursor is None else (int(cursor[0]), int(cursor[1])),
+            # An apply from before the ledger's masks kept none: every op file is read once.
+            ledger=_stamps(data.get("ledger", {})),
             left={str(rel): None if s is None else (int(s[0]), int(s[1])) for rel, s in data["left"].items()},
             files=[str(f) for f in data["files"]],
             skipped=[str(s) for s in data["skipped"]],
@@ -491,6 +500,35 @@ def _final(fate: forgetdocs.Fate) -> bool:
     return doc is not None and doc.meta.type == "decision" and doc.meta.status in decision_form.FINAL
 
 
+def _op_stamps(root: Path, listed: Forgotten) -> dict[str, Stamp]:
+    """Every op file's stamp, once the list masks an op: none read before."""
+    if not listed.ops:
+        return {}
+    files, _ = ledger_ops.listing(root)
+    return {rel: s for rel, path in files if (s := _stamp(path)) is not None}
+
+
+def _ledger(
+    root: Path, listed: Forgotten, state: _State, *, moved: bool, stamps: Mapping[str, Stamp]
+) -> tuple[dict[str, str], int]:
+    """Each op file that moved, or every one when the list did, read raw, as `ledger_ops.masked_file` leaves it when it
+    holds a listed op's line that isn't its mask, or a twin masking made; and how many lines it masks. A file that
+    isn't UTF-8 is left: no reader reads it, and `docket vault check` names it."""
+    texts: dict[str, str] = {}
+    lines = 0
+    for rel, stamp in sorted(stamps.items()):
+        if not moved and state.ledger.get(rel) == stamp:
+            continue
+        text = ledger_ops.utf8(root / rel)
+        if text is None:
+            continue
+        masked = ledger_ops.masked_file(text, listed.ops)
+        if masked is not None:
+            texts[rel] = masked
+            lines += sum(1 for _, raw, mask in ledger_ops.listed_lines(text, listed.ops) if raw != mask)
+    return texts, lines
+
+
 def _cursor(vault: Vault, listed: Forgotten) -> str | None:
     """This machine's cursor file without the retry and waiting entries on a rid forgotten whole: its text, or None
     when it holds none."""
@@ -539,6 +577,7 @@ def apply(vault: Vault, keys: KeyStore, *, first: bool = False) -> Applied:
         run_stamps = {run.path.relative_to(root).as_posix(): stamp for run, stamp in runs}
         cursor_path = cursors.file_path(root, vault.machine)
         cursor_stamp = _stamp(cursor_path)
+        op_stamps = _op_stamps(root, listed)
         # Docs and stored media arrive by a commit or a pull, which moves HEAD: walked only then, or when the list
         # moved, a write waits to be committed, or a doc left for its owner changed.
         left_moved = _left_moved(root, state)
@@ -552,6 +591,7 @@ def apply(vault: Vault, keys: KeyStore, *, first: bool = False) -> Applied:
             and not listed.pending
             and run_stamps == state.runs
             and cursor_stamp == state.cursor
+            and op_stamps == state.ledger
             and doc_stamps == state.docs
             and media_now == was
             and not left_moved
@@ -582,6 +622,7 @@ def apply(vault: Vault, keys: KeyStore, *, first: bool = False) -> Applied:
         docs = _docs(vault, listed, state, moved=judged, skipped=skipped, stamps=doc_stamps) if walk else _Docs()
         done.left = docs.left
         cursor = _cursor(vault, listed) if judged or cursor_stamp != state.cursor else None
+        masks, done.ops = _ledger(root, listed, state, moved=judged, stamps=op_stamps)
         writes: list[tuple[str, str | None]] = [
             *((p.relative_to(root).as_posix(), text) for p, text in raw.left.items()),
             *docs.writes,
@@ -590,7 +631,9 @@ def apply(vault: Vault, keys: KeyStore, *, first: bool = False) -> Applied:
             writes.append((cursor_path.relative_to(root).as_posix(), cursor))
         removed = [p.relative_to(root).as_posix() for p in media.removed]
         unlisted = sorted(media.unlisted) if listed.problem is None else []
-        named: set[str] = {*state.pending, *(rel for rel, _ in writes), *removed, *([FORGOTTEN] if unlisted else [])}
+        named: set[str] = {
+            *state.pending, *(rel for rel, _ in writes), *masks, *removed, *([FORGOTTEN] if unlisted else []),
+        }  # fmt: skip
         paths = sorted(named)
         revs = {**state.revs, **dict(docs.revs)}
         # The paths and the docs' revs go on record before anything in the tree changes, so a crash or a failure from
@@ -607,6 +650,8 @@ def apply(vault: Vault, keys: KeyStore, *, first: bool = False) -> Applied:
                 retry(lambda path=path: path.unlink(missing_ok=True))
             else:
                 write_replacing(home, path, text, "forget")
+        if masks:
+            ledger_store.write_masks(vault, masks)
         for path in media.removed:
             retry(lambda path=path: path.unlink(missing_ok=True))
         for one in sorted(media.keys):
@@ -631,7 +676,7 @@ def apply(vault: Vault, keys: KeyStore, *, first: bool = False) -> Applied:
             )
             done.commit = vault.commit(paths, f"{what}\n{lines}" if lines else what)
         _reached("committed")
-        written = {rel for rel, _ in writes}
+        written = {*(rel for rel, _ in writes), *masks}
         after = forgotten.load(root, home)
         _write_state(
             home,
@@ -643,6 +688,7 @@ def apply(vault: Vault, keys: KeyStore, *, first: bool = False) -> Applied:
                 docs=_restamped(root, doc_stamps, written) if walk else state.docs,
                 media={rel: s for rel, s in media.seen.items() if rel not in removed} if walk else state.media,
                 cursor=_stamp(cursor_path) if cursor is not None else cursor_stamp,
+                ledger={rel: (_stamp(root / rel) or s) if rel in masks else s for rel, s in op_stamps.items()},
                 left={rel: doc_stamps.get(rel) for rel in (doc_path(i).as_posix() for i in docs.left)},
                 files=sorted(raw.files),
                 skipped=sorted(skipped),

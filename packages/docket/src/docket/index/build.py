@@ -732,7 +732,7 @@ def _rebuild(vault: Vault, reason: str | None, started: float) -> BuildReport:
         _, runs = indexer.add_runs(vault.rawlog.run_files())
         docs = indexer.sync_docs(set())
         indexer.sync_entities(force=True)
-        ops = ledger_index.rebuild(conn, vault.root)
+        ops = ledger_index.rebuild(conn, vault.root, listed.ops)
         matching.refresh(conn, analyzer, full=True)
         if keeper is not None:
             keeper.close()
@@ -843,7 +843,7 @@ def update(vault: Vault) -> BuildReport:
                 touched, runs = indexer.add_runs(new)
                 docs = indexer.sync_docs(touched)
                 entities = indexer.sync_entities()
-                ops = ledger_index.update(conn, vault.root)
+                ops = ledger_index.update(conn, vault.root, listed.ops)
                 if runs or docs or entities:
                     matching.refresh(conn, analyzer, full=entities, new_words=indexer.new_words)
                 if keeper is not None:
@@ -866,17 +866,19 @@ def ledger_tables(vault: Vault, tables: sqlite3.Connection | None = None) -> Gen
     """The ledger's tables as the op files stand (DR-0616, DR-0619): the index's, brought up to date, when it opens as
     this Docket writes it and its lock comes within `LEDGER_WAIT`; else every op file folded into a database in
     memory. The index's lock is held until the caller is done, so no update moves the tables while it asks them. With
-    `tables`, the caller's own, as they are and left open: a dry run's, holding what a write would leave."""
+    `tables`, the caller's own, as they are and left open: a dry run's, holding what a write would leave. Either reads
+    each op the forgotten list masks as its mask (DR-0695), so a list that doesn't read stops the ledger too."""
     if tables is not None:
         yield tables
         return
-    held = _ledger_index(vault)
+    listed = forgotten.load(vault.root, vault.home)
+    held = _ledger_index(vault, listed)
     if held is None:
         conn = sqlite3.connect(":memory:", isolation_level=None)
         try:
             conn.executescript(LEDGER_TABLES)
             conn.execute("BEGIN")
-            ledger_index.rebuild(conn, vault.root)
+            ledger_index.rebuild(conn, vault.root, listed.ops)
             conn.execute("COMMIT")
             yield conn
         finally:
@@ -905,10 +907,10 @@ def ledger_tables_of(ledger: Ledger) -> Generator[sqlite3.Connection]:
         conn.close()
 
 
-def _ledger_index(vault: Vault) -> tuple[sqlite3.Connection, FileLock] | None:
-    """The index with its ledger tables brought up to date, under its lock, which the caller releases; None when
-    there is no index, it was built for another Docket, other languages or another forgotten list, the forgotten list
-    doesn't read, or it can't be had within `LEDGER_WAIT`."""
+def _ledger_index(vault: Vault, listed: Forgotten) -> tuple[sqlite3.Connection, FileLock] | None:
+    """The index with its ledger tables brought up to date under the list in force, under its lock, which the caller
+    releases; None when there is no index, it was built for another Docket, other languages or another forgotten
+    list, or it can't be had within `LEDGER_WAIT`."""
     db = db_path(vault)
     if not db.exists():
         return None
@@ -919,16 +921,11 @@ def _ledger_index(vault: Vault) -> tuple[sqlite3.Connection, FileLock] | None:
         return None
     conn = sqlite3.connect(db, isolation_level=None, timeout=LEDGER_WAIT)
     try:
-        try:
-            usable = stale(conn, languages_of(vault), forgotten.load(vault.root, vault.home).digest) is None
-        except DocketError:
-            # A forgotten list that doesn't read leaves the index's digest unknown: the write folds in memory, as it
-            # does with no index, and never fails for the cache's sake.
-            usable = False
+        usable = stale(conn, languages_of(vault), listed.digest) is None
         if usable:
             conn.execute("BEGIN IMMEDIATE")
             try:
-                ledger_index.update(conn, vault.root)
+                ledger_index.update(conn, vault.root, listed.ops)
                 conn.execute("COMMIT")
             except BaseException:
                 conn.execute("ROLLBACK")

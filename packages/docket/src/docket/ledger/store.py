@@ -34,6 +34,9 @@ to what differs, the unkeyed meeting with its start and subject joined, or a new
 meeting the owner removed; an undo asked by batch or written by sync is as if never (DR-0647, DR-0649). In the
 catch-up's own pass, which never sets, a held key's join carries the held meeting's values, an empty one as null. This
 module also keeps the step's pending rids, in this clone's private folder.
+
+A forget's apply writes its masks through `write_masks`, the one change a committed line takes (DR-0693); a write
+commits an op file a stopped apply left masked, its lines' ids listed, as it commits one a stopped write left (DR-0696).
 """
 
 from __future__ import annotations
@@ -75,6 +78,7 @@ from docket.ledger.ops import (
     Op,
     Via,
 )  # fmt: skip
+from docket.vault import forgotten
 from docket.vault.home import make_private
 from docket.vault.neverstore import matches_text, names_person
 from docket.vault.redact import Redactor
@@ -2041,15 +2045,30 @@ def revert_import(vault: Vault, *, dry_run: bool = False) -> Reverted:
     return Reverted(files, dict(sorted(vias.items())), commit)
 
 
+# -- a forget's masks (#212) ------------------------------------------------------------------------------------
+
+
+def write_masks(vault: Vault, texts: Mapping[str, str]) -> None:
+    """A forget's masks in place (DR-0693, DR-0695): each op file's text as `ops.masked_file` left it, its listed ops'
+    lines masked and a twin masking made dropped, written whole through a temp file and a rename. The one other write
+    of a committed line: the apply, under the vault lock, recorded the paths first and commits them in its one
+    commit."""
+    ops.folder(vault.root)
+    for rel, text in sorted(texts.items()):
+        write_replacing(vault.home, vault.root / rel, text, "ledger-mask")
+
+
 # -- committing -------------------------------------------------------------------------------------------------
 
 
 def pending(vault: Vault) -> list[str]:
-    """Op files a write that stopped before its commit left: new ones, and tracked ones that only grew. One that lost
-    or changed a committed line refuses the write, since its commit would make the change for good."""
+    """Op files a write or a forget's apply that stopped before its commit left: new ones, tracked ones that only
+    grew, and lines changed to their masks, their op ids listed (DR-0696). One that lost or changed a committed line
+    otherwise refuses the write, since its commit would make the change for good."""
     changed = vault.git.changed_against_head(OPS_DIR)
+    listed = forgotten.load(vault.root, vault.home).ops if changed else frozenset[str]()
     for rel in changed:
-        if not check.committed_kept(vault, rel):
+        if not check.committed_kept(vault, rel, listed):
             raise LedgerError(
                 f"{rel} lost or changed a committed op line; ops are written once, so put it back from git "
                 "(`docket vault check` names it); nothing written"
