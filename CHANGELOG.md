@@ -25,6 +25,10 @@ Unreleased in the same PR.
   points and streams in one write, every change or none, each saying who decided it, `as` naming what one made for a
   later op's `$name`, and a dry run that lists every change it would refuse. An add that looks like an open item is
   refused unless forced, and so is a meeting without an event that doubles one.
+- Meetings come from the calendar: each promotion turns the calendar's events it writes into the ledger's meetings,
+  keyed by the event, so a moved, renamed or cancelled meeting changes in place, and `docket staging promote` says
+  how many. An old meeting at the same start under the same subject is joined and keeps its number. `docket ledger
+  calendar` catches up from what raw holds: run it once a calendar source is set up, and after an import.
 
 - Slack, Teams, Outlook mail and the calendar ship as example sources beside Plaud, in `examples/sources/`:
   `docket source new <name> --example` copies one into your project with its sensitivity, tools and lookback. Slack

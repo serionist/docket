@@ -22,9 +22,11 @@ from calendar_payloads import (
     OFFSITE,
     PLANNING,
     RD_SYNC,
+    REVIEW_MOVED,
     ROOM_OCC,
     STANDUP,
     STANDUP_MON,
+    STANDUP_TUE,
     SYNC_FRI,
     SYNC_FRI_CANCELLED,
     Event,
@@ -37,6 +39,7 @@ from calendar_payloads import (
 from starlette.testclient import TestClient
 
 from docket import capture
+from docket.ledger import load
 from docket.service.app import ServiceApp, create_app
 from docket.service.state import Settings
 from docket.sources.contract import check_output
@@ -104,6 +107,39 @@ def test_a_cancellation_or_a_new_response_is_a_new_version(mapper: ModuleType) -
     changed = checked(mapper, Run().script(week(SYNC_FRI_CANCELLED, replace(STANDUP_MON, response="Accept"))))
     for e in (SYNC_FRI, STANDUP_MON):
         assert version(changed[rid(e)]) != version(base[rid(e)])
+
+
+def test_the_week_through_promotion_makes_its_meetings_and_a_cancellation_sets_one(
+    tmp_path: Path, mapper: ModuleType
+) -> None:
+    vault = project_with_this_source(tmp_path)
+    gate = Gate(vault)
+    gate.stage(checked(mapper, Run().script(week(*EVENTS))).values())
+    first = gate.promote()
+    assert first.meetings is not None
+    # Each timed event is a meeting, in start order; the offsite marks a day and makes none.
+    assert [(o.rid, o.what, o.meeting) for o in first.meetings.outcomes] == [
+        (rid(STANDUP_MON), "added", "M-0001"),
+        (rid(STANDUP_TUE), "added", "M-0002"),
+        (rid(REVIEW_MOVED), "added", "M-0003"),
+        (rid(PLANNING), "added", "M-0004"),
+        (rid(SYNC_FRI), "added", "M-0005"),
+        (rid(OFFSITE), "left out", None),
+    ]
+    held = {m.event: m for m in load(vault.root).meetings.values()}
+    planning = held[rid(PLANNING)]
+    assert (planning.subject, planning.start.isoformat(), planning.where, planning.response, planning.organiser) == (
+        "Q4 planning - draft, v2", "2026-10-22T10:00:00+02:00", "Room 4.12; Microsoft Teams Meeting", "organiser",
+        "Ben Sample",
+    )  # fmt: skip
+    assert held[rid(STANDUP_MON)].series == held[rid(STANDUP_TUE)].series == f"calendar:{rest(single_id(STANDUP))}"
+    # Friday's sync is cancelled before the next run: the same meeting reads cancelled, its subject as it was.
+    gate.stage(checked(mapper, Run().script(week(SYNC_FRI_CANCELLED))).values())
+    second = gate.promote()
+    assert second.meetings is not None
+    assert [(o.what, o.meeting) for o in second.meetings.outcomes] == [("set", "M-0005")]
+    sync = {m.event: m for m in load(vault.root).meetings.values()}[rid(SYNC_FRI)]
+    assert (sync.number, sync.subject, sync.response) == (5, "Weekly test sync", "cancelled")
 
 
 # -- a live run, end to end ------------------------------------------------------------------------------------------

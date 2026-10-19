@@ -19,6 +19,10 @@ promotion runs media's four checks again and deletes what fails; promotion store
 A Whisper transcript follows its family's cuts at promotion (DR-0590): its next version, cut by text, goes in the run
 with the cut, unstaged, since it only takes text out of what raw holds (DR-0596).
 
+A promotion makes the ledger's meetings from the calendar's records (DR-0647): the event rids it writes are pending
+before their run file is written, and once the gate lets go of the lock the calendar step makes them, taking the lock
+again itself. A step that fails never fails the promotion: its rids stay pending for the next step.
+
 Nothing here names a dropped record: not a log line, not an error, not a file. Only counts leave the gate.
 """
 
@@ -54,6 +58,8 @@ from docket.vault.staging import Classifier, Decided, Entry, Scan, Staged, Stagi
 from docket.vault.vault import Vault
 
 if TYPE_CHECKING:  # the ranges module reaches the vault package, which imports the gate
+    from docket.ledger.calendar import Stepped
+    from docket.ledger.ops import Via
     from docket.media.ranges import Needed
 
 log = logging.getLogger(__name__)
@@ -116,6 +122,8 @@ class SourceRun:
     commit: str | None
     redactions: Counter[str]
     files: tuple[Path, ...] = ()
+    # The rids of the event records it wrote, noted as pending for the calendar step before the run file (DR-0647).
+    events: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -136,6 +144,10 @@ class PromoteResult:
     media_held: list[str] = field(default_factory=list[str])
     # Whisper transcripts cut to follow their families' cuts (DR-0590).
     followed: int = 0
+    # The calendar step after it (DR-0647): what it made, or why it stopped, its rids left pending; neither when no
+    # event record was written and none was pending.
+    meetings: Stepped | None = None
+    meetings_stopped: str | None = None
 
 
 @dataclass(frozen=True)
@@ -319,9 +331,11 @@ class Gate:
             self.staging.write(staged)
             return staged
 
-    def promote(self, source: str | None = None) -> PromoteResult:
+    def promote(self, source: str | None = None, *, via: Via = "cli") -> PromoteResult:
         """Write every ready record to the raw log: cut, redacted with the current rules, one run per source, in the
-        order the records were staged, so of two versions of one record the later one is the later line (#107)."""
+        order the records were staged, so of two versions of one record the later one is the later line (#107). Then,
+        out of the gate's lock, the calendar step makes the meetings of the event records written and of any a stopped
+        step left pending, through the caller's way in (DR-0647)."""
         with self.vault.lock:
             # Before anything is written: commit what an earlier promotion left behind, so a repo Docket can't commit
             # to (a rebase in progress, a detached HEAD) stops the promotion here, with no new run file on disk.
@@ -368,7 +382,25 @@ class Gate:
                 result.on_hold,
                 result.followed,
             )
-            return result
+        self._meetings(result, via)
+        return result
+
+    def _meetings(self, result: PromoteResult, via: Via) -> None:
+        """The calendar step (DR-0647), outside the gate's lock: the step takes the vault's lock itself and reads each
+        rid at raw's latest version under it. It never fails the promotion, whose records are in raw: why it stopped
+        goes in the result, and its rids stay pending for the next promotion or docket ledger calendar."""
+        from docket.ledger import calendar  # noqa: PLC0415 - the ledger's modules import the vault's
+
+        rids = [rid for run in result.runs for rid in run.events]
+        if not rids and not calendar.pending(self.vault):
+            return
+        try:
+            result.meetings = calendar.step(self.vault, rids, via=via)
+        except Exception as e:  # anything: the promotion stands
+            log.warning("gate: the calendar step stopped (%s); its records stay pending", type(e).__name__)
+            # A DocketError says what to do; anything else is named by its type too, so a bug reads as one.
+            told = str(e) if isinstance(e, DocketError) else f"{type(e).__name__}: {e}" if str(e) else ""
+            result.meetings_stopped = told or type(e).__name__
 
     def media_check(self, rid: str) -> str | None:
         """Why media for a rid can't be staged now, or None: the four checks after a sweep, under the lock."""
@@ -729,6 +761,8 @@ class Gate:
     ) -> SourceRun:
         # The versions the gate cut from raw go after the staged records, in the same run and commit (DR-0596).
         written = [*(final for _, final in items), *extra]
+        # Pending before the run file is written, so a crash after it loses no meeting (DR-0647).
+        events = self._note_events(written)
         run = self.vault.rawlog.write_run(name, written, run_at)
         files = f" in {len(run.paths)} run files" if len(run.paths) > 1 else ""
         what = f"{run.written} record(s){files}" if run.written else "an interrupted run"
@@ -739,7 +773,20 @@ class Gate:
         for entry, _ in items:
             self.staging.delete(entry.path)
         redactions = sum((markers(final) for final in written), Counter[str]())
-        return SourceRun(name, run.path, run.written, run.skipped, commit, redactions, run.paths)
+        return SourceRun(name, run.path, run.written, run.skipped, commit, redactions, run.paths, events)
+
+    def _note_events(self, records: Sequence[RawRecord]) -> tuple[str, ...]:
+        """The rids of the event records a run writes new, noted as pending for the calendar step. A version raw holds
+        already is skipped by the run and drives nothing: raw doesn't change under the gate's lock, and a run that
+        stopped after its file was written noted its rids at its first try."""
+        from docket.ledger import calendar  # noqa: PLC0415 - the ledger's modules import the vault's
+
+        events = tuple(
+            dict.fromkeys(r.rid for r in records if r.kind == calendar.KIND and not self.vault.rawlog.contains(r))
+        )
+        if events:
+            calendar.note_pending(self.vault, events)
+        return events
 
     def _uncommitted_runs_with(self, rid: str) -> list[str]:
         """The run files git hasn't committed yet that hold a record, vault-relative."""

@@ -265,7 +265,9 @@ def _step(
         )
         if not dry_run and replayed:
             clear_pending(vault, replayed)
-    return _Part(written, left, tuple(replayed))
+    # A promotion's own rids are pending too, noted before its run file: only the others were replayed.
+    given = set(rids)
+    return _Part(written, left, tuple(rid for rid in replayed if rid not in given))
 
 
 def _stepped(parts: Sequence[_Part], dry_run: bool) -> Stepped:
@@ -355,8 +357,7 @@ def lines(stepped: Stepped) -> list[str]:
             out.append(f"removed  {when}  {o.subject}: the owner removed its meeting, so it stays out")
         elif o.what == store.LEFT_OUT:
             out.append(f"left out {o.rid}: {o.why}")
-    said = ", ".join(f"{stepped.counts[what]} {what}" for what in ORDER if stepped.counts.get(what))
-    out.append(said or "no event records")
+    out.append(_counts(stepped))
     if stepped.replayed:
         out.append(f"replayed {len(stepped.replayed)} pending record(s)")
     if stepped.dry_run:
@@ -365,3 +366,21 @@ def lines(stepped: Stepped) -> list[str]:
         many = f" in {len(stepped.commits)} commits, the last" if len(stepped.commits) > 1 else ", commit"
         out.append(f"{len(stepped.ops)} op(s) written{many} {stepped.commit[:7]}")
     return out
+
+
+def brief(stepped: Stepped) -> list[str]:
+    """The step as `docket staging promote` says it after its runs: the counts, what it replayed and its commit on
+    one line, then each near miss, to join by hand."""
+    said = _counts(stepped)
+    if stepped.replayed:
+        said += f", {len(stepped.replayed)} pending replayed"
+    if stepped.commit is not None:
+        said += f"; commit {stepped.commit[:7]}"
+    near = [f"{o.meeting} has {other} close by: join it by hand if it is the same" for o in stepped.outcomes
+            for other in o.near]  # fmt: skip
+    return [said, *near]
+
+
+def _counts(stepped: Stepped) -> str:
+    said = ", ".join(f"{stepped.counts[what]} {what}" for what in ORDER if stepped.counts.get(what))
+    return said or "no event records"

@@ -324,10 +324,16 @@ def vault_status(vault: VaultOption = None) -> None:
 @vault_app.command("check")
 def vault_check(vault: VaultOption = None) -> None:
     """Check that the raw log is intact: every file parses, and nothing written once was changed. Each stream's
-    STATUS.md is read against the ledger too, and nothing is written."""
-    problems = find_vault(vault).check()
+    STATUS.md is read against the ledger too, and nothing is written. Then say how many calendar records wait for
+    their meetings, which a stopped step left for the next one."""
+    found = find_vault(vault)
+    problems = found.check()
     for problem in problems:
         say(str(problem))
+    from docket.ledger import check as ledger_check  # noqa: PLC0415
+
+    for note in ledger_check.notes(found):
+        say(note)
     if problems:
         typer.echo(f"{len(problems)} problem(s)")
         raise typer.Exit(1)
@@ -806,6 +812,16 @@ def staging_promote(source: SourceOption = None, vault: VaultOption = None) -> N
         typer.echo(f"media     waits: {problem}")
     if result.media_dropped:
         typer.echo(f"media     {result.media_dropped} file(s) deleted, failing their checks")
+    if result.meetings is not None:
+        from docket.ledger import calendar as ledger_events  # noqa: PLC0415
+
+        for line in ledger_events.brief(result.meetings):
+            typer.echo(f"meetings  {line}")
+    if result.meetings_stopped is not None:
+        typer.echo(
+            f"meetings  not made: {result.meetings_stopped}; their records stay pending for the next promotion or "
+            "docket ledger calendar"
+        )
     if not result.runs and not result.held and not result.on_hold and not result.media:
         typer.echo("nothing ready")
 
