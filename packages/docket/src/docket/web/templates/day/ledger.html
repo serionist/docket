@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% from "macros.html" import notice as note, locator %}
+{% from "day/macros.html" import hidden, row, poll, verdict %}
+{% block main %}
+<div class="day ledger" data-day="ledger">
+<header class="day-head">
+  <h1>Ledger</h1>
+  {% if view %}<p class="counts">{{ view.counts }}</p>{% endif %}
+  <details class="new-item"{% if form == 'new' %} open{% endif %}>
+    <summary class="button" data-key="n">New item</summary>
+    <form class="new-form" method="post" action="/ledger/write">
+      {{ hidden(state) }}<input type="hidden" name="op" value="add"><input type="hidden" name="form" value="new">
+      {% set t = typed if form == 'new' else {} %}
+      <label class="wide">Title <input type="text" name="fields.title" value="{{ t.get('fields.title', '') }}" autocomplete="off" dir="auto"></label>
+      <label>Kind <select name="fields.kind">{% for k in kinds %}<option{% if k == t.get('fields.kind', 'task') %} selected{% endif %}>{{ k }}</option>{% endfor %}</select></label>
+      <label>Who <input type="text" name="fields.who" value="{{ t.get('fields.who', '') }}" autocomplete="off" dir="auto"></label>
+      <label>Stream <input type="text" name="fields.stream" value="{{ t.get('fields.stream', state.stream or '') }}" list="streams" autocomplete="off" spellcheck="false"></label>
+      <label>Due <input type="date" name="fields.due" value="{{ t.get('fields.due', '') }}"></label>
+      <label class="wide">Description <textarea name="fields.description" rows="2" dir="auto">{{ t.get('fields.description', '') }}</textarea></label>
+      <label class="wide">Source, a link or a locator (optional) <input type="text" name="fields.source" value="{{ t.get('fields.source', '') }}" autocomplete="off" spellcheck="false"></label>
+      {% if alikes %}
+      <div class="alikes wide">
+        <p>It looks like {{ 'this open item' if alikes|length == 1 else 'these open items' }}:</p>
+        <ul>{% for a in alikes %}<li><a href="{{ a.url }}">{{ locator(a.ref) }} <span dir="auto">{{ a.title }}</span></a> <span class="meta" dir="auto">{{ a.who }}</span></li>{% endfor %}</ul>
+        <button type="submit" class="button" name="force" value="true">Add anyway</button>
+      </div>
+      {% endif %}
+      <div class="acts wide"><button type="submit" class="button primary">Add</button></div>
+    </form>
+  </details>
+</header>
+
+{% if view %}
+<nav aria-label="States">
+  <ul class="chips">
+    {% for c in view.chips %}<li><a class="chip state-chip{% if c.on %} on{% endif %}" href="{{ c.url }}"{% if c.on %} aria-current="true"{% endif %}>{{ c.label }}</a></li>{% endfor %}
+  </ul>
+</nav>
+<form class="filters" method="get" action="/ledger" role="search">
+  {% if state.state != 'open' %}<input type="hidden" name="state" value="{{ state.state }}">{% endif %}
+  {% if state.open %}<input type="hidden" name="open" value="{{ state.open }}">{% endif %}
+  <label class="q">Find <input id="query" type="search" name="q" value="{{ state.q or '' }}" autocomplete="off" spellcheck="false" placeholder="words in the title, people, notes, history"></label>
+  <label>Stream <select name="stream"><option value="">any</option>{% for s in view.streams %}<option{% if s == state.stream %} selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
+  <label>Kind <select name="kind"><option value="">any</option>{% for k in kinds %}<option{% if k == state.kind %} selected{% endif %}>{{ k }}</option>{% endfor %}</select></label>
+  <label>Who <input type="text" name="who" value="{{ state.who or '' }}" autocomplete="off"></label>
+  {% if state.state in ('open', 'all') %}
+  <label>Group <select name="group">{% for g, said in (('due', 'by due'), ('stream', 'by stream'), ('kind', 'by kind'), ('who', 'by person'), ('meeting', 'by meeting')) %}<option value="{{ g }}"{% if g == state.group %} selected{% endif %}>{{ said }}</option>{% endfor %}</select></label>
+  {% endif %}
+  <label class="check"><input type="checkbox" name="archived" value="1"{% if state.archived %} checked{% endif %}> archived too</label>
+  <button type="submit" class="button">Filter</button>
+</form>
+{% endif %}
+
+{% if problem %}{{ note('error', problem) }}{% endif %}
+{% if notice %}
+<div class="notice info day-notice" role="status">
+  {{ icon('info') }}
+  <div class="notice-body">
+    <p>{{ notice.text }}</p>
+    {% if notice.lines %}<ul class="notice-lines">{% for l in notice.lines %}<li dir="auto">{{ l }}</li>{% endfor %}</ul>{% endif %}
+  </div>
+  {% if notice.button %}
+  <form class="notice-undo" method="post" action="/ledger/write">
+    {{ hidden(state) }}<input type="hidden" name="op" value="undo"><input type="hidden" name="batch" value="{{ notice.batch }}">{% if notice.then_redo %}<input type="hidden" name="redo" value="1">{% endif %}
+    <button type="submit" class="button" data-key="u">{{ notice.button }}</button>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if view %}
+<div class="layout">
+  <section class="results day-list" aria-label="Items" data-announce="{{ view.shown }} of {{ view.total }} items">
+    {% for g in view.groups %}
+    <section class="day-group {{ g.cls }}" aria-labelledby="group-{{ loop.index }}">
+      <h2 class="day-group-head" id="group-{{ loop.index }}"><span>{{ g.label }}</span> <span class="n">{{ g.total }}</span>{% if g.selectable %}<button type="button" class="link-button select-all" data-action="select-all">Select all<span class="visually-hidden"> in {{ g.label }}</span></button>{% endif %}</h2>
+      <ol class="rows">{% for r in g.rows %}{{ row(r, state) }}{% endfor %}</ol>
+    </section>
+    {% else %}
+    <p class="empty-line">{{ view.empty }}</p>
+    {% endfor %}
+    {% if view.more %}<p class="more"><span class="meta">{{ view.shown }} of {{ view.total }}</span> <a class="button" href="{{ view.more }}">Show more</a></p>{% endif %}
+    <form id="act" class="act-bar" method="post" action="/ledger/write" aria-label="The ticked rows">
+      {{ hidden(state) }}<input type="hidden" name="at" value=""><input type="hidden" name="form" value="act">
+      <p class="act-count"><span class="ticked" aria-hidden="true"></span> ticked</p>
+      {# Drop comes first, so Enter in its why drops even without the script. #}
+      <label class="why">Why <input type="text" name="note" value="{{ typed.get('note', '') if form == 'act' else '' }}" autocomplete="off" placeholder="a drop needs one"></label>
+      <button type="submit" class="button danger" name="op" value="drop">Drop</button>
+      {% for b in act %}{{ verdict(b) }}{% endfor %}
+      <button type="submit" class="button" name="op" value="triage:" data-key="0">No call</button>
+      <button type="submit" class="button" name="op" value="done" data-key="e">Done</button>
+      <span class="snooze" data-snooze>
+        <span class="acts-label">Snooze</span>
+        {% for b in act_snooze %}<button type="submit" class="button" name="op" value="{{ b.value }}" title="{{ b.title }}">{{ b.label }}</button>{% endfor %}
+        <label class="snooze-day">to <input type="date" name="until" min="{{ tomorrow }}"></label>
+        <button type="submit" class="button" name="op" value="snooze">Snooze</button>
+      </span>
+      <button type="submit" class="button" name="op" value="reopen">Reopen</button>
+      <button type="button" class="button" data-action="clear-ticks">Clear</button>
+    </form>
+  </section>
+  <aside id="panel" class="panel-slot" aria-label="The open item">
+    {% include "day/_item.html" %}
+  </aside>
+</div>
+<datalist id="streams">{% for s in view.streams %}<option value="{{ s }}"></option>{% endfor %}</datalist>
+{% if version %}{{ poll(state, version) }}{% endif %}
+{% endif %}
+</div>
+{% endblock %}

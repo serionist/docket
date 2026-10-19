@@ -20,13 +20,13 @@ import os
 import sqlite3
 import time
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
 from docket_testkit import Best, best_of, empty_vault, make_config, traced
-from ledger_kit import ADD_FIELDS
+from ledger_kit import CHANGES, ITEMS, MEETINGS, SERIES, build
 from starlette.testclient import TestClient
 
 from docket.index import build as index_build
@@ -38,10 +38,6 @@ from docket.ledger.ops import Op
 from docket.service.app import create_app
 from docket.service.state import Settings
 
-ITEMS = 5_000
-MEETINGS = 2_000
-# Meetings a series holds: a weekly meeting's year. A roll ties a series' meetings into one part (DR-0633).
-SERIES = 50
 FOLD_SECONDS = 1.5
 # A full rebuild runs only on a schema bump or a forget, never on the daily path (DR-0635).
 REBUILD_SECONDS = 2.0
@@ -50,76 +46,6 @@ WRITE_SECONDS = 0.1
 SNAPSHOT_SECONDS = 0.1
 DAY_SECONDS = 0.5
 SHOW_ALL_SECONDS = 2.0
-CHANGES = ("log", "triage", "set", "log", "snooze", "triage", "log", "done", "reopen")
-
-
-def build(root: Path, *, meetings: bool = True) -> None:
-    """The items' ops, and with `meetings` the meetings' too, in their month files under root, each read once."""
-    files: dict[str, list[str]] = {}
-    highest: str | None = None
-    start = datetime(2026, 1, 5, 8, tzinfo=UTC)
-    for n in range(ITEMS):
-        when = start + timedelta(minutes=n * 90)
-        machine = ("desk", "laptop")[n % 2]
-        ids = ops.mint(highest, when, 1 + len(CHANGES))
-        highest = ids[-1]
-        keys = {
-            "log": {"note": "chased in the thread again, no answer yet"},
-            "triage": {"verdict": "chase"},
-            "set": {"fields": {"due": "2026-12-01", "notes": "ask twice, then call"}},
-            "snooze": {"until": when.date() + timedelta(days=3)},
-        }
-        made = [Op(schema_version=1, id=ids[0], item=ids[0], op="add", day=when.date(), at=when.replace(microsecond=0),
-                   machine=machine, by="claude", via="cli", batch=ids[0], number=n + 1,
-                   fields={**ADD_FIELDS, "title": f"Send Ada the dates, round {n}"})]  # fmt: skip
-        made += [
-            Op(schema_version=1, id=ids[k], item=ids[0], op=kind, day=when.date(), machine=machine, by="sync",
-               via="tool", batch=ids[0], after=ids[k - 1], **keys.get(kind, {}))
-            for k, kind in enumerate(CHANGES, start=1)
-        ]  # fmt: skip
-        for o in made:
-            files.setdefault(ops.rel_of(o), []).append(o.text())
-    if meetings:
-        add_meetings(files, start)
-    for rel, texts in files.items():
-        path = root / rel
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("\n".join(texts) + "\n", encoding="utf-8", newline="\n")
-    for path in (root / ops.OPS_DIR).iterdir():
-        path.read_bytes()
-
-
-def add_meetings(files: dict[str, list[str]], start: datetime) -> None:
-    """Each meeting: its add, the dates point rolled in from the one before in its series and that one's roll, four
-    points and their answers: ten point ops a meeting."""
-    highest: str | None = None
-    before: tuple[str, str] | None = None
-    for n in range(MEETINGS):
-        when = start + timedelta(hours=n * 4)
-        machine = ("desk", "laptop")[n % 2]
-        ids = ops.mint(highest, when, 11)
-        highest = ids[-1]
-        base = {"schema_version": 1, "day": when.date(), "machine": machine, "by": "sync", "via": "tool",
-                "batch": ids[0]}  # fmt: skip
-        slot = f"{when:%Y-%m-%dT%H:%M}+00:00"
-        made = [Op(**base, id=ids[0], item=ids[0], op="meeting", number=n + 1,
-                   fields={"subject": f"Weekly pilot sync {n // SERIES}", "start": slot, "end": slot})]  # fmt: skip
-        if n % SERIES == 0:
-            before = None
-        dates = {"text": "The pilot's dates"} | ({"from": before[1]} if before else {})
-        made.append(Op(**base, id=ids[1], item=ids[0], op="point", fields=dates))
-        if before is not None:
-            made.append(Op(**base, id=ids[2], item=before[0], op="point_set", point=before[1],
-                           fields={"state": "rolled", "to": ids[1]}))  # fmt: skip
-        made += [Op(**base, id=ids[3 + k], item=ids[0], op="point", fields={"text": f"Point {k}"}) for k in range(4)]
-        made += [
-            Op(**base, id=ids[7 + k], item=ids[0], op="point_set", point=ids[3 + k],
-               fields={"state": "answered", "answer": "agreed in the call"})
-            for k in range(4)
-        ]  # fmt: skip
-        before = (ids[0], ids[1])
-        for o in made:
-            files.setdefault(ops.rel_of(o), []).append(o.text())
 
 
 def one_more(root: Path, last: Op, kind: str, **keys: object) -> Op:

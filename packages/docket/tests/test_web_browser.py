@@ -23,6 +23,7 @@ import pytest
 import uvicorn
 from briefs_kit import NORTHWIND, briefs_template
 from curate_kit import curate_vault
+from day_kit import day_vault
 from decisions_kit import BRIEF, decisions_template
 from docket_testkit import index_template
 from playwright.sync_api import Page, expect, sync_playwright
@@ -31,6 +32,7 @@ from settings_kit import settings_template
 from staging_kit import staging_vault
 from sync_kit import as_structured, as_text, memo, sync_template
 
+from docket.ledger import store
 from docket.service import client, server
 from docket.service.client import call_json
 from docket.service.token import Tokens
@@ -841,6 +843,143 @@ def test_the_decisions_on_the_briefs_page_in_a_browser(decisions_service: tuple[
         expect(plain.locator(".decisions details.folded summary", has_text="it stands")).to_have_count(1)
         plain.screenshot(path=str(shots / "decisions-no-script.png"), full_page=True)
         scriptless.close()
+
+
+@pytest.fixture
+def day_root(tmp_path: Path) -> Path:
+    """The invented day vault: seven items, a meeting with its points, two streams."""
+    return day_vault(tmp_path).root
+
+
+@pytest.fixture
+def day_service(day_root: Path) -> Iterator[tuple[int, str]]:
+    yield from _serve(day_root)
+
+
+def _day_page(p: Any, service: tuple[int, str], errors: list[str], path: str = "/ledger") -> tuple[Any, Page, str]:
+    """A browser signed in to the service, on a day page, collecting what goes wrong."""
+    port, token = service
+    link = client.call("POST", "/api/session", token=token, at=port)
+    assert link is not None
+    browser = p.chromium.launch(channel=None if BROWSER == "chromium" else BROWSER)
+    page = browser.new_page(viewport={"width": 1440, "height": 900})
+    page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.on("requestfailed", lambda r: errors.append(f"request failed: {r.method} {r.url} ({r.failure})"))
+    page.on("response", lambda r: errors.append(f"{r.status} {r.request.method} {r.url}") if r.status >= 400 else None)
+    base = f"http://127.0.0.1:{port}"
+    page.goto(f"{link.body['url']}&next={quote(path)}")
+    page.wait_for_url(f"{base}{path}")
+    return browser, page, base
+
+
+def test_the_ledger_s_keys_in_a_browser(day_service: tuple[int, str], tmp_path: Path) -> None:
+    """The keys move the selection and the panel with it, a verdict's key writes and moves on, u undoes, and a verdict
+    over ticked rows sets it on all of them, then clears it once all hold it (DR-0661, DR-0662)."""
+    shots = Path(os.environ.get("DOCKET_TEST_SCREENSHOTS") or tmp_path)
+    shots.mkdir(parents=True, exist_ok=True)
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser, page, base = _day_page(p, day_service, errors)
+        expect(page.locator("h1")).to_have_text("Ledger")
+        expect(page.locator(".day-group-head").first).to_contain_text("Overdue")
+
+        # j selects the first row and Enter opens it beside the list; j then carries the panel to the next row.
+        page.keyboard.press("j")
+        page.keyboard.press("Enter")
+        expect(page.locator("#panel [data-item]")).to_have_attribute("data-item", "A-0001")
+        page.keyboard.press("j")
+        expect(page.locator("#panel [data-item]")).to_have_attribute("data-item", "A-0002")
+        expect(page.locator("#row-A-0002")).to_have_class(re.compile(r"\bopen\b"))
+        page.wait_for_url(f"{base}/ledger?open=A-0002")
+        page.screenshot(path=str(shots / "ledger.png"), full_page=True)
+
+        # 2 calls it claude, and the selection and the panel go on to the next row; u undoes it, and offers Redo.
+        page.keyboard.press("2")
+        page.wait_for_url(re.compile(r"/ledger\?open=A-0003&done="))
+        expect(page.locator(".day-notice")).to_contain_text("A-0002: triage: claude")
+        expect(page.locator("#row-A-0002 .tri")).to_have_class(re.compile(r"t-claude"))
+        page.keyboard.press("u")
+        expect(page.locator(".day-notice")).to_contain_text("Undone.")
+        expect(page.locator(".day-notice button")).to_have_text("Redo")
+        expect(page.locator("#row-A-0002 .tri")).not_to_have_class(re.compile(r"t-claude"))
+
+        # Two rows ticked, one already chase: 4 sets chase on both; ticked again, 4 clears it on both.
+        page.click("#panel .close")
+        for ref in ("A-0001", "A-0003"):
+            page.check(f"#row-{ref} .tick")
+        expect(page.locator("#act")).to_be_visible()
+        page.screenshot(path=str(shots / "ledger-ticked.png"), full_page=True)
+        page.keyboard.press("4")
+        expect(page.locator(".day-notice")).to_contain_text("A-0003: triage: chase")
+        expect(page.locator("#row-A-0003")).to_have_attribute("data-triage", "chase")
+        for ref in ("A-0001", "A-0003"):
+            page.check(f"#row-{ref} .tick")
+        expect(page.locator('#act .verdict[data-verdict="chase"]')).to_have_attribute("value", "triage:")
+        page.keyboard.press("4")
+        expect(page.locator(".day-notice")).to_contain_text("A-0001: triage cleared")
+        expect(page.locator("#row-A-0001")).to_have_attribute("data-triage", "")
+
+        # At phone width the open item covers the list and nothing scrolls sideways.
+        page.goto(f"{base}/ledger?open=A-0003")
+        page.set_viewport_size({"width": 390, "height": 844})
+        _fits(page, "#panel .close", "#f-A-0003-title")
+        page.screenshot(path=str(shots / "ledger-390.png"), full_page=True)
+        assert not errors, errors
+        browser.close()
+
+
+def test_a_field_saves_on_change_in_a_browser(day_service: tuple[int, str]) -> None:
+    """Notes typed and left by a click on another row are saved first, the panel waiting for the save; a select saves
+    as it changes; a save the writer refuses keeps its text, marked unsaved, with the writer's words (DR-0661)."""
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser, page, base = _day_page(p, day_service, errors, "/ledger?open=A-0003")
+        page.fill("#f-A-0003-notes", "Call the venue on Monday")
+        page.click("#row-A-0001 .row-link")
+        expect(page.locator("#panel [data-item]")).to_have_attribute("data-item", "A-0001")
+        page.click("#row-A-0003 .row-link")
+        expect(page.locator("#f-A-0003-notes")).to_have_value("Call the venue on Monday")
+        expect(page.locator("#history-A-0003")).to_contain_text("notes edited")
+
+        page.select_option("#f-A-0003-kind", "task")
+        expect(page.locator("#history-A-0003")).to_contain_text("kind: task")
+        expect(page.locator("#row-A-0003 .kind")).to_have_text("task")
+
+        page.fill("#f-A-0003-title", "")
+        page.press("#f-A-0003-title", "Enter")
+        expect(page.locator("#field-A-0003-title .field-problem")).to_have_text("title can't be cleared")
+        expect(page.locator("#field-A-0003-title")).to_have_attribute("data-unsaved", "")
+        expect(page.locator("#row-A-0003 .title")).to_have_text("Pick the venue")
+        assert page.url == f"{base}/ledger?open=A-0003"
+        # The refused save's 400, and the console's word on it, are the one failure the page expects.
+        assert [e for e in errors if "400" not in e] == [], errors
+        browser.close()
+
+
+def test_a_tick_holds_the_poll_and_a_write_from_the_cli_reloads_once_it_is_cleared(
+    day_service: tuple[int, str], day_root: Path
+) -> None:
+    """While a row is ticked the poll holds back, so a write from the CLI reloads nothing past the 5 seconds; once the
+    tick is cleared, the next poll reloads the page with it (DR-0663)."""
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser, page, _ = _day_page(p, day_service, errors)
+        page.check("#row-A-0001 .tick")
+        expect(page.locator("#act")).to_be_visible()
+        page.evaluate("window.notReloaded = true")
+        change = {"op": "set", "item": "A-0005", "fields": {"title": "Quote from the new caterer"}}
+        store.write(Vault.open(day_root), [change], by="user", via="cli")
+        page.wait_for_timeout(6_500)
+        assert page.evaluate("window.notReloaded === true")
+        assert page.is_checked("#row-A-0001 .tick")
+        expect(page.locator("#row-A-0005 .title")).to_have_text("Quote from the caterer")
+
+        page.keyboard.press("Escape")
+        expect(page.locator("#row-A-0005 .title")).to_have_text("Quote from the new caterer", timeout=12_000)
+        assert page.evaluate("window.notReloaded === undefined")
+        assert not errors, errors
+        browser.close()
 
 
 def _add(page: Page, base: str, value: str, shot: Path) -> None:

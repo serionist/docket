@@ -176,11 +176,12 @@ class LedgerError(DocketError):
 
 
 class RefusedError(LedgerError):
-    """One change refused, by its place and its op, and why."""
+    """One change refused, by its place and its op, and why; `refs` names the open items an add looks like, by id, so
+    a page can show them beside Add anyway (DR-0661)."""
 
-    def __init__(self, n: int, kind: str, why: str) -> None:
+    def __init__(self, n: int, kind: str, why: str, refs: tuple[str, ...] = ()) -> None:
         super().__init__(f"change {n} ({kind}): {why}; nothing written")
-        self.n, self.kind, self.why = n, kind, why
+        self.n, self.kind, self.why, self.refs = n, kind, why, refs
 
 
 @dataclass(frozen=True)
@@ -595,8 +596,8 @@ class _Write:
                 out[str((self.adds_line(folded.id).fields or {}).get("name"))] = cast(Stream | None, folded.value)
         return out
 
-    def refuse(self, n: int, why: str) -> NoReturn:
-        raise RefusedError(n, self.kind, why)
+    def refuse(self, n: int, why: str, refs: tuple[str, ...] = ()) -> NoReturn:
+        raise RefusedError(n, self.kind, why, refs)
 
     def resolve(self, n: int, ref: object) -> str:
         """The item a change names, by its id or its A- number."""
@@ -1632,7 +1633,7 @@ class _Batch(_Write):
                 self.batch_change(n, change)
             except RefusedError as e:
                 if not self.dry_run:
-                    raise RefusedError(n, kind, e.why) from None
+                    raise RefusedError(n, kind, e.why, e.refs) from None
                 self.take_back(start, given, given_meetings)
                 self.refusals.append(Refusal(n, kind, e.why))
             else:
@@ -1751,7 +1752,8 @@ class _Batch(_Write):
         likely, same = self.look_alikes(self.fields(n, change.get("fields"), adding=True))
         if likely and not force and self.via != "import":
             named = "; ".join(f"{self.label(item_id)} {_cut(title, SUMMARY)}" for item_id, title in likely)
-            self.refuse(n, f"looks like an open item already: {named}; log the news there, or add with force true")
+            why = f"looks like an open item already: {named}; log the news there, or add with force true"
+            self.refuse(n, why, tuple(item_id for item_id, _ in likely))
         self.change(n, change)
         self.remarks += [(n, f"{self.label(i)} comes from the same source: {_cut(t, SUMMARY)}") for i, t in same]
 

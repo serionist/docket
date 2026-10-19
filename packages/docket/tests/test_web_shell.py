@@ -72,7 +72,7 @@ def test_the_navigation_has_a_slot_for_every_page_and_links_the_built_ones(clien
     slots = nav.find_all("span", class_="nav-slot")
     assert len(slots) == len(pages.PAGES) - len(built)
     assert len(pages.PAGES) == 12
-    assert [s.attrs["title"].split(":")[0] for s in slots[:5]] == ["Today", "Queue", "Ledger", "Meetings", "Outbox"]
+    assert [s.attrs["title"].split(":")[0] for s in slots[:4]] == ["Today", "Queue", "Meetings", "Outbox"]
     # No number beside a slot, which would read as a count: one muted "later" per group with a page to come, the phase
     # in the tooltip and the screen-reader text.
     waiting = sum(1 for g in pages.NAV if not all(p.built for p in g.pages))
@@ -85,7 +85,7 @@ def test_the_navigation_has_a_slot_for_every_page_and_links_the_built_ones(clien
     # Built pages come first in their group, so its one "later" label precedes only what is to come; a group whose
     # pages are all built has none.
     day, finding = nav.find_all("ul", class_="nav-group")[:2]
-    assert day.find("li").text() == "later"
+    assert [c.text() for c in day.find_all("li")][:2] == ["Ledger", "later"]
     assert [c.text() for c in finding.find_all("li")] == ["Search", "Recording", "Briefs"]
 
 
@@ -106,6 +106,8 @@ def test_the_navigation_has_a_slot_for_every_page_and_links_the_built_ones(clien
         "/recording",
         "/recording?rid=calls:rec-0100",
         "/briefs",
+        "/ledger",
+        "/ledger/panel",
     ],
 )
 def test_every_page_and_fragment_carries_the_page_csp_and_no_store(client: TestClient, path: str) -> None:

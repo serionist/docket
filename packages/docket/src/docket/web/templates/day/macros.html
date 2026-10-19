@@ -1,0 +1,73 @@
+{# The day pages' own pieces (DR-0661 to DR-0664). Every value is escaped: an item's text is data. #}
+{% from "macros.html" import locator %}
+
+{% macro hidden(state) %}
+{% for name, value in state.hidden() %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+{% endmacro %}
+
+{# The poll: every 5 seconds the op files' version, a reload when it moved (DR-0663). docket.js holds it back while
+   the owner is doing something a reload would lose. #}
+{% macro poll(state, version, oob=false) %}
+<div id="poll" class="poll" hx-get="/ledger/changed?page={{ state.page }}&amp;v={{ version }}" hx-trigger="every 5s" hx-swap="none" data-poll{% if oob %} hx-swap-oob="true"{% endif %}></div>
+{% endmacro %}
+
+{% macro verdict(b, ref='') %}
+<button type="submit" class="button verdict t-{{ b.verdict }}" name="op" value="{{ b.value }}" data-key="{{ b.key }}" data-verdict="{{ b.verdict }}" aria-pressed="{{ 'true' if b.pressed else 'false' }}" title="{{ b.title }}">{{ b.label }}{% if ref %}<span class="visually-hidden"> {{ ref }}</span>{% endif %}</button>
+{% endmacro %}
+
+{% macro row(r, state, oob=false) %}
+<li class="row state-{{ r.state }}{% if r.open %} open{% endif %}{% if r.woke %} woke{% endif %}" id="row-{{ r.ref }}" data-ref="{{ r.ref }}" data-triage="{{ r.triage or '' }}" data-next="{{ r.next }}"{% if r.callable %} data-item{% endif %}{% if oob %} hx-swap-oob="true"{% endif %}>
+  {% if r.callable %}<input type="checkbox" class="tick" name="item" value="{{ r.ref }}" form="act" aria-label="Tick {{ r.ref }}">{% else %}<span class="tick-slot" aria-hidden="true"></span>{% endif %}
+  <span class="tri{% if r.triage %} t-{{ r.triage }}{% endif %}" title="{{ r.triage or 'no call yet' }}" aria-hidden="true"></span>
+  <a class="hit-link row-link" href="{{ r.url }}" hx-get="{{ r.fragment }}" hx-target="#panel" data-ref="{{ r.ref }}"><span class="ref">{{ r.ref }}</span><span class="kind k-{{ r.kind }}">{{ r.kind }}</span><span class="title" dir="auto">{{ r.title }}</span>{% if r.meeting %}<span class="mtg">{{ r.meeting }}</span>{% endif %}{% if r.archived %}<span class="badge">archived</span>{% endif %}</a>
+  <span class="who" dir="auto">{{ r.who }}</span>
+  <span class="stream">{{ r.stream }}</span>
+  <span class="due {{ r.due.cls }}" title="{{ r.due.title }}">{{ r.due.text }}</span>
+  <span class="age" title="open {{ r.age }} days">{{ r.age }}d</span>
+  {% if r.quick %}
+  <form class="quick" method="post" action="/ledger/write">
+    {{ hidden(state) }}<input type="hidden" name="item" value="{{ r.ref }}"><input type="hidden" name="at" value="{{ r.next if r.open or not state.open else '' }}">
+    {% for b in r.quick %}{{ verdict(b, r.ref) }}{% endfor %}
+    {% if r.triage %}<button type="submit" class="button" name="op" value="triage:" data-key="0" title="Clear the call (0)">&#x2205;<span class="visually-hidden"> No call for {{ r.ref }}</span></button>{% endif %}
+    <button type="submit" class="button" name="op" value="done" data-key="e" title="Done (e)">&#x2713;<span class="visually-hidden"> Done {{ r.ref }}</span></button>
+    <a class="button" href="{{ r.drop_url }}" hx-get="{{ r.drop_fragment }}" hx-target="#panel" data-key="Delete" title="Drop: say why (Delete)">&#x2715;<span class="visually-hidden"> Drop {{ r.ref }}</span></a>
+  </form>
+  {% endif %}
+</li>
+{% endmacro %}
+
+{# A text field of the item panel, saved on change through htmx; without the script its Save posts it (DR-0661). #}
+{% macro field(state, ref, name, label, value, unsaved=false, problem='') %}
+{% set kind = {'due': 'date', 'kind': 'select', 'description': 'area', 'notes': 'area', 'outcome': 'area'}.get(name, 'text') %}
+{% set key = name if name == 'notes' else 'fields.' ~ name %}
+<form class="field field-{{ name }}" id="field-{{ ref }}-{{ name }}" method="post" action="/ledger/write" data-field{% if unsaved %} data-unsaved{% endif %}>
+  {{ hidden(state) }}<input type="hidden" name="op" value="{{ 'notes' if name == 'notes' else 'set' }}"><input type="hidden" name="item" value="{{ ref }}"><input type="hidden" name="form" value="field">
+  <label for="f-{{ ref }}-{{ name }}">{{ label }}</label>
+  {% if kind == 'area' %}
+  <textarea id="f-{{ ref }}-{{ name }}" name="{{ key }}" rows="{{ 5 if name == 'notes' else 3 }}" dir="auto" hx-post="/ledger/save" hx-trigger="change" hx-target="closest form" hx-swap="outerHTML" data-save>{{ value }}</textarea>
+  {% elif kind == 'select' %}
+  <select id="f-{{ ref }}-{{ name }}" name="{{ key }}" hx-post="/ledger/save" hx-trigger="change" hx-target="closest form" hx-swap="outerHTML" data-save>{% for k in ('reply', 'decision', 'task', 'invite', 'waiting') %}<option{% if k == value %} selected{% endif %}>{{ k }}</option>{% endfor %}</select>
+  {% else %}
+  <input id="f-{{ ref }}-{{ name }}" name="{{ key }}" type="{{ kind }}" value="{{ value }}"{% if name == 'stream' %} list="streams" spellcheck="false"{% endif %} autocomplete="off" dir="auto" hx-post="/ledger/save" hx-trigger="change" hx-target="closest form" hx-swap="outerHTML" data-save>
+  {% endif %}
+  <button type="submit" class="button field-save">Save<span class="visually-hidden"> {{ label }}</span></button>
+  {% if problem %}<p class="field-problem" role="alert">{{ problem }}</p>{% endif %}
+</form>
+{% endmacro %}
+
+{% macro history(p, state, tz, oob=false) %}
+<ol class="history" id="history-{{ p.row.ref }}"{% if oob %} hx-swap-oob="true"{% endif %}>
+  {% for h in p.history %}
+  <li class="history-line{% if h.undone_by %} undone{% endif %}">
+    <p class="lh"><time datetime="{{ (h.at or h.day).isoformat() }}">{{ h.at|at(tz) if h.at else h.day.isoformat() }}</time><span class="by by-{{ h.by }}">{{ h.by }}</span><span>via {{ h.via }}</span></p>
+    <p class="lt" dir="auto">{{ h.line }}</p>
+    {% if h.undone_by %}<p class="undone-by">undone by {{ locator(h.undone_by) }}</p>{% endif %}
+    {% if h.button %}
+    <form class="history-undo" method="post" action="/ledger/write">{{ hidden(state.opened(p.row.ref)) }}{% if h.button == 'Undo' %}<input type="hidden" name="redo" value="1">{% endif %}<button type="submit" class="button" name="op" value="undo:{{ h.op }}">{{ h.button }}<span class="visually-hidden">: {{ h.line }}</span></button></form>
+    {% endif %}
+  </li>
+  {% else %}
+  <li class="history-line">No history yet.</li>
+  {% endfor %}
+</ol>
+{% endmacro %}

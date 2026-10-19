@@ -717,7 +717,8 @@ change lands on whoever uses that vendor, while the core still checks every rid 
 | Settings | sources, never-store lists, models, redaction rules; the Claude API key and a spend cap later | 1 |
 | Recording | the summary next to the transcript, click a line to read and play it; the two transcripts side by side | 2 |
 | Briefs | per person, project and topic, each beside the raw its lines cite; the decision log per stream later | 2 |
-| Today, Queue, Ledger, Meetings | the day: meetings with briefs and points, triage, items with their raw source one click away | 3 |
+| Ledger | items by due or by stream, kind, who or meeting, the open one beside them with its source and materials one click away; every button one batch, with Undo | 3 |
+| Today, Queue, Meetings | the day: meetings with briefs and points, triage | 3 |
 | Outbox | drafts waiting for a click | 3 |
 
 Every page has the actions that belong on it. An action runs in the service, runs Claude headless, or hands the job
@@ -770,6 +771,13 @@ How it is built (DR-0170 to DR-0175, DR-0546):
   what it contradicts, then what is decided, superseded ones folded. Its buttons post to `/briefs/decision`,
   which writes a decision's status as `docket decision set` does, on the writer thread and checked against the rev
   the page showed (DR-0603, DR-0566).
+- The day pages, the Ledger first, read the ledger beside the writer through the `ledger` tool's reads and two of
+  their own, `matching` and `batch_lines`, and write only through the ledger's writer: each form post one batch, by
+  user, via page, answered with a 303 and a notice with Undo, a refusal answering the page as typed (DR-0661). The
+  old tasks app's keys act on the ticked rows or the one selection, which the open panel follows (DR-0662); text
+  fields save on change; the page polls a hash of the op files and reloads when another writer moved them, unless the
+  owner is mid-change (DR-0663). One item panel serves every page, its materials opened only when the item names them
+  and they pass the path checks (DR-0664).
 
 ## 11. Claude first
 

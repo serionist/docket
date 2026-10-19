@@ -26,6 +26,7 @@ from docket.vault.anchors import Anchor, format_anchor, trailing_anchors
 from docket.vault.decision_form import NOT_A_DECISION, NOT_CONFIRMED
 from docket.vault.spans import Span
 from docket.web.briefs_state import ORPHANED, TYPES, BriefsState
+from docket.web.day_state import DayState
 from docket.web.panel import SpanView, Style, anchored_rid, frontmatter_end, line_parts, span_view
 from docket.web.recording_state import RecordingState, time_at
 from docket.web.state import SearchState
@@ -161,6 +162,8 @@ class BriefsView:
     lines: list[BriefLine] = field(default_factory=list[BriefLine])
     raw: RawView | None = None
     choose: str = ""
+    # A person's items on the Ledger (DR-0669).
+    ledger: Link | None = None
     # The entity's decisions, for a project, topic or stream; the list's links to what waits.
     decisions: DecisionsPart | None = None
     waiting: list[Link] = field(default_factory=list[Link])
@@ -273,6 +276,8 @@ def _brief(facts: Facts, state: BriefsState, found: BriefState, doc: DocView) ->
     age = _age(found, facts.now)
     view.meta = " \N{MIDDLE DOT} ".join(p for p in (found.type or ORPHANED, f"rev {found.rev}", age) if p)
     view.back = state.but(brief=None, line=None).url()
+    if found.type == "person":
+        view.ledger = Link(f"{found.name}'s items on the Ledger", DayState(who=found.name).url())
     for why in found.why.split("; ") if found.why else []:
         if why == NOT_CONFIRMED:
             view.notices.append(f"Stale: {why}; marked below. The brief skill's next rev cites the log's decisions.")

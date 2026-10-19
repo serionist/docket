@@ -22,7 +22,7 @@ from docket.ledger import batch, ops
 from docket.ledger.fold import Item, Ledger, fold
 from docket.ledger.meetings import Meeting
 from docket.ledger.ops import Op
-from docket.ledger.store import BATCH, CHANGES, LedgerError, Written, write
+from docket.ledger.store import BATCH, CHANGES, LedgerError, RefusedError, Written, write
 from docket.vault.vault import Vault
 
 GOLDEN = Path(__file__).parent / "fixtures" / "ledger-batch.json"
@@ -242,9 +242,13 @@ def test_rollover_names_the_meetings_it_couldn_t_roll(vault: Vault) -> None:
 
 
 def test_an_add_that_looks_like_an_open_item_is_refused_unless_forced(vault: Vault) -> None:
-    write(vault, [ADD], now=NOW)
+    first = write(vault, [ADD], now=NOW).ops[0].id
     same_who = {**ADD, "fields": {**ADD_FIELDS, "title": "send ADA the DATES, please", "source": "chat:C0TEST/9"}}
     refused(vault, [same_who], r"change 1 \(add\): looks like an open item already: A-0001 Send Ada the dates; log")
+    # The refusal names them by id too, so a page can show them beside Add anyway (DR-0661).
+    with pytest.raises(RefusedError) as caught:
+        write(vault, [same_who], now=NOW)
+    assert caught.value.refs == (first,)
     # The same who with another title, or a title alike from someone else elsewhere, is a new ask.
     write(vault, [{**ADD, "fields": {**ADD_FIELDS, "title": "Book the room", "source": "chat:C0TEST/9"}}], now=NOW)
     write(vault, [{**ADD, "fields": {**ADD_FIELDS, "who": "Ben Example", "source": "chat:C0TEST/10"}}], now=NOW)

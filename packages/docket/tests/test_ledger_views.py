@@ -179,8 +179,11 @@ def test_list_counts_every_match_then_gives_the_first_k(conn: sqlite3.Connection
         "A-0004 [decision] Ada Example: Pick the vendor (17d, done 10-18, archived) [pilot]",
         "A-0001 [reply] Ada Example: Send Ada the dates (10d, due 10-18, 2d late) [pilot] @M-0001 <chase>",
     ]
-    # No k is no cap, as --json and the pages read list.
-    assert len(ask(conn, "list", state="all", k=None).items) == every.counts.items == 6
+    # No k is no cap, as --json and the pages read list; the pages leave the chase counts out, the rest the same.
+    whole = ask(conn, "list", state="all", k=None)
+    assert len(whole.items) == every.counts.items == 6
+    paged = views.read(conn, Ask(view="list", state="all", k=None), TZ, AT, chased=False)
+    assert (paged.counts.chased_items, paged.counts.chased, paged.items) == (0, 0, whole.items)
     assert views.lines(ask(conn, "list", state="dropped"), TZ) == [
         "1 item: 0 open, 0 snoozed, 0 done, 1 dropped; 0 overdue; chased 0 items, 0 times",
         "A-0005 [reply] Dan Example: Answer the survey (0d, dropped 10-18) [pilot]",
@@ -789,3 +792,82 @@ def test_no_read_quotes_a_record(vault: Vault, capsys: pytest.CaptureFixture[str
             outputs.append(out)
     assert not [out for out in outputs if marker in out]
     assert record.rid in outputs[0]
+
+
+# -- the pages' reads: matching and batch_lines (DR-0661, DR-0665) ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("q", "found"),
+    [
+        # A title, and a point's text on a meeting.
+        ("dates", {1, 6, 20}),
+        # Every word, folded: an accent typed or not, any case, in any order.
+        ("DÁTES send", {1, 6}),
+        # Notes and a description, which only show gives; a meeting's notes and where.
+        ("show-only-text notes", {4, 20}),
+        ("room 3", {20}),
+        # The subject of the meeting an item hangs on, and the meeting itself.
+        ("weekly", {1, 20}),
+        # A log line: the snoozes written to two items.
+        ("snoozed", {4, 12}),
+        # A number, an item's and a meeting's; a who and an organiser; an answer.
+        ("0005", {10, 35}),
+        ("ada example", {1, 8, 12, 20}),
+        ("show-only-text answer", {20}),
+        # Nothing to find, and no word at all.
+        ("zeppelin", set()),
+        ("?!", set()),
+    ],
+)
+def test_matching_finds_every_word_folded_in_an_item_s_or_a_meeting_s_text(
+    conn: sqlite3.Connection, q: str, found: set[int]
+) -> None:
+    assert views.matching(conn, q) == {ulid(n) for n in found}
+
+
+def test_matching_reads_materials_and_text_that_isn_t_ascii(tmp_path: Path) -> None:
+    c = tables_of(
+        tmp_path,
+        [
+            item(1, 1, title="Book the café"),
+            op("material", 2, 1, ref="notes/plan.md", label="The plan"),
+            item(3, 2, title="Something else"),
+        ],
+    )
+    try:
+        assert views.matching(c, "cafe") == {ulid(1)}
+        assert views.matching(c, "plan.md") == {ulid(1)}
+        assert views.matching(c, "the plan") == {ulid(1)}
+    finally:
+        c.close()
+
+
+def test_batch_lines_give_a_write_s_lines_by_what_each_changed_in_the_ops_order(tmp_path: Path) -> None:
+    batch, other = ulid(2), ulid(6)
+    c = tables_of(
+        tmp_path,
+        [
+            item(1, 1),
+            op("triage", 2, 1, verdict="chase", batch=batch),
+            op("meeting", 3, number=1, batch=batch),
+            op("point", 4, 3, fields={"text": "The budget"}, batch=batch),
+            op("stream", 5, batch=batch),
+            op("stream", 6, fields={"name": "ops", "status": "active"}, batch=other),
+            op("undo", 7, 6, of=other, batch=ulid(7)),
+        ],
+    )
+    try:
+        lines = views.batch_lines(c, batch)
+        assert [(line.ref, line.kind) for line in lines] == [
+            ("A-0001", "triage"),
+            ("M-0001", "meeting"),
+            ("M-0001", "point"),
+            ("pilot", "stream"),
+        ]
+        assert lines[0].line == "triage: chase"
+        # A stream its undo took shows no line, as in its history; a batch that wrote nothing has none either.
+        assert views.batch_lines(c, ulid(7)) == []
+        assert views.batch_lines(c, ulid(99)) == []
+    finally:
+        c.close()
