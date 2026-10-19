@@ -1,9 +1,9 @@
 ---
 title: Make the ledger's meetings from calendar records (one-way door)
 issue: "#200"
-status: draft
-approved_by:
-approved_at:
+status: approved
+approved_by: claude (autonomy grant)
+approved_at: 2026-10-19
 ---
 
 # Make the ledger's meetings from calendar records
@@ -28,10 +28,10 @@ links recordings and asks by time with #201's window read. Two PRs: the step and
 | the core, on index update | no: it runs on every clone and on a rebuild, so it would apply a stale version over the sync's own set (a decline the week view no longer shows) |
 | the sync skill through `ledger_batch` | no: a fixed mapping needs no judgement, and every machine's copy of the skill would have to agree |
 
-- `Gate.promote` notes its event records' rids as pending in the vault's private folder before its lock is released.
-  Then `ledger/calendar.py` makes one write `by: sync`, via the caller's `cli` or `page`, and clears them once it
-  commits or has nothing to write. The next promotion or catch-up replays what is pending first, sets included, as
-  DR-0463 finishes a stopped write first.
+- `Gate.promote` notes its event records' rids as pending in the vault's private folder before it writes the run
+  file; a rid whose version never reached raw reads raw's latest and changes nothing. Then `ledger/calendar.py` makes
+  one write `by: sync`, via the caller's `cli` or `page`, and clears them once it commits or has nothing to write. The
+  next promotion or catch-up replays what is pending first, sets included, as DR-0463 finishes a stopped write first.
 - One version per rid, raw's latest by line order, so an event moved twice before one promotion lands at its last
   time; the adds then go in start order, then rid. A pending rid is read at raw's latest version too, so one left
   over a full revert (#202) applies as any record would to the ledger it meets.
@@ -40,8 +40,8 @@ links recordings and asks by time with #201's window read. Two PRs: the step and
 - `docket ledger calendar [--since DAY] [--dry-run]`, the catch-up: what is pending, then the latest version of each
   event record from DAY, 14 days back by default, adding and joining only, so a stale version never undoes what the
   sync set by hand. It runs when #200 lands, after an import or a reset, after a split.
-- Two clones: a pulled run comes with its ops and is never promoted again; two that promote one version write the same
-  ops in the same order, one meeting per key (DR-0621), renumbered (DR-0613) only when their ledgers differed.
+- Two clones: a pulled run comes with its ops, never promoted again; two promoting one version write the same ops in
+  the same order, one meeting per key (DR-0621), renumbered (DR-0613) only when their ledgers differed.
 
 ### The record (one-way, DR-0646) and its fields (DR-0648)
 
@@ -74,10 +74,10 @@ What the core reads from a record of kind `event`, one per occurrence. Every cal
 - the join: a `meeting` add with `continues`, carrying the record's fields as any add does. The old meeting's number,
   points and outcome hold; an open one takes the calendar's fields, as todo.py's update did; an archived one only
   gains its key, the fields being an idle set there. Tried for each version, unless the key continues one already;
-- undos, read by the write that made them: the owner's (`user` or `claude`) that took out only this meeting's adds is
-  meant. A removal stays removed, a new version too; a `continues` add undone alone is a split, never rejoined, its
-  key given an add of its own. One that took out other ops as well (a batch, the step's own write), or by `sync`, is
-  as if never: the step adds or joins again. Undoing a step write that made this one meeting alone reads as removal;
+- undos, read by how they were asked: one by `of` from `user` or `claude` is meant, however many meetings its write
+  took out. A removal stays removed, a new version too; a `continues` add undone alone is a split, never rejoined,
+  its key given an add of its own. One by `batch`, which the undo op's new `of_batch` names (DR-0614), or by `sync` is
+  as if never: the step adds or joins again;
 - near misses named in the output, to join by hand: an unkeyed meeting at the add's start under another subject, and
   one with its folded subject on its day at another start, so the cut-over spot-check catches moved meetings.
 
@@ -109,9 +109,9 @@ What the core reads from a record of kind `event`, one per occurrence. Every cal
 
 ## Doors and data
 
-One-way, PR 1's title naming it: what the core reads from an event record (DR-0646); AGENTS.md's mapper line gains it.
-`medium`: DR-0647 to DR-0652. No new op, kind, field or via; the pending file is per clone and never committed. Data:
-the first catch-up writes the window's meetings in one write.
+One-way, PR 1's title naming them: what the core reads from an event record (DR-0646), AGENTS.md's mapper line gaining
+it, and an undo op's `of_batch` (DR-0614 amended), which a Docket before reads and ignores. `medium`: DR-0647 to
+DR-0652. The pending file is per clone, never committed. Data: the first catch-up writes the window's meetings.
 
 ## Steps
 
@@ -125,8 +125,8 @@ the first catch-up writes the window's meetings in one write.
 - PR 1, invented people: each field; the header read, a body after its blank line not; both sides of the 25 October
   DST change; each left-out case named, the rest written; a move, a rename, a cancellation, a show-as-only version; an
   archived meeting's idle set; joins a minute off, by case and spaces, from two candidates, onto an archived meeting,
-  from a key that continues one; both near misses; one undo's removal and split kept, a batch's and the step's write's
-  done again; two clones in both orders; the catch-up never setting; perf, 300 records into 2,000 meetings under 2 s.
+  from a key that continues one; both near misses; an `of` undo's removal and split kept, a `batch` or sync undo's
+  done again, `of_batch` written; two clones in both orders; the catch-up never setting; perf, 300 records under 2 s.
 - PR 2: the example week through promotion, its Friday sync cancelled in a second run; a moved event's two versions
   in one promotion; a stopped step replayed with its sets; a pending rid after a full revert; perf, 30 under 0.5 s.
 
@@ -141,9 +141,9 @@ reads; `packages/docket/README.md`'s `docket ledger calendar`; glossary: join; a
   by hand. A renamed series' old meetings don't join: named as near misses, joined by hand.
 - Two clones harvesting minutes apart with the event changed between: the older version's set can sort last and win
   until the next version corrects it. Rare, accepted (DR-0647).
-- A reset by undo instead of `--revert` would read meetings it took out one by one as removed: resets revert.
+- A reset by undoing each meeting instead of `--revert` would read them as removed: resets revert.
 
 ## Plan review
 
-Round 1: three majors (one version per rid, a stopped step's sets replayed, which undos count) and four minors (the
-header and the contract keys, the cross-clone race, same-day near misses, the import's reason), all fixed in place.
+Round 1: three majors (one version per rid, stopped sets replayed, which undos count) and four minors (the header and
+keys, the race, near misses, the import's reason). Round 2: approved, two minors fixed (undos by how asked, pending).
