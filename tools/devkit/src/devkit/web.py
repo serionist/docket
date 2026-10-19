@@ -16,7 +16,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from devkit.repo import KitError, git
+from devkit.repo import KitError
 
 WEB = "packages/docket/web"
 LIST = f"{WEB}/build-inputs.txt"
@@ -31,12 +31,28 @@ def pathspecs(text: str) -> list[str]:
     return [s for s in (line.strip() for line in text.splitlines()) if s and not s.startswith("#")]
 
 
+# What a git hook sets for the git it runs: with GIT_DIR set, git takes the folder it runs in for the work tree's top,
+# and lists the web folder's files from there. Each half of the hash leaves them out, so git finds the repo itself.
+HOOK_VARIABLES = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_PREFIX")
+
+
 def input_files(root: Path) -> list[str]:
     """The tracked files the pathspecs match, relative to the web folder, sorted by their UTF-8 bytes."""
-    web = root / WEB
     specs = pathspecs((root / LIST).read_text(encoding="utf-8"))
-    out = git(web, "ls-files", "-z", "--", *specs)
-    return sorted((f for f in out.split("\0") if f), key=lambda f: f.encode("utf-8"))
+    env = {k: v for k, v in os.environ.items() if k not in HOOK_VARIABLES}
+    proc = subprocess.run(
+        ["git", "ls-files", "-z", "--", *specs],
+        cwd=root / WEB,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise KitError(f"git ls-files in {WEB}: {proc.stderr.strip()}")
+    return sorted((f for f in proc.stdout.split("\0") if f), key=lambda f: f.encode("utf-8"))
 
 
 def inputs_hash(root: Path) -> str:

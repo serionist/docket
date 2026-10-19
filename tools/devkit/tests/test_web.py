@@ -96,3 +96,17 @@ def test_the_command_writes_the_document_or_says_whether_it_is_current(
     assert cli.main(["web-schema"]) == 0
     assert cli.main(["web-schema", "--check"]) == 0
     assert f"{web.SCHEMA} is current" in capsys.readouterr().out
+
+
+def test_a_git_hook_s_variables_change_nothing(site: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A pre-push hook runs the gate with GIT_DIR set, which would make git take the web folder for the work tree.
+    before = web.inputs_hash(site)
+    monkeypatch.setenv("GIT_DIR", str(site / ".git"))
+    assert web.input_files(site) == ["index.html", "src/main.ts"]
+    assert web.inputs_hash(site) == before
+
+
+def test_a_folder_git_can_t_read_says_so(tmp_path: Path) -> None:
+    put(tmp_path, web.LIST, b"src\n")
+    with pytest.raises(KitError, match="git ls-files"):
+        web.input_files(tmp_path)

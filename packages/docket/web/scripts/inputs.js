@@ -11,6 +11,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 export const LIST = "build-inputs.txt";
+const HOOK_VARIABLES = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_PREFIX"];
 
 /**
  * The pathspecs build-inputs.txt names: one a line, blank lines and # comments left out.
@@ -31,7 +32,9 @@ export function pathspecs(text) {
  */
 export function inputFiles(root) {
   const specs = pathspecs(readFileSync(path.join(root, LIST), "utf8"));
-  const out = execFileSync("git", ["ls-files", "-z", "--", ...specs], { cwd: root, encoding: "utf8" });
+  // A git hook's variables would make git take this folder for the work tree's top; git finds the repo itself.
+  const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !HOOK_VARIABLES.includes(name)));
+  const out = execFileSync("git", ["ls-files", "-z", "--", ...specs], { cwd: root, encoding: "utf8", env });
   const files = out.split("\0").filter(Boolean);
   return files.sort((a, b) => Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8")));
 }
