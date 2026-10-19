@@ -77,6 +77,12 @@ def plaud(imported: Path, tmp_path: Path, route: str) -> Callable[..., Vault]:
     return copy
 
 
+def test_resolves_says_which_locators_read_finds_something_at_without_reading_them(vault: Vault) -> None:
+    found = [CALL, f"plaud:{CALL}@12:08", doc_path(CALL_ID).as_posix(), CALL_ID, REC]
+    missing = ["notes/calls/missing.md", "mail:Venue dates | 2026-09-01 10:00", "legacy-note:nothing-here", "r:[x"]
+    assert recall.resolves(vault, [*found, *missing, CALL]) == set(found)
+
+
 def test_an_old_path_reads_its_legacy_note(vault: Vault) -> None:
     result = recall.read(vault, CALL)
     assert result.doc is not None

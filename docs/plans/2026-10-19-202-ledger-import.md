@@ -148,3 +148,15 @@ the dry run's JSON only gaining fields; `cheap`: DR-0657 to DR-0659. Data: none 
 
 Round 1: one major (a revert's emptied files, which a union merge brings back) and four minors, all fixed in place.
 Round 2: approved; three minors (a rerun's order and the conflict's fix, the mirror's lock) fixed in place.
+
+## PR 1, as built
+
+| Planned | Built |
+|---|---|
+| the import's text rules as a live write's | `store.TextRules`, the writer's own screen moved out of `_Write` so both use it; the import screens each name and value once, since an export repeats its people, streams and log lines |
+| refusals, each by its line | a line that doesn't read refuses before anything is folded, so a missing add's ops aren't named twice; then held texts and ops from elsewhere, then the fold's new problems |
+| the catch-up's dry run over the ledger as the import leaves it | `ledger_tables(vault, tables)` takes a dry run's own tables, `build.ledger_tables_of` fills them from the import's own fold, and `write_calendar` and the catch-up take them, a dry run only |
+| sources by `read`'s rules, asked of the index | `recall.resolves`, `read`'s dispatch without reading; the tests' read routes run it both ways |
+| `--revert` deletes with `git rm` | the op files unlinked and the tracked ones committed as gone, which is what `git rm` and a commit leave |
+| its last write renumbers | `store.write(vault, [], via="import")`: a write renumbers before its changes, and with none that is all it does |
+| `perf`: 50,000 ops dry run under 3 s | the perf ledger's 62,000 ops: about 2.5 s dry and 9 s imported, in twelve month commits, on a desk; the test holds 6 s and 30 s for CI's slowest shard |

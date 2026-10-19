@@ -447,13 +447,13 @@ def copy_vault(template: Path, tmp_path: Path) -> Vault:
 
 READ_ROUTES = ["parse", "index"]
 # The calls a route takes: each asks the raw log through the index when it is current (DR-0446, DR-0522).
-ROUTED = ("read", "verify", "doc_put")
+ROUTED = ("read", "verify", "doc_put", "resolves")
 # And a notes import, which checks every note's covers through one lookup (DR-0522); it parses every legacy doc itself.
 IMPORTS = ("import_notes",)
 
 
 def read_route(route: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every `recall.read`, `recall.verify` and `recall.doc_put`, and every notes import, in a test through one route
+    """Every `recall.read`, `verify`, `doc_put` and `resolves`, and every notes import, in a test through one route
     (DR-0321, DR-0446, DR-0522): `parse`, with no index, parses every doc and loads each source whole; `index`
     brings the index up to date before each call, and loading a source whole while the call runs fails the test, as
     does parsing every doc outside an import, so the index answers all that read asks and every record comes from its

@@ -1,5 +1,5 @@
 """The ledger: items owed and awaited, meetings with their talking points, and streams, kept as ops in the vault and
-folded into their state and history (#198, #199, #200, #201).
+folded into their state and history (#198, #199, #200, #201, #202).
 
 | Module | What |
 |---|---|
@@ -10,6 +10,7 @@ folded into their state and history (#198, #199, #200, #201).
 | `batch` | a batch's ops read from JSON, and what a write wrote as the `ledger_batch` tool's result and lines |
 | `views` | the `ledger` tool's reads: snapshot, show, queue, list, meetings and suggest (DR-0638, DR-0660) |
 | `calendar` | meetings from calendar records: the step after a promotion and the catch-up (DR-0646 to DR-0652) |
+| `imports` | a ledger brought in with its history from an export's op lines; its dry run (DR-0653 to DR-0656) |
 | `check` | what `docket vault check` says about the ledger (DR-0617) |
 | `status` | each stream's STATUS.md frontmatter, rendered after a write and by `docket render` (DR-0673 to DR-0675) |
 

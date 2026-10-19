@@ -50,6 +50,7 @@ from docket.index.chunks import (
 from docket.index.languages import Languages, resolve
 from docket.index.schema import LEDGER_TABLES, check_sqlite, create, stale
 from docket.index.text import Analyzer
+from docket.ledger.fold import Ledger, paused
 from docket.models import config as models_config
 from docket.models.provider import Off
 from docket.plaintext import fold, words
@@ -861,10 +862,14 @@ def update(vault: Vault) -> BuildReport:
 
 
 @contextlib.contextmanager
-def ledger_tables(vault: Vault) -> Generator[sqlite3.Connection]:
+def ledger_tables(vault: Vault, tables: sqlite3.Connection | None = None) -> Generator[sqlite3.Connection]:
     """The ledger's tables as the op files stand (DR-0616, DR-0619): the index's, brought up to date, when it opens as
     this Docket writes it and its lock comes within `LEDGER_WAIT`; else every op file folded into a database in
-    memory. The index's lock is held until the caller is done, so no update moves the tables while it asks them."""
+    memory. The index's lock is held until the caller is done, so no update moves the tables while it asks them. With
+    `tables`, the caller's own, as they are and left open: a dry run's, holding what a write would leave."""
+    if tables is not None:
+        yield tables
+        return
     held = _ledger_index(vault)
     if held is None:
         conn = sqlite3.connect(":memory:", isolation_level=None)
@@ -883,6 +888,21 @@ def ledger_tables(vault: Vault) -> Generator[sqlite3.Connection]:
     finally:
         conn.close()
         lock.release()
+
+
+@contextlib.contextmanager
+def ledger_tables_of(ledger: Ledger) -> Generator[sqlite3.Connection]:
+    """A fold's tables, in memory: the ledger as a write not yet made would leave it, for a dry run to ask."""
+    conn = sqlite3.connect(":memory:", isolation_level=None)
+    try:
+        conn.executescript(LEDGER_TABLES)
+        conn.execute("BEGIN")
+        with paused():
+            ledger_index.fill(conn, ledger)
+        conn.execute("COMMIT")
+        yield conn
+    finally:
+        conn.close()
 
 
 def _ledger_index(vault: Vault) -> tuple[sqlite3.Connection, FileLock] | None:

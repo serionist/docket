@@ -29,6 +29,10 @@ Unreleased in the same PR.
   keyed by the event, so a moved, renamed or cancelled meeting changes in place, and `docket staging promote` says
   how many. An old meeting at the same start under the same subject is joined and keeps its number. `docket ledger
   calendar` catches up from what raw holds: run it once a calendar source is set up, and after an import.
+- `docket ledger import <file>` brings an old ledger in with its history, from the op lines an export script wrote: a
+  month per commit, every ask, chase and close on its own day, so the counts reach back to its start. `--dry-run`
+  counts what it brings and names the sources it can't resolve and the old meetings `docket ledger calendar` joins
+  after it; a rerun adds nothing twice; `--revert` takes every op out again, for until the switch.
 
 - Slack, Teams, Outlook mail and the calendar ship as example sources beside Plaud, in `examples/sources/`:
   `docket source new <name> --example` copies one into your project with its sensitivity, tools and lookback. Slack
