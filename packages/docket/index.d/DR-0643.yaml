@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0643
+    title: A ledger read gives counts, a line per row with short text and locators, and never a record's text
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#201"]
+    description: "Counts first, then one line per item, meeting, point or stream, as todo.py printed them: an item's number, kind, who, title cut at 72 characters, age in days, due and how late, snooze, stream, meeting and triage, and in a snapshot its source; a meeting's start, end, subject, organiser, open points and open items; a point's n, state, text, item and proposed. Locators are never cut. Ids show only where a number names nothing, during a clash, and on points in show. Notes, description, outcome, attendees and the history show only in show. No read quotes a record: a source is a locator, and read opens it. The structured result holds the same rows with their fields."
+    not_chosen:
+      - "todo.py's snapshot JSON, every field of every item: a sync's context would carry notes and logs it doesn't use."
+      - "A full flag that quotes a source's record: read already does, with the summary first."

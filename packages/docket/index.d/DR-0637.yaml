@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0637
+    title: "The ledger reaches Claude as two MCP tools: ledger, which reads, and ledger_batch, which writes"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#201"]
+    description: "ledger(view, ref, since, until, who, stream, kind, state, k) reads the ledger and is annotated read-only and closed-world, so a skill pre-approves it as it does search and read. ledger_batch(ops, by, dry_run) makes one all-or-nothing write through the ledger's one writer, via tool, on the service's writer thread, and is annotated as run_open is: not read-only, not destructive, not idempotent, closed-world. Under the trust model (#191) nothing new guards it: Claude Code's own permission prompt shows each batch unless the owner allows the tool. Both return a result model as structured content beside a compact text, LedgerRead and BatchResult, as every tool does (DR-0150); mcp-tools.json holds them."
+    binds:
+      - "The names ledger and ledger_batch, their parameters, enums and defaults are a door (DR-0150): parameters only gain optional ones whose default keeps today's behaviour, enums only gain values, results only gain fields."
+    not_chosen:
+      - "One ledger tool with an action, as the design's tool table had it: a tool is read-only or not as a whole, so a skill would pre-approve writes with the reads or prompt on every read."
+      - "A tool per read and per verb, todo.py's shape: twenty names in the door for what two carry."
