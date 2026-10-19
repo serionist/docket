@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0665
+    title: "The day pages filter as the list view does and search text with q: every word, folded, in an item's or meeting's text"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#203", "#204", "#205"]
+    description: q matches an item when every word, folded as Search folds text, is in its number, title, who, stream, kind, source, description, notes or outcome, its materials' refs and labels, its meeting's subject or a line of its log; and a meeting when they are in its number, subject, organiser, attendees, where, notes, outcome or a point's text or answer, as the owner's old tasks app searched. The read is views.matching, beside the tool's reads in ledger/views.py and off the tool, so the tool's door (DR-0637) doesn't move; the tool may take q later. stream, kind and who are the list view's own filters. The filter form is a GET applied with Enter, and the URL holds it.
+    not_chosen:
+      - "An FTS table over items: one more table to keep in step, for a few thousand rows."
+      - Filtering as you type, as the old tasks app did with every item in the page.

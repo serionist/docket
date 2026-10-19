@@ -29,9 +29,10 @@ NAV: tuple[Group, ...] = (
     Group(
         "The day",
         (
+            # Built pages come first in their group (DR-0546); each day page's PR marks it built (DR-0669).
+            Page("ledger", "Ledger", "/ledger", 3, "items with their raw source one click away", built=True),
             Page("today", "Today", "/today", 3, "the day: meetings with their briefs and points"),
             Page("queue", "Queue", "/queue", 3, "triage, then the items one at a time"),
-            Page("ledger", "Ledger", "/ledger", 3, "items with their raw source one click away"),
             Page("meetings", "Meetings", "/meetings", 3, "meetings with their briefs, points and minutes"),
             Page("outbox", "Outbox", "/outbox", 3, "drafts waiting for a click"),
         ),
@@ -145,6 +146,24 @@ RECORDING_KEYS: Keys = ((("?",), "these keys"),)
 # The Briefs page's briefs and lines are plain links too.
 BRIEFS_KEYS: Keys = ((("?",), "these keys"),)
 
+# The day pages' keys, the owner's old tasks app's (DR-0662): a key presses the button that carries it, on the ticked
+# rows or else the selected item; a held key repeats nothing, and u undoes.
+DAY_KEYS: Keys = (
+    (("j", "k"), "next, previous row; with the panel open, its item"),
+    (("Enter", "o"), "open the selected row beside the list"),
+    (("x", " "), "tick the selected row"),
+    (("1", "2", "3", "4"), "discuss, claude, me, chase; again clears it"),
+    (("0",), "no call"),
+    (("e",), "done"),
+    (("Delete", "Backspace"), "drop: say why"),
+    (("s",), "snooze"),
+    (("u",), "undo the last change, or redo it; Ctrl+Z too"),
+    (("n",), "a new item"),
+    (("/",), "to the search box"),
+    (("Escape",), "clear the ticks, or close the panel"),
+    (("?",), "these keys"),
+)
+
 PAGE_KEYS: dict[str, Keys] = {
     "search": KEYS,
     "sync": SYNC_KEYS,
@@ -153,6 +172,7 @@ PAGE_KEYS: dict[str, Keys] = {
     "settings": SETTINGS_KEYS,
     "recording": RECORDING_KEYS,
     "briefs": BRIEFS_KEYS,
+    "ledger": DAY_KEYS,
 }
 HINTS: dict[str, Keys] = {
     "search": ((("/",), "search"), (("j", "k"), "move"), (("Enter",), "open"), (("?",), "keys")),
@@ -162,4 +182,11 @@ HINTS: dict[str, Keys] = {
     "settings": ((("?",), "keys"),),
     "recording": ((("?",), "keys"),),
     "briefs": ((("?",), "keys"),),
+    "ledger": (
+        (("j", "k"), "move"),
+        (("x",), "tick"),
+        (("1", "2", "3", "4"), "call"),
+        (("u",), "undo"),
+        (("?",), "keys"),
+    ),
 }

@@ -24,8 +24,11 @@ TOKEN = "t0ken-for-tests-only"  # noqa: S105 - an invented token
 VOID = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"})
 # The htmx attributes the pages may use; none of them runs code. Filters in hx-trigger, hx-on and js: values do.
 HTMX_ATTRIBUTES = frozenset(
-    {"hx-get", "hx-target", "hx-trigger", "hx-headers", "hx-history-elt", "hx-swap", "hx-push-url", "hx-replace-url"}
-)
+    {
+        "hx-get", "hx-post", "hx-target", "hx-trigger", "hx-headers", "hx-history-elt", "hx-swap", "hx-swap-oob",
+        "hx-push-url", "hx-replace-url",
+    }
+)  # fmt: skip
 
 
 @dataclass

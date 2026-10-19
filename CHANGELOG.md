@@ -27,6 +27,11 @@ Unreleased in the same PR.
   has them, is taken over; one edited by hand is left and reported until the two agree. `docket vault check` names
   each file that lags or was edited, nothing is committed, and nothing goes into a repo anyone can read. Update Docket
   on every machine before you add a status file: an older one refuses the entry.
+- The Ledger page, `docket open /ledger`: your items by due, stream, kind, person or meeting, the one you open beside
+  them with its call, fields, notes, materials, source and history. Every button writes one change you can undo, and a
+  bulk acts on the rows you tick; the old tasks app's keys work (`1` to `4`, `e`, `Delete`, `s`, `u`), fields save as
+  you leave them, and the page reloads by itself when the CLI, Claude or a sync changes the ledger. A person's brief
+  links to their items.
 - The ledger: the items you owe and await, meetings with their talking points, and streams, kept as ops in your vault.
   Claude reads it with the `ledger` tool, and you with `docket ledger snapshot`, `show`, `queue`, `list`, `meetings`
   and `suggest`: counts first, then a line per item, meeting, point or stream, each source a locator `read` opens.

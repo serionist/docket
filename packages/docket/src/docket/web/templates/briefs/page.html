@@ -148,7 +148,7 @@
 <header class="briefs-head">
   <p class="eyebrow"><span class="kind">{{ icon('doc') }}brief</span><span class="meta">{{ view.meta }}</span><span class="badge state {{ view.state }}">{{ view.state }}</span></p>
   <h1 dir="auto">{{ view.title }}</h1>
-  <p class="briefs-locator">{{ locator(view.id) }} <a href="{{ view.back }}">All briefs</a></p>
+  <p class="briefs-locator">{{ locator(view.id) }} <a href="{{ view.back }}">All briefs</a>{% if view.ledger %} <a href="{{ view.ledger.url }}" dir="auto">{{ view.ledger.text }}</a>{% endif %}</p>
 </header>
 {% for n in view.notices %}{{ notice('warn', n) }}{% endfor %}
 {% if view.new %}

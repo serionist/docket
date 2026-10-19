@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0668
+    title: On a ledger of 5,000 items and 2,000 meetings each day page answers in a quarter second, its poll in a hundredth
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#203"]
+    description: "The pages' perf test builds #201's perf ledger (5,000 items with 50,000 ops, 2,000 meetings with 20,000 point ops), its builder moved to ledger_kit so both tests share it, rebuilds the index and asks each page once before the clock. It then times each GET (Today, the Queue, the Ledger, the Ledger with q, Meetings, an item's panel, a meeting's panel, each as its PR lands) to 0.25 s, the version check to 0.01 s, a button's write on one item to DR-0635's 0.1 s and a bulk of 50 to 0.25 s, each asserted on its own and only when no tracer runs; a write is timed through its route with the commit left out, as the ledger's own timed write is dry. The views' reads keep #201's tenth of a second for a snapshot; the render takes the rest, its lists cut at k. The pages read list without its chase counts (views.read with chased false), which they don't show and which were most of a whole list's time, about 0.1 s of 0.12 s on the perf ledger; the tool's read is unchanged. DR-0635 sets no budget for a read, so the tenth is #201's snapshot test's. Measured on the developer's machine with PR 1: the Ledger 61 ms, with q 110 ms, an item's panel 16 ms, the poll 2 ms, a write 13 ms, a bulk of 50 37 ms."
+    binds:
+      - The pages' perf test holds each page's GET to 0.25 s, the version check to 0.01 s, a write on one item to 0.1 s and a bulk of 50 to 0.25 s, each on its own.
+    not_chosen: ["Every row on the page: thousands of rendered rows take most of a second."]

@@ -858,8 +858,9 @@ What the service refuses, and what it doesn't:
 
 ## The web app
 
-`docket open` signs your browser in to the service's own pages. In this version that is Search, Recording, Briefs,
-Sync, Staging, Curate and Settings; the navigation shows the pages still to come, with the phase each arrives in.
+`docket open` signs your browser in to the service's own pages. In this version that is the Ledger, Search,
+Recording, Briefs, Sync, Staging, Curate and Settings; the navigation shows the pages still to come, with the phase each
+arrives in.
 
 - Search runs the search Claude runs: the same words, names, time words and dates. Sources and a month narrow it;
   people and entities favour the hits that mention them, as Claude's boosts do. Facet counts are within the top 200.
@@ -919,6 +920,32 @@ when you ask Claude; the page's one write is your click on a decision (DR-0566).
 - A brief whose entity a never-store list now holds shows only that it is hidden, and is counted on the list; a
   line a list now names shows only that it is hidden, and opens nothing.
 - Keys: `?`.
+
+### The Ledger page
+
+`/ledger` lists the ledger's items beside the one you open, and every button writes the change as one batch, by you,
+through the page, as `docket ledger batch` would (DR-0661 to DR-0666). It is the old tasks app's list, one click and
+one key at a time.
+
+| Part | Shows |
+|---|---|
+| The list | open items by due: snooze ended, overdue, today, this week, later, none; or by stream, kind, who or meeting. Snoozed by the day each comes back, closed by its day, or all; 100 rows, Show more for the next 100 |
+| A row | its call, number, kind, title, meeting, who, stream, due and age; on hover or focus the verdicts, done and drop |
+| Ticked rows | the act bar: a verdict, no call, done, drop with its why, snooze, reopen; each row the change doesn't take is skipped and named |
+| The item | its call, its fields, saved as you leave each one, the meeting it hangs on with its points, notes, materials, where it came from, its counts and its history, newest first, Undo on each line that has one |
+
+- Its URL holds `open`, `q` (every word, in an item's text and log), `stream`, `kind`, `who`, `state`, `group`,
+  `archived` and `k`; `/ledger?who=Ada` is what a person's brief links to.
+- After a change the page says what it wrote, with Undo; after an undo, Redo. A change the ledger refuses writes
+  nothing and keeps what you typed, with the ledger's words.
+- A material that is a path from your repo's top opens with its app or in its folder, on this machine, only for
+  documents, images and media inside the repo; a text file opens in the panel. A URL opens as a link, a locator on
+  the Search page.
+- The page reloads by itself when the ledger changes, from the CLI, Claude or a sync, unless you are typing, have
+  rows ticked or a save is on its way.
+- Keys: `j` and `k` move, the panel following once open; `x` or Space ticks; `1` to `4` discuss, claude, me, chase;
+  `0` no call; `e` done; `Delete` or Backspace drop; `s` snooze; `u` or Ctrl+Z undo; `n` a new item; `/` the search
+  box; `?` for the rest.
 
 ### The Sync page
 

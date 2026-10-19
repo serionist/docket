@@ -1,0 +1,11 @@
+decisions:
+  - id: DR-0669
+    title: Today is the start page, the day pages lead the navigation, and Briefs and Today link out
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#203", "#206"]
+    description: From the Today page's PR, / answers 303 to /today and the brand links to /; Search is the start page until then. The navigation's day group lists Today, Queue, Ledger and Meetings as built, each marked as its PR lands and first in its group (DR-0546), the Outbox a later slot. A person's brief links to their items on the Ledger (/ledger?who=<name>); a meeting's attendees link to their briefs; Today's last sync per source links to /sync?source=<name>; the Sync page itself doesn't change. The day pages' URLs only gain optional parameters, as Search's do (DR-0174), since the tasks skill (#209) opens them.
+    not_chosen:
+      - "Search as the start page for good: the day starts on Today, as the old tasks app's first tab."

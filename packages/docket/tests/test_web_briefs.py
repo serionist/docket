@@ -158,6 +158,15 @@ def test_a_brief_opens_beside_the_raw_its_line_cites(client: TestClient, tmp_pat
     assert lines(opened)[mail].find("a", class_="line-link").attrs["aria-current"] == "true"
 
 
+def test_a_person_s_brief_links_to_their_items_on_the_ledger(client: TestClient) -> None:
+    """DR-0669: a person's brief, and only a person's, links to the Ledger narrowed to them."""
+    links = page(client, f"/briefs?brief={BEN}").find("p", class_="briefs-locator").find_all("a")
+    assert [(a.attrs["href"], a.text()) for a in links][1:] == [
+        ("/ledger?who=Ben+Sample", "Ben Sample's items on the Ledger")
+    ]
+    assert len(page(client, f"/briefs?brief={NORTHWIND}").find("p", class_="briefs-locator").find_all("a")) == 1
+
+
 def test_a_time_anchor_opens_the_recording_page_at_its_time(client: TestClient, tmp_path: Path) -> None:
     n = line_of(tmp_path, NORTHWIND, "- 7 Oct, supplier call")
     tree = page(client, f"/briefs?brief={NORTHWIND}&line={n}")

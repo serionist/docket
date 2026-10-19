@@ -45,6 +45,7 @@ from docket.ledger import ops
 from docket.ledger.fold import CLOSED, NUMBER, Item, number_text
 from docket.ledger.meetings import meeting_text
 from docket.ledger.store import MEETING_NUMBER
+from docket.plaintext import fold, words
 
 View = Literal["snapshot", "show", "queue", "list", "meetings", "suggest"]
 State = Literal["open", "snoozed", "done", "dropped", "all"]
@@ -134,6 +135,18 @@ READ_WHOLE = f"SELECT item, kind, keys FROM item_log WHERE {STANDS} AND {CODE} =
 EVERY_COUNT = COUNTS.replace("item IN ({marks}) AND ", "")
 # Where each code adds, in an item's counts: times chased, snoozes, due changes, reopens.
 SLOT = {"c": 0, "s": 1, "m": 2, "r": 3}
+# What q is matched in (DR-0665), each text column after the number, the subject first.
+MATCH_MEETINGS = 'SELECT id, number, subject, organiser, attendees, "where", notes, outcome, adds FROM meetings'
+MATCH_ITEMS = (
+    "SELECT id, number, title, who, stream, kind, source, description, notes, outcome, materials, meeting FROM items"
+)
+MATCH_LOG = "SELECT item, group_concat(line, ' ') FROM item_log WHERE line IS NOT NULL GROUP BY item"
+# A write's lines in a log table; a stream's ref is its name, or its add's id once it is undone.
+BATCH_LINES = "SELECT id, version, item, kind, line FROM {table} WHERE batch = ? AND line IS NOT NULL"
+BATCH_STREAM_LINES = (
+    "SELECT l.id, l.version, coalesce(s.name, l.item), l.kind, l.line FROM stream_log l "
+    "LEFT JOIN streams s ON s.id = l.stream WHERE l.batch = ? AND l.line IS NOT NULL"
+)
 
 
 class ItemRow(BaseModel):
@@ -285,6 +298,15 @@ class Detail(BaseModel):
     history: list[Change] = []
 
 
+class BatchLine(BaseModel):
+    """One line of a write, as a page's notice says it: what the op changed by its ref (an item's, a meeting's or a
+    stream's), the op's kind and its log line."""
+
+    ref: str
+    kind: str
+    line: str
+
+
 class LedgerRead(BaseModel):
     """What the `ledger` tool read (DR-0638, DR-0660): its view, today as the owner's day the counts and lines are
     made from, the window its meetings or items were read in, its counts, and its rows; show's object in `detail`."""
@@ -342,15 +364,64 @@ def now() -> datetime:
     return datetime.now(UTC)
 
 
-def read(conn: sqlite3.Connection, ask: Ask, tz: ZoneInfo, at: datetime) -> LedgerRead:
-    """One read of the ledger's tables as `ask` says, today the owner's day at `at`. It writes nothing."""
+def read(conn: sqlite3.Connection, ask: Ask, tz: ZoneInfo, at: datetime, *, chased: bool = True) -> LedgerRead:
+    """One read of the ledger's tables as `ask` says, today the owner's day at `at`. It writes nothing. `chased` False
+    leaves list's chase counts at 0: the day pages show none, and reading them is most of a whole list's time
+    (DR-0668); the tool always reads them."""
     ask.check()
-    reader = _Reader(conn, tz, at)
+    reader = _Reader(conn, tz, at, chased=chased)
     views: dict[str, Callable[[Ask], LedgerRead]] = {
         "snapshot": reader.snapshot, "show": reader.show, "queue": reader.queue, "list": reader.listing,
         "meetings": reader.meetings, "suggest": reader.suggest,
     }  # fmt: skip
     return views[ask.view](ask)
+
+
+def matching(conn: sqlite3.Connection, q: str) -> set[str]:
+    """The items and meetings, by id, whose text holds every word of `q`, each folded as Search folds text (DR-0665):
+    an item's number, title, who, stream, kind, source, description, notes and outcome, its materials' refs and
+    labels, its meeting's subject and its log's lines; a meeting's number, subject, organiser, attendees, where, notes,
+    outcome and its standing points' text and answers. A `q` with no word matches nothing. The pages' read, off the
+    tool."""
+    wanted = [fold(w) for w in words(q)]
+    if not wanted:
+        return set()
+    said: dict[str, list[str]] = {}
+    subjects: dict[str, str] = {}
+    for meeting_id, number, *texts, adds in conn.execute(MATCH_MEETINGS):
+        said[meeting_id] = [meeting_text(number) if number is not None else "", *(t or "" for t in texts)]
+        subjects |= dict.fromkeys(json.loads(adds), texts[0])
+    for meeting_id, text, answer in conn.execute("SELECT meeting, text, answer FROM points WHERE n IS NOT NULL"):
+        said.setdefault(meeting_id, []).extend((text, answer or ""))
+    for item_id, number, *texts, materials, meeting in conn.execute(MATCH_ITEMS):
+        said[item_id] = [number_text(number) if number is not None else "", *(t or "" for t in texts)]
+        said[item_id] += [f"{m['ref']} {m.get('label') or ''}" for m in json.loads(materials)]
+        said[item_id].append(subjects.get(meeting, ""))
+    for item_id, lines in conn.execute(MATCH_LOG):
+        if item_id in said:
+            said[item_id].append(lines)
+    return {key for key, texts in said.items() if all(word in _folded(" ".join(texts)) for word in wanted)}
+
+
+def _folded(text: str) -> str:
+    # fold() reads a character at a time; ASCII text, most of a ledger's, folds as it lowercases.
+    return text.lower() if text.isascii() else fold(text)
+
+
+def batch_lines(conn: sqlite3.Connection, batch: str) -> list[BatchLine]:
+    """A write's lines, by its batch (its first op's id), in the ops' order: the ref of what each op changed, its kind
+    and its log line; an op that shows no line, such as a renumber, is left out. The pages' notice after a write
+    (DR-0661), off the tool."""
+    reader = _Reader(conn, ZoneInfo("UTC"), now())
+    items = conn.execute(BATCH_LINES.format(table="item_log"), (batch,)).fetchall()
+    meetings = conn.execute(BATCH_LINES.format(table="meeting_log"), (batch,)).fetchall()
+    item_refs = reader.item_refs(row[2] for row in items)
+    meeting_refs = reader.meetings_of(row[2] for row in meetings)
+    rows = [(i, v, item_refs[add], kind, line) for i, v, add, kind, line in items]
+    rows += [(i, v, meeting_refs[add], kind, line) for i, v, add, kind, line in meetings]
+    rows += conn.execute(BATCH_STREAM_LINES, (batch,)).fetchall()
+    rows.sort(key=lambda row: (row[0], row[1]))
+    return [BatchLine(ref=ref, kind=kind, line=line) for _, _, ref, kind, line in rows]
 
 
 def cut(text: str, width: int = TITLE) -> str:
@@ -371,9 +442,10 @@ def _chunks(values: Iterable[str]) -> list[list[str]]:
 class _Reader:
     """The tables asked for one read, with the numbers that name nothing (DR-0613) read once, when a row needs them."""
 
-    def __init__(self, conn: sqlite3.Connection, tz: ZoneInfo, at: datetime) -> None:
+    def __init__(self, conn: sqlite3.Connection, tz: ZoneInfo, at: datetime, *, chased: bool = True) -> None:
         self.conn = conn
         self.tz = tz
+        self.chased = chased
         self.today = at.astimezone(tz).date()
         self._item_clashes: set[int] | None = None
         self._meeting_clashes: set[int] | None = None
@@ -651,7 +723,7 @@ class _Reader:
             part = ask.who.casefold().strip()
             items = [i for i in items if part in i.who.casefold()]
         counts = self.by_state(items)
-        history = self.history_counts(i.id for i in items)
+        history = self.history_counts(i.id for i in items) if self.chased else {}
         counts.chased_items = sum(1 for c in history.values() if c[0])
         counts.chased = sum(c[0] for c in history.values())
         done = [i.days for i in items if i.state == "done"]

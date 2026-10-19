@@ -62,11 +62,11 @@
   <h2 id="keys-title">Keys</h2>
   <dl class="keys">
     {% for names, what in page_keys %}
-    <div><dt>{% for key in names %}<kbd data-key="{{ key }}">{{ 'Esc' if key == 'Escape' else key }}</kbd>{% endfor %}</dt><dd>{{ what }}</dd></div>
+    <div><dt>{% for key in names %}<kbd data-key="{{ key }}">{{ {'Escape': 'Esc', ' ': 'Space'}.get(key, key) }}</kbd>{% endfor %}</dt><dd>{{ what }}</dd></div>
     {% endfor %}
   </dl>
   <label class="switch"><input type="checkbox" data-action="keys-switch"{% if not keys_off %} checked{% endif %}> Single-key shortcuts</label>
-  <p class="hint">Turn them off when they get in the way of your screen reader's keys{% if current == 'search' %}; <kbd>Esc</kbd> still closes the panel{% elif current == 'staging' %}; <kbd>Esc</kbd> still closes the record{% elif current == 'curate' %}; <kbd>Esc</kbd> still closes the card{% endif %}.</p>
+  <p class="hint">Turn them off when they get in the way of your screen reader's keys{% if current == 'search' %}; <kbd>Esc</kbd> still closes the panel{% elif current == 'staging' %}; <kbd>Esc</kbd> still closes the record{% elif current == 'curate' %}; <kbd>Esc</kbd> still closes the card{% elif current == 'ledger' %}; <kbd>Esc</kbd> still closes the item{% endif %}.</p>
   <div class="dialog-actions"><button type="button" class="button" data-action="close-dialog">Close</button></div>
 </dialog>
 </body>
