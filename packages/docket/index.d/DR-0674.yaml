@@ -6,10 +6,10 @@ decisions:
     by: Claude (autonomy grant)
     cost: one-way
     sources: ["#208"]
-    description: The frontmatter is a --- line, then stream, status, where, next, deadline and updated in that order (DR-0625), one a line, an unset one left out, a day bare, text plain when YAML reads it back as the same text and else JSON-quoted, as todo.py's write_stream wrote them; then the line "# Rendered by Docket from the ledger; change the stream, not these lines. sha256:<16 hex>", the hash of the field lines joined with LF; then a --- line. Everything after that line is the owner's body, kept byte for byte, its line endings and a BOM included, and the frontmatter takes the file's line ending. todo.py's read_stream and check read it unchanged, for the week in step.
+    description: "The frontmatter is a --- line, then stream, status, where, next, deadline and updated in that order (DR-0625), one a line, an unset one left out, a day bare, text plain when YAML reads it back as the same text and else JSON-quoted, as todo.py's write_stream wrote them; then the line \"# Rendered by Docket from the ledger; change the stream, not these lines. sha256:<16 hex>\"; then a --- line. The hash covers every line between the two --- lines except the comment line, joined with LF, so any other key or line, a comment or a blank one included, fails it and counts as a differing field: the file is left and reported (DR-0675). Everything after the closing line is the owner's body, kept byte for byte, its line endings and a BOM included, and the frontmatter takes the file's line ending. todo.py's read_stream reads it unchanged, and todo.py's check does too for a stream with where and next set; the ledger allows a stream without them, which that check calls missing, a note for the week in step."
     binds:
       - Docket writes only a STATUS.md's frontmatter; its body is never written or read into the ledger.
-      - The fields, their order, the scalars and the comment line are a one-way door (AGENTS.md).
+      - The fields, their order, the scalars, the comment line and the lines its hash covers are a one-way door (AGENTS.md).
     not_chosen:
       - "The hash in a record in Docket's private folder: another machine that pulls the file has none (DR-0553)."
       - "The hash as a seventh field: todo.py and anything else reading the frontmatter would meet it."
