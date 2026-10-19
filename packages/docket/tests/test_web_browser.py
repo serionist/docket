@@ -858,20 +858,41 @@ def day_service(day_root: Path) -> Iterator[tuple[int, str]]:
     yield from _serve(day_root)
 
 
+# htmx starts in a task after the deferred scripts, which can come after the load event a navigation waits for; a key
+# pressed before it follows a row's link as a plain one, and the focus it asked for is lost with the page. Each page
+# the browser loads marks when htmx has processed its body.
+HTMX_READY = (
+    "document.addEventListener('htmx:after:process', "
+    "(e) => { if (e.target === document.body) window.htmxReady = true; })"
+)
+
+
+def _at(page: Page, url: str | re.Pattern[str]) -> None:
+    """The page at `url`, htmx started on it, so the next key or click acts as the owner's would."""
+    page.wait_for_url(url)
+    page.wait_for_function("window.htmxReady === true")
+
+
+def _go(page: Page, url: str) -> None:
+    page.goto(url)
+    _at(page, url)
+
+
 def _day_page(p: Any, service: tuple[int, str], errors: list[str], path: str = "/ledger") -> tuple[Any, Page, str]:
-    """A browser signed in to the service, on a day page, collecting what goes wrong."""
+    """A browser signed in to the service, on a day page with htmx started, collecting what goes wrong."""
     port, token = service
     link = client.call("POST", "/api/session", token=token, at=port)
     assert link is not None
     browser = p.chromium.launch(channel=None if BROWSER == "chromium" else BROWSER)
     page = browser.new_page(viewport={"width": 1440, "height": 900})
+    page.add_init_script(HTMX_READY)
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.on("requestfailed", lambda r: errors.append(f"request failed: {r.method} {r.url} ({r.failure})"))
     page.on("response", lambda r: errors.append(f"{r.status} {r.request.method} {r.url}") if r.status >= 400 else None)
     base = f"http://127.0.0.1:{port}"
     page.goto(f"{link.body['url']}&next={quote(path)}")
-    page.wait_for_url(f"{base}{path}")
+    _at(page, f"{base}{path}")
     return browser, page, base
 
 
@@ -898,10 +919,11 @@ def test_the_ledger_s_keys_in_a_browser(day_service: tuple[int, str], tmp_path: 
 
         # 2 calls it claude, and the selection and the panel go on to the next row; u undoes it, and offers Redo.
         page.keyboard.press("2")
-        page.wait_for_url(re.compile(r"/ledger\?open=A-0003&done="))
+        _at(page, re.compile(r"/ledger\?open=A-0003&done="))
         expect(page.locator(".day-notice")).to_contain_text("A-0002: triage: claude")
         expect(page.locator("#row-A-0002 .tri")).to_have_class(re.compile(r"t-claude"))
         page.keyboard.press("u")
+        _at(page, re.compile(r"&said=undo"))
         expect(page.locator(".day-notice")).to_contain_text("Undone.")
         expect(page.locator(".day-notice button")).to_have_text("Redo")
         expect(page.locator("#row-A-0002 .tri")).not_to_have_class(re.compile(r"t-claude"))
@@ -953,7 +975,7 @@ def test_a_field_saves_on_change_in_a_browser(day_service: tuple[int, str]) -> N
         expect(page.locator("#field-A-0003-title .field-problem")).to_have_text("title can't be cleared")
         expect(page.locator("#field-A-0003-title")).to_have_attribute("data-unsaved", "")
         expect(page.locator("#row-A-0003 .title")).to_have_text("Pick the venue")
-        assert page.url == f"{base}/ledger?open=A-0003"
+        page.wait_for_url(f"{base}/ledger?open=A-0003")
         # The refused save's 400, and the console's word on it, are the one failure the page expects.
         assert [e for e in errors if "400" not in e] == [], errors
         browser.close()
@@ -997,28 +1019,28 @@ def test_a_drop_s_why_and_a_snooze_s_day_take_the_focus_in_a_browser(
         page.keyboard.press("j")
         page.keyboard.press("Backspace")
         expect(why).to_be_focused()
-        assert page.url == f"{base}/ledger?open=A-0001&drop=1"
+        page.wait_for_url(f"{base}/ledger?open=A-0001&drop=1")
 
-        page.goto(f"{base}/ledger")
+        _go(page, f"{base}/ledger")
         page.keyboard.press("j")
         page.keyboard.press("s")
         working = day_view.next_working_day(today()).isoformat()
         expect(page.locator(f'#panel [data-snooze] button[value="snooze:{working}"]')).to_be_focused()
         page.keyboard.press("Enter")
-        page.wait_for_url(re.compile(r"/ledger\?open=A-0002&done="))
+        _at(page, re.compile(r"/ledger\?open=A-0002&done="))
         expect(page.locator(".day-notice")).to_contain_text("A-0001: snooze")
 
-        page.goto(f"{base}/ledger")
+        _go(page, f"{base}/ledger")
         before = day_routes.version(day_root)
         page.keyboard.press("j")
         page.keyboard.press("Delete")
         expect(why).to_be_focused()
         page.keyboard.type("replied, see the thread")
         expect(why).to_have_value("replied, see the thread")
-        assert page.url == f"{base}/ledger?open=A-0002&drop=1"
+        page.wait_for_url(f"{base}/ledger?open=A-0002&drop=1")
         assert day_routes.version(day_root) == before
         page.keyboard.press("Enter")
-        page.wait_for_url(re.compile(r"/ledger\?open=A-0003&done="))
+        _at(page, re.compile(r"/ledger\?open=A-0003&done="))
         expect(page.locator(".day-notice")).to_contain_text("A-0002: dropped")
 
         # A click on a row's drop, which shows on its hover, focuses its why too.
@@ -1028,7 +1050,7 @@ def test_a_drop_s_why_and_a_snooze_s_day_take_the_focus_in_a_browser(
         expect(why).to_be_focused()
         page.keyboard.type("we met")
         expect(why).to_have_value("we met")
-        assert page.url == f"{base}/ledger?open=A-0004&drop=1"
+        page.wait_for_url(f"{base}/ledger?open=A-0004&drop=1")
         assert day_routes.version(day_root) == before
         assert not errors, errors
         browser.close()
@@ -1047,7 +1069,7 @@ def test_space_ticks_and_ctrl_z_undoes_in_a_browser(day_service: tuple[int, str]
         expect(page.locator("#row-A-0001 .tick")).not_to_be_checked()
 
         page.keyboard.press("2")
-        page.wait_for_url(re.compile(r"/ledger\?at=A-0002&done="))
+        _at(page, re.compile(r"/ledger\?at=A-0002&done="))
         expect(page.locator(".day-notice")).to_contain_text("A-0001: triage: claude")
         page.keyboard.press("Control+z")
         expect(page.locator(".day-notice")).to_contain_text("Undone.")
@@ -1108,7 +1130,7 @@ def test_open_and_show_in_folder_keep_the_panel_s_scroll_in_a_browser(
             kept = page.evaluate(scrolled)
             assert kept > 0
             page.locator("#panel .material-open").first.get_by_role("button", name=button).click()
-            page.wait_for_url(re.compile(rf"done={done}"))
+            _at(page, re.compile(rf"done={done}"))
             expect(page.locator(".day-notice")).to_be_visible()
             assert abs(page.evaluate(scrolled) - kept) <= 2
             page.evaluate("document.getElementById('panel').scrollTop = 0")
