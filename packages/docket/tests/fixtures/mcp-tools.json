@@ -3291,6 +3291,13 @@
         "ops": {
           "type": "integer"
         },
+        "rendered": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "renumbered": {
           "default": [],
           "items": {

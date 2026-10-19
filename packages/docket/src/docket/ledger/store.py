@@ -53,7 +53,7 @@ from docket import console
 from docket.errors import DocketError
 from docket.index.build import ledger_tables
 from docket.index.ledger import Held, Light
-from docket.ledger import check, ops
+from docket.ledger import check, ops, status
 from docket.ledger.fold import CLOSED, NUMBER, Folded, Item, family, fold_item, number_text, paused
 from docket.ledger.meetings import Meeting, ObjectFold, Objects, Point, Stream, fold_objects, meeting_text
 from docket.ledger.ops import (
@@ -191,7 +191,8 @@ class Written:
     """What a write wrote, or with a dry run would write: its ops in order, its commit, the number of each item and
     meeting it touched; then per change the ops it wrote (a write's renumbers are in `ops` only); each `as` name and
     the id it names; how each id an op or a name touched reads (A-0302, M-0040, M-0040#3, a stream's name); what the
-    writer says of a change beyond its ops, by its place; and a dry run's refusals."""
+    writer says of a change beyond its ops, by its place; a dry run's refusals; and what the render of the streams'
+    STATUS.md files after it said, each file written, left or refused (DR-0675)."""
 
     ops: tuple[Op, ...]
     commit: str | None
@@ -201,6 +202,7 @@ class Written:
     labels: dict[str, str] = field(default_factory=dict[str, str])
     remarks: tuple[tuple[int, str], ...] = ()
     refused: tuple[Refusal, ...] = ()
+    rendered: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -266,7 +268,9 @@ def write(
     now: datetime | None = None,
 ) -> Written:
     """Make the changes, all of them or none, as one write by `by` through `via`, unless a change gives its own; with
-    `dry_run`, check every change and say what would be written and what is refused, writing nothing."""
+    `dry_run`, check every change and say what would be written and what is refused, writing nothing. A write that
+    changed a stream renders its STATUS.md once the lock is let go, and a render's failure never fails it
+    (DR-0675)."""
     if by not in ops.BY or via not in ops.VIA:
         raise LedgerError(f"by is one of {', '.join(ops.BY)}, via one of {', '.join(ops.VIA)}")
     moment = now or datetime.now(UTC)
@@ -281,9 +285,12 @@ def write(
             new = tuple(plan.new)
             written = plan.written(new)
             message = plan.message() if new else ""
+            touched = plan.streams_touched()
         if dry_run or not new:
             return written
-        return replace(written, commit=commit_ops(vault, new, message))
+        written = replace(written, commit=commit_ops(vault, new, message))
+        marked = status.mark(vault, touched)
+    return replace(written, rendered=status.after_write(vault, touched, marked))
 
 
 def write_calendar(
@@ -470,6 +477,18 @@ class _Write:
                 out[op.item] = self.number_of(op.item)
             elif self.fold_of(op.item).kind == "meeting":
                 out[op.item] = self.meeting_number(op.item)
+        return out
+
+    def streams_touched(self) -> dict[str, Stream | None]:
+        """The streams this write's ops changed, by name, as the write leaves them: None for one that no longer
+        stands, every add of it undone."""
+        out: dict[str, Stream | None] = {}
+        for op in self.new:
+            if op.item not in self.object_adds:
+                continue
+            folded = self.fold_of(op.item)
+            if folded.kind == "stream":
+                out[str((self.adds_line(folded.id).fields or {}).get("name"))] = cast(Stream | None, folded.value)
         return out
 
     def refuse(self, n: int, why: str) -> NoReturn:

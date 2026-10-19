@@ -204,9 +204,11 @@ same result on any day.
   - A record joins the unkeyed meeting with its start and subject, as todo.py's update did, so an old meeting keeps
     its number; the owner's undo asked by `of` is kept, one asked by `batch` is as if never (DR-0649, DR-0652).
   - Recordings and asks link to meetings by time through the ledger's window read, written by the sync (DR-0651).
-- A stream can have a status file in the user's repo, rendered from the ledger at a path set per stream in
-  `vault.yaml`, with frontmatter `where`, `next`, `deadline` and `updated`. A hand edit to it is reported, not merged.
-  Docket renders only into a repo that passes setup's public-remote check.
+- A stream can have a STATUS.md in the user's repo, at the path `vault.yaml`'s `rendered` names with kind `status`
+  (DR-0673). Its frontmatter is rendered from the ledger: todo.py's six fields and a line hashing them; the body below
+  is the owner's, kept byte for byte (DR-0674). It renders after each write that changes the stream, once the lock is
+  let go, and on `docket render`, never committed and never into a public repo. A hand edit is left and reported
+  until the two agree, and `docket vault check` names it, a file that lags and a stream the ledger lacks (DR-0675).
 
 ### 3.5 Beyond search
 
@@ -321,7 +323,7 @@ Inside, the layout is the same either way:
 ```
 vault/
   vault.yaml                     the owner, time zone, languages, sources, primary machine, redaction, never-store,
-                                 the files rendered from the entities
+                                 the files rendered from the entities and the ledger
   staging/                       new records waiting for the gate                          -> never committed
   raw/<source>/<yyyy>/<mm>/<yyyy-mm-dd>T<hhmm>-<machine>.jsonl
                                  a file per sync run and 16 MiB, written once              -> plain git
@@ -815,8 +817,9 @@ No big-bang switch: each piece of an existing setup is replaced only after its r
    is left and reported, a repo anyone can read gets none, and a never-store value is left out (DR-0552 to DR-0554).
 4. The ledger moves last, imported with its whole history; for a week both run in step, the old one read-only.
    Until the day pages exist, an existing setup's sync harvests through its own source skills into Docket and keeps
-   reconciling into its own task list. Once the ledger has moved, each stream's status file is rendered from it, as
-   the people directory and the glossary are from the entities.
+   reconciling into its own task list. Once the ledger has moved, each stream's STATUS.md frontmatter is rendered
+   from it, as the people directory and the glossary are from the entities: a file the old tool wrote is taken over
+   when its fields agree with the ledger, and left and reported when they don't (DR-0675).
 
 ## 13. How we know it works
 

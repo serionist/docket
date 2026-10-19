@@ -8,6 +8,13 @@ Unreleased in the same PR.
 
 ### Added
 
+- Each stream's STATUS.md, its frontmatter written from the ledger: name it in `vault.yaml` under `rendered`, as
+  `{kind: status, stream: pilot, path: projects/pilot/STATUS.md}`, and commit it. Docket writes the stream's fields
+  and a line hashing them after every ledger write that changes the stream and on `docket render`, and leaves the
+  body below as you wrote it, line endings included. A frontmatter that holds just the stream's fields, as the ledger
+  has them, is taken over; one edited by hand is left and reported until the two agree. `docket vault check` names
+  each file that lags or was edited, nothing is committed, and nothing goes into a repo anyone can read. Update Docket
+  on every machine before you add a status file: an older one refuses the entry.
 - The ledger: the items you owe and await, meetings with their talking points, and streams, kept as ops in your vault.
   Claude reads it with the `ledger` tool, and you with `docket ledger snapshot`, `show`, `queue`, `list`, `meetings`
   and `suggest`: counts first, then a line per item, meeting, point or stream, each source a locator `read` opens.

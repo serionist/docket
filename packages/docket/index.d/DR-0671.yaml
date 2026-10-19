@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0671
+    title: The day comes in full only to a session whose project folder sits in the vault's repo; elsewhere it is one line of counts
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#207"]
+    description: "The vault's repo is the consuming repo's top folder: walking up from the service's vault folder, the first folder above it that holds .git, found by a stat with no git process; a vault in no repo counts its own folder. The hook finds the session's own top folder the same way, the first folder at or above its project folder (CLAUDE_PROJECT_DIR, or else its own working folder) that holds .git, and compares the two as paths: the same folder gets the full day, so a session in any folder of the vault's repo does and a separate repo nested inside it does not; any other gets one line, day: n overdue, n due today, n meetings, n untriaged; sync due: the sources. The plugin runs in every project, so titles, names and subjects stay out of other projects' sessions. This amends DR-0163's counts and paths only: it now holds for sessions outside the vault's repo. It prints on every start, resume, clear and compact, as the status lines do (DR-0161), so a resumed session gets today's day."
+    binds:
+      - A session outside the vault's repo gets counts only from the day, never a title, a name or a subject.
+    not_chosen:
+      - "The full day in every session: 45 lines of the owner's tasks in every coding session, and the ledger's text in repos others read."
+      - "A setting naming where the day shows: one more key, while the vault's repo already says where the owner works."
+      - "The vault's own folder, a project holding it or sitting in it: a session in the repo's other folders, where the owner works too, would get counts."
+      - "Asking git for the repo's top folder: a git process in every session of every project."
+      - "Any folder inside the vault's repo: a separate repo nested in it, someone else's clone among them, would get the owner's day."
