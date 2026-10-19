@@ -36,7 +36,9 @@ export function useLapsed(): boolean {
   return useSyncExternalStore(subscribe, isLapsed);
 }
 
-/** The command that opens this page again, quoted for a shell: its path and its query string as they stand. */
-export function openCommand(location: { pathname: string; searchStr: string }): string {
-  return `docket open "${location.pathname}${location.searchStr}"`;
-}
+/**
+ * The command that signs the browser in again. Always the same words: nothing from the URL goes into a command the
+ * owner copies into a shell, where a crafted link's quotes, `$(...)` or backquotes would run. This page keeps its own
+ * URL, so Retry after signing in carries on here.
+ */
+export const OPEN_COMMAND = "docket open";

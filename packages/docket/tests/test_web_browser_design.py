@@ -174,7 +174,8 @@ def test_a_lapsed_session_asks_for_a_new_link_and_retries(browser: Browser, week
     page.context.clear_cookies()
     page.get_by_role("button", name="End the session here").click()
     dialog = page.get_by_role("alertdialog")
-    expect(dialog).to_contain_text('docket open "/design?part=components"')
+    # The same words whatever the URL holds: nothing from it reaches a command the owner pastes into a shell.
+    expect(dialog.locator("code")).to_have_text("docket open")
     # Retry without a session: /api/web answers 401 and the dialog comes back.
     dialog.get_by_role("button", name="Retry").click()
     expect(page.get_by_role("alertdialog")).to_be_visible()

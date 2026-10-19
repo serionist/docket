@@ -89,9 +89,16 @@ describe("the shell", () => {
     expect(document.title).toBe("Design - Docket");
   });
 
-  it("says how to sign in again when the session has lapsed, naming this page", async () => {
-    await open("/design?part=components", answer(401, { error: "a bearer token is needed" }));
-    expect(await screen.findByText("Your session has ended")).toBeTruthy();
-    expect(screen.getByText('docket open "/design?part=components"')).toBeTruthy();
+  it("says how to sign in again when the session has lapsed, with a command nothing in the URL reaches", async () => {
+    // A crafted link: quotes, a command substitution and backquotes, which a shell would run if they reached it.
+    const hostile = "/design?part=components&x=%22%3B+calc+%24%28whoami%29+%60id%60+%27&y=$(touch+pwned)";
+    await open(hostile, answer(401, { error: "a bearer token is needed" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toContain("Your session has ended");
+    const command = dialog.querySelector("code")?.textContent;
+    expect(command).toBe("docket open");
+    for (const piece of ["whoami", "calc", "pwned", "`", "$(", '"', "/design"]) {
+      expect(dialog.textContent).not.toContain(piece);
+    }
   });
 });

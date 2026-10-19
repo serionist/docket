@@ -1,5 +1,4 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useLocation } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -9,7 +8,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { clearLapsed, openCommand, useLapsed } from "@/lib/session";
+import { clearLapsed, OPEN_COMMAND, useLapsed } from "@/lib/session";
 
 /**
  * The session lapsed (/api/web answered 401): the page stays as it is, with whatever was typed in it, and this says
@@ -17,7 +16,6 @@ import { clearLapsed, openCommand, useLapsed } from "@/lib/session";
  */
 export function SessionDialog() {
   const lapsed = useLapsed();
-  const location = useLocation();
   const client = useQueryClient();
   const retry = () => {
     clearLapsed();
@@ -29,11 +27,11 @@ export function SessionDialog() {
         <AlertDialogHeader>
           <AlertDialogTitle>Your session has ended</AlertDialogTitle>
           <AlertDialogDescription>
-            Sign in again from a terminal on this machine, then press Retry. Nothing on this page is lost.
+            Run this in a terminal on this machine, then press Retry here. Nothing on this page is lost.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <code className="block rounded-sm border border-rule bg-paper px-3 py-2 font-mono text-sm break-all select-all">
-          {openCommand(location)}
+          {OPEN_COMMAND}
         </code>
         <AlertDialogFooter>
           <Button variant="default" onClick={retry}>
