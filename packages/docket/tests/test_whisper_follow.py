@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import git, make_config, make_record, sh
+from docket_testkit import copied, git, make_config, make_record, sh
 
 from docket.index import rebuild, search
 from docket.index.build import db_path
@@ -92,16 +92,22 @@ def summary(text: str = "## Summary\n\nThe crane passed.") -> RawRecord:
 
 
 def plaud_vault(tmp_path: Path, *, runs: bool = True, name: str = "vault") -> Vault:
-    """A vault with the call, its transcript and its Whisper transcript in raw; plaud a source this machine runs."""
+    """A vault with the call, its transcript and its Whisper transcript in raw; plaud a source this machine runs. A
+    copy of one built once per run for these settings (DR-0531)."""
+    key = f"{__name__}.plaud-vault-{name}-{'runs' if runs else 'idle'}"
+    return Vault.open(copied(tmp_path, lambda d: _build_plaud_vault(d, runs=runs, name=name), key))
+
+
+def _build_plaud_vault(folder: Path, *, runs: bool, name: str) -> Path:
     config = make_config()
     config.sources = {"plaud": SourceConfig()}
-    vault = Vault.init(tmp_path / name, config, "test-box")
+    vault = Vault.init(folder / name, config, "test-box")
     if runs:
         cursors.save(vault, "plaud", cursors.Cursor())
     Gate(vault).stage([make_record(rid=CALL, kind="recording", title="Crane check", text="", **UNDER)])
     Gate(vault).stage([recorder(), summary(), whisper()])
     Gate(vault).promote()
-    return vault
+    return vault.root
 
 
 def later(vault: Vault, *cuts: Cut, said: list[dict[str, Any]] | None = None) -> None:

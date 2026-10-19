@@ -23,7 +23,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
-from docket_testkit import make_config, make_record
+from docket_testkit import copied, digest, make_config, make_record
 
 from docket.media.fetch import Fetcher, Limits
 from docket.media.keystore import KeyStore
@@ -155,7 +155,17 @@ def media_vault(
     folders: tuple[str, ...] = (),
     store: bool = True,
 ) -> Vault:
-    """A vault with a plaud source this machine ingests, a file key store, and the call staged."""
+    """A vault with a plaud source this machine ingests, a file key store, and the call staged: a copy of one built
+    once per run for these settings (DR-0531). The key store is made in the copy, so no two vaults share a store's
+    identity, as two clones never do; staging the call reads no key."""
+    key = "media-vault-" + digest(sensitivity, *folders)
+    vault = Vault.open(copied(tmp_path, lambda d: _build_media_vault(d, sensitivity, folders), key))
+    if store:
+        KeyStore(vault.home).init("file")
+    return vault
+
+
+def _build_media_vault(folder: Path, sensitivity: str, folders: tuple[str, ...]) -> Path:
     config = make_config()
     config.sources = {
         "plaud": SourceConfig(
@@ -164,13 +174,11 @@ def media_vault(
         ),
         "chat": SourceConfig(),
     }
-    vault = Vault.init(tmp_path / "vault", config, "test-box")
+    vault = Vault.init(folder / "vault", config, "test-box")
     cursors.save(vault, "plaud", cursors.Cursor())
     cursors.save(vault, "chat", cursors.Cursor())
-    if store:
-        KeyStore(vault.home).init("file")
     Gate(vault).stage(call())
-    return vault
+    return vault.root
 
 
 def in_raw(vault: Vault) -> None:

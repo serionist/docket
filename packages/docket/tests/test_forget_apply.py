@@ -13,7 +13,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from docket_testkit import empty_vault, git, make_config, make_record, sh
+from docket_testkit import copied_with_seals, empty_vault, git, make_config, make_record, sh
 from forget_kit import forget, line, stored
 from ledger_kit import ADD_FIELDS, NOW, write_ops
 from media_kit import CALL, POLISHED, audio, call, in_raw, media_vault
@@ -45,14 +45,19 @@ def put(vault: Vault) -> None:
     media.put(vault, CALL, path=str(drop / "take"))
 
 
-@pytest.fixture
-def vault(tmp_path: Path) -> Vault:
-    """The call in raw with its audio stored and its key here, and two chat messages beside it."""
-    found = media_vault(tmp_path)
+def _build_vault(folder: Path) -> Path:
+    found = media_vault(folder)
     put(found)
     in_raw(found)
     found.write_run("chat", CHAT)
-    return found
+    return found.root
+
+
+@pytest.fixture
+def vault(tmp_path: Path) -> Vault:
+    """The call in raw with its audio stored and its key here, and two chat messages beside it: built once per run,
+    each test a copy (DR-0531)."""
+    return Vault.open(copied_with_seals(tmp_path, _build_vault, f"{__name__}.vault"))
 
 
 def key_of(vault: Vault) -> str:

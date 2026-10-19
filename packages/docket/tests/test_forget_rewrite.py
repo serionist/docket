@@ -8,6 +8,7 @@ in an invented host repo."""
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -16,7 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from docket_testkit import AtConsole, git, make_config, make_record
+from docket_testkit import AtConsole, copied_with_seals, git, make_config, make_record
 from media_kit import CALL, POLISHED, audio, call, in_raw, media_vault
 
 from docket import recall
@@ -59,9 +60,8 @@ def cite(vault: Vault, doc_id: str, text: str) -> str:
     return f"[d:{doc_id}@{found.meta.rev}#{next(n for n, said in found.lines() if said == text)}]"
 
 
-@pytest.fixture
-def host(tmp_path: Path) -> Path:
-    top = tmp_path / "host"
+def _host(folder: Path) -> Path:
+    top = folder / "host"
     top.mkdir()
     git(top, "init", "-q", "-b", "main")
     (top / "outside.txt").write_text(f"The call {CALL} was about the crane.\n", encoding="utf-8", newline="\n")
@@ -103,10 +103,41 @@ class Forgot:
     before: str
 
 
+# The forgets' rewrite folders, kept beside a template, so a test's copy finds them in its own vault (DR-0531).
+WRITTEN = "written.json"
+
+
+def _keep(folder: Path, first: rewrite.Written, second: rewrite.Written, before: str = "") -> None:
+    data = {"first": first, "second": second}
+    kept = {k: [w.folder.name, w.expressions, w.scoped, w.blobs] for k, w in data.items()}
+    (folder / WRITTEN).write_text(json.dumps({"written": kept, "before": before}), encoding="utf-8")
+
+
+def _kept(folder: Path, vault: Vault) -> tuple[rewrite.Written, rewrite.Written, str]:
+    """The template's two forgets in the copy's vault. Each folder's callback names its scoped table by its absolute
+    path, the template's, so it is written again as the rewrite writes it, naming the copy's own."""
+    data = json.loads((folder / WRITTEN).read_text(encoding="utf-8"))
+    base = vault.home.private / rewrite.FOLDER
+    kept = [data["written"][k] for k in ("first", "second")]
+    first, second = (rewrite.Written(base / name, e, s, b) for name, e, s, b in kept)
+    for written in (first, second):
+        body = rewrite.CALLBACK_BODY.replace("{path!r}", repr((written.folder / rewrite.SCOPED).as_posix()))
+        (written.folder / rewrite.CALLBACK).write_text(body, encoding="utf-8", newline="\n")
+    return first, second, data["before"]
+
+
 @pytest.fixture
-def forgot(host: Path, owner: Callable[..., AtConsole]) -> Forgot:
+def forgot(tmp_path: Path, owner: Callable[..., AtConsole]) -> Forgot:
     """Two forgets of a folder vault: the starter and the call whole, then a held recording by its versions, released
-    with a cut afterwards; and a note and a doc written again after them."""
+    with a cut afterwards; and a note and a doc written again after them. Built once per run; each test a copy."""
+    top = copied_with_seals(tmp_path, lambda d: _build_forgot(d, owner), f"{__name__}.forgot")
+    vault = Vault.open(top / "vault")
+    first, second, before = _kept(tmp_path, vault)
+    return Forgot(vault, first, second, before)
+
+
+def _build_forgot(folder: Path, owner: Callable[..., AtConsole]) -> Path:
+    host = _host(folder)
     config = make_config("folder")
     config.sources = {"plaud": SourceConfig(), "chat": SourceConfig()}
     vault = Vault.init(host / "vault", config, "test-box")
@@ -157,7 +188,17 @@ def forgot(host: Path, owner: Callable[..., AtConsole]) -> Forgot:
     # After the release: a note on the cut version at the same times, and a doc rebuilt at the removed one's path.
     recall.doc_put(vault, doc(vault, LATER, [HELD_POLISHED], on_held))
     recall.doc_put(vault, doc(vault, GONE, [REPLY], [f"- Rebuilt on the reply. [r:{REPLY}]"]))
-    return Forgot(vault, first.written, second.written, before)
+    _keep(folder, first.written, second.written, before)
+    return host
+
+
+def names_its_own_table(written: rewrite.Written) -> bool:
+    callback = (written.folder / rewrite.CALLBACK).read_text(encoding="utf-8")
+    return repr((written.folder / rewrite.SCOPED).as_posix()) in callback
+
+
+def test_a_copy_s_callbacks_name_its_own_scoped_tables(forgot: Forgot) -> None:
+    assert names_its_own_table(forgot.first) and names_its_own_table(forgot.second)
 
 
 def test_the_files_hold_no_text_and_leave_head_as_it_is(forgot: Forgot) -> None:
@@ -298,8 +339,16 @@ KEPT = f"- Someone replied. [r:{REPLY}]"
 def reworded(tmp_path: Path, owner: Callable[..., AtConsole]) -> Reworded:
     """Docs reworded between revs, each keeping a line on a kept reply: a note on the transcript, with a line its first
     rev alone holds; a digest built on it; a note covering the transcript alone, by short anchors; and a note on a held
-    recording's transcript. Then the transcript forgotten whole, and the held recording by its versions."""
-    vault = media_vault(tmp_path)
+    recording's transcript. Then the transcript forgotten whole, and the held recording by its versions. Built once
+    per run; each test a copy."""
+    top = copied_with_seals(tmp_path, lambda d: _build_reworded(d, owner), f"{__name__}.reworded")
+    vault = Vault.open(top)
+    first, second, _ = _kept(tmp_path, vault)
+    return Reworded(vault, first, second)
+
+
+def _build_reworded(folder: Path, owner: Callable[..., AtConsole]) -> Path:
+    vault = media_vault(folder)
     in_raw(vault)
     vault.write_run("chat", [make_record(2, rid=REPLY, source="chat", text="The reply.")])
     rev1 = [f"- The crane went through. [r:{POLISHED}@0:01]", f"- Ada was pleased with it. [r:{POLISHED}@0:02]", KEPT]
@@ -326,7 +375,8 @@ def reworded(tmp_path: Path, owner: Callable[..., AtConsole]) -> Reworded:
     owner("code")
     second = forget_now.forget(vault, "held", [])
     assert first.written is not None and second.written is not None
-    return Reworded(vault, first.written, second.written)
+    _keep(folder, first.written, second.written)
+    return vault.root
 
 
 DROPPED = (
@@ -340,6 +390,10 @@ DROPPED = (
     "The pad might come Monday.",
     "The pad comes Monday.",
 )
+
+
+def test_a_reworded_copy_s_callbacks_name_its_own_scoped_tables(reworded: Reworded) -> None:
+    assert names_its_own_table(reworded.first) and names_its_own_table(reworded.second)
 
 
 def test_each_rev_of_a_doc_is_judged_on_its_own_and_head_stays(reworded: Reworded) -> None:

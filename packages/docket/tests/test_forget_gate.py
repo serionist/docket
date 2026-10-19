@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from docket_testkit import AtConsole, make_record
+from docket_testkit import AtConsole, copied_with_seals, make_record
 from fastapi.testclient import TestClient
 from forget_kit import AT, forget, line, stored
 from media_kit import CALL, POLISHED, audio, call, in_raw, media_vault, tone
@@ -43,14 +43,27 @@ def put(vault: Vault, data: bytes | None = None) -> None:
     media.put(vault, CALL, path=str(drop / "take"))
 
 
-@pytest.fixture
-def held(tmp_path: Path) -> Vault:
-    """The call in raw with its audio stored and its key here."""
-    vault = media_vault(tmp_path)
+def _build_held(folder: Path) -> Path:
+    vault = media_vault(folder)
     put(vault)
     in_raw(vault)
     assert layout.stored_files(vault.root, CALL)
-    return vault
+    return vault.root
+
+
+@pytest.fixture
+def held(tmp_path: Path) -> Vault:
+    """The call in raw with its audio stored and its key here: built once per run, each test a copy (DR-0531)."""
+    return Vault.open(copied_with_seals(tmp_path, _build_held, f"{__name__}.held"))
+
+
+def test_a_copy_of_the_held_template_plays_its_audio_as_a_vault_built_here_does(held: Vault, tmp_path: Path) -> None:
+    # The store's seal is kept in the state folder, outside the vault: the copy gets it too, so its key opens.
+    here = Vault.open(_build_held(tmp_path / "here"))
+    assert reader.state_of(here, CALL) == reader.state_of(held, CALL) == "ok"
+    assert reader.read(held, CALL).state == reader.read(here, CALL).state == "ok"
+    again = Vault.open(copied_with_seals(tmp_path / "again", _build_held, f"{__name__}.held"))
+    assert reader.read(again, CALL).state == "ok"
 
 
 def stored_key(vault: Vault) -> str:
