@@ -220,12 +220,14 @@ class _Rule:
         meeting whose add's event digests as a shell's does."""
         out = {item_id: item_id for item_id in self.ledger.folds if item_id in masked}
         events: set[str] = set()
+        made: set[str] = set()
         for obj_id, adds in self.meetings.items():
             if any(add_id in masked for add_id in adds):
                 out.update(dict.fromkeys(adds, obj_id))
+                made.add(obj_id)
                 events.update(self.events[a] for a in adds if a in self.events)
         for obj_id, adds in self.meetings.items():
-            if obj_id not in out.values() and any(self.events.get(a) in events for a in adds):
+            if obj_id not in made and any(self.events.get(a) in events for a in adds):
                 out.update(dict.fromkeys(adds, obj_id))
         return out
 
@@ -269,9 +271,14 @@ class _Rule:
                     frontier.append(copy)
 
     def _made_by(self, item_id: str, linked: Op) -> bool:
-        """Whether an item is one `point_item` made: its add in the batch of the point_set linking it."""
+        """Whether an item is one `point_item` made: its add, sourced from a meeting, in the batch of the point_set
+        linking it."""
         add = self.op(item_id)
-        return add.op == "add" and add.id == add.item and add.batch is not None and add.batch == linked.batch
+        source = (add.fields or {}).get("source")
+        return (
+            add.op == "add" and add.id == add.item and add.batch is not None and add.batch == linked.batch
+            and isinstance(source, str) and source.startswith(MEETING_SOURCE)
+        )  # fmt: skip
 
     def masked(self, judge: _Judge) -> tuple[set[str], dict[str, str]]:
         """Every op the rule masks, listed ones too, and each add of a shell with its shell."""

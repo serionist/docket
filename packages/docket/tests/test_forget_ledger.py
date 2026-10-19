@@ -628,3 +628,15 @@ def test_the_screens_count_past_twenty_and_say_two_shells_as_shells(tmp_path: Pa
     assert "drop      A-0001, A-0002 are shells left open, to drop" in said
     assert sum(line.startswith("kept      A-") for line in said) == 20 and "kept      and 2 more" in said
     assert sum(line.startswith("raise     M-") for line in said) == 20 and "raise     and 2 more" in said
+
+
+def test_only_an_item_point_item_made_goes_with_its_point() -> None:
+    shell = meeting(10, event(1))
+    raised = point(11, 10, "Ada: dates for the venue")
+    made = op("add", 12, fields={**ADD_FIELDS, "source": f"meeting:{ulid(10)}"}, batch=ulid(12))
+    link = op("point_set", 13, 10, point=ulid(11), fields={"item": ulid(12)}, batch=ulid(12))
+    own = op("add", 14, fields={**ADD_FIELDS, "source": OTHER}, batch=ulid(14))
+    linked = op("point_set", 15, 10, point=ulid(11), fields={"item": ulid(14)}, batch=ulid(14))
+    got = matched(shell, raised, made, link, own, linked, gone=[event(1)])
+    assert ulid(12) in got.new and ulid(14) not in got.new
+    assert got.shells == ("A-0012", "M-0010")
