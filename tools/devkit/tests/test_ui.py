@@ -190,14 +190,15 @@ def test_a_round_shoots_each_state_at_each_size_and_theme_and_writes_its_checks(
     code = ui.run("design", root=tmp_path, browser=driven, serve=serve)
     out = tmp_path / ui.ROUNDS / "design" / "r1"
     states = ui.PAGES["design"].states
-    wide, narrow = len(states) - sum(s.only == "narrow" for s in states), len(states)
+    shots = sum(s.only in (None, size) for s in states for size in ui.SIZES)
     assert served == ["week"]
-    assert len(browser.contexts) == 2 * (wide + narrow)
+    assert len(browser.contexts) == 2 * shots
     assert {c["color_scheme"] for c in browser.contexts} == {"light", "dark"}
     assert {(c["viewport"]["width"], c["is_mobile"]) for c in browser.contexts} == {(1440, False), (390, True)}
     assert all(c["reduced_motion"] == "reduce" and c["timezone_id"] == ui.ZONE for c in browser.contexts)
     assert (out / "list-light-1440x900.png").is_file() and (out / "sheet-dark-390x844.png").is_file()
     assert not (out / "sheet-dark-1440x900.png").exists(), "the sheet is a narrow window's only"
+    assert (out / "theme-light-1440x900.png").is_file() and not (out / "theme-light-390x844.png").exists()
     checks = json.loads((out / "checks.json").read_text(encoding="utf-8"))
     clicked = [c for c in checks if c["state"] == "select"]
     assert clicked and all(c["problems"]["console"] == ["the click threw"] for c in clicked)

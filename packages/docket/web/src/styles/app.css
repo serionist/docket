@@ -10,6 +10,9 @@
 @import "./variants.css";
 
 @source "../../src";
+/* The tests aren't the build's inputs (build-inputs.txt), so their words make no classes. */
+@source not "../../src/**/*.test.*";
+@source not "../../src/test";
 
 /* dark: follows the same switch as the tokens: the data-theme the server wrote, or the system's when it wrote none. */
 @custom-variant dark {

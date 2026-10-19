@@ -1,8 +1,9 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import { act, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import routes from "@/routes.json";
+import { installKeys } from "@/lib/keys";
 import { createQueryClient } from "@/lib/query";
 import { clearLapsed } from "@/lib/session";
 import { createAppRouter, routeTree } from "@/router";
@@ -55,6 +56,8 @@ async function open(url: string, fetched: Response) {
   return router;
 }
 
+beforeAll(() => installKeys());
+
 afterEach(() => {
   vi.unstubAllGlobals();
   clearLapsed();
@@ -87,6 +90,27 @@ describe("the shell", () => {
     expect(screen.getByText("vault on ui-box")).toBeTruthy();
     expect(screen.getByRole("heading", { level: 1, name: "Design" })).toBeTruthy();
     expect(document.title).toBe("Design - Docket");
+  });
+
+  it("lists this page's keys before the shell's in the ? dialog", async () => {
+    await open("/design", answer(200, SHELL));
+    await screen.findByRole("link", { name: "Staging, 3 records wait" });
+    act(() => {
+      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "?", bubbles: true, cancelable: true }));
+    });
+    const dialog = await screen.findByRole("dialog", { name: "Keys" });
+    const groups = [...dialog.querySelectorAll("h3")].map((h) => h.textContent);
+    expect(groups).toEqual(["This list", "Everywhere"]);
+  });
+
+  it("opens the ? dialog from the header's button with the keys off, and says they are off", async () => {
+    document.documentElement.dataset.keys = "off";
+    await open("/design", answer(200, SHELL));
+    act(() => {
+      screen.getByRole("button", { name: "Keys (?)" }).click();
+    });
+    const dialog = await screen.findByRole("dialog", { name: "Keys" });
+    expect(dialog.textContent).toContain("The keys are off.");
   });
 
   it("says how to sign in again when the session has lapsed, with a command nothing in the URL reaches", async () => {

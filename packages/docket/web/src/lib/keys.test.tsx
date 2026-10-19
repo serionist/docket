@@ -1,4 +1,5 @@
 import { render } from "@testing-library/react";
+import type * as React from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { commandFor, installKeys, keyName, register, registered, useKeys } from "./keys";
 
@@ -84,19 +85,127 @@ describe("the key layer", () => {
     expect(commandFor(new KeyboardEvent("keydown", { key: "z" }))).toBeUndefined();
   });
 
-  it("lets the group registered last win a key both claim, and drops a group when it goes", () => {
+  it("lets the group registered last win a key two of one level claim, and drops a group when it goes", () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    unregister.push(register({ id: "first", title: "First", commands: [{ keys: ["n"], what: "new", run: first }] }));
+    const off = register({ id: "second", title: "Second", commands: [{ keys: ["n"], what: "new", run: second }] });
+    expect(registered().map((g) => g.id)).toEqual(["second", "first"]);
+    press("n");
+    off();
+    press("n");
+    expect(second).toHaveBeenCalledOnce();
+    expect(first).toHaveBeenCalledOnce();
+    expect(registered().map((g) => g.id)).toEqual(["first"]);
+  });
+
+  it("lets a page's group win a key the shell's claims too, whichever registered first", () => {
     const shell = vi.fn();
     const page = vi.fn();
-    unregister.push(
-      register({ id: "shell", title: "Everywhere", commands: [{ keys: ["?"], what: "keys", run: shell }] }),
+    const pageGroup = { id: "page", title: "Page", commands: [{ keys: ["?"], what: "page keys", run: page }] };
+    const shellGroup = {
+      id: "shell",
+      title: "Everywhere",
+      level: "shell" as const,
+      commands: [{ keys: ["?"], what: "keys", run: shell }],
+    };
+    // A full load mounts the page's effects before the shell's; a client navigation mounts the page after.
+    for (const order of [
+      [pageGroup, shellGroup],
+      [shellGroup, pageGroup],
+    ]) {
+      const offs = order.map((group) => register(group));
+      expect(registered().map((g) => g.id)).toEqual(["page", "shell"]);
+      press("?");
+      for (const off of offs) off();
+    }
+    expect(page).toHaveBeenCalledTimes(2);
+    expect(shell).not.toHaveBeenCalled();
+  });
+
+  it("puts a page's keys before the shell's under React, on a full load and after a navigation", () => {
+    const shell = vi.fn();
+    const page = vi.fn();
+    function Page() {
+      useKeys("page", "This page", [{ keys: ["?"], what: "page keys", run: page }]);
+      return null;
+    }
+    function Shell({ children }: { children?: React.ReactNode }) {
+      useKeys("shell", "Everywhere", [{ keys: ["?"], what: "these keys", run: shell }], "shell");
+      return children;
+    }
+    // A full load: the child page's effect registers before its parent shell's.
+    const load = render(
+      <Shell>
+        <Page />
+      </Shell>,
     );
-    const off = register({ id: "page", title: "Page", commands: [{ keys: ["?"], what: "page keys", run: page }] });
     press("?");
-    off();
+    load.unmount();
+    // A navigation: the shell stands, and the page mounts under it.
+    const nav = render(<Shell />);
+    nav.rerender(
+      <Shell>
+        <Page />
+      </Shell>,
+    );
     press("?");
-    expect(page).toHaveBeenCalledOnce();
-    expect(shell).toHaveBeenCalledOnce();
-    expect(registered().map((g) => g.id)).toEqual(["shell"]);
+    expect(registered().map((g) => g.title)).toEqual(["This page", "Everywhere"]);
+    nav.unmount();
+    expect(page).toHaveBeenCalledTimes(2);
+    expect(shell).not.toHaveBeenCalled();
+  });
+
+  it("leaves Enter and Space to the focused link or control, and takes its other keys", () => {
+    const run = vi.fn();
+    unregister.push(
+      register({
+        id: "t",
+        title: "Test",
+        commands: [
+          { keys: ["Enter", "o"], what: "open", run },
+          { keys: ["x", " "], what: "tick", run },
+        ],
+      }),
+    );
+    const link = document.createElement("a");
+    link.href = "/ledger";
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    details.append(summary);
+    const button = document.createElement("button");
+    const inner = document.createElement("span");
+    button.append(inner);
+    const controls = [link, summary, button, inner];
+    for (const role of ["button", "checkbox", "switch", "menuitem", "tab"]) {
+      const el = document.createElement("div");
+      el.setAttribute("role", role);
+      el.tabIndex = 0;
+      controls.push(el);
+    }
+    document.body.append(link, details, button, ...controls.slice(4));
+    for (const control of controls) {
+      for (const key of ["Enter", " "]) {
+        expect(press(key, {}, control).defaultPrevented, `${key} on ${control.outerHTML}`).toBe(false);
+      }
+    }
+    expect(run).not.toHaveBeenCalled();
+    // A letter on a button is the page's still: only the keys that press it are the button's.
+    expect(press("x", {}, button).defaultPrevented).toBe(true);
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it("leaves a combobox's typeahead letters to it, as a field's", () => {
+    const run = vi.fn();
+    unregister.push(register({ id: "t", title: "Test", commands: [{ keys: ["j", "k"], what: "move", run }] }));
+    const trigger = document.createElement("button");
+    trigger.setAttribute("role", "combobox");
+    const value = document.createElement("span");
+    trigger.append(value);
+    document.body.append(trigger);
+    expect(press("j", {}, trigger).defaultPrevented).toBe(false);
+    expect(press("k", {}, value).defaultPrevented).toBe(false);
+    expect(run).not.toHaveBeenCalled();
   });
 
   it("registers a component's keys while it is mounted, each running its latest command", () => {

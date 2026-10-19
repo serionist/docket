@@ -139,9 +139,8 @@ function Where({ shell }: { shell: Shell | undefined }) {
       <p className="truncate" title={where}>
         {where}
       </p>
-      <p className="truncate" title={shell.index_line}>
-        {shell.index_line}
-      </p>
+      {/* Two lines at 224 px, so its time shows. */}
+      <p className="text-pretty">{shell.index_line}</p>
     </div>
   );
 }

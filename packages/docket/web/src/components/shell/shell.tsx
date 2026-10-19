@@ -14,10 +14,18 @@ export function useTitle(title: string): void {
   }, [title]);
 }
 
+const ShowKeys = React.createContext<() => void>(() => undefined);
+
+/** What opens the ? dialog, for a page's own button: it opens with the keys off too, and says so. */
+export function useShowKeys(): () => void {
+  return React.useContext(ShowKeys);
+}
+
 /** Every page's frame: the skip link, the sidebar, the page, and the dialogs any page can raise. */
 export function Shell() {
   const [keysOpen, setKeysOpen] = React.useState(false);
-  useKeys("shell", "Everywhere", [{ keys: ["?"], what: "these keys", run: () => setKeysOpen(true) }]);
+  const showKeys = React.useCallback(() => setKeysOpen(true), []);
+  useKeys("shell", "Everywhere", [{ keys: ["?"], what: "these keys", run: showKeys }], "shell");
   return (
     <TooltipProvider>
       <a
@@ -26,10 +34,12 @@ export function Shell() {
       >
         Skip to the page
       </a>
-      <SidebarProvider>
-        <AppSidebar />
-        <Outlet />
-      </SidebarProvider>
+      <ShowKeys.Provider value={showKeys}>
+        <SidebarProvider>
+          <AppSidebar />
+          <Outlet />
+        </SidebarProvider>
+      </ShowKeys.Provider>
       <KeysDialog open={keysOpen} onOpenChange={setKeysOpen} />
       <SessionDialog />
     </TooltipProvider>

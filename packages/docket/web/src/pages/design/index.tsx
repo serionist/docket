@@ -6,7 +6,7 @@
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { KeyboardIcon } from "lucide-react";
 import { Page, PageHeader } from "@/components/shell/page";
-import { useTitle } from "@/components/shell/shell";
+import { useShowKeys, useTitle } from "@/components/shell/shell";
 import { Button } from "@/components/ui/button";
 import { one, type Search } from "@/lib/search";
 import { cn } from "@/lib/utils";
@@ -30,6 +30,7 @@ export function DesignPage() {
   useTitle("Design");
   const search: Search = useSearch({ from: "/design" });
   const navigate = useNavigate();
+  const showKeys = useShowKeys();
   const part = partOf(search);
   const open = part === "list" ? one(search, "open") : undefined;
   const setOpen = (ref: string | undefined) =>
@@ -57,12 +58,7 @@ export function DesignPage() {
             </Link>
           ))}
         </nav>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Keys (?)"
-          onClick={() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "?" }))}
-        >
+        <Button variant="ghost" size="icon-sm" aria-label="Keys (?)" onClick={showKeys}>
           <KeyboardIcon />
         </Button>
       </PageHeader>

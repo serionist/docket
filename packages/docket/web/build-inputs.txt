@@ -1,6 +1,8 @@
 # What the build reads, as git pathspecs from this folder. build.json holds the hash of the tracked files they match,
 # line endings made LF, so the gate can tell a source changed since the build without Node (DR-0705). openapi.json
-# is left out: the types made from it are erased, and the typecheck catches drift.
+# is left out: the types made from it are erased, and the typecheck catches drift. Vite reads tsconfig.json and the
+# tsconfig.app.json it names for the sources' JSX and imports; tsconfig.node.json only types the tools. The tests are
+# out, and app.css keeps Tailwind off them too.
 .npmrc
 .nvmrc
 build-inputs.txt
@@ -13,4 +15,6 @@ src
 :(exclude,glob)src/**/*.test.ts
 :(exclude,glob)src/**/*.test.tsx
 :(exclude)src/test
+tsconfig.app.json
+tsconfig.json
 vite.config.ts

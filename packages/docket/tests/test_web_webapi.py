@@ -13,12 +13,16 @@ from docket_testkit import copied
 from docket_webkit import OURS, PORT, TOKEN
 from starlette.testclient import TestClient
 
+from docket import paths
 from docket.errors import DocketError
 from docket.ledger import day as ledger_day
-from docket.service.app import create_app
+from docket.service.app import ServiceApp, create_app
 from docket.service.sessions import COOKIE, Sessions
 from docket.service.state import Settings
+from docket.service.writer import IndexUpdater
 from docket.vault.gate import Gate
+from docket.vault.staging import Staging
+from docket.vault.vault import Vault
 from docket.web import webapi
 
 SCHEMA = Path(__file__).parents[1] / "web" / "openapi.json"
@@ -51,7 +55,7 @@ def test_the_shell_counts_the_week_s_untriaged_items_waiting_records_and_due_syn
     assert answer.headers["cache-control"] == "no-store"
     shell = answer.json()
     # day_kit's seed: seven items, one done and one snoozed, so five open, one of them with a call; staging_kit's
-    # three records.
+    # three records, read as the files stand.
     assert shell["untriaged"] == 4
     assert shell["staging"] == 3
     assert shell["sync_due"] == ["chat"], "the live source, never synced"
@@ -80,12 +84,42 @@ def test_a_vault_that_doesn_t_read_says_why(tmp_path: Path) -> None:
     assert shell["problem"] and shell["vault"] is None
 
 
+def files(*roots: Path) -> dict[Path, tuple[int, int]]:
+    """Every file under the roots, with its size and modification time."""
+    return {p: (p.stat().st_size, p.stat().st_mtime_ns) for root in roots for p in root.rglob("*") if p.is_file()}
+
+
+def test_the_shell_s_read_writes_nothing_and_leaves_the_sweep_to_the_staging_page(tmp_path: Path) -> None:
+    vault = Vault.open(world(tmp_path, "week"))
+    # A record decided by hand before a crash let its staged file go: the gate's sweep would delete it now.
+    staging = Staging(vault.root, vault.home)
+    first = staging.scan().entries[0]
+    staging.remember([(first.staged.record.rid, first.key)], "private")
+    state = paths.state_dir()
+    client = client_of(vault.root)
+    app = client.app
+    assert isinstance(app, ServiceApp)
+    # The service's own index update at start writes the index; the read alone is what is watched here.
+    app.service.updater = IndexUpdater(lambda: None)
+    with client:
+        before = files(vault.root, state)
+        shell = client.get("/api/web/shell").json()
+        assert files(vault.root, state) == before, "the shell's read wrote nothing: no sweep, no lock, no state"
+        assert shell["staging"] == 3, "the staged files as they stand"
+        # The Staging page's own read sweeps, and the shell counts what it left.
+        assert len(Gate(vault).list().entries) == 2
+        assert client.get("/api/web/shell").json()["staging"] == 2
+
+
 def test_a_part_that_doesn_t_read_leaves_its_count_out(week: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     def refused(*_args: object, **_kwargs: object) -> None:
         raise DocketError("the forgotten list doesn't read")
 
+    def unreadable(*_args: object, **_kwargs: object) -> None:
+        raise OSError("staging doesn't read")
+
     monkeypatch.setattr(ledger_day, "read", refused)
-    monkeypatch.setattr(Gate, "list", refused)
+    monkeypatch.setattr(Staging, "scan", unreadable)
     shell = week.get("/api/web/shell").json()
     assert (shell["untriaged"], shell["staging"], shell["sync_due"]) == (None, None, [])
     assert shell["problem"] is None

@@ -110,3 +110,33 @@ def test_a_folder_git_can_t_read_says_so(tmp_path: Path) -> None:
     put(tmp_path, web.LIST, b"src\n")
     with pytest.raises(KitError, match="git ls-files"):
         web.input_files(tmp_path)
+
+
+def test_the_real_list_moves_the_hash_on_a_tsconfig_option_and_not_on_a_test(
+    repo: Path, git: Callable[..., str]
+) -> None:
+    # This repo's build-inputs.txt over a web folder of its shape: what the build reads moves the hash, a test doesn't.
+    git(repo, "config", "core.autocrlf", "false")
+    put(repo, web.LIST, (REAL_ROOT / web.LIST).read_bytes())
+    for name in ("tsconfig.json", "tsconfig.app.json", "src/main.tsx", "src/lib/keys.test.tsx", "src/test/setup.ts"):
+        put(repo, f"{web.WEB}/{name}", b"{}\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "Web")
+    before = web.inputs_hash(repo)
+    put(repo, f"{web.WEB}/src/lib/keys.test.tsx", b'it("a test renamed", () => {});\n')
+    put(repo, f"{web.WEB}/src/test/setup.ts", b"// changed\n")
+    assert web.inputs_hash(repo) == before
+    for name in ("tsconfig.app.json", "tsconfig.json"):
+        put(repo, f"{web.WEB}/{name}", b'{"compilerOptions": {"jsx": "preserve"}}\n')
+        assert web.inputs_hash(repo) != before, name
+        put(repo, f"{web.WEB}/{name}", b"{}\n")
+
+
+def test_the_build_s_inputs_take_both_tsconfigs_and_tailwind_reads_no_test() -> None:
+    files = web.input_files(REAL_ROOT)
+    assert {"tsconfig.json", "tsconfig.app.json"} <= set(files)
+    assert [f for f in files if ".test." in f or f.startswith("src/test/")] == []
+    # Tailwind makes classes from the words it scans, so the tests the hash leaves out stay out of its scan too.
+    css = (REAL_ROOT / web.WEB / "src/styles/app.css").read_text(encoding="utf-8")
+    assert '@source not "../../src/**/*.test.*";' in css
+    assert '@source not "../../src/test";' in css

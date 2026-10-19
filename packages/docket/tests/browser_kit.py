@@ -26,10 +26,11 @@ WATCH_CSP = (
     "window.__csp.push(`${e.violatedDirective} ${e.blockedURI || 'inline'}`));"
 )
 # A modal hides the page behind it, as it should, and axe would read that page as missing its landmarks: a modal
-# state is checked inside the modal.
+# state is checked inside the modal on top, the last opened, a menu included.
 AXE_RUN = """async () => {
-  const modal = document.querySelector(
-    '[role=dialog][data-state=open], [role=alertdialog][data-state=open], [role=listbox][data-state=open]');
+  const modal = [...document.querySelectorAll(
+    '[role=dialog][data-state=open], [role=alertdialog][data-state=open], [role=listbox][data-state=open], ' +
+    '[role=menu][data-state=open]')].pop();
   const found = await axe.run(modal ?? document, {
     runOnly: {type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice']},
   });

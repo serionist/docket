@@ -90,6 +90,13 @@ PAGES: dict[str, Page] = {
             State("keys", "/design", (("press", "?"),)),
             State("session", "/design?part=components", (("click", "text=End the session here"),)),
             State("sheet", "/design", (("click", "[aria-label='Open the pages']"),), only="narrow"),
+            State("theme", "/design", (("click", "button:has-text('Theme')"),), only="wide"),
+            State(
+                "sheet-theme",
+                "/design",
+                (("click", "[aria-label='Open the pages']"), ("click", "button:has-text('Theme')")),
+                only="narrow",
+            ),
         ),
     ),
 }
@@ -102,11 +109,12 @@ WATCH_CSP = (
     "document.addEventListener('securitypolicyviolation', e => "
     "window.__csp.push(`${e.violatedDirective} ${e.blockedURI || 'inline'}`));"
 )
-# A modal (a dialog, an open listbox) hides the page behind it from assistive technology, as it should; axe then
-# reads that page as missing its landmarks, so a modal state is checked inside the modal.
+# A modal (a dialog, an open listbox or menu) hides the page behind it from assistive technology, as it should; axe
+# then reads that page as missing its landmarks, so a modal state is checked inside the modal on top, the last opened.
 AXE_RUN = """async () => {
-  const modal = document.querySelector(
-    '[role=dialog][data-state=open], [role=alertdialog][data-state=open], [role=listbox][data-state=open]');
+  const modal = [...document.querySelectorAll(
+    '[role=dialog][data-state=open], [role=alertdialog][data-state=open], [role=listbox][data-state=open], ' +
+    '[role=menu][data-state=open]')].pop();
   const found = await axe.run(modal ?? document, {
     runOnly: {type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice']},
   });

@@ -18,7 +18,7 @@ from docket.errors import DocketError
 from docket.ledger import day as ledger_day
 from docket.ledger import views
 from docket.service.state import Service
-from docket.vault.gate import Gate
+from docket.vault.staging import Staging
 from docket.web import shell as shell_parts
 
 PREFIX = "/api/web"
@@ -36,7 +36,8 @@ class Shell(BaseModel):
     index_line: str
     # Open items with no call yet, as the Queue lists them.
     untriaged: int | None
-    # Records waiting at the gate: pending, ready and on hold, as the Staging page counts them.
+    # Records waiting at the gate: pending, ready and on hold, the staged files as they stand. The Staging page's
+    # sweep, when it opens, may drop some first.
     staging: int | None
     # The live sources whose sync is due, by name; none while a run of theirs is open.
     sync_due: list[str]
@@ -76,14 +77,14 @@ async def read_shell(service: Service) -> Shell:
         return sum(1 for i in day.queue if i.triage is None), [s.source for s in day.syncs if s.due]
 
     def waiting() -> int | None:
-        # Through the gate's own call on the writer thread, as the Staging page reads it: its sweep comes first.
+        # The staged files as they stand, read beside the writer, never on it: the shell's read writes nothing and
+        # takes no lock. The gate's sweep, which may drop a record, runs when the Staging page opens.
         try:
-            return len(Gate(service.vault()).list().entries)
+            return len(Staging(vault.root, vault.home).scan().entries)
         except (DocketError, OSError):
             return None
 
-    untriaged, due = await asyncio.to_thread(ledger)
-    staging = await service.writer.run(waiting)
+    (untriaged, due), staging = await asyncio.gather(asyncio.to_thread(ledger), asyncio.to_thread(waiting))
     return Shell(
         vault=vault.root.name,
         machine=vault.machine,

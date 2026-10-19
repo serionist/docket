@@ -110,6 +110,73 @@ def test_the_shell_and_its_list_in_chrome(browser: Browser, week: tuple[int, str
     clean(page, errors)
 
 
+def test_enter_and_space_press_the_focused_link_or_control(browser: Browser, week: tuple[int, str]) -> None:
+    port, token = week
+    page, errors = opened(browser, port, token, "/design")
+    # The skip link: Tab reaches it first, and Enter follows it rather than opening the selected row.
+    page.keyboard.press("Tab")
+    expect(page.get_by_role("link", name="Skip to the page")).to_be_focused()
+    page.keyboard.press("Enter")
+    expect(page.locator("#main")).to_be_focused()
+    assert "open=" not in page.url
+    # Space on a row's tick ticks that row, not the selected one.
+    boxes = page.get_by_role("checkbox")
+    boxes.nth(2).focus()
+    page.keyboard.press(" ")
+    expect(boxes.nth(2)).to_have_attribute("aria-checked", "true")
+    expect(boxes.nth(0)).to_have_attribute("aria-checked", "false")
+    # Enter on the Theme button opens its menu.
+    page.get_by_role("button", name=re.compile(r"^Theme")).focus()
+    page.keyboard.press("Enter")
+    expect(page.get_by_role("menu")).to_be_visible()
+    assert axe(page) == []
+    page.keyboard.press("Escape")
+    expect(page.get_by_role("menu")).to_have_count(0)
+    # Space on the keys switch turns the keys off, and ticks nothing.
+    switch = page.get_by_role("switch", name="Keys on")
+    switch.focus()
+    page.keyboard.press(" ")
+    expect(switch).to_have_attribute("aria-checked", "false")
+    expect(page.locator('[role="checkbox"][aria-checked="true"]')).to_have_count(1)
+    # With the keys off, the header's button still opens the keys, and they say they are off.
+    page.get_by_role("button", name="Keys (?)").click()
+    expect(page.get_by_role("dialog", name="Keys")).to_contain_text("The keys are off.")
+    page.keyboard.press("Escape")
+    switch.focus()
+    page.keyboard.press(" ")
+    expect(switch).to_have_attribute("aria-checked", "true")
+    # Enter on a sidebar link, with the keys on, follows the link.
+    page.get_by_role("navigation", name="Pages").get_by_role("link", name="Search").focus()
+    page.keyboard.press("Enter")
+    page.wait_for_url("**/search")
+    assert errors == []
+    assert page.evaluate("window.__csp") == []
+
+
+def test_the_keys_rows_and_the_index_line_show_whole(browser: Browser, week: tuple[int, str]) -> None:
+    port, token = week
+    # At 390 px a row's words wrap, and the row grows to hold them.
+    narrow = {"width": 390, "height": 844}
+    page, errors = opened(browser, port, token, "/design", viewport=narrow, has_touch=True, is_mobile=True)
+    page.keyboard.press("?")
+    expect(page.get_by_role("dialog", name="Keys")).to_be_visible()
+    spilled = page.evaluate(
+        """() => [...document.querySelectorAll('[role=dialog] dd, [role=dialog] dt')].filter(cell => {
+          const box = cell.getBoundingClientRect(); const range = document.createRange();
+          range.selectNodeContents(cell); const text = range.getBoundingClientRect();
+          return text.top < box.top - 0.5 || text.bottom > box.bottom + 0.5;
+        }).map(cell => cell.textContent)"""
+    )
+    assert spilled == []
+    clean(page, errors)
+    # At 1440 the sidebar is 224 px, and its index line wraps rather than clipping its time.
+    page, errors = opened(browser, port, token, "/design")
+    line = page.get_by_role("navigation", name="Pages").locator("p").last
+    expect(line).to_be_visible()
+    assert line.evaluate("p => p.scrollWidth <= p.clientWidth && p.scrollHeight <= p.clientHeight")
+    clean(page, errors)
+
+
 def test_a_select_under_the_csp_gets_the_nonce(browser: Browser, week: tuple[int, str]) -> None:
     port, token = week
     page, errors = opened(browser, port, token, "/design?part=components")
