@@ -35,6 +35,7 @@ from docket.ledger import ops as ledger_ops
 from docket.ledger import status as ledger_status
 from docket.ledger import store as ledger_store
 from docket.ledger import views as ledger_views
+from docket.ledger import whole as ledger_whole
 from docket.media import backup as media_backup
 from docket.media import confirm as media_confirm
 from docket.media import sources as media_sources
@@ -2079,13 +2080,26 @@ def ledger_snapshot(
 
 @ledger_app.command("show")
 def ledger_show(
-    ref: Annotated[str, typer.Argument(help="An item's A- number, a meeting's M- number, an id, or a stream's name.")],
+    ref: Annotated[
+        str | None, typer.Argument(help="An item's A- number, a meeting's M- number, an id, or a stream's name.")
+    ] = None,
+    every: Annotated[
+        bool, typer.Option("--all", help="Every item, meeting and stream, archived too, stamped; with --json only.")
+    ] = False,
     as_json: LedgerJson = False,
     vault: VaultOption = None,
 ) -> None:
     """One item, meeting or stream as its ops leave it: its fields, notes, materials, a meeting's points with their
     ids and its items, an item's counts, and its history, every change in order with who made it and how. A number
-    others have held too names them."""
+    others have held too names them. --all --json gives every one so, with the op files' stamp and the vault lock's
+    file, for a script outside Docket."""
+    if every:
+        if ref is not None or not as_json:
+            raise DocketError("--all takes no ref, and gives JSON only: docket ledger show --all --json")
+        typer.echo(ledger_whole.as_json(ledger_whole.read(find_vault(vault), ledger_views.now())))
+        return
+    if ref is None:
+        raise DocketError("give an item's A- number, a meeting's M- number, an id or a stream's name, or --all --json")
     _ledger_read(vault, ledger_views.Ask(view="show", ref=ref), as_json)
 
 

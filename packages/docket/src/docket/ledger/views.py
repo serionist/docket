@@ -18,6 +18,9 @@ answers and the history come only in `show`, and no read quotes a record. A snoo
 as todo.py showed it: open in every count and filter, untriaged in the queue, its row marked `woke`. An item's counts
 come from its ops, never its log's words (DR-0644): it is chased once per triage to chase that stands, an idle one
 too.
+
+`every` gives each item, meeting and stream as show gives it, in a few queries for all of them, for `docket ledger show
+--all --json` (DR-0659, DR-0684): the same code makes each result from rows read together.
 """
 
 from __future__ import annotations
@@ -39,7 +42,7 @@ from docket.index import ledger as index_ledger
 from docket.index.ledger import Held, utc_text
 from docket.index.query import parse_when
 from docket.ledger import ops
-from docket.ledger.fold import CLOSED, NUMBER, number_text
+from docket.ledger.fold import CLOSED, NUMBER, Item, number_text
 from docket.ledger.meetings import meeting_text
 from docket.ledger.store import MEETING_NUMBER
 
@@ -84,7 +87,16 @@ def _columns(names: Sequence[str]) -> str:
 ITEMS = f"SELECT {_columns(ITEM_COLUMNS)} FROM items"  # noqa: S608
 MEETINGS = f"SELECT {_columns(MEETING_COLUMNS)} FROM meetings"  # noqa: S608
 STREAMS = f"SELECT {_columns(STREAM_COLUMNS)} FROM streams"  # noqa: S608
+# A meeting's row and what show gives of it besides.
+MEETINGS_WHOLE = (
+    f'SELECT {_columns(MEETING_COLUMNS)}, attendees, "where", series, event, notes, outcome, materials, added_by '  # noqa: S608
+    "FROM meetings"
+)
+# A meeting's or a stream's history, in the order show lists it.
+OBJECT_HISTORY = "SELECT id, day, at, by, via, line, undone_by, kind, item FROM {table}"
+BY_ID = " ORDER BY id, item, version"
 BY_OPENED = " ORDER BY opened, claimed, id"
+NO_COUNTS = (0, 0, 0, 0)
 # Open now: an open item, or a snoozed one whose day, the value given, has come.
 AWAKE = "(state = 'open' OR (state = 'snoozed' AND until <= ?))"
 # A triage to chase and a set of the due, in an op line as the writer writes it. A quoted text holds none of these
@@ -118,6 +130,8 @@ CODE = (
 # The module's own SQL, never a user's text.
 COUNTS = f"SELECT item, {CODE} FROM item_log WHERE {STANDS}"  # noqa: S608
 READ_WHOLE = f"SELECT item, kind, keys FROM item_log WHERE {STANDS} AND {CODE} = 'w'"  # noqa: S608
+# Every item's, in one pass, for show --all.
+EVERY_COUNT = COUNTS.replace("item IN ({marks}) AND ", "")
 # Where each code adds, in an item's counts: times chased, snoozes, due changes, reopens.
 SLOT = {"c": 0, "s": 1, "m": 2, "r": 3}
 
@@ -505,16 +519,18 @@ class _Reader:
             done=states["done"], dropped=states["dropped"], overdue=sum(1 for item in items if item.late is not None),
         )  # fmt: skip
 
-    def history_counts(self, ids: Iterable[str]) -> dict[str, tuple[int, int, int, int]]:
+    def history_counts(self, ids: Iterable[str] | None) -> dict[str, tuple[int, int, int, int]]:
         """Each item's times chased, snoozes, due changes and reopens, from the ops that stand, an idle one too
-        (DR-0644): a chase repeated on an item already marked chase is a chase. Items with none are left out.
+        (DR-0644): a chase repeated on an item already marked chase is a chase. Items with none are left out; None
+        asks every item's.
 
         SQL codes a line by its text where its text can't mislead (`CODE`); any other line that may chase or move the
         due is read whole, by the reader the fold reads it with, so an escape, a nested object or a key given twice
         counts as the fold takes it."""
         out: dict[str, list[int]] = {}
         whole: set[str] = set()
-        for item_id, code in self.select(COUNTS, ids):
+        coded = self.conn.execute(EVERY_COUNT).fetchall() if ids is None else self.select(COUNTS, ids)
+        for item_id, code in coded:
             if code == "w":
                 whole.add(item_id)
             elif code:
@@ -695,19 +711,27 @@ class _Reader:
         return self.show_item(index_ledger.find(self.conn, text))
 
     def show_item(self, shown: index_ledger.Shown) -> LedgerRead:
-        item = shown.item
-        (row,) = self.items(" WHERE id = ?", (item.id,), whole=True)
-        chased, snoozes, due_moves, reopens = self.history_counts([item.id]).get(item.id, (0, 0, 0, 0))
+        item_id = shown.item.id
+        (row,) = self.items(" WHERE id = ?", (item_id,), whole=True)
         named = number_text(shown.named or 0)
+        history = [Change(id=c.id, day=c.day, at=c.at, by=c.by, via=c.via, line=c.line, undone_by=c.undone_by,
+                          kind=c.kind)
+                   for c in shown.history]  # fmt: skip
+        counted = self.history_counts([item_id]).get(item_id, NO_COUNTS)
+        also = [f"{named} by {other}, {index_ledger.now_held(held)}" for other, held in shown.also]
+        return self.item_read(shown.item, row, counted, history, also)
+
+    def item_read(
+        self, item: Item, row: ItemRow, counted: tuple[int, int, int, int], history: list[Change], also: list[str]
+    ) -> LedgerRead:
+        """An item's show from its fields, its row read whole, its counts, its history and the others that held the
+        number it was named by."""
+        chased, snoozes, due_moves, reopens = counted
         detail = Detail(
             kind="item", added_by=item.added_by, claimed=item.claimed if item.number is None else None,
             description=item.description, notes=item.notes, outcome=item.outcome,
-            materials=[MaterialRow(ref=m.ref, label=m.label) for m in item.materials],
-            also=[f"{named} by {other}, {index_ledger.now_held(held)}" for other, held in shown.also],
-            chased=chased, snoozes=snoozes, due_moves=due_moves, reopens=reopens,
-            history=[Change(id=c.id, day=c.day, at=c.at, by=c.by, via=c.via, line=c.line, undone_by=c.undone_by,
-                            kind=c.kind)
-                     for c in shown.history],
+            materials=[MaterialRow(ref=m.ref, label=m.label) for m in item.materials], also=also, chased=chased,
+            snoozes=snoozes, due_moves=due_moves, reopens=reopens, history=history,
         )  # fmt: skip
         return LedgerRead(view="show", today=self.today, counts=Counts(items=1), items=[row], detail=detail)
 
@@ -741,29 +765,31 @@ class _Reader:
         return chosen, number, [(h, held[h]) for h in holders if h != chosen]
 
     def show_meeting(self, meeting_id: str, named: int | None, also: Sequence[tuple[str, int | None]]) -> LedgerRead:
-        (raw,) = self.conn.execute(
-            'SELECT id, number, subject, start, "end", organiser, stream, response, archived, adds, attendees, '
-            '"where", series, event, notes, outcome, materials, added_by FROM meetings WHERE id = ?',
-            (meeting_id,),
-        ).fetchall()
+        (raw,) = self.conn.execute(MEETINGS_WHOLE + " WHERE id = ?", (meeting_id,)).fetchall()
         (row,) = self.meeting_rows([raw[:10]], whole=True)
         adds: list[str] = json.loads(raw[9])
-        attendees, place, series, event, notes, outcome, materials, added_by = raw[10:]
         linked = self.item_rows(self.conn.execute(
             f"{ITEMS} WHERE meeting IN ({', '.join('?' * len(adds))}){BY_OPENED}", adds
         ).fetchall())  # fmt: skip
+        parts = (linked, self.point_rows([row], whole=True), self.history("meeting_log", adds))
+        return self.meeting_read(raw, row, *parts, named=named, also=also)
+
+    def meeting_read(
+        self, raw: Sequence[Any], row: MeetingRow, linked: list[ItemRow], points: list[PointRow], history: list[Change],
+        *, named: int | None = None, also: Sequence[tuple[str, int | None]] = (),
+    ) -> LedgerRead:  # fmt: skip
+        """A meeting's show from its row, read whole, its items, its standing points and its history."""
+        attendees, place, series, event, notes, outcome, materials, added_by = raw[10:]
         label = meeting_text(named or 0)
         detail = Detail(
             kind="meeting", added_by=added_by, notes=notes, outcome=outcome, attendees=json.loads(attendees),
             where=place, series=series, event=event, materials=_materials(materials),
-            also=[f"{label} by {other}, {_now_meeting(held)}" for other, held in also],
-            history=self.history("meeting_log", adds),
+            also=[f"{label} by {other}, {_now_meeting(held)}" for other, held in also], history=history,
         )  # fmt: skip
         counts = Counts(meetings=1, points_open=row.points_open, items=len(linked))
         return LedgerRead(
-            view="show", today=self.today, counts=counts, items=linked, meetings=[row],
-            points=self.point_rows([row], whole=True), detail=detail,
-        )  # fmt: skip
+            view="show", today=self.today, counts=counts, items=linked, meetings=[row], points=points, detail=detail
+        )
 
     def stream_row(self, stream_id: str, gone: str) -> tuple[StreamRow, list[str], str]:
         rows = self.stream_rows(" WHERE id = ?", (stream_id,), whole=True)
@@ -781,21 +807,69 @@ class _Reader:
         return LedgerRead(view="show", today=self.today, counts=counts, items=items, streams=[row], detail=detail)
 
     def history(self, table: str, adds: Sequence[str]) -> list[Change]:
-        """A meeting's or a stream's history: the lines of its adds that show, oldest first."""
-        sql = (
-            f"SELECT id, day, at, by, via, line, undone_by, kind FROM {table} WHERE item IN ({{marks}}) "  # noqa: S608
-            "AND line IS NOT NULL"
-        )
-        rows = sorted(self.select(sql, adds), key=lambda r: r[0])
+        """A meeting's or a stream's history: the lines of its adds that show, oldest first, two of one id by add
+        and version."""
+        sql = f"{OBJECT_HISTORY.format(table=table)} WHERE item IN ({{marks}}) AND line IS NOT NULL{BY_ID}"
+        return [_change(r) for r in sorted(self.select(sql, adds), key=lambda r: r[0])]
+
+    # -- every object (DR-0659) ---------------------------------------------------------------------------------------
+
+    def every(self) -> tuple[list[LedgerRead], list[LedgerRead], list[LedgerRead]]:
+        """Every item, meeting and stream that stands, archived ones too, each as show gives it by its ref, which
+        names it alone, so no other holder of its number comes with it: items by the day each opened, meetings by
+        start, streams by name. A few queries for all of them, where show asks a few for each."""
+        streams = [r for (r,) in self.conn.execute("SELECT id FROM streams ORDER BY name")]
+        return self.every_item(), self.every_meeting(), [self.show_stream(self.stream_row(s, "")) for s in streams]
+
+    def every_item(self) -> list[LedgerRead]:
+        found = index_ledger.every_item(self.conn)
+        history: dict[str, list[Change]] = {}
+        for r in self.conn.execute(f"{index_ledger.HISTORY} WHERE line IS NOT NULL{index_ledger.IN_ORDER}"):
+            history.setdefault(r[8], []).append(_change(r))
+        counted = self.history_counts(None)
         return [
-            Change(id=i, day=date.fromisoformat(day), at=None if at is None else datetime.fromisoformat(at), by=by,
-                   via=via, line=line, undone_by=undone, kind=kind)
-            for i, day, at, by, via, line, undone, kind in rows
-        ]  # fmt: skip
+            self.item_read(found[row.id], row, counted.get(row.id, NO_COUNTS), history.get(row.id, []), [])
+            for row in self.items(whole=True)
+        ]
+
+    def every_meeting(self) -> list[LedgerRead]:
+        raws = self.conn.execute(MEETINGS_WHOLE + " ORDER BY utc, id").fetchall()
+        rows = self.meeting_rows([raw[:10] for raw in raws], whole=True)
+        owner = {add: raw[0] for raw in raws for add in json.loads(raw[9])}
+        linked: dict[str, list[ItemRow]] = {}
+        on = self.conn.execute(f"{ITEMS} WHERE meeting IS NOT NULL{BY_OPENED}").fetchall()
+        for raw, row in zip(on, self.item_rows(on), strict=True):
+            if raw[7] in owner:
+                linked.setdefault(owner[raw[7]], []).append(row)
+        points: dict[str, list[PointRow]] = {}
+        for point in self.point_rows(rows, whole=True):
+            points.setdefault(point.meeting, []).append(point)
+        history: dict[str, list[Change]] = {}
+        sql = f"{OBJECT_HISTORY.format(table='meeting_log')} WHERE line IS NOT NULL{BY_ID}"
+        for r in self.conn.execute(sql):
+            if r[8] in owner:
+                history.setdefault(owner[r[8]], []).append(_change(r))
+        return [
+            self.meeting_read(raw, row, linked.get(row.id, []), points.get(row.ref, []), history.get(row.id, []))
+            for raw, row in zip(raws, rows, strict=True)
+        ]
 
 
 def _materials(text: str) -> list[MaterialRow]:
     return [MaterialRow(ref=m["ref"], label=m.get("label")) for m in json.loads(text)]
+
+
+def _change(row: Sequence[Any]) -> Change:
+    i, day, at, by, via, line, undone, kind, _ = row
+    return Change(id=i, day=date.fromisoformat(day), at=None if at is None else datetime.fromisoformat(at), by=by,
+                  via=via, line=line, undone_by=undone, kind=kind)  # fmt: skip
+
+
+def every(
+    conn: sqlite3.Connection, tz: ZoneInfo, at: datetime
+) -> tuple[list[LedgerRead], list[LedgerRead], list[LedgerRead]]:
+    """Every item, meeting and stream as show gives it, today the owner's day at `at` (DR-0659). It writes nothing."""
+    return _Reader(conn, tz, at).every()
 
 
 def _now_meeting(number: int | None) -> str:

@@ -834,6 +834,11 @@ class Shown:
     also: tuple[tuple[str, int | None], ...] = ()
 
 
+# An item's history as show lists it: the lines that show, in id order, two texts of one id by version.
+HISTORY = "SELECT id, day, at, by, via, line, undone_by, kind, item FROM item_log"
+IN_ORDER = " ORDER BY item, id, version"
+
+
 def find(conn: sqlite3.Connection, ref: str) -> Shown:
     """The item an A- number or an id names (DR-0613): a number finds the item that holds it and names the others
     that held it; one that none holds now, but more than one held, names them and shows none."""
@@ -877,15 +882,20 @@ def _shown(
     if row is None:
         hidden = conn.execute("SELECT 1 FROM item_numbers WHERE item = ? LIMIT 1", (item_id,)).fetchone()
         raise DocketError(f"{item_id} was undone" if hidden else f"no item {item_id}")
-    history = tuple(
-        Change(op_id, date.fromisoformat(day), at and datetime.fromisoformat(at), by, via, line, undone, kind)
-        for op_id, day, at, by, via, line, undone, kind in conn.execute(
-            "SELECT id, day, at, by, via, line, undone_by, kind FROM item_log WHERE item = ? AND line IS NOT NULL "
-            "ORDER BY id, version",
-            (item_id,),
-        )
-    )
+    history = tuple(_change(r) for r in conn.execute(f"{HISTORY} WHERE item = ? AND line IS NOT NULL{IN_ORDER}",
+                                                      (item_id,)))  # fmt: skip
     return Shown(_item(row), history, named, also)
+
+
+def every_item(conn: sqlite3.Connection) -> dict[str, Item]:
+    """Every item that stands, by id, as `find` gives it: what `docket ledger show --all` reads (DR-0659)."""
+    sql = f"SELECT {', '.join(ITEM_COLUMNS)} FROM items"  # noqa: S608 - the module's own columns
+    return {row[0]: _item(row) for row in conn.execute(sql)}
+
+
+def _change(row: Sequence[Any]) -> Change:
+    op_id, day, at, by, via, line, undone, kind, _ = row
+    return Change(op_id, date.fromisoformat(day), at and datetime.fromisoformat(at), by, via, line, undone, kind)
 
 
 def _item(row: Sequence[Any]) -> Item:

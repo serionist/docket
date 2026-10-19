@@ -828,11 +828,13 @@ No big-bang switch: each piece of an existing setup is replaced only after its r
    `docket ledger import` takes op lines a script in the user's project writes from the old ledger, a month per
    commit, skipping what it holds, so no importer for one person's format lives in Docket (DR-0653); its dry run
    counts what it brings (DR-0654), old meetings come in keyless for `docket ledger calendar` to join (DR-0655), and
-   `--revert` deletes every op file until the switch (DR-0656). Until the day pages exist, an existing setup's sync
-   harvests through its own source skills into Docket and keeps reconciling into its own task list. Once the ledger
-   has moved, each stream's STATUS.md frontmatter is rendered from it, as the people directory and the glossary are
-   from the entities: a file the old tool wrote is taken over when its fields agree with the ledger, and left and
-   reported when they don't (DR-0675).
+   `--revert` deletes every op file until the switch (DR-0656). For the week in step, `docket ledger show --all
+   --json` gives every object as `show` does, with the op files' stamp and the vault lock's file, for the user's own
+   mirror of the old ledger to render from and check against (DR-0659, DR-0684). Until the day pages exist, an
+   existing setup's sync harvests through its own source skills into Docket and keeps reconciling into its own task
+   list. Once the ledger has moved, each stream's STATUS.md frontmatter is rendered from it, as the people directory
+   and the glossary are from the entities: a file the old tool wrote is taken over when its fields agree with the
+   ledger, and left and reported when they don't (DR-0675).
 
 ## 13. How we know it works
 
