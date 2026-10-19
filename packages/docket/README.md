@@ -872,6 +872,10 @@ What the service refuses, and what it doesn't:
 Recording, Briefs, Sync, Staging, Curate and Settings; the navigation shows the pages still to come, with the phase each
 arrives in.
 
+The pages are moving, one by one, into a new app built in React. Its shell is at `/design` for now
+(`docket open /design`): the sidebar with what waits at the gate and whether a sync is due, the theme and keys switches
+at its foot, and the design the pages move to, on invented data. It comes built with Docket; nothing to install.
+
 - Search runs the search Claude runs: the same words, names, time words and dates. Sources and a month narrow it;
   people and entities favour the hits that mention them, as Claude's boosts do. Facet counts are within the top 200.
 - A hit opens beside the results: its summary, with the lines pointing at it marked, next to the raw it came from.
@@ -1032,5 +1036,6 @@ the api provider it names as commands.
   and the question says so; one that turns credentials redaction off refuses the add until you commit or undo it.
 - Keys: `?`.
 
-The pages' browser test runs on CI. To run it here, against your own Chrome or Edge:
-`DOCKET_TEST_BROWSER=chrome uv run pytest packages/docket/tests/test_web_browser.py` (or `msedge`).
+The pages' browser tests run on CI. To run them here, against your own Chrome or Edge, with `npm ci` run once in
+`packages/docket/web` for their accessibility checks:
+`DOCKET_TEST_BROWSER=chrome uv run pytest packages/docket/tests/test_web_browser*.py` (or `msedge`).

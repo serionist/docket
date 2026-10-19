@@ -29,6 +29,7 @@ diff, no build, no tests. It would run with every credential on this machine.
    - a PR: `gh pr diff <n> --name-only > files.txt` and `gh pr diff <n> > scope.diff`. Someone else's PR is reviewed,
      not fixed;
    - a path: `git ls-files -- <paths> > files.txt`, leaving out what is not code or config.
+   Leave the web app's build out of each, after `--`: `':!packages/docket/src/docket/web/app'` (DR-0705).
    From the second round of a change, also write `delta.diff`: the fixes since the last reviewed commit.
 2. The ground truth: `AGENTS.md`, `REVIEW.md`, `uv run docs door <path>` and the binding decisions for each folder
    in scope, the plan the branch committed in `docs/plans/` if any, then the diff, then the touched files in full.

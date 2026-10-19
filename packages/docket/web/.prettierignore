@@ -1,0 +1,5 @@
+node_modules
+openapi.json
+package-lock.json
+src/api/schema.d.ts
+src/components/ui/LICENSE.md

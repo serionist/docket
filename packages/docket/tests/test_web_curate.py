@@ -150,7 +150,7 @@ def test_a_card_opens_beside_the_list_with_its_snippets(client: TestClient, vaul
     marks = [m.text() for m in panel.find_all("mark")]
     assert marks[:1] == ["Nortwin"]
     links = [a.attrs["href"] for a in panel.find_all("a", class_="locator")]
-    assert links and all(link.startswith("/search?hit=r%3Aplaud%3Arec-") for link in links)
+    assert links and all(link.startswith("/search?hit=r:plaud:rec-") for link in links)
     fragment = client.get(f"/curate/panel?open={northwind.id}")
     assert fragment.status_code == 200 and fragment.headers["HX-Push-Url"] == f"/curate?open={northwind.id}"
     assert not a11y_problems(fragment.text, whole=False)

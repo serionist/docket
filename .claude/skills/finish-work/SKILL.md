@@ -21,6 +21,7 @@ complete. `main` takes PRs only, squash-merged.
    run gate check-text .local/pr-body.md`, push, and run `gh pr create --draft --title "<plain sentence>" --body-file
    .local/pr-body.md`. Say it's open and how to see it all (the Files tab, or `git diff origin/main...HEAD`). Wait for
    the maintainer's go, unless under an autonomy grant.
+   Every diff you read leaves the web app's build out: `-- ':!packages/docket/src/docket/web/app'` (DR-0705).
 5. Review with the `review-code` skill until it is `clean`: another round only after a blocker or a major. Commit each
    round of fixes with `gate quick` passing. Write the verdict and the fixes into the body's Review section, run `gate
    check-text` on the body again, then `gh pr edit <n> --body-file .local/pr-body.md`. Every edit of the title or the

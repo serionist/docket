@@ -22,7 +22,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlsplit
 
 from starlette.datastructures import QueryParams
 
@@ -31,14 +31,13 @@ from docket.index import parse_when
 from docket.index.query import MAX_K
 from docket.vault.anchors import AnchorError, parse_locator
 from docket.vault.processed import DOC_TYPES
+from docket.web import urls
 
 DEFAULT_K = 20
 MORE = 20
 DEFAULT_AROUND = 1
 MAX_AROUND = 30
 LINES = re.compile(r"^([1-9]\d*)(?:-([1-9]\d*))?$")
-# Kept as they are in a query string, so a locator reads in the address bar as it does everywhere else.
-URL_SAFE = ":@/,"
 
 
 class StateError(DocketError):
@@ -189,8 +188,7 @@ class SearchState:
 
     def url(self, path: str = "/search") -> str:
         """This state's canonical URL on a path: the page itself, or one of its fragments."""
-        query = urlencode(self.pairs(), safe=URL_SAFE)
-        return f"{path}?{query}" if query else path
+        return urls.link(path, self.pairs())
 
     def but(self, **changes: object) -> SearchState:
         return replace(self, **changes)  # pyright: ignore[reportArgumentType]

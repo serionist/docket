@@ -15,7 +15,6 @@ from collections.abc import Mapping
 from contextlib import closing
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 from starlette.datastructures import QueryParams
@@ -32,6 +31,7 @@ from docket.vault.curatelog import Line
 from docket.vault.entities import ENTITY_TYPES, entity_rel, load_entities
 from docket.vault.neverstore import listed
 from docket.vault.vault import Vault
+from docket.web import urls
 
 PATH = "/curate"
 PANEL = "/curate/panel"
@@ -90,8 +90,7 @@ class CurateState:
         return out
 
     def url(self, path: str = PATH, *, done: bool = False) -> str:
-        query = urlencode(self.pairs(done=done))
-        return f"{path}?{query}" if query else path
+        return urls.link(path, self.pairs(done=done))
 
 
 def canonical(url: str) -> str | None:
@@ -387,7 +386,7 @@ def snippet(s: Snippet) -> SnippetView:
         before=s.text[:a],
         mark=s.text[a:b],
         after=s.text[b:],
-        search="/search?" + urlencode({"hit": s.locator}),
+        search=urls.link("/search", [("hit", s.locator)]),
     )
 
 

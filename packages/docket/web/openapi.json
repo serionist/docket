@@ -1,0 +1,125 @@
+{
+  "components": {
+    "schemas": {
+      "Shell": {
+        "description": "What the sidebar shows beside its pages (DR-0708): the counts and marks, and the vault, machine and index line\nat its foot. A count is None when its part of the vault doesn't read; `problem` says why the vault doesn't open.",
+        "properties": {
+          "index_line": {
+            "title": "Index Line",
+            "type": "string"
+          },
+          "machine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Machine"
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem"
+          },
+          "staging": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Staging"
+          },
+          "sync_due": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sync Due",
+            "type": "array"
+          },
+          "untriaged": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Untriaged"
+          },
+          "vault": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vault"
+          },
+          "zone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zone"
+          }
+        },
+        "required": [
+          "vault",
+          "machine",
+          "zone",
+          "index_line",
+          "untriaged",
+          "staging",
+          "sync_due",
+          "problem"
+        ],
+        "title": "Shell",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "Docket's web app API",
+    "version": "1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/web/shell": {
+      "get": {
+        "operationId": "shell_api_web_shell_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Shell"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Shell"
+      }
+    }
+  }
+}

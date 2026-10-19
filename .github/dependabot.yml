@@ -1,7 +1,7 @@
-# Dependabot version updates, weekly: the Python packages, in uv.lock and in the models' worker requirements, and the
-# actions the workflows pin by SHA. Each group is a PR like any other: CI must pass and the maintainer merges it. A
-# group's long title doesn't matter, since the squash takes the maintainer's own subject. Security updates come as soon
-# as an advisory is published, whatever the schedule.
+# Dependabot version updates, weekly: the Python packages, in uv.lock and in the models' worker requirements, the web
+# app's npm packages, and the actions the workflows pin by SHA. Each group is a PR like any other: CI must pass and the
+# maintainer merges it. A group's long title doesn't matter, since the squash takes the maintainer's own subject.
+# Security updates come as soon as an advisory is published, whatever the schedule.
 version: 2
 
 # A week's Python updates in one PR, both entries below together: the gate's lock step fails while onnxruntime,
@@ -31,6 +31,21 @@ updates:
     patterns: ["*"]
     cooldown:
       default-days: 7
+
+  # The web app's packages (DR-0703), weekly in a group of their own. Each PR changes package-lock.json, an input of the
+  # committed build, so it is rebuilt with `npm run build` in packages/docket/web and the build committed, as the
+  # models' lock is recompiled.
+  - package-ecosystem: npm
+    directory: /packages/docket/web
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      npm:
+        patterns: ["*"]
 
   - package-ecosystem: github-actions
     directory: /

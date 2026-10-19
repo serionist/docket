@@ -1,0 +1,19 @@
+decisions:
+  - id: DR-0703
+    title: The web app is a React single-page app with shadcn/ui on Tailwind v4, built by Vite, and the service is its only server
+    status: decided
+    at: "2026-10-19"
+    by: Soma Osvay
+    cost: medium
+    sources: ["#252", "19 Oct, confirmed by the maintainer"]
+    supersedes: [DR-0016]
+    description: "The pages are one React 19 app in TypeScript under packages/docket/web: TanStack Router keeps each page's state in its URL, with parseSearch and stringifySearch of its own in place of its JSON encoding, so every value stays a string, a repeated key stays repeated and a value is encoded as the server encodes it (DR-0704); TanStack Query fetches (DR-0711); shadcn/ui components, copied into the source as its CLI writes them, sit on Radix and Tailwind CSS 4; icons come from lucide-react; Vite 8 builds it. The service hosts the built app: FastAPI serves its files and its index.html for every client route on the same origin and port as /api and /mcp, 127.0.0.1:8741 by default (DR-0151). No other server serves it and no Node runs at runtime. Vite's dev server is for development only: it runs on localhost or in a browser profile of its own, never on 127.0.0.1, so the session cookie it gets never replaces the owner's docket_session there, and it proxies to a throwaway service with Host and Origin set to the target's. Versions are exact pins in package-lock.json, each at least a week old when taken: Node 24.21.0 exact in .nvmrc, engines.node >=24.21.0 <25, npm in packageManager, and .npmrc turns install scripts off. TypeScript stays on 6.0 while typescript-eslint's range stops below 6.1, and package.json's overrides give openapi-typescript the same TypeScript: \"openapi-typescript\": {\"typescript\": \"$typescript\"}. No form library (fields save one at a time), no key library (DR-0711), no virtual list (a list shows k rows, DR-0666) and no toast library (the notice is a bar)."
+    binds:
+      - "The service is the app's only server: same origin and port as the API, no Node at runtime."
+      - A runtime package lands with its licence in the build's licence file and its reason in the PR.
+    not_chosen:
+      - "Jinja and htmx kept, styled to look like shadcn: the maintainer chose the real components and a product's feel (#252)."
+      - "Next.js or another server-rendering framework: a Node server at runtime."
+      - "React Router: TanStack Router types the routes and their search, and its encoding is replaced, so the URL stays plain."
+      - "pnpm: one more tool to install, where npm comes with Node."
+      - "TypeScript 7: typescript-eslint doesn't take it yet."

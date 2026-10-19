@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from urllib.parse import urlencode
 
 from starlette.datastructures import QueryParams
 
@@ -26,6 +25,7 @@ from docket.errors import DocketError
 from docket.vault.decision_form import PICKS
 from docket.vault.entities import ENTITY_TYPES
 from docket.vault.processed import id_problem
+from docket.web import urls
 
 PATH = "/briefs"
 # The id of the part that shows the open line's raw, which every link setting `line` names.
@@ -33,8 +33,6 @@ FRAGMENT = "raw"
 # The group a brief whose entity is gone is listed in.
 ORPHANED = "orphaned"
 TYPES = (*ENTITY_TYPES, ORPHANED)
-# Kept as they are in a query string, so a brief's id reads in the address bar as it does everywhere else.
-URL_SAFE = ":"
 
 
 class BriefsStateError(DocketError):
@@ -89,8 +87,7 @@ class BriefsState:
         line = str(self.line) if self.line is not None else None
         named = (("brief", self.brief), ("line", line), ("type", self.type), ("done", self.done))
         pairs = [(name, v) for name, v in named if v]
-        query = urlencode(pairs, safe=URL_SAFE)
-        return f"{PATH}?{query}" if query else PATH
+        return urls.link(PATH, pairs)
 
     def link(self) -> str:
         """The URL a link takes: with `line`, it lands on the line's raw."""

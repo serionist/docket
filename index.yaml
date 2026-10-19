@@ -173,11 +173,12 @@ decisions:
     binds: ["A private recording never reaches git, not even in history."]
   - id: DR-0016
     title: The web app is FastAPI with server-rendered HTML and HTMX, with no front-end build
-    status: decided
+    status: superseded
     at: "2026-10-14"
     by: Soma Osvay
     cost: medium
     sources: [docs/design.md]
+    superseded_by: [DR-0703]
     description: "One Python service renders the pages with Jinja templates and uses HTMX for interaction, so a friend installs one package and nothing needs Node. It still has a real structure: routes, templates as components, a small design system, tests over HTTP."
     not_chosen:
       - A single-page app (React or Svelte) with its own build, shipped inside the wheel.

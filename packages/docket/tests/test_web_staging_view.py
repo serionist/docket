@@ -61,7 +61,7 @@ def shown(record: RawRecord, why: Why = "mixed", **fields: Any) -> Shown:
 
 def test_the_url_is_written_back_in_one_canonical_form() -> None:
     read = state(f"cut=30:02-31:12&u=3&k={DEFAULT_K}&open={OPENED}&u=1-2&source=calls&u=3&state=pending&x=1")
-    assert read.url() == f"/staging?source=calls&state=pending&open={OPENED}&u=1-2&u=3&cut=30%3A02-31%3A12"
+    assert read.url() == f"/staging?source=calls&state=pending&open={OPENED}&u=1-2&u=3&cut=30:02-31:12"
     assert state(read.url().partition("?")[2]) == read
     # Typed cuts split on commas and spaces, as the field takes them.
     assert state(f"open={OPENED}&cut=0:10-0:20,+1:00-1:05").cut == ("0:10-0:20", "1:00-1:05")

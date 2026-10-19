@@ -26,7 +26,7 @@ def prefs(request: Request) -> dict[str, Any]:
     return {"theme": theme if theme in THEMES else None, "keys_off": request.cookies.get(KEYS_COOKIE) == "off"}
 
 
-def _index_line(service: Service) -> str:
+def index_line(service: Service) -> str:
     last = service.last_update
     if last is None:
         return "the index is being brought up to date"
@@ -46,5 +46,5 @@ def shell(service: Service | None, request: Request, title: str, current: str = 
         context["vault_name"], context["machine"] = vault.root.name, vault.machine
     except (DocketError, OSError):
         context["vault_name"] = "no vault"
-    context["index_line"] = _index_line(service)
+    context["index_line"] = index_line(service)
     return context

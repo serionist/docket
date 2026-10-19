@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0706
+    title: The app's document carries a strict CSP with a style nonce per response, and the browser keeps only the two cookies
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#252"]
+    description: "index.html goes out with Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' 'nonce-<n>'; font-src 'self'; img-src 'self'; media-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none', and Cache-Control: no-store. The nonce is 16 random bytes per response, in a meta element the app reads through one useNonce() hook, for the three style elements Radix inserts: the scroll lock's, through get-nonce, and Select's and ScrollArea's, whose nonce the shadcn wrappers pass to SelectViewport and ScrollAreaViewport. Styles React sets go through the CSSOM, which the policy allows. No inline script, eval or new Function: Vite's module preload polyfill is off, and no package needs them. A browser test opens a Select and fails on any securitypolicyviolation event. The server writes docket_theme into the document as data-theme, so the first paint has the right theme. The browser keeps docket_theme and docket_keys and nothing else: TanStack Query's cache lives in memory and is never persisted, and a draft lives in the page until it saves."
+    binds:
+      - No inline script, eval or new Function; styles only from 'self' or the document's nonce.
+      - The user's words never go to localStorage, sessionStorage or IndexedDB.
+    not_chosen:
+      - "style-src 'unsafe-inline': any injected style would apply."
+      - "The theme in localStorage: a first paint in the wrong theme."
+      - "The selection and scroll in sessionStorage, as the Jinja day pages keep them across a reload: the app doesn't reload (DR-0711)."
