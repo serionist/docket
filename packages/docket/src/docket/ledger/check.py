@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from docket.ledger import fold, ops, status
+from docket.ledger import fold, ops, status, store
 
 if TYPE_CHECKING:
     from docket.vault.vault import Vault
@@ -28,8 +28,6 @@ def committed_kept(vault: Vault, rel: str) -> bool:
 def notes(vault: Vault) -> list[str]:
     """What `docket vault check` says beside its problems: calendar records whose meetings a stopped step left for the
     next one (DR-0647). The session-start day says the same line."""
-    from docket.ledger import store  # noqa: PLC0415 - the writer reaches the index, which a check needs only here
-
     waiting = len(store.calendar_pending(vault))
     return [f"{waiting} calendar record(s) wait for their meetings; `docket ledger calendar`"] if waiting else []
 

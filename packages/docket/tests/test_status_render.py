@@ -21,7 +21,7 @@ from ledger_kit import NOW
 
 from docket.cli import main
 from docket.errors import DocketError
-from docket.ledger import batch, status
+from docket.ledger import batch, calendar, status
 from docket.ledger.fold import load
 from docket.ledger.meetings import Stream
 from docket.ledger.status import Fields
@@ -859,6 +859,8 @@ def test_vault_check_names_each_status_file_against_the_ledger_and_writes_nothin
                               encoding="utf-8", newline="\n")  # fmt: skip
     files["depot"].unlink()
     before = {name: (p.stat().st_mtime_ns, p.read_bytes()) for name, p in files.items() if p.exists()}
+    # A calendar step that stopped left a record for the next: the check says so beside the problems.
+    calendar.note_pending(made, ["calendar:E1"])
     assert main(["vault", "check", "--vault", str(made.root)]) == 1
     assert capsys.readouterr().out.splitlines() == [
         'projects/pilot/STATUS.md: a hand edit holds its frontmatter: where "Waiting on Ben" in the file, "PR #12 '
@@ -866,6 +868,7 @@ def test_vault_check_names_each_status_file_against_the_ledger_and_writes_nothin
         "projects/fleet/STATUS.md: stale; docket render",
         "projects/depot/STATUS.md: not rendered yet; docket render",
         "projects/harbour/STATUS.md: the ledger holds no stream harbour; add it, or take the file out of vault.yaml",
+        "1 calendar record(s) wait for their meetings; `docket ledger calendar`",
         "4 problem(s)",
     ]
     assert {name: (p.stat().st_mtime_ns, p.read_bytes()) for name, p in files.items() if p.exists()} == before
