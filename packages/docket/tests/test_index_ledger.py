@@ -165,6 +165,39 @@ def test_a_file_read_close_to_its_time_is_hashed_again_so_a_rewrite_at_its_size_
     assert settled(old, old + RACY_NS) == old
 
 
+def test_a_file_s_time_is_kept_once_settled_and_a_settled_file_is_left_alone(
+    tmp_path: Path, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both sides of the rule on every system, on a clock the test sets: a file read within RACY_NS of its time is
+    stored with time 0 and read again by each update; read later, its time is stored, by a rebuild or an update, and
+    while it keeps its size and time no update reads it."""
+    write_ops(tmp_path, [op("add", 1)])
+    path = tmp_path / DESK
+    when = 1_790_000_000 * 10**9
+    os.utime(path, ns=(when, when))
+    clock = [when + RACY_NS // 2]
+    monkeypatch.setattr(time, "time_ns", lambda: clock[0])
+    rebuild(conn, tmp_path)
+    assert rows(conn, "SELECT mtime_ns FROM ledger_files") == [(0,)]
+    assert update(conn, tmp_path) == 0
+    assert rows(conn, "SELECT mtime_ns FROM ledger_files") == [(0,)]
+    clock[0] = when + 2 * RACY_NS
+    assert update(conn, tmp_path) == 0
+    assert rows(conn, "SELECT mtime_ns FROM ledger_files") == [(when,)]
+    later = fresh_tables()
+    try:
+        rebuild(later, tmp_path)
+        assert rows(later, "SELECT mtime_ns FROM ledger_files") == [(when,)]
+    finally:
+        later.close()
+
+    def unread(self: Path) -> bytes:
+        raise AssertionError(f"{self} was read")
+
+    monkeypatch.setattr(Path, "read_bytes", unread)
+    assert update(conn, tmp_path) == 0
+
+
 def test_back_to_back_rewrites_at_one_size_never_hide_from_an_update(tmp_path: Path) -> None:
     """Real writes, no time set by hand: a file goes from one clone's line to another's of the same length right after
     a catch-up read it, as a reset or a rebase's checkout leaves it. Most land in the same tick of the file clock."""
