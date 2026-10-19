@@ -1,6 +1,7 @@
 {
   "today": "2026-10-20",
   "stamp": {
+    "root": "<the vault's root>",
     "files": [
       {
         "path": "ledger/ops/2026-10-desk.jsonl",

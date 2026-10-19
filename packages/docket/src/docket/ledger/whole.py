@@ -31,8 +31,13 @@ class OpFile(BaseModel):
 
 
 class Stamp(BaseModel):
-    """The op files, in name order, as they stood when the read was taken, and the vault lock's file."""
+    """The op files as they stood when the read was taken, and the vault lock's file. `root` is the vault's root,
+    absolute with forward slashes, which each file's path is from. The files are what every reader of the ledger
+    reads, in name order: the plain files in the op folder (`ops.OPS_DIR`) named `<yyyy-mm>-<machine>.jsonl`;
+    `.gitkeep`, any other name, a link and a folder are skipped, and an op folder that is a link lists none
+    (`ops.listing`)."""
 
+    root: str
     files: list[OpFile]
     lock: str
 
@@ -58,7 +63,7 @@ def read(vault: Vault, at: datetime) -> Whole:
         # The collector paused: a read of every object makes a hundred thousand models, none of them in a cycle.
         with ledger_tables(vault) as conn, paused():
             items, meetings, streams = views.every(conn, tz, at)
-    stamp = Stamp(files=files, lock=str(vault.lock.path))
+    stamp = Stamp(root=vault.root.absolute().as_posix(), files=files, lock=str(vault.lock.path))
     return Whole(today=at.astimezone(tz).date(), stamp=stamp, items=items, meetings=meetings, streams=streams)
 
 

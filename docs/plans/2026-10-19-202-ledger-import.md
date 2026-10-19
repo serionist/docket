@@ -170,6 +170,6 @@ Round 2: approved; three minors (a rerun's order and the conflict's fix, the mir
 |---|---|
 | every object whole in #201's `show` model | each item, meeting and stream exactly as `show <ref> --json` gives it, its ref naming it alone, so no other holder of its number comes with it (DR-0684); `views.every` reads them all in a few queries, the same code making each result as `show` makes it |
 | the stamp taken under the vault lock before it reads | the read runs under the lock too, so a write lands before both or after both; `ledger/whole.py` takes the lock, the stamp and the tables |
-| the vault lock's file | `stamp.lock`, the path a script's own `filelock.FileLock` takes; a test takes it from another thread while Docket holds it |
+| the vault lock's file | `stamp.lock`, the path a script's own `filelock.FileLock` takes; a test takes it from another thread while Docket holds it; `stamp.root`, the vault's root the files' paths are from, from the code review |
 | `show --all --json`'s golden, stamped | `tests/fixtures/ledger-show-all.json`, its times and the lock's path written as placeholders; on the index and with none |
 | - | on the perf ledger, 5,000 items and 2,000 meetings, about 0.7 s with its 20 MB of JSON, the best of three, held at 2 s: the collector paused over the read, which halves it, each history built once, and compact JSON, which a script parses as it parses `show`'s |

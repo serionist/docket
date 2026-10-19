@@ -33,7 +33,7 @@ AT = datetime(2026, 10, 20, 8, 0, tzinfo=UTC)
 LONG = "Send the pilot's dates to everyone on the list before the steering group meets on Thursday afternoon"
 GOLDEN = Path(__file__).parent / "fixtures" / "ledger-show-all.json"
 # What the golden holds for what differs from one run to the next.
-LOCK, TIME = "<the vault lock's file>", 0
+ROOT, LOCK, TIME = "<the vault's root>", "<the vault lock's file>", 0
 
 
 def item(n: int, number: int, **fields: Any) -> Op:
@@ -173,11 +173,14 @@ def test_the_command_gives_the_golden_stamped_with_the_files_and_the_lock(
     found = json.loads(out)
     stamp = found["stamp"]
     listed = ops.listing(vault.root)[0]
-    assert stamp["lock"] == str(vault.lock.path)
+    assert (stamp["root"], stamp["lock"]) == (vault.root.absolute().as_posix(), str(vault.lock.path))
+    assert Path(stamp["root"]).is_absolute() and "\\" not in stamp["root"]
+    assert all((Path(stamp["root"]) / f["path"]).is_file() for f in stamp["files"])
     assert stamp["files"] == [
         {"path": rel, "size": path.stat().st_size, "mtime_ns": path.stat().st_mtime_ns} for rel, path in listed
     ]
-    golden = {**found, "stamp": {"files": [{**f, "mtime_ns": TIME} for f in stamp["files"]], "lock": LOCK}}
+    files = [{**f, "mtime_ns": TIME} for f in stamp["files"]]
+    golden = {**found, "stamp": {"root": ROOT, "files": files, "lock": LOCK}}
     assert golden == json.loads(GOLDEN.read_text(encoding="utf-8"))
 
 
@@ -236,6 +239,16 @@ def test_a_write_after_the_read_moves_the_stamp(vault: Vault) -> None:
     assert before.lock == after.lock
     assert [f.path for f in before.files] == [f.path for f in after.files]
     assert [f.size for f in after.files] != [f.size for f in before.files]
+
+
+def test_the_stamp_lists_only_the_op_files_every_reader_reads(vault: Vault) -> None:
+    folder = vault.root / ops.OPS_DIR
+    (folder / ops.KEEP).write_text("", encoding="utf-8")
+    (folder / "notes.txt").write_text("not an op file\n", encoding="utf-8")
+    (folder / "2026-13-desk.jsonl").write_text("", encoding="utf-8")
+    (folder / "2026-11-desk.jsonl").mkdir()
+    stamp = whole.read(vault, AT).stamp
+    assert [f.path for f in stamp.files] == ["ledger/ops/2026-10-desk.jsonl", "ledger/ops/2026-10-laptop.jsonl"]
 
 
 def test_the_command_refuses_all_with_a_ref_or_without_json_and_nothing_at_all(
