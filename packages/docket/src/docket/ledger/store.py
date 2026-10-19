@@ -1,10 +1,11 @@
 """Writing the ledger (DR-0610, DR-0612, DR-0613, DR-0618): the one writer of ops, a whole write or none of it.
 
-A write runs under the vault lock. It folds the op files; gives a renumber to each item a clash left without a
-number; checks each change against the items as the write leaves them, the way todo.py's verbs check them; mints the
-ids and numbers; screens the text; then writes this machine's month file through a temp file and a rename and
-commits it, with any op file a stopped write left. A change that can't be made refuses the whole write, naming the
-change by its place and, for the text rules, the field, never the value.
+A write runs under the vault lock. It brings the index's ledger tables up to date from the op files, or folds them in
+memory when the index can't be had (DR-0616, DR-0619), and reads each item it touches from them; gives a renumber to
+each item a clash left without a number; checks each change against the items as the write leaves them, the way
+todo.py's verbs check them; mints the ids and numbers; screens the text; then writes this machine's month file through
+a temp file and a rename and commits it, with any op file a stopped write left. A change that can't be made refuses
+the whole write, naming the change by its place and, for the text rules, the field, never the value.
 
     write(vault, [{"op": "add", "fields": {"kind": "reply", "title": "Send Ada the dates", "who": "Ada",
                    "stream": "pilot", "source": "chat:C0X/1"}},
@@ -28,8 +29,10 @@ from zoneinfo import ZoneInfo
 
 from docket import console
 from docket.errors import DocketError
+from docket.index.build import ledger_tables
+from docket.index.ledger import Held
 from docket.ledger import check, ops
-from docket.ledger.fold import CLOSED, Folded, Item, Ledger, family, fold_item, load, number_text
+from docket.ledger.fold import CLOSED, NUMBER, Folded, Item, family, fold_item, number_text
 from docket.ledger.ops import DAYS, FIELDS, KINDS, OPS_DIR, REQUIRED, VERDICTS, By, Line, Op, Via
 from docket.vault.neverstore import matches_text, names_person
 from docket.vault.redact import Redactor
@@ -50,7 +53,6 @@ CHANGES: dict[str, tuple[str, ...]] = {
     "archive": ("item", "note"),
     "undo": ("of", "batch", "note"),
 }
-NUMBER = re.compile(r"^(?:A-?)?(\d{1,9})$", re.IGNORECASE)
 SLUG = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 ONE_LINE = ("title", "who", "source")
 TEXTS = ("description", "notes", "outcome")
@@ -106,30 +108,35 @@ def write(
     moment = now or datetime.now(UTC)
     with vault.writing():
         ops.folder(vault.root)
-        plan = _Write(vault, load(vault.root), by, via, moment)
-        plan.renumber()
-        for n, change in enumerate(changes, start=1):
-            plan.change(n, change)
-        new = tuple(plan.new)
+        # The tables are asked only while the write is planned: its commit runs with the index free.
+        with ledger_tables(vault) as conn:
+            plan = _Write(vault, Held(conn), by, via, moment)
+            plan.renumber()
+            for n, change in enumerate(changes, start=1):
+                plan.change(n, change)
+            new = tuple(plan.new)
+            numbers = plan.numbers()
+            message = plan.message() if new else ""
         if dry_run or not new:
-            return Written(new, None, plan.numbers())
-        commit = commit_ops(vault, new, plan.message())
-        return Written(new, commit, plan.numbers())
+            return Written(new, None, numbers)
+        return Written(new, commit_ops(vault, new, message), numbers)
 
 
 class _Write:
-    """One write as it is planned: the ledger it started from, the lines by item with its own ops added, and the
-    numbers it gave."""
+    """One write as it is planned: the ledger's tables it reads, the lines of each item it touched with its own ops
+    added, and the numbers it gave."""
 
-    def __init__(self, vault: Vault, ledger: Ledger, by: By, via: Via, now: datetime) -> None:
+    def __init__(self, vault: Vault, held: Held, by: By, via: Via, now: datetime) -> None:
         self.vault = vault
-        self.ledger = ledger
+        self.held = held
+        self.highest_id = held.highest_id()
+        self.highest_number = held.highest_number()
         self.by: By = by
         self.via: Via = via
         self.now = now
         self.day = now.astimezone(ZoneInfo(vault.config.owner.time_zone)).date()
         self.at = now.astimezone(UTC).replace(microsecond=0)
-        self.lines = {item: list(group) for item, group in ledger.lines.items()}
+        self.lines: dict[str, list[Line]] = {}
         self.new: list[Op] = []
         self.given: dict[int, str] = {}
         self.redactor = Redactor.from_config(vault.config.redaction)
@@ -137,8 +144,14 @@ class _Write:
 
     # -- what stands ------------------------------------------------------------------------------------------------
 
+    def lines_of(self, item_id: str) -> list[Line]:
+        """An item's lines: as the tables hold them, read once, with this write's ops added."""
+        if item_id not in self.lines:
+            self.lines[item_id] = self.held.lines(item_id)
+        return self.lines[item_id]
+
     def fold(self, item_id: str) -> Folded:
-        return fold_item(item_id, self.lines.get(item_id, []))
+        return fold_item(item_id, self.lines_of(item_id))
 
     def number_of(self, item_id: str) -> int:
         mine = [number for number, named in self.given.items() if named == item_id]
@@ -167,7 +180,7 @@ class _Write:
         if m is None:
             self.refuse(n, "item is an A- number or an item's id")
         number = int(m.group(1))
-        named = [*self.ledger.holders.get(number, ())]
+        named = self.held.holders(number)
         if number in self.given and self.given[number] not in named:
             named.append(self.given[number])
         if not named:
@@ -183,13 +196,9 @@ class _Write:
     def emit(self, kind: str, item_id: str | None, **keys: Any) -> Op:
         """The next op of this write, added to its item's lines so the next change sees it."""
         # The first op is minted on the clock; each next one is the one before plus one (DR-0612).
-        op_id = (
-            ops.encode(ops.decode(self.new[-1].id) + 1)
-            if self.new
-            else ops.mint(self.ledger.highest_id, self.now, 1)[0]
-        )
+        op_id = ops.encode(ops.decode(self.new[-1].id) + 1) if self.new else ops.mint(self.highest_id, self.now, 1)[0]
         item = item_id or op_id
-        mine = self.lines.setdefault(item, [])
+        mine = self.lines_of(item)
         op = Op(
             schema_version=1, id=op_id, item=item, op=kind, day=self.day, at=self.at, machine=self.vault.machine,
             by=self.by, via=self.via, batch=self.new[0].id if self.new else op_id,
@@ -200,15 +209,15 @@ class _Write:
         return op
 
     def next_number(self) -> int:
-        return max(self.ledger.highest_number, *self.given, 0) + 1
+        return max(self.highest_number, *self.given, 0) + 1
 
     def renumber(self) -> None:
         """A new number for each item whose latest claim lost one to an earlier claim (DR-0613)."""
         self.kind = "renumber"
-        for item in self.ledger.clashes():
+        for item_id in self.held.clashing():
             number = self.next_number()
-            self.given[number] = item.id
-            self.emit("renumber", item.id, number=number)
+            self.given[number] = item_id
+            self.emit("renumber", item_id, number=number)
 
     # -- the text rules (DR-0618) -----------------------------------------------------------------------------------
 
@@ -378,8 +387,10 @@ class _Write:
                 self.refuse(n, f"op {of} is undone already")
             self.undo_one(found.op, note)
             return
+        for item_id in self.held.in_batch(cast(str, batch)):
+            self.lines_of(item_id)
         targets = sorted(
-            (line.op for group in self.lines.values() for line in group if line.op.batch == batch),
+            (line.op for item_id in sorted(self.lines) for line in self.lines[item_id] if line.op.batch == batch),
             key=lambda op: op.id, reverse=True,
         )  # fmt: skip
         done = 0
@@ -391,12 +402,17 @@ class _Write:
             self.refuse(n, f"no op of batch {batch} to undo")
 
     def op_line(self, op_id: str) -> Line | None:
-        return next((line for group in self.lines.values() for line in group if line.op.id == op_id), None)
+        """An op's line, from the items whose lines hold its id, by item id and then as each item's lines run."""
+        for item_id in self.held.items_of(op_id):
+            self.lines_of(item_id)
+        return next(
+            (line for item_id in sorted(self.lines) for line in self.lines[item_id] if line.op.id == op_id), None
+        )
 
     def undo_one(self, target: Op, note: str | None) -> None:
         """Undo an op, then each op of its kind on its item that it had left idle and that would now apply, one at a
         time, so another machine's close doesn't take over once this one is gone (DR-0614)."""
-        kinds = {line.op.id: line.op.op for line in self.lines[target.item]}
+        kinds = {line.op.id: line.op.op for line in self.lines_of(target.item)}
         prior = self.fold(target.item)
         of = target.id
         while True:

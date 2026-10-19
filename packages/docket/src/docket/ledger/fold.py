@@ -19,12 +19,14 @@ words are made when they are read.
 from __future__ import annotations
 
 import gc
-from collections.abc import Iterable, Sequence
+import re
+from collections.abc import Generator, Iterable, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 
-from docket.ledger.ops import DAYS, REQUIRED, Line, Op, read_all
+from docket.ledger.ops import DAYS, REQUIRED, FileRead, Line, Op, read_all
 
 CLOSED = ("done", "dropped")
 # done and drop are one kind for the undo that also undoes what the undone op left idle (DR-0614).
@@ -34,6 +36,8 @@ SHORT = 160
 WORDS = {"add": "added", "log": "", "done": "done", "drop": "dropped", "reopen": "reopened", "archive": "archived"}
 SETTABLE = ("kind", "title", "who", "stream", "source", "opened", "due", "description", "notes", "outcome")
 KEPT = (*REQUIRED, "opened")
+# An item's number as a change or a command names it: A-0302, a-302 or 302.
+NUMBER = re.compile(r"^(?:A-?)?(\d{1,9})$", re.IGNORECASE)
 
 
 def family(kind: str) -> str:
@@ -371,17 +375,25 @@ def fold(lines: Iterable[Line]) -> Ledger:
     )
 
 
-def load(root: Path) -> Ledger:
-    """The vault's ledger: every op file read and folded, the reading's problems first, and the highest id any line
-    holds, one this Docket can't read included (DR-0612). The cyclic collector is paused meanwhile: the read makes
-    tens of thousands of objects, none of them in a cycle, and each pass of it would walk them all again."""
+@contextmanager
+def paused() -> Generator[None]:
+    """The cyclic collector paused: a fold makes tens of thousands of objects, none of them in a cycle, and each pass
+    of it would walk them all again. Nested, the outermost turns it back on."""
     was = gc.isenabled()
     gc.disable()
     try:
-        read = read_all(root)
-        ledger = fold(read.lines)
+        yield
     finally:
         if was:
             gc.enable()
+
+
+def load(root: Path, files: list[FileRead] | None = None) -> Ledger:
+    """The vault's ledger: every op file read and folded, the reading's problems first, and the highest id any line
+    holds, one this Docket can't read included (DR-0612), with the collector paused. With `files`, each file read
+    is added to it, as the index keeps them (DR-0616)."""
+    with paused():
+        read = read_all(root, files)
+        ledger = fold(read.lines)
     highest = max((i for i in (ledger.highest_id, read.highest) if i is not None), default=None)
     return replace(ledger, problems=read.problems + ledger.problems, highest_id=highest)

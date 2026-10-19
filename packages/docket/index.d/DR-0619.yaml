@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0619
+    title: A ledger write and docket ledger show ask the index's ledger tables brought up to date, or a fold of the op files in memory when the index can't be had within a second
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#198"]
+    description: "The ledger's tables in the index are a cache (DR-0115), so nothing a write or docket ledger show does depends on them. Each takes the index's lock for at most a second, checks the index opens as this Docket writes it (schema, languages, stemmer, the forgotten list's digest), brings its ledger tables up to date from ledger_files in one transaction, and asks them while it plans, holding the lock until it is done so no update moves the tables under it; a write's commit runs after it lets the lock go. When there is no index, it is of another build, or its lock or its file is held past the second, as a rebuild holds it for minutes, the op files are folded into the same tables in a database in memory and asked the same way: a write never waits on a rebuild, and both paths run one set of reads. A write's own ops reach the index at the next catch-up, a write's, a show's or docket index update's."
+    binds:
+      - A ledger write never waits for the index past a second; past it, or with no index or one of another build, it folds the op files in memory.
+      - The fold in memory fills the same tables the index holds, and the writer and show ask both the same way.
+    not_chosen:
+      - "Waiting for the index's lock as long as an update does: a rebuild would hold every ledger write for minutes."
+      - "Building the index when there is none: a first write would cost a whole rebuild."
+      - "Writing a write's own ops into the index after its commit: the next catch-up reads them in milliseconds, and a failure there would fail a write already committed."

@@ -28,7 +28,8 @@ from docket.forget import plan as forget_plan
 from docket.forget import rewrite as forget_rewrite
 from docket.imports import notes
 from docket.index import flags as index_flags
-from docket.index.build import db_path
+from docket.index import ledger as index_ledger
+from docket.index.build import db_path, ledger_tables
 from docket.index.embedpass import fill
 from docket.media import backup as media_backup
 from docket.media import confirm as media_confirm
@@ -132,6 +133,8 @@ reconcile_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(reconcile_app, name="reconcile")
+ledger_app = typer.Typer(help="The ledger: items owed and awaited, each with its history.", no_args_is_help=True)
+app.add_typer(ledger_app, name="ledger")
 
 # How often the embedding pass says how far it got.
 PROGRESS_SECONDS = 10.0
@@ -1406,7 +1409,8 @@ def _report(report: index.BuildReport) -> None:
         say(f"rebuilt{f' ({report.reason})' if report.reason else ''} in {report.seconds:.1f} s")
     else:
         entities = ", the entity files" if report.entities else ""
-        say(f"updated in {report.seconds:.1f} s: {report.runs} run file(s), {report.docs} doc(s){entities}")
+        ops = f", {report.ops} ledger op(s)" if report.ops else ""
+        say(f"updated in {report.seconds:.1f} s: {report.runs} run file(s), {report.docs} doc(s){entities}{ops}")
     say("  ".join(f"{table} {n}" for table, n in report.counts.items()))
     for problem in report.problems:
         say(f"! {problem}")
@@ -2016,6 +2020,18 @@ def reconcile_list(vault: VaultOption = None) -> None:
     ingests, with spots no fix decides; and how many a never-store list or your decisions keep out. Writes nothing."""
     found = find_vault(vault)
     say_all(render.reconcile(spots.listing(found), ZoneInfo(found.config.owner.time_zone)))
+
+
+@ledger_app.command("show")
+def ledger_show(
+    item: Annotated[str, typer.Argument(help="The item: its A- number, or its id.")], vault: VaultOption = None
+) -> None:
+    """An item as its ops leave it: its fields, its state, and its history, every change in order with who made it
+    and how. A number other items have held too names them. Reads the index's ledger, brought up to date first."""
+    v = find_vault(vault)
+    with ledger_tables(v) as conn:
+        shown = index_ledger.find(conn, item)
+    say_all(render.ledger_item(shown, ZoneInfo(v.config.owner.time_zone)))
 
 
 @hook_app.command("session-start")

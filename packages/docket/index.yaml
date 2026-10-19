@@ -39,6 +39,7 @@ reading:
   - { path: packages/docket/src/docket/osprompt/marker.py, role: contract, note: "the console-code marker: its path per system and when it counts, judged by whether the owner could replace an entry, with the token checked first (DR-0574)" }
   - { path: packages/docket/src/docket/ledger/ops.py, role: contract, note: "the ledger's op line, a one-way door: its files, keys and kinds, how a line reads, op ids and their order (DR-0610 to DR-0613)" }
   - { path: packages/docket/src/docket/ledger/store.py, role: contract, note: "the ledger's one writer: a whole write or none, the checks per change, ids and numbers, the text rules, undo and what it left idle (DR-0613, DR-0614, DR-0618)" }
+  - { path: packages/docket/src/docket/index/ledger.py, role: contract, note: "the ledger in the index, not a door: items, item_log, item_numbers and ledger_files, an update that reads a file that only grew from where it stopped, what a write and docket ledger show ask (DR-0616, DR-0619)" }
 decisions:
   - id: DR-0019
     title: The vault's layout and run-file names are fixed

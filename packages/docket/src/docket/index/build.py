@@ -4,9 +4,10 @@
 objects) into a new file, sorted, and replaces the old one, so two rebuilds of one vault give the same database.
 A decision is the one exception: its status is read from git, and a confirmed or rejected one is indexed as its
 last commit holds it, the file noted when it says otherwise (DR-0603).
-`update` runs the same indexer on the live file for what changed since: new run files, docs whose bytes changed, and
-the entity files; anything it can't follow (a run file changed or removed, another schema or set of languages) makes it
-rebuild. Raw lines are read leniently: a line that doesn't load is a problem and the rest is indexed (DR-0115).
+`update` runs the same indexer on the live file for what changed since: new run files, docs whose bytes changed, the
+entity files and the ledger's op files (DR-0616); anything it can't follow (a run file changed or removed, another
+schema or set of languages) makes it rebuild. Raw lines are read leniently: a line that doesn't load is a problem and
+the rest is indexed (DR-0115).
 Both leave out what the forgotten list takes, the records and the doc lines its docs' rule drops, and the index is built
 under the list's digest: one built under another is rebuilt by `update` and refused by `open_index` (DR-0593).
 """
@@ -20,17 +21,18 @@ import os
 import sqlite3
 import time
 from collections import defaultdict
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Generator, Iterable
 from datetime import datetime
 from pathlib import Path
 from typing import Any, NamedTuple, cast
 from zoneinfo import ZoneInfo
 
-from filelock import FileLock
+from filelock import FileLock, Timeout
 from pydantic import BaseModel, ValidationError
 
 from docket.errors import DocketError
 from docket.index import flags, matching, vectors
+from docket.index import ledger as ledger_index
 from docket.index.chunks import (
     COLUMNS,
     Chunk,
@@ -46,7 +48,7 @@ from docket.index.chunks import (
     thread_owner,
 )
 from docket.index.languages import Languages, resolve
-from docket.index.schema import check_sqlite, create, stale
+from docket.index.schema import LEDGER_TABLES, check_sqlite, create, stale
 from docket.index.text import Analyzer
 from docket.models import config as models_config
 from docket.models.provider import Off
@@ -73,6 +75,9 @@ REPLACE_SECONDS = 5.0
 REPLACE_WAIT = 0.1
 BUSY_SECONDS = 5.0
 JOURNALS = ("-journal", "-wal", "-shm")
+# How long a ledger write or `docket ledger show` waits for the index before it folds the op files in memory: a
+# rebuild can hold the index for minutes, and a write never waits on a cache (DR-0619).
+LEDGER_WAIT = 1.0
 
 
 class BuildReport(BaseModel):
@@ -83,6 +88,8 @@ class BuildReport(BaseModel):
     runs: int = 0
     docs: int = 0
     entities: bool = False
+    # The ledger's op lines read: every one on a rebuild, those the op files gained on an update (DR-0616).
+    ops: int = 0
     counts: dict[str, int] = {}
     problems: list[str] = []
     seconds: float = 0.0
@@ -654,7 +661,7 @@ def changed_docs(conn: sqlite3.Connection, root: Path) -> int:
 
 
 def _counts(conn: sqlite3.Connection) -> dict[str, int]:
-    tables = ("records", "chunks", "docs", "entities", "mentions", "problems")
+    tables = ("records", "chunks", "docs", "entities", "mentions", "items", "problems")
     return {t: conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in tables}  # noqa: S608 - fixed names
 
 
@@ -724,6 +731,7 @@ def _rebuild(vault: Vault, reason: str | None, started: float) -> BuildReport:
         _, runs = indexer.add_runs(vault.rawlog.run_files())
         docs = indexer.sync_docs(set())
         indexer.sync_entities(force=True)
+        ops = ledger_index.rebuild(conn, vault.root)
         matching.refresh(conn, analyzer, full=True)
         if keeper is not None:
             keeper.close()
@@ -732,7 +740,7 @@ def _rebuild(vault: Vault, reason: str | None, started: float) -> BuildReport:
             conn.execute(f"DETACH DATABASE {keeper.carry}")
         conn.execute("INSERT INTO chunks_fts (chunks_fts) VALUES ('optimize')")
         report = BuildReport(
-            rebuilt=True, reason=reason, runs=runs, docs=docs, entities=True, counts=_counts(conn),
+            rebuilt=True, reason=reason, runs=runs, docs=docs, entities=True, ops=ops, counts=_counts(conn),
             problems=_problems(conn),
         )  # fmt: skip
         conn.close()
@@ -834,6 +842,7 @@ def update(vault: Vault) -> BuildReport:
                 touched, runs = indexer.add_runs(new)
                 docs = indexer.sync_docs(touched)
                 entities = indexer.sync_entities()
+                ops = ledger_index.update(conn, vault.root)
                 if runs or docs or entities:
                     matching.refresh(conn, analyzer, full=entities, new_words=indexer.new_words)
                 if keeper is not None:
@@ -843,12 +852,79 @@ def update(vault: Vault) -> BuildReport:
                 conn.execute("ROLLBACK")
                 raise
             report = BuildReport(
-                rebuilt=False, runs=runs, docs=docs, entities=entities, counts=_counts(conn), problems=_problems(conn),
-                seconds=round(time.monotonic() - started, 3),
+                rebuilt=False, runs=runs, docs=docs, entities=entities, ops=ops, counts=_counts(conn),
+                problems=_problems(conn), seconds=round(time.monotonic() - started, 3),
             )  # fmt: skip
         finally:
             conn.close()
     return report
+
+
+@contextlib.contextmanager
+def ledger_tables(vault: Vault) -> Generator[sqlite3.Connection]:
+    """The ledger's tables as the op files stand (DR-0616, DR-0619): the index's, brought up to date, when it opens as
+    this Docket writes it and its lock comes within `LEDGER_WAIT`; else every op file folded into a database in
+    memory. The index's lock is held until the caller is done, so no update moves the tables while it asks them."""
+    held = _ledger_index(vault)
+    if held is None:
+        conn = sqlite3.connect(":memory:", isolation_level=None)
+        try:
+            conn.executescript(LEDGER_TABLES)
+            conn.execute("BEGIN")
+            ledger_index.rebuild(conn, vault.root)
+            conn.execute("COMMIT")
+            yield conn
+        finally:
+            conn.close()
+        return
+    conn, lock = held
+    try:
+        yield conn
+    finally:
+        conn.close()
+        lock.release()
+
+
+def _ledger_index(vault: Vault) -> tuple[sqlite3.Connection, FileLock] | None:
+    """The index with its ledger tables brought up to date, under its lock, which the caller releases; None when
+    there is no index, it was built for another Docket, other languages or another forgotten list, the forgotten list
+    doesn't read, or it can't be had within `LEDGER_WAIT`."""
+    db = db_path(vault)
+    if not db.exists():
+        return None
+    lock = _lock(vault)
+    try:
+        lock.acquire(timeout=LEDGER_WAIT)
+    except Timeout:
+        return None
+    conn = sqlite3.connect(db, isolation_level=None, timeout=LEDGER_WAIT)
+    try:
+        try:
+            usable = stale(conn, languages_of(vault), forgotten.load(vault.root, vault.home).digest) is None
+        except DocketError:
+            # A forgotten list that doesn't read leaves the index's digest unknown: the write folds in memory, as it
+            # does with no index, and never fails for the cache's sake.
+            usable = False
+        if usable:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                ledger_index.update(conn, vault.root)
+                conn.execute("COMMIT")
+            except BaseException:
+                conn.execute("ROLLBACK")
+                raise
+    except sqlite3.Error:
+        # Another process holds the file past the wait: the op files are folded in memory instead.
+        usable = False
+    except BaseException:
+        conn.close()
+        lock.release()
+        raise
+    if usable:
+        return conn, lock
+    conn.close()
+    lock.release()
+    return None
 
 
 def _reader(db: Path, timeout: float = BUSY_SECONDS) -> sqlite3.Connection:

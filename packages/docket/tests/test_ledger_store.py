@@ -1,18 +1,22 @@
 """The ledger's one writer (DR-0610, DR-0612, DR-0613, DR-0614, DR-0618): what a write writes and commits, what it
-refuses, the text rules, undo, renumbering a clash, and putting things back when a commit fails."""
+refuses, the text rules, undo, renumbering a clash, and putting things back when a commit fails. Each runs twice:
+with no index, the writer folding the op files in memory, and with one, the writer reading its ledger tables
+brought up to date (DR-0616, DR-0619)."""
 
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 from docket_testkit import commit_config, empty_vault, folder_vault, make_config, sh
-from ledger_kit import ADD_FIELDS, NOW
+from ledger_kit import ADD_FIELDS, NOW, caught_up, rebuilt
 
 from docket.errors import DocketError
+from docket.index import rebuild
 from docket.ledger import load, ops, store
 from docket.ledger.fold import Item, Ledger, fold
 from docket.ledger.ops import Op
@@ -25,9 +29,16 @@ FILE = "ledger/ops/2026-10-test-box.jsonl"
 ADD: dict[str, Any] = {"op": "add", "fields": dict(ADD_FIELDS)}
 
 
-@pytest.fixture
-def vault(tmp_path: Path) -> Vault:
-    return empty_vault(tmp_path, make_config())
+@pytest.fixture(params=["memory", "index"])
+def vault(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Vault]:
+    """A new vault: with no index, or with one, whose ledger tables then end as a fold of the op files leaves them."""
+    v = empty_vault(tmp_path, make_config())
+    if request.param == "memory":
+        yield v
+        return
+    rebuild(v)
+    yield v
+    assert caught_up(v) == rebuilt(v.root)
 
 
 def ledger(vault: Vault) -> Ledger:

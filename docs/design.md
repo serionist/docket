@@ -422,8 +422,12 @@ the earlier ones (DR-0112).
 | `docs`, `doc_covers`, `doc_anchors`, `old_paths`, `derived_from`, `doc_lines` | processed docs, the records each covers, each line's anchors, legacy notes' old paths, each line's pinned refs to the doc lines it was built from, and each doc's citable lines by hash, which one join reads the flags from (DR-0542) |
 | `entities`, `aliases`, `alias_terms`, `entity_links`, `external_ids` | the keyword layer loaded from YAML, with each alias's forms and misspellings |
 | `mentions`, `extracts` | which chunk mentions which entity; typed values (ticket, amount, date, URL) |
-| `items`, `item_log`, `meetings`, `points`, `streams` | the ledger, folded from the op log |
+| `items`, `item_log`, `item_numbers`, `ledger_files` | the ledger folded from its ops (DR-0616): each item's fields and state, every op with its keys, `after`, its log line and the undo that left it out, each number and the items that held it, and each op file's size, time and sha256, so an update reads a file that only grew from where it stopped |
+| `meetings`, `points`, `streams` | meetings, their talking points and streams, folded the same way (#199) |
 | `links`, `runs` | meetings to records, items to records; sync history |
+
+A write and `docket ledger show` bring the ledger's tables up to date first, and fold the op files in memory instead
+when the index is missing, of another build, or held past a second (DR-0619): nothing in the index is a door.
 
 ### 5.5 Retention and forgetting
 

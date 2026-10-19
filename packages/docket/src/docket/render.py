@@ -15,6 +15,8 @@ from docket.curate.batch import BatchView, Measure, Status
 from docket.curate.propose import UNSEEN, CardSpelling
 from docket.decisions import DecisionsReport, DecisionState
 from docket.index import SearchResult
+from docket.index.ledger import Shown, now_held
+from docket.ledger.fold import Item, number_text
 from docket.plaintext import printable
 from docket.questions import EvalReport, Score
 from docket.recall import ReadResult, StaleReport, VerifyResult
@@ -483,3 +485,36 @@ def reconcile(found: Listing, tz: ZoneInfo) -> list[str]:
     if found.hidden:
         lines.append(f"hidden     {found.hidden} recording(s) a never-store list or your decisions keep out")
     return lines
+
+
+def ledger_item(shown: Shown, tz: ZoneInfo) -> list[str]:
+    """What `docket ledger show` says: the item's number and title, its fields as they stand, the other items that held
+    the number it was named by, then its history, oldest first: each change's day and time here, who made it and how,
+    and its line, an undone one marked with the undo that left it out."""
+    item = shown.item
+    lines = [f"{number_text(item.number) if item.number is not None else 'no number'}  {item.title}"]
+    rows = [("id", item.id), ("kind", item.kind), ("state", _item_state(item))]
+    if item.number is None:
+        rows.append(("number", f"{number_text(item.claimed)} went to an earlier claim; the next write gives a new one"))
+    rows += [("who", item.who), ("stream", item.stream), ("source", item.source)]
+    rows.append(("opened", f"{item.opened}, by {item.added_by}"))
+    rows += [("due", str(item.due))] if item.due is not None else []
+    rows += [(name, text) for name in ("description", "notes", "outcome") if (text := getattr(item, name))]
+    rows += [("material", m.ref + (f"  {m.label}" if m.label else "")) for m in item.materials]
+    rows += [("also held", f"{number_text(shown.named or 0)} by {other}, {now_held(now)}") for other, now in shown.also]
+    for label, value in rows:
+        first, *rest = value.split("\n")
+        lines += [f"{label:<12} {first}", *(f"{'':<12} {row}" for row in rest)]
+    for n, change in enumerate(shown.history):
+        when = f"{change.day} {change.at.astimezone(tz):%H:%M}" if change.at is not None else f"{change.day}      "
+        undone = f"  (undone by {change.undone_by})" if change.undone_by else ""
+        lines.append(f"{'history' if n == 0 else '':<12} {when}  {change.by} via {change.via}  {change.line}{undone}")
+    return lines
+
+
+def _item_state(item: Item) -> str:
+    if item.state == "open":
+        return f"open, triage {item.triage}" if item.triage else "open"
+    if item.state == "snoozed":
+        return f"snoozed until {item.until}"
+    return f"{item.state} on {item.closed}" + (", archived" if item.archived else "")
