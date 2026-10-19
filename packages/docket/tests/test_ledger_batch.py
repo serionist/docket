@@ -206,6 +206,12 @@ def test_archive_with_no_item_archives_what_is_due(vault: Vault) -> None:
     assert write(vault, [{"op": "archive"}], now=NOW).ops == ()
 
 
+def test_archive_and_rollover_with_no_meeting_in_the_ledger_write_nothing(vault: Vault) -> None:
+    write(vault, [ADD], now=NOW)
+    written = write(vault, [{"op": "archive"}, {"op": "rollover"}], now=later(30))
+    assert (written.ops, written.remarks) == ((), ())
+
+
 def test_a_point_on_a_meeting_the_batch_took_off_reads_as_its_meeting(vault: Vault) -> None:
     written = write(vault, [
         {"op": "meeting", "fields": dict(MEETING), "as": "m"},
@@ -223,7 +229,10 @@ def test_rollover_names_the_meetings_it_couldn_t_roll(vault: Vault) -> None:
         {"op": "meeting", "fields": {"subject": "Weekly pilot sync", "start": at(26, 9), "end": at(26, 10)}},
         {"op": "point", "item": "M-0001", "fields": {"text": "Nowhere to go"}},
         {"op": "point", "item": "M-0002", "fields": {"text": "Rolls on"}},
+        {"op": "meeting", "fields": {"subject": "Retro", "start": at(20, 9), "end": at(20, 10)}},
+        {"op": "point", "item": "M-0004", "fields": {"text": "Not due for a day"}},
     ], now=NOW)  # fmt: skip
+    # Budget is due with nowhere to go; the Retro ended two hours ago, so it isn't due yet and isn't named.
     written = write(vault, [{"op": "rollover"}], now=datetime(2026, 10, 20, 12, tzinfo=UTC))
     assert [o.op for o in written.ops] == ["point", "point_set"]
     assert written.remarks == ((1, "M-0001 Budget: 1 open point(s), no next meeting"),)

@@ -1293,14 +1293,12 @@ class _Batch(_Write):
         super().__init__(vault, held, by, via, now)
         self.write_by: By = by
         self.dry_run = dry_run
-        self.names: dict[str, str] = {}
+        self.as_ids: dict[str, str] = {}
         # A refused change's name, and the change, so a later `$name` naming it hangs on it (a dry run's only).
         self.lost: dict[str, int] = {}
         self.per_change: list[tuple[Op, ...]] = []
         self.remarks: list[tuple[int, str]] = []
         self.refusals: list[Refusal] = []
-        # Each meeting's standing points as the batch began, by id: a point's n is read against them (DR-0640).
-        self.began = {m.id: [p.id for p in m.points] for m in self.objects().meetings.values()}
         self._held_open: dict[str, tuple[str, str, str]] | None = None
 
     def step(self, n: int, change: Mapping[str, Any]) -> None:
@@ -1368,7 +1366,7 @@ class _Batch(_Write):
         name = change.get("as")
         if name is not None and (not isinstance(name, str) or not NAME.fullmatch(name)):
             self.refuse(n, "as is a name: a lowercase letter, then lowercase letters, digits or underscores")
-        if name in self.names or name in self.lost:
+        if name in self.as_ids or name in self.lost:
             self.refuse(n, f"as {name} is given twice in the batch")
         inner = self.substituted(n, {key: value for key, value in change.items() if key not in ("as", "by")})
         start = len(self.new)
@@ -1392,7 +1390,7 @@ class _Batch(_Write):
             if kind == "rollover":
                 self.stranded(n)
         if name is not None:
-            self.names[name] = self.made(kind, self.new[start:], inner)
+            self.as_ids[name] = self.made(kind, self.new[start:], inner)
 
     def substituted(self, n: int, change: dict[str, Any]) -> dict[str, Any]:
         """The change with each `$name` in its references given as the id it names (DR-0640)."""
@@ -1409,9 +1407,9 @@ class _Batch(_Write):
         m = NAMED.fullmatch(value) if isinstance(value, str) else None
         if m is None:
             return value
-        if m.group(1) not in self.names:
+        if m.group(1) not in self.as_ids:
             self.refuse(n, f"{value} isn't given by an earlier change's as")
-        return self.names[m.group(1)]
+        return self.as_ids[m.group(1)]
 
     def made(self, kind: str, written: Sequence[Op], change: Mapping[str, Any]) -> str:
         """The id a change's `as` names: the item an add or a point's item made, the point a point added, the meeting
@@ -1501,6 +1499,10 @@ class _Batch(_Write):
             if item is None or not closed or item.archived or _archive_undone(folded):
                 continue
             self.change(n, {"op": "archive", "item": item_id, **keys})
+        # The tables' candidates, by a day either side of the owner's, and the meetings the write has read already.
+        self.load(self.held.archivable(cutoff + timedelta(days=1)))
+        if not self.object_adds:
+            return
         objects = self.objects()
         due = [
             m.id for m in sorted(objects.meetings.values(), key=lambda m: (m.start, m.id))
@@ -1520,7 +1522,9 @@ class _Batch(_Write):
             start, end = _when(fields["start"]), _when(fields["end"])
             if end < start:
                 self.refuse(n, "end is before start")
-            meetings = self.objects().meetings.values()
+            # The meetings the tables hold at that start, with those the write has read or added.
+            self.load(self.held.meetings_at(start))
+            meetings = self.objects().meetings.values() if self.object_adds else ()
             twin = next((m for m in meetings if m.start == start and _same_subject(m.subject, fields["subject"])), None)
             if twin is not None:
                 label = self.meeting_label(twin)
@@ -1535,7 +1539,7 @@ class _Batch(_Write):
         if m is None:
             return change
         meeting = self.resolve_meeting(n, change.get("item"))
-        began = self.began.get(meeting.id)
+        began = self.began(meeting.id)
         if began is None:
             return change
         k, label = int(m.group(1)), self.meeting_label(meeting)
@@ -1545,12 +1549,26 @@ class _Batch(_Write):
             self.refuse(n, f"{label}'s point {k} was taken off earlier in the batch")
         return {**change, "point": began[k - 1]}
 
+    def began(self, meeting_id: str) -> list[str] | None:
+        """A meeting's standing points as the batch began, by id: the meetings read, folded without this batch's ops;
+        None for a meeting the batch added."""
+        mine = {op.id for op in self.new}
+        with paused():
+            before = fold_objects(
+                {a: [ln for ln in self.lines[a] if ln.op.id not in mine] for a in self.object_adds if a not in mine}
+            )
+        meeting = before.meetings.get(before.owner.get(meeting_id, ""))
+        return None if meeting is None else [p.id for p in meeting.points]
+
     def stranded(self, n: int) -> None:
-        """The meetings a rollover couldn't roll: over, not archived, with open points and no next meeting, as todo.py's
-        meeting rollover listed them (DR-0641)."""
+        """The meetings a rollover couldn't roll: due, not archived, with open points and no next meeting, as todo.py's
+        meeting rollover listed them (DR-0641). The rollover read each due meeting, so nothing more is read."""
+        if not self.object_adds:
+            return
         for meeting in sorted(self.objects().meetings.values(), key=lambda m: (m.start, m.id)):
             still = meeting.open_points()
-            if still and not meeting.archived and meeting.end <= self.now and self.next_in_series(meeting) is None:
+            due = _due(self.now, meeting.end, meeting.outcome, meeting.response)
+            if still and not meeting.archived and due and self.next_in_series(meeting) is None:
                 what = f"{self.meeting_label(meeting)} {_cut(meeting.subject, 50)}"
                 self.remarks.append((n, f"{what}: {len(still)} open point(s), no next meeting"))
 
@@ -1565,11 +1583,11 @@ class _Batch(_Write):
                 labels[point] = self.point_label(op.item, point)
             if op.op == "renumber":
                 labels[op.id] = self.lost_label(op)
-        for named in self.names.values():
+        for named in self.as_ids.values():
             if named not in labels:
                 labels[named] = self.label(named)
         return Written(
-            new, None, self.numbers(), tuple(self.per_change), dict(self.names), labels, tuple(self.remarks),
+            new, None, self.numbers(), tuple(self.per_change), dict(self.as_ids), labels, tuple(self.remarks),
             tuple(self.refusals),
         )  # fmt: skip
 
