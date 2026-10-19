@@ -1,32 +1,36 @@
-# Dependabot version updates, weekly: the Python packages in uv.lock and the actions the workflows pin by SHA. Each
-# update is a PR like any other: CI must pass and the maintainer merges it. Security updates come as soon as an advisory
-# is published, whatever the schedule.
+# Dependabot version updates, weekly: the Python packages, in uv.lock and in the models' worker requirements, and the
+# actions the workflows pin by SHA. Each group is a PR like any other: CI must pass and the maintainer merges it. A
+# group's long title doesn't matter, since the squash takes the maintainer's own subject. Security updates come as soon
+# as an advisory is published, whatever the schedule.
 version: 2
+
+# A week's Python updates in one PR, both entries below together: the gate's lock step fails while onnxruntime,
+# tokenizers or numpy in the models' requirements differ from the dev group's pins, so a bump and its twin must land
+# together, and one PR runs CI once rather than once a package. A multi-ecosystem group can't split by update type, so
+# a major comes in the same PR.
+multi-ecosystem-groups:
+  python:
+    schedule:
+      interval: weekly
+      day: monday
 
 updates:
   - package-ecosystem: uv
     directory: /
-    schedule:
-      interval: weekly
-      day: monday
+    multi-ecosystem-group: python
+    patterns: ["*"]
     # Wait a week after a version is published, so a broken or compromised release is pulled first.
     cooldown:
       default-days: 7
-    open-pull-requests-limit: 10
-    # No group: a grouped title ("Bump x from a to b in the <group> group across 1 directory") can pass the 72
-    # characters a commit on main may have, so each Python update comes as its own short-titled PR.
 
-  # The models' worker requirements (DR-0332): the .in files and their hashed .txt. The gate's lock step fails while
-  # onnxruntime, tokenizers or numpy here differ from the dev group's pins, so a bump here and its twin from the uv
-  # entry above go in together, recompiled with `uv run devkit models-lock`.
+  # The models' worker requirements (DR-0332): the .in files and their hashed .txt. Dependabot's recompile of the .txt
+  # doesn't write tools/devkit/models-wheels.json, so the PR is recompiled with `uv run devkit models-lock`.
   - package-ecosystem: pip
     directory: /packages/docket/src/docket/models
-    schedule:
-      interval: weekly
-      day: monday
+    multi-ecosystem-group: python
+    patterns: ["*"]
     cooldown:
       default-days: 7
-    open-pull-requests-limit: 5
 
   - package-ecosystem: github-actions
     directory: /

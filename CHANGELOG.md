@@ -283,6 +283,9 @@ Unreleased in the same PR.
 
 ### Changed
 
+- The models' and the speech workers now run ONNX Runtime 1.31, tokenizers 0.23.3, numpy 2.5.4 and PyAV 19, and
+  Docket cuts audio with PyAV 19 too. Models and speech stay off after you update until you run `docket models
+  install` again, and `docket models install --speech` where you use speech.
 - The ledger obeys the forgotten list: an op a forget masked reads `[forgotten]` where its words were, in every read,
   `show`, the index and an import run again, its number and history kept, and the next gate call on each clone writes
   the mask into the op files. A forgotten list that doesn't read now stops the ledger's reads and writes too. Update
