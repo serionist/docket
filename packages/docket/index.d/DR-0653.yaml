@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0653
+    title: docket ledger import writes an export's op lines a month per commit, skipping what the ledger holds of them and refusing anything else
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#202"]
+    description: "docket ledger import <file> reads JSON lines, each an op line (DR-0611) with via import, day alone and the export's own ids. machine, batch and after are the writer's, so the import sets them: its machine, the month's first op id, the object's op before; a line carrying one of them, or another via, refuses the file. Under the vault lock it writes the months oldest first, each one write through store.py, the one writer (DR-0610): the text rules a live write follows (DR-0618, DR-0627), the month's file through a temp file and a rename, one commit; then the index's ledger tables catch up. The ledger may hold only ops of the file, each line for line as the import would write it: those are skipped and the rest written, so a rerun writes nothing and an import stopped after a month finishes. An op the ledger holds that the file doesn't, a live write's or a changed export's, refuses the import, naming how many. A line that isn't an op, a text rule's refusal, or a problem docket vault check would name in the fold of the result refuses it, naming place and field, never the value."
+    binds:
+      - The file is op lines in DR-0611's format, less the keys the writer sets; the import adds none of its own.
+      - "An import never writes over ops it didn't bring: the ledger it meets holds nothing, or a part of the same file line for line."
+    not_chosen:
+      - "ledger_batch's changes (#201): they take the write's day and mint fresh ids, so the history would land on the import's day and a rerun would double it."
+      - "One commit for the whole import: a write's ops fall in one month (DR-0610)."
+      - "Topping up a ledger live writes have touched: two writers' numbers and states would need merging, for a run made once."

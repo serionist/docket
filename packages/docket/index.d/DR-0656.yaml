@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0656
+    title: docket ledger import --revert takes every op out in one commit, until the old ledger retires
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#202"]
+    description: "docket ledger import --revert [--dry-run] takes every op line out of ledger/ops/, the import's and any written since, in one commit through store.py, refolds the index's ledger tables and says how many of each via went. It is for the trial imports and a rollback before the old ledger retires: CLI only, never a tool or a page. Git keeps the lines, and reverting that commit, which only adds lines, brings them back. docket vault check compares the working tree with HEAD (DR-0617), so a commit that removes lines is no problem; besides a forget's apply, this is the one way committed op lines go."
+    not_chosen:
+      - "git revert of the import's commits: under the vault's union merge (DR-0142) a revert's removed lines that meet a later append are kept without a word, and an import is a commit per month plus what was written on top."
+      - "Taking out only the import's ops: ops written on top name its items and would dangle, and a rerun refuses a ledger holding ops it didn't bring (DR-0653)."

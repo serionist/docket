@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0657
+    title: An export writes each old log entry as a log op after the op its words name, and catches up at the end
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#202"]
+    description: "What the import expects of an export, which the owner's export script, outside Docket (roadmap step 15), writes from todo.py's own load(). An item: an add with its number and its fields as they stand, opened set, due as its first due line had it, an M- number as that meeting's id, on the earlier of opened and its first entry's day; its materials as they stand; per log entry a log op with its text verbatim, its day and by, and before it, on its day, the op its words name when that applies: triage (a chase is triage: chase), snooze, done, drop, reopen, a set of due; at the end, catch-up ops where state, until, triage or due still differ from the old ledger's; an archived item or meeting, then an archive op 14 days after its close or start, or on its last op's day if later. A meeting: its number, start and end with the zone's offset, notes from todo.py's note, attendees split on commas, recordings and links as materials, no key (DR-0655); its points as point and point_set ops, from and to paired point to point in todo.py's order, by equal text when the counts differ, else naming the meeting. A stream op per stream, from its STATUS.md frontmatter, else active. by: me is user, claude and sync stay, none or another name is claude; an add takes its first entry's; meetings and points are claude. Only todo.py's own renderings make ops; free text stays words. An imported op other than log shows no log line (DR-0611), so an item's log reads as the old one and the history counts (#201) come from the ops."
+    not_chosen:
+      - "Old log lines as log ops alone: the history counts would start at the import."
+      - "Each line as its real op with the old words in its note: an imported op shows no line (DR-0611), and log entries per item would no longer be the log ops."
+      - "Free-text chases (\"chased Ada\") as triage ops: a word rule would guess."
+      - "Every field's old values rebuilt from its change lines: only due feeds a count; the rest stay words."

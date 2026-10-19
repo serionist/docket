@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0655
+    title: The import keys an old meeting by the one calendar record matching its start and subject
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#202"]
+    description: "A keyless meeting add in the file whose start, to the minute in the owner's zone, and subject, case and spaces folded, match exactly one calendar record in the vault (todo.py's upsert rule) gets that record's event and series from #200's own function; its other fields stay as the export wrote them. None or several leaves it keyless, named in the dry run, for #200 to continue (DR-0621). The export writes no key, so DR-0622's key has one builder, the core's."
+    binds:
+      - "One function builds a meeting's event and series from a calendar record, #200's; the import calls it."
+    not_chosen:
+      - "The export building the key, as #199's plan said: a second builder outside Docket, reading the vault's raw records."
+      - "Leaving every old meeting to #200's continue: a keyed add sets the record's fields over the old ones, and the match report would come after the import instead of in its dry run."

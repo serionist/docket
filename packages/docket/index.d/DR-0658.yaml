@@ -1,0 +1,13 @@
+decisions:
+  - id: DR-0658
+    title: An export derives each op's id from its day, its place and its object's number
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#202"]
+    description: An op's id is a ULID whose 48-bit time is the op's day at 00:00 UTC, or for a meeting's ops the meeting's start, plus the op's place among its object's ops in milliseconds, and whose 80 random bits are the first 80 of sha256 of the object's number or name and the place (A-0281/7, M-0040/3, stream:pilot/0). Ops keep their order within their object, every op sorts after its add (DR-0612), a copy sorts after its source since the next meeting of a series starts later, and the same ledger gives the same ids, so a rerun adds nothing twice. A future meeting's ops sort ahead of the clock until its start passes; DR-0612's minting follows them.
+    not_chosen:
+      - "Ids minted when the export runs: a second export would double every op."
+      - "A rank within the day across the whole ledger: one new item would shift every id that day."
+      - "Future meetings held at the export's day: the ids would hang on the day it ran, and copies between future meetings would need a rule of their own."
