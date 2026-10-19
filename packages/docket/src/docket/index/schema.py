@@ -27,7 +27,8 @@ from docket.index.text import snowball_version
 # 10: a decision's status in docs, and decision_lines, the decisions each of a brief's Decisions lines cites, so
 # a search hit marks one that cites no confirmed decision (DR-0565).
 # 11: the ledger folded from its ops, in items, item_log, item_numbers and ledger_files (DR-0616).
-SCHEMA_VERSION = 11
+# 12: meetings, points, streams and their logs and numbers, out of item_log, and an item's meeting (DR-0628).
+SCHEMA_VERSION = 12
 TOKENIZER = "unicode61 remove_diacritics 2"
 # remove_diacritics 2 came in SQLite 3.27.
 MIN_SQLITE = (3, 27, 0)
@@ -118,17 +119,19 @@ CREATE TABLE problems (kind TEXT NOT NULL, place TEXT NOT NULL, message TEXT NOT
 CREATE TABLE skipped (rid TEXT PRIMARY KEY, parts INTEGER NOT NULL) WITHOUT ROWID;
 """
 
-# The ledger's tables (DR-0616), which a write also builds in memory when the index can't be had. item_log keeps
-# rowids: its rows hold each op's line, too long for a table without them.
+# The ledger's tables (DR-0616, DR-0628), which a write also builds in memory when the index can't be had. The logs
+# keep rowids: their rows hold each op's line, too long for a table without them. A meeting's or a stream's log row
+# keeps the key its add carries and the op a link names (a continues, a from, a to), so an update and a write find the
+# meetings an op touches from the rows alone.
 LEDGER_TABLES = """
 CREATE TABLE ledger_files (
   path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime_ns INTEGER NOT NULL, sha256 TEXT NOT NULL, highest TEXT
 ) WITHOUT ROWID;
 CREATE TABLE items (
   id TEXT PRIMARY KEY, number INTEGER, claimed INTEGER NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL,
-  who TEXT NOT NULL, stream TEXT NOT NULL, source TEXT NOT NULL, opened TEXT NOT NULL, due TEXT, description TEXT,
-  notes TEXT, outcome TEXT, state TEXT NOT NULL, until TEXT, closed TEXT, triage TEXT, archived INTEGER NOT NULL,
-  materials TEXT NOT NULL, added_by TEXT NOT NULL, last_op TEXT NOT NULL
+  who TEXT NOT NULL, stream TEXT NOT NULL, source TEXT NOT NULL, meeting TEXT, opened TEXT NOT NULL, due TEXT,
+  description TEXT, notes TEXT, outcome TEXT, state TEXT NOT NULL, until TEXT, closed TEXT, triage TEXT,
+  archived INTEGER NOT NULL, materials TEXT NOT NULL, added_by TEXT NOT NULL, last_op TEXT NOT NULL
 ) WITHOUT ROWID;
 CREATE INDEX items_claimed ON items (claimed);
 CREATE TABLE item_log (
@@ -141,6 +144,42 @@ CREATE TABLE item_numbers (
   number INTEGER NOT NULL, item TEXT NOT NULL, claim TEXT NOT NULL, hidden INTEGER NOT NULL, PRIMARY KEY (number, item)
 ) WITHOUT ROWID;
 CREATE INDEX item_numbers_item ON item_numbers (item);
+CREATE TABLE meetings (
+  id TEXT PRIMARY KEY, number INTEGER, claimed INTEGER NOT NULL, event TEXT, series TEXT, start TEXT NOT NULL,
+  "end" TEXT NOT NULL, utc TEXT NOT NULL, day TEXT NOT NULL, subject TEXT NOT NULL, organiser TEXT, "where" TEXT,
+  response TEXT, attendees TEXT NOT NULL, stream TEXT, notes TEXT, outcome TEXT, materials TEXT NOT NULL,
+  archived INTEGER NOT NULL, adds TEXT NOT NULL, added_by TEXT NOT NULL, last_op TEXT NOT NULL
+) WITHOUT ROWID;
+CREATE INDEX meetings_utc ON meetings (utc);
+CREATE TABLE points (
+  id TEXT PRIMARY KEY, meeting TEXT NOT NULL, n INTEGER, text TEXT NOT NULL, state TEXT NOT NULL, answer TEXT,
+  item TEXT, "from" TEXT, "to" TEXT, proposed INTEGER NOT NULL, moved_to TEXT, day TEXT NOT NULL, by TEXT NOT NULL
+) WITHOUT ROWID;
+CREATE INDEX points_meeting ON points (meeting);
+CREATE TABLE meeting_log (
+  item TEXT NOT NULL, id TEXT NOT NULL, version INTEGER NOT NULL, meeting TEXT NOT NULL, after TEXT, day TEXT NOT NULL,
+  at TEXT, by TEXT NOT NULL, via TEXT NOT NULL, kind TEXT NOT NULL, batch TEXT, keys TEXT NOT NULL, line TEXT,
+  undone_by TEXT, fate TEXT NOT NULL, key TEXT, link TEXT, PRIMARY KEY (item, id, version)
+);
+CREATE INDEX meeting_log_id ON meeting_log (id);
+CREATE INDEX meeting_log_key ON meeting_log (key) WHERE key IS NOT NULL;
+CREATE INDEX meeting_log_link ON meeting_log (link) WHERE link IS NOT NULL;
+CREATE TABLE meeting_numbers (
+  number INTEGER NOT NULL, meeting TEXT NOT NULL, claim TEXT, held TEXT, hidden INTEGER NOT NULL,
+  PRIMARY KEY (number, meeting)
+) WITHOUT ROWID;
+CREATE INDEX meeting_numbers_meeting ON meeting_numbers (meeting);
+CREATE TABLE streams (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL, "where" TEXT, next TEXT, deadline TEXT,
+  updated TEXT NOT NULL, adds TEXT NOT NULL, added_by TEXT NOT NULL, last_op TEXT NOT NULL
+) WITHOUT ROWID;
+CREATE TABLE stream_log (
+  item TEXT NOT NULL, id TEXT NOT NULL, version INTEGER NOT NULL, stream TEXT NOT NULL, after TEXT, day TEXT NOT NULL,
+  at TEXT, by TEXT NOT NULL, via TEXT NOT NULL, kind TEXT NOT NULL, batch TEXT, keys TEXT NOT NULL, line TEXT,
+  undone_by TEXT, fate TEXT NOT NULL, key TEXT, PRIMARY KEY (item, id, version)
+);
+CREATE INDEX stream_log_id ON stream_log (id);
+CREATE INDEX stream_log_key ON stream_log (key) WHERE key IS NOT NULL;
 """
 
 

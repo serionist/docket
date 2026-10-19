@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -337,7 +338,7 @@ def test_a_clash_is_renumbered_by_the_next_write_and_its_number_names_neither_it
 def test_ops_of_two_months_or_two_machines_aren_t_one_write(vault: Vault) -> None:
     october = Op(schema_version=1, id=ops.mint(None, NOW, 1)[0], item=ops.mint(None, NOW, 1)[0], op="log",
                  day=date(2026, 10, 31), machine="test-box", by="user", via="import", note="x")  # fmt: skip
-    november = october.model_copy(update={"day": date(2026, 11, 1)})
+    november = replace(october, day=date(2026, 11, 1))
     with pytest.raises(LedgerError, match="a write's ops fall in one month, and these span 2 files"):
         store.commit_ops(vault, [october, november], "Ledger: import")
 

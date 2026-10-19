@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0633
+    title: "An update and a write fold a meeting with its part: the meetings tied to it by a key, a continues, a from or a to, followed until nothing new comes"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#199", "#218"]
+    description: "A meeting's fold reads other meetings' (DR-0623): a copy stands while its source stands and the source's winning roll names it, and a roll lands while its copy or the meeting it names stands, so one op can change meetings it doesn't name. The meetings that can change together are a part: the adds of one key, the meeting a continues names and every add continuing it, the meeting holding the point a from or a roll's to names, and every meeting whose lines name a point or an add of the part, followed until nothing new comes. Links are set by lines alone, never by the fold (DR-0621), so a part only grows as lines come. meeting_log keeps each row's key (an add's event) and link (a continues, a from, a to), indexed, and stream_log each stream add's name, so a part is found from the rows. An update folds again the items its new lines name and the parts their meetings' and streams' lines touch, from their rows and the new lines, and gives the M- numbers those claim, now or before, to their first claimants in one statement, as items' numbers are given (DR-0616), instead of folding each number's holders. A write reads from the tables only the parts of the meetings and streams its changes name, folds those again after each op it writes to one, and asks the tables for the rest: a stream's name, an event's adds, a number's holders, the meetings due with an open point, and the meetings a roll may go to. A rollover reads the meetings due with an open point and those their points roll to. A weekly series whose points roll every week is one part, so a write to one of its meetings reads the series: fifty meetings a year, about 20 ms. A ledger whose meetings were all one part would cost a write what folding every meeting cost before."
+    binds:
+      - An update folds again only the parts its new lines touch; a test holds it to a rebuild over random histories of items, meetings, keys, joins, points, rolls, streams and undos, lines arriving in any order.
+      - A write reads only the parts of the meetings and streams its changes name; a test counts what it reads.
+    not_chosen:
+      - "Every meeting folded on every write, as #199's first PR had it: about 0.25 s for 2,000 meetings on each change."
+      - "Only the objects the new lines name, their keys and continues, and the meetings their from and to name, as the plan had it: a roll's undo changes copies two meetings on, which no new line names."
+      - "Each number's holders folded too: their parts would come with them; the rows' claims give the numbers."
+      - "A part's id kept in the rows: a line joining two parts would rewrite one part's rows."

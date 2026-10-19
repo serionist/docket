@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0634
+    title: "suggest: linked items but prep tasks, then replies, waits and decisions on someone in the meeting by name or first name, then waits in its stream, 15 at most"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#199"]
+    description: "DR-0629's rules as built, over the index's tables, writing nothing. A prep item is a task whose title starts with prep, any case: the task a sync wrote to prepare a meeting before it proposed points instead (DR-0623). Someone in the meeting is its organiser or an attendee; an item's who matches a whole name or its first word, case and spaces folded, the whole name winning, since a ledger's who is often a first name and a calendar's attendee a full one. The items are open or snoozed, come by number within each group and once each, in the first group that takes them, with why: linked to the meeting, on a name in the meeting, or waiting in its stream. An item on a standing point of the meeting is left out. The meeting is named by the id of any add of it, so a key's add and a continued meeting's id both find it."
+    not_chosen:
+      - "A who matched as a whole name only: Ada would miss Ada Example, the calendar's name for her."
+      - "Every task linked to the meeting taken for prep: a task to raise there would be left out."

@@ -72,13 +72,13 @@ def history(seed: int) -> list[Op]:
 def test_any_order_of_any_machine_s_lines_folds_to_one_ledger(seed: int) -> None:
     made = history(seed)
     texts = [(ops.rel_of(o), o.text()) for o in made]
-    want = snapshot(fold(Line(Op.model_validate_json(t), t, rel, n) for n, (rel, t) in enumerate(texts, 1)))
+    want = snapshot(fold(Line(ops.read_op(t), t, rel, n) for n, (rel, t) in enumerate(texts, 1)))
     rng = random.Random(seed + 100)  # noqa: S311 - a seeded shuffle
     for _ in range(5):
         # A union merge can put the lines in any order and leave one twice.
         shuffled = texts + rng.sample(texts, k=len(texts) // 4)
         rng.shuffle(shuffled)
-        got = fold(Line(Op.model_validate_json(t), t, rel, n) for n, (rel, t) in enumerate(shuffled, 1))
+        got = fold(Line(ops.read_op(t), t, rel, n) for n, (rel, t) in enumerate(shuffled, 1))
         assert snapshot(got) == want
         assert not [p for p in got.problems if "texts" in p[1]]
 

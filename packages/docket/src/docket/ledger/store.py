@@ -1,12 +1,12 @@
 """Writing the ledger (DR-0610, DR-0612, DR-0613, DR-0618): the one writer of ops, a whole write or none of it.
 
 A write runs under the vault lock. It brings the index's ledger tables up to date from the op files, or folds them in
-memory when the index can't be had (DR-0616, DR-0619), and reads each item it touches from them, and every meeting and
-stream; gives a renumber to each item or meeting a clash left without a number; checks each change against the ledger
-as the write leaves it, the way todo.py's verbs check them; mints the ids and numbers; screens the text; then writes
-this machine's month file through a temp file and a rename and commits it, with any op file a stopped write left. A
-change that can't be made refuses the whole write, naming the change by its place and, for the text rules, the field,
-never the value.
+memory when the index can't be had (DR-0616, DR-0619), and reads each item it touches from them, and each meeting and
+stream it touches with the rest of its part (DR-0633), folding only those; gives a renumber to each item or meeting a
+clash left without a number; checks each change against the ledger as the write leaves it, the way todo.py's verbs
+check them; mints the ids and numbers; screens the text; then writes this machine's month file through a temp file and
+a rename and commits it, with any op file a stopped write left. A change that can't be made refuses the whole write,
+naming the change by its place and, for the text rules, the field, never the value.
 
     write(vault, [{"op": "add", "fields": {"kind": "reply", "title": "Send Ada the dates", "who": "Ada",
                    "stream": "pilot", "source": "chat:C0X/1"}},
@@ -25,9 +25,10 @@ the meetings that are due to the next of their series (DR-0624).
 
 from __future__ import annotations
 
+import heapq
 import re
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -37,7 +38,7 @@ from zoneinfo import ZoneInfo
 from docket import console
 from docket.errors import DocketError
 from docket.index.build import ledger_tables
-from docket.index.ledger import Held
+from docket.index.ledger import Held, Light
 from docket.ledger import check, ops
 from docket.ledger.fold import CLOSED, NUMBER, Folded, Item, family, fold_item, number_text, paused
 from docket.ledger.meetings import Meeting, ObjectFold, Objects, Point, Stream, fold_objects, meeting_text
@@ -189,14 +190,15 @@ def _one_series(a: str, b: str) -> bool:
 
 
 class _Write:
-    """One write as it is planned: the ledger's tables it reads, the lines of each item it touched and of every meeting
-    and stream, with its own ops added, and the numbers it gave."""
+    """One write as it is planned: the ledger's tables it reads, the lines of each item it touched and of each meeting
+    and stream it touched with the rest of its part, with its own ops added, and the numbers it gave."""
 
     def __init__(self, vault: Vault, held: Held, by: By, via: Via, now: datetime) -> None:
         self.vault = vault
         self.held = held
         self.highest_id = held.highest_id()
         self.highest_number = held.highest_number()
+        self.highest_meeting = held.highest_meeting_number()
         self.by: By = by
         self.via: Via = via
         self.now = now
@@ -209,17 +211,12 @@ class _Write:
         self.given_meetings: dict[int, str] = {}
         self.redactor = Redactor.from_config(vault.config.redaction)
         self.kind = ""
-        # Every meeting's and stream's lines as the tables hold them, all folded, and for each add the adds of its
-        # object, so an op's `after` sees them all. The index folds only items so far: #199's second PR folds the
-        # meetings there too, and a write then reads only the ones it touches.
-        with paused():
-            self.lines.update(held.object_lines())
-        self.object_adds = set(self.lines)
+        # The meetings' and streams' adds read so far, whole parts (DR-0633), and their fold; the streams' names as the
+        # tables hold them, for the streams no part read holds.
+        self.object_adds: set[str] = set()
         self._objects: Objects | None = None
         self.same: dict[str, set[str]] = {}
-        for add_id, obj_id in self.objects().owner.items():
-            self.same.setdefault(obj_id, set()).add(add_id)
-            self.same[add_id] = self.same[obj_id]
+        self.names = held.streams()
 
     # -- what stands ------------------------------------------------------------------------------------------------
 
@@ -232,13 +229,62 @@ class _Write:
     def fold(self, item_id: str) -> Folded:
         return fold_item(item_id, self.lines_of(item_id))
 
+    def load(self, adds: Iterable[str]) -> None:
+        """Read from the tables, once, the meetings and streams these adds belong to with the rest of their parts:
+        what folding them needs, and nothing more (DR-0633)."""
+        wanted = {add_id for add_id in adds if add_id not in self.object_adds}
+        if not wanted:
+            return
+        with paused():
+            found = self.held.part(wanted, known=self.object_adds)
+            read = self.held.object_lines(found)
+        for add_id in found:
+            self.lines[add_id] = read.get(add_id, [])
+        self.object_adds |= found
+        # Folded at once, so each add read knows its object's adds before an op is written to it.
+        self._objects = None
+        self.objects()
+
     def objects(self) -> Objects:
-        """The meetings and streams as the write leaves them, folded again after each op written to one, with the
-        collector paused as `load` pauses it."""
+        """The meetings and streams the write has read, as it leaves them, folded again after each op written to one,
+        with the collector paused as `load` pauses it; and for each add the adds of its object, so an op's `after`
+        sees them all."""
         if self._objects is None:
             with paused():
                 self._objects = fold_objects({add_id: self.lines[add_id] for add_id in self.object_adds})
+            self.same = {}
+            for add_id, obj_id in self._objects.owner.items():
+                self.same.setdefault(obj_id, set()).add(add_id)
+                self.same[add_id] = self.same[obj_id]
         return self._objects
+
+    def owner(self, add_id: str) -> str | None:
+        """The meeting or stream an add belongs to, read from the tables when the write hasn't yet; None for an id no
+        meeting or stream has as an add."""
+        if add_id not in self.object_adds:
+            if not self.held.is_object(add_id):
+                return None
+            self.load([add_id])
+        return self.objects().owner.get(add_id)
+
+    def stream_names(self) -> dict[str, str]:
+        """Each stream's name with its id: the fold's for the streams the write has read, the tables' for the rest."""
+        out = {name: stream_id for name, stream_id in self.names.items() if stream_id not in self.object_adds}
+        if self.object_adds:
+            out.update(self.objects().names)
+        return out
+
+    def by_event(self, event: str) -> Meeting | None:
+        """The meeting holding an event, as the write leaves it."""
+        self.load(self.held.keyed("meeting", event))
+        objects = self.objects()
+        return objects.meetings.get(objects.events.get(event, ""))
+
+    def by_name(self, name: str) -> Stream | None:
+        """The stream holding a name, as the write leaves it."""
+        self.load(self.held.keyed("stream", name))
+        objects = self.objects()
+        return objects.streams.get(objects.names.get(name, ""))
 
     def number_of(self, item_id: str) -> int:
         mine = [number for number, named in self.given.items() if named == item_id]
@@ -310,9 +356,9 @@ class _Write:
         if not isinstance(ref, str) or not ref.strip():
             self.refuse(n, "it needs item, an A- number or an item's id, an M- number or a stream's name")
         text = ref.strip()
-        objects = self.objects()
-        if ops.ULID.fullmatch(text) and text in objects.owner:
-            obj_id = objects.owner[text]
+        obj_id = self.owner(text) if ops.ULID.fullmatch(text) else None
+        if obj_id is not None:
+            objects = self.objects()
             if obj_id in objects.meetings:
                 return "meeting", obj_id
             if obj_id in objects.streams:
@@ -320,8 +366,8 @@ class _Write:
             self.refuse(n, f"{text} was undone")
         if MEETING_NUMBER.fullmatch(text):
             return "meeting", self.resolve_meeting(n, text).id
-        if text in objects.names:
-            return "stream", objects.names[text]
+        if text in self.stream_names():
+            return "stream", cast(Stream, self.by_name(text)).id
         if not (ops.ULID.fullmatch(text) or NUMBER.fullmatch(text)):
             if SLUG.fullmatch(text):
                 self.refuse(n, f"no stream {text}")
@@ -333,9 +379,9 @@ class _Write:
         if not isinstance(ref, str) or not ref.strip():
             self.refuse(n, "it needs item, a meeting's M- number or id")
         text = ref.strip()
-        objects = self.objects()
         if ops.ULID.fullmatch(text):
-            meeting = objects.meetings.get(objects.owner.get(text, ""))
+            obj_id = self.owner(text)
+            meeting = self.objects().meetings.get(obj_id or "")
             if meeting is None:
                 self.refuse(n, f"no meeting {text}")
             return meeting
@@ -343,8 +389,10 @@ class _Write:
         if m is None:
             self.refuse(n, "a meeting is named by its M- number or its id")
         number = int(m.group(1))
-        # The meetings are folded again after each op this write writes, so the holders are current, and only a
-        # meeting that stands holds a number.
+        # Every meeting the tables say holds it read, and folded again after each op this write writes, so the
+        # holders are current, and only a meeting that stands holds a number.
+        self.load(self.held.meeting_holders(number))
+        objects = self.objects()
         named = objects.holders.get(number, ())
         label = meeting_text(number)
         if len(named) != 1:
@@ -369,12 +417,17 @@ class _Write:
         mine.append(Line(op, op.text(), ops.rel_of(op), 0))
         self.new.append(op)
         if kind in ("meeting", "stream"):
-            joined = (op.fields or {}).get("continues")
+            fields = op.fields or {}
+            joined = fields.get("continues")
             group = self.same.get(joined, set()) if isinstance(joined, str) else set[str]()
             group.add(op.id)
             for add_id in group:
                 self.same[add_id] = group
             self.object_adds.add(op.id)
+            # A key's other adds, undone ones too, are one object with this one: their part is read with it.
+            key = fields.get("event" if kind == "meeting" else "name")
+            if isinstance(key, str):
+                self.load(self.held.keyed(kind, key))
         if item in self.object_adds:
             self._objects = None
         return op
@@ -383,19 +436,22 @@ class _Write:
         return max(self.highest_number, *self.given, 0) + 1
 
     def next_meeting_number(self) -> int:
-        return max(self.objects().highest_number, *self.given_meetings, 0) + 1
+        read = self.objects().highest_number if self.object_adds else 0
+        return max(self.highest_meeting, read, *self.given_meetings, 0) + 1
 
     def renumber(self) -> None:
-        """A new number for each item or meeting whose latest claim lost one to an earlier claim (DR-0613)."""
+        """A new number for each item or meeting whose latest claim lost one to an earlier claim (DR-0613): the
+        tables say which, having folded every meeting's claims."""
         self.kind = "renumber"
         for item_id in self.held.clashing():
             number = self.next_number()
             self.given[number] = item_id
             self.emit("renumber", item_id, number=number)
-        for meeting in self.objects().clashes():
+        for meeting_id in self.held.meeting_clashes():
+            self.load([meeting_id])
             number = self.next_meeting_number()
-            self.given_meetings[number] = meeting.id
-            self.emit("renumber", meeting.id, number=number)
+            self.given_meetings[number] = meeting_id
+            self.emit("renumber", meeting_id, number=number)
 
     # -- the text rules (DR-0618, DR-0627) --------------------------------------------------------------------------
 
@@ -439,7 +495,7 @@ class _Write:
 
     def held_stream(self, n: int, value: str) -> str:
         """A stream an item or a meeting names: once the ledger holds a stream, one it holds (DR-0625)."""
-        names = self.objects().names
+        names = self.stream_names()
         if names and value not in names:
             self.refuse(n, f"no stream {value}; add it first, or name one of {', '.join(sorted(names))}")
         return value
@@ -667,21 +723,20 @@ class _Write:
             return
         fields = self.meeting_fields(n, change.get("fields"))
         event, continues = fields.get("event"), fields.get("continues")
-        objects = self.objects()
         if continues is not None:
             if event is None:
                 self.refuse(n, "continues needs an event: only a meeting with one continues a meeting")
-            joined = objects.meetings[continues]
+            held = self.by_event(event)
+            joined = self.objects().meetings[continues]
             if joined.event is not None:
                 self.refuse(n, f"{self.meeting_label(joined)} has an event; only a meeting without one is continued")
-            held = objects.meetings.get(objects.events.get(event, ""))
             if held is not None and not self.keyed(held.id):
                 self.refuse(n, f"that event continues {self.meeting_label(held)} already")
             self.need_meeting_fields(n, fields)
             # The continued meeting's number goes on the add, so the object claims no new one (DR-0621).
             self.emit("meeting", None, number=joined.number or joined.claimed, fields=_present(fields), note=note)
             return
-        held = objects.meetings.get(objects.events.get(event, "")) if event is not None else None
+        held = self.by_event(event) if event is not None else None
         if held is None:
             self.need_meeting_fields(n, fields)
             if _when(fields["end"]) < _when(fields["start"]):
@@ -704,8 +759,7 @@ class _Write:
         event, continues = given.get("event"), given.get("continues")
         if not isinstance(event, str) or continues not in (None, "", "-"):
             return False
-        objects = self.objects()
-        held = objects.meetings.get(objects.events.get(one_line(event), ""))
+        held = self.by_event(one_line(event))
         return held is not None and held.archived
 
     def need_meeting_fields(self, n: int, fields: dict[str, Any]) -> None:
@@ -787,7 +841,7 @@ class _Write:
         name = fields.get("name")
         if name is None:
             self.refuse(n, "a stream needs name")
-        held = self.objects().streams.get(self.objects().names.get(name, ""))
+        held = self.by_name(name)
         if held is not None:
             fields.pop("name")
             self.set_stream(n, held, fields, note)
@@ -939,14 +993,26 @@ class _Write:
     def rollover(self, n: int, change: Mapping[str, Any], note: str | None) -> None:
         """The open points of each meeting that is due rolled to the next meeting of its series, as todo.py rolls them:
         a cancelled meeting at once, one that is over with an outcome, any other a day after its end. The meetings
-        are taken by start, each from the ledger as the rolls before it left it."""
-        for meeting_id in [m.id for m in sorted(self.objects().meetings.values(), key=lambda m: (m.start, m.id))]:
-            meeting = self.objects().meetings[meeting_id]
-            still = meeting.open_points()
-            if not still or meeting.archived:
+        are taken by start, each from the ledger as the rolls before it left it: those the tables say are due with an
+        open point, those the write has read with one, and each meeting a roll went to, which starts later. Only those
+        are read."""
+        heap = [
+            (row.start, row.id) for row in self.held.with_open_points()
+            if row.id not in self.object_adds and _due(self.now, row.end, row.outcome, row.response)
+        ]  # fmt: skip
+        if self.object_adds:
+            heap += [(m.start, m.id) for m in self.objects().meetings.values() if m.open_points() and not m.archived]
+        heapq.heapify(heap)
+        done: set[str] = set()
+        while heap:
+            _, meeting_id = heapq.heappop(heap)
+            obj_id = self.owner(meeting_id)
+            meeting = self.objects().meetings.get(obj_id or "")
+            if meeting is None or meeting.id in done:
                 continue
-            over = meeting.end <= self.now and (bool(meeting.outcome) or self.now - meeting.end >= ROLL_AFTER)
-            if meeting.response != "cancelled" and not over:
+            done.add(meeting.id)
+            still = meeting.open_points()
+            if not still or meeting.archived or not _due(self.now, meeting.end, meeting.outcome, meeting.response):
                 continue
             target = self.next_in_series(meeting)
             if target is None:
@@ -959,29 +1025,37 @@ class _Write:
                     fields["proposed"] = True
                 copy = self.emit("point", target.id, fields=fields, note=note)
                 self.emit("point_set", meeting.id, point=point.id, fields={"state": "rolled", "to": copy.id}, note=note)
+            heapq.heappush(heap, (target.start, target.id))
 
     def next_in_series(self, meeting: Meeting) -> Meeting | None:
         """The next meeting by start, not cancelled or declined: the same series when both have one, else todo.py's
-        rule, the same subject, then one starting with the other with the same organiser (DR-0624)."""
+        rule, the same subject, then one starting with the other with the same organiser (DR-0624). The meetings the
+        write hasn't read are asked from the tables, and only the one chosen is read."""
+        read = self.objects().meetings.values()
         later = sorted(
-            (m for m in self.objects().meetings.values()
-             if m.id != meeting.id and m.start > meeting.start and m.response not in ("cancelled", "declined")
-             and not m.archived),
+            [*(Light(m.id, m.start, m.series, m.subject, m.organiser) for m in read
+               if m.id != meeting.id and m.start > meeting.start and m.response not in ("cancelled", "declined")
+               and not m.archived),
+             *(m for m in self.held.later_meetings(meeting.start) if m.id not in self.object_adds)],
             key=lambda m: (m.start, m.id),
         )  # fmt: skip
+        chosen: Light | None = None
         if meeting.series is not None:
-            same = next((m for m in later if m.series == meeting.series), None)
-            if same is not None:
-                return same
-            later = [m for m in later if m.series is None]
-        exact = next((m for m in later if _same_subject(m.subject, meeting.subject)), None)
-        if exact is not None:
-            return exact
-        return next(
-            (m for m in later if _one_series(m.subject, meeting.subject)
-             and (not (m.organiser and meeting.organiser) or m.organiser == meeting.organiser)),
-            None,
-        )  # fmt: skip
+            chosen = next((m for m in later if m.series == meeting.series), None)
+            if chosen is None:
+                later = [m for m in later if m.series is None]
+        if chosen is None:
+            chosen = next((m for m in later if _same_subject(m.subject, meeting.subject)), None)
+        if chosen is None:
+            chosen = next(
+                (m for m in later if _one_series(m.subject, meeting.subject)
+                 and (not (m.organiser and meeting.organiser) or m.organiser == meeting.organiser)),
+                None,
+            )  # fmt: skip
+        if chosen is None:
+            return None
+        obj_id = cast(str, self.owner(chosen.id))
+        return self.objects().meetings[obj_id]
 
     # -- undo -------------------------------------------------------------------------------------------------------
 
@@ -1004,6 +1078,7 @@ class _Write:
             return
         for item_id in self.held.in_batch(cast(str, batch)):
             self.lines_of(item_id)
+        self.load(self.held.objects_in_batch(cast(str, batch)))
         targets = sorted(
             (line.op for item_id in sorted(self.lines) for line in self.lines[item_id] if line.op.batch == batch),
             key=lambda op: op.id, reverse=True,
@@ -1026,9 +1101,11 @@ class _Write:
         return list(folded.lines), folded.undone, folded.idle
 
     def op_line(self, op_id: str) -> Line | None:
-        """An op's line, from the items whose lines hold its id, by item id and then as each item's lines run."""
+        """An op's line, from the items, meetings and streams whose lines hold its id, by add id and then as each one's
+        lines run."""
         for item_id in self.held.items_of(op_id):
             self.lines_of(item_id)
+        self.load(self.held.objects_of(op_id))
         return next(
             (line for item_id in sorted(self.lines) for line in self.lines[item_id] if line.op.id == op_id), None
         )
@@ -1135,6 +1212,12 @@ class _Write:
         if len(summary) > SUMMARY:
             summary = f"{said[0]} and {len(self.new) - 1} more"
         return f"Ledger: {summary} on {self.vault.machine}"
+
+
+def _due(now: datetime, end: datetime, outcome: str | None, response: str | None) -> bool:
+    """Whether a meeting's open points roll now, by todo.py's rule (DR-0624): a cancelled meeting at once, one that is
+    over with an outcome, any other a day after its end."""
+    return response == "cancelled" or (end <= now and (bool(outcome) or now - end >= ROLL_AFTER))
 
 
 def _undo_family(op: Op) -> str | None:
