@@ -18,6 +18,7 @@ import pytest
 from day_kit import CHAT, LINK, PLAN, SAME, ZONE, day, day_vault, hidden, signed_in, today
 from docket_testkit import empty_vault, make_config
 from docket_webkit import OURS, PORT, TOKEN, a11y_problems, html_problems, parse
+from ledger_kit import ADD_FIELDS, op, ulid, write_ops
 from starlette.testclient import TestClient
 
 from docket.ledger import ops as ledger_ops
@@ -420,6 +421,24 @@ def test_a_verdict_posts_one_batch_by_user_via_page_and_moves_the_selection_on(
     html = page(client, again.headers["location"])
     assert texts(html, "day-notice") == ["Nothing changed."]
     assert not parse(html).find_all("form", class_="notice-undo")
+
+
+def test_a_clash_s_rows_are_named_by_their_ids_as_a_batch_takes_them(client: TestClient, vault: Vault) -> None:
+    """Another clone's add claims A-0001 too: both rows are named by their ids until the renumber, the refs a batch
+    takes (DR-0613), and a call posted on one writes, the writer renumbering it first."""
+    theirs = op("add", 0, number=1, machine="laptop", fields={**ADD_FIELDS, "title": "Their copy of the dates"})
+    write_ops(vault.root, [theirs])
+    ours = next(o["id"] for o in ops(vault) if o["op"] == "add" and o["fields"]["title"] == "Send Ada the dates")
+    html = page(client)
+    assert {ours, ulid(0)} <= set(rows(html))
+    assert "A-0001" not in rows(html)
+    form = hidden(html, "quick")
+    assert form["item"] == ours
+    answer = post(client, {**form, "op": "triage:me"})
+    assert back(answer)["done"]
+    wrote = [o for o in ops(vault) if o.get("batch") == back(answer)["done"][0]]
+    assert [o["op"] for o in wrote] == ["renumber", "triage"]
+    assert parse(page(client, f"/ledger/panel?open={ours}")).find("section", class_="item-panel")
 
 
 def test_a_row_s_quick_button_moves_the_selection_without_a_panel(client: TestClient, vault: Vault) -> None:
