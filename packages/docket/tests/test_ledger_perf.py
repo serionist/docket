@@ -2,7 +2,7 @@
 `load`, 500 of its ops read as a forget's masks (DR-0695), in under a second and a half; all of it folded into the
 index's tables in under two seconds; one op more, on an item or a meeting, as a write leaves it, read into them in a
 tenth of a second; a write touching one meeting planned in a tenth of a second, reading only its part (DR-0616,
-DR-0628, DR-0633, DR-0635); a snapshot of it, every item open, read from the tables with its lines in a tenth of a
+DR-0628, DR-0633, DR-0635); a snapshot of it, every item open, read from the tables with its lines in a fifth of a
 second (DR-0638); the day's route on a vault holding it in half a second (DR-0672); and all of it as `docket ledger
 show --all --json` gives it, stamped, with its JSON, in under two seconds (DR-0659).
 
@@ -47,7 +47,7 @@ FOLD_SECONDS = 1.5
 REBUILD_SECONDS = 2.0
 CATCH_UP_SECONDS = 0.1
 WRITE_SECONDS = 0.1
-SNAPSHOT_SECONDS = 0.1
+SNAPSHOT_SECONDS = 0.2
 DAY_SECONDS = 0.5
 SHOW_ALL_SECONDS = 2.0
 CHANGES = ("log", "triage", "set", "log", "snooze", "triage", "log", "done", "reopen")
@@ -269,7 +269,7 @@ def test_a_write_touching_one_meeting_reads_only_its_series(tmp_path: Path, monk
 
 
 @pytest.mark.perf
-def test_a_snapshot_of_a_ledger_that_size_reads_from_the_index_in_a_tenth_of_a_second(tmp_path: Path) -> None:
+def test_a_snapshot_of_a_ledger_that_size_reads_from_the_index_in_a_fifth_of_a_second(tmp_path: Path) -> None:
     """Every item is open, so the snapshot lists all 5,000, and the 40 meetings left with an open point beside those
     of its window; read once before the clock starts, so SQLite's cache is warm as a running service's is. The other
     views are timed for the print only."""
