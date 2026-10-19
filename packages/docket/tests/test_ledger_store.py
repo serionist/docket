@@ -355,7 +355,9 @@ def test_the_import_s_dry_run_names_each_line_it_would_refuse_by_its_field(tmp_p
 
 
 def test_an_index_that_doesn_t_answer_refuses_the_locator_it_can_t_check(tmp_path: Path) -> None:
+    """With no index handed in, the rid's text alone is checked; an index that fails can't check it, and refuses."""
     vault = kept_and_dropped(tmp_path)
+    assert store.TextRules(vault).screen("source", "mail:AAMkADmsg1") == "mail:AAMkADmsg1"
     conn = sqlite3.connect(":memory:")
     conn.close()
     with pytest.raises(store.TextRefusedError, match="source can't be checked against the never-store containers"):
