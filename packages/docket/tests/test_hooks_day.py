@@ -10,8 +10,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from docket_testkit import empty_vault, make_config
 
-from docket import hooks
+from docket import hooks, userconfig
 from docket.cli import main
 from docket.ledger import day
 from docket.service import client, install
@@ -28,9 +29,9 @@ LINES = [
 COUNTS = "day: 1 overdue, 0 due today, 0 meetings today, 1 untriaged; sync due: chat"
 
 
-def status(running: bool = True) -> ServiceStatus:
-    return ServiceStatus("task Docket", running, 8741, {"vault": "D:/work/vault"} if running else {}, "file", None, {},
-                         None)  # fmt: skip
+def status(running: bool = True, **body: Any) -> ServiceStatus:
+    said = {"vault": "D:/work/vault", **body} if running else {}
+    return ServiceStatus("task Docket", running, 8741, said, "file", None, {}, None)
 
 
 def a_repo(folder: Path) -> Path:
@@ -153,12 +154,32 @@ def test_a_slow_service_or_one_that_can_t_read_the_day_is_one_line_to_claude(
     assert "Kov" not in json.dumps(out)
 
 
-def test_the_service_down_names_the_command_that_reads_the_vault(repo: Path) -> None:
+def test_the_service_down_names_the_command_that_reads_the_vault(repo: Path, tmp_path: Path) -> None:
+    userconfig.set_default_vault(empty_vault(tmp_path / "owner", make_config()).root)
     service = FakeService(repo)
     out = start(service, repo, status(running=False))
     assert context(out)[-1] == "day: the service is down; docket ledger day reads the vault"
     assert service.asked == []
     assert "docket ledger day" not in out["systemMessage"]
+
+
+def test_before_a_vault_and_a_service_are_set_up_the_day_says_nothing(repo: Path, tmp_path: Path) -> None:
+    """No vault yet, a vault gone, a service never installed, a running one with no vault or one it can't open: the
+    status lines already say what to set up, so the day neither asks nor points at `docket ledger day`."""
+    service = FakeService(repo)
+    down = status(running=False)
+    never = ServiceStatus(None, False, 8741, {}, "nowhere yet", None, {}, None)
+
+    def said(st: ServiceStatus) -> list[str]:
+        return [line for line in context(start(service, repo, st)) if line.startswith("day")]
+
+    for st in (down, never, status(vault=None), status(vault_problem="a convert stopped part way")):
+        assert said(st) == [], st
+    userconfig.set_default_vault(tmp_path / "moved")
+    assert said(down) == []
+    userconfig.set_default_vault(empty_vault(tmp_path / "owner", make_config()).root)
+    assert said(never) == []
+    assert service.asked == []
 
 
 def test_a_failed_status_check_asks_no_day(repo: Path) -> None:

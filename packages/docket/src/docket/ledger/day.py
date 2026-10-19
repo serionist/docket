@@ -15,8 +15,9 @@
     streams (1)
     pilot: Waiting on the venue -> Book the room (10-30)
 
-`Day` holds what each section lists, uncut, for a page; `lines` says it in at most `room` lines, giving rows back from
-the streams up when it must, each cut section keeping its count and the read that lists it. An item is listed once
+`Day` holds what each section lists, uncut, for a page; `lines` says it in at most `room` lines: past it, sections are
+cut whole from the streams up, each to its count and the read that lists it, then rows are given back within the room,
+the last cut first. An item is listed once
 among overdue, replies, decisions and tasks, invites and waiting, in the first that holds it, a section's cap aside;
 the queue and a meeting may repeat it. Rows are the ledger tool's own lines, the source left out. Nothing here writes,
 and a read takes no lock of the vault's.
@@ -35,7 +36,7 @@ from pydantic import BaseModel
 
 from docket.errors import DocketError
 from docket.index.build import ledger_tables
-from docket.ledger import ops, status, store, views
+from docket.ledger import check, ops, status, views
 from docket.ledger.views import ItemRow, LedgerRead, MeetingRow, PointRow, StreamRow, item_line, meeting_line
 from docket.vault import cursors, rendered
 from docket.vault.vault import Vault
@@ -120,8 +121,8 @@ class Day(BaseModel):
     """The owner's day at `at`: the live sources' syncs, or why this machine's cursor file doesn't read; the queue,
     every open item with a snooze whose day has come, untriaged first, then by verdict, each by due; today's meetings
     not yet ended and the next working day's; the item sections; the decisions and tasks listed nowhere above, not due
-    this week; the streams not closed; the status files the check names; the calendar records a stopped step left
-    pending (DR-0647)."""
+    this week; the streams not closed; the status files the check names; and what `docket vault check` says beside its
+    problems, the calendar records a stopped step left pending (DR-0647)."""
 
     today: date
     at: datetime
@@ -133,7 +134,7 @@ class Day(BaseModel):
     later: int = 0
     streams: list[StreamRow] = []
     status: list[StatusFile] = []
-    calendar_pending: int = 0
+    notes: list[str] = []
 
 
 class DayLine(BaseModel):
@@ -166,7 +167,7 @@ def next_working_day(day: date) -> date:
 
 def read(vault: Vault, at: datetime, running: Iterable[str] = ()) -> Day:
     """The day at `at` from one snapshot read, today to the next working day, with the streams' whole fields from the
-    same tables; then the cursor files, the status files and the pending calendar records. `running` names the sources
+    same tables; then the cursor files, the status files and the check's notes. `running` names the sources
     with a run open, which the service knows."""
     tz = ZoneInfo(vault.config.owner.time_zone)
     today = at.astimezone(tz).date()
@@ -179,8 +180,7 @@ def read(vault: Vault, at: datetime, running: Iterable[str] = ()) -> Day:
         StatusFile(path=path, what=what, owner=what not in (status.STALE, status.NOT_YET))
         for path, what in status.checked(vault, fields)
     ]
-    return build(found, at, syncs=syncs, sync_problem=problem, files=files,
-                 pending=len(store.calendar_pending(vault)))  # fmt: skip
+    return build(found, at, syncs=syncs, sync_problem=problem, files=files, notes=check.notes(vault))
 
 
 def sync_marks(vault: Vault, now: datetime, running: Iterable[str] = ()) -> tuple[list[SyncMark], str | None]:
@@ -215,7 +215,7 @@ def build(
     syncs: Sequence[SyncMark] = (),
     sync_problem: str | None = None,
     files: Sequence[StatusFile] = (),
-    pending: int = 0,
+    notes: Sequence[str] = (),
 ) -> Day:
     """The day from a snapshot read whose window starts today: the sections worked out, nothing cut."""
     today = found.today
@@ -256,7 +256,7 @@ def build(
     return Day(
         today=today, at=at, syncs=list(syncs), sync_problem=sync_problem, queue=queue, meetings=days,
         sections=sections, later=later, streams=[s for s in found.streams if s.status != "closed"],
-        status=list(files), calendar_pending=pending,
+        status=list(files), notes=list(notes),
     )  # fmt: skip
 
 
@@ -270,41 +270,61 @@ def repo_of(vault: Vault) -> Path:
 
 @dataclass(frozen=True)
 class _Block:
-    """A part of the day's text: its lines, and its lines once each cut that reaches it is made, by the cut's turn."""
+    """A part of the day's text in each size it takes, from its cut size to its whole; `cut_at` names the size each
+    cut that reaches it leaves it at, by the cut's turn."""
 
-    lines: list[DayLine]
-    cuts: dict[int, list[DayLine]]
+    forms: list[list[DayLine]]
+    cut_at: dict[int, int]
 
-    def at(self, made: int) -> list[DayLine]:
-        reached = [turn for turn in self.cuts if turn <= made]
-        return self.cuts[max(reached)] if reached else self.lines
+    def size(self, made: int) -> int:
+        """Its size once the first `made` cuts are made."""
+        return min((size for turn, size in self.cut_at.items() if turn <= made), default=len(self.forms) - 1)
+
+    def before(self, turn: int) -> int:
+        """Its size with only the cuts before `turn` made: as much as giving back `turn`'s rows makes it."""
+        return min((size for t, size in self.cut_at.items() if t < turn), default=len(self.forms) - 1)
 
 
 def _said(texts: Iterable[str]) -> list[DayLine]:
     return [DayLine(text=text) for text in texts]
 
 
+def _whole(lines: list[DayLine]) -> _Block:
+    return _Block([lines], {})
+
+
 def lines(day: Day, room: int = ROOM) -> list[DayLine]:
-    """The day in at most `room` lines: past it, sections give their rows back in the cut order, streams first, each
-    keeping its count and the read that lists it. The sync line, the status files, overdue, today's meetings, the
-    calendar's and the last line are never cut, so they pass `room` only on an extreme day."""
-    blocks = [_Block([_sync_line(day)], {})]
-    blocks += [_Block([DayLine(text=f"status: {f.path}: {f.what}", owner=f.owner)], {}) for f in day.status]
-    if day.calendar_pending:
-        # Worded as `docket vault check` words it.
-        said = f"{day.calendar_pending} calendar record(s) wait for their meetings; `docket ledger calendar`"
-        blocks.append(_Block(_said([said]), {}))
+    """The day in at most `room` lines. Past it, sections are cut whole in the cut order, streams first, each to its
+    count and the read that lists it, as few as fit; then rows are given back within the room, the last cut first:
+    today's meetings' points and items meeting by meeting before the next day's, then the queue's rows, then each
+    section's row by row, each keeping how many more and where. The sync line, the status files, the check's notes,
+    overdue, today's meetings and the last line are never cut, so they pass `room` only on an extreme day."""
+    blocks = [_whole([_sync_line(day)])]
+    blocks += [_whole([DayLine(text=f"status: {f.path}: {f.what}", owner=f.owner)]) for f in day.status]
+    blocks += [_whole(_said([note])) for note in day.notes]
     blocks += _queue(day)
     blocks += _meetings(day)
     blocks += _sections(day)
     blocks += _streams(day)
-    blocks.append(_Block(_said([LAST]), {}))
+    blocks.append(_whole(_said([LAST])))
     made = 0
-    out = [line for block in blocks for line in block.at(made)]
-    while len(out) > room and made < NEXT_DAY_CUT:
+    sizes = [block.size(made) for block in blocks]
+    total = sum(len(block.forms[size]) for block, size in zip(blocks, sizes, strict=True))
+    while total > room and made < NEXT_DAY_CUT:
         made += 1
-        out = [line for block in blocks for line in block.at(made)]
-    return out
+        sizes = [block.size(made) for block in blocks]
+        total = sum(len(block.forms[size]) for block, size in zip(blocks, sizes, strict=True))
+    for turn in range(made, 0, -1):
+        for k, block in enumerate(blocks):
+            if turn not in block.cut_at:
+                continue
+            while sizes[k] < block.before(turn):
+                grown = total - len(block.forms[sizes[k]]) + len(block.forms[sizes[k] + 1])
+                if grown > room:
+                    break
+                sizes[k] += 1
+                total = grown
+    return [line for block, size in zip(blocks, sizes, strict=True) for line in block.forms[size]]
 
 
 def counts(day: Day) -> str:
@@ -360,7 +380,7 @@ def _sync_line(day: Day) -> DayLine:
 
 def _queue(day: Day) -> list[_Block]:
     """The untriaged count and each verdict's, then the discuss and claude rows and the me and chase refs; cut, its
-    counts alone."""
+    counts alone. Given back, the rows come one at a time, then the refs."""
     if not day.queue:
         return []
     by: dict[str | None, list[ItemRow]] = {}
@@ -368,50 +388,69 @@ def _queue(day: Day) -> list[_Block]:
         by.setdefault(item.triage, []).append(item)
     verdicts = ", ".join(f"{v} {len(by[v])}" for v in ops.VERDICTS if v in by)
     head = f"queue: {len(by.get(None, []))} untriaged" + (f"; {verdicts}" if verdicts else "")
-    rows: list[str] = []
-    for verdict in ("discuss", "claude"):
-        group = by.get(verdict, [])
-        if group:
-            rows += [verdict, *(f"  {item_line(i, day.today)}" for i in group[:QUEUE_ROWS])]
-            rows += [f"  +{len(group) - QUEUE_ROWS} more: {QUEUE_READ}"] if len(group) > QUEUE_ROWS else []
-    rows += [f"{v}: {', '.join(i.ref for i in by[v])}" for v in ("me", "chase") if v in by]
-    cut = _said([f"{head}; {QUEUE_READ} lists them"])
-    return [_Block(_said([head, *rows]) if rows else cut, {QUEUE_CUT: cut})]
+    groups = [(verdict, by[verdict]) for verdict in ("discuss", "claude") if verdict in by]
+    rows = sum(min(len(group), QUEUE_ROWS) for _, group in groups)
+    refs = [f"{v}: {', '.join(i.ref for i in by[v])}" for v in ("me", "chase") if v in by]
+    steps = rows + len(refs)
+    forms: list[list[DayLine]] = []
+    for step in range(steps + 1):
+        said = [head if steps and step == steps else f"{head}; {QUEUE_READ} lists them"]
+        left = step
+        for verdict, group in groups:
+            shown = min(left, len(group), QUEUE_ROWS)
+            left -= shown
+            if shown:
+                said += [verdict, *(f"  {item_line(i, day.today)}" for i in group[:shown])]
+                said += [f"  +{len(group) - shown} more: {QUEUE_READ}"] if len(group) > shown else []
+        forms.append(_said(said + refs[: max(0, step - rows)]))
+    return [_Block(forms, {QUEUE_CUT: 0})]
 
 
 def _meetings(day: Day) -> list[_Block]:
     """A block a day: its heading, each meeting's line with its open points (`?` proposed) and open items; cut, the
-    meeting lines alone, whose counts stay; the next working day's then to a count."""
+    meeting lines alone, whose counts stay; the next working day's then to a count. Given back, a meeting's points
+    and items come back with it, meeting by meeting."""
     blocks: list[_Block] = []
     for on in day.meetings:
         label = "today" if on.day == day.today else WEEKDAYS[on.day.weekday()]
         head = f"meetings {label} {_date(on.day, day.today)}"
-        full, bare = [head], [head]
-        for dm in on.meetings[:MEETINGS_A_DAY]:
-            m = dm.meeting
-            full.append(meeting_line(m, day.today))
-            bare.append(full[-1])
-            full += [f"  {'?' if p.proposed else '*'} {p.text}" for p in dm.points[:POINTS_A_MEETING]]
-            if len(dm.points) > POINTS_A_MEETING:
-                full.append(f"  +{len(dm.points) - POINTS_A_MEETING} more points: the ledger tool's show {m.ref}")
-            for i in dm.items[:ITEMS_A_MEETING]:
-                full.append(f"  {i.ref} {i.title}" + (f" (due {_date(i.due, day.today)})" if i.due else ""))
-            if len(dm.items) > ITEMS_A_MEETING:
-                full.append(f"  +{len(dm.items) - ITEMS_A_MEETING} more items: the ledger tool's show {m.ref}")
-        if len(on.meetings) > MEETINGS_A_DAY:
-            more = f"+{len(on.meetings) - MEETINGS_A_DAY} more: {MEETINGS_READ}"
-            full.append(more)
-            bare.append(more)
-        cuts = {POINTS_CUT: _said(bare)}
+        shown = on.meetings[:MEETINGS_A_DAY]
+        hidden = len(on.meetings) - len(shown)
+        more = [f"+{hidden} more: {MEETINGS_READ}"] if hidden else []
+        forms = [
+            _said([head, *(line for k, dm in enumerate(shown) for line in _meeting(dm, day.today, whole=k < upto)),
+                   *more])
+            for upto in range(len(shown) + 1)
+        ]  # fmt: skip
+        cut_at = {POINTS_CUT: 0}
         if on.day != day.today:
-            cuts[NEXT_DAY_CUT] = _said([f"{head}: {_n(len(on.meetings), 'meeting')}; {MEETINGS_READ} lists them"])
-        blocks.append(_Block(_said(full), cuts))
+            forms.insert(0, _said([f"{head}: {_n(len(on.meetings), 'meeting')}; {MEETINGS_READ} lists them"]))
+            cut_at = {POINTS_CUT: 1, NEXT_DAY_CUT: 0}
+        blocks.append(_Block(forms, cut_at))
     return blocks
+
+
+def _meeting(dm: DayMeeting, today: date, *, whole: bool) -> list[str]:
+    """A meeting's line, and when `whole` its open points to the cap and its open items to theirs, each saying how many
+    more and where."""
+    m = dm.meeting
+    out = [meeting_line(m, today)]
+    if not whole:
+        return out
+    out += [f"  {'?' if p.proposed else '*'} {p.text}" for p in dm.points[:POINTS_A_MEETING]]
+    if len(dm.points) > POINTS_A_MEETING:
+        out.append(f"  +{len(dm.points) - POINTS_A_MEETING} more points: the ledger tool's show {m.ref}")
+    out += [f"  {i.ref} {i.title}" + (f" (due {_date(i.due, today)})" if i.due else "")
+            for i in dm.items[:ITEMS_A_MEETING]]  # fmt: skip
+    if len(dm.items) > ITEMS_A_MEETING:
+        out.append(f"  +{len(dm.items) - ITEMS_A_MEETING} more items: the ledger tool's show {m.ref}")
+    return out
 
 
 def _sections(day: Day) -> list[_Block]:
     """Overdue, replies, decisions and tasks, invites and waiting: a heading with the count, the rows to the cap and
-    how many more; cut, the count and the read. The decisions and tasks not due this week are a count beneath."""
+    how many more; cut, the count and the read. The decisions and tasks not due this week are a count beneath. Given
+    back, the rows come one at a time."""
     blocks: list[_Block] = []
     for section in day.sections:
         title, cap, read_whole, turn = SECTIONS[section.name]
@@ -420,16 +459,19 @@ def _sections(day: Day) -> list[_Block]:
         if not rows and not later:
             continue
         beyond = f"{later} more not due this week" if later else ""
-        more = ", ".join(p for p in (f"+{len(rows) - cap} more" if len(rows) > cap else "", beyond) if p)
-        full = [f"{title} ({len(rows)})", *(item_line(i, day.today) for i in rows[:cap])]
-        full += [f"  {more}: {read_whole}"] if more else []
-        cut = f"{title} ({len(rows)})" + (f", {beyond}" if beyond else "") + f": {read_whole}"
-        blocks.append(_Block(_said(full), {turn: _said([cut])} if turn is not None else {}))
+        forms = [_said([f"{title} ({len(rows)})" + (f", {beyond}" if beyond else "") + f": {read_whole}"])]
+        for shown in range(1, min(cap, len(rows)) + 1):
+            more = ", ".join(p for p in (f"+{len(rows) - shown} more" if len(rows) > shown else "", beyond) if p)
+            said = [f"{title} ({len(rows)})", *(item_line(i, day.today) for i in rows[:shown])]
+            forms.append(_said(said + ([f"  {more}: {read_whole}"] if more else [])))
+        # Overdue is never cut: whole.
+        blocks.append(_Block(forms, {turn: 0}) if turn is not None else _whole(forms[-1]))
     return blocks
 
 
 def _streams(day: Day) -> list[_Block]:
-    """Each stream not closed: todo.py's `pilot [waiting]: where -> next (deadline)`; cut, the count."""
+    """Each stream not closed: todo.py's `pilot [waiting]: where -> next (deadline)`; cut, the count. Given back, the
+    rows come one at a time."""
     if not day.streams:
         return []
     rows: list[str] = []
@@ -439,4 +481,8 @@ def _streams(day: Day) -> list[_Block]:
         text += f" -> {views.cut(s.next, WHERE)}" if s.next else ""
         rows.append(text + (f" ({_date(s.deadline, day.today)})" if s.deadline else ""))
     head = f"streams ({len(rows)})"
-    return [_Block(_said([head, *rows]), {STREAMS_CUT: _said([f"{head}: {STREAMS_READ}"])})]
+    forms = [_said([f"{head}: {STREAMS_READ}"])]
+    for shown in range(1, len(rows) + 1):
+        more = [f"  +{len(rows) - shown} more: {STREAMS_READ}"] if shown < len(rows) else []
+        forms.append(_said([head, *rows[:shown], *more]))
+    return [_Block(forms, {STREAMS_CUT: 0})]

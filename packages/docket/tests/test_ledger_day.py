@@ -25,7 +25,7 @@ from docket.index import rebuild
 from docket.ledger import day, status, store, views
 from docket.ledger.day import Day, DayLine, StatusFile, SyncMark
 from docket.ledger.ops import Op
-from docket.ledger.views import Ask
+from docket.ledger.views import Ask, Counts, ItemRow, LedgerRead, MeetingRow, PointRow, StreamRow
 from docket.service.app import create_app
 from docket.service.state import Settings
 from docket.vault import cursors
@@ -177,7 +177,7 @@ CUTS = [
 
 
 def full_day(conn: sqlite3.Connection) -> Day:
-    return built(conn, syncs=SYNCS, files=[EDITED, STALE], pending=2)
+    return built(conn, syncs=SYNCS, files=[EDITED, STALE], notes=[FULL[3]])
 
 
 # -- the sections -----------------------------------------------------------------------------------------------------
@@ -295,30 +295,25 @@ def test_a_stream_without_where_or_next_and_a_deadline_in_another_year(tmp_path:
 # -- the cuts ---------------------------------------------------------------------------------------------------------
 
 
-def made_cuts(said: list[str]) -> int:
-    """How many cuts a day's lines show made; the cuts made are always the first ones in the order."""
-    shown = [(cut in said) != (k == 6) for k, cut in enumerate(CUTS)]
-    made = shown.count(True)
-    assert shown == [True] * made + [False] * (len(CUTS) - made), said
-    return made
-
-
-def test_past_its_room_the_day_gives_rows_back_in_the_cut_order_and_no_more_than_it_must(
+def test_past_its_room_the_day_is_cut_whole_from_the_streams_up_then_filled_back_to_the_room(
     conn: sqlite3.Connection,
 ) -> None:
-    """Room by room, from the whole day down to none: the cuts made are the first n in the order, n the fewest that
-    fit, each section cut to its count and the read that lists it."""
+    """Room by room, from the whole day down to none: never past the room unless what is never cut passes it, and
+    full to it within a line. One line short, the streams are cut to their count and can't take a row back."""
     found = full_day(conn)
-    lengths: dict[int, int] = {}
+    least = len(day.lines(found, 0))
     for room in range(len(FULL), -1, -1):
         said = texts(day.lines(found, room))
-        made = made_cuts(said)
-        lengths.setdefault(made, len(said))
-        assert len(said) <= room or made == len(CUTS)
-        # Each cut made was needed: the day with one cut fewer doesn't fit.
-        assert made == 0 or lengths[made - 1] > room
-    assert sorted(lengths) == list(range(len(CUTS) + 1))
+        assert len(said) <= max(room, least), room
+        assert len(said) >= min(room, len(FULL)) - 1 or len(said) == least, room
     assert texts(day.lines(found, len(FULL))) == FULL
+    assert texts(day.lines(found, len(FULL) - 1)) == [*FULL[:-4], CUTS[0], day.LAST]
+    assert texts(day.lines(found, len(FULL) - 3)) == [*FULL[:29], CUTS[1], CUTS[0], day.LAST]
+    # In 20 lines every cut but the next day's is made; the replies' row fits back, today's points and the queue's rows
+    # don't.
+    assert texts(day.lines(found, 20)) == [
+        *FULL[:4], CUTS[5], *FULL[11:13], *FULL[16:24], CUTS[3], CUTS[2], CUTS[1], CUTS[0], day.LAST
+    ]  # fmt: skip
 
 
 def test_what_is_never_cut_passes_the_room_only_on_an_extreme_day(conn: sqlite3.Connection) -> None:
@@ -336,6 +331,82 @@ def test_what_is_never_cut_passes_the_room_only_on_an_extreme_day(conn: sqlite3.
         CUTS[0],
         day.LAST,
     ]
+
+
+def busy(**sizes: int) -> Day:
+    """A day built straight from rows, as the code review's probe built it: `sizes` says how many of each."""
+    today, at = date(2026, 10, 20), datetime(2026, 10, 20, 7, 0, tzinfo=UTC)
+    made: list[ItemRow] = []
+
+    def row(kind: str, *, due: date | None = None, triage: str | None = None, days: int = 5) -> ItemRow:
+        n = len(made) + 1
+        late = (today - due).days if due is not None and due < today else None
+        return ItemRow(ref=f"A-{n:04d}", id=f"I{n:025d}", number=n, kind=kind, title=f"Invented title {n}",
+                       who="Ada Example", stream="pilot", source="x", meeting=None, opened=today - timedelta(days=days),
+                       due=due, state="open", until=None, closed=None, triage=triage, archived=False, days=days,
+                       late=late)  # fmt: skip
+
+    # Each kind of row: its kind, how many, its due, its verdict and how many days it has been open.
+    kinds: list[tuple[str, int, date | None, str | None, int]] = [
+        ("task", sizes["overdue"], today - timedelta(days=2), None, 5),
+        ("task", sizes["untriaged"], None, None, 5),
+        *(("task", sizes[verdict], None, verdict, 5) for verdict in ("discuss", "claude", "me", "chase")),
+        ("reply", sizes["replies"], None, None, 5),
+        ("decision", sizes["decisions"], today + timedelta(days=3), None, 5),
+        ("invite", sizes["invites"], None, None, 5),
+        ("waiting", sizes["waiting"], None, None, 9),
+    ]
+    for kind, count, due, triage, days in kinds:
+        for _ in range(count):
+            made.append(row(kind, due=due, triage=triage, days=days))
+    meetings: list[MeetingRow] = []
+    points: list[PointRow] = []
+    for k, (on, count) in enumerate(((today, sizes["today"]), (today + timedelta(days=1), sizes["tomorrow"]))):
+        for j in range(count):
+            start = datetime(on.year, on.month, on.day, 9 + j, tzinfo=UTC)
+            ref = f"M-{k}{j:03d}"
+            linked = [i.ref for i in made[j * sizes["items"] : (j + 1) * sizes["items"]]]
+            meetings.append(MeetingRow(ref=ref, id=f"M{k}{j}", number=None, subject=f"Invented meeting {k}{j}",
+                                       start=start, end=start + timedelta(minutes=30), organiser="Ada Example",
+                                       stream=None, response=None, archived=False, points_open=sizes["points"],
+                                       items=linked))  # fmt: skip
+            points += [PointRow(ref=f"{ref}#{p}", id=f"P{k}{j}{p}", meeting=ref, n=p, state="open",
+                                text=f"Invented point {p}", item=None, proposed=False)
+                       for p in range(1, sizes["points"] + 1)]  # fmt: skip
+    streams = [StreamRow(ref=f"s{k}", id=f"S{k}", name=f"s{k}", status="active", next="Next step", deadline=None,
+                         where="Somewhere", updated=today) for k in range(sizes["streams"])]  # fmt: skip
+    found = LedgerRead(view="snapshot", today=today, counts=Counts(), items=made, meetings=meetings, points=points,
+                       streams=streams)  # fmt: skip
+    return day.build(found, at)
+
+
+BUSY = {"overdue": 40, "untriaged": 258, "discuss": 5, "claude": 8, "me": 3, "chase": 4, "replies": 15,
+        "decisions": 12, "invites": 3, "waiting": 7, "today": 6, "tomorrow": 4, "points": 2, "items": 1,
+        "streams": 7}  # fmt: skip
+
+
+def test_a_busy_day_fills_its_room_and_keeps_today_s_first_meetings_points() -> None:
+    """Cut whole, the busy day took 32 of 42 lines, every point and item of today's meetings gone. Given back, the
+    last cut first, today's meetings take theirs back meeting by meeting, then the queue its rows."""
+    said = texts(day.lines(busy(**BUSY), 42))
+    assert len(said) in (41, 42)
+    first = said.index("meetings today 10-20")
+    assert said[first + 1 : first + 5] == [
+        "M-0000 10-20 09:00-09:30 Invented meeting 00, Ada Example; 2 open; items A-0001",
+        "  * Invented point 1",
+        "  * Invented point 2",
+        "  A-0001 Invented title 1 (due 10-18)",
+    ]
+
+
+def test_a_day_one_line_over_gives_back_what_fits() -> None:
+    edge = busy(**{**BUSY, "overdue": 4, "untriaged": 10, "discuss": 3, "claude": 3, "me": 1, "chase": 1,
+                   "replies": 10, "decisions": 0, "invites": 0, "waiting": 0, "today": 3, "tomorrow": 2,
+                   "streams": 0})  # fmt: skip
+    whole = texts(day.lines(edge, 1000))
+    said = texts(day.lines(edge, len(whole) - 1))
+    assert len(said) in (len(whole) - 2, len(whole) - 1)
+    assert "replies owed (10)" in said
 
 
 # -- the counts line and the sync line --------------------------------------------------------------------------------

@@ -101,11 +101,17 @@ def _lines(st: ServiceStatus, environ: Mapping[str, str]) -> list[Line]:
 
 def _day(st: ServiceStatus, call: DayCall, environ: Mapping[str, str], room: int) -> list[Line]:
     """The owner's day from the running service: whole when this session's own repo is the vault's, else its counts;
-    one line naming the read that works when the service is down, slow or can't read it (DR-0672). The hook never
-    folds the ledger itself."""
-    if not st.running:
-        return [Line("day: the service is down; docket ledger day reads the vault", False)]
+    one line naming the read that works when the service is down, slow or can't read it (DR-0672). Nothing before a
+    vault and a service are set up, or while the service can't open its vault: the status lines say what to do. The
+    hook never folds the ledger itself."""
     try:
+        if st.running and (not st.body.get("vault") or st.body.get("vault_problem")):
+            return []
+        if not st.running:
+            configured = userconfig.service().vault or userconfig.default_vault()
+            if st.installed is None or configured is None or Vault.find(configured) is None:
+                return []
+            return [Line("day: the service is down; docket ledger day reads the vault", False)]
         answer = call(st, max(room, 0))
         if answer is None:
             return [Line(f"day: no answer in {DAY_SECONDS:g} s; the ledger tool's snapshot reads it", False)]

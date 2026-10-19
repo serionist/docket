@@ -159,8 +159,9 @@ the first at or above it holding `.git`, is the vault's repo, so a separate repo
 | the hook prints the day | `session_start` takes the day's call as a third argument; `docket hook session-start` passes one asking `GET /api/day?room=` 45 less the status lines, for 3 s. The hook reads the JSON itself and loads no ledger or index module |
 | a line per hand-edited status file | a line per file the check names: the ones the render leaves (a hand edit, a stream the ledger lacks, a frontmatter that doesn't read) shown to the owner too; `stale` and `not rendered yet` to Claude alone, since `docket render` settles them |
 | the counts line elsewhere | Claude's alone, a sync due included: outside the vault's repo the owner sees nothing of the day |
-| the cuts | each section cut whole, to its count and its read, in DR-0670's order, as few as fit; a section cut stays cut when a later cut frees room |
-| the calendar backlog | the day says `<n> calendar record(s) wait for their meetings; docket ledger calendar` from `store.calendar_pending`, as #224's `docket vault check` note words it; whichever lands second shares the line |
+| the cuts | each section cut whole, to its count and its read, in DR-0670's order, as few as fit; then rows given back within the room, the last cut first: today's meetings' points and items meeting by meeting, the queue's rows, each section's row by row, each keeping how many more and where. Whole cuts alone left a busy day at 32 of 42 lines with every one of today's points out; it now takes 41 (DR-0670) |
+| the calendar backlog | the day says what `docket vault check` notes beside its problems, `ledger.check.notes` from #224: `<n> calendar record(s) wait for their meetings; docket ledger calendar` |
+| the service down | one line naming `docket ledger day`, and nothing before a vault and a service are set up, or while the running service can't open its vault: the status lines already say what to do (DR-0672) |
 | a last line naming the tool and the skills | it names the ledger tool, `ledger_batch` and `run_open`: the sync and tasks skills come with #209 and #210 |
 | `(/sync)` on the sync line | `(ask Claude to sync them)`: the plugin has no sync skill yet, and a sync starts with `run_open` (DR-0251) |
 | `docket ledger day` | and `--json`, the `Day` itself, as the other reads have |

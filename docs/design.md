@@ -213,8 +213,8 @@ same result on any day.
   the syncs due, the queue, today's and the next working day's meetings with their points and items, then overdue,
   replies, decisions and tasks, invites, waits and streams, an item listed once among them (DR-0670). It comes whole
   only in a session whose own repo is the vault's, else as one line of counts (DR-0671), in at most 45 lines, cut from
-  the streams up; the hook waits 3 s for the service and never folds the ledger itself (DR-0672). `docket ledger day`
-  prints the same from the vault.
+  the streams up and given back to the room; the hook waits 3 s for the service and never folds the ledger itself
+  (DR-0672). `docket ledger day` prints the same from the vault.
 
 ### 3.5 Beyond search
 
