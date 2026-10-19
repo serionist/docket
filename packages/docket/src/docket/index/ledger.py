@@ -6,7 +6,7 @@ claimants, and the op files read, so a write and `docket ledger show` ask the in
 | `items` | each item whose add stands: its fields, state, number (null while a clash waits), latest claim, last op |
 | `item_log` | every op line, by item and id: its keys, its text, its log line, its fate, the undo that left it out |
 | `item_numbers` | each number and every item that claimed it, by its first claim; an undone add's item is hidden |
-| `ledger_files` | each op file read: its size, modification time, sha256 and the highest op id a line names |
+| `ledger_files` | each op file read: its size, time (0 while racily clean), sha256, the highest op id a line names |
 
 `rebuild` folds every op file through `ledger.load`. `update` follows a file that only grew, its old bytes the same up
 to a line's end: it reads the lines after them, folds again from `item_log` the items they name, then gives each
@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import time
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -42,6 +43,9 @@ LOG_COLUMNS = ("item", "id", "version", "after", "day", "at", "by", "via", "kind
 NEWLINE = 0x0A
 # Lines as the fold orders them: by id, and one id's texts by their text.
 TEXT_ORDER = attrgetter("op.id", "text")
+# Git's rule for a racily clean file: a file written this close to its read could be written again within the same
+# tick of the file clock, keeping its size and time. Its time is stored as 0, so the next update hashes it again.
+RACY_NS = 2_000_000_000
 
 
 def _insert(table: str, columns: Sequence[str], verb: str = "INSERT") -> str:
@@ -62,6 +66,11 @@ ASSIGN = (
 
 def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def settled(mtime_ns: int, read_ns: int) -> int:
+    """A file's time as it is stored: 0 while it is too close to the read for a rewrite to change it."""
+    return 0 if read_ns - mtime_ns < RACY_NS else mtime_ns
 
 
 def _iso(value: date | None) -> str | None:
@@ -151,11 +160,15 @@ def rebuild(conn: sqlite3.Connection, root: Path) -> int:
     lines it read. The collector stays paused from the read to the last row (`ledger.load`), and the fold is let go
     before it runs again: its first pass would walk every object the fold made, still young, for nothing."""
     files: list[ops.FileRead] = []
+    # Taken before any file is read, so a file counts as racily clean for at least as long as it can be.
+    read_ns = time.time_ns()
     with paused():
         ledger = load(root, files)
         for table in TABLES:
             conn.execute(f"DELETE FROM {table}")  # noqa: S608 - the module's own table names
-        conn.executemany(INSERT_FILE, [(f.rel, f.size, f.mtime_ns, f.sha256, f.highest) for f in files])
+        conn.executemany(
+            INSERT_FILE, [(f.rel, f.size, settled(f.mtime_ns, read_ns), f.sha256, f.highest) for f in files]
+        )
         rows = _Rows()
         for item_id, folded in ledger.folds.items():
             item = folded.item
@@ -173,7 +186,8 @@ def _grew(data: bytes, size: int, sha: str) -> bool:
 def update(conn: sqlite3.Connection, root: Path) -> int:
     """The tables brought up to date with the op files, inside the caller's transaction: the lines each file gained
     since it was read folded into the items they name; anything else folds every file again. How many op lines it
-    read."""
+    read. A file stored with time 0 (`RACY_NS`) is hashed again, so a rewrite that kept its size and time is seen."""
+    read_ns = time.time_ns()
     stored: dict[str, tuple[int, int, str, str | None]] = {
         path: (size, mtime, sha, highest)
         for path, size, mtime, sha, highest in conn.execute(
@@ -202,7 +216,7 @@ def update(conn: sqlite3.Connection, root: Path) -> int:
             continue
         found = ops.parse(text, rel)
         highest = max((i for i in (old[3] if old else None, found.highest) if i is not None), default=None)
-        conn.execute(INSERT_FILE, (rel, len(data), st.st_mtime_ns, _sha(data), highest))
+        conn.execute(INSERT_FILE, (rel, len(data), settled(st.st_mtime_ns, read_ns), _sha(data), highest))
         fresh += found.lines
     if fresh:
         refold(conn, fresh)

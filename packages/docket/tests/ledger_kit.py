@@ -68,8 +68,11 @@ def fresh_tables() -> sqlite3.Connection:
 
 
 def tables(conn: sqlite3.Connection) -> Rows:
-    """The ledger's tables' rows, in key order."""
-    return {t: sorted(conn.execute(f"SELECT * FROM {t}").fetchall()) for t in ledger_index.TABLES}  # noqa: S608
+    """The ledger's tables' rows, in key order; an op file's without its time, which is 0 or not by when it was read
+    (`RACY_NS`), so two reads a moment apart can differ there and nowhere else."""
+    rows = {t: sorted(conn.execute(f"SELECT * FROM {t}").fetchall()) for t in ledger_index.TABLES}  # noqa: S608
+    rows["ledger_files"] = [(path, size, sha, highest) for path, size, _, sha, highest in rows["ledger_files"]]
+    return rows
 
 
 def rebuilt(root: Path) -> Rows:

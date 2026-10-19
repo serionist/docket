@@ -714,6 +714,8 @@ def logical_dump(db: Path) -> dict[str, list[tuple[Any, ...]]]:
         keys = {row[0]: (row[1], row[2]) for row in conn.execute("SELECT id, owner, ordinal FROM chunks")}
         out = {t: sorted(conn.execute(f"SELECT * FROM {t}").fetchall()) for t in LOGICAL_TABLES}  # noqa: S608
         out["chunks"] = sorted(tuple(row[1:]) for row in conn.execute("SELECT * FROM chunks"))
+        # An op file's time is 0 or not by when it was read (RACY_NS): two reads a moment apart may differ there alone.
+        out["ledger_files"] = [(p, size, sha, high) for p, size, _, sha, high in out["ledger_files"]]
         out["mentions"] = sorted((keys[c], e, h, a) for c, e, h, a in conn.execute("SELECT * FROM mentions"))
         # Vectors by the chunk they belong to, not its row id (DR-0336).
         for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'chunk_vec_%'"):

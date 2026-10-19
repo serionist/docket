@@ -19,6 +19,7 @@ from docket.index import build, rebuild
 from docket.index import ledger as ledger_index
 from docket.index.schema import SCHEMA_VERSION
 from docket.ledger import fold, store
+from docket.vault import forgotten
 from docket.vault.vault import Vault
 
 ADD: dict[str, Any] = {"op": "add", "fields": dict(ADD_FIELDS)}
@@ -98,6 +99,21 @@ def test_an_index_of_another_build_or_busy_past_the_wait_leaves_the_write_to_a_f
             "while a rebuild runs", "while an update writes", "done",
         ]  # fmt: skip
     assert done.after is not None
+
+
+def test_a_forgotten_list_that_doesn_t_read_leaves_the_write_and_show_to_a_fold_in_memory(
+    indexed: Vault, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """With no index the write goes through, so with one it does too: the index's digest can't be known, and a write
+    never depends on the cache (DR-0619)."""
+    store.write(indexed, [ADD], now=NOW)
+    before = index_rows(indexed)
+    forgotten.list_path(indexed.root).write_text("not a forget\n", encoding="utf-8")
+    (log,) = store.write(indexed, [{"op": "log", "item": "A-0001", "note": "still written"}], now=NOW).ops
+    assert log.after == log.item
+    assert index_rows(indexed) == before
+    code, out, _ = show(capsys, "A-0001")
+    assert code == 0 and out[-1].endswith("claude via cli  still written")
 
 
 def test_a_failure_while_the_index_catches_up_lets_its_lock_go(indexed: Vault, monkeypatch: pytest.MonkeyPatch) -> None:

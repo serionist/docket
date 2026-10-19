@@ -887,8 +887,8 @@ def ledger_tables(vault: Vault) -> Generator[sqlite3.Connection]:
 
 def _ledger_index(vault: Vault) -> tuple[sqlite3.Connection, FileLock] | None:
     """The index with its ledger tables brought up to date, under its lock, which the caller releases; None when
-    there is no index, it was built for another Docket, other languages or another forgotten list, or it can't be had
-    within `LEDGER_WAIT`."""
+    there is no index, it was built for another Docket, other languages or another forgotten list, the forgotten list
+    doesn't read, or it can't be had within `LEDGER_WAIT`."""
     db = db_path(vault)
     if not db.exists():
         return None
@@ -899,7 +899,12 @@ def _ledger_index(vault: Vault) -> tuple[sqlite3.Connection, FileLock] | None:
         return None
     conn = sqlite3.connect(db, isolation_level=None, timeout=LEDGER_WAIT)
     try:
-        usable = stale(conn, languages_of(vault), forgotten.load(vault.root, vault.home).digest) is None
+        try:
+            usable = stale(conn, languages_of(vault), forgotten.load(vault.root, vault.home).digest) is None
+        except DocketError:
+            # A forgotten list that doesn't read leaves the index's digest unknown: the write folds in memory, as it
+            # does with no index, and never fails for the cache's sake.
+            usable = False
         if usable:
             conn.execute("BEGIN IMMEDIATE")
             try:

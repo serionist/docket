@@ -3,9 +3,11 @@ merge and change, leaving what a rebuild leaves every time, a clash and an undon
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
+import time
 from collections.abc import Callable, Iterator
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -15,7 +17,7 @@ import pytest
 from ledger_kit import ADD_FIELDS, fresh_tables, op, rebuilt, tables, ulid, write_ops
 
 from docket.index import ledger as ledger_index
-from docket.index.ledger import Held, rebuild, update
+from docket.index.ledger import RACY_NS, Held, rebuild, settled, update
 from docket.ledger import fold, load, ops
 from docket.ledger.ops import Op
 
@@ -96,9 +98,9 @@ def test_a_rebuild_holds_each_item_every_op_each_number_and_each_file(tmp_path: 
         (1, ulid(1), ulid(1), 0), (2, ulid(7), ulid(7), 0), (3, ulid(12), ulid(12), 1),
     ]  # fmt: skip
     data = (tmp_path / DESK).read_bytes()
-    st = (tmp_path / DESK).stat()
-    assert rows(conn, "SELECT path, size, mtime_ns, highest FROM ledger_files") == [
-        (DESK, len(data), st.st_mtime_ns, ulid(50))
+    # Written a moment ago, so racily clean: its time is kept as 0 until it is older than RACY_NS.
+    assert rows(conn, "SELECT path, size, mtime_ns, sha256, highest FROM ledger_files") == [
+        (DESK, len(data), 0, hashlib.sha256(data).hexdigest(), ulid(50))
     ]
     assert Held(conn).highest_id() == load(tmp_path).highest_id == ulid(50)
 
@@ -132,6 +134,54 @@ def test_an_update_with_nothing_new_reads_nothing(tmp_path: Path, conn: sqlite3.
     st = path.stat()
     # Written again with the same bytes, as a checkout can leave it: its new time is kept, nothing is read.
     assert same_as_rebuild(conn, tmp_path, lambda: os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))) == 0
+
+
+def test_a_file_read_close_to_its_time_is_hashed_again_so_a_rewrite_at_its_size_and_time_is_seen(
+    tmp_path: Path, conn: sqlite3.Connection
+) -> None:
+    """Git's rule for racily clean files (RACY_NS): read within two seconds of its time, a file is stored with time 0.
+    Rewritten at its size within one tick of the file clock, as a checkout of another clone's line leaves it, it keeps
+    its size and time, and the next update hashes it, sees the change and folds it whole. Once its time is older, the
+    time is stored, and the file is left alone while it stays as it is."""
+    path = tmp_path / DESK
+    base, ours, theirs = (op("add", 1).text(), op("add", 10, number=2).text(), op("add", 11, number=3).text())
+    assert len(ours) == len(theirs)
+    path.parent.mkdir(parents=True)
+    path.write_text(f"{base}\n{ours}\n", encoding="utf-8", newline="\n")
+    rebuild(conn, tmp_path)
+    assert rows(conn, "SELECT mtime_ns FROM ledger_files") == [(0,)]
+    st = path.stat()
+
+    def rewrite() -> None:
+        path.write_text(f"{base}\n{theirs}\n", encoding="utf-8", newline="\n")
+        os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
+
+    assert same_as_rebuild(conn, tmp_path, rewrite) == 2
+    assert rows(conn, "SELECT id FROM items ORDER BY id") == [(ulid(1),), (ulid(11),)]
+    old = time.time_ns() - 10 * RACY_NS
+    os.utime(path, ns=(old, old))
+    assert update(conn, tmp_path) == 0
+    assert rows(conn, "SELECT mtime_ns FROM ledger_files") == [(old,)]
+    assert settled(old, old + RACY_NS) == old
+
+
+def test_back_to_back_rewrites_at_one_size_never_hide_from_an_update(tmp_path: Path) -> None:
+    """Real writes, no time set by hand: a file goes from one clone's line to another's of the same length right after
+    a catch-up read it, as a reset or a rebase's checkout leaves it. Most land in the same tick of the file clock."""
+    base, ours, theirs = (op("add", 1).text(), op("add", 10, number=2).text(), op("add", 11, number=3).text())
+    for n in range(20):
+        root = tmp_path / f"r{n}"
+        path = root / DESK
+        path.parent.mkdir(parents=True)
+        path.write_bytes(f"{base}\n{ours}\n".encode())
+        conn = fresh_tables()
+        try:
+            rebuild(conn, root)
+            path.write_bytes(f"{base}\n{theirs}\n".encode())
+            update(conn, root)
+            assert tables(conn) == rebuilt(root), n
+        finally:
+            conn.close()
 
 
 def test_a_file_that_grew_is_read_from_where_it_stopped_and_only_its_items_fold_again(
