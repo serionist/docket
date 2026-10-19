@@ -28,7 +28,9 @@ scripts over todo.py's own `load()` and `save()`, so no importer for one person'
   the live text rules (DR-0618, DR-0627) and one commit, `Ledger: import 2026-09, 1,204 ops on desk`; then the index.
 - Held ops: it skips the file's ops the ledger holds line for line, so a rerun writes nothing and a stopped one
   finishes. The ledger's own objects (the step's meetings) stand beside it, renumbered by its last write where a file's
-  add claims first (DR-0613). An op from elsewhere on a file's object, or a held line with another text, refuses it.
+  add claims first (DR-0613), which it always does, sorting early (DR-0658); a number one of the file's objects would
+  lose refuses it, naming both claims. An op from elsewhere on a file's object, or a held line with another text,
+  refuses it.
 - Old meetings come in keyless (DR-0655): no `event` or `series`. After the import, the catch-up, `docket ledger
   calendar --since <the calendar's first day>`, joins each one a record matches through `continues`, on the same start
   to the minute and folded subject, the old id and number holding whatever the step made first.
@@ -77,9 +79,10 @@ scripts over todo.py's own `load()` and `save()`, so no importer for one person'
 - `by`: `me` is `user`, `claude` and `sync` stay, none or another name is `claude`; an add takes its first entry's;
   meetings and points are `claude`. Free text stays words: "chased Ada" is a log line, not a chase. An imported op
   other than `log` shows no log line (DR-0611), so an item's log reads as todo.py's and the counts (#201) use the ops.
-- Ids: a ULID, its time the op's day at 00:00 UTC (a meeting's: its start) plus its place among its object's ops in
-  ms, so ops keep their order and a copy sorts after its source; its random bits sha256 of `A-0281/7`, `M-0040/3`,
-  `stream:pilot/0`. todo.py's `today()`, which bounds a v1 note's dates in `load()`, is pinned to the export's day
+- Ids: a ULID. An add's time is 2000-01-01 plus its number in ms (a stream's, 2000-01-01), so it sorts before any id
+  Docket mints and its old number holds against one the step gave first; every other op's is its day at 00:00 UTC (a
+  meeting's: its start) plus its place among its object's ops in ms, so ops keep their order and a copy sorts after its
+  source. Its random bits are sha256 of `A-0281/0`, `A-0281/7`, `M-0040/3`, `stream:pilot/0`. todo.py's `today()`, which bounds a v1 note's dates in `load()`, is pinned to the export's day
   (`--today`, kept in the file's name): the same ledger gives the same file.
 
 ### The mirror and the checks (DR-0659)
@@ -140,9 +143,8 @@ the dry run's JSON only gaining fields; `cheap`: DR-0657 to DR-0659. Data: none 
 
 ## Risks
 
-- A future meeting's ops sort ahead of the clock (DR-0612, accepted) and after the step's: one the step numbered as
-  high keeps that number. Rare; the dry run names it. A line form the export doesn't know: the settling ops keep the
-  state right, and its report counts lines by what they became, so a lost chase shows.
+- A line form the export doesn't know: the settling ops keep the state right, and its report counts lines by what
+  they became, so a lost chase shows.
 
 ## Plan review
 
@@ -156,7 +158,8 @@ Round 2: approved; three minors (a rerun's order and the conflict's fix, the mir
 | the import's text rules as a live write's | `store.TextRules`, the writer's own screen moved out of `_Write` so both use it; the import screens each name and value once, since an export repeats its people, streams and log lines |
 | refusals, each by its line | a line that doesn't read refuses before anything is folded, so a missing add's ops aren't named twice; then held texts and ops from elsewhere, then the fold's new problems |
 | the catch-up's dry run over the ledger as the import leaves it | `ledger_tables(vault, tables)` takes a dry run's own tables, `build.ledger_tables_of` fills them from the import's own fold, and `write_calendar` and the catch-up take them, a dry run only |
-| sources by `read`'s rules, asked of the index | `recall.resolves`, `read`'s dispatch without reading; the tests' read routes run it both ways |
-| `--revert` deletes with `git rm` | the op files unlinked and the tracked ones committed as gone, which is what `git rm` and a commit leave |
-| its last write renumbers | `store.write(vault, [], via="import")`: a write renumbers before its changes, and with none that is all it does |
-| `perf`: 50,000 ops dry run under 3 s | the perf ledger's 62,000 ops: about 2.5 s dry and 9 s imported, in twelve month commits, on a desk; the test holds 6 s and 30 s for CI's slowest shard |
+| sources by `read`'s rules, asked of the index | `recall.resolves`, `read`'s dispatch without building a read, a doc taken as the forget leaves it, as `read` takes it; the tests' read routes run it both ways |
+| `--revert` deletes with `git rm` | the op files unlinked and the tracked ones committed as gone, which is what `git rm` and a commit leave; a new one a stopped write left staged unstaged first, so no later commit, the user's own included, brings it back |
+| its last write renumbers | `store.write(vault, [], via="import")`: a write renumbers before its changes, and with none that is all it does; the dry run lists them as Docket-made, renumbered |
+| ids from the op's day (DR-0658) | an add's id is 2000-01-01 plus its number in ms, from the code review: at its day, a meeting the step numbered before its start kept the number, the normal case in the live clone; the import refuses adds that aren't early, and a number one of the file's objects would lose, naming both claims |
+| `perf`: 50,000 ops dry run under 3 s | the perf ledger's 62,000 ops: about 1.8 s dry and 6.5 s imported, in twelve month commits, on a desk, the collector paused over the read and the folds; the test holds 6 s and 30 s for CI's slowest shard |

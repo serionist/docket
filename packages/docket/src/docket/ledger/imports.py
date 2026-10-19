@@ -5,12 +5,15 @@ export's habit, `day` alone. `machine`, `batch` and `after` are the writer's, so
 the first op id of the op's month, and the op before it of the same object. A line carrying one of them, or another
 `via`, refuses the file. Every value passes the text rules a live write passes (`store.TextRules`).
 
+Each add's id is 2000-01-01 plus its number in milliseconds (DR-0658), before any id Docket mints, so every number
+of the file holds against a claim Docket made first (DR-0613); a file whose adds aren't is refused.
+
 The ledger may hold the file's ops, each line for line as the import would write it, which are skipped, so a rerun
 writes nothing and an import stopped after a month finishes; and objects of its own that name none of the file's,
 such as the calendar step's meetings (DR-0647). An op from elsewhere naming one of the file's objects, or a held line
 with another text, refuses the import: revert first (DR-0656). So does a problem `docket vault check` would name in
-the fold of the result that the ledger didn't have already, but a number one of the ledger's own objects holds too:
-the import's last write renumbers it (DR-0613).
+the fold of the result that the ledger didn't have already, and a number one of the file's objects would lose; one
+the ledger's own object loses goes through, and the import's last write renumbers that object (DR-0613).
 
 The months are written oldest first, each one write through `store.py` and one commit. Old meetings come in keyless,
 and `docket ledger calendar` joins them afterwards (DR-0655); the dry run shows those joins by running the catch-up's
@@ -24,7 +27,7 @@ import json
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any, cast
 
 from pydantic import ValidationError
@@ -33,7 +36,7 @@ from docket import recall
 from docket.index.build import ledger_tables, ledger_tables_of
 from docket.ledger import calendar, fold, ops, store
 from docket.ledger.fold import Ledger, number_text
-from docket.ledger.meetings import Meeting, meeting_text
+from docket.ledger.meetings import Meeting, ObjectFold, meeting_text
 from docket.ledger.ops import Line, Op
 from docket.vault.vault import Vault
 
@@ -43,9 +46,12 @@ WRITERS = ("machine", "batch", "after")
 IDS = ("item", "meeting", "continues", "from", "to")
 # One line of text, as the writer keeps it (`store.one_line`).
 ONE_LINE = (*store.ONE_LINE, "note", "label")
-# The words a fold's problem uses for a number two objects claim: the import's last write renumbers the later one.
+# The words a fold's problem uses for a number two objects claim: `_problems` says whose it is.
 CLASH = ("held by two items;", "held by two meetings;")
 NO_SCHEME = "(no scheme)"
+# An add's id is this time plus its number in ms, a stream's this time itself: before any id Docket mints, so an old
+# number holds against a claim Docket made before the import (DR-0658).
+ADDS_AT = int(datetime(2000, 1, 1, tzinfo=UTC).timestamp() * 1000)
 
 
 @dataclass(frozen=True)
@@ -123,7 +129,8 @@ def plan(vault: Vault, text: str, name: str, *, report: bool = False) -> Plan:
     """The import of `text` as it would be written, each refusal by its line, and with `report` the dry run's counts.
     Lines that don't read are refused before anything is folded: the fold of a file missing them would only name what
     hangs on them."""
-    read = _read(vault, text, name)
+    with fold.paused():
+        read = _read(vault, text, name)
     refusals = read.refusals
     if refusals:
         return Plan((), 0, tuple(refusals))
@@ -152,8 +159,10 @@ def plan(vault: Vault, text: str, name: str, *, report: bool = False) -> Plan:
         )
     if refusals:
         return Plan((), skipped, tuple(refusals))
-    ledger = fold.fold([*held.lines, *fresh])
-    refusals += _problems(ledger, fold.fold(held.lines), objects)
+    with fold.paused():
+        ledger = fold.fold([*held.lines, *fresh])
+        before = fold.fold(held.lines)
+    refusals += _problems(ledger, before, objects)
     months: dict[str, list[Op]] = {}
     for line in fresh:
         months.setdefault(f"{line.op.day:%Y-%m}", []).append(line.op)
@@ -196,6 +205,7 @@ def _read(vault: Vault, text: str, name: str) -> _Lines:
     rules = _Screen(vault)
     firsts: dict[str, str] = {}
     before: dict[str, str] = {}
+    late: list[int] = []
     for op_id, (n, data) in sorted(given.items()):
         item, day = str(data.get("item")), str(data.get("day"))[:7]
         filled = {**data, "machine": vault.machine, "batch": firsts.setdefault(day, op_id)}
@@ -216,6 +226,13 @@ def _read(vault: Vault, text: str, name: str) -> _Lines:
             continue
         out.ops[op.id] = (op, op.text(), n)
         before[op.item] = op.id
+        if op.op in ops.MAKES and ops.decode(op.id) >> ops.RANDOM_BITS != ADDS_AT + (op.number or 0):
+            late.append(n)
+    if late:
+        out.refusals.append(
+            f"{len(late):,} add(s) don't sort early ({name}:{min(late)} first): an export gives each add the id "
+            "2000-01-01 plus its number in ms, so every old number holds against one Docket gave (DR-0658)"
+        )
     return out
 
 
@@ -284,19 +301,40 @@ def _names(op: Op, ids: set[str]) -> bool:
 
 
 def _problems(ledger: Ledger, before: Ledger, objects: set[str]) -> list[str]:
-    """What the fold of the result names that the ledger alone didn't, but a number one of the ledger's own objects
-    holds too; and a number two of the file's objects hold."""
+    """What the fold of the result names that the ledger alone didn't, but a number two objects claim; and each number
+    one of the file's objects would lose, naming both claims. A number the ledger's own object loses goes through: the
+    import's last write renumbers that object (DR-0613)."""
     had = set(before.problems)
     out = [
         f"{where}: {what}" for where, what in ledger.problems if (where, what) not in had and not what.startswith(CLASH)
     ]
-    for number, holders in ledger.holders.items():
-        if len([h for h in holders if h in objects]) > 1:
-            out.append(f"{number_text(number)} is held by two of the file's items")
-    for number, holders in ledger.objects.holders.items():
-        if len({ledger.objects.owner.get(h, h) for h in holders if h in objects}) > 1:
-            out.append(f"{meeting_text(number)} is held by two of the file's meetings")
+    found = ledger.objects
+    for item in ledger.clashes():
+        if item.id in objects:
+            winner = ledger.holders[item.claimed][0]
+            first, lost = (_side(i, ledger.folds[i], item.claimed) for i in (winner, item.id))
+            out.append(_lost(number_text(item.claimed), "item", winner in objects, first, lost))
+    for meeting in found.clashes():
+        if meeting.id in objects:
+            winner = found.holders[meeting.claimed][0]
+            first, lost = (_side(i, found.folds[i], meeting.claimed) for i in (winner, meeting.id))
+            out.append(_lost(meeting_text(meeting.claimed), "meeting", winner in objects, first, lost))
     return out
+
+
+def _side(obj_id: str, folded: fold.Folded | ObjectFold, number: int) -> str:
+    """An object by its id and the place of its first claim of a number: the file's line, or the op file's."""
+    op_id = next(op_id for op_id, claimed in folded.claims if claimed == number)
+    return f"{obj_id} ({next((line.where for line in folded.lines if line.op.id == op_id), op_id)})"
+
+
+def _lost(number: str, kind: str, theirs: bool, first: str, lost: str) -> str:
+    """A number one of the file's objects would lose, naming the claim that keeps it and the one that loses it."""
+    whose = "the file's" if theirs else "the ledger's own"
+    return (
+        f"{number} is claimed first by {whose} {kind} {first}, so the file's {lost} would lose it; every number "
+        "of the file holds (DR-0658)"
+    )
 
 
 # -- what the dry run counts (DR-0654) ----------------------------------------------------------------------------
@@ -315,6 +353,7 @@ def _count(vault: Vault, ledger: Ledger, *, objects: set[str], ids: set[str], el
     streams = [found.streams[i] for i in sorted(objects) if i in found.streams]
     chains, naming = _chains(ledger, meetings)
     not_ours = Counter(f"{line.op.op} by {line.op.by} via {line.op.via} on {line.op.machine}" for line in elsewhere)
+    # A number one of the file's objects loses refuses the import (`_problems`): every loser left is Docket-made.
     renumbered = [f"{number_text(i.claimed)} ({i.id})" for i in ledger.clashes()]
     renumbered += [f"{meeting_text(m.claimed)} ({m.id})" for m in found.clashes()]
     idle: Counter[str] = Counter()
@@ -460,8 +499,8 @@ def _counted_lines(counted: Counted) -> list[str]:
     elsewhere = sum(counted.not_from_the_file.values())
     out.append(f"not from the file: {elsewhere:,}")
     out += [f"  {n:,} {what}" for what, n in counted.not_from_the_file.items()]
-    if counted.renumbered:
-        out.append(f"renumbered by its last write: {', '.join(counted.renumbered)}")
+    out.append(f"Docket-made, renumbered by its last write: {len(counted.renumbered):,}")
+    out += [f"  {what}" for what in counted.renumbered]
     unresolved = sum(len(numbers) for numbers in counted.unresolved.values())
     out.append(f"sources it can't resolve: {unresolved:,}")
     out += [f"  {scheme} {len(numbers):,}: {', '.join(numbers)}" for scheme, numbers in counted.unresolved.items()]

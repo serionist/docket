@@ -2,8 +2,8 @@
 that adds nothing, the refusals, the ledger's own meetings beside the import, the catch-up's joins, and the revert.
 
 The file comes from a stand-in for the owner's export script (DR-0657, DR-0658): ops as it writes them, via import,
-`day` alone, each id from the op's day (a meeting's: its start) and its place among its object's ops. Invented people,
-streams and events only."""
+`day` alone, each add's id 2000-01-01 plus its number in ms, every other op's from its day (a meeting's: its start) and
+its place among its object's ops. Invented people, streams and events only."""
 
 from __future__ import annotations
 
@@ -58,20 +58,24 @@ def _ms(moment: datetime) -> int:
 
 
 class Export:
-    """A stand-in for the owner's export: each op's id is its day at 00:00 UTC (a meeting's: its start) plus its place
-    among its object's ops in milliseconds, with the first 80 bits of sha256 of the object's number and that place."""
+    """A stand-in for the owner's export: each add's id is 2000-01-01 plus its number in milliseconds (a stream's,
+    with none, 2000-01-01 itself), each other op's its day at 00:00 UTC (a meeting's: its start) plus its place among
+    its object's ops, with the first 80 bits of sha256 of the object's number and that place. Not `early`, the adds
+    take the other ops' rule, as DR-0658 had it first."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, early: bool = True) -> None:
         self.lines: list[dict[str, Any]] = []
         self.places: dict[str, int] = {}
         self.ids: dict[str, str] = {}
         self.starts: dict[str, datetime] = {}
+        self.early = early
 
     def _op(self, key: str, base: int, kind: str, on: date, by: str, **keys: Any) -> str:
         place = self.places.get(key, 0)
         self.places[key] = place + 1
         bits = int.from_bytes(hashlib.sha256(f"{key}/{place}".encode()).digest()[:10], "big")
-        op_id = ops.encode(((base + place) << ops.RANDOM_BITS) | bits)
+        at = imports.ADDS_AT + keys.get("number", 0) if self.early and kind in ops.MAKES else base + place
+        op_id = ops.encode((at << ops.RANDOM_BITS) | bits)
         item = self.ids.setdefault(key, op_id)
         line = {"schema_version": 1, "id": op_id, "item": item, "op": kind, "day": on.isoformat(), "by": by}
         self.lines.append({**line, "via": "import", **keys})
@@ -117,9 +121,9 @@ def item_fields(kind: str, title: str, who: str, stream: str, source: str, **mor
     return {"kind": kind, "title": title, "who": who, "stream": stream, "source": source, **more}
 
 
-def export() -> Export:
+def export(*, early: bool = True) -> Export:
     """Five items through the line forms an export maps, four meetings with rolls paired and not, two streams."""
-    e = Export()
+    e = Export(early=early)
     e.stream("pilot", day(9, 1), status="active", where="Waiting on the venue", next="Book the room")
     e.stream("ops", day(9, 1), status="waiting")
     e.meeting(1, WEEKLY, "Weekly pilot sync", organiser="Ada Example", attendees=["Ada Example", "Ben Sample"])
@@ -386,8 +390,85 @@ def test_the_ledger_s_own_meetings_stand_beside_it_and_lose_a_number_it_claims_f
     assert done.renumbered is not None
     numbers = {m.id: m.number for m in ledger(vault).meetings.values()}
     assert (numbers[own.id], numbers[export().ids["M-0001"]]) == (5, 1)
-    assert "renumbered by its last write: " in "\n".join(imports.lines(dry))
+    said = imports.lines(dry)
+    assert said[said.index("Docket-made, renumbered by its last write: 1") + 1] == f"  M-0001 ({own.id})"
     assert imports.lines(done)[-2].endswith(f", renumbered in {done.renumbered[:7]}")
+
+
+# The owner's meetings: one a day at 09:00 in Budapest, 1 to 10 October, M-0001 to M-0010 in the old ledger.
+DAILY = datetime(2026, 10, 1, 7, 0, tzinfo=UTC)
+# The live clone's calendar step ran on 5 October at noon, before half of them started and before the import.
+STEP_AT = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
+
+
+def test_every_imported_meeting_keeps_its_number_over_the_step_s_and_the_joins_land_on_it(vault: Vault) -> None:
+    vault.write_run("cal", [event(n, DAILY + timedelta(days=n - 1), f"Daily sync {n}") for n in range(1, 11)], STEP_AT)
+    calendar.catch_up(vault, day(9, 21), now=STEP_AT)
+    step = {m.id: m.number or 0 for m in ledger(vault).meetings.values()}
+    assert sorted(step.values()) == list(range(1, 11))
+    e = Export()
+    for n in range(1, 11):
+        e.meeting(n, DAILY + timedelta(days=n - 1), f"Daily sync {n}")
+        e.at(n, "point", fields={"text": f"Prep for day {n}"})
+    old = {n: e.ids[f"M-{n:04d}"] for n in range(1, 11)}
+    dry = run(vault, e.text(), dry_run=True)
+    assert dry.plan.refusals == () and dry.plan.counted is not None
+    assert len(dry.plan.counted.renumbered) == 10
+    run(vault, e.text())
+    found = ledger(vault)
+    assert {n: found.meetings[i].number for n, i in old.items()} == {n: n for n in old}
+    assert sorted(found.meetings[i].number or 0 for i in step) == list(range(11, 21))
+    assert found.problems == ()
+    caught = calendar.catch_up(vault, day(9, 21), now=NOW)
+    assert [(o.what, o.meeting) for o in caught.outcomes] == [("joined", f"M-{n:04d}") for n in old]
+    assert [join.split(" ")[0] for join in dry.plan.counted.joins] == [f"M-{n:04d}" for n in old]
+    found = ledger(vault)
+    assert {m.event: (m.id, m.number) for m in found.meetings.values()} == {f"cal:E{n}": (i, n) for n, i in old.items()}
+    assert found.problems == ()
+
+
+def test_every_imported_item_keeps_its_number_over_one_docket_gave_first(vault: Vault) -> None:
+    for title in ("one", "two", "three"):
+        fields = item_fields("task", f"Docket's {title}", "Ben Sample", "ops", "app:tasks")
+        store.write(vault, [{"op": "add", "fields": fields, "force": True}], now=STEP_AT)
+    own = {i.id: i.number or 0 for i in ledger(vault).items.values()}
+    assert sorted(own.values()) == [1, 2, 3]
+    e = Export()
+    for n, d in ((1, 1), (2, 4), (3, 8)):
+        e.item(n, day(10, d), **item_fields("task", f"The owner's {n}", "Ada Example", "ops", "app:tasks"))
+        e.logged(n, day(10, d), "asked in the thread")
+    dry = run(vault, e.text(), dry_run=True)
+    assert dry.plan.counted is not None
+    assert dry.plan.counted.renumbered == sorted(f"A-{n:04d} ({i})" for i, n in own.items())
+    run(vault, e.text())
+    found = ledger(vault)
+    assert {n: found.items[e.ids[f"A-{n:04d}"]].number for n in (1, 2, 3)} == {1: 1, 2: 2, 3: 3}
+    assert sorted(found.items[i].number or 0 for i in own) == [4, 5, 6]
+    assert found.problems == ()
+
+
+def test_a_file_whose_adds_don_t_sort_early_is_refused(vault: Vault) -> None:
+    e = export(early=False)
+    adds = sum(1 for line in e.lines if line["op"] in ops.MAKES)
+    said = run(vault, e.text(), dry_run=True).plan.refusals
+    assert said == (
+        f"{adds} add(s) don't sort early ({NAME}:1 first): an export gives each add the id 2000-01-01 plus its number "
+        "in ms, so every old number holds against one Docket gave (DR-0658)",
+    )
+
+
+def test_a_number_the_ledger_s_own_object_claims_first_refuses_naming_both_claims(vault: Vault) -> None:
+    one, two = Export(), Export()
+    one.item(1, day(9, 1), **item_fields("task", "The first file's", "Ada Example", "ops", "app:tasks"))
+    two.item(1, day(9, 2), key="another", **item_fields("task", "The second file's", "Ada Example", "ops", "app:x"))
+    first, second = sorted([one, two], key=lambda e: e.lines[0]["id"])
+    run(vault, first.text())
+    (held,) = ops.read_all(vault.root).lines
+    said = run(vault, second.text(), dry_run=True).plan.refusals
+    assert said == (
+        f"A-0001 is claimed first by the ledger's own item {held.op.id} ({held.where}), so the file's "
+        f"{second.lines[0]['id']} ({NAME}:1) would lose it; every number of the file holds (DR-0658)",
+    )
 
 
 def test_a_catch_up_s_joins_on_its_meetings_refuse_a_rerun_until_a_revert(vault: Vault) -> None:
@@ -491,13 +572,19 @@ def test_a_line_that_isn_t_an_op_is_refused_before_the_fold_and_one_the_fold_can
     assert said == (f"{NAME}:{n + 1}: names an item no add made; left out",)
 
 
-def test_two_of_the_file_s_items_or_meetings_on_one_number_are_refused(vault: Vault) -> None:
+def test_two_of_the_file_s_items_or_meetings_on_one_number_are_refused_naming_both(vault: Vault) -> None:
     e = export()
     e.item(1, day(10, 20), key="again", **item_fields("task", "Another", "Ben Sample", "ops", "app:x"))
     e.meeting(1, WEEKLY + timedelta(days=21), "Weekly pilot sync", key="again too")
+    place = {line["id"]: n for n, line in enumerate(e.lines, start=1)}
     said = run(vault, e.text(), dry_run=True).plan.refusals
-    assert "A-0001 is held by two of the file's items" in said
-    assert "M-0001 is held by two of the file's meetings" in said
+    for number, kind, keys in (("A-0001", "item", ("A-0001", "again")), ("M-0001", "meeting", ("M-0001", "again too"))):
+        first, lost = sorted(e.ids[key] for key in keys)
+        assert (
+            f"{number} is claimed first by the file's {kind} {first} ({NAME}:{place[first]}), so the file's {lost} "
+            f"({NAME}:{place[lost]}) would lose it; every number of the file holds (DR-0658)"
+        ) in said
+    assert len(said) == 2
 
 
 # -- reverting ------------------------------------------------------------------------------------------------------
@@ -530,6 +617,43 @@ def test_a_revert_deletes_every_op_file_in_one_commit_and_a_rerun_gives_the_same
 
 def test_a_revert_of_nothing_says_so(vault: Vault) -> None:
     assert imports.revert_lines(store.revert_import(vault), dry_run=False) == ["no op files: nothing to revert"]
+
+
+LATER = datetime(2026, 11, 3, 9, 0, tzinfo=UTC)
+
+
+def stopped_write(vault: Vault, rel: str) -> None:
+    """A write that stopped after its `git add` and before its commit: its new op file left staged."""
+    (vault.root / rel).write_text('{"id":"left by a stopped write"}\n', encoding="utf-8", newline="\n")
+    git(vault.root, "add", "--", rel)
+
+
+def ledger_in_head(vault: Vault) -> list[str]:
+    """The op files HEAD holds."""
+    return [rel for rel in sh(vault.root, "git", "ls-tree", "-r", "--name-only", "HEAD", "--", "ledger").split()
+            if rel.endswith(ops.SUFFIX)]  # fmt: skip
+
+
+def test_a_revert_unstages_a_file_a_stopped_write_left_and_the_next_write_goes_through(vault: Vault) -> None:
+    run(vault, export().text())
+    stopped_write(vault, "ledger/ops/2026-12-test-box.jsonl")
+    reverted = store.revert_import(vault)
+    assert "ledger/ops/2026-12-test-box.jsonl" in reverted.files
+    assert sh(vault.root, "git", "status", "--porcelain", "--", "ledger") == ""
+    fields = item_fields("task", "After the revert", "Ben Sample", "ops", "app:tasks")
+    assert store.write(vault, [{"op": "add", "fields": fields}], now=LATER).commit is not None
+    assert ledger_in_head(vault) == ["ledger/ops/2026-11-test-box.jsonl"]
+
+
+def test_the_owner_s_own_commit_after_a_revert_brings_no_op_file_back(vault: Vault) -> None:
+    run(vault, export().text())
+    stopped_write(vault, "ledger/ops/2026-11-test-box.jsonl")
+    store.revert_import(vault)
+    (vault.root / "mine.txt").write_text("the owner's own change\n", encoding="utf-8")
+    git(vault.root, "add", "mine.txt")
+    git(vault.root, "commit", "-qm", "The owner's own commit")
+    assert ledger_in_head(vault) == []
+    assert sh(vault.root, "git", "status", "--porcelain", "--", "ledger") == ""
 
 
 def test_a_clone_that_wrote_before_pulling_a_revert_meets_a_conflict_not_a_union(vault: Vault, tmp_path: Path) -> None:
@@ -607,7 +731,7 @@ ITEMS = 5_000
 MEETINGS = 2_000
 SERIES = 50
 # The dry run of a ledger the perf ledger's size, and its import, a month per commit, in this time on CI's slowest
-# shard: about 2.5 s and 9 s on a desk (DR-0654). An owner's ledger is a twentieth of it.
+# shard: about 1.8 s and 6.5 s on a desk (DR-0654). An owner's ledger is a twentieth of it.
 DRY_RUN_SECONDS = 6.0
 IMPORT_SECONDS = 30.0
 

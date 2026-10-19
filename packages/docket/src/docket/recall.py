@@ -315,9 +315,9 @@ def absent(root: Path, rid: str) -> str:
 
 
 def resolves(vault: Vault, locators: Iterable[str]) -> set[str]:
-    """The locators `read` finds something at, by its rules (DR-0131), asked without reading it: a rid in the raw log,
-    a doc, a processed doc's path, or a legacy note's old path, with a time or not. One that doesn't parse, or names
-    nothing or several, doesn't resolve."""
+    """The locators `read` finds something at, by its rules (DR-0131), asked without building a read: a rid in the raw
+    log, a doc, a processed doc's path, or a legacy note's old path, with a time or not, a doc as the forget leaves it
+    (DR-0580). One that doesn't parse, names nothing or several, or names a doc the forget empties, doesn't resolve."""
     call = _Call(vault)
     try:
         return {locator for locator in dict.fromkeys(locators) if _resolves(call, locator)}
@@ -332,12 +332,13 @@ def _resolves(call: _Call, locator: str) -> bool:
         if path is not None and not call.raw.has(value):
             given = Path(os.path.normpath(call.store.root / path[0].replace("\\", "/")))
             if given.is_relative_to((call.store.root / "processed").resolve()) and given.is_file():
-                return True
-            call.old_path(path[0])
+                call.left(_load(call.store, "path", str(given), None))
+            else:
+                call.left(_load(call.store, "doc", call.old_path(path[0]), None))
             return True
         loc = parse_locator(value, DOC_TYPES)
         if loc.kind != "record":
-            _load(call.store, loc.kind, loc.value, None)
+            call.left(_load(call.store, loc.kind, loc.value, None))
             return True
         return call.raw.has(loc.value)
     except (AnchorError, DocketError):

@@ -2025,6 +2025,11 @@ def revert_import(vault: Vault, *, dry_run: bool = False) -> Reverted:
         if dry_run or not files:
             return Reverted(files, dict(sorted(vias.items())))
         tracked = set(vault.git.in_head(OPS_DIR) or ())
+        # A write that stopped between its add and its commit left its new file staged: kept so, the next commit,
+        # the user's own too, would bring it back. Unstaged first, so a failure leaves every file where it was.
+        staged = vault.git.staged_new(OPS_DIR)
+        if staged:
+            vault.git.run("reset", "-q", "--", *staged)
         for _, path in listed:
             path.unlink()
         out = sum(vias.values())

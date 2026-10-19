@@ -1,14 +1,19 @@
 decisions:
   - id: DR-0658
-    title: An export derives each op's id from its day, its place and its object's number
+    title: An export gives each add the id 2000-01-01 plus its number in ms, and every other op one from its day, its place and its object's number
     status: proposed
     at: "2026-10-19"
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#202"]
-    description: An op's id is a ULID whose 48-bit time is the op's day at 00:00 UTC, or for a meeting's ops the meeting's start, plus the op's place among its object's ops in milliseconds, and whose 80 random bits are the first 80 of sha256 of the object's number or name and the place (A-0281/7, M-0040/3, stream:pilot/0). Ops keep their order within their object, every op sorts after its add (DR-0612), a copy sorts after its source since the next meeting of a series starts later, and the same ledger gives the same ids, so a rerun adds nothing twice. todo.py's load() bounds a v1 note's dates by today(), so the export pins today() to its own day, given by --today and kept in the file's name, and an export run again with that day gives the same file. A future meeting's ops sort ahead of the clock until its start passes; DR-0612's minting follows them.
+    description: "An add's id, an item's, a meeting's or a stream's, is a ULID whose 48-bit time is 2000-01-01 00:00 UTC plus the object's number in milliseconds, a stream's, with no number, 2000-01-01 itself. Every other op's time is the op's day at 00:00 UTC, or for a meeting's ops the meeting's start, plus the op's place among its object's ops in milliseconds. The 80 random bits are the first 80 of sha256 of the object's number or name and the place (A-0281/0 for an add, A-0281/7, M-0040/3, stream:pilot/0). So every add sorts before any id Docket mints (DR-0612), and each old number holds against a claim Docket made before the import, such as the calendar step's meetings numbered from M-0001 in the live clone (DR-0613): the import's last write renumbers those. The A- adds keep their numbers' order, and so do the M- adds. An A- and an M- add of one number share a millisecond but not their random bits, so they are two ids, and the two kinds' claims never meet. Two files' adds of one number are one id: a second file's with another text is refused as held with another text (DR-0653), never a second object. The import refuses a file whose adds aren't so, and a number one of the file's objects would lose, naming both claims. Ops keep their order within their object, every op sorts after its add, a copy sorts after its source since the next meeting of a series starts later, and the same ledger gives the same ids, so a rerun adds nothing twice. Nothing but ops.mint, and the import's check of the adds, reads a time out of an id. todo.py's load() bounds a v1 note's dates by today(), so the export pins today() to its own day, given by --today and kept in the file's name, and an export run again with that day gives the same file. A future meeting's ops other than its add sort ahead of the clock until its start passes; DR-0612's minting follows them."
+    binds:
+      - "An export's adds sort before any id Docket mints: 2000-01-01 plus the object's number in ms."
     not_chosen:
       - "Ids minted when the export runs: a second export would double every op."
       - "A rank within the day across the whole ledger: one new item would shift every id that day."
       - "Future meetings held at the export's day: the ids would hang on the day it ran, and copies between future meetings would need a rule of their own."
       - "The export's day as a first line of the file: the file would no longer be op lines alone."
+      - "Adds at their day, as this entry first had it: a claim Docket made before the import, such as the calendar step's meeting for a day after it ran, sorts first and keeps the number, so an imported meeting or item loses the number its owner has used in notes and chats for weeks."
+      - "Adds at their day and a renumber of Docket's object in the import's last write: a renumber doesn't free a number another claim holds first (DR-0613), so the imported object still loses it."
+      - "A- and M- adds in ranges of their own: their claims never meet, so one range does."
