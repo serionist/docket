@@ -104,10 +104,10 @@ def test_the_folders_follow_the_env_var_or_the_users_own(monkeypatch: pytest.Mon
 def test_the_requirements_are_pinned_with_hashes() -> None:
     for device in config.DEVICES:
         text = config.requirements(device)
-        assert "--hash=sha256:" in text and "numpy==2.5.3" in text
+        assert "--hash=sha256:" in text and "numpy==2.5.4" in text
         assert len(config.requirements_hash(device)) == 64
-    assert "onnxruntime==1.30.0" in config.requirements("cpu")
-    assert "onnxruntime-gpu==1.30.0" in config.requirements("cuda")
+    assert "onnxruntime==1.31.0" in config.requirements("cpu")
+    assert "onnxruntime-gpu==1.31.0" in config.requirements("cuda")
 
 
 def test_installed_says_what_the_install_left_or_why_it_cant_be_used() -> None:

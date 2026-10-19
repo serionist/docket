@@ -63,7 +63,7 @@ RERANK_QUERY = "who offered to cover the shipping cost for the second print run"
 RERANK_TEXT = "The printer sent a new quote for the second print run and asked about the paper weight. " * 21
 RERANK_RUNS = 3
 PACKAGES = {"cpu": "about 50 MB", "cuda": "about 1.3 GB"}
-# ONNX Runtime 1.30's Mac wheels are for Apple silicon on macOS 14 or later.
+# ONNX Runtime 1.31's Mac wheels are for Apple silicon on macOS 14 or later.
 MACOS_MIN = 14
 CUDA_SYSTEMS = ("win32", "linux")
 

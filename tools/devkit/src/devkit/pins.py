@@ -1,7 +1,7 @@
 """The models' worker pins: equal to the dev group's, and installable on every system their markers name.
 
-The tests run the worker's code on the dev group's packages, and Dependabot bumps the two in separate PRs (uv for the
-dev group, pip for the requirements files), so the gate holds them equal. The CUDA file's onnxruntime-gpu counts as
+The tests run the worker's code on the dev group's packages, and Dependabot bumps the two from separate entries (uv for
+the dev group, pip for the requirements files), so the gate holds them equal. The CUDA file's onnxruntime-gpu counts as
 onnxruntime.
 
 A universal compile pins by metadata, not by the files a release has: nvidia-cublas 13.8.1.7 came for Linux only while
