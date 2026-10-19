@@ -10,11 +10,12 @@ from typing import Any
 
 import pytest
 from docket_testkit import empty_vault, make_record, sh, traced
-from test_ledger_calendar import config, event, meetings, said
+from test_ledger_calendar import NOW, config, event, meetings, said
 
 from docket.cli import main
 from docket.errors import DocketError
 from docket.ledger import calendar, ops
+from docket.ledger.store import write
 from docket.vault.gate import Gate
 from docket.vault.rawlog import RawLog
 from docket.vault.vault import Vault
@@ -87,26 +88,56 @@ def test_a_step_that_stops_never_fails_the_promotion_and_the_next_replays_it(
         "next promotion or docket ledger calendar"
     )
     assert (len(vault.rawlog.read("cal:E1")), calendar.pending(vault), meetings(vault)) == (1, ["cal:E1"], {})
+    # The vault check says what waits, and the vault is still ok.
+    assert main(["vault", "check", "--vault", str(vault.root)]) == 0
+    waiting = "1 calendar record(s) wait for their meetings; `docket ledger calendar`"
+    assert capsys.readouterr().out.splitlines() == [waiting, "vault ok"]
     monkeypatch.undo()
     # The next promotion has nothing ready, and replays what is pending.
     out = promote(vault, capsys)
     assert out[0].startswith("meetings  1 added, 1 pending replayed; commit ")
     assert out[1] == "nothing ready"
     assert (meetings(vault)["cal:E1"].number, calendar.pending(vault)) == (1, [])
+    assert main(["vault", "check", "--vault", str(vault.root)]) == 0
+    assert capsys.readouterr().out.splitlines() == ["vault ok"]
 
 
-def test_a_step_that_fails_any_other_way_never_fails_the_promotion_either(
-    vault: Vault, monkeypatch: pytest.MonkeyPatch
+def test_a_step_that_fails_any_other_way_never_fails_the_promotion_and_says_the_error_s_type(
+    vault: Vault, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def broken(*_: Any, **__: Any) -> calendar.Stepped:
+    def bug(*_: Any, **__: Any) -> calendar.Stepped:
+        return {}["x"]  # type: ignore[no-any-return]
+
+    monkeypatch.setattr(calendar, "step", bug)
+    Gate(vault).stage([event(1)])
+    out = promote(vault, capsys)
+    assert out[-1].startswith("meetings  not made: KeyError: 'x'; their records stay pending")
+    assert calendar.pending(vault) == ["cal:E1"]
+
+    def bare(*_: Any, **__: Any) -> calendar.Stepped:
         raise RuntimeError
 
-    monkeypatch.setattr(calendar, "step", broken)
+    monkeypatch.setattr(calendar, "step", bare)
     gate = Gate(vault)
-    gate.stage([event(1)])
+    gate.stage([event(2, 8)])
     result = gate.promote()
     assert (result.runs[0].written, result.meetings, result.meetings_stopped) == (1, None, "RuntimeError")
-    assert calendar.pending(vault) == ["cal:E1"]
+    assert calendar.pending(vault) == ["cal:E1", "cal:E2"]
+
+
+def test_a_version_raw_holds_already_drives_no_set_over_a_hand_edit(vault: Vault) -> None:
+    gate = Gate(vault)
+    gate.stage([event(1, response="accepted")])
+    # Another clone harvested and promoted the same version, and its run and ops were pulled.
+    vault.write_run("cal", [event(1, response="accepted")], NOW)
+    calendar.step(vault, ["cal:E1"], via="cli", now=NOW)
+    # The sync declines it by hand.
+    write(vault, [{"op": "set", "item": "M-0001", "fields": {"response": "declined"}}], by="sync", now=NOW)
+    result = gate.promote()
+    # The run skips the version raw holds, and nothing is noted or set for it.
+    run = result.runs[0]
+    assert (run.written, run.skipped, run.events, result.meetings) == (0, 1, (), None)
+    assert (meetings(vault)["cal:E1"].response, calendar.pending(vault)) == ("declined", [])
 
 
 def test_the_rids_are_pending_before_the_run_file_is_written(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:

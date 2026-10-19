@@ -398,7 +398,9 @@ class Gate:
             result.meetings = calendar.step(self.vault, rids, via=via)
         except Exception as e:  # anything: the promotion stands
             log.warning("gate: the calendar step stopped (%s); its records stay pending", type(e).__name__)
-            result.meetings_stopped = str(e) or type(e).__name__
+            # A DocketError says what to do; anything else is named by its type too, so a bug reads as one.
+            told = str(e) if isinstance(e, DocketError) else f"{type(e).__name__}: {e}" if str(e) else ""
+            result.meetings_stopped = told or type(e).__name__
 
     def media_check(self, rid: str) -> str | None:
         """Why media for a rid can't be staged now, or None: the four checks after a sweep, under the lock."""
@@ -774,10 +776,14 @@ class Gate:
         return SourceRun(name, run.path, run.written, run.skipped, commit, redactions, run.paths, events)
 
     def _note_events(self, records: Sequence[RawRecord]) -> tuple[str, ...]:
-        """The rids of the event records among those a run writes, noted as pending for the calendar step."""
+        """The rids of the event records a run writes new, noted as pending for the calendar step. A version raw holds
+        already is skipped by the run and drives nothing: raw doesn't change under the gate's lock, and a run that
+        stopped after its file was written noted its rids at its first try."""
         from docket.ledger import calendar  # noqa: PLC0415 - the ledger's modules import the vault's
 
-        events = tuple(dict.fromkeys(r.rid for r in records if r.kind == calendar.KIND))
+        events = tuple(
+            dict.fromkeys(r.rid for r in records if r.kind == calendar.KIND and not self.vault.rawlog.contains(r))
+        )
         if events:
             calendar.note_pending(self.vault, events)
         return events

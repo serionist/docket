@@ -15,6 +15,8 @@ from docket_webkit import OURS, a11y_problems, html_problems, parse
 from staging_kit import PHONE, TALK, key_of, mail, memo, signed_in, staging_vault
 from starlette.testclient import TestClient
 
+from docket.errors import DocketError
+from docket.ledger import calendar
 from docket.service import state as service_state
 from docket.service.app import ServiceApp
 from docket.sources import local
@@ -354,6 +356,22 @@ def test_promote_writes_and_commits_and_brings_the_index_up_to_date(client: Test
     assert "Promoted: 3 records written to raw and committed." in page(client, answer.headers["location"])
     one = client.post("/staging/promote", data={"promote": "Bad name!"}, headers=SAME)
     assert one.status_code == 400 and "promote names a source" in one.text
+
+
+def test_a_promotion_whose_calendar_step_stopped_says_meetings_not_made(
+    client: TestClient, vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def busy(*_: Any, **__: Any) -> calendar.Stepped:
+        raise DocketError("another docket process holds the vault; try again")
+
+    monkeypatch.setattr(calendar, "step", busy)
+    # A step that stopped earlier left a record pending: this promotion's step runs for it, and stops too.
+    calendar.note_pending(vault, ["calendar:E1"])
+    Gate(vault).classify(key_of(vault, MAIL_RID), "work")
+    answer = client.post("/staging/promote", data=form(page(client), "promote-all"), headers=SAME)
+    assert answer.headers["location"] == "/staging?done=promoted-2-0-stopped"
+    said = page(client, answer.headers["location"])
+    assert "Meetings not made: the calendar step stopped, and its records wait for the next promotion." in said
 
 
 # -- held recordings -------------------------------------------------------------------------------------------------

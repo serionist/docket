@@ -48,7 +48,8 @@ MAX_SPEC = 40
 
 KEY = re.compile(r"^[0-9a-f]{32}$")
 DONE = re.compile(
-    r"^(?:(?P<label>work|private)-(?P<key>[0-9a-f]{12})|promoted-(?P<written>\d{1,7})-(?P<held>\d{1,7}))$"
+    r"^(?:(?P<label>work|private)-(?P<key>[0-9a-f]{12})"
+    r"|promoted-(?P<written>\d{1,7})-(?P<held>\d{1,7})(?P<stopped>-stopped)?)$"
 )
 PICK = re.compile(r"^(\d{1,6})(?:-(\d{1,6}))?$")
 
@@ -536,7 +537,10 @@ def done_line(done: str | None) -> str | None:
         return f"{m.group('key')} dropped as private: a later pull of the same version is skipped."
     written, held = int(m.group("written")), int(m.group("held"))
     line = f"Promoted: {written} record{_s(written)} written to raw and committed"
-    return line + (f"; {held} held back, each with its problem in the list." if held else ".")
+    line += f"; {held} held back, each with its problem in the list." if held else "."
+    if m.group("stopped"):
+        line += " Meetings not made: the calendar step stopped, and its records wait for the next promotion."
+    return line
 
 
 def _s(n: int) -> str:

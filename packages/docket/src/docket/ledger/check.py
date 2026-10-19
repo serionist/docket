@@ -25,6 +25,15 @@ def committed_kept(vault: Vault, rel: str) -> bool:
     return all(line in now for line in vault.git.show_at_head(rel).split("\n") if line.strip())
 
 
+def notes(vault: Vault) -> list[str]:
+    """What `docket vault check` says beside its problems: calendar records whose meetings a stopped step left for the
+    next one (DR-0647). The session-start day says the same line."""
+    from docket.ledger import store  # noqa: PLC0415 - the writer reaches the index, which a check needs only here
+
+    waiting = len(store.calendar_pending(vault))
+    return [f"{waiting} calendar record(s) wait for their meetings; `docket ledger calendar`"] if waiting else []
+
+
 def problems(vault: Vault) -> list[tuple[str, str]]:
     """The ledger's problems, each as (where, what)."""
     ledger = fold.load(vault.root)

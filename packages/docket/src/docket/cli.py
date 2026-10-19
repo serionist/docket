@@ -324,10 +324,16 @@ def vault_status(vault: VaultOption = None) -> None:
 @vault_app.command("check")
 def vault_check(vault: VaultOption = None) -> None:
     """Check that the raw log is intact: every file parses, and nothing written once was changed. Each stream's
-    STATUS.md is read against the ledger too, and nothing is written."""
-    problems = find_vault(vault).check()
+    STATUS.md is read against the ledger too, and nothing is written. Then say how many calendar records wait for
+    their meetings, which a stopped step left for the next one."""
+    found = find_vault(vault)
+    problems = found.check()
     for problem in problems:
         say(str(problem))
+    from docket.ledger import check as ledger_check  # noqa: PLC0415
+
+    for note in ledger_check.notes(found):
+        say(note)
     if problems:
         typer.echo(f"{len(problems)} problem(s)")
         raise typer.Exit(1)

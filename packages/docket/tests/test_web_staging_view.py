@@ -342,6 +342,10 @@ def test_waited_and_done_read_plainly() -> None:
         done_line("promoted-12-1")
         == "Promoted: 12 records written to raw and committed; 1 held back, each with its problem in the list."
     )
+    assert done_line("promoted-2-0-stopped") == (
+        "Promoted: 2 records written to raw and committed. Meetings not made: the calendar step stopped, and its "
+        "records wait for the next promotion."
+    )
     assert done_line(None) is None
 
 

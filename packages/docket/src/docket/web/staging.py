@@ -213,8 +213,10 @@ def router(service: Service) -> APIRouter:
             if any(run.written for run in result.runs) or (result.meetings is not None and result.meetings.commits):
                 service.updater.poke()
             written = sum(run.written for run in result.runs)
+            # A calendar step that stopped is said too: its records wait for the next promotion (DR-0647).
+            stopped = "-stopped" if result.meetings_stopped is not None else ""
             done = StagingState(
-                source=back.source, state=back.state, k=back.k, done=f"promoted-{written}-{len(result.held)}"
+                source=back.source, state=back.state, k=back.k, done=f"promoted-{written}-{len(result.held)}{stopped}"
             )
             return RedirectResponse(done.url(done=True), status_code=303)
 
