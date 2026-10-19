@@ -1,0 +1,19 @@
+decisions:
+  - id: DR-0649
+    title: A record joins the unkeyed meeting with its start and subject, as todo.py's meeting add updated it; an undo asked by of is kept, a removal or a split, and one asked by batch or written by sync is as if never
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#200"]
+    description: "todo.py's meeting add updated the meeting with the same start and subject. For each record it takes, the step looks for a standing meeting with no event, archived or not, whose start is the record's to the minute and whose subject is the record's with case and spaces folded, DR-0624's rule; of several, the earliest by id. When one is found and the key continues no meeting yet, it writes a meeting add with continues (DR-0621), carrying the record's fields as any add does: the old meeting's id, number, points and outcome hold, an open one takes the calendar's fields as todo.py's update did, and an archived one only gains its key, the add's fields being an idle set there. It tries this whether the ledger holds the key or not, so a meeting the step made before an import still joins the imported one. An undo of a key's add is read by how it was asked, which its undo op says (DR-0614). One asked by of, by user or claude, is meant, however many meetings its write took out: a removal, every add undone, stays removed, and the step writes nothing for the key, a new version included; a continues add undone alone is a split, never rejoined, and the key gets an add of its own. One asked by batch, its undo op carrying of_batch, or written by sync, is as if never: the step adds or joins again as if the add hadn't been written. So a step write that made one meeting is as if never when its batch is undone, and removed when that meeting's add is. Rehearsal resets don't undo: they revert (DR-0652). The step's output names two near misses for joining by hand: an unkeyed meeting at an add's start under another subject, which a renamed series leaves, and an unkeyed meeting with its folded subject on its day at another start, which a moved meeting leaves, so the cut-over spot-check catches both."
+    binds:
+      - A join needs the same start to the minute and the same subject, case and spaces aside.
+      - "An undo asked by of, by user or claude, is kept: a removal is never added again, a split never rejoined. One asked by batch or written by sync is as if never."
+    not_chosen:
+      - "Joining on start alone, or on start and organiser: two meetings in one slot would merge."
+      - "A join carrying the old meeting's fields: its end and place would stay as they were after the calendar changed them, unlike todo.py's update."
+      - "An add for any key with no standing add: a meeting the owner removed would come back with its next version."
+      - "Every undone add counting as removed: undoing a wrong step write would keep its meetings out for good."
+      - "Joining a meeting on its subject and day at another start: a series meeting twice a day would merge; it is named instead."
+      - "Judging an undo by what its write took out: removing several meetings in one write would read as if never, and a step write of one meeting couldn't be told from its removal."

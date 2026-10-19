@@ -15,7 +15,8 @@ naming the change by its place and, for the text rules, the field, never the val
 Changes name an item by its A- number or its id, a meeting by its M- number or an id of its adds, a stream by its
 name. A number more than one item or meeting has held names none: it is named by its id until the clash is behind it.
 Undo takes `of`, an op's id, or `batch`, a write's first op id; an undo also undoes what the op it undoes left idle,
-done and drop counting as one kind (DR-0614), and for points only rolls and copies (DR-0624).
+done and drop counting as one kind (DR-0614), and for points only rolls and copies (DR-0624). An undo asked by batch
+writes `of_batch`, that batch, on each undo op, so a reader can tell how it was asked (DR-0614).
 
 Meetings, points and streams (#199): `meeting` adds one, or with an event the ledger holds sets what changed on the
 add carrying that event, or with `continues` joins an unkeyed meeting (DR-0621); `stream` adds or sets one by name;
@@ -27,6 +28,12 @@ A write is a batch (#201): the changes `BATCH` names, each with `by` (DR-0639), 
 with no item archiving what is due (DR-0641), an add refused when it looks like an open item and a keyless meeting
 when it doubles one (DR-0642). A point's n is its place when the batch began. A dry run goes on past a refusal and
 lists each one, the changes naming a refused change's `$name` marked as hanging on it.
+
+The calendar step (#200) writes through `write_calendar`, by sync and never refusing: each event record's meeting set
+to what differs, the unkeyed meeting with its start and subject joined, or a new meeting, and nothing for a key whose
+meeting the owner removed; an undo asked by batch or written by sync is as if never (DR-0647, DR-0649). In the
+catch-up's own pass, which never sets, a held key's join carries the held meeting's values, an empty one as null. This
+module also keeps the step's pending rids, in this clone's private folder.
 """
 
 from __future__ import annotations
@@ -67,6 +74,7 @@ from docket.ledger.ops import (
     Op,
     Via,
 )  # fmt: skip
+from docket.vault.home import make_private
 from docket.vault.neverstore import matches_text, names_person
 from docket.vault.redact import Redactor
 from docket.vault.staging import write_replacing
@@ -195,6 +203,46 @@ class Written:
     refused: tuple[Refusal, ...] = ()
 
 
+@dataclass(frozen=True)
+class Event:
+    """A calendar record as the calendar step gives it to the writer (DR-0646, DR-0648): its rid, the meeting fields it
+    carries, event among them, and whether only an add or a join may come of it, as in the catch-up's own pass
+    (DR-0647)."""
+
+    rid: str
+    fields: dict[str, Any]
+    adds_only: bool = False
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """What the calendar step made of one record (DR-0647, DR-0649): `added`, `joined`, `set`, `kept` (nothing to
+    change), `idle` (its meeting is archived), `removed` (the owner removed its meeting) or `left out`, with why; the
+    meeting as it reads, its subject and start as written, and the near misses an add has, as they read."""
+
+    rid: str
+    what: str
+    meeting: str | None = None
+    subject: str | None = None
+    start: str | None = None
+    why: str | None = None
+    near: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class CalendarWritten:
+    """What a calendar step wrote, or with a dry run would write: its ops, its commit, an outcome per record, and the
+    highest M- number it gave, 0 for none."""
+
+    ops: tuple[Op, ...]
+    commit: str | None
+    outcomes: tuple[Outcome, ...]
+    numbered: int = 0
+
+
+LEFT_OUT = "left out"
+
+
 def one_line(text: str) -> str:
     return " ".join(CONTROL.sub("", text).split())
 
@@ -236,6 +284,39 @@ def write(
         if dry_run or not new:
             return written
         return replace(written, commit=commit_ops(vault, new, message))
+
+
+def write_calendar(
+    vault: Vault,
+    events: Sequence[Event],
+    *,
+    via: Via,
+    dry_run: bool = False,
+    now: datetime | None = None,
+    taken: int = 0,
+    renumber: bool = True,
+) -> CalendarWritten:
+    """The calendar step's one write, by sync (DR-0647): each record's meeting added, joined or set, in the order
+    given. It never refuses: a record it can't take is an outcome left out, with why, and the rest is written. A
+    catch-up's dry run, whose chunks write nothing, gives `taken`, the highest M- number its chunks before gave, so
+    this one numbers after them, and renumbers in its first chunk alone."""
+    if via not in ops.VIA:
+        raise LedgerError(f"via is one of {', '.join(ops.VIA)}")
+    moment = now or datetime.now(UTC)
+    with vault.writing():
+        ops.folder(vault.root)
+        with ledger_tables(vault) as conn:
+            plan = _Write(vault, Held(conn), "sync", via, moment)
+            plan.highest_meeting = max(plan.highest_meeting, taken)
+            if renumber:
+                plan.renumber()
+            outcomes = tuple(plan.calendar(n, event) for n, event in enumerate(events, start=1))
+            new = tuple(plan.new)
+            message = plan.message() if new else ""
+        numbered = max(plan.given_meetings, default=0)
+        if dry_run or not new:
+            return CalendarWritten(new, None, outcomes, numbered)
+        return CalendarWritten(new, commit_ops(vault, new, message), outcomes, numbered)
 
 
 def _is_roll(op: Op) -> bool:
@@ -1120,6 +1201,130 @@ class _Write:
         obj_id = cast(str, self.owner(chosen.id))
         return self.objects().meetings[obj_id]
 
+    # -- calendar records (#200) ------------------------------------------------------------------------------------
+
+    def calendar(self, n: int, event: Event) -> Outcome:
+        """One record's meeting (DR-0647 to DR-0649): its key's meeting set to what differs, an unkeyed meeting with
+        its start and subject joined, or a new meeting; nothing for a key whose meeting the owner removed. What the
+        text rules refuse is left out, with why, before anything is written."""
+        self.kind = "calendar"
+        try:
+            fields = self.meeting_fields(n, event.fields)
+            self.need_meeting_fields(n, fields)
+            if not fields.get("event"):
+                self.refuse(n, "a calendar record's meeting needs its event")
+            if _when(str(fields["end"])) < _when(str(fields["start"])):
+                self.refuse(n, "end is before start")
+        except RefusedError as e:
+            return Outcome(event.rid, LEFT_OUT, why=e.why)
+        key, subject, start = str(fields["event"]), str(fields["subject"]), str(fields["start"])
+        # What the record may touch is read in one go, its key's adds, the meetings at its start and its day's unkeyed
+        # ones, so the write folds what it has read once per record, not again for each read.
+        when = _when(start)
+        self.load([*self.held.keyed("meeting", key), *self.held.meetings_at(when), *self.held.unkeyed_on(when.date())])
+
+        def said(what: str, meeting: str | None = None, near: tuple[str, ...] = (), why: str | None = None) -> Outcome:
+            return Outcome(event.rid, what, meeting, subject, start, why, near)
+
+        held = self.by_event(key)
+        removed, split = self.undone_of(key)
+        if held is not None:
+            joined = self.join(key, held, fields, split, keep=event.adds_only)
+            if joined is not None:
+                return said("joined", joined)
+            label = self.meeting_label(held)
+            if event.adds_only:
+                return said("kept", label)
+            if held.archived:
+                return said("idle", label)
+            before = len(self.new)
+            changes = {name: value for name, value in fields.items() if name != "event"}
+            self.set_meeting(n, held, changes, None, key_add=self.key_add(held))
+            return said("set" if len(self.new) > before else "kept", label)
+        if removed:
+            return said("removed")
+        joined = self.join(key, None, fields, split)
+        if joined is not None:
+            return said("joined", joined)
+        if fields.get("response") == "cancelled":
+            return said(LEFT_OUT, why="cancelled, and no meeting holds it")
+        number = self.next_meeting_number()
+        op = self.emit("meeting", None, number=number, fields=_present(fields))
+        self.given_meetings[number] = op.id
+        return said("added", meeting_text(number), self.near_misses(fields))
+
+    def undone_of(self, key: str) -> tuple[bool, set[str]]:
+        """What the owner's undos of a key's adds meant, read by how each was asked (DR-0649): whether one asked by of
+        removed its meeting, and the meetings a split took off it, never joined from it again. An undo asked by batch,
+        its op carrying of_batch, or written by sync, is as if never."""
+        adds = [*self.held.keyed("meeting", key), *(op.id for op in self.new if self.keyed(op.id))]
+        removed = False
+        split: set[str] = set()
+        objects = self.objects()
+        for add_id in dict.fromkeys(adds):
+            add = self.adds_line(add_id)
+            if (add.fields or {}).get("event") != key:
+                continue
+            folded = objects.folds[objects.owner[add_id]]
+            undo_id = folded.undone.get(add_id)
+            if undo_id is None:
+                continue
+            # Read from the meeting's lines: an undo may name any add of the key as its item (DR-0621).
+            undo = next(line.op for line in folded.lines if line.op.id == undo_id)
+            if undo.of_batch is not None or undo.by == "sync":
+                continue
+            joined = (add.fields or {}).get("continues")
+            stands = objects.meetings.get(objects.owner.get(str(joined), "")) if joined else None
+            if stands is not None:
+                split.add(stands.id)
+            else:
+                removed = True
+        return removed, split
+
+    def join(
+        self, key: str, held: Meeting | None, fields: dict[str, Any], split: set[str], *, keep: bool = False
+    ) -> str | None:
+        """A join of the unkeyed meeting with the record's start and subject, the earliest by id, unless the key
+        continues one already or a split took that meeting off it (DR-0649): a meeting add with continues, the
+        record's fields on it as on any add. In the catch-up's own pass (`keep`) a held key's join carries instead the
+        held meeting's values of the fields the record gives, an empty one as null, so it sets nothing on it, and a
+        field cleared by hand stays cleared over an imported add sorting later (DR-0647). The joined meeting, as it
+        reads; None when there is none to join."""
+        if held is not None and not self.keyed(held.id):
+            return None
+        start = _when(str(fields["start"]))
+        self.load(self.held.meetings_at(start))
+        found = sorted(
+            m.id for m in self.objects().meetings.values()
+            if m.event is None and m.start == start and _same_subject(m.subject, str(fields["subject"]))
+            and m.id not in split
+        )  # fmt: skip
+        if not found:
+            return None
+        joined = self.objects().meetings[found[0]]
+        # The continued meeting's number goes on the add, so the object claims no new one (DR-0621).
+        number = joined.number or joined.claimed
+        carried = _present(fields)
+        if keep and held is not None:
+            carried |= {name: _as_written(held, name) for name in fields if name != "event"}
+        self.emit("meeting", None, number=number, fields={**carried, "continues": joined.id})
+        return self.meeting_label(joined)
+
+    def near_misses(self, fields: dict[str, Any]) -> tuple[str, ...]:
+        """The unkeyed meetings a new meeting nearly joined, for joining by hand (DR-0649): at its start under another
+        subject, or on its day under its subject at another start."""
+        start = _when(str(fields["start"]))
+        self.load([*self.held.meetings_at(start), *self.held.unkeyed_on(start.date())])
+        subject = str(fields["subject"])
+        near = [
+            m for m in self.objects().meetings.values()
+            if m.event is None and (
+                (m.start == start and not _same_subject(m.subject, subject))
+                or (m.day == start.date() and m.start != start and _same_subject(m.subject, subject))
+            )
+        ]  # fmt: skip
+        return tuple(self.meeting_label(m) for m in sorted(near, key=lambda m: (m.start, m.id)))
+
     # -- undo -------------------------------------------------------------------------------------------------------
 
     def undo(self, n: int, change: Mapping[str, Any], note: str | None) -> None:
@@ -1149,7 +1354,8 @@ class _Write:
         done = 0
         for op in targets:
             if op.op != "renumber" and op.id not in self.state_of(op.item)[1]:
-                self.undo_asked(n, op, note)
+                # Each undo op says the batch it undid, so a reader can tell it from one asked by of (DR-0614).
+                self.undo_asked(n, op, note, of_batch=cast(str, batch))
                 done += 1
         if not done:
             self.refuse(n, f"no op of batch {batch} to undo")
@@ -1173,12 +1379,12 @@ class _Write:
             (line for item_id in sorted(self.lines) for line in self.lines[item_id] if line.op.id == op_id), None
         )
 
-    def undo_asked(self, n: int, target: Op, note: str | None) -> None:
+    def undo_asked(self, n: int, target: Op, note: str | None, *, of_batch: str | None = None) -> None:
         """The undo a caller asks for. An item's op undoes as DR-0614 has it. A meeting's or a stream's add undoes
         every add of it, unless it continues a meeting: that one undoes alone and splits the pair (DR-0621). A roll
         and its copy undo together, refused while the copy has rolled on (DR-0624)."""
         if target.item not in self.object_adds:
-            self.undo_one(target, note)
+            self.undo_one(target, note, of_batch)
             return
         targets = [target]
         if target.op in ("meeting", "stream") and not (target.fields or {}).get("continues"):
@@ -1190,7 +1396,7 @@ class _Write:
                 self.refuse(n, "its copy has rolled on since; undo that roll first")
         for k, op in enumerate(targets):
             if op.id not in self.all_undone():
-                self.undo_object_op(op, note if k == 0 else None)
+                self.undo_object_op(op, note if k == 0 else None, of_batch)
 
     def rolled_on(self, copy_id: str) -> bool:
         """Whether a copy has rolled on: it folds as rolled, or, a losing copy that never folds, a roll that isn't
@@ -1221,14 +1427,14 @@ class _Write:
             return [op] if roll is None else [op, roll]
         return [op]
 
-    def undo_one(self, target: Op, note: str | None) -> None:
+    def undo_one(self, target: Op, note: str | None, of_batch: str | None = None) -> None:
         """Undo an item's op, then each op of its kind on its item that it had left idle and that would now apply,
         one at a time, so another machine's close doesn't take over once this one is gone (DR-0614)."""
         kinds = {line.op.id: line.op.op for line in self.lines_of(target.item)}
         prior = self.fold(target.item)
         of = target.id
         while True:
-            self.emit("undo", target.item, of=of, note=note)
+            self.emit("undo", target.item, of=of, of_batch=of_batch, note=note)
             later = self.fold(target.item)
             woke = sorted(
                 op_id for op_id in prior.idle - later.idle
@@ -1238,7 +1444,7 @@ class _Write:
                 return
             prior, of, note = later, woke[0], None
 
-    def undo_object_op(self, target: Op, note: str | None) -> None:
+    def undo_object_op(self, target: Op, note: str | None, of_batch: str | None = None) -> None:
         """Undo a meeting's or a stream's op, then, as DR-0614 does, each op of its kind it had left idle that would now
         apply. For points the kind is a roll or a copy alone, so undoing a roll never undoes an answer another clone
         gave meanwhile; these undos the rule adds are never refused (DR-0624)."""
@@ -1249,7 +1455,7 @@ class _Write:
             undone = self.all_undone()
             for op in batch:
                 if op.id not in undone:
-                    self.emit("undo", op.item, of=op.id, note=note)
+                    self.emit("undo", op.item, of=op.id, of_batch=of_batch, note=note)
                     note = None
             if kind is None:
                 return
@@ -1645,6 +1851,16 @@ def _when(value: str) -> datetime:
     return datetime.fromisoformat(value)
 
 
+def _as_written(meeting: Meeting, name: str) -> Any:
+    """A meeting field's value as an op carries it: a time to the minute with its offset, attendees as a list."""
+    value = getattr(meeting, name)
+    if name in TIMES:
+        return cast(datetime, value).isoformat(timespec="minutes")
+    if name == "attendees":
+        return list(cast(tuple[str, ...], value)) or None
+    return value
+
+
 def _meeting_differs(meeting: Meeting, name: str, value: Any) -> bool:
     current = getattr(meeting, name)
     if name in TIMES:
@@ -1681,6 +1897,49 @@ def material_ref(vault: Vault, ref: str) -> str:
         except ValueError:
             return path.as_posix()
     return text.replace("\\", "/").removeprefix("./")
+
+
+# -- the calendar step's pending rids (DR-0647) -------------------------------------------------------------------
+
+PENDING_DIR = "ledger"
+PENDING_FILE = "calendar-pending.txt"
+
+
+def calendar_pending_path(vault: Vault) -> Path:
+    """This clone's pending rids: in the vault's private folder, never committed."""
+    return vault.home.private / PENDING_DIR / PENDING_FILE
+
+
+def calendar_pending(vault: Vault) -> list[str]:
+    """The rids a promotion noted that no calendar step has cleared yet, in the order noted; none when the file is
+    gone."""
+    try:
+        text = calendar_pending_path(vault).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    return list(dict.fromkeys(line.strip() for line in text.split("\n") if line.strip()))
+
+
+def note_calendar_pending(vault: Vault, rids: Sequence[str]) -> None:
+    """Note rids as pending, before the run file holding their versions is written (DR-0647): a crash after it loses
+    no set, and a rid whose version never reached raw reads raw's latest and changes nothing."""
+    _save_calendar_pending(vault, [*calendar_pending(vault), *rids])
+
+
+def clear_calendar_pending(vault: Vault, rids: Sequence[str]) -> None:
+    """Take rids off the pending list once a calendar step's write committed or had nothing to write."""
+    done = set(rids)
+    _save_calendar_pending(vault, [rid for rid in calendar_pending(vault) if rid not in done])
+
+
+def _save_calendar_pending(vault: Vault, rids: Sequence[str]) -> None:
+    path = calendar_pending_path(vault)
+    kept = list(dict.fromkeys(rids))
+    if not kept:
+        path.unlink(missing_ok=True)
+        return
+    make_private(vault.home.git_dir, path.parent)
+    write_replacing(vault.home, path, "".join(f"{rid}\n" for rid in kept), "calendar-pending")
 
 
 # -- committing -------------------------------------------------------------------------------------------------

@@ -156,6 +156,9 @@ One record per occurrence, kind `event`:
 
 - A cancellation or a new response is a new version of the same rid. A new show-as alone isn't, and neither is reading a
   past day's label without its place.
+- Docket makes a meeting of each record (DR-0646): the rid is its event, and it reads the thread, ts, title, author,
+  `to`, `native.end`, `native.all_day` and the text's header, its lines before the first blank one. Keep those as
+  they are; anything a later version adds to the text goes after a blank line.
 - Without ids on the page, the rid is `calendar:d-<hash of organiser, subject and start>`. A cancellation keeps it; a
   moved meeting gets a second record.
 - The ids are the ones Microsoft Graph gives with `Prefer: IdType="ImmutableId"`, in its REST form, so a later Graph

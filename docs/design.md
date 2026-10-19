@@ -197,6 +197,13 @@ same result on any day.
 - Meetings come from the calendar. The core turns its records into meeting ops keyed by the event's own id (iCalUId or
   the provider's id), plus the occurrence's original start for a recurring event, so a moved, renamed or cancelled
   meeting updates the same meeting; nothing is matched on start time plus subject.
+  - A record of kind `event` is one occurrence: its rid is the meeting's event, and the core reads its thread, times,
+    title, author, `to` and its text's header, `Where:`, `Response:` and `Cancelled` (DR-0646, DR-0648).
+  - After each promotion the event records it wrote become one write by sync that never refuses; a step that stopped
+    is replayed first, and `docket ledger calendar` catches up by adding and joining, in writes of whole days (DR-0647).
+  - A record joins the unkeyed meeting with its start and subject, as todo.py's update did, so an old meeting keeps
+    its number; the owner's undo asked by `of` is kept, one asked by `batch` is as if never (DR-0649, DR-0652).
+  - Recordings and asks link to meetings by time through the ledger's window read, written by the sync (DR-0651).
 - A stream can have a status file in the user's repo, rendered from the ledger at a path set per stream in
   `vault.yaml`, with frontmatter `where`, `next`, `deadline` and `updated`. A hand edit to it is reported, not merged.
   Docket renders only into a repo that passes setup's public-remote check.

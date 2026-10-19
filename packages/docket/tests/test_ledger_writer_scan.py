@@ -1,6 +1,7 @@
 """Ops have one writer, `ledger/store.py` (DR-0618), scanned over the whole package as test_decision_writer_scan.py
-scans for a decision's status: only `store.write` commits ops, only the store writes a file in the ledger's package,
-and the op folder is spelled only where the layout names it."""
+scans for a decision's status: only the store's two writes commit ops, `write` and the calendar step's
+`write_calendar` (#200), only the store writes a file in the ledger's package, and the op folder is spelled only where
+the layout names it."""
 
 from __future__ import annotations
 
@@ -27,12 +28,13 @@ def _uses(name: str) -> set[tuple[str, str]]:
 
 
 def test_only_the_writer_commits_ops() -> None:
-    assert _uses("commit_ops") == {("ledger/store.py", "write")}
+    assert _uses("commit_ops") == {("ledger/store.py", "write"), ("ledger/store.py", "write_calendar")}
 
 
 def test_only_the_store_writes_a_file_in_the_ledger_s_package() -> None:
     assert {where for where in _uses("write_replacing") if where[0].startswith("ledger/")} == {
-        ("ledger/store.py", "commit_ops")
+        ("ledger/store.py", "commit_ops"),
+        ("ledger/store.py", "_save_calendar_pending"),
     }
     for path in sorted((SRC / "ledger").glob("*.py")):
         if path.name != "store.py":

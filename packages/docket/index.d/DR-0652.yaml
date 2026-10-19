@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0652
+    title: "The import's old meetings come keyless and the calendar catch-up joins them; a rehearsal reset is #202's full revert, then the import and the catch-up"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#200"]
+    description: "DR-0621 had the owner's export script, outside Docket (roadmap step 15), give an old meeting the event and series of a calendar record matching its time and subject. Instead #202's import brings every old meeting in keyless, and after it docket ledger calendar --since the calendar's first day joins each one a record matches (DR-0649), its id and number kept. #200's step builds every key: one matcher, tested in Docket, for the step, the catch-up and the import's dry run. The catch-up's dry run is the report the roadmap asks to spot-check, renamed series and moved meetings named as near misses. A rehearsal reset before cut-over is #202's full docket ledger import --revert, which takes every op line out, the step's meetings and the joins with the import's, then the import and the catch-up, which makes the calendar's meetings and the joins again from raw. Resets revert and never undo, so nothing they take out reads as removed (DR-0649); docket vault check compares the op files with HEAD alone (DR-0617), so a commit that takes lines out is no problem. A pending rid the revert leaves is read at raw's latest version when it is replayed (DR-0647)."
+    binds:
+      - Old meetings get their keys only through the calendar step's joins.
+      - A rehearsal reset reverts the op files; it never undoes the step's meetings.
+    not_chosen:
+      - "The export script or the import matching: a second builder of keys to keep alike with the step's."
+      - "A reset by undoing the catch-up's batch and the import's: the undos would read as removals and splits, and their lines would keep naming the removed meetings."
