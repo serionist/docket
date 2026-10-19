@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0661
+    title: A day page writes one batch per form post, by user via page, and its Undo undoes that batch
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#203", "#204", "#205", "#206"]
+    description: "The four day pages share one post route, /ledger/write. A form names its page and carries the page's state as hidden fields, as the Staging page's do, then one op of the batch's (DR-0639) and that op's keys; item, of or point repeats for a bulk, each value making one change, and a button may carry its op with its one value, such as triage:chase. The route writes the changes through store.write as one batch, by user, via page, on the service's writer thread (DR-0381), and asks no index update: the next read's ledger_tables reads the grown op file (DR-0616). It answers a 303 to the page with done naming the batch, its first op id; the page shows the batch's log lines and an Undo, a post of undo with that batch, and after an undo a Redo, the undo's own undo (DR-0614). A refusal writes nothing and answers the page the form names with the writer's words, 400, its text fields as typed. An item added on a page gets the source page:<day>T<hh:mm>, a text locator naming no record, as the owner's old tasks app did, unless the owner gives one."
+    binds:
+      - "A page writes only through store.write: one batch per form post, by user, via page."
+      - "A click is the owner acting: no confirmation and no guard beyond the writer's own checks."
+    not_chosen:
+      - "A route per verb with a snapshot to restore on undo, as the owner's old tasks app had: the ledger's undo already does it and keeps the history."
+      - "htmx posts swapping parts of the page: a plain post and a 303 keep every state a URL and work without JavaScript (DR-0170)."
+      - "A check that the item is as the page showed it, as Curate's hash: the writer refuses what no longer applies, and the history keeps a text set over a newer one."

@@ -1,0 +1,13 @@
+decisions:
+  - id: DR-0663
+    title: A day page reloads itself when an op file or a cursor file changes, checked every 5 seconds
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#203", "#204"]
+    description: "Each day page carries the version it read: a hash of every file in ledger/ops/ and every cursor file, by name, size and modification time, taken before the read. An element polls GET /ledger/changed with it every 5 seconds: unchanged answers 204, which htmx doesn't swap; changed answers HX-Refresh, and the page reloads at its URL, its panel and filters with it. docket.js holds the poll back while a form holds unsaved text, a field has the focus, rows are ticked, a dialog is open or the tab is hidden, so a reload never loses what the owner is doing. A write by the page, the CLI, Claude's ledger_batch or the sync, and a pull from another clone, each change a file; the check takes no index lock and reads no file's content."
+    not_chosen:
+      - "The index's ledger_files or its highest op id: each poll would bring the index up to date under its lock."
+      - "A banner asking for a reload: the old tasks app reloaded by itself, and the hold keeps a reload from losing work."
+      - "A push from the server: a second kind of connection for one bit."

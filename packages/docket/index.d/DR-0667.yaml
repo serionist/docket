@@ -1,0 +1,13 @@
+decisions:
+  - id: DR-0667
+    title: The Meetings page changes points, outcomes and notes; rollover and joins stay with the sync and Claude
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#205"]
+    description: "Each point button is one batch naming the point by its id, never its n: add (point with text, and item for a suggestion); answer (point_set with answer, which the writer marks answered); answered or open, drop and reopen (point_set state, a reopen clearing the answer); edit (point_set text); keep one proposed point (point_set clearing proposed) or all of them (keep on the meeting); remove one, or every proposed one (an undo of each point op); turn into an item (point_item). A rolled point shows no buttons, since only an undo changes it (DR-0623). The outcome and notes are a set on the meeting. Copy agenda copies the open points as text, in the page. Rollover is the sync's (DR-0624): a meeting that is over says its open points roll at the next sync, where the old tasks app rolled them at once. Joining a keyless meeting to a calendar one stays with Claude's ledger_batch (DR-0621); the panel shows a keyless meeting's badge."
+    binds: ["A page names a point by its id, never its n."]
+    not_chosen:
+      - "A rollover in the outcome's batch: it rolls every meeting that is due, the sync's job, inside the owner's undo."
+      - "A join form on the page: rare, and the cut-over's near misses go through Claude."

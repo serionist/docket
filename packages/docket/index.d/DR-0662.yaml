@@ -1,0 +1,13 @@
+decisions:
+  - id: DR-0662
+    title: "On the day pages a key writes: 1 to 4 the verdicts, 0 no call, e done, Delete drop, s snooze, u undo"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#203", "#204"]
+    description: "The owner's old tasks app's keys, kept: j and k move, x ticks a row, 1 discuss, 2 claude, 3 me, 4 chase, 0 clears the call, e marks done at once, Delete opens the drop form with its why focused (the writer needs one, DR-0611, where the old app dropped with none), s opens the snooze choices, u presses the notice's Undo, n opens the new item form, / the search box, Enter opens the focused row, Esc closes the panel or clears the ticks. A key presses the button that carries it (data-key), so it posts the form a click posts. It acts on the ticked rows, else the focused row, else the open item; a verdict's key on an item that holds that verdict clears it. After a write the page focuses the row that followed the acted ones, which the form names as at. The keys switch turns these off with the rest. Staging and Curate have no key that writes; these pages are for triage at speed, and u undoes."
+    binds: [A key posts the same form its button posts; no key writes anything a click can't.]
+    not_chosen:
+      - "No key that writes, as on the Staging and Curate pages: the Queue's issue asks for a key per verdict, as the old tasks app had."
+      - "A confirmation per key: one more key per item, where u undoes."

@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0668
+    title: On a ledger of 5,000 items and 2,000 meetings each day page answers in a quarter second, its poll in a hundredth
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#203"]
+    description: "The pages' perf test builds #201's perf ledger (5,000 items with 50,000 ops, 2,000 meetings with 20,000 point ops), its builder moved to ledger_kit so both tests share it, rebuilds the index and asks each page once before the clock. It then times each GET (Today, the Queue, the Ledger, the Ledger with q, Meetings, an item's panel, a meeting's panel) to 0.25 s, the version check to 0.01 s, a button's write on one item to DR-0635's 0.1 s and a bulk of 50 to 0.25 s, each asserted on its own and only when no tracer runs. The views' reads keep #201's tenth of a second for a snapshot; the render takes the rest, its lists cut at k. DR-0635 sets no budget for a read, so the tenth is #201's snapshot test's."
+    binds:
+      - The pages' perf test holds each page's GET to 0.25 s, the version check to 0.01 s, a write on one item to 0.1 s and a bulk of 50 to 0.25 s, each on its own.
+    not_chosen: ["Every row on the page: thousands of rendered rows take most of a second."]
