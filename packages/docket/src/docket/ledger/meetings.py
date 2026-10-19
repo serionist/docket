@@ -7,9 +7,10 @@ object folds from its own lines in id order, its undos first (DR-0614), each lat
 Points fold across meetings, since a roll copies one onto the next meeting (DR-0623). A copy stands only while its
 source stands and the source's winning roll, its first, names it; an op or a `from` naming an idle copy reads as
 naming the copy that roll names, so an answer given on a losing copy counts and a copy rolled on from it stands. A
-meeting is archived while its archive stands and no point of it is open, and a set sorting after that archive is idle
-(DR-0624). Numbers come last, as items' do (DR-0613): the add a meeting stands on and its renumbers claim, and each
-other add's number is one it held, which never wins a number from another meeting.
+roll whose copy stands nowhere, its meeting removed, is idle, so its point reads as open. A meeting is archived while
+its archive stands and no point of it is open, and a set sorting after that archive is idle (DR-0624). Numbers come
+last, as items' do (DR-0613): the add a meeting stands on and its renumbers claim, and each other add's number is one
+it held, which never wins a number from another meeting; in a join, the key's renumbers are numbers it held too.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from datetime import date, datetime
 from typing import Any, cast
 
 from docket.ledger.fold import Entry, Material, change_material, undos
-from docket.ledger.ops import MAKES, MEETING_REQUIRED, Line, Op, fits
+from docket.ledger.ops import MAKES, MEETING_REQUIRED, REFUSES, Line, Op, fits
 
 # A meeting's fields a set changes: never its key or the meeting it continues, which only an add sets (DR-0621).
 MEETING_SETTABLE = (
@@ -112,7 +113,7 @@ class Stream:
 class ObjectFold:
     """One meeting's or stream's fold: what it is (None when every add of it is undone), its adds, the lines it kept
     in order, the ops undone and by what, the ops that were idle, the claims of its number as (op id, number), and the
-    numbers its other adds held."""
+    numbers its other adds held, with, in a join, the key's renumbers."""
 
     kind: str
     id: str
@@ -150,13 +151,15 @@ class Objects:
 
 @dataclass
 class _Pre:
-    """The adds of one key, or one unkeyed meeting, with their lines checked and their undos read."""
+    """The adds of one key, or one unkeyed meeting, with their lines checked and their undos read, and the meeting
+    they continue, if any."""
 
     kind: str
     key: str | None
     adds: list[str]
     kept: list[Line]
     undone: dict[str, str]
+    continued: str | None = None
 
 
 def _key(line: Line) -> tuple[str, str]:
@@ -204,7 +207,8 @@ def fold_objects(groups: Mapping[str, Sequence[Line]]) -> Objects:
         # A continued meeting's id is the object's (DR-0621).
         adds = sorted([*pre.adds, *joined.adds])
         kept = sorted([*pre.kept, *joined.kept], key=_key)
-        members[joined.adds[0]] = _Pre(pre.kind, pre.key, adds, kept, {**pre.undone, **joined.undone})
+        undone = {**pre.undone, **joined.undone}
+        members[joined.adds[0]] = _Pre(pre.kind, pre.key, adds, kept, undone, continued=joined.adds[0])
     owner = {add_id: obj_id for obj_id, pre in members.items() for add_id in pre.adds}
     points, applied, left = _points(members, owner, problems)
     standing: dict[str, list[Point]] = {}
@@ -250,10 +254,13 @@ def _pre(
     """The lines of a key's adds, each sorting after the add it names, sets checked against the object's rules, and
     every undo read (DR-0614)."""
     kept: list[Line] = []
+    refused = REFUSES[kind]
     for line in sorted((ln for add_id in adds for ln in groups[add_id]), key=_key):
         op = line.op
         if op.id < op.item:
             problems.append((line.where, "sorts before its item's add; left out"))
+        elif op.op in refused:
+            problems.append((line.where, f"a {kind} takes no {op.op}; left out"))
         elif op.op == "set" and not fits(kind, op.fields or {}):
             problems.append((line.where, f"a set whose fields don't hold what a {kind}'s hold; left out"))
         else:
@@ -300,15 +307,19 @@ def _points(
     members: dict[str, _Pre], owner: dict[str, str], problems: list[tuple[str, str]]
 ) -> tuple[dict[str, Point], set[str], set[str]]:
     """Every point of every standing meeting, its copies settled along their `from` chains (DR-0623): the points by
-    id, the point ops that applied, and the point_sets left out because they name no point of their meeting."""
+    id, the point ops that applied, and the point_sets left out because they name no point of their meeting or, for
+    a roll, no point and no meeting."""
     points: dict[str, Point] = {}
     # Every point op's meeting, undone ones and a removed meeting's included: a from naming one names a point.
     every: dict[str, str] = {}
     adds: dict[str, Line] = {}
+    meetings: set[str] = set()
     for obj_id, pre in members.items():
         if pre.kind != "meeting":
             continue
         stands = any(a not in pre.undone for a in pre.adds)
+        if stands:
+            meetings.add(obj_id)
         for line in pre.kept:
             op = line.op
             if op.op != "point":
@@ -327,6 +338,10 @@ def _points(
                     proposed=f.get("proposed") is True,
                 )
                 adds[op.id] = line
+
+    def a_meeting(ref: str) -> bool:
+        return ref in owner and members[owner[ref]].kind == "meeting"
+
     sets_of: dict[str, list[Line]] = {}
     left: set[str] = set()
     for obj_id, pre in members.items():
@@ -335,7 +350,11 @@ def _points(
             if op.op != "point_set" or op.id in pre.undone:
                 continue
             target = op.point or ""
-            if target in points and points[target].meeting == obj_id:
+            to = str((op.fields or {}).get("to"))
+            if _rolls(op) and to not in every and not a_meeting(to):
+                problems.append((line.where, "a roll whose to names no point and no meeting; left out"))
+                left.add(op.id)
+            elif target in points and points[target].meeting == obj_id:
                 sets_of.setdefault(target, []).append(line)
             elif every.get(target) != obj_id:
                 problems.append((line.where, "names no point of its meeting; left out"))
@@ -345,7 +364,7 @@ def _points(
     dead: list[str] = []
     for point_id in sorted(points):
         source = points[point_id].rolled_from
-        if source is None or (source in owner and source not in every):
+        if source is None or a_meeting(source):
             roots.append(point_id)
         elif source in points and source < point_id:
             kids.setdefault(source, []).append(point_id)
@@ -356,11 +375,15 @@ def _points(
             points[point_id].rolled_from = None
             roots.append(point_id)
     applied: set[str] = set()
+    # A roll lands on a copy of its point that is there or, from an import that couldn't pair it, on a meeting that
+    # stands, by any of its adds; any other roll's copy stands nowhere.
+    landing = {add_id for add_id, obj_id in owner.items() if obj_id in meetings}
     queue: deque[tuple[str, list[Line], list[str]]] = deque((root, [], []) for root in roots)
     while queue:
         point_id, moved_sets, moved_kids = queue.popleft()
-        winner = _fold_point(points[point_id], sorted([*sets_of.get(point_id, []), *moved_sets], key=_key), applied)
         children = sorted({*kids.get(point_id, []), *moved_kids})
+        lines = sorted([*sets_of.get(point_id, []), *moved_sets], key=_key)
+        winner = _fold_point(points[point_id], lines, applied, children, landing)
         if winner not in children:
             dead += children
             continue
@@ -383,13 +406,23 @@ def _points(
     return points, applied, left
 
 
-def _fold_point(point: Point, lines: list[Line], applied: set[str]) -> str | None:
+def _rolls(op: Op) -> bool:
+    return (op.fields or {}).get("state") == "rolled"
+
+
+def _fold_point(
+    point: Point, lines: list[Line], applied: set[str], copies: Sequence[str], landing: set[str]
+) -> str | None:
     """A point from its own point_sets and those moved to it, in id order; the copy its winning roll names, if it
-    rolled. A rolled point changes only by an undo, so every op after its roll is idle."""
+    rolled. A rolled point changes only by an undo, so every op after its roll is idle. A roll whose copy stands
+    nowhere, its meeting removed on this clone or another, is idle too: the point reads as open, so it is never lost,
+    and a later roll can win (DR-0623)."""
     for line in lines:
         if point.state == "rolled":
             continue
         fields = line.op.fields or {}
+        if _rolls(line.op) and (to := str(fields.get("to"))) not in copies and to not in landing:
+            continue
         changed = False
         for name, value in fields.items():
             if name == "text" and value and value != point.text:
@@ -414,11 +447,16 @@ def _fold_meeting(
 ) -> ObjectFold:
     adds, undone = pre.adds, pre.undone
     standing = [a for a in adds if a not in undone]
-    claims = tuple((ln.op.id, ln.op.number or 0) for ln in lines if ln.op.op == "renumber" and ln.op.id not in undone)
     if not standing:
         return ObjectFold("meeting", obj_id, None, tuple(adds), tuple(lines), undone, frozenset())
-    # The add it stands on claims its number: the continued meeting's, else its first standing add's.
+    # The add it stands on claims its number: the continued meeting's, else its first standing add's. In a join only
+    # the continued meeting's own renumbers claim with it; the key's renumbers from before are numbers it held, so a
+    # renumber there never takes the joined meeting's number (DR-0621).
     claimer = obj_id if obj_id in standing else standing[0]
+    joined = claimer == pre.continued
+    renumbers = [ln.op for ln in lines if ln.op.op == "renumber" and ln.op.id not in undone]
+    claims = tuple((o.id, o.number or 0) for o in renumbers if not joined or o.item == claimer)
+    kept = tuple((o.id, o.number or 0) for o in renumbers if joined and o.item != claimer)
     first = makers[standing[0]].op
     f = first.fields or {}
     meeting = Meeting(
@@ -456,7 +494,7 @@ def _fold_meeting(
         elif kind in ("point", "point_set"):
             ok = op.id in applied
         else:
-            # log, undo and renumber apply; an item's kind, or one this Docket doesn't know, changes nothing.
+            # log, undo and renumber apply; a kind this Docket doesn't know changes nothing.
             ok = kind in ("log", "undo", "renumber")
         if not ok:
             idle.add(op.id)
@@ -464,7 +502,7 @@ def _fold_meeting(
         meeting.last = op.id
     meeting.points = mine
     claimed = (claimer, makers[claimer].op.number or 0)
-    held = tuple((a, makers[a].op.number or 0) for a in standing if a != claimer)
+    held = (*((a, makers[a].op.number or 0) for a in standing if a != claimer), *kept)
     return ObjectFold(
         "meeting", obj_id, meeting, tuple(adds), tuple(lines), undone, frozenset(idle), (claimed, *claims), held
     )

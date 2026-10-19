@@ -39,7 +39,7 @@ from docket.errors import DocketError
 from docket.index.build import ledger_tables
 from docket.index.ledger import Held
 from docket.ledger import check, ops
-from docket.ledger.fold import CLOSED, NUMBER, Folded, Item, family, fold_item, load, number_text
+from docket.ledger.fold import CLOSED, NUMBER, Folded, Item, family, fold_item, load, number_text, paused
 from docket.ledger.meetings import Meeting, ObjectFold, Objects, Point, Stream, fold_objects, meeting_text
 from docket.ledger.ops import (
     DAYS,
@@ -232,9 +232,11 @@ class _Write:
         return fold_item(item_id, self.lines_of(item_id))
 
     def objects(self) -> Objects:
-        """The meetings and streams as the write leaves them, folded again after each op written to one."""
+        """The meetings and streams as the write leaves them, folded again after each op written to one, with the
+        collector paused as `load` pauses it."""
         if self._objects is None:
-            self._objects = fold_objects({add_id: self.lines[add_id] for add_id in self.object_adds})
+            with paused():
+                self._objects = fold_objects({add_id: self.lines[add_id] for add_id in self.object_adds})
         return self._objects
 
     def number_of(self, item_id: str) -> int:
@@ -660,6 +662,8 @@ class _Write:
     def meeting(self, n: int, change: Mapping[str, Any], note: str | None) -> None:
         """A new meeting; with an event the ledger holds, a set of what changed on the add carrying it; with
         `continues`, an add joining that unkeyed meeting to the event's (DR-0621)."""
+        if self.archived_event(change.get("fields")):
+            return
         fields = self.meeting_fields(n, change.get("fields"))
         event, continues = fields.get("event"), fields.get("continues")
         objects = self.objects()
@@ -689,6 +693,20 @@ class _Write:
         fields.pop("continues", None)
         self.set_meeting(n, held, fields, note, key_add=self.key_add(held))
 
+    def archived_event(self, given: object) -> bool:
+        """Whether a meeting change is an event's update of an archived meeting: its event names one and it continues
+        none. That set is idle, so it is found before any field is checked: the writer writes nothing for it and
+        refuses nothing, and the sync's write never fails on an old meeting (DR-0624)."""
+        if not isinstance(given, Mapping):
+            return False
+        given = cast(Mapping[object, object], given)
+        event, continues = given.get("event"), given.get("continues")
+        if not isinstance(event, str) or continues not in (None, "", "-"):
+            return False
+        objects = self.objects()
+        held = objects.meetings.get(objects.events.get(one_line(event), ""))
+        return held is not None and held.archived
+
     def need_meeting_fields(self, n: int, fields: dict[str, Any]) -> None:
         missing = [name for name in MEETING_REQUIRED if fields.get(name) is None]
         if missing:
@@ -709,8 +727,8 @@ class _Write:
         return meeting_text(meeting.number or meeting.claimed)
 
     def set_meeting(self, n: int, meeting: Meeting, fields: dict[str, Any], note: str | None, *, key_add: str) -> None:
-        """A set of what changed. A set on an archived meeting is idle, so the writer writes nothing for it and refuses
-        nothing: the sync's write never fails on an old meeting (DR-0624)."""
+        """A set of what changed, on a meeting that isn't archived: a set on an archived one is idle, and its callers
+        write nothing for it before they check a field (DR-0624)."""
         if "event" in fields or "continues" in fields:
             self.refuse(n, "event and continues are set only by a meeting's add")
         cleared = [name for name in MEETING_REQUIRED if name in fields and fields[name] is None]
@@ -721,7 +739,7 @@ class _Write:
         if end < start:
             self.refuse(n, "end is before start")
         changed = {name: value for name, value in fields.items() if _meeting_differs(meeting, name, value)}
-        if changed and not meeting.archived:
+        if changed:
             self.emit("set", key_add, fields=changed, note=note)
 
     def object_change(
@@ -743,7 +761,9 @@ class _Write:
         meeting = objects.meetings[obj_id]
         label = self.meeting_label(meeting)
         if kind == "set":
-            self.set_meeting(n, meeting, self.meeting_fields(n, change.get("fields")), note, key_add=obj_id)
+            # Idle on an archived meeting, so nothing is checked and nothing refused (DR-0624).
+            if not meeting.archived:
+                self.set_meeting(n, meeting, self.meeting_fields(n, change.get("fields")), note, key_add=obj_id)
             return
         if kind == "log":
             if note is None:
@@ -1025,12 +1045,23 @@ class _Write:
             targets += [self.adds_line(a) for a in folded.adds if a != target.id and a not in folded.undone]
         elif _is_roll(target) or _is_copy(target):
             copy_id = str((target.fields or {}).get("to")) if _is_roll(target) else target.id
-            copy = self.objects().points.get(copy_id)
-            if copy is not None and copy.state == "rolled":
+            if self.rolled_on(copy_id):
                 self.refuse(n, "its copy has rolled on since; undo that roll first")
         for k, op in enumerate(targets):
             if op.id not in self.all_undone():
                 self.undo_object_op(op, note if k == 0 else None)
+
+    def rolled_on(self, copy_id: str) -> bool:
+        """Whether a copy has rolled on: it folds as rolled, or, a losing copy that never folds, a roll that isn't
+        undone names it (DR-0624)."""
+        copy = self.objects().points.get(copy_id)
+        if copy is not None and copy.state == "rolled":
+            return True
+        undone = self.all_undone()
+        return any(
+            _is_roll(line.op) and line.op.point == copy_id and line.op.id not in undone
+            for add_id in self.object_adds for line in self.lines[add_id]
+        )  # fmt: skip
 
     def adds_line(self, add_id: str) -> Op:
         return next(line.op for line in self.lines[add_id] if line.op.id == add_id)

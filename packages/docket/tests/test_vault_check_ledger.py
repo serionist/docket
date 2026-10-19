@@ -69,9 +69,17 @@ def test_meetings_points_and_streams_the_fold_leaves_out_are_named(vault: Vault)
         op("point_set", 3, 1, point=ulid(77), fields={"state": "answered"}, machine="test-box"),
         op("pin", 4, 4, machine="test-box"),
         op("log", 5, 4, note="on a later Docket's object", machine="test-box"),
+        op("add", 6, machine="test-box"),
+        op("point", 7, 6, fields={"text": "On an item"}, machine="test-box"),
+        op("triage", 8, 1, verdict="me", machine="test-box"),
+        op("point", 9, 1, fields={"text": "Dates"}, machine="test-box"),
+        op("point_set", 10, 1, point=ulid(9), fields={"state": "rolled", "to": ulid(78)}, machine="test-box"),
     ])  # fmt: skip
     assert dict(ledger_problems(vault) + [(p.where, p.message) for p in vault.check() if p.where == "M-0001"]) == {
         f"{FILE}:3": "names no point of its meeting; left out",
+        f"{FILE}:7": "an item takes no point; left out",
+        f"{FILE}:8": "a meeting takes no triage; left out",
+        f"{FILE}:10": "a roll whose to names no point and no meeting; left out",
         "M-0001": f"held by two meetings; the next write gives {ulid(2)} a new number",
     }
 

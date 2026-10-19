@@ -3,6 +3,7 @@ points one change at a time, a point turned into an item, streams by name, rollo
 
 from __future__ import annotations
 
+import gc
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -11,9 +12,9 @@ import pytest
 from docket_testkit import commit_config, empty_vault, make_config, sh
 from ledger_kit import ADD_FIELDS, MEETING, NOW
 
-from docket.ledger import ops
+from docket.ledger import ops, store
 from docket.ledger.fold import Ledger, fold
-from docket.ledger.meetings import Meeting
+from docket.ledger.meetings import Meeting, fold_objects
 from docket.ledger.ops import Op
 from docket.ledger.store import LedgerError, write
 from docket.vault.config import RedactionPattern, VaultConfig
@@ -96,9 +97,16 @@ def test_a_meeting_with_an_event_the_ledger_holds_sets_what_changed_on_the_add_c
     })  # fmt: skip
     assert write(vault, [moved], now=later(2)).ops == ()
     write(vault, [{"op": "archive", "item": "M-0001"}], now=later(3))
-    # A set on an archived meeting is idle: the writer writes nothing and refuses nothing (DR-0624).
-    assert write(vault, [add_meeting(event="calendar:E1", where="Room 3")], now=later(4)).ops == ()
-    assert write(vault, [{"op": "set", "item": "M-0001", "fields": {"where": "Room 3"}}], now=later(5)).ops == ()
+    # A set on an archived meeting is idle: the writer writes nothing and refuses nothing, so it checks no field of
+    # it, and an event's update with an end before its start still fails no write (DR-0624).
+    for idle in (
+        add_meeting(event="calendar:E1", where="Room 3"),
+        add_meeting(event=" calendar:E1 ", end="2026-10-19T08:00+02:00"),
+        {"op": "meeting", "fields": {"event": "calendar:E1", "subject": None}},
+        {"op": "set", "item": "M-0001", "fields": {"where": "Room 3"}},
+        {"op": "set", "item": "M-0001", "fields": {"start": "Monday"}},
+    ):
+        assert write(vault, [idle], now=later(4)).ops == ()
     assert meeting(vault, 1).where == "Room 2"
     assert write(vault, [add_meeting(event="  ")], now=later(6)).ops[0].number == 2
 
@@ -393,6 +401,74 @@ def test_undoing_a_roll_also_undoes_another_clone_s_roll_it_woke_and_keeps_that_
     (undo,) = write(vault, [{"op": "undo", "of": answer.id}], now=later(41)).ops
     assert undo.item == roll.item
     assert meeting(vault, 1).points[0].state == "open"
+
+
+def test_a_undo_of_a_losing_roll_whose_copy_rolled_on(vault: Vault) -> None:
+    """Both clones rolled one point and the laptop's copy, which lost, rolled on: a losing copy never folds, so the
+    roll naming it says it rolled on, and the owner's undo of the laptop's roll or copy is refused until that later
+    roll is undone, as for a copy that stands (DR-0624)."""
+    write(vault, [
+        slot(19, response="cancelled"),
+        slot(20),
+        slot(21),
+        {"op": "point", "item": "M-0001", "fields": {"text": "Dates"}},
+    ], now=NOW)  # fmt: skip
+    (copy, roll) = write(vault, [{"op": "rollover"}], now=later(1)).ops
+    source = roll.point or ""
+    theirs = laptop(vault, "point", meeting(vault, 2).id, fields={"text": "Dates", "from": source})
+    their_roll = laptop(vault, "point_set", roll.item, point=source, fields={"state": "rolled", "to": theirs.id})
+    on = laptop(vault, "point", meeting(vault, 3).id, fields={"text": "Dates", "from": theirs.id})
+    rolled_on = laptop(vault, "point_set", copy.item, point=theirs.id, fields={"state": "rolled", "to": on.id})
+    points = ledger(vault).objects.points
+    assert (points[theirs.id].stands, points[theirs.id].state, points[copy.id].rolled_to) == (False, "open", on.id)
+    for of in (their_roll.id, theirs.id):
+        with pytest.raises(LedgerError, match="its copy has rolled on since; undo that roll first"):
+            write(vault, [{"op": "undo", "of": of}], now=later(40))
+    assert [o.of for o in write(vault, [{"op": "undo", "of": rolled_on.id}], now=later(41)).ops] == [
+        rolled_on.id, on.id,
+    ]  # fmt: skip
+    undos = write(vault, [{"op": "undo", "of": their_roll.id}], now=later(42)).ops
+    assert [o.of for o in undos] == [their_roll.id, theirs.id]
+    assert [(m.number, p.id) for m in ledger(vault).meetings.values() for p in m.open_points()] == [(2, copy.id)]
+
+
+@pytest.mark.parametrize("where", ["here", "on the laptop"])
+def test_a_point_rolled_into_a_meeting_removed_here_or_on_another_clone_is_open_again_and_rolls_on(
+    vault: Vault, where: str
+) -> None:
+    """The meeting a point rolled into removed, by the owner or by a clone that hadn't pulled the roll: the point is
+    open on its own meeting again, nothing is named, and the next rollover rolls it on (DR-0623)."""
+    write(vault, [
+        slot(19, response="cancelled"),
+        slot(20),
+        slot(27),
+        {"op": "point", "item": "M-0001", "fields": {"text": "Dates"}},
+    ], now=NOW)  # fmt: skip
+    (_, roll) = write(vault, [{"op": "rollover"}], now=later(1)).ops
+    removed = meeting(vault, 2).id
+    if where == "here":
+        write(vault, [{"op": "undo", "of": removed}], now=later(2))
+    else:
+        laptop(vault, "undo", removed, of=removed)
+    assert [(m.number, p.id, p.state) for m in ledger(vault).meetings.values() for p in m.open_points()] == [
+        (1, roll.point, "open"),
+    ]  # fmt: skip
+    assert [str(p) for p in vault.check() if p.where.startswith(("ledger", "M-"))] == []
+    (again, rolled) = write(vault, [{"op": "rollover"}], now=datetime(2026, 10, 25, tzinfo=UTC)).ops
+    assert (again.item, rolled.point, rolled.fields) == (meeting(vault, 3).id, roll.point, {"state": "rolled",
+                                                                                          "to": again.id})  # fmt: skip
+    assert [(m.number, p.text) for m in ledger(vault).meetings.values() for p in m.open_points()] == [(3, "Dates")]
+
+
+def test_the_writer_folds_the_meetings_again_with_the_collector_paused(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each op on a meeting folds every meeting again, so the collector is paused as `load` pauses it."""
+    seen: list[bool] = []
+    real = fold_objects
+    monkeypatch.setattr(store, "fold_objects", lambda groups: seen.append(gc.isenabled()) or real(groups))
+    write(vault, [add_meeting(), {"op": "point", "item": "M-0001", "fields": {"text": "Dates"}}], now=NOW)
+    assert (bool(seen), any(seen), gc.isenabled()) == (True, False, True)
 
 
 def test_an_undo_of_a_meeting_s_op_takes_what_it_woke_of_its_kind(vault: Vault) -> None:

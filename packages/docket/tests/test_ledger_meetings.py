@@ -3,13 +3,17 @@ their chains, archive, and what is left out."""
 
 from __future__ import annotations
 
+import random
 from datetime import date, datetime, timedelta, timezone
+from typing import Any
 
+import pytest
 from ledger_kit import DAY, MEETING, STREAM, lines, meeting, op, point, point_set, roll, ulid
 
+from docket.ledger import ops
 from docket.ledger.fold import Ledger, describe, fold
 from docket.ledger.meetings import Meeting, Point, describe_point
-from docket.ledger.ops import Op
+from docket.ledger.ops import Line, Op
 
 
 def folded(*made: Op) -> Ledger:
@@ -61,7 +65,6 @@ def test_sets_materials_and_logs_change_a_meeting_and_its_offset_counts() -> Non
         op("material", 5, 1, ref="notes/pilot.md", label="the notes"),
         op("material", 6, 1, ref="notes/pilot.md", remove=True),
         op("log", 7, 1, note="moved to the morning"),
-        op("triage", 8, 1, verdict="me"),
         op("pin", 9, 1),
         op("renumber", 10, 1, number=4),
     ))  # fmt: skip
@@ -69,7 +72,7 @@ def test_sets_materials_and_logs_change_a_meeting_and_its_offset_counts() -> Non
     assert (m.subject, m.start.isoformat(timespec="minutes"), m.notes, m.attendees, m.event, m.number) == (
         "Pilot sync", "2026-10-19T08:00+01:00", None, (), None, 4,
     )  # fmt: skip
-    assert [e.applied for e in m.log] == [True, True, True, True, True, True, True, False, False, True]
+    assert [e.applied for e in m.log] == [True, True, True, True, True, True, True, False, True]
     assert m.log[1].line == (
         "subject: Pilot sync; start: 2026-10-19T08:00+01:00; attendees: Cy Example; notes edited; "
         f"event: calendar:E9; continues: {ulid(1)}; later: 5"
@@ -296,6 +299,41 @@ def test_a_point_the_losing_copy_rolled_on_stands_through_the_winning_copy() -> 
     assert [p.id for m in ledger.meetings.values() for p in m.open_points()] == [ulid(9)]
 
 
+def test_a_point_rolled_into_a_removed_meeting_reads_as_open_and_a_later_roll_wins() -> None:
+    """Its copy's meeting removed, here or on another clone, the roll is idle and the point open again, so it is
+    never lost; a later roll then wins, and with the meeting brought back the first roll wins again, the later copy's
+    answer following it (DR-0623)."""
+    made = [
+        meeting(1, subject="Week 1"),
+        meeting(2, subject="Week 2"),
+        meeting(3, subject="Week 3"),
+        point(4, 1, "Dates"),
+        *roll(5, 1, 4, 2),
+        op("undo", 7, 2, of=ulid(2)),
+    ]
+    removed = folded(*made)
+    old = removed.meetings[ulid(1)]
+    (source,) = old.points
+    assert (source.state, source.rolled_to, old.open_points(), removed.problems) == ("open", None, [source], ())
+    assert [e.applied for e in old.log] == [True, True, False]
+    again = [*made, *roll(8, 1, 4, 3), point_set(10, 3, 8, answer="the 21st", state="answered")]
+    rolled = folded(*again)
+    assert (rolled.objects.points[ulid(4)].rolled_to, [p.id for p in rolled.meetings[ulid(3)].points]) == (
+        ulid(8), [ulid(8)],
+    )  # fmt: skip
+    back = folded(*again, op("undo", 11, 2, of=ulid(7)))
+    first, later = back.objects.points[ulid(5)], back.objects.points[ulid(8)]
+    assert (first.stands, first.answer, later.stands, later.moved_to) == (True, "the 21st", False, ulid(5))
+    assert [p.id for m in back.meetings.values() for p in m.points] == [ulid(4), ulid(5)]
+
+
+def test_a_roll_an_import_couldn_t_pair_lands_on_its_meeting_while_that_stands() -> None:
+    made = [meeting(1), meeting(2, subject="Next"), point(3, 1), point_set(4, 1, 3, state="rolled", to=ulid(2))]
+    (rolled,) = folded(*made).meetings[ulid(1)].points
+    assert (rolled.state, rolled.rolled_to) == ("rolled", ulid(2))
+    assert folded(*made, op("undo", 5, 2, of=ulid(2))).meetings[ulid(1)].points[0].state == "open"
+
+
 def test_a_copy_whose_source_stands_nowhere_is_idle_and_a_from_naming_a_meeting_or_nothing_is_a_root() -> None:
     ledger = folded(
         meeting(1),
@@ -358,7 +396,6 @@ def test_a_stream_is_keyed_by_its_name_and_updated_on_its_latest_change() -> Non
         op("set", 3, 1, fields={"next": "send the dates"}, day=later + timedelta(days=1)),
         op("stream", 4, fields={**STREAM, "status": "waiting"}, day=later + timedelta(days=2)),
         op("log", 5, 1, note="quiet week"),
-        op("archive", 6, 1),
         op("stream", 7, fields={"name": "other", "status": "closed"}),
         op("undo", 8, 7, of=ulid(7)),
     )
@@ -367,7 +404,7 @@ def test_a_stream_is_keyed_by_its_name_and_updated_on_its_latest_change() -> Non
         ulid(1), "pilot", "waiting", "kick-off done", "send the dates", date(2026, 11, 2), (ulid(1), ulid(4)),
     )  # fmt: skip
     assert s.updated == later + timedelta(days=2)
-    assert [e.applied for e in s.log] == [True, True, False, True, True, False]
+    assert [e.applied for e in s.log] == [True, True, False, True, True]
     assert (ledger.objects.names, ledger.objects.folds[ulid(7)].value) == ({"pilot": ulid(1)}, None)
     assert describe(op("stream", 1)) == "added"
 
@@ -387,6 +424,56 @@ def test_a_second_text_of_a_meeting_s_add_is_idle_and_a_stream_s_undone_set_is_l
     )
 
 
+def test_a_renumber_on_the_key_s_side_before_a_join_is_a_number_the_joined_meeting_held() -> None:
+    """An event's meeting renumbered after a clash, then continuing an unkeyed one: the joined meeting keeps the
+    continued one's number, and the renumber's still names it (DR-0621). A renumber of the joined meeting claims."""
+    made = [
+        meeting(1, number=7),
+        meeting(2, subject="Another", number=5),
+        meeting(3, "calendar:E1", number=5),
+        op("renumber", 4, 3, number=8),
+        meeting(5, "calendar:E1", number=7, continues=ulid(1)),
+    ]
+    ledger = folded(*made)
+    m = ledger.meetings[ulid(1)]
+    assert (m.number, m.claimed, m.adds, ledger.problems) == (7, 7, (ulid(1), ulid(3), ulid(5)), ())
+    assert ledger.objects.holders == {5: (ulid(2), ulid(1)), 7: (ulid(1),), 8: (ulid(1),)}
+    clash = folded(meeting(0, subject="First", number=7), *made, op("renumber", 6, 1, number=9))
+    assert (clash.meetings[ulid(1)].number, clash.objects.holders[7], clash.objects.holders[8]) == (
+        9, (ulid(0), ulid(1)), (ulid(1),),
+    )  # fmt: skip
+
+
+def test_an_op_its_object_doesn_t_take_and_a_roll_to_nothing_are_left_out_and_named() -> None:
+    """A point on an item, a triage on a meeting, an archive on a stream: each is left out and named (DR-0620). So is
+    a roll whose to names no point and no meeting, its point staying open, and a from naming a stream reads as none."""
+    ledger = folded(
+        op("add", 1),
+        point(2, 1, "On an item"),
+        point_set(3, 1, 2, answer="x"),
+        meeting(4),
+        op("triage", 5, 4, verdict="me"),
+        op("stream", 6),
+        op("archive", 7, 6),
+        point(8, 4, "Dates"),
+        point_set(9, 4, 8, state="rolled", to=ulid(77)),
+        point(10, 4, "From a stream", **{"from": ulid(6)}),
+    )
+    assert messages(ledger) == [
+        "an item takes no point; left out",
+        "an item takes no point_set; left out",
+        "a stream takes no archive; left out",
+        "a meeting takes no triage; left out",
+        "a roll whose to names no point and no meeting; left out",
+        "its from names no earlier point and no meeting; read as none",
+    ]
+    m = ledger.meetings[ulid(4)]
+    assert ([p.text for p in m.open_points()], [e.op.op for e in m.log]) == (
+        ["Dates", "From a stream"], ["meeting", "point", "point"],
+    )  # fmt: skip
+    assert ([e.op.op for e in ledger.items[ulid(1)].log], len(ledger.streams[ulid(6)].log)) == (["add"], 1)
+
+
 def test_two_meetings_claiming_one_number_wait_for_a_renumber() -> None:
     ledger = folded(meeting(1, number=3), meeting(2, subject="Other", number=3), op("renumber", 3, 2, number=4))
     assert {m.id: m.number for m in ledger.meetings.values()} == {ulid(1): 3, ulid(2): 4}
@@ -404,3 +491,67 @@ def test_a_point_op_says_what_it_did_in_a_few_words() -> None:
     )
     assert isinstance(Point(id="x", meeting="y", text="z", added_by="user", day=DAY), Point)
     assert MEETING["subject"] == only(folded(meeting(1))).subject
+
+
+def snapshot(ledger: Ledger) -> list[Any]:
+    out: list[Any] = [
+        (m.id, m.number, m.event, m.subject, m.where, m.archived, m.adds,
+         tuple((p.id, p.state, p.answer, p.rolled_to) for p in m.points),
+         tuple((e.op.id, e.applied, e.undone_by) for e in m.log))
+        for m in sorted(ledger.meetings.values(), key=lambda m: m.id)
+    ]  # fmt: skip
+    out.append(sorted(ledger.objects.holders.items()))
+    out.append(sorted((p.id, p.stands, p.moved_to) for p in ledger.objects.points.values()))
+    return out
+
+
+def history(seed: int) -> list[Op]:
+    """Ninety ops at random: meetings with and without an event, some continuing one, points, answers, rolls to any
+    meeting, sets and undos of any op."""
+    rng = random.Random(seed)  # noqa: S311
+    made: list[Op] = []
+    keys: dict[int, str | None] = {}
+    points: list[tuple[int, int]] = []
+    for n in range(2, 182, 2):
+        r = rng.random()
+        if not keys or r < 0.18:
+            event = rng.choice([None, "calendar:E1", "calendar:E2", "calendar:E3"])
+            alone = [k for k, key in keys.items() if key is None]
+            extra = {"continues": ulid(rng.choice(alone))} if event and alone and rng.random() < 0.3 else {}
+            made.append(meeting(n, event, number=rng.randint(1, 6), subject=f"S{n}", **extra))
+            keys[n] = event
+        elif r < 0.4:
+            on = rng.choice(list(keys))
+            made.append(point(n, on, f"P{n}"))
+            points.append((n, on))
+        elif r < 0.6 and points:
+            which, on = rng.choice(points)
+            made.append(point_set(n, on, which, answer=f"a{n}", state="answered"))
+        elif r < 0.75 and points:
+            which, on = rng.choice(points)
+            to = rng.choice(list(keys))
+            made += roll(n, on, which, to)
+            points.append((n, to))
+        elif r < 0.85:
+            made.append(op("set", n, rng.choice(list(keys)), fields={"where": f"Room {n}"}))
+        else:
+            target = rng.choice(made)
+            made.append(op("undo", n, ops.decode(target.item) - ops.decode(ulid(0)), of=target.id))
+    return made
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_any_order_of_the_lines_with_lines_twice_folds_to_one_ledger(seed: int) -> None:
+    """Keys, joins, points, rolls and undos fold alike whatever order the files hold the lines in, a line read twice
+    being one op (DR-0612)."""
+    texts = [(ops.rel_of(o), o.text()) for o in history(seed)]
+
+    def read(order: list[tuple[str, str]]) -> Ledger:
+        return fold(Line(Op.model_validate_json(t), t, rel, k) for k, (rel, t) in enumerate(order, start=1))
+
+    base = snapshot(read(texts))
+    rng = random.Random(seed + 7)  # noqa: S311
+    for _ in range(6):
+        shuffled = texts + rng.sample(texts, k=len(texts) // 3)
+        rng.shuffle(shuffled)
+        assert snapshot(read(shuffled)) == base

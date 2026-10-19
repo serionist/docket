@@ -73,6 +73,16 @@ OPS = (
 )  # fmt: skip
 # The kinds that make an object, each an op whose item is its own id (DR-0620).
 MAKES = ("add", "meeting", "stream")
+# The kinds each object takes. Another kind this Docket knows naming one, a point on an item or a triage on a meeting,
+# is a problem and is left out; a kind it doesn't know changes nothing (DR-0620).
+TAKES = {
+    "item": (
+        "add", "set", "log", "triage", "snooze", "done", "drop", "reopen", "material", "archive", "undo", "renumber",
+    ),
+    "meeting": ("meeting", "set", "log", "material", "archive", "point", "point_set", "undo", "renumber"),
+    "stream": ("stream", "set", "log", "undo"),
+}  # fmt: skip
+REFUSES = {kind: frozenset(OPS) - frozenset(takes) for kind, takes in TAKES.items()}
 FIELDS = ("kind", "title", "who", "stream", "source", "meeting", "opened", "due", "description", "notes", "outcome")
 REQUIRED = ("kind", "title", "who", "stream", "source")
 DAYS = ("opened", "due")

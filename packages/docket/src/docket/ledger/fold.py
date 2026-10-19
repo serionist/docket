@@ -6,7 +6,8 @@ same ledger. Lines are taken by id; a line twice is one op, and one id on two te
 an item, a meeting's and a stream's in `meetings`; one of a kind this Docket doesn't know is kept and folds into
 nothing, and any other op naming an item no add made is left out. Per item:
 
-1. Its add is the first add by id and text; an op with no add, or sorting before it, is left out.
+1. Its add is the first add by id and text; an op with no add, sorting before it, or of a kind an item doesn't take
+   (a point), is left out.
 2. Every undo's target is checked first: one naming an op that isn't an earlier one of its item, a renumber or a bad
    undo is left out (DR-0614). Then undos are read from the latest back, each leaving out the op it names unless it
    is undone itself. An undone add hides the item.
@@ -29,7 +30,7 @@ from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from docket.ledger.ops import DAYS, MAKES, OPS, REQUIRED, FileRead, Line, Op, fits, read_all
+from docket.ledger.ops import DAYS, MAKES, OPS, REFUSES, REQUIRED, FileRead, Line, Op, fits, read_all
 
 if TYPE_CHECKING:
     from docket.ledger.meetings import Meeting, Objects, Stream
@@ -333,11 +334,15 @@ def fold_item(item_id: str, lines: Sequence[Line]) -> Folded:
         return Folded(None, (), {}, frozenset(), (), left)
     problems: list[tuple[str, str]] = []
     kept = [add]
+    refused = REFUSES["item"]
     for line in ordered:
         if line is add:
             continue
         if line.op.id < add.op.id:
             problems.append((line.where, "sorts before its item's add; left out"))
+            continue
+        if line.op.op in refused:
+            problems.append((line.where, f"an item takes no {line.op.op}; left out"))
             continue
         if line.op.op == "set" and not fits("item", line.op.fields or {}):
             problems.append((line.where, "a set whose fields don't hold what an item's hold; left out"))
