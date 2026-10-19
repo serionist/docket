@@ -14,7 +14,10 @@ the next call. Until then every reader skips what the list takes.
 | ledger | each listed op's line in every machine's op file, as its mask; a twin masking made, a union merge's, gone |
 
 A key the apply deletes that no line names, a stored file's this clone made before its pull, goes on a keys-only line
-(DR-0595), so the clones that imported its export delete it too.
+(DR-0595), so the clones that imported its export delete it too. So does an op the ledger's rule masks that no line
+names: the rule is matched again over every op line once the list's digest moved, and over the whole ledger when a
+line an op file gained looks like one it masks, so a clone's own op from before its pull, or one a pull brought, is
+found (DR-0694). A stream whose ops it masked has its STATUS.md rendered again once the lock is let go (DR-0695).
 
 Keys and staging are this clone's own and go at once. The tree waits while git is in the middle of something the owner
 runs, a rebase, a merge, a detached HEAD or unmerged paths, since its commit would be refused and the owner's
@@ -34,19 +37,22 @@ import dataclasses
 import hashlib
 import json
 import logging
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from docket.errors import DocketError
+from docket.forget import ledger as forget_ledger
 from docket.ledger import ops as ledger_ops
+from docket.ledger import status
 from docket.ledger import store as ledger_store
 from docket.media import cutlog, layout
 from docket.media import staged as media_staged
 from docket.media.keystore import KeyStore
 from docket.vault import cursors, decision_form, forgetdocs, forgotten
+from docket.vault.anchors import DocRef
 from docket.vault.docstore import DocStore
 from docket.vault.forgotten import FORGOTTEN, Forget, Forgotten
 from docket.vault.home import Home
@@ -83,6 +89,11 @@ class Applied:
     removed: int = 0
     # Ledger op lines written as their masks.
     ops: int = 0
+    # Ops the ledger's rule masked that no line named, now on an ops-only line.
+    listed_ops: int = 0
+    # The streams whose ops were masked, by name, and what rendering their STATUS.md said (DR-0675).
+    streams: list[str] = field(default_factory=list[str])
+    rendered: tuple[str, ...] = ()
     # Docs the rule changes that stay as they are: a hand edit its take-in refuses, or a final decision edited on disk.
     left: list[str] = field(default_factory=list[str])
     # Keys this clone held that no line named, now on a keys-only line.
@@ -383,9 +394,11 @@ class Left:
     def gone(self, rid: str) -> bool:
         if self.listed.whole(rid):
             return True
-        if self.lookup.versions(rid):
+        # The list's hashes before raw: a rid neither taken nor versioned is never gone, and the ledger asks of every
+        # locator it holds (DR-0694).
+        if rid_hash(rid) not in self.skipped and not self.listed.versioned(rid):
             return False
-        return rid_hash(rid) in self.skipped or self.listed.versioned(rid)
+        return not self.lookup.versions(rid)
 
     def timed(self, rid: str) -> bool:
         latest = self.lookup.latest(rid)
@@ -402,11 +415,9 @@ class Left:
         return rid_hash(rid) in self.listed.media
 
 
-def judge(
-    store: DocStore, docs: Sequence[ProcessedDoc], raw: forgetdocs.Raw, listed: Forgotten
-) -> dict[str, forgetdocs.Fate]:
-    """What the docs' rule makes of these docs, reading what their refs lead to through the store: each cited doc as it
-    reads now, and each earlier rev from git."""
+def readers(store: DocStore) -> tuple[forgetdocs.Current, forgetdocs.Older]:
+    """How the docs' rule reads what refs lead to, through the store: each cited doc as it reads now, and each
+    earlier rev from git."""
 
     def current(wanted: Iterable[str]) -> dict[str, ProcessedDoc]:
         out: dict[str, ProcessedDoc] = {}
@@ -428,7 +439,33 @@ def judge(
                 continue
         return out
 
+    return current, older
+
+
+def judge(
+    store: DocStore, docs: Sequence[ProcessedDoc], raw: forgetdocs.Raw, listed: Forgotten
+) -> dict[str, forgetdocs.Fate]:
+    """What the docs' rule makes of these docs, reading what their refs lead to through the store."""
+    current, older = readers(store)
     return forgetdocs.fates(docs, raw, listed, current=current, older=older)
+
+
+class Judged:
+    """The docs as a forget leaves them, for the ledger's rule (DR-0694): the docs it removes, and each ref an op's text
+    holds judged by the docs' rule against raw as the forget leaves it, in the rev the ref names."""
+
+    def __init__(self, store: DocStore, raw: forgetdocs.Raw, listed: Forgotten, removed: Iterable[str]) -> None:
+        self.store = store
+        self.raw = raw
+        self.listed = listed
+        self.gone = frozenset(removed)
+
+    def removed(self, doc_id: str) -> bool:
+        return doc_id in self.gone
+
+    def cited(self, refs: Collection[DocRef]) -> set[DocRef]:
+        current, older = readers(self.store)
+        return forgetdocs.cited(refs, self.raw, self.listed, current=current, older=older)
 
 
 @dataclass
@@ -436,6 +473,8 @@ class _Docs:
     writes: list[tuple[str, str | None]] = field(default_factory=list[tuple[str, str | None]])
     revs: list[tuple[str, int]] = field(default_factory=list[tuple[str, int]])
     left: list[str] = field(default_factory=list[str])
+    # The docs the rule removes, by id: what a ledger op naming one reads on (DR-0694).
+    removed: list[str] = field(default_factory=list[str])
 
 
 def _doc_files(root: Path) -> dict[str, Path]:
@@ -488,6 +527,7 @@ def _docs(
         rel = doc_path(doc_id).as_posix()
         if fate.doc is None:
             out.writes.append((rel, None))
+            out.removed.append(doc_id)
             continue
         rev = max([fate.doc.meta.rev, *(n for n, _ in histories.get(doc_id, []))]) + 1
         out.writes.append((rel, fate.doc.render(rev=rev)))
@@ -501,32 +541,67 @@ def _final(fate: forgetdocs.Fate) -> bool:
 
 
 def _op_stamps(root: Path, listed: Forgotten) -> dict[str, Stamp]:
-    """Every op file's stamp, once the list masks an op: none read before."""
-    if not listed.ops:
+    """Every op file's stamp, once the list takes anything the ledger's rule judges: none read before."""
+    if not listed.digest:
         return {}
     files, _ = ledger_ops.listing(root)
     return {rel: s for rel, path in files if (s := _stamp(path)) is not None}
 
 
+@dataclass
+class _Ops:
+    """What the apply does to the op files: each file's text as its masks leave it, how many lines it masks and their
+    op ids, and the ops the rule masks that no list line names."""
+
+    texts: dict[str, str] = field(default_factory=dict[str, str])
+    lines: int = 0
+    ids: set[str] = field(default_factory=set[str])
+    new: list[str] = field(default_factory=list[str])
+
+
 def _ledger(
-    root: Path, listed: Forgotten, state: _State, *, moved: bool, stamps: Mapping[str, Stamp]
-) -> tuple[dict[str, str], int]:
+    root: Path,
+    listed: Forgotten,
+    state: _State,
+    *,
+    moved: bool,
+    stamps: Mapping[str, Stamp],
+    matched: Callable[[], forget_ledger.Found],
+) -> _Ops:
     """Each op file that moved, or every one when the list did, read raw, as `ledger_ops.masked_file` leaves it when it
-    holds a listed op's line that isn't its mask, or a twin masking made; and how many lines it masks. A file that
-    isn't UTF-8 is left: no reader reads it, and `docket vault check` names it."""
+    holds a masked op's line that isn't its mask, or a twin masking made. The rule is matched again, `matched`, when the
+    list moved or a line read looks like one it masks; what it finds that no line names is masked in every file, with
+    the listed ops. A file that isn't UTF-8 is left: no reader reads it, and `docket vault check` names it."""
     texts: dict[str, str] = {}
-    lines = 0
     for rel, stamp in sorted(stamps.items()):
-        if not moved and state.ledger.get(rel) == stamp:
-            continue
-        text = ledger_ops.utf8(root / rel)
-        if text is None:
-            continue
-        masked = ledger_ops.masked_file(text, listed.ops)
+        if moved or state.ledger.get(rel) != stamp:
+            text = ledger_ops.utf8(root / rel)
+            if text is not None:
+                texts[rel] = text
+    looks = moved or any(forget_ledger.suspect(raw, listed) for text in texts.values() for raw in text.split("\n"))
+    new = matched().new if looks and listed.problem is None else frozenset[str]()
+    if new:
+        # The rule's ops may sit in any file: every one is read.
+        for rel in sorted(set(stamps) - set(texts)):
+            text = ledger_ops.utf8(root / rel)
+            if text is not None:
+                texts[rel] = text
+    ids = listed.ops | new
+    out = _Ops(new=sorted(new))
+    for rel, text in texts.items():
+        masked = ledger_ops.masked_file(text, ids)
         if masked is not None:
-            texts[rel] = masked
-            lines += sum(1 for _, raw, mask in ledger_ops.listed_lines(text, listed.ops) if raw != mask)
-    return texts, lines
+            out.texts[rel] = masked
+            changed = [ledger_ops.id_of(raw) for _, raw, mask in ledger_ops.listed_lines(text, ids) if raw != mask]
+            out.lines += len(changed)
+            out.ids.update(op_id for op_id in changed if op_id is not None)
+    return out
+
+
+def _matched(vault: Vault, listed: Forgotten, raw: forgetdocs.Raw, removed: Iterable[str]) -> forget_ledger.Found:
+    """The ledger's rule over every op line, against raw and the docs as the list leaves them (DR-0694)."""
+    lines = ledger_ops.read_all(vault.root, masked=listed.ops).lines
+    return forget_ledger.match(lines, raw, listed, Judged(DocStore(vault), raw, listed, removed))
 
 
 def _cursor(vault: Vault, listed: Forgotten) -> str | None:
@@ -557,6 +632,15 @@ def apply(vault: Vault, keys: KeyStore, *, first: bool = False) -> Applied:
     key = key_of(listed)
     if not key:
         return Applied()
+    done = _apply(vault, keys, listed, key, first=first)
+    if done.streams:
+        # Once the lock is let go, as a write renders (DR-0675): an empty mark reads the ledger as it stands.
+        done.rendered = status.after_write(vault, dict.fromkeys(done.streams), ())
+    return done
+
+
+def _apply(vault: Vault, keys: KeyStore, listed: Forgotten, key: str, *, first: bool) -> Applied:
+    """The apply itself, under the vault lock."""
     home = vault.home
     root = vault.root
     with vault.lock:
@@ -622,7 +706,12 @@ def apply(vault: Vault, keys: KeyStore, *, first: bool = False) -> Applied:
         docs = _docs(vault, listed, state, moved=judged, skipped=skipped, stamps=doc_stamps) if walk else _Docs()
         done.left = docs.left
         cursor = _cursor(vault, listed) if judged or cursor_stamp != state.cursor else None
-        masks, done.ops = _ledger(root, listed, state, moved=judged, stamps=op_stamps)
+        left = Left(RawLookup(root), listed, skipped)
+        ledger = _ledger(
+            root, listed, state, moved=judged, stamps=op_stamps,
+            matched=lambda: _matched(vault, listed, left, docs.removed),
+        )  # fmt: skip
+        masks, done.ops = ledger.texts, ledger.lines
         writes: list[tuple[str, str | None]] = [
             *((p.relative_to(root).as_posix(), text) for p, text in raw.left.items()),
             *docs.writes,
@@ -632,7 +721,8 @@ def apply(vault: Vault, keys: KeyStore, *, first: bool = False) -> Applied:
         removed = [p.relative_to(root).as_posix() for p in media.removed]
         unlisted = sorted(media.unlisted) if listed.problem is None else []
         named: set[str] = {
-            *state.pending, *(rel for rel, _ in writes), *masks, *removed, *([FORGOTTEN] if unlisted else []),
+            *state.pending, *(rel for rel, _ in writes), *masks, *removed,
+            *([FORGOTTEN] if unlisted or ledger.new else []),
         }  # fmt: skip
         paths = sorted(named)
         revs = {**state.revs, **dict(docs.revs)}
@@ -640,10 +730,12 @@ def apply(vault: Vault, keys: KeyStore, *, first: bool = False) -> Applied:
         # here on leaves them for the next run to commit.
         _write_state(home, dataclasses.replace(state, pending=paths, revs=revs))
         _reached("recorded")
-        if unlisted:
-            # Listed before the keys go, so a key deleted here is named for the clones that imported this one's export.
-            forgotten.write_line(vault, Forget(keys=unlisted, at=datetime.now(UTC), machine=vault.machine))
-            done.listed_keys = len(unlisted)
+        if unlisted or ledger.new:
+            # Listed before the keys go, so a key deleted here is named for the clones that imported this one's export,
+            # and before the masks are written, so a masked line is never one the list doesn't explain (DR-0696).
+            found = Forget(keys=unlisted, ops=ledger.new, at=datetime.now(UTC), machine=vault.machine)
+            forgotten.write_line(vault, found)
+            done.listed_keys, done.listed_ops = len(unlisted), len(ledger.new)
         for rel, text in writes:
             path = root / rel
             if text is None:
@@ -662,8 +754,8 @@ def apply(vault: Vault, keys: KeyStore, *, first: bool = False) -> Applied:
         paths = _committable(vault, paths)
         if paths:
             what = (
-                f"Forget: {done.records} record(s), {done.media} media file(s), {done.docs + done.removed} doc(s) "
-                f"from {vault.machine}"
+                f"Forget: {done.records} record(s), {done.media} media file(s), {done.docs + done.removed} doc(s), "
+                f"{done.ops} op(s) from {vault.machine}"
                 if first
                 else f"Forget: applied on {vault.machine}"
             )
@@ -678,6 +770,8 @@ def apply(vault: Vault, keys: KeyStore, *, first: bool = False) -> Applied:
         _reached("committed")
         written = {*(rel for rel, _ in writes), *masks}
         after = forgotten.load(root, home)
+        if ledger.ids:
+            done.streams = forget_ledger.streams(ledger_ops.read_all(root, masked=after.ops).lines, ledger.ids)
         _write_state(
             home,
             _State(

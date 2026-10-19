@@ -1,5 +1,6 @@
 """A ledger of a few years: 5,000 items and 50,000 ops, and 2,000 meetings with 20,000 point ops, read and folded by
-`load`, 500 of its ops read as a forget's masks (DR-0695), in under a second and a half; all of it folded into the
+`load`, 500 of its ops read as a forget's masks (DR-0695), in under a second and a half; a clone's match again over
+it, 500 of its items shells, in under two and a half (DR-0694); all of it folded into the
 index's tables in under two seconds; one op more, on an item or a meeting, as a write leaves it, read into them in a
 tenth of a second; a write touching one meeting planned in a tenth of a second, reading only its part (DR-0616,
 DR-0628, DR-0633, DR-0635); a snapshot of it, every item open, read from the tables with its lines in a fifth of a
@@ -19,6 +20,7 @@ import json
 import os
 import sqlite3
 import time
+from collections.abc import Collection
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,6 +31,7 @@ from docket_testkit import Best, best_of, empty_vault, make_config, traced
 from ledger_kit import CHANGES, ITEMS, MEETINGS, SERIES, build
 from starlette.testclient import TestClient
 
+from docket.forget import ledger as forget_ledger
 from docket.index import build as index_build
 from docket.index import ledger as ledger_index
 from docket.index.ledger import Held
@@ -37,8 +40,11 @@ from docket.ledger import load, ops, store, views, whole
 from docket.ledger.ops import Op
 from docket.service.app import create_app
 from docket.service.state import Settings
+from docket.vault.anchors import DocRef
+from docket.vault.forgotten import Forgotten
 
 FOLD_SECONDS = 1.5
+MATCH_SECONDS = 2.5
 # A full rebuild runs only on a schema bump or a forget, never on the daily path (DR-0635).
 REBUILD_SECONDS = 2.0
 CATCH_UP_SECONDS = 0.1
@@ -75,6 +81,51 @@ def test_a_few_thousand_items_and_meetings_read_and_fold_in_a_second_and_a_half(
     assert ledger.problems == ()
     if not traced():
         assert elapsed < FOLD_SECONDS, f"reading and folding the ledger took {elapsed:.2f} s, over {FOLD_SECONDS} s"
+
+
+class _Raw:
+    """Raw as a forget of nothing in it leaves it: the rule's shells come from the list alone."""
+
+    def gone(self, rid: str) -> bool:
+        return False
+
+    def timed(self, rid: str) -> bool:
+        return False
+
+    def lands(self, rid: str, start: int, last: int) -> bool:
+        return False
+
+    def media(self, rid: str) -> bool:
+        return False
+
+
+class _Docs:
+    def removed(self, doc_id: str) -> bool:
+        return False
+
+    def cited(self, refs: Collection[DocRef]) -> set[DocRef]:
+        return set()
+
+
+@pytest.mark.perf
+def test_a_clone_s_match_again_over_that_ledger_with_500_shells_listed_takes_under_two_and_a_half_seconds(
+    tmp_path: Path,
+) -> None:
+    """What an apply does once the list moved (DR-0694): every op line read under the list and folded, and the rule's
+    shells and chains worked out over all of it."""
+    build(tmp_path)
+    adds = [line.op.id for line in ops.read_all(tmp_path, masked=frozenset()).lines if line.op.op == "add"]
+    listed = Forgotten(ops=frozenset(adds[::10][:500]))
+
+    def matched() -> forget_ledger.Found:
+        return forget_ledger.match(ops.read_all(tmp_path, masked=listed.ops).lines, _Raw(), listed, _Docs())
+
+    run = best_of(3, matched)
+    print(f"ledger match: {run.seconds:.2f} s ({run.runs()}) for {ITEMS:,} items, 500 of them shells")
+    # Each shell's add is listed already: its log lines and notes are what is new.
+    assert len(listed.ops) == 500 and len(run.result.new) == 2_000 and run.result.shells == ()
+    if not traced():
+        assert run.seconds < MATCH_SECONDS, f"matching took {run.seconds:.2f} s, over {MATCH_SECONDS} s"
 
 
 def caught_up(conn: sqlite3.Connection, root: Path) -> int:

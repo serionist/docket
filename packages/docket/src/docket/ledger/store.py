@@ -37,6 +37,11 @@ module also keeps the step's pending rids, in this clone's private folder.
 
 A forget's apply writes its masks through `write_masks`, the one change a committed line takes (DR-0693); a write
 commits an op file a stopped apply left masked, its lines' ids listed, as it commits one a stopped write left (DR-0696).
+After a forget (DR-0696): a source, a ref or an anchor naming a rid forgotten whole or a listed legacy note's old path
+is refused, naming the field, a hash check that keeps new ops from needing a mask; and on a shell, an item or a meeting
+whose making op the list holds (DR-0694), a text field or a log is refused, naming its number, and any op's note is
+written as `[forgotten]`, so a drop, an archive and a sync's due archives still go. The rollover leaves a shell's
+points where they are, and a shell's point makes no item.
 """
 
 from __future__ import annotations
@@ -79,9 +84,10 @@ from docket.ledger.ops import (
     Via,
 )  # fmt: skip
 from docket.vault import forgotten
-from docket.vault.anchors import AnchorError, parse_anchor
+from docket.vault.anchors import AnchorError, parse_anchor, parse_locator
 from docket.vault.home import make_private
 from docket.vault.neverstore import in_container, matches_text, names_person
+from docket.vault.processed import DOC_TYPES
 from docket.vault.redact import Redactor
 from docket.vault.staging import write_replacing
 from docket.vault.vault import UnmergedError, Vault
@@ -171,6 +177,8 @@ CONTROL = re.compile(
 SUMMARY = 60
 # todo.py's: a meeting that is over rolls its open points a day after its end, or at once with an outcome (DR-0624).
 ROLL_AFTER = timedelta(hours=24)
+# An anchor anywhere in a value: one on a rid forgotten whole is refused (DR-0696).
+ANCHOR = re.compile(r"\[r:[^\]\s]+\]")
 # todo.py's series rule: one subject starting with the other names one series only from this many characters.
 SERIES_PREFIX = 15
 # A "Name: what" point turned into an item waits on Name when the name is this many words or fewer, as in todo.py.
@@ -267,10 +275,10 @@ class TextRefusedError(LedgerError):
 class TextRules:
     """The text rules every op's values pass (DR-0618, DR-0627), for the writer and the import alike: text redacted, a
     never-store keyword, a person on the people list in who, an organiser or an attendee, a source or a material's ref
-    pointing into a never-store container (DR-0690), or a redaction rule's match in a value that isn't text refused.
-    `index` is the index's connection the containers are asked of, when the caller holds one. With `once`, the import's,
-    an index that fails is asked no more and `unanswered` says so, for the caller to refuse once; else each value it
-    can't check is refused."""
+    pointing into a never-store container (DR-0690), a locator or an anchor on what a forget took whole (DR-0696), or a
+    redaction rule's match in a value that isn't text refused. `index` is the index's connection the containers are
+    asked of, when the caller holds one. With `once`, the import's, an index that fails is asked no more and
+    `unanswered` says so, for the caller to refuse once; else each value it can't check is refused."""
 
     def __init__(self, vault: Vault, index: sqlite3.Connection | None = None, *, once: bool = False) -> None:
         self.lists = vault.config.never_store
@@ -280,10 +288,28 @@ class TextRules:
         self.unanswered = False
         # Whether `index` has the records table: a writer folding the op files in memory holds the ledger's alone.
         self.records: bool | None = None
+        self.listed = forgotten.load(vault.root, vault.home)
+
+    def forgotten(self, name: str, value: str) -> None:
+        """Refuse a locator naming a rid forgotten whole or a listed legacy note's old path, and an anchor on such a
+        rid in any value, naming the field: hashes on the list, never a value."""
+        listed = self.listed
+        if not (listed.rids or listed.old_paths):
+            return
+        if name in LOCATORS and _names_forgotten(value, listed):
+            raise TextRefusedError(f"{name} names what a forget took; leave it out")
+        for token in ANCHOR.findall(value) if "[r:" in value else ():
+            try:
+                rid = parse_anchor(token).rid
+            except AnchorError:
+                continue
+            if rid is not None and listed.whole(rid):
+                raise TextRefusedError(f"{name} anchors on what a forget took; leave it out")
 
     def screen(self, name: str, value: str, *, removing: bool = False) -> str:
         """A value as it may be written: text redacted, anything else as given; `TextRefusedError` when it may not. A
         material's removal adds no pointer, so `removing` skips the containers."""
+        self.forgotten(name, value)
         lists = self.lists
         counts: Counter[str] = Counter()
         redacted = self.redactor.text(value, counts)
@@ -350,6 +376,26 @@ def locator_rid(value: str) -> str:
         return parse_anchor(f"[r:{text}]").rid or text
     except AnchorError:
         return text
+
+
+def _names_forgotten(value: str, listed: forgotten.Forgotten) -> bool:
+    """Whether a locator names a rid forgotten whole, or a legacy note's old path a forget removed, by `read`'s
+    reading of it (DR-0131)."""
+    try:
+        found = parse_locator(value, DOC_TYPES)
+    except AnchorError:
+        return False
+    if found.kind == "record":
+        return listed.whole(found.value)
+    return found.kind == "path" and listed.legacy({found.value, found.value.replace("\\", "/")}, None)
+
+
+def _texts(keys: Mapping[str, Any]) -> list[str]:
+    """The keys and fields of an op a mask would change, but its note: what a shell refuses (DR-0696)."""
+    out = [key for key in ("ref", "label") if keys.get(key) is not None]
+    fields = cast(dict[str, Any], keys.get("fields") or {})
+    masked = ops.masked_fields(fields)
+    return out + [name for name, value in fields.items() if masked[name] != value]
 
 
 def one_line(text: str) -> str:
@@ -477,7 +523,12 @@ class _Write:
         self.given: dict[int, str] = {}
         self.given_meetings: dict[int, str] = {}
         self.rules = TextRules(vault, held.conn)
+        self.listed = self.rules.listed.ops
+        # Whether each add an op named is a shell's (DR-0694).
+        self.shells: dict[str, bool] = {}
         self.kind = ""
+        # The change being made, which a refusal from deep in a write names.
+        self.n = 0
         # The meetings' and streams' adds read so far, whole parts (DR-0633), and their fold; the streams' names as the
         # tables hold them, for the streams no part read holds.
         self.object_adds: set[str] = set()
@@ -605,6 +656,36 @@ class _Write:
     def refuse(self, n: int, why: str, refs: tuple[str, ...] = ()) -> NoReturn:
         raise RefusedError(n, self.kind, why, refs)
 
+    def shell(self, item_id: str) -> str | None:
+        """The number of the shell an op naming `item_id` lands on (DR-0694): an item whose add the forgotten list
+        holds, or a meeting one of whose adds it holds; None for anything else, a stream among them."""
+        listed = self.listed
+        if not listed:
+            return None
+        meeting = item_id in self.object_adds
+        found = self.shells.get(item_id)
+        if found is None:
+            # No add this write makes is listed and none joins a shell, so what an add is holds for the write.
+            if meeting:
+                folded = self.fold_of(item_id)
+                found = folded.kind == "meeting" and not listed.isdisjoint(folded.adds)
+            else:
+                found = item_id in listed
+            self.shells[item_id] = found
+        if not found:
+            return None
+        return meeting_text(self.meeting_number(item_id)) if meeting else number_text(self.number_of(item_id))
+
+    def on_shell(self, label: str, kind: str, keys: dict[str, Any]) -> dict[str, Any]:
+        """An op's keys on a shell: a log or any text refused, naming the shell; a note written as the marker, so a
+        drop, an archive and a sync's due archives still go (DR-0696)."""
+        if kind == "log":
+            self.refuse(self.n, f"{label} is a shell a forget left; it takes no log")
+        texts = _texts(keys)
+        if texts:
+            self.refuse(self.n, f"{label} is a shell a forget left; it takes no {texts[0]}")
+        return {**keys, "note": ops.MARK} if keys.get("note") is not None else keys
+
     def resolve(self, n: int, ref: object) -> str:
         """The item a change names, by its id or its A- number."""
         if not isinstance(ref, str) or not ref.strip():
@@ -686,6 +767,9 @@ class _Write:
         # The first op is minted on the clock; each next one is the one before plus one (DR-0612).
         op_id = ops.encode(ops.decode(self.new[-1].id) + 1) if self.new else ops.mint(self.highest_id, self.now, 1)[0]
         item = item_id or op_id
+        shell = self.shell(item) if item_id is not None else None
+        if shell is not None:
+            keys = self.on_shell(shell, kind, keys)
         mine = self.lines_of(item)
         seen = [line.op.id for add_id in self.same.get(item, {item}) for line in self.lines_of(add_id)]
         op = Op(
@@ -881,7 +965,7 @@ class _Write:
     def change(self, n: int, change: Mapping[str, Any]) -> None:
         """One of the writer's changes, its op and keys checked already against `BATCH` (`_Batch.batch_change`)."""
         kind = change.get("op")
-        self.kind = str(kind)
+        self.kind, self.n = str(kind), n
         note = self.note(n, change.get("note"))
         if kind == "add":
             self.add_item(n, self.fields(n, change.get("fields"), adding=True), note)
@@ -988,6 +1072,9 @@ class _Write:
                 self.refuse(n, "continues needs an event: only a meeting with one continues a meeting")
             held = self.by_event(event)
             joined = self.objects().meetings[continues]
+            shell = self.shell(continues)
+            if shell is not None:
+                self.refuse(n, f"{shell} is a shell a forget left; no meeting continues it")
             if joined.event is not None:
                 self.refuse(n, f"{self.meeting_label(joined)} has an event; only a meeting without one is continued")
             if held is not None and not self.keyed(held.id):
@@ -1222,6 +1309,9 @@ class _Write:
         anything else is a task; the point keeps a link to it."""
         meeting = self.open_meeting(n, change.get("item"))
         point = self.point_of(n, meeting, change.get("point"))
+        shell = self.shell(meeting.id)
+        if shell is not None:
+            self.refuse(n, f"{shell} is a shell a forget left; its points make no item")
         if point.state == "rolled":
             self.refuse(n, "that point rolled on; change it on the meeting it rolled to")
         if point.item is not None:
@@ -1274,6 +1364,9 @@ class _Write:
             still = meeting.open_points()
             if not still or meeting.archived or not _due(self.now, meeting.end, meeting.outcome, meeting.response):
                 continue
+            # A shell's points are forgotten: the screen named each one to raise again (DR-0694).
+            if self.shell(meeting.id) is not None:
+                continue
             target = self.next_in_series(meeting)
             if target is None:
                 continue
@@ -1323,7 +1416,7 @@ class _Write:
         """One record's meeting (DR-0647 to DR-0649): its key's meeting set to what differs, an unkeyed meeting with
         its start and subject joined, or a new meeting; nothing for a key whose meeting the owner removed. What the
         text rules refuse is left out, with why, before anything is written."""
-        self.kind = "calendar"
+        self.kind, self.n = "calendar", n
         try:
             fields = self.meeting_fields(n, event.fields)
             self.need_meeting_fields(n, fields)
@@ -1675,7 +1768,7 @@ class _Batch(_Write):
 
     def batch_change(self, n: int, change: Mapping[str, Any]) -> None:
         kind = change.get("op")
-        self.kind = str(kind)
+        self.kind, self.n = str(kind), n
         if not isinstance(kind, str) or kind not in BATCH:
             self.refuse(n, f"op is one of {', '.join(BATCH)}")
         extra = sorted(str(key) for key in change if key not in ("op", *BATCH[kind]))
@@ -1891,7 +1984,13 @@ class _Batch(_Write):
         for meeting in sorted(self.objects().meetings.values(), key=lambda m: (m.start, m.id)):
             still = meeting.open_points()
             due = _due(self.now, meeting.end, meeting.outcome, meeting.response)
-            if still and not meeting.archived and due and self.next_in_series(meeting) is None:
+            if (
+                still
+                and not meeting.archived
+                and due
+                and self.shell(meeting.id) is None
+                and (self.next_in_series(meeting) is None)
+            ):
                 what = f"{self.meeting_label(meeting)} {_cut(meeting.subject, 50)}"
                 self.remarks.append((n, f"{what}: {len(still)} open point(s), no next meeting"))
 

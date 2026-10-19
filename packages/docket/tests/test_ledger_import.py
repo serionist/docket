@@ -380,14 +380,14 @@ def test_a_rerun_after_a_forget_compares_and_writes_its_listed_ops_masked(vault:
 
 
 def test_a_listed_op_is_masked_before_the_text_rules_see_it(vault: Vault) -> None:
-    """A forget of an ask, then the person it named put on the never-store list, a revert and the same export again:
-    the listed op is masked before its values are screened, so the import brings it back as its mask instead of
-    stopping on what the forget took (DR-0696)."""
+    """A forget of an ask, every op of the shell it leaves listed, then the person it named put on the never-store
+    list, a revert and the same export again: the listed ops are masked before their values are screened, so the import
+    brings them back as their masks instead of stopping on what the forget took (DR-0696)."""
     text = export().text()
     run(vault, text)
     raw = {line.op.id: line.text for line in ops.read_all(vault.root, masked=frozenset()).lines}
     (cleo,) = [op_id for op_id, line in raw.items() if '"who":"Cleo Test"' in line]
-    forget(vault, ops=[cleo])
+    forget(vault, ops=[op_id for op_id, line in raw.items() if f'"item":"{cleo}"' in line])
     vault = configured(vault, people=["Cleo Test"])
     store.revert_import(vault)
     again = run(vault, text)
@@ -409,7 +409,7 @@ def test_a_listed_op_is_masked_before_its_source_meets_the_never_store_container
     run(vault, text)
     raw = {line.op.id: line.text for line in ops.read_all(vault.root, masked=frozenset()).lines}
     (budget,) = [op_id for op_id, line in raw.items() if '"source":"app:tasks"' in line]
-    forget(vault, ops=[budget])
+    forget(vault, ops=[op_id for op_id, line in raw.items() if f'"item":"{budget}"' in line])
     vault = configured(vault, containers=["tasks"])
     store.revert_import(vault)
     again = run(vault, text)
@@ -419,6 +419,23 @@ def test_a_listed_op_is_masked_before_its_source_meets_the_never_store_container
     fresh = configured(empty_vault(vault.root.parent / "two", config()), containers=["tasks"])
     (said,) = run(fresh, text).plan.refusals
     assert said.endswith(": source points into a never-store container; leave it out")
+
+
+def test_an_unlisted_line_holding_text_on_a_shell_refuses_the_import_by_its_place(vault: Vault) -> None:
+    """A shell's add on the list and its other ops not, as a list written by hand leaves it: after a revert, the same
+    export names each line that would bring text back onto the shell, and nothing is written (DR-0696)."""
+    text = export().text()
+    run(vault, text)
+    raw = {line.op.id: line.text for line in ops.read_all(vault.root, masked=frozenset()).lines}
+    (cleo,) = [op_id for op_id, line in raw.items() if '"who":"Cleo Test"' in line]
+    forget(vault, ops=[cleo])
+    store.revert_import(vault)
+    again = run(vault, text)
+    assert again.plan.refusals and not again.commits
+    for said in again.plan.refusals:
+        assert said.startswith(f"{NAME}:") and said.endswith(
+            ": holds text on A-0003, a shell a forget left; leave it out of the file"
+        )
 
 
 def test_a_changed_line_or_an_op_from_elsewhere_on_its_objects_refuses_a_rerun(vault: Vault) -> None:

@@ -7,16 +7,21 @@ a temp one; invented data only."""
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from docket_testkit import AtConsole, git, make_record, sh
+from docket_testkit import AtConsole, empty_vault, git, make_config, make_record, sh
 from forget_kit import forget
+from ledger_kit import ADD_FIELDS, NOW
 from media_kit import CALL, POLISHED, audio, call, in_raw, media_vault
 
 from docket import index
 from docket.errors import DocketError
 from docket.forget import now as forget_now
+from docket.ledger import ops as ledger_ops
+from docket.ledger import store
+from docket.ledger.ops import MARK
 from docket.media import layout, reader
 from docket.media import put as media
 from docket.media import staged as media_staged
@@ -184,3 +189,72 @@ def test_a_union_merge_that_brings_back_forgotten_lines_is_finished_by_the_next_
     left = _lines(second.root / run)
     assert len(left) == 1 and chat[2].rid in left[0]
     assert git(second.root, "log", "-1", "--format=%s").strip() == "Forget: applied on other-box"
+
+
+# -- the ledger (DR-0694, DR-0696) -------------------------------------------------------------------------------------
+
+SAID = "Ada said Tuesday at the venue"
+ANCHORED = "As the channel had it"
+
+
+def ledger_pair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Vault, Vault]:
+    """A with an item from a chat message, pushed; B its clone, which logs on that item and anchors another one's log
+    on the message before it pulls A's forget of it."""
+    first = empty_vault(tmp_path, make_config())
+    first.write_run("chat", [make_record(1), make_record(2)])
+    store.write(first, [{"op": "add", "fields": {**ADD_FIELDS, "source": make_record(1).rid}}], now=NOW)
+    with_remote(tmp_path, first)
+    second = clone(tmp_path, monkeypatch)
+    other = {**ADD_FIELDS, "title": "Book the venue", "source": make_record(2).rid}
+    store.write(second, [{"op": "log", "item": "A-0001", "note": SAID}, {"op": "add", "fields": other}], now=NOW)
+    store.write(second, [{"op": "log", "item": "A-0002", "note": f"{ANCHORED} [r:{make_record(1).rid}]"}], now=NOW)
+    return first, second
+
+
+def said(vault: Vault) -> list[str]:
+    """The op lines on disk that still say what B wrote on the forgotten message."""
+    return [line for _, path in ledger_ops.listing(vault.root)[0] for line in _lines(path)
+            if SAID in line or ANCHORED in line]  # fmt: skip
+
+
+def test_a_clone_s_own_ops_from_before_its_pull_are_masked_and_listed_at_its_next_gate_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, owner: Callable[..., AtConsole]
+) -> None:
+    first, second = ledger_pair(tmp_path, monkeypatch)
+    forget_now_at(first, owner, make_record(1).rid)
+    push(first)
+    assert second.sync().rebased
+    # Read at once, the item a shell; B's log on it and its anchored log still on disk until the gate call.
+    assert len(said(second)) == 2
+    with pytest.raises(DocketError, match="A-0001 is a shell a forget left; it takes no log"):
+        store.write(second, [{"op": "log", "item": "A-0001", "note": "Again"}], now=NOW)
+    Gate(second).list()
+    assert said(second) == []
+    listed = forgotten.load(second.root, second.home)
+    mine = [line.op for line in ledger_ops.read_all(second.root).lines if line.op.machine == "other-box"]
+    assert {o.id for o in mine if o.op == "log"} <= listed.ops and not {
+        o.id for o in mine if o.op == "add"
+    } & listed.ops
+    assert git(second.root, "log", "-1", "--format=%s").strip() == "Forget: applied on other-box"
+    assert git(second.root, "status", "--porcelain", "--", ".").strip() == ""
+    assert second.check() == []
+    # The shell is still dropped and archived when due, its notes written as the marker.
+    dropped = store.write(second, [{"op": "drop", "item": "A-0001", "note": "Forgotten"}], now=NOW)
+    archived = store.write(second, [{"op": "archive", "note": "The sync's due archive"}], now=NOW + timedelta(days=15))
+    assert [o.note for o in (*dropped.ops, *archived.ops)] == [MARK, MARK]
+
+
+def test_ops_a_pull_brought_from_before_the_other_clone_s_gate_call_are_masked_here(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, owner: Callable[..., AtConsole]
+) -> None:
+    first, second = ledger_pair(tmp_path, monkeypatch)
+    forget_now_at(first, owner, make_record(1).rid)
+    push(first)
+    second.sync()
+    # B pushes before its own gate call has masked anything.
+    push(second)
+    assert first.sync().fetched and len(said(first)) == 2
+    Gate(first).list()
+    assert said(first) == []
+    assert git(first.root, "log", "-1", "--format=%s").strip() == "Forget: applied on test-box"
+    assert first.check() == []

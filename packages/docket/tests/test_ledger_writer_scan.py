@@ -1,7 +1,8 @@
 """Ops have one writer, `ledger/store.py` (DR-0618), scanned over the whole package as test_decision_writer_scan.py
 scans for a decision's status: only the store's three writes commit ops, `write`, the calendar step's `write_calendar`
 (#200) and the import's `write_import` (#202), only the store writes a file in the ledger's package, only the forget's
-apply writes masks through it (#212), and the op folder is spelled only where the layout names it."""
+apply writes masks through it (#212), and the op folder is spelled only where the layout names it, its name read
+by the history rewrite, which reads every blob the folder's files have had (DR-0697)."""
 
 from __future__ import annotations
 
@@ -35,7 +36,7 @@ def test_only_the_writer_commits_ops() -> None:
 
 def test_only_the_forget_s_apply_writes_masks() -> None:
     """The one change a committed line takes is to its mask, by the apply, which lists it first (DR-0693)."""
-    assert _uses("write_masks") == {("forget/apply.py", "apply")}
+    assert _uses("write_masks") == {("forget/apply.py", "_apply")}
 
 
 def test_only_the_store_writes_a_file_in_the_ledger_s_package() -> None:
@@ -55,4 +56,6 @@ def test_the_op_folder_is_spelled_only_where_the_layout_names_it() -> None:
         p.relative_to(SRC).as_posix() for p in SRC.rglob("*.py") if "ledger/ops" in p.read_text(encoding="utf-8")
     }
     assert spelled == {"ledger/ops.py", "vault/vault.py"}
-    assert {where[0] for where in _uses("OPS_DIR")} == {"ledger/ops.py", "ledger/store.py", "ledger/check.py"}
+    assert {where[0] for where in _uses("OPS_DIR")} == {
+        "ledger/ops.py", "ledger/store.py", "ledger/check.py", "forget/rewrite.py",
+    }  # fmt: skip

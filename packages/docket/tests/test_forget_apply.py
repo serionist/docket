@@ -97,7 +97,7 @@ def test_the_apply_takes_the_family_out_in_one_commit(vault: Vault) -> None:
     (run,) = [r.path for r in vault.rawlog.run_files() if r.source == "plaud"]
     done = forget_apply.apply(vault, KeyStore(vault.home), first=True)
     assert (done.records, done.media, done.keys, done.docs) == (2, 1, 1, 0)
-    assert subjects(vault)[:2] == ["Forget: 2 record(s), 1 media file(s), 0 doc(s) from test-box",
+    assert subjects(vault)[:2] == ["Forget: 2 record(s), 1 media file(s), 0 doc(s), 0 op(s) from test-box",
                                    "Forget: the list from test-box"]  # fmt: skip
     # The run file left with no line stays, empty, so another clone's rewrite of it merges.
     assert run.exists() and run.read_bytes() == b""

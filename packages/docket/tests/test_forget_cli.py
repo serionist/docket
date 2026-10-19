@@ -253,9 +253,9 @@ def test_the_code_forgets_in_the_order_of_writes(
     out = capsys.readouterr().out
     # The screen named the doc by its id; then what went.
     assert NOTE in out
-    assert "forgot    2 record(s), 1 media file(s), 1 doc(s); 1 key(s) deleted here, committed" in out
+    assert "forgot    2 record(s), 1 media file(s), 1 doc(s), 0 ledger op(s); 1 key(s) deleted here, committed" in out
     assert "index     rebuilt without what was forgotten" in out
-    assert subjects(vault)[:2] == ["Forget: 2 record(s), 1 media file(s), 1 doc(s) from test-box",
+    assert subjects(vault)[:2] == ["Forget: 2 record(s), 1 media file(s), 1 doc(s), 0 op(s) from test-box",
                                    "Forget: the list from test-box"]  # fmt: skip
     assert git(vault.root, "status", "--porcelain", "--", ".").strip() == ""
     assert not stored.exists() and KeyStore(vault.home).ids() == []

@@ -13,7 +13,9 @@ A rid forgotten whole never comes back, so its run files' lines are matched by t
 line is blanked only in the blobs that held it: a version forgotten alone, which a release can write again just as it
 was; each doc line the docs' rule drops in any blob any doc's file has had, deleted docs' too, each judged on its own
 rev once its bytes name the family or cite a doc built on it; and each line of the vault's docs holding an `[r:` token
-on a rid forgotten whole (DR-0598). Files outside the vault are the owner's own, as a copy anywhere else is: only a
+on a rid forgotten whole (DR-0598). So is each line of an op the list masks that isn't its mask, in any blob any op file
+has had, deleted files' too, read raw and only in the blobs whose bytes hold a listed op's id (DR-0697): HEAD holds
+only masks once the apply committed. Files outside the vault are the owner's own, as a copy anywhere else is: only a
 copy of a forgotten record's own raw line there is blanked.
 
 Nothing in them is text from the family: rids and versions are ids, lines are named by their hashes.
@@ -35,6 +37,7 @@ from docket.childproc import console_flags
 from docket.errors import DocketError
 from docket.forget import apply as forget_apply
 from docket.forget.plan import DocCut, Plan
+from docket.ledger import ops as ledger_ops
 from docket.media import layout
 from docket.vault import forgetdocs, forgotten
 from docket.vault.anchors import encode_rid
@@ -156,8 +159,14 @@ def _blob_ids(vault: Vault, refs: Iterable[str]) -> dict[str, str]:
 def doc_blobs(vault: Vault) -> dict[str, set[str]]:
     """Every blob each doc's file has had in any commit on any ref, merges' sides included, by its path in the vault:
     the vault's doc blobs, which the rewrite reads and nothing outside them."""
+    return blobs_under(vault, "processed")
+
+
+def blobs_under(vault: Vault, folder: str) -> dict[str, set[str]]:
+    """Every blob each file under a folder of the vault has had in any commit on any ref, merges' sides included, a
+    deleted file's too, by its path in the vault."""
     git = vault.git
-    out = git.out("log", "--all", "-m", "--no-renames", "--format=", "--raw", "--no-abbrev", "-z", "--", "processed")
+    out = git.out("log", "--all", "-m", "--no-renames", "--format=", "--raw", "--no-abbrev", "-z", "--", folder)
     found: dict[str, set[str]] = {}
     fields = out.split("\0")
     for n, info in enumerate(fields[:-1]):
@@ -168,6 +177,27 @@ def doc_blobs(vault: Vault) -> dict[str, set[str]]:
         if blob != NO_BLOB:
             found.setdefault(fields[n + 1].removeprefix(git.prefix), set()).add(blob)
     return found
+
+
+def op_rows(vault: Vault, ids: Collection[str]) -> set[tuple[str, str]]:
+    """Each line of a listed op that isn't its mask, by every blob an op file has had on any ref, deleted files' too,
+    and the line's hash (DR-0697): read raw, never through the masking parse, and only in a blob whose bytes hold a
+    listed id. A blob that isn't UTF-8 is left, as every reader of op files leaves it."""
+    if not ids:
+        return set()
+    needle = re.compile(b"|".join(re.escape(op_id.encode("ascii")) for op_id in sorted(ids)))
+    blobs = sorted({blob for found in blobs_under(vault, ledger_ops.OPS_DIR).values() for blob in found})
+    rows: set[tuple[str, str]] = set()
+    for blob, data in zip(blobs, _cat(vault, blobs), strict=True):
+        if needle.search(data) is None:
+            continue
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        lines = data.split(b"\n")
+        rows |= {(blob, line_hash(lines[n - 1])) for n, raw, mask in ledger_ops.listed_lines(text, ids) if raw != mask}
+    return rows
 
 
 @dataclass(frozen=True)
@@ -312,6 +342,8 @@ def write(vault: Vault, plan: Plan, held: Before, at: datetime) -> Written:
         cut = next((cuts[rel] for rel in sorted(by_blob[blob]) if rel in cuts), None)
         lines = data.split(b"\n")
         scoped |= {(blob, line_hash(lines[n - 1])) for n in judged.dropped(data, cut) if 0 < n <= len(lines)}
+    # Every op the list masks, this forget's and the earlier ones', which an ops-only line may have listed since.
+    scoped |= op_rows(vault, forgotten.load(vault.root, vault.home).ops | plan.ledger.new)
     found = list(dict.fromkeys([*found, *expressions(plan)]))
     (folder / LINES).write_text("".join(f"{e}\n" for e in found), encoding="utf-8", newline="\n")
     (folder / SCOPED).write_text("".join(f"{b} {h}\n" for b, h in sorted(scoped)), encoding="utf-8", newline="\n")

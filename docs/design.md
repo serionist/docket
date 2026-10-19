@@ -181,6 +181,11 @@ same result on any day.
 - A forget masks an op in place, the one change a committed line takes: its id, keys and structure kept, its text
   `[forgotten]`, its locators `[forgotten:<32 hex>]`. The list names it, so every reader of the ledger reads it masked
   at once and each clone's next gate call writes the mask (DR-0693, DR-0695, DR-0696).
+  - It masks an op anchoring on the family or naming it as a locator, and every op of an item or a meeting whose
+    making op it masks: a shell, kept with its number. A point's copies go with it only when its words are its own;
+    every clone matches again, so its own ops from before its pull go too (DR-0694).
+  - The writer refuses text or a log on a shell and a locator or an anchor on what was forgotten, and writes a note
+    there as `[forgotten]`; the import refuses a line bringing text back onto a shell (DR-0696).
 - Meetings and streams are objects in the same files: an add, a meeting or a stream op whose item is its own id makes
   one, and an object of a kind this Docket doesn't know is kept and changes nothing (DR-0620). The adds of one key, a
   meeting's event or a stream's name, are one object, and a keyed add may continue a meeting that had none, whose id
@@ -476,7 +481,8 @@ when the index is missing, of another build, or held past a second (DR-0619): no
 ### 5.5 Retention and forgetting
 
 Prevention first: the gate keeps private, uncut and unredacted content out of git. What gets in anyway leaves with
-`docket forget`, on every clone, and for good. Retention by age is phase 3: it will write the list's keys-only lines.
+`docket forget`, on every clone, and for good. Retention by age is phase 3: it will write list lines as a forget does,
+so the ledger's ops built on what expires are masked, never removed (DR-0697).
 
 | Part | What |
 |---|---|
@@ -486,9 +492,9 @@ Prevention first: the gate keeps private, uncut and unredacted content out of gi
 | the index | built under the list's digest, refused under another until rebuilt; a forget rebuilds it after the vault lock (DR-0593) |
 | the apply | the list against the tree, staging and the key store: raw lines, audio and its keys, doc lines and what was built on them, cursor entries, listed ops' lines as their masks, in one commit. Every gate call on every clone runs it first; the tree waits while the owner's git is mid-rebase or mid-merge (DR-0581, DR-0597) |
 | docs | a line anchored on what was forgotten goes, and every line built on it; an empty doc goes, but a confirmed or rejected decision keeps its title and links (DR-0580) |
-| the ledger | each op the list names is masked in place, its id and keys kept and its text `[forgotten]`: every reader of the ledger reads it so at once, the apply writes the masks in its one commit, and `docket vault check` explains a line changed to its mask and names one not masked yet (DR-0693, DR-0695, DR-0696) |
+| the ledger | each op the list names is masked in place, its id and keys kept and its text `[forgotten]`: every reader of the ledger reads it so at once, the apply writes the masks in its one commit, and `docket vault check` explains a line changed to its mask and names one not masked yet (DR-0693, DR-0695, DR-0696). The forget lists the ops anchoring on the family or naming it, and every op of a shell, an item or meeting built on it; every clone's apply matches again and lists what it finds on an ops-only line (DR-0694) |
 | keys | deleted on this clone at once, on the others at their next gate call, read or service start; kept out of every export and import made from then on (DR-0595) |
-| history | the text stays in the history of the repo the vault lives in: Docket never rewrites it, and writes the `git filter-repo` files for a fresh clone, which leave the owner's files outside the vault as they are and are checked read-only by `docket forget --check-rewrite`: HEAD stays as it is, and each older branch is named (DR-0594, DR-0598) |
+| history | the text stays in the history of the repo the vault lives in: Docket never rewrites it, and writes the `git filter-repo` files for a fresh clone, which leave the owner's files outside the vault as they are and are checked read-only by `docket forget --check-rewrite`: HEAD stays as it is, and each older branch is named (DR-0594, DR-0598); a listed op's lines go from every blob an op file has had, a deleted file's too (DR-0697) |
 
 What a forget can't reach, which every dry run names: key exports made before, the LFS server's encrypted copies,
 chunks an API provider was sent, the source itself, other clones until their next gate call, and files outside the
