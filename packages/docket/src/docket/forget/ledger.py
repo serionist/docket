@@ -17,9 +17,10 @@ by its event: another clone's add of a forgotten event reads on the family itsel
 record's meeting, which the calendar step brings back. Only an op whose line a mask changes is named: one with no text
 has nothing to hide, and a listed one is masked already.
 
-What it finds is said by number, never a word: the shells it leaves, the open ones among them to drop, an item open or a
-meeting with an open point, which the day's lists would show for good, each object that lost a material or a link and
-kept its text, and each open point on a shell rolled in from a live meeting, to raise again. Streams are counted, their
+What it finds is said by number, never a word: the shells it leaves, the open ones to drop, an item open or a meeting
+with an open point, which the day's lists would show for good, and a point masked for its own words left open on a
+kept meeting, which the rollover leaves where it is; each object that lost a material or a link and kept its text; and
+each open point on a shell rolled in from a live meeting, to raise again. Streams are counted, their
 names being words. A doc an earlier forget's commit removed reads as removed, so a clone's own op naming it from
 before its pull is found.
 """
@@ -66,7 +67,8 @@ class Docs(Protocol):
 @dataclass(frozen=True)
 class Found:
     """What the rule masks that no list line names yet, each op whose line a mask changes; then, by number, the shells
-    those leave, the open ones among them (an item open, a meeting with an open point), each object that lost a
+    those leave, the open ones to drop (an item open, a meeting with an open point, a point masked for its own words
+    left open on a kept meeting, which never rolls on), each object that lost a
     material or a link and kept its text, each open point on a new shell rolled in from a live meeting, and how many
     stream ops lost their text."""
 
@@ -325,6 +327,13 @@ class _Rule:
             self.label(i) for i in made
             if (i in items and items[i].state in OPEN) or (i in meetings and meetings[i].open_points())
         ]  # fmt: skip
+        # And each open point masked for its own words on a kept meeting, as `M-0040#2`: the rollover leaves it.
+        if any(op_id in self.points for op_id in new):
+            for obj_id in sorted(set(meetings) - shells, key=self.label):
+                open_ += [
+                    f"{self.label(obj_id)}#{k}" for k, point in enumerate(meetings[obj_id].points, start=1)
+                    if point.id in new and point.state == "open"
+                ]  # fmt: skip
         lost: dict[str, Counter[str]] = {}
         streams = 0
         for op_id in new:

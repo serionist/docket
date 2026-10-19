@@ -42,8 +42,9 @@ is refused, naming the field, a hash check that keeps new ops from needing a mas
 whose making op the list holds (DR-0694), a text field or a log is refused, naming its number, and any op's note and
 outcome are written as `[forgotten]`, so a drop, an archive, a close with an outcome and a sync's due archives still
 go. The rollover leaves a shell's points where they are, and a shell's point makes no item. A point the list holds on
-a meeting that isn't a shell, masked for its own words, is a small shell: it takes no answer or text and makes no
-item, naming it as `M-0040#2`, while its state still changes, so the owner can close it.
+a meeting that isn't a shell, masked for its own words, is a small shell: it takes no text and makes no item, naming
+it as `M-0040#2`; an answer there is written as `[forgotten]` and its state still changes, so the owner can close it;
+and the rollover leaves it where it is.
 """
 
 from __future__ import annotations
@@ -694,8 +695,12 @@ class _Write:
 
     def on_point(self, add_id: str, keys: dict[str, Any]) -> dict[str, Any]:
         """A point_set's keys on a point the forgotten list holds, on a meeting that isn't a shell: masked for its own
-        words, a small shell (DR-0696). An answer or text refused, naming the point, since a later match would take
-        it; its state set alone, so the owner can close it; a note written as the marker."""
+        words, a small shell (DR-0696). Text refused, naming the point, since a later match would take it; an answer
+        and a note written as the marker and its state set, as an outcome on a shell is, so the owner can close it and
+        a batch answering a meeting's points never stops on it."""
+        fields = cast(dict[str, Any], keys.get("fields") or {})
+        if fields.get("answer") is not None:
+            keys = {**keys, "fields": {**fields, "answer": ops.MARK}}
         texts = _texts(keys)
         if texts:
             label = self.point_label(add_id, str(keys["point"]))
@@ -1391,11 +1396,15 @@ class _Write:
             if meeting is None or meeting.id in done:
                 continue
             done.add(meeting.id)
-            still = meeting.open_points()
-            if not still or meeting.archived or not _due(self.now, meeting.end, meeting.outcome, meeting.response):
-                continue
-            # A shell's points are forgotten: the screen named each one to raise again (DR-0694).
-            if self.shell(meeting.id) is not None:
+            # A point a forget left stays where it is, copied nowhere: the screen named it to drop (DR-0696). So do a
+            # shell's points, which the screen named each to raise again (DR-0694).
+            still = [point for point in meeting.open_points() if point.id not in self.listed]
+            if (
+                not still
+                or meeting.archived
+                or self.shell(meeting.id) is not None
+                or not _due(self.now, meeting.end, meeting.outcome, meeting.response)
+            ):
                 continue
             target = self.next_in_series(meeting)
             if target is None:

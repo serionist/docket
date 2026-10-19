@@ -161,3 +161,10 @@ Forgetting; the glossary's shell; AGENTS.md's door lines; the CHANGELOG with eac
 | F5: a shell meeting with an open point stayed in the day's list, unnamed | minor | fixed: named among those to drop on both screens |
 | F6: no crash test before the ops-only line, or between it and the masks | minor | fixed: a `listed` seam; both crashes finished by the next gate call |
 | F7, found while fixing: a point an earlier forget listed for its own words on a kept meeting didn't start the chain at a match again, so another clone's answer to it from before its pull was suspected and never masked | minor | fixed by the maintainer's lead: such a point is a small shell, followed at every match (DR-0694); the writer refuses an answer, text or an item on it and passes its state alone, and the import refuses a line with text on it (DR-0696) |
+
+### PR 2, round 2: approved; two minors fixed by the maintainer's lead
+
+| Finding | Severity | Status |
+|---|---|---|
+| R1: an answer on a point a forget left was refused, so a batch answering a meeting's points stopped on it | minor | fixed: written as `[forgotten]`, its state set, as an outcome on a shell is (DR-0696) |
+| R2: the rollover copied a point a forget left on, a copy carrying the marker that no list line names | minor | fixed: the rollover leaves it where it is, and the dry run and the screen name it among those to drop (DR-0694, DR-0696) |

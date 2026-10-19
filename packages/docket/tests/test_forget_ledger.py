@@ -145,7 +145,7 @@ def test_an_item_whose_source_is_forgotten_is_a_shell_named_by_number_on_both_sc
     for screen in (False, True):
         said = planning.lines(plan, screen=screen)
         assert f"ledger    2 ops masked; {number} is a shell now" in said
-        assert f"drop      {number} is a shell left open, to drop" in said
+        assert f"drop      {number} left open, to drop" in said
         assert not any(SAID in line or "Send Ada" in line for line in said)
         assert any("ledger text that names it in plain words" in line for line in said)
     assert kept not in "".join(planning.lines(plan, screen=True))
@@ -261,7 +261,7 @@ def test_a_meeting_whose_calendar_record_is_forgotten_is_a_shell_with_its_points
     # Its open point would keep it in the day's lists: named to drop on both screens.
     assert plan.ledger.shells == (number,) and plan.ledger.open == (number,)
     for screen in (False, True):
-        assert f"drop      {number} is a shell left open, to drop" in planning.lines(plan, screen=screen)
+        assert f"drop      {number} left open, to drop" in planning.lines(plan, screen=screen)
     assert plan.ledger.new == frozenset(ids_of(vault, "Weekly 1:1", event(1)) | ids_of(vault, "The venue")
                                         | ids_of(vault, "Agreed the dates"))  # fmt: skip
     assert other not in plan.ledger.shells
@@ -452,31 +452,59 @@ def test_a_meeting_shell_takes_no_point_answer_item_or_join_and_its_points_never
     write(vault, {"op": "point_set", "item": first, "point": 1, "fields": {"state": "dropped"}})
 
 
-def test_a_point_a_forget_left_on_a_live_meeting_takes_no_words_and_makes_no_item_but_closes(
-    vault: Vault, owner: Callable[..., AtConsole]
-) -> None:
+def two_points(vault: Vault) -> str:
+    """The first weekly 1:1 with a plain point and one anchored on the chat message, as its first and second; its
+    number."""
     number = weekly(vault, 1)
     write(
         vault,
         {"op": "point", "item": number, "fields": {"text": "The venue"}},
         {"op": "point", "item": number, "fields": {"text": f"Ada said so [r:{CHAT}]"}},
     )
+    return number
+
+
+def test_a_point_a_forget_left_on_a_live_meeting_takes_no_text_or_item_and_an_answer_as_the_marker(
+    vault: Vault, owner: Callable[..., AtConsole]
+) -> None:
+    number = two_points(vault)
     forget_now_at(vault, owner, CHAT)
     assert points_of(vault, number) == [("The venue", "open"), (MARK, "open")]
     refused = [
-        ({"op": "point_set", "item": number, "point": 2, "fields": {"answer": "Tuesday"}}, "it takes no answer"),
         ({"op": "point_set", "item": number, "point": 2, "fields": {"text": "Ada again"}}, "it takes no text"),
         ({"op": "point_item", "item": number, "point": 2, "fields": {"stream": "pilot"}}, "it makes no item"),
     ]
     for change, why in refused:
         with pytest.raises(RefusedError, match=f"{number}#2 is a point a forget left; {why}"):
             write(vault, change)
-    # Its state alone still changes, so the owner can close it; a note there is the marker.
-    closed = write(vault, {"op": "point_set", "item": number, "point": 2, "fields": {"state": "dropped"},
-                           "note": "Not ours"})  # fmt: skip
-    assert [o.note for o in closed.ops] == [MARK]
-    write(vault, {"op": "point_set", "item": number, "point": 1, "fields": {"answer": "Tuesday"}})
-    assert points_of(vault, number) == [("The venue", "answered"), (MARK, "dropped")]
+    # A batch answering the meeting's points goes: the forgotten one's answer and note are the marker, its state set.
+    answered = write(
+        vault,
+        {"op": "point_set", "item": number, "point": 1, "fields": {"answer": "Tuesday"}},
+        {"op": "point_set", "item": number, "point": 2, "fields": {"answer": "Wednesday"}, "note": "As agreed"},
+    )
+    assert [((o.fields or {}).get("answer"), o.note) for o in answered.ops] == [("Tuesday", None), (MARK, MARK)]
+    assert points_of(vault, number) == [("The venue", "answered"), (MARK, "answered")]
+    write(vault, {"op": "point_set", "item": number, "point": 2, "fields": {"state": "dropped"}})
+    assert points_of(vault, number)[1] == (MARK, "dropped")
+    assert vault.check() == []
+
+
+def test_the_rollover_leaves_a_point_a_forget_left_where_it_is_and_the_screens_name_it_to_drop(
+    vault: Vault, owner: Callable[..., AtConsole]
+) -> None:
+    number = two_points(vault)
+    second = weekly(vault, 2)
+    plan = plan_of(vault, CHAT)
+    assert plan.ledger.open == (f"{number}#2",) and plan.ledger.shells == ()
+    for screen in (False, True):
+        assert f"drop      {number}#2 left open, to drop" in planning.lines(plan, screen=screen)
+    forget_now_at(vault, owner, CHAT)
+    rolled = write(vault, {"op": "rollover"})
+    # Only the live point rolls on: no copy carrying the marker is made for a later match to take.
+    assert [o.op for o in rolled.ops] == ["point", "point_set"]
+    assert points_of(vault, second) == [("The venue", "open")]
+    assert points_of(vault, number) == [("The venue", "rolled"), (MARK, "open")]
     assert vault.check() == []
 
 
@@ -766,7 +794,7 @@ def test_the_screens_count_past_twenty_and_say_two_shells_as_shells(tmp_path: Pa
     )  # fmt: skip
     said = planning.lines(plan, screen=False)
     assert "ledger    1 op masked; A-0001, M-0001 are shells now" in said
-    assert "drop      A-0001, A-0002 are shells left open, to drop" in said
+    assert "drop      A-0001, A-0002 left open, to drop" in said
     assert sum(line.startswith("kept      A-") for line in said) == 20 and "kept      and 2 more" in said
     assert sum(line.startswith("raise     M-") for line in said) == 20 and "raise     and 2 more" in said
 

@@ -719,7 +719,8 @@ def _ledger_lines(found: forget_ledger.Found) -> list[str]:
         left = f"; {shells(found.shells)} now" if found.shells else ""
         out.append(f"ledger    {_plural(len(found.new), 'op')} masked{left}")
     if found.open:
-        out.append(f"drop      {shells(found.open)} left open, to drop")
+        # Shells, and points masked for their own words on a kept meeting, which never roll on.
+        out.append(f"drop      {_first(found.open)} left open, to drop")
     out += [f"kept      {one}" for one in found.kept[:SHOWN]]
     if len(found.kept) > SHOWN:
         out.append(f"kept      and {len(found.kept) - SHOWN} more")

@@ -473,7 +473,8 @@ forget: an older one reads what a merge brings back until a newer one's gate cal
   with no anchor or locator, is out of its reach.
 - After a forget the ledger refuses text or a log on a shell, and a source, a ref or an anchor naming what was
   forgotten; a drop, an archive or a close with an outcome on a shell still goes, its note and outcome `[forgotten]`.
-  A point the forget masked on a meeting it kept takes no answer or text and makes no item, and can still be dropped.
+  A point the forget masked on a meeting it kept takes no text and makes no item; an answer there reads `[forgotten]`,
+  it can still be dropped, and the rollover leaves it where it is.
 
 What a forget can't reach, which every dry run names: key exports made before (make a new one right after, then
 destroy the old), the LFS server's encrypted copies, chunks sent to an API provider, the source itself, and files
