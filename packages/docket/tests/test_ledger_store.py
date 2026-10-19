@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
@@ -253,6 +254,16 @@ def test_text_is_redacted_and_a_locator_a_keyword_or_a_listed_person_refuses_the
         with pytest.raises(LedgerError, match=_re(why)) as caught:
             write(vault, [change], now=NOW)
         assert "hunter2" not in str(caught.value) and "ebula" not in str(caught.value)
+
+
+def test_the_text_rules_drop_the_same_control_characters_on_every_code_point() -> None:
+    # The class as it read before its SO to US range was written out a character at a time: every C0 control but tab,
+    # LF and CR, DEL and the C1 controls, the BOM and the two non-characters that end the BMP.
+    before = {*range(0x00, 0x09), 0x0B, 0x0C, *range(0x0E, 0x20), *range(0x7F, 0xA0), 0xFEFF, 0xFFFE, 0xFFFF}
+    every = "".join(map(chr, range(sys.maxunicode + 1)))
+    assert {ord(c) for c in store.CONTROL.findall(every)} == before
+    assert store.one_line("a\x0e\x1fb\tc") == "ab c"
+    assert store.clean_text("a\x0e\x1fb\r\nc\x1a") == "ab\nc"
 
 
 # -- never-store containers (DR-0690) -----------------------------------------------------------------------------

@@ -161,7 +161,13 @@ PEOPLE = ("who", "organiser", "attendee")
 TIMES = ("start", "end")
 SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
-CONTROL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\ufeff\ufffe\uffff]")
+# Every control character but tab, LF and CR, then the BOM and the two non-characters that end the BMP. SO to US is
+# written out a character at a time: as a range, code scanning reads it as a typo for a narrower one.
+CONTROL = re.compile(
+    "[\x00-\x08\x0b\x0c"
+    "\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f"
+    "\x7f-\x9f\ufeff\ufffe\uffff]"
+)
 SUMMARY = 60
 # todo.py's: a meeting that is over rolls its open points a day after its end, or at once with an outcome (DR-0624).
 ROLL_AFTER = timedelta(hours=24)
