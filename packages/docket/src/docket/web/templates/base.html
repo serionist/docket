@@ -62,7 +62,7 @@
   <h2 id="keys-title">Keys</h2>
   <dl class="keys">
     {% for names, what in page_keys %}
-    <div><dt>{% for key in names %}<kbd data-key="{{ key }}">{{ 'Esc' if key == 'Escape' else key }}</kbd>{% endfor %}</dt><dd>{{ what }}</dd></div>
+    <div><dt>{% for key in names %}<kbd data-key="{{ key }}">{{ {'Escape': 'Esc', ' ': 'Space'}.get(key, key) }}</kbd>{% endfor %}</dt><dd>{{ what }}</dd></div>
     {% endfor %}
   </dl>
   <label class="switch"><input type="checkbox" data-action="keys-switch"{% if not keys_off %} checked{% endif %}> Single-key shortcuts</label>

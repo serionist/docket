@@ -63,7 +63,7 @@
     <p class="lt" dir="auto">{{ h.line }}</p>
     {% if h.undone_by %}<p class="undone-by">undone by {{ locator(h.undone_by) }}</p>{% endif %}
     {% if h.button %}
-    <form class="history-undo" method="post" action="/ledger/write">{{ hidden(state.opened(p.row.ref)) }}{% if h.button == 'Undo' %}<input type="hidden" name="redo" value="1">{% endif %}<button type="submit" class="button" name="op" value="undo:{{ h.op }}">{{ h.button }}<span class="visually-hidden">: {{ h.line }}</span></button></form>
+    <form class="history-undo" method="post" action="/ledger/write">{{ hidden(state.opened(p.row.ref)) }}<input type="hidden" name="said" value="{{ h.button|lower }}"><button type="submit" class="button" name="op" value="undo:{{ h.op }}">{{ h.button }}<span class="visually-hidden">: {{ h.line }}</span></button></form>
     {% endif %}
   </li>
   {% else %}

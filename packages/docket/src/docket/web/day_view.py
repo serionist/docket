@@ -190,8 +190,8 @@ class Notice:
     lines: list[str] = field(default_factory=list[str])
     button: str | None = None
     batch: str | None = None
-    # Whether the button's write is itself an undo, so the next notice offers Redo.
-    then_redo: bool = False
+    # What the button's post says it did, `undo` or `redo`, so the next notice reads right.
+    then: str | None = None
 
 
 # -- days -------------------------------------------------------------------------------------------------------------
@@ -603,8 +603,9 @@ def viewable(link: Link, state: DayState) -> Link:
 
 
 def build_notice(state: DayState, lines: Sequence[BatchLine]) -> Notice | None:
-    """What the last post did (DR-0661): the batch's lines and its Undo, a Redo after an undo; Nothing changed when a
-    post wrote nothing; the rows a bulk's op didn't take."""
+    """What the last post did (DR-0661): the batch's lines and its Undo, a Redo after an Undo; Nothing changed when a
+    post wrote nothing; the rows a bulk's op didn't take. Undone and Redone are what the post said it was, never read
+    from its lines: a batch of undos can be a change of its own, such as removing every proposed point."""
     done = state.done
     if done is None:
         return None
@@ -620,7 +621,7 @@ def build_notice(state: DayState, lines: Sequence[BatchLine]) -> Notice | None:
     if not lines:
         return Notice("info", "That change is no longer in the ledger's history." + skipped)
     said = [f"{line.ref}: {cut(line.line)}" for line in lines]
-    undo = all(line.kind == "undo" for line in lines)
-    redo = state.redo and undo
-    head = ("Undone." if redo else "Redone.") if undo else "Saved."
-    return Notice("info", f"{head}{skipped}", said, "Redo" if redo else "Undo", done, then_redo=not redo)
+    if state.said == "undo":
+        return Notice("info", f"Undone.{skipped}", said, "Redo", done, then="redo")
+    head = "Redone." if state.said == "redo" else "Saved."
+    return Notice("info", f"{head}{skipped}", said, "Undo", done, then="undo")

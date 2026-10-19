@@ -264,6 +264,7 @@ def test_an_empty_ledger_says_how_items_come(tmp_path: Path) -> None:
         ("who=" + "x" * 121, "who is at most 120"),
         ("open=A-0001&text=" + "x" * 1001, "text is a material's ref"),
         ("done=nothing" + "&skipped=A-1" * 501, "skipped names at most 500"),
+        ("done=nothing&said=nope", "said is undo or redo"),
     ],
 )
 def test_a_value_the_url_can_t_hold_is_the_page_s_error(client: TestClient, query: str, said: str) -> None:
@@ -277,9 +278,9 @@ def test_the_state_reads_into_one_canonical_url() -> None:
     assert state.url() == "/ledger?open=A-0012&q=two+words&drop=1"
     assert state.url("/ledger/panel") == "/ledger/panel?open=A-0012&q=two+words&drop=1"
     assert DayState.read({"open": "M-7", "drop": "1", "text": "a.md"}).url() == "/ledger?open=M-0007"
-    assert DayState.read({"redo": "1", "skipped": "A-1"}).url(notice=True) == "/ledger"
-    noticed = DayState.read({"at": "A-0002", "done": "nothing", "redo": "1", "skipped": "A-1"})
-    assert noticed.url(notice=True) == "/ledger?at=A-0002&done=nothing&redo=1&skipped=A-0001"
+    assert DayState.read({"said": "undo", "skipped": "A-1"}).url(notice=True) == "/ledger"
+    noticed = DayState.read({"at": "A-0002", "done": "nothing", "said": "undo", "skipped": "A-1"})
+    assert noticed.url(notice=True) == "/ledger?at=A-0002&done=nothing&said=undo&skipped=A-0001"
     assert canonical("http://127.0.0.1:8741/ledger/panel?open=a-12&at=A-1") == "/ledger?open=A-0012"
     assert canonical("/search?query=x") is None
     assert canonical("/ledger?k=0") is None
@@ -413,7 +414,7 @@ def test_a_verdict_posts_one_batch_by_user_via_page_and_moves_the_selection_on(
     assert back(answer) == {"open": ["A-0003"], "done": [last["batch"]]}
     html = page(client, answer.headers["location"])
     assert texts(html, "day-notice")[0].startswith("Saved. A-0002: triage: claude")
-    undo = {"page": "ledger", "open": "A-0003", "op": "undo", "batch": last["batch"], "redo": "1"}
+    undo = {"page": "ledger", "open": "A-0003", "op": "undo", "batch": last["batch"], "said": "undo"}
     assert hidden(html, "notice-undo") == undo
     # Posted twice, it changes nothing the second time and says so, with no Undo.
     again = post(client, {**form, "op": "triage:claude"})
@@ -464,6 +465,33 @@ def test_a_bulk_gives_each_op_the_rows_it_takes_and_names_the_rest(client: TestC
     refused = post(client, {**act, "op": "reopen", "item": ["A-0001", "A-0003"]})
     assert refused.status_code == 400
     assert "A-0001 is already open" in texts(refused.text, "notice")[0]
+
+
+def test_one_ticked_row_runs_as_a_bulk_as_many_do(
+    client: TestClient, vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The act bar answers the same for one ticked row as for many: a dry run first, the rows it takes written, and a
+    row it doesn't take refused as a bulk the writer refuses whole is (DR-0661). A row's or the panel's own call is one
+    item, with no dry run."""
+    real = store.write
+    dry: list[bool] = []
+
+    def spied(*args: Any, **keys: Any) -> store.Written:
+        dry.append(bool(keys.get("dry_run")))
+        return real(*args, **keys)
+
+    monkeypatch.setattr(store, "write", spied)
+    act = hidden(page(client), "act-bar")
+    one = post(client, {**act, "op": "reopen", "item": "A-0001"})
+    many = post(client, {**act, "op": "reopen", "item": ["A-0001", "A-0003"]})
+    assert (one.status_code, many.status_code) == (400, 400)
+    assert texts(one.text, "notice")[0] == texts(many.text, "notice")[0] == "A-0001 is already open"
+    assert dry == [True, True]
+    assert back(post(client, {**act, "op": "triage:me", "item": "A-0003"}))["done"]
+    assert dry[2:] == [True, False]
+    quick = hidden(page(client), "quick")
+    assert back(post(client, {**quick, "op": "triage:me"}))["done"]
+    assert dry[4:] == [False]
 
 
 def test_a_drop_with_no_why_is_refused_with_the_text_as_typed_and_no_poll(client: TestClient, vault: Vault) -> None:
@@ -542,14 +570,14 @@ def test_the_notice_undoes_the_batch_and_then_redoes_it(client: TestClient) -> N
     html = page(client, f"/ledger?open=A-0003&done={done}")
     assert parse(html).find("form", class_="notice-undo").find("button").text() == "Undo"
     undone = post(client, hidden(html, "notice-undo"))
-    assert back(undone)["redo"] == ["1"]
+    assert back(undone)["said"] == ["undo"]
     html = page(client, undone.headers["location"])
     assert texts(html, "day-notice")[0].startswith("Undone. A-0002: undo: done")
     assert parse(html).find("form", class_="notice-undo").find("button").text() == "Redo"
     assert "A-0002" in rows(html)
     redone = post(client, hidden(html, "notice-undo"))
     html = page(client, redone.headers["location"])
-    assert "redo" not in back(redone)
+    assert back(redone)["said"] == ["redo"]
     assert texts(html, "day-notice")[0].startswith("Redone.")
     assert parse(html).find("form", class_="notice-undo").find("button").text() == "Undo"
     assert "A-0002" not in rows(html)
@@ -559,15 +587,20 @@ def test_a_history_line_undoes_by_its_op_and_the_undo_s_own_line_redoes(client: 
     html = page(client, "/ledger?open=A-0001")
     undo = parse(html).find("ol", id="history-A-0001").find("form", class_="history-undo")
     fields = hidden(html, "history-undo")
-    assert fields["redo"] == "1"
+    assert fields["said"] == "undo"
     answer = post(client, {**fields, "op": undo.find("button").attrs["value"]})
-    assert back(answer)["redo"] == ["1"]
-    lines = parse(page(client, "/ledger?open=A-0001")).find("ol", id="history-A-0001").find_all("li")
+    assert back(answer)["said"] == ["undo"]
+    html = page(client, "/ledger?open=A-0001")
+    lines = parse(html).find("ol", id="history-A-0001").find_all("li")
     assert [li.find("p", class_="lt").text() for li in lines] == ["undo: triage: chase", "triage: chase", "added"]
     assert lines[0].find("button").text().startswith("Redo")
     assert "undone by" in lines[1].text()
     assert not lines[1].find_all("button")
     assert not lines[2].find_all("button")
+    redo = hidden(html, "history-undo")
+    assert redo["said"] == "redo"
+    redone = post(client, {**redo, "op": lines[0].find("button").attrs["value"]})
+    assert texts(page(client, redone.headers["location"]), "day-notice")[0].startswith("Redone. A-0001: undo: undo")
 
 
 @pytest.mark.parametrize(
@@ -904,16 +937,18 @@ def test_a_notice_says_what_the_last_post_did() -> None:
     undo = views.BatchLine(ref="A-0001", kind="undo", line="undo: triage: me")
     batch = "01M3250V000000000000000001"
 
-    def said(lines: list[views.BatchLine], **keys: Any) -> tuple[str, str | None, bool]:
-        found = day_view.build_notice(DayState(done=batch, **keys), lines)
+    def notice(lines: list[views.BatchLine], said: str | None = None) -> tuple[str, str | None, str | None]:
+        found = day_view.build_notice(DayState(done=batch, said=said), lines)
         assert found is not None
-        return found.text, found.button, found.then_redo
+        return found.text, found.button, found.then
 
     assert day_view.build_notice(DayState(), []) is None
-    assert said([]) == ("That change is no longer in the ledger's history.", None, False)
-    assert said([line]) == ("Saved.", "Undo", True)
-    assert said([undo], redo=True) == ("Undone.", "Redo", False)
-    assert said([undo]) == ("Redone.", "Undo", True)
+    assert notice([]) == ("That change is no longer in the ledger's history.", None, None)
+    assert notice([line]) == ("Saved.", "Undo", "undo")
+    assert notice([undo], "undo") == ("Undone.", "Redo", "redo")
+    assert notice([undo], "redo") == ("Redone.", "Undo", "undo")
+    # A batch of undos that is a change of its own, such as every proposed point removed, says what it is: saved.
+    assert notice([undo, undo]) == ("Saved.", "Undo", "undo")
 
 
 def test_a_due_says_how_near_it_is(client: TestClient, vault: Vault) -> None:

@@ -83,6 +83,9 @@
   // -- the day pages (DR-0661 to DR-0663) ------------------------------------------------------------------------
 
   const RESTORE = "docket-day-restore";
+  // The drop's why, and a snooze's first choice, the next working day: what Delete and s put the focus on.
+  const WHY = 'details.close-form input[name="note"]';
+  const PRESET = '[data-snooze] button[value^="snooze:"]';
   const day = () => document.querySelector("[data-day]");
   const rows = () => [...document.querySelectorAll(".day-list .row")];
   const ticks = () => [...document.querySelectorAll(".day-list .tick:checked")];
@@ -91,6 +94,7 @@
   let waiting = null;
   let following = false;
   let focusAfter = null;
+  let leaving = false;
 
   // The selection: the row whose link has the focus, else the one the panel shows, else the one last selected.
   function selected() {
@@ -189,8 +193,9 @@
     } else if (where.id === "panel") {
       const form = where.querySelector("details.close-form");
       if (form) form.open = true;
-      form?.querySelector('input[name="note"]')?.focus();
+      where.querySelector(WHY)?.focus();
     } else {
+      focusAfter = WHY;
       pressIn(where, "Delete");
     }
   }
@@ -199,10 +204,10 @@
     const where = scope();
     if (!where) return;
     if (where.id === "act" || where.id === "panel") {
-      where.querySelector("[data-snooze] button, [data-snooze] input")?.focus();
+      where.querySelector(PRESET)?.focus();
       return;
     }
-    focusAfter = "[data-snooze] button";
+    focusAfter = PRESET;
     select(where, { open: true });
   }
 
@@ -220,13 +225,17 @@
       step(key === "j" ? 1 : -1);
       return true;
     }
-    if (!["x", "1", "2", "3", "4", "0", "e", "Delete", "s", "u", "n"].includes(key)) return false;
+    if (!["x", " ", "1", "2", "3", "4", "0", "e", "Delete", "Backspace", "s", "u", "n"].includes(key)) return false;
+    // Space on a button, a tick or a summary presses it, as it does anywhere.
+    if (key === " " && event.target.matches?.("button, input, summary")) return false;
     if (event.repeat) return true;
     switch (key) {
       case "x":
+      case " ":
         tick(selected());
         break;
       case "Delete":
+      case "Backspace":
         drop();
         break;
       case "s":
@@ -290,18 +299,22 @@
     }
   });
 
+  // Where the owner is, kept for the page that comes next: the panel's and the page's scroll, and what else it says.
+  function keep(what) {
+    const slot = document.getElementById("panel");
+    try {
+      sessionStorage.setItem(RESTORE, JSON.stringify({ panel: slot?.scrollTop || 0, y: scrollY, ...what }));
+    } catch {
+      // No session storage: the page loads where its URL says.
+    }
+  }
+
   document.addEventListener("htmx:after:request", (event) => {
     const ctx = event.detail?.ctx;
     if (!day() || !ctx) return;
     if (isPoll(ctx) && ctx.hx?.refresh === "true") {
       // The poll's own reload: the selection and the panel's scroll come back after it, and only then.
-      const slot = document.getElementById("panel");
-      const keep = { url: location.href, ref: selected()?.dataset.ref || "", panel: slot?.scrollTop || 0, y: scrollY };
-      try {
-        sessionStorage.setItem(RESTORE, JSON.stringify(keep));
-      } catch {
-        // No session storage: the page reloads where its URL says.
-      }
+      keep({ url: location.href, ref: selected()?.dataset.ref || "" });
     }
     if (isSave(ctx) && ctx.response?.status >= 400) {
       // A refused save's field answers marked unsaved; keep the mark if the swap is held up.
@@ -329,14 +342,17 @@
       kept = null;
     }
     const find = (ref) => rows().find((row) => row.dataset.ref === ref);
-    if (kept && kept.url === location.href) {
+    const params = new URLSearchParams(location.search);
+    // The poll's reload comes back to its own URL; a material opened or shown comes back to its item, said so.
+    const opened = ["opened", "shown"].includes(params.get("done")) && kept?.open === params.get("open");
+    if (kept && (kept.material ? opened : kept.url === location.href)) {
       if (kept.ref) select(find(kept.ref));
       const slot = document.getElementById("panel");
       if (slot) slot.scrollTop = kept.panel;
       window.scrollTo(0, kept.y);
       return;
     }
-    const at = new URLSearchParams(location.search).get("at");
+    const at = params.get("at");
     if (at) select(find(at));
   }
 
@@ -356,12 +372,21 @@
     row.classList.add("selected");
   });
 
-  // A post names where the selection goes, and once it is sent its buttons are spent: a double click posts once.
+  // A post asks first when another form holds unsaved text, so Stay leaves every button live; once it goes, it names
+  // where the selection goes and its buttons are spent: a double click posts once.
   document.addEventListener("submit", (event) => {
     const form = event.target;
     if (!day() || !(form instanceof HTMLFormElement) || form.method !== "post") return;
+    const others = [...day().querySelectorAll("form[data-unsaved]")].some((other) => other !== form);
+    if (others && !window.confirm("Leave the text you typed unsaved?")) {
+      event.preventDefault();
+      return;
+    }
+    leaving = true;
     const at = form.querySelector('input[name="at"]');
     if (at) at.value = after(acted(form));
+    // Open and Show in folder come back to the same panel, scrolled where it was.
+    if (form.matches(".material-open")) keep({ material: true, open: form.querySelector('input[name="open"]')?.value });
     delete form.dataset.unsaved;
     setTimeout(() => {
       for (const button of form.querySelectorAll("button")) button.disabled = true;
@@ -369,11 +394,12 @@
   });
 
   window.addEventListener("pageshow", () => {
+    leaving = false;
     for (const button of document.querySelectorAll("[data-day] form button:disabled")) button.disabled = false;
   });
 
   window.addEventListener("beforeunload", (event) => {
-    if (unsaved(day())) event.preventDefault();
+    if (!leaving && unsaved(day())) event.preventDefault();
   });
 
   document.addEventListener("keydown", (event) => {
@@ -432,9 +458,16 @@
   });
 
   document.addEventListener("keydown", (event) => {
-    if (event.ctrlKey || event.metaKey || event.altKey) return;
     const target = event.target;
     const typing = target.matches?.("input, textarea, select, [contenteditable]") && !(day() && target.matches(".tick"));
+    // Ctrl+Z undoes on a day page as u does, as the old tasks app's did; in a field it is the field's own undo.
+    const undo = (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key === "z";
+    if (undo && day() && !typing && keysOn() && !document.querySelector("dialog[open]")) {
+      event.preventDefault();
+      if (!event.repeat) pressIn(document.querySelector(".day-notice"), "u");
+      return;
+    }
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
     if (event.key === "Escape") {
       if (document.querySelector("dialog[open]")) return;
       if (typing) {
@@ -495,13 +528,18 @@
     if (target.id === "panel") {
       const item = itemPanel()?.dataset.item;
       for (const row of rows()) row.classList.toggle("open", Boolean(item) && row.dataset.ref === item);
-      if (following || focusAfter) {
-        // The selection moved by key: the focus stays on its row, or goes where the key asked.
-        following = false;
-        const asked = focusAfter && target.querySelector(focusAfter);
-        focusAfter = null;
-        if (asked) asked.focus();
-        else selected()?.querySelector(".row-link")?.focus({ preventScroll: true });
+      // A key or a link that asks for a field gets it, such as the drop's why, so what is typed next goes there and
+      // never to the keys; a selection moved by key keeps the focus on its row.
+      const asked = (focusAfter && target.querySelector(focusAfter)) || target.querySelector("[autofocus]");
+      const moved = following || focusAfter;
+      following = false;
+      focusAfter = null;
+      if (asked) {
+        asked.focus();
+        return;
+      }
+      if (moved) {
+        selected()?.querySelector(".row-link")?.focus({ preventScroll: true });
         return;
       }
       const heading = target.querySelector("#panel-title");

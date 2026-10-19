@@ -14,7 +14,7 @@ parameters first, then each page's own, in one canonical form with the defaults 
 | `drop` | `1` opens the open item's drop form, its why focused | none |
 | `text` | a material of the open item shown in the panel's viewer | none |
 | `done` | what the last post did: its batch, `nothing`, `opened` or `shown` | none |
-| `redo` | `1` when that batch was an undo, so its notice offers Redo | none |
+| `said` | what that batch was when it undid or redid one, `undo` or `redo`, so its notice says so | none |
 | `skipped` | the rows a bulk's op didn't take | none |
 
 Unknown parameters are ignored, and the URLs only gain optional ones, since the tasks skill opens them (DR-0669). A
@@ -48,6 +48,7 @@ MAX_K = 100_000
 STATES = ("open", "snoozed", "closed", "all")
 GROUPS = ("due", "stream", "kind", "who", "meeting")
 NOTICES = ("nothing", "opened", "shown")
+SAID = ("undo", "redo")
 MAX_Q = 200
 MAX_WHO = 120
 MAX_TEXT = 1000
@@ -92,7 +93,7 @@ class DayState:
     drop: bool = False
     text: str | None = None
     done: str | None = None
-    redo: bool = False
+    said: str | None = None
     skipped: tuple[str, ...] = ()
 
     @staticmethod
@@ -139,6 +140,9 @@ class DayState:
         done = first("done")
         if done is not None and done not in NOTICES and not ops.ULID.fullmatch(done):
             raise DayStateError(f"done is what the last change did, a batch's id or one of {', '.join(NOTICES)}")
+        said = first("said")
+        if said is not None and said not in SAID:
+            raise DayStateError(f"said is undo or redo, not {said!r}")
         skipped = every("skipped")
         if len(skipped) > MAX_SKIPPED:
             raise DayStateError(f"skipped names at most {MAX_SKIPPED} rows")
@@ -157,12 +161,12 @@ class DayState:
             drop=flag("drop"),
             text=text,
             done=done,
-            redo=flag("redo"),
+            said=said,
             skipped=tuple(ref_of(s, "skipped") for s in skipped),
         ).canonical()
 
     def canonical(self) -> DayState:
-        """`at` only without an open panel; `drop` and `text` only with an open item; `redo` and `skipped` only with
+        """`at` only without an open panel; `drop` and `text` only with an open item; `said` and `skipped` only with
         `done`."""
         item = self.open is not None and not is_meeting(self.open)
         return replace(
@@ -170,7 +174,7 @@ class DayState:
             at=None if self.open is not None else self.at,
             drop=self.drop and item,
             text=self.text if item else None,
-            redo=self.redo and self.done is not None,
+            said=self.said if self.done is not None else None,
             skipped=self.skipped if self.done is not None else (),
         )
 
@@ -190,7 +194,7 @@ class DayState:
         out += [("text", self.text)] if self.text else []
         if notice and self.done:
             out.append(("done", self.done))
-            out += [("redo", "1")] if self.redo else []
+            out += [("said", self.said)] if self.said else []
             out += [("skipped", s) for s in self.skipped]
         return out
 
@@ -207,7 +211,7 @@ class DayState:
 
     def quiet(self) -> DayState:
         """This state without what a post said or what the panel holds open beyond its item: what a form carries."""
-        return self.but(drop=False, text=None, done=None, redo=False, skipped=())
+        return self.but(drop=False, text=None, done=None, said=None, skipped=())
 
     def opened(self, ref: str | None) -> DayState:
         """The panel open on another item, or closed with None."""

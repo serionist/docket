@@ -61,7 +61,7 @@
   </div>
   {% if notice.button %}
   <form class="notice-undo" method="post" action="/ledger/write">
-    {{ hidden(state) }}<input type="hidden" name="op" value="undo"><input type="hidden" name="batch" value="{{ notice.batch }}">{% if notice.then_redo %}<input type="hidden" name="redo" value="1">{% endif %}
+    {{ hidden(state) }}<input type="hidden" name="op" value="undo"><input type="hidden" name="batch" value="{{ notice.batch }}"><input type="hidden" name="said" value="{{ notice.then }}">
     <button type="submit" class="button" data-key="u">{{ notice.button }}</button>
   </form>
   {% endif %}

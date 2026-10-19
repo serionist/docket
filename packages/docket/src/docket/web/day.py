@@ -273,8 +273,10 @@ class Posted:
     op: str
     changes: list[dict[str, Any]]
     at: str | None
-    redo: bool
+    # What an undo's post says it is, `undo` or `redo`, for the notice after it.
+    said: str | None
     typed: dict[str, str]
+    bulk: bool
 
 
 def page_of(params: QueryParams) -> str:
@@ -293,6 +295,8 @@ def posted(form: QueryParams, now: datetime) -> Posted:
     typed = {k: form.get(k) or "" for k in TYPED if k in form}
     at = (form.get("at") or "").strip()
     one = items[0] if len(items) == 1 else None
+    # A call on ticked rows, one or many, runs as a bulk: the act bar answers the same for one row as for many.
+    bulk = name in CALLS and (len(items) > 1 or form.get("form") == "act")
     if name in CALLS:
         if not items:
             raise DayStateError("tick a row, or open an item, first")
@@ -336,7 +340,8 @@ def posted(form: QueryParams, now: datetime) -> Posted:
         changes = [{"op": "undo", "of": of} if of else {"op": "undo", "batch": batch}]
     else:
         raise DayStateError("op is one of triage, snooze, done, drop, reopen, set, notes, log, material, add, undo")
-    return Posted(state, name, changes, ref_of(at, "at") if at else None, form.get("redo") == "1", typed)
+    said = ((form.get("said") or "").strip() or None) if name == "undo" else None
+    return Posted(state, name, changes, ref_of(at, "at") if at else None, said, typed, bulk)
 
 
 @dataclass(frozen=True)
@@ -352,7 +357,7 @@ def write(vault: Vault, changes: list[dict[str, Any]], *, bulk: bool) -> Wrote:
     version is taken under the same lock as the write, so a save's answer brings no reload of its own."""
     with vault.lock:
         skipped: tuple[str, ...] = ()
-        if bulk and len(changes) > 1:
+        if bulk:
             dry = store.write(vault, changes, by="user", via="page", dry_run=True)
             refused = {r.n: r for r in dry.refused}
             if len(refused) == len(changes):
@@ -376,7 +381,7 @@ def after(post: Posted, wrote: Wrote) -> DayState:
         back = back.opened(written.labels.get(added, added))
     if not written.ops:
         return back.but(done="nothing", skipped=wrote.skipped)
-    return back.but(done=written.ops[0].batch, redo=post.redo, skipped=wrote.skipped)
+    return back.but(done=written.ops[0].batch, said=post.said, skipped=wrote.skipped)
 
 
 # -- the routes -----------------------------------------------------------------------------------------------------
@@ -487,7 +492,7 @@ def router(service: Service) -> APIRouter:
                 back = _back(form)
                 return await whole(request, back, status=400, problem=str(e), typed=_typed(form), form=_form(form))
             try:
-                wrote = await service.writer.run(lambda: write(service.vault(), post.changes, bulk=post.op in CALLS))
+                wrote = await service.writer.run(lambda: write(service.vault(), post.changes, bulk=post.bulk))
             except RefusedError as e:
                 return await whole(
                     request, post.state, status=400, problem=e.why, typed=post.typed, alikes=e.refs, form=_form(form)

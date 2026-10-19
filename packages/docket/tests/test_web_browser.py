@@ -23,7 +23,7 @@ import pytest
 import uvicorn
 from briefs_kit import NORTHWIND, briefs_template
 from curate_kit import curate_vault
-from day_kit import day_vault
+from day_kit import day_vault, today
 from decisions_kit import BRIEF, decisions_template
 from docket_testkit import index_template
 from playwright.sync_api import Page, expect, sync_playwright
@@ -38,6 +38,8 @@ from docket.service.client import call_json
 from docket.service.token import Tokens
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.vault import Vault
+from docket.web import day as day_routes
+from docket.web import day_view
 from docket.web import settings as settings_routes
 from docket.web.settings_view import Facts
 
@@ -978,6 +980,138 @@ def test_a_tick_holds_the_poll_and_a_write_from_the_cli_reloads_once_it_is_clear
         page.keyboard.press("Escape")
         expect(page.locator("#row-A-0005 .title")).to_have_text("Quote from the new caterer", timeout=12_000)
         assert page.evaluate("window.notReloaded === undefined")
+        assert not errors, errors
+        browser.close()
+
+
+def test_a_drop_s_why_and_a_snooze_s_day_take_the_focus_in_a_browser(
+    day_service: tuple[int, str], day_root: Path
+) -> None:
+    """Delete or Backspace on a row, and a click on its drop, open the drop form with its why focused, so a why typed
+    there, an e in it, never presses an item key; s on a row focuses the next working day, and Enter snoozes to it
+    (DR-0662)."""
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser, page, base = _day_page(p, day_service, errors)
+        why = page.locator("#panel details.close-form input[name=note]")
+        page.keyboard.press("j")
+        page.keyboard.press("Backspace")
+        expect(why).to_be_focused()
+        assert page.url == f"{base}/ledger?open=A-0001&drop=1"
+
+        page.goto(f"{base}/ledger")
+        page.keyboard.press("j")
+        page.keyboard.press("s")
+        working = day_view.next_working_day(today()).isoformat()
+        expect(page.locator(f'#panel [data-snooze] button[value="snooze:{working}"]')).to_be_focused()
+        page.keyboard.press("Enter")
+        page.wait_for_url(re.compile(r"/ledger\?open=A-0002&done="))
+        expect(page.locator(".day-notice")).to_contain_text("A-0001: snooze")
+
+        page.goto(f"{base}/ledger")
+        before = day_routes.version(day_root)
+        page.keyboard.press("j")
+        page.keyboard.press("Delete")
+        expect(why).to_be_focused()
+        page.keyboard.type("replied, see the thread")
+        expect(why).to_have_value("replied, see the thread")
+        assert page.url == f"{base}/ledger?open=A-0002&drop=1"
+        assert day_routes.version(day_root) == before
+        page.keyboard.press("Enter")
+        page.wait_for_url(re.compile(r"/ledger\?open=A-0003&done="))
+        expect(page.locator(".day-notice")).to_contain_text("A-0002: dropped")
+
+        # A click on a row's drop, which shows on its hover, focuses its why too.
+        before = day_routes.version(day_root)
+        page.hover("#row-A-0004")
+        page.click("#row-A-0004 .quick [data-key=Delete]")
+        expect(why).to_be_focused()
+        page.keyboard.type("we met")
+        expect(why).to_have_value("we met")
+        assert page.url == f"{base}/ledger?open=A-0004&drop=1"
+        assert day_routes.version(day_root) == before
+        assert not errors, errors
+        browser.close()
+
+
+def test_space_ticks_and_ctrl_z_undoes_in_a_browser(day_service: tuple[int, str]) -> None:
+    """The old tasks app's other keys: Space ticks the selected row, and Ctrl+Z undoes as u does (DR-0662)."""
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser, page, _ = _day_page(p, day_service, errors)
+        page.keyboard.press("j")
+        page.keyboard.press(" ")
+        expect(page.locator("#row-A-0001 .tick")).to_be_checked()
+        expect(page.locator("#act")).to_be_visible()
+        page.keyboard.press("Escape")
+        expect(page.locator("#row-A-0001 .tick")).not_to_be_checked()
+
+        page.keyboard.press("2")
+        expect(page.locator(".day-notice")).to_contain_text("A-0001: triage: claude")
+        page.keyboard.press("Control+z")
+        expect(page.locator(".day-notice")).to_contain_text("Undone.")
+        expect(page.locator("#row-A-0001")).to_have_attribute("data-triage", "chase")
+        assert not errors, errors
+        browser.close()
+
+
+def test_staying_on_the_leave_guard_keeps_the_form_live_in_a_browser(
+    day_service: tuple[int, str], day_root: Path
+) -> None:
+    """A post that would leave text typed elsewhere unsaved asks first; Stay writes nothing and leaves its buttons live,
+    and Leave posts it with no second question (DR-0661)."""
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser, page, base = _day_page(p, day_service, errors, "/ledger?open=A-0003")
+        # Stay, then Leave; a question past those two is answered Leave and counted.
+        answers, seen = [False, True], []
+
+        def answer(dialog: Any) -> None:
+            seen.append(dialog.type)
+            leave = answers.pop(0) if answers else True
+            if leave:
+                dialog.accept()
+            else:
+                dialog.dismiss()
+
+        page.on("dialog", answer)
+        page.fill(".log-add input[name=note]", "a line not yet added")
+        before = day_routes.version(day_root)
+        claude = page.locator("#panel .call-form .verdict[data-verdict=claude]")
+        claude.click()
+        expect(claude).to_be_enabled()
+        assert (seen, page.url) == (["confirm"], f"{base}/ledger?open=A-0003")
+        assert day_routes.version(day_root) == before
+        claude.click()
+        page.wait_for_url(re.compile(r"done="))
+        assert seen == ["confirm", "confirm"]
+        expect(page.locator(".day-notice")).to_contain_text("A-0003: triage: claude")
+        assert not errors, errors
+        browser.close()
+
+
+def test_open_and_show_in_folder_keep_the_panel_s_scroll_in_a_browser(
+    day_service: tuple[int, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A material opened or shown in its folder comes back to its panel scrolled where it was (DR-0663); the launcher
+    is patched, so nothing opens."""
+    launched: list[tuple[str, bool]] = []
+    monkeypatch.setattr(day_routes, "launch", lambda path, *, reveal: launched.append((Path(path).name, reveal)))
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser, page, _ = _day_page(p, day_service, errors, "/ledger?open=A-0005")
+        page.set_viewport_size({"width": 1440, "height": 520})
+        scrolled = "document.getElementById('panel').scrollTop"
+        for button, done in (("Open", "opened"), ("Show in folder", "shown")):
+            page.locator("#panel .material-open").first.scroll_into_view_if_needed()
+            kept = page.evaluate(scrolled)
+            assert kept > 0
+            page.locator("#panel .material-open").first.get_by_role("button", name=button).click()
+            page.wait_for_url(re.compile(rf"done={done}"))
+            expect(page.locator(".day-notice")).to_be_visible()
+            assert abs(page.evaluate(scrolled) - kept) <= 2
+            page.evaluate("document.getElementById('panel').scrollTop = 0")
+        assert launched == [("plan.md", False), ("plan.md", True)]
         assert not errors, errors
         browser.close()
 

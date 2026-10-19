@@ -943,8 +943,9 @@ one key at a time.
   the Search page.
 - The page reloads by itself when the ledger changes, from the CLI, Claude or a sync, unless you are typing, have
   rows ticked or a save is on its way.
-- Keys: `j` and `k` move, the panel following once open; `x` ticks; `1` to `4` discuss, claude, me, chase; `0` no
-  call; `e` done; `Delete` drop; `s` snooze; `u` undo; `n` a new item; `/` the search box; `?` for the rest.
+- Keys: `j` and `k` move, the panel following once open; `x` or Space ticks; `1` to `4` discuss, claude, me, chase;
+  `0` no call; `e` done; `Delete` or Backspace drop; `s` snooze; `u` or Ctrl+Z undo; `n` a new item; `/` the search
+  box; `?` for the rest.
 
 ### The Sync page
 
