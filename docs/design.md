@@ -218,6 +218,11 @@ same result on any day.
   only in a session whose own repo is the vault's, else as one line of counts (DR-0671), in at most 45 lines, cut from
   the streams up and given back to the room; the hook waits 3 s for the service and never folds the ledger itself
   (DR-0672). `docket ledger day` prints the same from the vault.
+- The plugin's sync writes into the ledger: its agents report from what raw keeps after their own promotion, and one
+  batch by `sync` closes on evidence, logs or adds the asks, sets and links meetings, writes minutes, rolls over,
+  proposes points and moves streams, with no proposal queue (DR-0686, DR-0689). The writer refuses a `source` or a
+  material's `ref` pointing into a never-store container, by a Slack or Teams rid's text or the index's container and
+  thread for any rid (DR-0690).
 
 ### 3.5 Beyond search
 
@@ -805,10 +810,12 @@ Phase 0's plugin, by piece:
 | `curate` | a round in chat over `docket curate`: the cards in one table with Claude's call and why, each decided only on the user's answer for it; seeding from a people directory or glossary in `seeding.md`; only `status`, `show` and `log` pre-approved (DR-0472) |
 | `cuts` | the owner's words for a held recording's left-out stretches placed as time ranges, in a proposals file, shown to the owner, and the release run on their yes; only `docket hold list` and `show` pre-approved (DR-0605) |
 | the capture hook | PostToolUse for `mcp__.*` runs `docket hook post-tool-use`: binds a run, posts the captures an open run of this session wants, one line to Claude each (DR-0242) |
+| `sync` | each live source in an agent of its own through `run_open`, the source's `SKILL.md` and its `sync.md`: it classifies a mixed source's plain records, promotes its own, writes recording notes and returns one block, every locator read; then one `ledger_batch` by `sync`, dry run first, in a fixed order, and the list in chat; only reads pre-approved (DR-0685 to DR-0689) |
 
 - The plugin holds no scripts: its hook and token helper run the `docket` command, which must be on PATH (DR-0162).
 - A plugin can't ship a `CLAUDE.md`, so the rules live in the MCP server's instructions and the recall skill.
-- Sync and tasks come later; a sync starts today with `run_open` (DR-0251).
+- Tasks comes next. A single source still syncs by hand with `run_open` (DR-0251); a project's own sync skill points
+  at `sync` at the cut-over, its lore moved to the project's `CLAUDE.md` and each source's `sync.md` (DR-0692).
 
 **Claude inside the service** (phase 3) does processing, not harvesting: notes and minutes, digests, briefs,
 proposals, meeting prep, draft replies, through the Claude Agent SDK loading the same plugin. It runs on the user's

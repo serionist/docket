@@ -8,6 +8,13 @@ Unreleased in the same PR.
 
 ### Added
 
+- `/docket:sync`: Claude syncs your live sources, each in an agent of its own, then writes what they found into the
+  ledger in one batch you can undo whole: what closed, with the evidence; what you owe and await, new asks
+  untriaged; invites, attendees, minutes and outcomes on your meetings; proposed points for the coming week's; and
+  your streams. Then it goes through the list with you, drafting nothing before. A source's `sync.md`, beside its
+  `SKILL.md`, keeps what you know about finding things there. The ledger now refuses an item's source or a
+  material's ref that points into a never-store container, naming the field and never the value, and an import's
+  dry run names each old line it would refuse.
 - Your day at each session's start: in the repo that holds your vault, Claude sees the syncs due, the queue, today's
   and the next working day's meetings with their points and items, what is overdue, the replies owed, decisions and
   tasks due this week, invites, waits and your streams, in at most 45 lines; in any other repo, one line of counts.

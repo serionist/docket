@@ -6,6 +6,7 @@ brought up to date (DR-0616, DR-0619)."""
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
@@ -13,17 +14,19 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import commit_config, empty_vault, folder_vault, make_config, sh
+from docket_testkit import commit_config, empty_vault, folder_vault, make_config, make_record, sh
 from ledger_kit import ADD_FIELDS, NOW, caught_up, rebuilt
 
 from docket.errors import DocketError
+from docket.index import build as index_build
 from docket.index import rebuild
-from docket.ledger import load, ops, store
+from docket.ledger import imports, load, ops, store
 from docket.ledger.fold import Item, Ledger, fold
 from docket.ledger.ops import Op
 from docket.ledger.store import LedgerError, material_ref, write
 from docket.vault import forgotten
-from docket.vault.config import RedactionPattern, VaultConfig
+from docket.vault.config import RedactionPattern, SourceConfig, VaultConfig
+from docket.vault.gate import Gate
 from docket.vault.vault import UnmergedError, Vault
 
 FILE = "ledger/ops/2026-10-test-box.jsonl"
@@ -250,6 +253,113 @@ def test_text_is_redacted_and_a_locator_a_keyword_or_a_listed_person_refuses_the
         with pytest.raises(LedgerError, match=_re(why)) as caught:
             write(vault, [change], now=NOW)
         assert "hunter2" not in str(caught.value) and "ebula" not in str(caught.value)
+
+
+# -- never-store containers (DR-0690) -----------------------------------------------------------------------------
+
+INTO = "points into a never-store container; leave it out"
+# A DM and a chat by their ids, and a thread by its parent's rid, as a never-store list names them.
+CONTAINERS = ["D0PRIVATE", "teams:19:private@thread.v2", "slack:C0PILOT/1791000001.000100"]
+
+
+def test_a_source_or_a_ref_in_a_never_store_container_refuses_the_write_naming_the_field(vault: Vault) -> None:
+    """A Slack or Teams rid carries its conversation: found by the rid's text up to each slash, after `r:` and an
+    anchor come off, never naming the value."""
+    vault = configured(vault, containers=CONTAINERS)
+    write(vault, [ADD], now=NOW)
+    refused = [
+        ({**ADD, "fields": {**ADD_FIELDS, "source": "slack:D0PRIVATE/1791000005.000100"}}, "source"),
+        ({**ADD, "fields": {**ADD_FIELDS, "source": "r:slack:D0PRIVATE/1791000005.000100#2"}}, "source"),
+        ({"op": "set", "item": "A-0001", "fields": {"source": "[r:teams:19:private@thread.v2/1791000005000#1]"}},
+         "source"),
+        ({"op": "material", "item": "A-0001", "ref": "teams:19:private@thread.v2/1791000005000"}, "ref"),
+        ({"op": "material", "item": "A-0001", "ref": "r:slack:C0PILOT/1791000001.000100@00:12"}, "ref"),
+    ]  # fmt: skip
+    for change, name in refused:
+        with pytest.raises(LedgerError, match=_re(f"{name} {INTO}")) as caught:
+            write(vault, [change], now=NOW)
+        assert not any(part in str(caught.value) for part in ("PRIVATE", "private", "1791"))
+    (dry,) = write(vault, [refused[0][0]], dry_run=True, now=NOW).refused
+    assert (dry.n, dry.why) == (1, f"source {INTO}")
+    # Another chat, a reply whose rid doesn't carry its listed thread, and a channel that only starts like a DM.
+    written = write(vault, [
+        {**ADD, "fields": {**ADD_FIELDS, "source": "teams:19:public@thread.v2/1791000005000"}},
+        {"op": "material", "item": "A-0001", "ref": "slack:C0PILOT/1791000002.000100"},
+        {"op": "material", "item": "A-0001", "ref": "slack:D0PRIVATE2/1791000005.000100"},
+    ], now=later(1))  # fmt: skip
+    assert len(written.ops) == 3
+
+
+def test_a_locator_s_rid_comes_without_r_its_brackets_and_its_position() -> None:
+    assert store.locator_rid(" [r:slack:D0X/1791000005.000100#2-3] ") == "slack:D0X/1791000005.000100"
+    assert store.locator_rid("r:plaud:rec-01/transcript@12:08-12:40") == "plaud:rec-01/transcript"
+    assert store.locator_rid("r:mail:a%40b") == "mail:a@b"
+    assert store.locator_rid("teams:19:x@thread.v2/1791000005000") == "teams:19:x@thread.v2/1791000005000"
+    assert store.locator_rid("the pilot channel, 14 Oct") == "the pilot channel, 14 Oct"
+
+
+def kept_and_dropped(tmp_path: Path) -> Vault:
+    """A vault whose mail source kept one conversation and dropped a listed one at the gate, with a Slack thread in
+    raw: the index built, the kept conversation and the thread listed afterwards."""
+    config = make_config()
+    config.sources |= {"mail": SourceConfig(), "slack": SourceConfig()}
+    config.never_store.containers = ["AAMkADconv9"]
+    vault = empty_vault(tmp_path, config)
+    mails = [
+        make_record(rid=f"mail:AAMkADmsg{n}", source="mail", kind="mail", container=None,
+                    thread=f"mail:AAMkADconv{n}", title="The pilot's dates", author="Ben Sample <ben@example.invalid>")
+        for n in (1, 9)
+    ]  # fmt: skip
+    staged = Gate(vault).stage(mails)
+    assert (staged.ready, staged.dropped["never-store"]) == (1, 1)
+    Gate(vault).promote()
+    parent = make_record(1, rid="slack:C0PILOT/1791000001.000100", source="slack", container="slack:C0PILOT")
+    reply = make_record(2, rid="slack:C0PILOT/1791000002.000100", source="slack", container="slack:C0PILOT",
+                        thread=parent.rid)  # fmt: skip
+    vault.write_run("slack", [parent, reply], NOW)
+    rebuild(vault)
+    return configured(vault, containers=["AAMkADconv9", "AAMkADconv1", parent.rid])
+
+
+def test_the_index_names_the_container_or_thread_a_rid_doesn_t_carry_and_a_dropped_mail_is_written(
+    tmp_path: Path,
+) -> None:
+    """For any source, the container and thread the index holds for the rid: a mail rid doesn't carry its
+    conversation, nor a reply its thread. A mail the gate dropped never reached the index, so its locator names
+    nothing Docket keeps and is written (DR-0690)."""
+    vault = kept_and_dropped(tmp_path)
+    assert index_build.locate(vault, "mail:AAMkADmsg9") is None
+    write(vault, [ADD], now=NOW)
+    for change, name in (
+        ({**ADD, "fields": {**ADD_FIELDS, "source": "mail:AAMkADmsg1"}}, "source"),
+        ({"op": "material", "item": "A-0001", "ref": "[r:slack:C0PILOT/1791000002.000100#1]"}, "ref"),
+    ):
+        with pytest.raises(LedgerError, match=_re(f"{name} {INTO}")):
+            write(vault, [change], now=NOW)
+    (add,) = write(vault, [{**ADD, "fields": {**ADD_FIELDS, "source": "mail:AAMkADmsg9"}}], now=later(1)).ops
+    assert add.fields is not None and add.fields["source"] == "mail:AAMkADmsg9"
+
+
+def test_the_import_s_dry_run_names_each_line_it_would_refuse_by_its_field(tmp_path: Path) -> None:
+    vault = kept_and_dropped(tmp_path)
+    lines = []
+    for n, source in enumerate(("slack:D0PRIVATE/1791000005.000100", "mail:AAMkADmsg1", "mail:AAMkADmsg9"), start=1):
+        add_id = ops.encode(((imports.ADDS_AT + n) << ops.RANDOM_BITS) | 7)
+        fields = {**ADD_FIELDS, "title": f"Ask {n}", "source": source, "opened": "2026-10-14"}
+        lines.append({"schema_version": 1, "id": add_id, "item": add_id, "op": "add", "day": "2026-10-14",
+                      "by": "claude", "via": "import", "number": n, "fields": fields})  # fmt: skip
+    vault = configured(vault, containers=[*vault.config.never_store.containers, "D0PRIVATE"])
+    text = "".join(json.dumps(line) + "\n" for line in lines)
+    said = imports.run(vault, text, "export.jsonl", dry_run=True).plan.refusals
+    assert said == (f"export.jsonl:1: source {INTO}", f"export.jsonl:2: source {INTO}")
+
+
+def test_an_index_that_doesn_t_answer_refuses_the_locator_it_can_t_check(tmp_path: Path) -> None:
+    vault = kept_and_dropped(tmp_path)
+    conn = sqlite3.connect(":memory:")
+    conn.close()
+    with pytest.raises(store.TextRefusedError, match="source can't be checked against the never-store containers"):
+        store.TextRules(vault, conn).screen("source", "mail:AAMkADmsg1")
 
 
 def test_an_undo_leaves_out_one_op_and_an_undo_of_an_undo_puts_it_back(vault: Vault) -> None:

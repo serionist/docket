@@ -172,3 +172,15 @@ Round 1, 19 Oct, of a682400: one blocker, three majors, seven minors, all fixed 
 
 Round 2, 19 Oct, of 5311411: approved, five minors folded in: DR-0690's stripped forms, narrowed bind and mail test;
 STREAMS in MEETINGS' form; the search fallback moved to tasks and the reconcile; docs in the vault; unnoted recordings.
+
+## PR 1, as built
+
+| Planned | Built |
+|---|---|
+| the writer screen in `TextRules` (DR-0690) | `TextRules.contained` for `source` and `ref`: `store.locator_rid` strips brackets, `r:` and the position the anchor grammar reads, so a Teams chat id's `@thread.v2` stays; the rid's text up to each slash, then the index's container and thread. The writer asks the index it holds when its ledger tables come from it, the import opens one to read, and with none only the text is checked. An index that doesn't answer refuses the value: it can't be checked |
+| the import's dry run names it | `imports._fill` screens with the index `imports._records` opens; each refused line is `export.jsonl:<n>: source points into a never-store container; leave it out` |
+| `sync/SKILL.md`, `sync/fork.md` | the block lives in `fork.md` alone, which `SKILL.md` fills: `{SOURCE}`, `{VAULT}`, `{TODAY}`, `{OWED_SINCE}`, and `{ZONE}` from `vault.yaml`, since `docket ledger day --json` gives `at` in UTC. An ask's day carries its local time when the source gives one, so the reconcile can link it to a meeting: no new field |
+| reads-only pre-approvals | `ledger`, `search`, `read`, `verify`, and `briefs` and `decisions` too, which the summary names once; `docket ledger day`, `docket staging list` and `show` |
+| one agent per source | `subagent_type: fork` where Claude Code offers it, else `general-purpose`, since `fork.md` stands alone |
+| `test_plugin_files.py` | the block's labels and each line's fields pinned; every `docket` command and flag, `ledger` view, op and tool parameter the two files name checked; the worked batch dry-run clean on an invented pilot ledger. AGENTS.md names `sync`; `tasks` comes with PR 2 |
+| docs | the plugin README's sync section with the cut-over for a sync of one's own; `fork.md` on the plugin's reading list as a contract; the package README's gate and live runs; design's Tasks and Claude first |

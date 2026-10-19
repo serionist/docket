@@ -31,10 +31,37 @@ Then add this repo as a marketplace and install the plugin, in Claude Code:
 | `/docket:setup` | checks Docket is installed, asks which sources to set up, where the vault lives and your languages, creates the vault, and on your yes writes each source's skill and mapper with `docket source new` |
 | `/docket:curate` | runs a curate round with you: Docket's cards for new people and terms and for spellings search misses, each with Claude's call and why, decided only on your answer for each card; and seeds entities from a people directory or glossary you point at, applied on your yes |
 | `/docket:cuts` | for recordings you held back, turns your words for each left-out stretch into time ranges on the transcript, writes them to a proposals file outside any repo, shows you the cuts and runs `docket hold release` on your yes; it tells you first where the transcripts it reads stay in Claude Code's session files |
+| `/docket:sync` | syncs your live sources, each in an agent of its own, then writes what they found into the ledger in one batch and goes through the list with you (below) |
 
-To sync a source, ask Claude to sync it: Claude calls `run_open`, follows the source's skill in your project, and
-closes the run with `ingest`. Allow `mcp__plugin_docket_docket__run_open` and `mcp__plugin_docket_docket__ingest` in
-your permission rules to skip the two prompts a run asks. The `sync` and `tasks` skills arrive in later phases.
+To sync a single source by hand, ask Claude to sync it: Claude calls `run_open`, follows the source's skill in your
+project, and closes the run with `ingest`. Allow `mcp__plugin_docket_docket__run_open` and
+`mcp__plugin_docket_docket__ingest` in your permission rules to skip the two prompts a run asks. The `tasks` skill
+comes next.
+
+## The sync
+
+`/docket:sync`, or `/docket:sync <source>...` for some of them, runs each live source in an agent of its own, then
+writes what they found into the ledger in one `ledger_batch` by `sync`, and goes through the list with you.
+
+| Part | What |
+|---|---|
+| the agents | one per source, side by side: each opens a run, follows the source's `SKILL.md` and its `sync.md`, classifies the plainly work or plainly private records of a mixed source, promotes its own, writes a note for each work recording, and reports what you owe and await, what closed, invites, minutes and outcomes |
+| the reconcile | one batch, dry run first: closes on a locator that shows it, asks logged or added (new ones untriaged), meetings set and linked, minutes, rollover, proposed points for the coming week's meetings, streams, archive |
+| the list | in chat: meetings and prep, today, this week, whenever, invites, waiting on others; then what changed, the sources that didn't run, what waits on the Staging page, and the batch, to undo whole |
+
+- Nothing is drafted or sent before you have gone through the list, and then only drafts: a chat's draft tool, a mail
+  left as a draft unless you say send for that mail.
+- A source's `sync.md`, beside its `SKILL.md` in your project, holds what you know about finding things there: what
+  counts as an ask and as evidence, the names its transcripts mishear, your note layout. The sync adds what it learns
+  there; copying a newer `SKILL.md` over yours leaves it alone. `docket source new` writes none.
+- Your project's `CLAUDE.md` holds the rest: how you draft and in which language, the names the ledger uses for
+  people, which stream a topic goes to, how to tell apart meetings that share a slot.
+- The agents' runs, classifies, promotions and notes and the batch ask unless your permission rules allow them. The
+  skill pre-approves only reads: `ledger`, `search`, `read`, `verify`, `briefs`, `decisions`, `docket ledger day`,
+  `docket staging list` and `show`.
+- Moving from a sync of your own: keep its name and description, so your words still reach it, and make its body one
+  line, "Run `/docket:sync` (the Skill tool) with the same arguments". Move its lore into `CLAUDE.md` and each
+  source's `sync.md`, and delete it once the plugin's sync has run a working week.
 
 To curate, allow `Bash(docket curate status *)`, `Bash(docket curate show *)` and `Bash(docket curate log *)` if you
 like: they leave the vault as it is. Leave every other `docket curate` command to ask. In auto mode Claude Code may run
