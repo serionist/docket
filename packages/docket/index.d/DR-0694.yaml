@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0694
+    title: "A forget masks the ops that anchor on its family, link to it or are built on it: an item by its source and a meeting by its event become shells, to a fixed point"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#212"]
+    description: "The rule follows the docs' (DR-0580). An op whose text holds an [r: anchor on the family, judged where it reads, or a [d: ref to a line the docs' rule drops or a doc it removes, is masked. A material whose ref reads on the family by read's rules (DR-0131), a rid, a doc or a legacy note's old path the forget takes, is masked: a recording linked to a meeting goes as its link, and the meeting stays. An item whose source, in any of its ops, reads on the family is a shell, every op of it masked. A meeting whose event, in any of its adds, the forget takes, a calendar record, is a shell with its points: DR-0650 left that meeting for the forget. What is built on a masked op is masked too, to a fixed point: a point's copies along from, an item made from a masked point, and an item whose source names a shell meeting. An item only linked to a shell meeting keeps its words, and text naming a record with no anchor is among what forget can't reach, as for docs. The forget matches against the ledger as its plan reads it; every clone's apply matches again, every op line once the list's digest moved and the lines a pull brought otherwise, so a clone's own op from before its pull is found, and one no list line names goes on an ops-only line committed with the rest, as DR-0595's keys-only line. The dry run and the --now screen count the ops and name the shells by number only, each open shell to drop."
+    binds:
+      - A shell is every op of an item whose source, or of a meeting whose event, reads on the family, and of what is built on a masked op.
+      - Only anchors and locators find an op; a record named in plain words is out of reach, and the dry run says so.
+    not_chosen:
+      - "A meeting from a forgotten calendar record keeping the owner's points and notes: its subject, people and place go anyway, and its points are about that meeting."
+      - "Hiding a shell from the day's lists in the fold: the screen names each open shell, to drop."
+      - "Matching never-store values in op text: docs aren't matched that way, and the writer refuses them when written (DR-0618)."
