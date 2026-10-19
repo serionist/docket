@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0686
+    title: /docket:sync runs each live source in an agent of its own through run_open; the agent classifies a mixed source's plain records, promotes its source and finds what the ledger needs
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#210"]
+    description: "The sources are docket ledger day --json's syncs: every live source in vault.yaml (tools listed, on, not private), or those the user names, each with its skill under .claude/skills/sources/<name>/. With the service down the sync stops and says so. One agent per source, all launched in one message, each prompted from fork.md with the source, the vault and the day. An agent reads the open items with ledger; runs its source through run_open, the source's SKILL.md and its sync.md when there is one (DR-0688), ingest and the final run, as the run's steps say; for a mixed source classifies each staged record that is plainly work or plainly private, by claude, a non-work stretch cut, an unsure one left for the Staging page; promotes its own source with docket staging promote --source, so its rids resolve and the calendar's records make their meetings (DR-0647); for a recording source writes a recording-note per work recording with doc_put, the vendor's summary and the whole transcript read, every line anchored; then finds, over what its run read and older context from search and read, the return block (DR-0687). The cursors (DR-0245, DR-0607) replace the old state file: run_open gives the window and the kept ids. Harvest files stop; the raw and the sync's summary replace them. There is no quick mode. The owed check covers the run's window, or 40 working days of the vault while the ledger holds no item."
+    binds:
+      - An agent reads its source only inside a run, so what it reports is what Docket keeps.
+      - A run that can't open or stops short leaves its mark, the other sources go on, and the summary says so.
+    not_chosen:
+      - "A quick mode that reads with no run: what it reported would not be kept, and a run already reads a day back for chat and mail."
+      - "Promoting once in the main thread after the agents: a recording's note needs its transcript in raw, and an agent checks its rids with read only once its source is promoted."
+      - "Every source in one agent: an agent holds one open run, so the sources would run one after another."
+      - "A state file of the sync's own: the cursors hold the mark, the kept ids and what is owed, on every machine."

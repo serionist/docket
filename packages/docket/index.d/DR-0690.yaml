@@ -1,0 +1,13 @@
+decisions:
+  - id: DR-0690
+    title: The sync ends with the old summary in chat and drafts nothing before the owner has gone through it
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#210"]
+    description: "The summary is read from the ledger after the write: Meetings and prep (each meeting the owner has something to do for, with its open items and open points, those proposed this run marked, and the outcomes the sync wrote), Today (due today or overdue), This week, Whenever, Invites and Waiting on others, a line each; then what changed and what the sync closed by itself, the sources that didn't run and why, the meetings rollover left with nowhere to go, the LEARNED lines written and where, the batch to undo, and the stale briefs and proposed decisions, said once. The owner answers in free text, written as one batch by user, or hands over to /docket:tasks. Nothing is drafted before that. A message is a draft: a chat's draft tool, never its send; a mail left as a draft and sent only on the owner's word for that one mail, never where the owner's own rules say drafts only. The agents stay read-only on every source."
+    binds:
+      - No message is sent without the owner's word for it, and none where their rules say drafts only.
+    not_chosen:
+      - "Harvest files or digests as a sync's record: the raw holds what was read, and the summary says what it meant."

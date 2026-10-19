@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0688
+    title: "A source may keep a sync.md beside its SKILL.md: the project's lore for finding in that source, read by the sync's agent"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#210"]
+    description: ".claude/skills/sources/<name>/sync.md, optional, holds what the owner's project knows about finding in that source beyond its route: what counts as an ask there and what as evidence, names its transcripts mishear, a recording note's layout, and LEARNED lines from earlier syncs. The source's agent reads it after SKILL.md. A LEARNED line about the route goes into SKILL.md and any other into sync.md, as an owner's old sync put route notes in the source skill and the rest in its fork prompt. SKILL.md stays the run's route (DR-0251), and copying the reference over it after an upgrade leaves sync.md alone. docket source new writes none, and a source without one gets the plugin's rules alone. The reconcile's rules stay in the plugin's sync skill. A source skill gives the sync nothing else new: its What it makes section, which every template has, is where the agent learns its rids."
+    binds:
+      - The file name sync.md beside a source's SKILL.md is a one-way door (AGENTS.md).
+      - sync.md never restates the run's steps or the return block's shape.
+    not_chosen:
+      - "A section of SKILL.md: an upgrade copies the reference's SKILL.md over the project's, which would take the lore with it, and DR-0251 keeps SKILL.md to the source's own calls."
+      - "The lore in the plugin: it is one owner's, learned on their workspaces and their people."

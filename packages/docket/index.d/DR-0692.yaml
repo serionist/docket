@@ -1,0 +1,11 @@
+decisions:
+  - id: DR-0692
+    title: At the cut-over a project's own sync and tasks skills keep their names and point at /docket:sync and /docket:tasks
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#209", "#210"]
+    description: "An owner whose project has its own sync and tasks skills keeps their names and descriptions, so their words still reach them, and replaces each body with one line: run /docket:sync, or /docket:tasks, with the same arguments, through the Skill tool. The lore in the old fork prompts moves into each source's sync.md (DR-0688), their route notes into its SKILL.md. The old skills go a week later, once the plugin's have run a working week. The plugin's README says so for anyone moving from a sync of their own."
+    not_chosen:
+      - "Deleting the old skills at once: a week of the pointers keeps the way back one edit."
