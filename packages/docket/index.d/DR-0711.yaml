@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0711
+    title: One key layer of the app's own drives the selection the panel follows, and a 5 s poll refetches in place unless the owner is mid-change
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#252"]
+    description: "The old tasks app's keys, as DR-0662 kept them: j and k move, x or Space tick, 1 to 4 the verdicts, 0 no call, e done, Delete or Backspace the drop form with its why focused, s the snooze choices with the next working day focused, u or Ctrl+Z the notice's Undo or Redo (Ctrl+Z stays a field's own undo in a field), n a new item, / the search box, Enter opens the selected row, Esc closes the panel or clears the ticks, and ? lists the keys. One keydown listener reads a registry each page fills: a key runs the command its button runs, so no key writes anything a click can't. It ignores event.repeat, keys typed in a field or with Alt or Meta, and every key while the keys switch is off; the item keys act on the ticked rows or the selected item and never on a meeting's row or panel. The ? dialog reads the same registry. One selection: the selected row is the open one, j and k carry the panel with it, and a call moves it to the row after the acted ones. Every 5 s the page asks GET /api/web/ledger/changed with the version it read (DR-0663's hash, Today's with the cursor files); a change refetches the page's reads in place, with no reload, so the selection, ticks, scroll and drafts stay. The poll holds while a field has the focus or unsaved text, a save is in flight, rows are ticked, a dialog or the new item form is open or the tab is hidden, and refetches once released; a selected item gone from the list hands the selection to the row in its place."
+    binds:
+      - A key runs the command its button runs; the item keys never act on a meeting.
+      - The poll never refetches under a focused or unsaved field, ticked rows or an open dialog.
+    not_chosen:
+      - "A key library: its scoping rules fight the field, repeat and meeting rules, which fit in one small module."
+      - "A reload on a change, as the Jinja pages do: the app refetches and keeps its state."
+      - "A push from the server: a second kind of connection for one bit."

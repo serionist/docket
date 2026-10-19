@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0709
+    title: "The app reads and writes through /api/web, the browser's own JSON routes: the session cookie only, JSON bodies only, typed from the server's models"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#252"]
+    description: "Each page has one read, GET /api/web/<page> with its URL's parameters, answering what its view builder (day_view.py, staging_view.py and the others, which do no I/O) builds today, less what was only markup, and its panel's read beside it; GET /api/web/shell gives the sidebar's counts and the footer's line. Each write moves to POST /api/web/<page>/<verb>, a JSON body in and a JSON answer out in place of a 303: the day pages' write, save and open, Staging's classify and promote, Curate's round, decide, undo and lift, Settings' never-store (its question, then the add), redaction and source, and the Briefs page's decision; the Recording page's audio keeps its byte ranges at /api/web/recording/audio. The routes take the session cookie only and refuse a request with an Authorization header, so a write via page is the browser's; a write takes Content-Type: application/json only, else 415, so no form from anywhere can post one, and every write still passes the Guard's Origin and Sec-Fetch-Site checks (DR-0152). A refusal answers 400 with the writer's words, and anything unexpected 500 with no detail, logged as its type and frames. The routes' Pydantic models are the contract: uv run devkit web-schema writes their OpenAPI document to packages/docket/web/openapi.json, the quick gate checks it is current, and the build makes the TypeScript types from it with openapi-typescript and calls the routes through openapi-fetch. /api is Docket's own until the first release, so none of this is a door; the ledger's reads answer LedgerRead, which already is one (DR-0660)."
+    binds:
+      - /api/web takes the session cookie only, and a write only a JSON body.
+      - "A page writes through the same calls as before, on the writer thread: store.write by user via page, the gate's calls, vault.yaml's writer, DocStore.decide."
+    not_chosen:
+      - "The MCP tools from the browser: /mcp takes only the bearer token, and the token never reaches a page."
+      - "The ledger tool's reads grouped in the browser: the groups and their order are tested in Python (DR-0666), and a page would fetch every row."
+      - "A CSRF token: SameSite=Strict, the Origin checks and JSON-only bodies already refuse a cross-site write."

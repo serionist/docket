@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0712
+    title: The app is tested by Vitest, by JSON tests in Python and by Python's Playwright in Chrome with axe, and each page goes through at most four screenshot rounds
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#252"]
+    supersedes: [DR-0179]
+    description: "Vitest 5 in jsdom with Testing Library tests the key layer, the selection, the bulk rule, the save states, the leave guard, the poll's hold, the notice and the tokens' contrast. The /api/web routes are tested in Python through Starlette's TestClient on the invented vaults, the render tests' assertions ported to the answers. The pages are tested by Python's Playwright driving the real service in the runner's own Chrome, nothing downloaded (DOCKET_TEST_BROWSER=chrome), one file per page, so the shard plugin splits them by their recorded times into Browser (Linux) shares of at most 5 minutes (DR-0698). A browser test fails on a console error or a CSP violation, and axe-core, a test dependency never shipped, runs over each page's states in light and dark with the a11y suite's rules: names, headings, landmarks, focus visible. The perf ledger holds DR-0668's budgets on the JSON reads and writes, and in Chrome a page opened from the sidebar shows its rows with its keys live within 0.25 s, warm, best of three; the first page's script stays under 250 KB gzipped, which the web job checks. Every page and shared component is designed with the frontend-design skill and goes through the screenshot loop: uv run devkit ui <page> seeds an invented world, starts a throwaway service on a free port with config and state folders of its own and a file token, never the owner's service, port or folders, drives the built app in Chrome with the clock, zone and motion fixed, and writes each state's shots, light and dark at 1440x900 and 390x844, with the machine checks to .local/ui/<page>/r<n>/. The builder critiques them: the page's spec first, then hierarchy at a glance, density, both themes, the narrow width and the words. The machine checks block every round; there are at most 4 rounds, fewer when one finds only polish, and what is left is named in the PR."
+    binds:
+      - Each page lands with its JSON tests, its browser tests, axe in both themes and its screenshot rounds.
+      - A browser test fails on any console error or CSP violation.
+    not_chosen:
+      - "@playwright/test in TypeScript: the invented vaults, the throwaway service and the CLI's writes are Python's, and the shard plugin already splits pytest files."
+      - "Pixel-diff baselines: the pages change with every PR for weeks; the rounds' critique and the machine checks carry it."
+      - "More than 4 rounds a page: the maintainer's cap."

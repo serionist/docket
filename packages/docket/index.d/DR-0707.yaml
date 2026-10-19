@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0707
+    title: The design tokens are light-dark() pairs under Tailwind v4's @theme, a ledger's palette in Atkinson Hyperlegible Next, dense by default
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#252"]
+    supersedes: [DR-0173]
+    description: "tokens.css holds every colour as a light-dark() pair on :root, so a theme is only a color-scheme: the system's, or light or dark from docket_theme as data-theme; shadcn's variable names (background, card, primary, border, ring, destructive, sidebar) map onto them, and its dark: classes follow the same switch through one custom variant. The palette is a ledger's, light and dark: paper for the ground (#F4F6F1, #121612), a white sheet for the list and panel (#FFFFFF, #1A1F1A), blue-black ink (#1B2330, #E4E9E1), green rules (#D3DACD, #2E372E), ledger green for the selection, focus and the main button (#2C6A4E, #80C6A1) and red ink for overdue, drop and errors (#B0281F, #F08A80). The four verdicts are stamps in inks of their own, discuss blue, claude violet, me ochre and chase magenta: the one bold thing on a page. Type is Atkinson Hyperlegible Next with Latin Extended, for Hungarian's long accents, and its Mono for locators and paths only, both OFL-1.1 from Fontsource, on Bringhurst's scale: 12 px for meta, 14 for the UI, 16 for the panel's text, 18 for its title, 21 for a page's; weights 400 and 600, tabular figures in lists, no capitals for labels. Density: a 4 px grid, rows of 32 px, 44 px on a coarse pointer. Radius by role: 4 px controls and stamps, 8 px popovers and menus, 12 px dialogs, none on rows, which are ruled, not carded. Text contrasts 4.5:1 and borders, the focus ring and icons 3:1 on paper, sheet and the selection in both themes, which a Vitest test checks over tokens.css; the first screenshot rounds may move a value, and the test holds the floor. The Jinja pages keep their own CSS until they go."
+    binds:
+      - Every colour is a token pair in tokens.css; components use tokens, never raw colours.
+      - Text 4.5:1, borders, the focus ring and icons 3:1, in both themes, held by a test.
+    not_chosen:
+      - "shadcn's neutral defaults with Inter or Geist: the look of every other app."
+      - "A token block per theme: every colour written twice."
+      - "oklch values: the contrast test reads hex, and the pairs are few."

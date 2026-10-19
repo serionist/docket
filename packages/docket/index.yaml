@@ -812,11 +812,12 @@ decisions:
       - "localStorage for the theme: a first paint in the wrong theme."
   - id: DR-0173
     title: The CSS is hand-written in cascade layers with light-dark() tokens, for browsers from mid-2024
-    status: proposed
+    status: superseded
     at: "2026-10-15"
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#9"]
+    superseded_by: [DR-0707]
     description: "Four files under static/css (tokens, base, components, search) in the layers reset, tokens, base, components and pages. Every colour is a light-dark() pair, so a theme is only a color-scheme: the system's, or light or dark from the docket_theme cookie the server renders as data-theme. No preprocessor, no build, no prefixes or polyfills. Text contrasts at least 4.5:1, and borders, the focus ring and icons 3:1, in both themes, which a test checks over the tokens."
     not_chosen:
       - "Sass or Tailwind: a build step DR-0016 rules out."
@@ -877,11 +878,12 @@ decisions:
     not_chosen: ["docket open alone: the user lands on Search and finds the page again by hand."]
   - id: DR-0179
     title: The web app is tested over HTTP, plus one browser smoke test in CI
-    status: proposed
+    status: superseded
     at: "2026-10-15"
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#9"]
+    superseded_by: [DR-0712]
     description: Render tests drive every route and state through Starlette's TestClient on the index fixture vault and parse the HTML with the standard library; an HTML check and the structural accessibility rules run over every state, and a test checks the tokens' contrast. One Playwright test drives the real service in the runner's own Chrome in a Linux CI job (DOCKET_TEST_BROWSER=chrome), with no browser downloaded; with the variable set, a browser that can't start fails it, and without it the test skips and says so.
     not_chosen:
       - "No browser test: CSP and htmx failures show only in a browser."
