@@ -2,8 +2,9 @@
 `load` in under a second and a half; all of it folded into the index's tables in under two seconds; one op more, on an
 item or a meeting, as a write leaves it, read into them in a tenth of a second; a write touching one meeting planned in
 a tenth of a second, reading only its part (DR-0616, DR-0628, DR-0633, DR-0635); a snapshot of it, every item open,
-read from the tables with its lines in a tenth of a second (DR-0638); and the day's route on a vault holding it in half
-a second (DR-0672).
+read from the tables with its lines in a tenth of a second (DR-0638); the day's route on a vault holding it in
+half a second (DR-0672); and all of it as `docket ledger show --all --json` gives it, stamped, with its JSON, in
+under two seconds (DR-0659).
 
 The ops are written as the writer writes them, a month file per machine, each item an add and nine changes, each
 meeting four points answered and a point rolled from the meeting before it in its weekly series of fifty. Wall time
@@ -14,6 +15,7 @@ reading a file new to it on its first open isn't timed.
 from __future__ import annotations
 
 import functools
+import json
 import os
 import sqlite3
 import time
@@ -31,7 +33,7 @@ from docket.index import build as index_build
 from docket.index import ledger as ledger_index
 from docket.index.ledger import Held
 from docket.index.schema import LEDGER_TABLES
-from docket.ledger import load, ops, store, views
+from docket.ledger import load, ops, store, views, whole
 from docket.ledger.ops import Op
 from docket.service.app import create_app
 from docket.service.state import Settings
@@ -47,6 +49,7 @@ CATCH_UP_SECONDS = 0.1
 WRITE_SECONDS = 0.1
 SNAPSHOT_SECONDS = 0.1
 DAY_SECONDS = 0.5
+SHOW_ALL_SECONDS = 2.0
 CHANGES = ("log", "triage", "set", "log", "snooze", "triage", "log", "done", "reopen")
 
 
@@ -323,3 +326,26 @@ def test_the_day_s_route_on_a_vault_holding_a_ledger_that_size_answers_in_half_a
     assert len(answer.json()["lines"]) <= 43
     if not traced():
         assert asked.seconds < DAY_SECONDS, f"the day's route took {asked.seconds:.2f} s, over {DAY_SECONDS} s"
+
+
+@pytest.mark.perf
+def test_the_whole_ledger_shows_with_its_stamp_as_json_in_under_two_seconds(tmp_path: Path) -> None:
+    """Every item and meeting as show gives it, from the index's tables brought up to date, stamped under the vault's
+    lock, and the JSON the command prints: what an owner's mirror waits for. Read once before the clock starts."""
+    vault = empty_vault(tmp_path, make_config())
+    build(vault.root)
+    index_build.rebuild(vault)
+    at = datetime(2026, 6, 1, 8, tzinfo=UTC)
+
+    def shown() -> str:
+        return whole.as_json(whole.read(vault, at))
+
+    shown()
+    run = best_of(3, shown)
+    found = json.loads(run.result)
+    print(f"ledger show --all --json: {run.seconds:.2f} s ({run.runs()}), {len(run.result) / 1e6:.1f} MB")
+    assert (len(found["items"]), len(found["meetings"]), found["streams"]) == (ITEMS, MEETINGS, [])
+    assert sum(len(m["points"]) for m in found["meetings"]) == MEETINGS * 5
+    assert len(found["stamp"]["files"]) == len(ops.listing(vault.root)[0])
+    if not traced():
+        assert run.seconds < SHOW_ALL_SECONDS, f"show --all took {run.seconds:.2f} s, over {SHOW_ALL_SECONDS} s"

@@ -11,6 +11,7 @@ folded into their state and history (#198, #199, #200, #201, #202, #207).
 | `views` | the `ledger` tool's reads: snapshot, show, queue, list, meetings and suggest (DR-0638, DR-0660) |
 | `calendar` | meetings from calendar records: the step after a promotion and the catch-up (DR-0646 to DR-0652) |
 | `imports` | a ledger brought in with its history from an export's op lines; its dry run (DR-0653 to DR-0656) |
+| `whole` | `show --all --json`: every object as show gives it, stamped under the vault lock (DR-0659, DR-0684) |
 | `check` | what `docket vault check` says about the ledger (DR-0617) |
 | `status` | each stream's STATUS.md frontmatter, rendered after a write and by `docket render` (DR-0673 to DR-0675) |
 | `day` | the owner's day at the session start and in `docket ledger day`, from one snapshot read (DR-0670 to DR-0672) |

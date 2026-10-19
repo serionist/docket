@@ -39,6 +39,9 @@ Unreleased in the same PR.
   number kept. `--dry-run` counts what it brings and names the sources it can't resolve and the old meetings `docket
   ledger calendar` joins after it; a rerun adds nothing twice; `--revert` takes every op out again, for until the
   switch.
+- `docket ledger show --all --json` gives every item, meeting and stream, archived ones too, each as `docket ledger
+  show` gives it, with the op files' stamp and the vault lock's file: what a script of your own, such as a mirror of
+  the ledger you came from, renders from and checks against.
 
 - Slack, Teams, Outlook mail and the calendar ship as example sources beside Plaud, in `examples/sources/`:
   `docket source new <name> --example` copies one into your project with its sensitivity, tools and lookback. Slack
