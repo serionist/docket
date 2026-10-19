@@ -55,8 +55,8 @@ INSERT_NUMBER = _insert("item_numbers", ("number", "item", "claim", "hidden"))
 INSERT_FILE = _insert("ledger_files", ("path", "size", "mtime_ns", "sha256", "highest"), "INSERT OR REPLACE")
 # Each number given to the item whose claim of it sorts first among the items that stand, as the fold gives it.
 ASSIGN = (
-    "UPDATE items SET number = CASE WHEN id = (SELECT item FROM item_numbers WHERE number = ?1 AND hidden = 0 "
-    "ORDER BY claim, item LIMIT 1) THEN claimed END WHERE claimed = ?1"
+    "UPDATE items SET number = CASE WHEN id = (SELECT item FROM item_numbers WHERE number = ? AND hidden = 0 "
+    "ORDER BY claim, item LIMIT 1) THEN claimed END WHERE claimed = ?"
 )
 
 
@@ -229,7 +229,7 @@ def refold(conn: sqlite3.Connection, fresh: Iterable[Line]) -> None:
         numbers.update(n for _, n in folded.claims)
         rows.add(item_id, lines.values(), folded, None)
     rows.write(conn)
-    conn.executemany(ASSIGN, [(n,) for n in sorted(numbers)])
+    conn.executemany(ASSIGN, [(n, n) for n in sorted(numbers)])
 
 
 # -- asking -------------------------------------------------------------------------------------------------------
