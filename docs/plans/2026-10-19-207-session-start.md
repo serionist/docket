@@ -1,16 +1,17 @@
 ---
 title: Show the day at session start, and render each stream's STATUS.md
 issue: "#207, #208"
-status: draft
-approved_by:
-approved_at:
+status: approved
+approved_by: claude (autonomy grant)
+approved_at: 2026-10-19
 ---
 
 # Show the day at session start, and render each stream's STATUS.md
 
 `docket hook session-start` gains the owner's day, todo.py's dashboard read from the ledger through the service, in
 at most 45 lines; he sees only a due sync and a hand-edited status file. Each stream `vault.yaml`'s `rendered` names
-gets its STATUS.md frontmatter written from the ledger after every write to it, the body his. Two PRs, the day first.
+gets its STATUS.md frontmatter written from the ledger after every write to it, the body his. Two PRs, STATUS.md
+first: the order was swapped after approval (Steps).
 
 ## Goal
 
@@ -19,7 +20,7 @@ gets its STATUS.md frontmatter written from the ledger after every write to it, 
 
 ## Design
 
-### The day (PR 1, DR-0670 to DR-0672)
+### The day (PR 2, DR-0670 to DR-0672)
 
 `ledger/day.py` builds a `Day` from one `snapshot` read (#201's views, today to the next working day) and the Sync
 page's due rule (DR-0304), moved beside the cursors. `GET /api/day` gives its lines; the hook prints them after the
@@ -40,14 +41,15 @@ status lines. The Today page renders the same `Day`: whichever lands first adds 
   and tasks, invites and waiting, as todo.py's `shown` set; queue rows and a meeting's items may repeat it. A last
   line names the `ledger` tool and the skills. Past 45 lines with the status lines, sections give rows back in the cut
   order, each keeping its count and the read that lists it; the rows never cut pass 45 only on an extreme day.
-- Claude gets every line, the owner the due sync and from PR 2 a hand-edited file (DR-0163), every start, resume, clear
-  and compact (DR-0161). In full when the session's project folder (`CLAUDE_PROJECT_DIR`) sits in the vault's repo, the
-  first folder above the vault holding `.git` (a stat); else a line of counts, amending DR-0163's counts and paths.
+- Claude gets every line, the owner the due sync and a hand-edited status file (DR-0163), every start, resume, clear
+  and compact (DR-0161). In full when the project's own top folder, the first at or above `CLAUDE_PROJECT_DIR` holding
+  `.git`, is the vault's repo, the first folder above the vault holding one (a stat each), so a separate repo nested
+  in the vault's gets counts; else a line of counts, amending DR-0163's counts and paths.
 - Speed: at most 0.3 s more per start at the median on the maintainer's Windows machine; the route half a second over
   DR-0635's perf ledger; a busy index a second, then a fold (DR-0619). The hook waits 3 s, 8 s at worst with the
   status call, under its 15; slow or down, one line names the read that works, and the hook never folds.
 
-### STATUS.md (PR 2, DR-0673 to DR-0675)
+### STATUS.md (PR 1, DR-0673 to DR-0676)
 
 `rendered` (DR-0552) takes a third kind: `{kind: status, stream: pilot, path: projects/pilot/STATUS.md}`. `stream` is
 needed by it and refused by the others, one entry a stream, the path rules as DR-0552. Naming it in a committed
@@ -82,32 +84,38 @@ a stream with `where` and `next` set.
 
 ## Doors and data
 
-- One-way, in PR 2's title and AGENTS.md's door list: the `status` kind and its `stream` (DR-0673); the frontmatter's
+- One-way, in PR 1's title and AGENTS.md's door list: the `status` kind and its `stream` (DR-0673); the frontmatter's
   fields, order, scalars, comment line and what its hash covers, the body never written (DR-0674).
-- `medium`: the render (DR-0675). `cheap`: the day, where it shows, its budget (DR-0670 to DR-0672). Not doors:
+- `medium`: the render (DR-0675). `cheap`: the repo and remotes found without git (DR-0676); the day, where it shows,
+  its budget (DR-0670 to DR-0672). Not doors:
   `/api/day`, `docket ledger day`, the words, the cap; `BatchResult.rendered` adds a field.
 - Data: none moves. A `status` entry needs this Docket on every machine; the take-over waits for the import (#202).
 
 ## Steps
 
-1. PR 1, "Show the day at session start", after #201's PR 2: the due rule; `ledger/day.py`; `GET /api/day`; the
-   hook; `docket ledger day`. Proved by `test_ledger_day.py` and `test_hooks_day.py`.
-2. PR 2, "Render each stream's STATUS.md (one-way door)": the kind; `ledger/status.py`; the render at the end of
-   `store.write`; `docket render`; the check; the day's line. Proved by `test_status_render.py`.
+1. PR 1, "Render each stream's STATUS.md (one-way door)": the kind; `ledger/status.py`; the render at the end of
+   `store.write`; `docket render`; the check. Proved by `test_status_render.py`.
+2. PR 2, "Show the day at session start", once #201's PR 2 (#222) merges: the due rule; `ledger/day.py`;
+   `GET /api/day`; the hook, with its line per hand-edited status file; `docket ledger day`. Proved by
+   `test_ledger_day.py` and `test_hooks_day.py`.
+
+Swapped after approval: STATUS.md needs nothing of #222, so it goes first, and the day's line for a hand-edited
+status file moves into the day's PR. The STATUS.md PR leaves the hook alone.
 
 ## Tests
 
-- PR 1, invented people: each section, order, cap and cut; an overdue item also queued and on a meeting; meetings after
-  now and the next working day's (Friday gives Monday), cancelled and declined out; due snoozes; two machines' sync
-  marks; the hook on a fake service down, slow, in the vault's repo, above it, elsewhere; the route's perf.
-- PR 2: each render row, a key added, `updated` alone differing; `status` without `stream`, a stream twice; CRLF and
+- PR 1: each render row, a key added, `updated` alone differing; `status` without `stream`, a stream twice; CRLF and
   a BOM kept; a change before the rename, another render's too; a public remote; golden bytes; a write's render and a
-  failed one; the check, a stale file; the day.
+  failed one; the check, a stale file.
+- PR 2, invented people: each section, order, cap and cut; an overdue item also queued and on a meeting; meetings after
+  now and the next working day's (Friday gives Monday), cancelled and declined out; due snoozes; two machines' sync
+  marks; the hook on a fake service down, slow, in the vault's repo, above it, in a repo nested in it, elsewhere; a
+  hand-edited status file's line; the route's perf.
 
 ## Docs
 
 `docs/design.md`'s Tasks, vault and Claude first sections and its status-hook row, and `hooks.py`'s docstring (DR-0163
-amended); AGENTS.md's doors; the READMEs; CHANGELOG; DR-0670 to 0675.
+amended); AGENTS.md's doors; the READMEs; CHANGELOG; DR-0670 to 0676.
 
 ## Risks
 
@@ -127,3 +135,16 @@ Round 1, at `1d6a205`: changes needed, P1 a major. All eleven fixed in this revi
 - P3 to P7: the take-over's five fields, as stored; the hash over every frontmatter line but its own; a broken one
   left; a render racing another renders once more; the check names a stale file, the editor risk corrected.
 - P8, P9, P11: due snoozes' wording; the last cuts named; todo.py's `check` claim qualified, with a Risks row.
+
+Round 2, at `7aaccfd`: approved; one minor fixed in place. P12: the full day only when the project's own top folder,
+the first at or above it holding `.git`, is the vault's repo, so a separate repo nested in it gets the counts line
+(DR-0671).
+
+## PR 1, as built
+
+| Planned | Built |
+|---|---|
+| the render after a write reads the stream | from the write's own fold while the op files are as its commit left them, else the ledger as it stands, so a render that runs late never puts back an older state (DR-0675) |
+| `vault/rendered.py` shares the checks, the probe and the write | and finds the consuming repo by a stat and keeps its remote URLs while `.git/config` stays: four git processes a render, about 150 ms on Windows, would pass a write's budget (DR-0676); a write's render now takes about 5 ms |
+| a change before the rename is left | `write_replacing` asks a check of the caller's right before its rename, so the file is read again there |
+| the check names a missing stream, a hand edit, a stale file | and a file not rendered yet, absent or one the render would take over: `not rendered yet; docket render` (DR-0675) |
