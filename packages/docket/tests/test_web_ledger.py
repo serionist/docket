@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from day_kit import CHAT, LINK, PLAN, SAME, ZONE, day, day_vault, hidden, signed_in, today
-from docket_testkit import empty_vault, make_config
+from docket_testkit import commit_config, empty_vault, make_config
 from docket_webkit import OURS, PORT, TOKEN, a11y_problems, html_problems, parse
 from ledger_kit import ADD_FIELDS, op, ulid, write_ops
 from starlette.testclient import TestClient
@@ -27,6 +27,7 @@ from docket.ledger.store import LedgerError
 from docket.service.app import create_app
 from docket.service.sessions import COOKIE, Sessions
 from docket.service.state import Settings
+from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.vault import Vault
 from docket.web import day as day_routes
 from docket.web import day_view
@@ -562,6 +563,38 @@ def test_a_new_item_opens_and_a_look_alike_asks_first(client: TestClient, vault:
     forced = post(client, {**form, **alike, "force": "true", "fields.source": LINK})
     assert back(forced)["open"] == ["A-0009"]
     assert ops(vault)[-1]["fields"]["source"] == LINK
+
+
+def test_a_pointer_into_a_never_store_container_is_refused_naming_the_field(client: TestClient, vault: Vault) -> None:
+    """A new item's source or a material's ref in a container the never-store list names is the writer's refusal on
+    the page: its words, naming the field and never the value, the text kept as typed and nothing written. A material
+    already there still comes off, since a removal adds no pointer (DR-0661, DR-0690)."""
+    listed = "slack:D0PRIVATE/1791000005.000100"
+    write(vault, {"op": "material", "item": "A-0004", "ref": listed, "label": "the thread"})
+    path = vault.root / CONFIG_FILE
+    config = VaultConfig.load(path)
+    config.never_store.containers = ["D0PRIVATE"]
+    path.write_text(config.dump(), encoding="utf-8", newline="\n")
+    commit_config(vault.root)
+    before = len(ops(vault))
+    source = f"r:{listed}#2"
+    new = {**hidden(page(client), "new-form"), "fields.title": "Answer the thread", "fields.who": "Ada Example",
+           "fields.kind": "reply", "fields.source": source}  # fmt: skip
+    refused = post(client, new)
+    assert refused.status_code == 400
+    assert texts(refused.text, "notice")[0] == "source points into a never-store container; leave it out"
+    assert parse(refused.text).find("input", name="fields.source").attrs["value"] == source
+    html = page(client, "/ledger?open=A-0004")
+    material = {**hidden(html, "material-add"), "ref": "slack:D0PRIVATE/1791000006.000100", "label": "the reply"}
+    refused = post(client, material)
+    assert refused.status_code == 400
+    assert texts(refused.text, "notice")[0] == "ref points into a never-store container; leave it out"
+    typed = parse(refused.text).find("form", class_="material-add").find("input", name="ref")
+    assert typed.attrs["value"] == material["ref"]
+    assert len(ops(vault)) == before
+    removed = post(client, hidden(html, "material-remove"))
+    assert back(removed)["open"] == ["A-0004"]
+    assert (ops(vault)[-1]["ref"], ops(vault)[-1]["remove"]) == (listed, True)
 
 
 def test_the_notice_undoes_the_batch_and_then_redoes_it(client: TestClient) -> None:
