@@ -15,13 +15,13 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from docket_testkit import empty_vault, make_config, make_record
-from ledger_kit import ADD_FIELDS, fresh_tables, meeting, op, point, point_set, ulid, write_ops
+from ledger_kit import ADD_FIELDS, fresh_tables, meeting, op, point, point_set, roll, ulid, write_ops
 
 from docket.cli import main
 from docket.errors import DocketError
 from docket.index import ledger as ledger_index
 from docket.index import rebuild
-from docket.ledger import ops, views
+from docket.ledger import load, ops, views
 from docket.ledger.ops import Op
 from docket.ledger.views import Ask, LedgerRead
 from docket.vault.records import version
@@ -77,7 +77,7 @@ def seed() -> list[Op]:
         meeting(35, number=5, subject="Vendor call", start="2026-10-22T14:00+02:00", end="2026-10-22T15:00+02:00",
                 response="declined"),
         op("stream", 40, fields={"name": "pilot", "status": "active", "next": "Book the room", "deadline": "2026-10-30",
-                                 "where": "projects/pilot/"}),
+                                 "where": "Waiting on the venue"}),
         op("stream", 41, fields={"name": "ops", "status": "waiting"}),
     ]  # fmt: skip
 
@@ -138,7 +138,7 @@ def test_a_snapshot_gives_the_open_items_with_sources_the_window_s_meetings_with
         "M-0005 10-22 14:00-15:00 Vendor call (declined)",
         "streams",
         "ops waiting",
-        "pilot active; next: Book the room; deadline 10-30; where projects/pilot/",
+        "pilot active; where: Waiting on the venue; next: Book the room; deadline 10-30",
     ]  # fmt: skip
     first = found.items[0]
     assert (first.ref, first.id, first.meeting, first.days, first.late, first.triage) == (
@@ -179,6 +179,7 @@ def test_list_counts_every_match_then_gives_the_first_k(conn: sqlite3.Connection
         "A-0004 [decision] Ada Example: Pick the vendor (17d, done 10-18, archived) [pilot]",
         "A-0001 [reply] Ada Example: Send Ada the dates (10d, due 10-18, 2d late) [pilot] @M-0001 <chase>",
     ]
+    # No k is no cap, as --json and the pages read list.
     assert len(ask(conn, "list", state="all", k=None).items) == every.counts.items == 6
     assert views.lines(ask(conn, "list", state="dropped"), TZ) == [
         "1 item: 0 open, 0 snoozed, 0 done, 1 dropped; 0 overdue; chased 0 items, 0 times",
@@ -189,13 +190,14 @@ def test_list_counts_every_match_then_gives_the_first_k(conn: sqlite3.Connection
 @pytest.mark.parametrize(
     ("keys", "numbers"),
     [
-        ({}, [1, 2, 3, 6]),
+        # Open now: A-0002 sleeps until 10-25, so it is snoozed, not open.
+        ({}, [1, 3, 6]),
         ({"state": "snoozed"}, [2]),
         ({"state": "done"}, [4]),
         ({"who": "ADA", "state": "all"}, [4, 1, 6]),
-        ({"who": " ben "}, [2]),
+        ({"who": " ben ", "state": "snoozed"}, [2]),
         ({"stream": "ops"}, [3]),
-        ({"kind": "waiting"}, [2]),
+        ({"kind": "waiting", "state": "all"}, [2]),
         ({"state": "all", "since": "2026-10-05"}, [1, 2, 3, 5, 6]),
         ({"state": "all", "until": "2026-10-10"}, [4, 1]),
         # A time is the owner's day it falls on: 23:30 UTC on the 10th is the 11th in Budapest.
@@ -254,6 +256,134 @@ def test_counts_come_from_the_ops_that_stand_never_from_the_log_s_words(tmp_path
         "counts       done after 6 days; chased 0 times, snoozed 1 time, due moved 0 times, reopened 1 time"
     )
     assert "median 3 days to done" in said(conn, "list", state="all")[0]
+
+
+# An op line by hand, before its own keys.
+HEAD = (
+    '{{"schema_version":1,"id":"{id}","item":"{item}","op":"{kind}","day":"2026-10-18","machine":"desk","by":"user",'
+    '"via":"cli"'
+)
+
+
+@pytest.mark.parametrize(
+    ("kind", "tail"),
+    [
+        # A chase or a due spelt with an escape.
+        ("triage", ',"verdict":"\\u0063hase"}'),
+        ("triage", ',"verdict":"cha\\u0073e"}'),
+        ("set", ',"fields":{"\\u0064ue":"2026-10-30"}}'),
+        # An object inside the op, with a verdict or a due of its own.
+        ("triage", ',"extra":{"verdict":"chase"},"verdict":"me"}'),
+        ("set", ',"fields":{"later":{"due":"x"},"title":"t"}}'),
+        # A key given twice, the last one winning.
+        ("triage", ',"verdict":"chase","verdict":"me"}'),
+        ("triage", ',"verdict":"me","verdict":"chase"}'),
+        ("set", ',"fields":{"due":"2026-10-30"},"fields":{"title":"t"}}'),
+        # A due beside the fields, which the op leaves alone.
+        ("set", ',"due":"2026-10-30","fields":{"title":"t"}}'),
+        ("set", ',"fields":{"title":"t"},"due":"2026-10-30"}'),
+        # Spaced as JSON allows.
+        ("triage", ',"verdict":\t"chase"}'),
+        # As the writer writes them.
+        ("triage", ',"verdict":"chase"}'),
+        ("set", ',"fields":{"due":"2026-10-30"}}'),
+    ],
+)
+def test_counts_read_a_line_whole_wherever_its_text_could_mislead(tmp_path: Path, kind: str, tail: str) -> None:
+    """A valid line written by hand counts as the fold reads it, whatever its text says (DR-0660)."""
+    add = op("add", 1)
+    path = tmp_path / ops.rel_of(add)
+    path.parent.mkdir(parents=True)
+    line = HEAD.format(id=ulid(2), item=ulid(1), kind=kind) + tail
+    path.write_text(f"{add.text()}\n{line}\n", encoding="utf-8", newline="\n")
+    read = [e.op for e in load(tmp_path).items[ulid(1)].log if e.op.id == ulid(2) and e.undone_by is None]
+    want = (
+        sum(1 for o in read if o.op == "triage" and o.verdict == "chase"), 0,
+        sum(1 for o in read if o.op == "set" and "due" in (o.fields or {})), 0,
+    )  # fmt: skip
+    conn = fresh_tables()
+    ledger_index.rebuild(conn, tmp_path)
+    detail = views.read(conn, Ask(view="show", ref="A-1"), TZ, AT).detail
+    assert detail is not None
+    assert (detail.chased, detail.snoozes, detail.due_moves, detail.reopens) == want
+
+
+def test_a_snooze_whose_day_has_come_is_open_again_in_every_read(tmp_path: Path) -> None:
+    """As todo.py showed it: a snooze until today or before is open, untriaged in the queue, counted open, and marked
+    woke so a page can group it; snoozed means still asleep (DR-0660)."""
+    sunday = datetime(2026, 10, 25, 8, tzinfo=UTC)
+    made = [
+        item(1, 1, title="Snoozed till Thursday"), op("snooze", 2, 1, until=date(2026, 10, 22)),
+        item(3, 2, title="Snoozed till today"), op("snooze", 4, 3, until=date(2026, 10, 25)),
+        item(5, 3, title="Asleep till Tuesday"), op("snooze", 6, 5, until=date(2026, 10, 27)),
+        item(7, 4, title="Mine"), op("triage", 8, 7, verdict="me"),
+    ]  # fmt: skip
+    conn = tables_of(tmp_path, made)
+
+    def read(view: str, **keys: Any) -> LedgerRead:
+        return views.read(conn, Ask(view=view, **keys), TZ, sunday)
+
+    queue = read("queue")
+    assert [(i.number, i.woke) for i in queue.items] == [(1, True), (2, True), (4, False)]
+    assert views.lines(queue, TZ)[:4] == [
+        "3 open (2 snoozes ended): 2 untriaged, 1 me",
+        "untriaged",
+        "  A-0001 [reply] Ada Example: Snoozed till Thursday (7d, snooze ended 10-22) [pilot]",
+        "  A-0002 [reply] Ada Example: Snoozed till today (7d, snooze ended 10-25) [pilot]",
+    ]
+    assert [i.number for i in read("list").items] == [1, 2, 4]
+    assert [i.number for i in read("list", state="snoozed").items] == [3]
+    snapshot = read("snapshot")
+    assert (snapshot.counts.open, snapshot.counts.woke, snapshot.counts.snoozed) == (3, 2, 1)
+    assert views.lines(snapshot, TZ)[0] == (
+        "3 open (2 snoozes ended), 1 snoozed, 0 overdue; 0 meetings, 0 points open; 0 streams"
+    )
+    assert (
+        views.lines(snapshot, TZ)[4]
+        == f"A-0003 [reply] Ada Example: Asleep till Tuesday (7d, snoozed to 10-27) [pilot] src {SOURCE}"
+    )
+    assert views.lines(read("show", ref="A-1"), TZ)[3] == "state        snooze ended on 2026-10-22, open again"
+    assert read("list", state="all").model_dump(mode="json")["items"][0]["woke"] is True
+
+
+def test_an_archived_meeting_stays_out_of_the_snapshot_even_in_its_window(tmp_path: Path) -> None:
+    """DR-0622: an archived meeting is done with; the meetings view still lists it, marked."""
+    made = [
+        meeting(1, subject="Cancelled vendor call", start="2026-10-21T10:00+02:00", end="2026-10-21T11:00+02:00",
+                response="cancelled"),
+        op("archive", 2, 1),
+        meeting(3, number=2, subject="Pilot sync"),
+    ]  # fmt: skip
+    conn = tables_of(tmp_path, made)
+    assert [m.subject for m in views.read(conn, Ask(), TZ, AT).meetings] == ["Pilot sync"]
+    assert views.lines(views.read(conn, Ask(view="meetings"), TZ, AT), TZ)[1:] == [
+        "M-0001 10-21 10:00-11:00 Cancelled vendor call (cancelled); archived",
+    ]
+
+
+def test_a_rolled_point_names_the_meeting_it_went_to_and_its_copy_the_one_it_came_from(tmp_path: Path) -> None:
+    """A roll's ends by meeting ref, so the Meetings page can link them; an import that named the meeting, not the
+    point, names it too; a point no roll touched has neither (DR-0660)."""
+    made = [
+        meeting(1, subject="Sync one", start="2026-10-19T09:00+02:00", end="2026-10-19T09:30+02:00"),
+        point(2, 1, "The pilot's dates"),
+        point(3, 1, "The budget"),
+        meeting(4, number=2, subject="Sync two", start="2026-10-26T09:00+01:00", end="2026-10-26T09:30+01:00"),
+        *roll(5, 1, 2, 4),
+        meeting(7, number=3, subject="Imported", start="2026-10-22T09:00+02:00", end="2026-10-22T09:30+02:00"),
+        point(8, 7, "From the old ledger", **{"from": ulid(1)}),
+    ]  # fmt: skip
+    found = views.read(tables_of(tmp_path, made), Ask(), TZ, AT)
+    assert [(p.ref, p.state, p.from_, p.to) for p in found.points] == [
+        ("M-0001#1", "rolled", None, "M-0002"),
+        ("M-0001#2", "open", None, None),
+        ("M-0003#1", "open", "M-0001", None),
+        ("M-0002#1", "open", "M-0001", None),
+    ]
+    lines = views.lines(found, TZ)
+    assert f"  #1 rolled The pilot's dates (to M-0002) {ulid(2)}" in lines
+    assert f"  #1 open The pilot's dates (from M-0001) {ulid(5)}" in lines
+    assert found.model_dump(mode="json")["points"][2]["from"] == "M-0001"
 
 
 def test_meetings_overlap_their_window_today_to_six_days_on_by_default(conn: sqlite3.Connection) -> None:
@@ -318,8 +448,9 @@ def test_a_window_says_its_times_and_a_meeting_of_no_length_at_its_start_is_in_i
 @pytest.mark.parametrize(
     ("keys", "why"),
     [
-        ({"until": "2026-10-19"}, "until is before since: the window is empty"),
-        ({"since": "2026-10-21T10:00", "until": "2026-10-21T10:00"}, "until is before since"),
+        # since defaulted to today, and the message says so.
+        ({"until": "2026-10-19"}, "until is before since, 2026-10-20 by default: the window is empty"),
+        ({"since": "2026-10-21T10:00", "until": "2026-10-21T10:00"}, "until is before since: the window is empty"),
         ({"since": "next week"}, "since is a date or a time"),
     ],
 )
@@ -396,8 +527,8 @@ def test_show_gives_a_stream_with_its_open_items_and_their_counts(conn: sqlite3.
     assert views.lines(by_name, TZ) == [
         "pilot  active",
         f"id           {ulid(40)}",
+        "where        Waiting on the venue",
         "next         Book the room",
-        "where        projects/pilot/",
         "deadline     2026-10-30",
         "updated      2026-10-18, added by claude",
         "items        2 open, 1 snoozed, 1 done, 1 dropped",

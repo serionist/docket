@@ -2051,8 +2051,9 @@ def _ledger_read(vault: Path | None, ask: ledger_views.Ask, as_json: bool) -> No
 def ledger_snapshot(
     since: LedgerSince = None, until: LedgerUntil = None, as_json: LedgerJson = False, vault: VaultOption = None
 ) -> None:
-    """The open and snoozed items, each with its source; the meetings from yesterday to six days after today, or with
-    an open point, with their points; and the streams. Counts first."""
+    """The open and snoozed items, each with its source, a snooze whose day has come counted open; the meetings not
+    archived from yesterday to six days after today, or with an open point, with their points; and the streams.
+    Counts first."""
     _ledger_read(vault, ledger_views.Ask(view="snapshot", since=since, until=until), as_json)
 
 
@@ -2070,7 +2071,8 @@ def ledger_show(
 
 @ledger_app.command("queue")
 def ledger_queue(as_json: LedgerJson = False, vault: VaultOption = None) -> None:
-    """The open items to work through: the untriaged first, then by triage (discuss, claude, me, chase), each by due."""
+    """The open items to work through: the untriaged first, a snooze whose day has come among them, then by triage
+    (discuss, claude, me, chase), each by due."""
     _ledger_read(vault, ledger_views.Ask(view="queue"), as_json)
 
 
@@ -2081,7 +2083,8 @@ def ledger_list(
     stream: Annotated[str | None, typer.Option("--stream", help="Items in this stream.")] = None,
     kind: Annotated[str | None, typer.Option("--kind", help="reply, decision, task, invite or waiting.")] = None,
     state: Annotated[
-        str, typer.Option("--state", help="open (open and snoozed), snoozed, done, dropped or all.")
+        str,
+        typer.Option("--state", help="open (and snoozed past its day), snoozed (still asleep), done, dropped or all."),
     ] = "open",
     since: Annotated[str | None, typer.Option("--since", help="Opened on this day or after.")] = None,
     until: Annotated[str | None, typer.Option("--until", help="Opened on this day or before.")] = None,

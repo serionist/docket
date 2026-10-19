@@ -10,12 +10,14 @@ when the index can't be had (DR-0619).
     M-0003 10-23 10:00-10:30 Pilot sync, Ada Example; 1 open; items A-0012
       #1 open The pilot's dates -> A-0012 01JAB3W8Q4X5M2Z7K9R0T6YVNC
     streams
-    pilot active; next: Book the room; deadline 10-30
+    pilot active; where: Waiting on the venue; next: Book the room; deadline 10-30
 
-A row's text is the ledger's own: a title, a subject, a point's text and a stream's next cut at 72 characters but in
-`show`, a source or a where never cut, since it is a locator `read` opens. Notes, descriptions, outcomes, attendees,
-answers and the history come only in `show`, and no read quotes a record. An item's counts come from its ops, never
-its log's words (DR-0644): it is chased once per triage to chase that stands, an idle one too.
+A row's text is the ledger's own: a title, a subject, a point's text and a stream's where and next cut at 72 characters
+but in `show`; a source never cut, since it is a locator `read` opens. Notes, descriptions, outcomes, attendees,
+answers and the history come only in `show`, and no read quotes a record. A snooze whose day has come is open again,
+as todo.py showed it: open in every count and filter, untriaged in the queue, its row marked `woke`. An item's counts
+come from its ops, never its log's words (DR-0644): it is chased once per triage to chase that stands, an idle one
+too.
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal, cast, get_args
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from docket.errors import DocketError
 from docket.index import ledger as index_ledger
@@ -83,30 +85,49 @@ ITEMS = f"SELECT {_columns(ITEM_COLUMNS)} FROM items"  # noqa: S608
 MEETINGS = f"SELECT {_columns(MEETING_COLUMNS)} FROM meetings"  # noqa: S608
 STREAMS = f"SELECT {_columns(STREAM_COLUMNS)} FROM streams"  # noqa: S608
 BY_OPENED = " ORDER BY opened, claimed, id"
-# A triage to chase and a set of the due, in an op line as the writer writes it.
+# Open now: an open item, or a snoozed one whose day, the value given, has come.
+AWAKE = "(state = 'open' OR (state = 'snoozed' AND until <= ?))"
+# A triage to chase and a set of the due, in an op line as the writer writes it. A quoted text holds none of these
+# unescaped, so finding one in a plain line finds the op's own key.
 CHASE = '"verdict":"chase"'
+VERDICT = '"verdict"'
 DUE = '"due":'
+FIELDS = '"fields":{'
 STANDS = "item IN ({marks}) AND fate IN ('applied', 'idle') AND kind IN ('triage', 'snooze', 'set', 'reopen')"
-# A line that names a chase or a due but not as the writer spaces them; the writer's spacing is ruled out first, so a
-# line as the writer wrote it is searched once.
-ODD = (
-    f"(kind = 'triage' AND instr(keys, '{CHASE}') = 0 AND instr(keys, '\"chase\"') > 0) "
-    f"OR (kind = 'set' AND instr(keys, '{DUE}') = 0 AND instr(keys, '\"due\"') > 0)"
+
+
+def _times(text: str) -> str:
+    """SQL: how many times an op line holds `text`."""
+    return f"(length(keys) - length(replace(keys, '{text}', ''))) / {len(text)}"
+
+
+# What each standing line counts as, one CASE a line, so each test runs once: a snooze (s), a reopen (r), a chase (c)
+# or a due moved (m) its text shows, a line to read whole (w), or nothing (''). A line with a backslash-u escape, which
+# can spell chase or due, is read whole. A triage counts by its text when it is the only object in its line and names
+# one verdict, since an object inside could hold a verdict of its own and a second verdict would win; a set when its
+# fields are its only other object and its last key, the due inside them. Any other triage naming chase, or set naming
+# due, is read whole, as the fold reads it (DR-0660).
+CODE = (
+    "CASE WHEN kind = 'snooze' THEN 's' WHEN kind = 'reopen' THEN 'r' WHEN instr(keys, '\\u') > 0 THEN 'w' "
+    "WHEN kind = 'triage' THEN CASE WHEN instr(keys, '\"chase\"') = 0 THEN '' "
+    f"WHEN instr(keys, '{CHASE}') > 0 AND {_times('{')} = 1 AND {_times(VERDICT)} = 1 THEN 'c' ELSE 'w' END "
+    "ELSE CASE WHEN instr(keys, '\"due\"') = 0 THEN '' "
+    f"WHEN {_times('{')} = 2 AND substr(keys, -2) = '}}}}' AND instr(keys, '{FIELDS}') > 0 "
+    f"AND instr(keys, '{DUE}') > instr(keys, '{FIELDS}') THEN 'm' ELSE 'w' END END"
 )
 # The module's own SQL, never a user's text.
-COUNTS = (
-    f"SELECT item, sum(kind = 'triage' AND instr(keys, '{CHASE}') > 0), sum(kind = 'snooze'), "  # noqa: S608
-    f"sum(kind = 'set' AND instr(keys, '{DUE}') > 0), sum(kind = 'reopen'), sum({ODD}) FROM item_log WHERE {STANDS} "
-    "GROUP BY item"
-)
-SPACED = f"SELECT item, kind, keys FROM item_log WHERE {STANDS} AND ({ODD})"  # noqa: S608
+COUNTS = f"SELECT item, {CODE} FROM item_log WHERE {STANDS}"  # noqa: S608
+READ_WHOLE = f"SELECT item, kind, keys FROM item_log WHERE {STANDS} AND {CODE} = 'w'"  # noqa: S608
+# Where each code adds, in an item's counts: times chased, snoozes, due changes, reopens.
+SLOT = {"c": 0, "s": 1, "m": 2, "r": 3}
 
 
 class ItemRow(BaseModel):
     """An item as a read's line gives it. `ref` is its A- number, or its id while that names nothing (DR-0613); its
     title is cut at 72 characters but in show; its meeting is the M- number of the meeting it hangs on; `days` is how
-    long it has been open, or was until it closed, `late` how many days today is past its due while it is open; `why`
-    is suggest's."""
+    long it has been open, or was until it closed, `late` how many days today is past its due while it is open; `woke`
+    marks a snoozed item whose day has come, its state still `snoozed` as the ledger holds it, open to every read and
+    untriaged in the queue (DR-0660); `why` is suggest's."""
 
     ref: str
     id: str
@@ -127,11 +148,17 @@ class ItemRow(BaseModel):
     days: int
     late: int | None
     why: str | None = None
+    woke: bool = False
 
 
 class PointRow(BaseModel):
     """A meeting's standing point: `ref` is `M-0040#2`, its place now; `id` names it for good, as a batch's point
-    takes it; `item` is the item it is about; `answer` comes in show only."""
+    takes it; `item` is the item it is about; `answer` comes in show only. `from` and `to` are the meetings, by ref,
+    a roll carried it from and to: a copy's `from`, a rolled point's `to`, None for a point no roll touched
+    (DR-0660)."""
+
+    # `from` is Python's word: the field is `from_`, read and written as `from`, as the points table names it.
+    model_config = ConfigDict(validate_by_name=True, serialize_by_alias=True)
 
     ref: str
     id: str
@@ -142,6 +169,8 @@ class PointRow(BaseModel):
     item: str | None
     proposed: bool
     answer: str | None = None
+    from_: str | None = Field(default=None, alias="from")
+    to: str | None = None
 
 
 class MeetingRow(BaseModel):
@@ -163,7 +192,8 @@ class MeetingRow(BaseModel):
 
 
 class StreamRow(BaseModel):
-    """A stream: `ref` is its name; its next cut at 72 characters but in show; where, a locator, never cut."""
+    """A stream: `ref` is its name; `where` is where it stands and `next` what comes next, todo.py's `where -> next`,
+    both status text cut at 72 characters but in show."""
 
     ref: str
     id: str
@@ -179,10 +209,11 @@ class Counts(BaseModel):
     """A read's counts, each where its view gives it: items by state and overdue (snapshot, list, a stream's show),
     untriaged and by triage (queue), chased items and times and the median days from open to done (list), meetings
     and their open points (snapshot, meetings), streams (snapshot). `items` counts every item that matched, `k` or
-    not."""
+    not. `open` counts the snoozes whose day has come, and `woke` how many of them; `snoozed` the ones still asleep."""
 
     items: int = 0
     open: int = 0
+    woke: int = 0
     snoozed: int = 0
     done: int = 0
     dropped: int = 0
@@ -256,8 +287,8 @@ class LedgerRead(BaseModel):
 
 @dataclass(frozen=True)
 class Ask:
-    """What a read asks: a view and the `ledger` tool's parameters, with its defaults. `k` None gives every row, as
-    the command's --json does (DR-0645)."""
+    """What a read asks: a view and the `ledger` tool's parameters, with its defaults. `k` None gives list every row,
+    as the command's --json and the pages read it (DR-0645); the tool's own k stops at 500."""
 
     view: str = "snapshot"
     ref: str | None = None
@@ -332,10 +363,11 @@ class _Reader:
         self._meeting_clashes: set[int] | None = None
 
     def select(self, sql: str, values: Iterable[str]) -> list[tuple[Any, ...]]:
-        """The rows `sql` gives for every value, `{marks}` standing for the `IN` list, a chunk at a time."""
+        """The rows `sql` gives for every value, `{marks}` standing for the `IN` list, a chunk at a time. Replaced, not
+        formatted: the counts' SQL searches op lines for a brace."""
         out: list[tuple[Any, ...]] = []
         for chunk in _chunks(values):
-            out += self.conn.execute(sql.format(marks=", ".join("?" * len(chunk))), chunk).fetchall()
+            out += self.conn.execute(sql.replace("{marks}", ", ".join("?" * len(chunk))), chunk).fetchall()
         return out
 
     # -- refs ---------------------------------------------------------------------------------------------------------
@@ -384,12 +416,14 @@ class _Reader:
             due_day = _day(due)
             closed_day = _day(closed)
             late = (today - due_day).days if due_day is not None and state in OPEN and due_day < today else None
+            until_day = _day(until)
             out.append(ItemRow(
                 ref=self.item_ref(item_id, number), id=item_id, number=number, kind=kind,
                 title=title if whole else cut(title), who=" ".join(who.split()), stream=stream, source=source,
                 meeting=meetings[meeting] if meeting else None, opened=opened_day, due=due_day, state=state,
-                until=_day(until), closed=closed_day, triage=triage, archived=bool(archived),
+                until=until_day, closed=closed_day, triage=triage, archived=bool(archived),
                 days=((closed_day or today) - opened_day).days, late=late,
+                woke=state == "snoozed" and until_day is not None and until_day <= today,
             ))  # fmt: skip
         return out
 
@@ -424,24 +458,35 @@ class _Reader:
         """The standing points of the meetings, in the meetings' order and each one's by n."""
         place = {m.id: k for k, m in enumerate(meetings)}
         refs = {m.id: m.ref for m in meetings}
-        raws = self.select("SELECT id, meeting, n, text, state, answer, item, proposed FROM points WHERE meeting IN "
-                           "({marks}) AND n IS NOT NULL", place)  # fmt: skip
+        raws = self.select('SELECT id, meeting, n, text, state, answer, item, proposed, "from", "to" FROM points WHERE '
+                           "meeting IN ({marks}) AND n IS NOT NULL", place)  # fmt: skip
         raws.sort(key=lambda r: (place[r[1]], r[2]))
         items = self.item_refs(r[6] for r in raws if r[6])
+        ends = self.roll_ends(end for r in raws for end in r[8:] if end)
         return [
             PointRow(
                 ref=f"{refs[meeting]}#{n}", id=point_id, meeting=refs[meeting], n=n, state=state,
                 text=text if whole else cut(text), item=items[item] if item else None, proposed=bool(proposed),
-                answer=answer if whole else None,
+                answer=answer if whole else None, to=ends[end] if end else None,
+                **{"from": ends[start] if start else None},
             )
-            for point_id, meeting, n, text, state, answer, item, proposed in raws
+            for point_id, meeting, n, text, state, answer, item, proposed, start, end in raws
         ]  # fmt: skip
+
+    def roll_ends(self, ends: Iterable[str]) -> dict[str, str]:
+        """The meeting, by ref, each end of a roll lies on: a point's meeting, or the meeting an import named when it
+        couldn't name the point; an end on no meeting that stands, as it is."""
+        wanted = set(ends)
+        on: dict[str, str] = dict(self.select("SELECT id, meeting FROM points WHERE id IN ({marks})", wanted))
+        refs = self.meetings_of(on.get(end, end) for end in wanted)
+        return {end: refs[on.get(end, end)] for end in wanted}
 
     def stream_rows(self, where: str = "", args: Sequence[Any] = (), *, whole: bool = False) -> list[StreamRow]:
         return [
             StreamRow(
                 ref=name, id=stream_id, name=name, status=status, next=nxt if whole or nxt is None else cut(nxt),
-                deadline=_day(deadline), where=place, updated=date.fromisoformat(updated),
+                deadline=_day(deadline), where=place if whole or place is None else cut(place),
+                updated=date.fromisoformat(updated),
             )
             for stream_id, name, status, place, nxt, deadline, updated in self.conn.execute(
                 STREAMS + where + " ORDER BY name", args
@@ -452,29 +497,33 @@ class _Reader:
 
     def by_state(self, items: Sequence[ItemRow]) -> Counts:
         states = Counter(item.state for item in items)
+        woke = sum(1 for item in items if item.woke)
         return Counts(
-            items=len(items), open=states["open"], snoozed=states["snoozed"], done=states["done"],
-            dropped=states["dropped"], overdue=sum(1 for item in items if item.late is not None),
+            items=len(items), open=states["open"] + woke, woke=woke, snoozed=states["snoozed"] - woke,
+            done=states["done"], dropped=states["dropped"], overdue=sum(1 for item in items if item.late is not None),
         )  # fmt: skip
 
     def history_counts(self, ids: Iterable[str]) -> dict[str, tuple[int, int, int, int]]:
         """Each item's times chased, snoozes, due changes and reopens, from the ops that stand, an idle one too
         (DR-0644): a chase repeated on an item already marked chase is a chase. Items with none are left out.
 
-        A line as the writer writes it names a chase and a due as `CHASE` and `DUE`, which a quoted text can't hold
-        unescaped, so SQL counts those; a line spaced otherwise that names one is read whole."""
+        SQL codes a line by its text where its text can't mislead (`CODE`); any other line that may chase or move the
+        due is read whole, by the reader the fold reads it with, so an escape, a nested object or a key given twice
+        counts as the fold takes it."""
         out: dict[str, list[int]] = {}
-        odd: list[str] = []
-        for item_id, chased, snoozes, due_moves, reopens, spaced in self.select(COUNTS, ids):
-            out[item_id] = [chased, snoozes, due_moves, reopens]
-            if spaced:
-                odd.append(item_id)
-        for item_id, kind, keys in self.select(SPACED, odd):
-            op = json.loads(keys)
+        whole: set[str] = set()
+        for item_id, code in self.select(COUNTS, ids):
+            if code == "w":
+                whole.add(item_id)
+            elif code:
+                out.setdefault(item_id, [0, 0, 0, 0])[SLOT[code]] += 1
+        for item_id, kind, keys in self.select(READ_WHOLE, whole):
+            op = ops.read_op(keys)
+            counts = out.setdefault(item_id, [0, 0, 0, 0])
             if kind == "triage":
-                out[item_id][0] += op.get("verdict") == "chase"
+                counts[0] += op.verdict == "chase"
             else:
-                out[item_id][2] += "due" in (op.get("fields") or {})
+                counts[2] += "due" in (op.fields or {})
         return {item_id: (a, b, c, d) for item_id, (a, b, c, d) in out.items()}
 
     # -- windows ------------------------------------------------------------------------------------------------------
@@ -501,7 +550,8 @@ class _Reader:
         else:
             until = self.instant(self.today + timedelta(days=start + days - 1), end=True)
         if until <= since:
-            raise DocketError("until is before since: the window is empty")
+            said = "" if given_since is not None else f", {since:%Y-%m-%d} by default"
+            raise DocketError(f"until is before since{said}: the window is empty")
         return since, until
 
     def overlapping(self, since: datetime, until: datetime) -> tuple[str, list[str]]:
@@ -517,14 +567,14 @@ class _Reader:
     # -- the views ----------------------------------------------------------------------------------------------------
 
     def snapshot(self, ask: Ask) -> LedgerRead:
-        """The open and snoozed items; the meetings in the window or not archived with an open point, their standing
-        points and open items; every stream."""
+        """The open and snoozed items; the meetings not archived (DR-0622) in the window or with an open point, their
+        standing points and open items; every stream."""
         since, until = self.window(ask, SNAPSHOT_WINDOW)
         items = self.items(" WHERE state IN ('open', 'snoozed')")
         overlap, values = self.overlapping(since, until)
         open_point = "EXISTS (SELECT 1 FROM points p WHERE p.meeting = m.id AND p.n IS NOT NULL AND p.state = 'open')"
         raws = self.conn.execute(
-            f"{MEETINGS} m WHERE {overlap} OR (archived = 0 AND {open_point}) ORDER BY utc, id", values
+            f"{MEETINGS} m WHERE archived = 0 AND ({overlap} OR {open_point}) ORDER BY utc, id", values
         ).fetchall()
         meetings = self.meeting_rows(raws)
         streams = self.stream_rows()
@@ -537,13 +587,13 @@ class _Reader:
         )  # fmt: skip
 
     def queue(self, _: Ask) -> LedgerRead:
-        """The open items: the untriaged first, then each verdict in todo.py's order and any other after, each by due,
-        those with none last."""
-        items = self.items(" WHERE state = 'open'")
+        """The open items, a snooze whose day has come among them: the untriaged first, then each verdict in todo.py's
+        order and any other after, each by due, those with none last."""
+        items = self.items(f" WHERE {AWAKE}", (self.today.isoformat(),))
         rank = {verdict: k for k, verdict in enumerate((None, *ops.VERDICTS))}
         far = date.max
         items.sort(key=lambda i: (rank.get(i.triage, len(rank)), i.triage or "", i.due or far))
-        counts = Counts(items=len(items), open=len(items))
+        counts = Counts(items=len(items), open=len(items), woke=sum(1 for item in items if item.woke))
         for item in items:
             if item.triage is None:
                 counts.untriaged += 1
@@ -556,8 +606,9 @@ class _Reader:
         counts over all of them, then the first k."""
         where: list[str] = []
         args: list[Any] = []
-        if ask.state == "open":
-            where.append("state IN ('open', 'snoozed')")
+        if ask.state in ("open", "snoozed"):
+            where.append(AWAKE if ask.state == "open" else "state = 'snoozed' AND until > ?")
+            args.append(self.today.isoformat())
         elif ask.state != "all":
             where.append("state = ?")
             args.append(ask.state)
@@ -760,7 +811,7 @@ def lines(found: LedgerRead, tz: ZoneInfo) -> list[str]:
     out: list[str] = []
     if found.view == "snapshot":
         out.append(
-            f"{c.open} open, {c.snoozed} snoozed, {c.overdue} overdue; {_n(c.meetings, 'meeting')}, "
+            f"{_open(c)}, {c.snoozed} snoozed, {c.overdue} overdue; {_n(c.meetings, 'meeting')}, "
             f"{_n(c.points_open, 'point')} open; {_n(c.streams, 'stream')}"
         )
         out += ["items", *(item_line(i, today, source=True) for i in found.items)]
@@ -769,7 +820,7 @@ def lines(found: LedgerRead, tz: ZoneInfo) -> list[str]:
         out += ["streams", *(stream_line(s, today) for s in found.streams)]
     elif found.view == "queue":
         verdicts = ", ".join(f"{n} {verdict}" for verdict, n in c.triage.items())
-        out.append(f"{c.open} open: {c.untriaged} untriaged" + (f", {verdicts}" if verdicts else ""))
+        out.append(f"{_open(c)}: {c.untriaged} untriaged" + (f", {verdicts}" if verdicts else ""))
         group: str | None = ""
         for item in found.items:
             if item.triage != group:
@@ -779,7 +830,7 @@ def lines(found: LedgerRead, tz: ZoneInfo) -> list[str]:
     elif found.view == "list":
         median = c.median_days_to_done
         out.append(
-            f"{_n(c.items, 'item')}: {c.open} open, {c.snoozed} snoozed, {c.done} done, {c.dropped} dropped; "
+            f"{_n(c.items, 'item')}: {_open(c)}, {c.snoozed} snoozed, {c.done} done, {c.dropped} dropped; "
             f"{c.overdue} overdue; chased {_n(c.chased_items, 'item')}, {_n(c.chased, 'time')}"
             + (f"; median {median:g} days to done" if median is not None else "")
         )
@@ -794,6 +845,11 @@ def lines(found: LedgerRead, tz: ZoneInfo) -> list[str]:
         out.append(f"{c.items} to raise")
         out += [item_line(i, today) for i in found.items]
     return out
+
+
+def _open(counts: Counts) -> str:
+    """The open items, saying how many of them are snoozes whose day has come."""
+    return f"{counts.open} open" + (f" ({_n(counts.woke, 'snooze')} ended)" if counts.woke else "")
 
 
 def _n(count: int, noun: str) -> str:
@@ -824,7 +880,7 @@ def item_line(item: ItemRow, today: date, *, source: bool = False) -> str:
     if item.late is not None:
         facts.append(f"{item.late}d late")
     if item.state == "snoozed" and item.until is not None:
-        facts.append(f"snoozed to {_date(item.until, today)}")
+        facts.append(f"{'snooze ended' if item.woke else 'snoozed to'} {_date(item.until, today)}")
     if item.state in CLOSED and item.closed is not None:
         facts.append(f"{item.state} {_date(item.closed, today)}")
     if item.archived:
@@ -850,20 +906,23 @@ def meeting_line(meeting: MeetingRow, today: date) -> str:
 
 
 def point_line(point: PointRow) -> str:
-    """`#2 open The pilot's dates -> A-0012 (proposed) 01JAB3W8Q4X5M2Z7K9R0T6YVNC`, the answer in show."""
+    """`#2 open The pilot's dates -> A-0012 (proposed) (from M-0039) 01JAB3W8Q4X5M2Z7K9R0T6YVNC`, the answer in
+    show."""
     text = f"#{point.n} {point.state} {point.text}"
     text += f" -> {point.item}" if point.item else ""
     text += " (proposed)" if point.proposed else ""
+    text += f" (from {point.from_})" if point.from_ else ""
+    text += f" (to {point.to})" if point.to else ""
     text += f"; answer: {' '.join(point.answer.split())}" if point.answer else ""
     return f"{text} {point.id}"
 
 
 def stream_line(stream: StreamRow, today: date) -> str:
-    """`pilot active; next: Book the room; deadline 10-30; where projects/pilot/`."""
+    """`pilot active; where: Waiting on the venue; next: Book the room; deadline 10-30`, todo.py's `where -> next`."""
     text = f"{stream.name} {stream.status}"
+    text += f"; where: {stream.where}" if stream.where else ""
     text += f"; next: {stream.next}" if stream.next else ""
-    text += f"; deadline {_date(stream.deadline, today)}" if stream.deadline else ""
-    return text + (f"; where {stream.where}" if stream.where else "")
+    return text + (f"; deadline {_date(stream.deadline, today)}" if stream.deadline else "")
 
 
 def _meetings_with_points(found: LedgerRead) -> list[str]:
@@ -941,10 +1000,10 @@ def _show_lines(found: LedgerRead, tz: ZoneInfo) -> list[str]:
         c = found.counts
         head = f"{stream.name}  {stream.status}"
         rows += [("id", stream.id)]
-        rows += [(name, value) for name, value in (("next", stream.next), ("where", stream.where)) if value]
+        rows += [(name, value) for name, value in (("where", stream.where), ("next", stream.next)) if value]
         rows += [("deadline", str(stream.deadline))] if stream.deadline else []
         rows.append(("updated", f"{stream.updated}, added by {detail.added_by}"))
-        rows.append(("items", f"{c.open} open, {c.snoozed} snoozed, {c.done} done, {c.dropped} dropped"))
+        rows.append(("items", f"{_open(c)}, {c.snoozed} snoozed, {c.done} done, {c.dropped} dropped"))
         rows += [("item", item_line(i, today)) for i in found.items]
     return [head, *_rows([*rows, *_history(detail.history, tz)])]
 
@@ -953,5 +1012,5 @@ def _item_state(item: ItemRow) -> str:
     if item.state == "open":
         return f"open, triage {item.triage}" if item.triage else "open"
     if item.state == "snoozed":
-        return f"snoozed until {item.until}"
+        return f"snooze ended on {item.until}, open again" if item.woke else f"snoozed until {item.until}"
     return f"{item.state} on {item.closed}" + (", archived" if item.archived else "")

@@ -309,16 +309,30 @@ def create_mcp(service: Service) -> MCPServer:
         ] = None,
         since: Annotated[
             str | None,
-            Field(description="From this date (the owner's day) or time; by default yesterday for a snapshot, today."),
+            Field(
+                description=(
+                    "A date (the owner's whole day) or a time. snapshot and meetings: their meetings from it, by "
+                    "default yesterday for a snapshot and today for meetings. list: items opened on or after its day, "
+                    "with no default: all time."
+                )
+            ),
         ] = None,
         until: Annotated[
-            str | None, Field(description="Up to this date, the whole day, or this time; by default six days on.")
+            str | None,
+            Field(
+                description=(
+                    "A date (the whole day) or a time. snapshot and meetings: their meetings up to it, by default the "
+                    "end of six days after today, or with since alone, eight days on from it for a snapshot and seven "
+                    "for meetings. list: items opened on or before its day, with no default: all time."
+                )
+            ),
         ] = None,
         who: Annotated[str | None, Field(description="list: items whose who holds this, case aside.")] = None,
         stream: Annotated[str | None, Field(description="list: items in this stream.")] = None,
         kind: Annotated[views.Kind | None, Field(description="list: items of this kind.")] = None,
         state: Annotated[
-            views.State, Field(description="list: open (open and snoozed), snoozed, done, dropped or all.")
+            views.State,
+            Field(description="list: open (and snoozed past its day), snoozed (still asleep), done, dropped or all."),
         ] = "open",
         k: Annotated[
             int, Field(ge=1, le=views.MAX_K, description="list: how many rows; the counts cover every match.")

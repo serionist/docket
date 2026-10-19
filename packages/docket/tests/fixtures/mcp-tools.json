@@ -2515,6 +2515,10 @@
             "untriaged": {
               "default": 0,
               "type": "integer"
+            },
+            "woke": {
+              "default": 0,
+              "type": "integer"
             }
           },
           "type": "object"
@@ -2779,6 +2783,10 @@
                 }
               ],
               "default": null
+            },
+            "woke": {
+              "default": false,
+              "type": "boolean"
             }
           },
           "required": [
@@ -2926,6 +2934,17 @@
               ],
               "default": null
             },
+            "from": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "id": {
               "type": "string"
             },
@@ -2956,6 +2975,17 @@
             },
             "text": {
               "type": "string"
+            },
+            "to": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             }
           },
           "required": [
