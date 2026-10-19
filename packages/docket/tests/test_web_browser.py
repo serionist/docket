@@ -1047,6 +1047,7 @@ def test_space_ticks_and_ctrl_z_undoes_in_a_browser(day_service: tuple[int, str]
         expect(page.locator("#row-A-0001 .tick")).not_to_be_checked()
 
         page.keyboard.press("2")
+        page.wait_for_url(re.compile(r"/ledger\?at=A-0002&done="))
         expect(page.locator(".day-notice")).to_contain_text("A-0001: triage: claude")
         page.keyboard.press("Control+z")
         expect(page.locator(".day-notice")).to_contain_text("Undone.")
