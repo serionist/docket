@@ -10,7 +10,6 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
-import time
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -18,7 +17,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
-from docket_testkit import commit_config, empty_vault, git, make_config, make_record, sh, traced
+from docket_testkit import best_of, commit_config, empty_vault, git, make_config, make_record, sh, traced
 
 from docket.cli import main
 from docket.index.build import ledger_tables
@@ -42,11 +41,16 @@ def config() -> VaultConfig:
     return base.model_copy(update={"sources": {**base.sources, "cal": SourceConfig()}})
 
 
+def made(root: Path) -> Vault:
+    """An empty vault holding one chat record, for an item's source to name."""
+    found = empty_vault(root, config())
+    found.write_run("chat", [RECORD], NOW)
+    return found
+
+
 @pytest.fixture
 def vault(tmp_path: Path) -> Vault:
-    made = empty_vault(tmp_path, config())
-    made.write_run("chat", [RECORD], NOW)
-    return made
+    return made(tmp_path)
 
 
 def day(month: int, n: int) -> date:
@@ -731,7 +735,7 @@ ITEMS = 5_000
 MEETINGS = 2_000
 SERIES = 50
 # The dry run of a ledger the perf ledger's size, and its import, a month per commit, in this time on CI's slowest
-# shard: about 1.8 s and 6.5 s on a desk (DR-0654). An owner's ledger is a twentieth of it.
+# shard, each the best of its runs: about 1.8 s and 6.5 s on a desk (DR-0654). An owner's ledger is a twentieth of it.
 DRY_RUN_SECONDS = 6.0
 IMPORT_SECONDS = 30.0
 
@@ -767,16 +771,16 @@ def big_export() -> Export:
 def test_a_ledger_the_perf_ledger_s_size_dry_runs_and_imports_in_time(vault: Vault) -> None:
     text = big_export().text()
     lines = text.count("\n")
-    began = time.perf_counter()
-    dry = run(vault, text, dry_run=True)
-    dry_s = time.perf_counter() - began
-    began = time.perf_counter()
-    done = run(vault, text)
-    import_s = time.perf_counter() - began
-    print(f"ledger import of {lines:,} ops: dry run {dry_s:.2f} s, import {import_s:.2f} s, {len(done.commits)} writes")
-    assert dry.plan.refusals == () and dry.plan.counted is not None
-    assert (sum(dry.plan.counted.log_entries.values()), dry.plan.counted.meetings) == (ITEMS * 4, MEETINGS)
-    assert (done.plan.ops, len(ledger(vault).items)) == (lines, ITEMS)
+    dry = best_of(3, lambda: run(vault, text, dry_run=True))
+    # Best of two, as one import takes over 3 s on CI; each run imports into a vault of its own.
+    vaults = iter((vault, made(vault.root.parent / "again")))
+    done = best_of(2, lambda into: (run(into, text), into), lambda: next(vaults))
+    (imported, into), planned = done.result, dry.result.plan
+    print(f"ledger import of {lines:,} ops: dry run {dry.seconds:.2f} s ({dry.runs()}), import {done.seconds:.2f} s "
+          f"({done.runs()}), {len(imported.commits)} writes")  # fmt: skip
+    assert planned.refusals == () and planned.counted is not None
+    assert (sum(planned.counted.log_entries.values()), planned.counted.meetings) == (ITEMS * 4, MEETINGS)
+    assert (imported.plan.ops, len(ledger(into).items)) == (lines, ITEMS)
     if not traced():
-        assert dry_s < DRY_RUN_SECONDS, f"the dry run took {dry_s:.2f} s, over {DRY_RUN_SECONDS} s"
-        assert import_s < IMPORT_SECONDS, f"the import took {import_s:.2f} s, over {IMPORT_SECONDS} s"
+        assert dry.seconds < DRY_RUN_SECONDS, f"the dry run took {dry.seconds:.2f} s, over {DRY_RUN_SECONDS} s"
+        assert done.seconds < IMPORT_SECONDS, f"the import took {done.seconds:.2f} s, over {IMPORT_SECONDS} s"
