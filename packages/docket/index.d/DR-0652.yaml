@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0652
+    title: The import's old meetings come keyless and the calendar catch-up joins them; the export script matches none
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#200"]
+    description: DR-0621 had the owner's export script, outside Docket (roadmap step 15), give an old meeting the event and series of a calendar record matching its time and subject. In the live clone the step makes meetings from the calendar before the import is final, and an imported add, minted after the step's, for a key the step holds is a later add whose number is only one the meeting held, so the old M- number would show under the step's. Instead the export script leaves every old meeting keyless, and after the import docket ledger calendar --since the calendar's first day joins each one a record matches (DR-0649). A join's number is the continued meeting's, so the old number wins whatever ran first, and one matcher, tested in Docket, does it. Its dry run is the report the roadmap asks to spot-check, a renamed series named as a near miss. An import reverted after the catch-up joined its meetings needs the catch-up's batch undone first (#202).
+    binds: [Old meetings are matched to calendar records only by the calendar step's joins.]
+    not_chosen:
+      - "The export script matching, as DR-0621 had it: two matchers to keep alike, and a meeting the step made first keeping its number over the old one."

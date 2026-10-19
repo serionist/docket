@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0650
+    title: "A record kept out of raw now makes no meeting op: media's screen and the hold lists decide"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#200"]
+    description: "The gate drops a private source's records and those a never-store list or the forgotten list names, and keeps back what a hold covers, so such records don't reach raw. The step checks again when it runs, for a record that went in before a list, a hold or a decision took it: it makes nothing when media's screen would keep the record out now (DR-0547: forgotten, its source private or not in vault.yaml in force, a never-store match on a version, withheld, classified private by hand; a source that is only off still counts) or a hold covers it. A meeting it made before stays as it is, and the forget removes what it must (#182). to is part of what never-store matches, so a listed attendee makes the whole record a never-store one and no name is left out piecemeal; DR-0627's refusal stays the writer's backstop."
+    binds:
+      - The step takes a record only when media's screen and the hold lists would let it in now.
+    not_chosen:
+      - "Leaving a never-store attendee out and writing the rest: the gate drops such a record whole, and the meeting's subject and slot would still say the person was there."
+      - "Removing a meeting whose record is kept out now: that is the forget's, with the owner's yes."

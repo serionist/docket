@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0646
+    title: "An event record makes a meeting: the core reads its rid, thread, ts, title, author and to, its text's Where, Response and Cancelled lines, and native's end and all_day"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#200"]
+    description: "DR-0105 has the core turn the calendar's records into meetings; this says what of a record it reads, so any calendar source's mapper can make them. A record of kind event is one occurrence, and its rid is the meeting's event, compared exactly (DR-0622's key): a move or a rename must keep it, so a mapper builds an occurrence's rid from an id that holds its series and its original slot, as Exchange's immutable occurrence id does, or from the series' id and the original start. thread is the series; ts is the start and native.end the end, each a moment with its zone; title is the subject; author is the organiser, Name <address>; to holds the attendees. The text's lines Where: <place>, Response: <accepted, tentative, declined, none or organiser> and Cancelled give the place, the owner's response and a cancellation; its other lines are for search. native.all_day true marks an all-day event, and fidelity derived a rid built from the record's content. The reference calendar source writes all of it today; nothing else of a record is read."
+    binds:
+      - A record of kind event is one occurrence, and its rid, which a move or a rename keeps, is its meeting's event.
+      - "The core reads rid, thread, ts, title, author, to, fidelity, the text's Where:, Response: and Cancelled lines, native.end and native.all_day, and nothing else of the record."
+    not_chosen:
+      - "Reading the reference mapper's own native keys (its raw response, its label): every other calendar source would copy one provider's shapes."
+      - "event built by the core from the series' id and the original start: the record is already one per occurrence, and only its mapper knows the provider's ids."
+      - "A new record field for the end: the raw record's version is a door of its own (DR-0020), and native already carries it."

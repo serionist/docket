@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0651
+    title: "Recordings and asks link to meetings by time through #201's window read, written by the sync: a recording as a material, an ask as the item's meeting; the core links nothing"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#200"]
+    description: "DR-0105 links recordings and chats to meetings by time. todo.py's meeting match listed the meetings whose slot held a time, 10 minutes either side and 120 after the end for asks, cancelled ones left out, and /sync linked one only when it was plainly the meeting: of two in one slot the one the note's content names, a 1:1 inside a big invite's slot or the owner's own focus time passed over. That stays the sync's judgement (#210). #201's meetings view over the window from 10 minutes before a recording's start to 10 after, or from 120 minutes before an ask to 10 after, gives todo.py's meetings. The sync writes a recording as a material on the meeting, its ref the recording's rid, and an ask as the item's meeting (DR-0626), in its batch by sync. #200 builds nothing for it, and #201's reason for no match view of its own, that #200 links by time itself, changes to this."
+    binds:
+      - A link by time is a material on the meeting or an item's meeting, written by the sync.
+    not_chosen:
+      - "The core linking a recording when one meeting holds its start: a 1:1 inside a big invite's slot, or a focus block, would link wrong, which /sync leaves to the note's content."
+      - "Links worked out in the index from times alone: a meeting moved after the call would take its recording along, and two meetings in one slot would both claim it."

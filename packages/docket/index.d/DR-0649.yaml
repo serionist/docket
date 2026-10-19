@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0649
+    title: A record joins the unkeyed meeting with its start and subject, as todo.py's meeting add updated it; a split key gets an add of its own, and a removed meeting stays removed
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#200"]
+    description: "todo.py's meeting add updated the meeting with the same start and subject. For each record it takes, the step looks for a standing meeting with no event, archived or not, whose start is the record's to the minute and whose subject is the record's with case and spaces folded, DR-0624's rule; of several, the earliest by id. When one is found and the key continues no meeting yet, it writes a meeting add with continues (DR-0621), carrying the record's fields as any add does: the old meeting's id, number, points and outcome hold, an open one takes the calendar's fields as todo.py's update did, and an archived one only gains its key, the add's fields being an idle set there. It tries this whether the ledger holds the key or not, so a meeting the step made before an import still joins the imported one. It never joins a meeting whose join from this key was undone. A key whose adds are all undone gets a new add only when each of them was a continues add undone alone, its meeting still standing (a split): the owner's split stands, and the record gets a meeting of its own. Any other key whose adds are all undone was removed, and the step writes nothing for it, a new version included. An add with an unkeyed meeting at its start under another subject names that meeting in the step's output, so a renamed series can be joined by hand."
+    binds:
+      - A join needs the same start to the minute and the same subject, case and spaces aside.
+      - The step never joins a pair whose join was undone, and never adds a meeting the owner removed.
+    not_chosen:
+      - "Joining on start alone, or on start and organiser: two meetings in one slot would merge."
+      - "A join carrying the old meeting's fields: its end and place would stay as they were after the calendar changed them, unlike todo.py's update."
+      - "An add for any key with no standing add: a meeting the owner removed would come back with its next version."

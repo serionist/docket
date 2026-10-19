@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0648
+    title: "A record's meeting fields: times in vault.yaml's zone, the subject without a cancellation's prefix, the organiser's name, cancelled as a response; a field it lacks is left; all-day, derived and new cancelled events make none"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#200"]
+    description: "start is ts and end native.end, in vault.yaml's owner zone with that moment's offset (DR-0622): the import and the writer's own times use that zone, so a join compares like with like, and a week read on a trip doesn't rewrite every meeting; native.zone isn't read. subject is the title, a Canceled: or Cancelled: start (case aside) dropped from a cancelled one, and (no subject) when there is none. organiser is the author's name without its <address>, or the address alone. where is the Where: line. response is cancelled when the text has a Cancelled line, else the Response: line. attendees are the names in to. A field the record doesn't carry is left as it is, so a version without a Where: line clears nothing. A version of a key the ledger holds is one set of what differs, on the add carrying the key (DR-0621): a move, a rename, a new place or response, or a cancellation is one op, and a version that changes only what a meeting doesn't keep (show-as, the label) writes nothing; a set on an archived meeting is idle (DR-0624). Left out: an all-day event, which marks a day and takes no points; a derived record, its rid built from its subject and start (DR-0105); a record with no end or an end before its start; and a cancelled record that holds no meeting and joins none, there being nothing to prepare."
+    binds:
+      - start and end are written in vault.yaml's zone, never the record's own.
+      - A field the record doesn't carry is never cleared by it.
+    not_chosen:
+      - "native.zone, the zone the page was read in: a trip would rewrite every meeting it read, and an old meeting's time and its record's would read differently."
+      - "Clearing a field a version lacks: a past day's label without its place would clear where."
+      - "All-day events as meetings: holidays and days out of office would fill the day's lists and take rolled points."
