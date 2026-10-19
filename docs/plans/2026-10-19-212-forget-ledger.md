@@ -8,8 +8,8 @@ approved_at:
 
 # Make forget reach the ledger's ops
 
-A forget masks the ledger ops built on what it takes: each line keeps its id, keys and structure, its words become
-`[forgotten]`, and an item or meeting built on a forgotten record stays a shell with its number. The list names the
+A forget masks the ledger ops on what it takes: each line keeps its id, keys and structure, its words become
+`[forgotten]`, and an item or meeting whose making op is masked stays a shell with its number. The list names the
 masked ops, so every clone reads them masked at once and rewrites its op files at its next gate call, as run files go.
 
 ## Goal
@@ -29,31 +29,36 @@ masked ops, so every clone reads them masked at once and rewrites its op files a
 | only the matching text blanked | no: op text has no anchored lines as a doc has; notes are set whole, so every later set repeats the quote |
 | a new op that masks | no: the text stays in every tree and in HEAD, and a Docket from before folds an unknown kind as nothing |
 
-- The mask is written in place, through `ledger/store.py` (DR-0618). Every key stays, and so do ids, numbers, days,
-  times, kinds, verdicts, states, responses, streams, `by`, `via` and booleans. Every other string becomes
-  `[forgotten]`, at any depth, and a list of them empty; a locator (`source`, `ref`, `event`, `series`) becomes
-  `[forgotten:<32 hex>]`, staging's digest of it. Required fields stay filled and a key still groups its adds.
+- The mask is written in place, through `ledger/store.py` (DR-0618). The text fields (`title`, `who`, `description`,
+  `notes`, `outcome`, `subject`, `organiser`, `where`, `text`, `answer`, `next`, `note`, `label`) and any string under
+  a name this Docket doesn't know become `[forgotten]`; `attendees` empties; the locators `source`, `ref`, `event` and
+  `series` become `[forgotten:<32 hex>]`, staging's digest. All else stays, `machine` and a stream's `status` too.
+- It is idempotent: a value already `[forgotten]` or `[forgotten:<32 hex>]` stays, so `mask(mask(x)) == mask(x)`.
+  Required fields stay filled, a key still groups its adds (DR-0621) and a material's remove still finds its add.
 
 ### Which ops (DR-0694)
 
 | An op | Masked |
 |---|---|
-| with an `[r:` anchor in its text on the family, judged where it reads (DR-0580), or a `[d:` ref to a line the docs' rule drops | that op |
-| a `material` whose ref reads on the family by `read`'s rules: a rid, a doc or a legacy note's old path the forget takes | that op |
-| of an item whose `source`, in any of its ops, reads on the family | every op of the item: a shell |
-| of a meeting whose `event`, in any of its adds, the forget takes: a calendar record | every op of it, its points' too: a shell |
-| built on a masked op: a point's copies (`from`), an item made from a masked point or whose source names a shell meeting | the same, to a fixed point, as a doc line built on a dropped line |
+| with an `[r:` anchor on the family, judged where it reads (DR-0580), or a `[d:` ref to a line the docs' rule drops | that op |
+| a `material` whose ref reads on the family by `read`'s rules: a rid, a doc or a legacy note's old path it takes | that op |
+| an item's add when its `source`, in the add or a `set`, reads on the family; a meeting's adds when the forget takes its `event` | that op, so its object is a shell |
+| of a shell: an item or meeting whose making op, any add of a meeting, is listed, one an anchor matched too | every op of it, its points' too |
+| a point's copies along `from`, and an item `point_item` made, from a point masked for its own words: raised on a shell, or matched by an anchor | the same, to a fixed point |
 
-- A meeting's recording is a material: the link goes, the meeting stays. A record named with no anchor is out of reach.
+- Shells come from the list, so a clone knows one after its locators are masked. A copy rolled into a shell goes as
+  that meeting's op; the chain beyond it, and an item made from it, keep their words. A meeting's recording is a
+  material: the link goes, the meeting stays. A record named with no anchor is out of reach.
 - Every clone's apply matches again, every op line once the list's digest moved and those a pull brought otherwise,
-  so a clone's own op from before its pull is found; one no line names goes on an ops-only line, as keys do (DR-0595).
+  so a clone's own op from before its pull is found. It masks a shell's ops that still hold text, and those no line
+  names go on an ops-only line, as keys do (DR-0595).
 
 ### The list and the readers (DR-0695)
 
 - The list's line gains `ops`: the masked ops' ids, plain, since an id holds a time and random bits, never words.
-- `ops.read_all` masks a listed id's line in memory before any fold, so the index, `ledger show`, the fold in memory
-  (DR-0619) and the writer read one ledger, and `ops` joins the digest (DR-0593). That is how a marked line is known
-  (DR-0612): both texts of a listed id read masked, so a line a union merge brought back folds as one op.
+- `ops.parse`, given the listed ids, masks each one's line before anything reads it, so `read_all`, the index's update,
+  the fold in memory (DR-0619), the writer and the import read one ledger, and `ops` joins the digest (DR-0593). That
+  is how a marked line is known (DR-0612): both texts of a listed id read masked, so a merge's twin folds as one op.
 - Across clones, as run files: the forget masks every op file in its tree, other machines' too, in its one commit;
   each clone reads masked after its pull, and its next gate call writes the masks, drops a merge's twin and commits,
   waiting out the owner's rebase (DR-0597). A stream it masks renders its STATUS.md again.
@@ -63,15 +68,17 @@ masked ops, so every clone reads them masked at once and rewrites its op files a
 | Where | After a forget |
 |---|---|
 | `docket vault check`, the writer's `pending()` | a committed line changed or gone is explained when its id is listed and the file holds its mask; a listed line not masked yet is a forget not finished, which the next gate call finishes |
-| the writer | refuses an op whose source, ref or anchor names a rid forgotten whole or a listed old path, naming the field |
-| the import (DR-0653) | compares and writes a listed op masked, so an import run again brings no text back |
+| the writer | refuses an op naming a rid forgotten whole or a listed old path in a source, ref or anchor, naming the field; refuses one holding text on a shell, naming its number; one with no text passes, a drop's required note written as `[forgotten]` |
+| the import (DR-0653) | compares and writes a listed op masked, so a rerun brings no text back; refuses an unlisted line holding text on a shell, naming the line |
 
 ### History, the dry run and retention (DR-0697)
 
-- `scoped.txt` gains each line of a listed id that isn't its mask, from every blob on any ref of the op files holding
-  one (DR-0598). HEAD holds masks only once the apply committed, so `--check-rewrite` passes as before.
-- The dry run and the screen give numbers, never a word (`2 items and 1 meeting left as shells: A-0281, A-0290,
-  M-0040`), each open shell to drop; an import's export file joins what forget can't reach.
+- `scoped.txt` gains each line of a listed id that isn't its mask, from every blob under `ledger/ops/` on any ref,
+  deleted files too, as `doc_blobs` reads `processed/`, pre-filtered by the ids' bytes (DR-0598). HEAD holds only
+  masks once the apply committed, so `--check-rewrite` passes; an ops-only line arriving later is in the next forget's.
+- The dry run and the screen give numbers, never a word: each shell (`A-0281, M-0038 left as shells`), each open one
+  to drop, and each object that lost a material or link and kept its text (`M-0040: recording link removed; notes
+  and points kept`). An import's export file joins what forget can't reach.
 - Retention, later, writes list lines as a forget does, so this rule masks the ops built on what expires, never
   removing one: numbers and history hang on it.
 
@@ -89,18 +96,19 @@ masked ops, so every clone reads them masked at once and rewrites its op files a
 
 PR 1, "Mask forgotten ledger ops on every clone (one-way doors)":
 
-1. `ops.mask()`, `read_all`'s masking, `forgotten.py`'s `ops`. `test_ledger_mask.py`: a golden mask per kind, read as
-   its kind; a key's adds one meeting; a material's remove paired; twins one op.
+1. `ops.mask()` and `ops.parse`'s masking; `forgotten.py`'s `ops`. `test_ledger_mask.py`: a golden mask per kind,
+   read as its kind and masked again unchanged; a key's adds one meeting; a remove paired; twins one op.
 2. The apply's op files through `store.py`. `test_forget_apply.py`: a crash at each step; a merge's twin dropped.
-3. `check.py`, `store.pending`, the import. `test_ledger_check.py`, `test_ledger_import.py`: each row of its table.
+3. `check.py`, `store.pending`, the import's comparison. `test_ledger_check.py`, `test_ledger_import.py`.
 
 PR 2, "Find the ledger ops a forget masks":
 
-4. `forget/ledger.py`: the rule and the plan's lines. `test_forget_ledger.py`: each row of Which ops; a version forget;
-   a calendar meeting with a point rolled on and a point's item.
-5. The apply's matching and ops-only line; the writer's refusal; the render. `test_forget_clones.py`: B's op from
-   before its pull masked and listed at its next gate call, and on A after its pull.
-6. The rewrite's rows. `test_forget_rewrite.py`, with `git filter-repo`: each original op line gone, HEAD unchanged.
+4. `forget/ledger.py`: the rule, shells by the list, the `from` chain; the plan's lines. `test_forget_ledger.py`: each
+   row of Which ops; a version forget; a weekly 1:1's point rolled across ten meetings, one meeting's calendar record
+   forgotten, and only that meeting's copy goes; a point raised on a shell, its copies and its item masked.
+5. The apply's matching and ops-only line; the refusals; the render. `test_forget_clones.py`: B's ops from before its
+   pull, a log line on a shell among them, masked and listed at its next gate call, and on A after its pull.
+6. The rewrite's rows. `test_forget_rewrite.py`, with `git filter-repo`: original op lines gone, a deleted file's too.
 
 ## Tests
 
@@ -122,8 +130,20 @@ Forgetting; the glossary's shell; AGENTS.md's door lines; the CHANGELOG with eac
 | a meeting from a forgotten calendar record loses the owner's points and notes too | open, for the maintainer: proposed as a shell (DR-0694) |
 | an open shell stays in the queue | open, for the maintainer: proposed, named on the screen to drop, not hidden by the fold |
 | a Docket from before stops on an `ops` line | meant: it can't mask, so it fails closed until updated |
-| an ops-only line rebuilds every clone's index once | accepted: vectors carry over |
+| an ops-only line makes every clone rebuild its index, re-read its run files and judge its docs again | accepted: rare, since the writer refuses new text on the family and on a shell |
 
 ## Plan review
 
-Not run yet.
+### Review, round 1, at a4fc1b3: two majors and seven minors, each settled in place by the maintainer's lead
+
+| Finding | Severity | Status |
+|---|---|---|
+| P1: once its locators are masked, a clone can't tell a shell | major | fixed: an item or meeting whose making op is listed is a shell, one an anchor matched too; every clone's re-match masks its unlisted ops (DR-0694) |
+| P2: the `from` chain masks live points | major | fixed: followed only from a point masked for its own words; a copy rolled into a shell goes as its op, and the chain beyond keeps its words (DR-0694) |
+| P3: the mask must be idempotent | minor | fixed: bound in DR-0693, with a golden test |
+| P4: masking in `read_all` misses other readers | minor | fixed: in `ops.parse`, given the listed ids (DR-0695) |
+| P5: the bind didn't name what is masked | minor | fixed: the text fields, `attendees`, the four locators and unknown names' strings; the rest stays (DR-0693) |
+| P6: new text could land on a shell | minor | fixed: the writer refuses it, naming the number, and the import, naming the line (DR-0696) |
+| P7: the rewrite missed deleted op files and later ops-only lines | minor | fixed: every blob under `ledger/ops/` on any ref, pre-filtered; a later line goes in the next forget's files (DR-0697) |
+| P8: an object that lost only a link went unnamed | minor | fixed: the dry run and the screen name it by number |
+| P9: an ops-only line costs more than an index rebuild | minor | accepted, in Risks |

@@ -1,14 +1,15 @@
 decisions:
   - id: DR-0696
-    title: After a forget, vault check and the writer accept a committed op line changed to its mask; the writer refuses a new op on a forgotten rid, and the import writes listed ops masked
+    title: After a forget, vault check and the writer accept a committed op line changed to its mask; the writer refuses text on the family or a shell, and the import writes listed ops masked
     status: proposed
     at: "2026-10-19"
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#212"]
-    description: "docket vault check and the writer's pending() explain a committed op line changed or gone when its id is listed and the file holds its mask (DR-0610, DR-0617), so a write after a stopped apply commits it, as it commits any op file a stopped write left. A listed id's line not masked yet is named as a forget not finished, which the next gate call finishes, as a run file changed only by listed lines gone is (DR-0581). The writer refuses an op whose source, a material's ref or an [r: anchor in its text names a rid forgotten whole or a removed legacy note's old path the list holds, naming the op and the field, never the value: a hash check, which keeps new ops from needing a mask. The import (DR-0653) compares a listed op of its file as its mask and writes it masked, so an import run again after a forget, whose ids the export derives the same, brings no text back."
+    description: "docket vault check and the writer's pending() explain a committed op line changed or gone when its id is listed and the file holds its mask (DR-0610, DR-0617), so a write after a stopped apply commits it, as it commits any op file a stopped write left. A listed id's line not masked yet is named as a forget not finished, which the next gate call finishes, as a run file changed only by listed lines gone is (DR-0581). The writer refuses an op whose source, a material's ref or an [r: anchor in its text names a rid forgotten whole or a removed legacy note's old path the list holds, naming the op and the field, never the value: a hash check, which keeps new ops from needing a mask. It refuses an op holding text on a shell (DR-0694), naming the shell's number; an op with no text, such as a done, an archive, a triage or a snooze without a note, passes, and a drop's required note is written as [forgotten], so an open shell can still be closed. The import (DR-0653) compares a listed op of its file as its mask and writes it masked, so an import run again after a forget, whose ids the export derives the same, brings no text back; it refuses an unlisted line holding text on a shell, naming the line."
     binds:
       - A committed op line that changed is explained only by its id on the list and its mask in the file.
-      - The import never writes a listed op's text.
+      - No write and no import puts text on a shell, and the import never writes a listed op's text.
     not_chosen:
       - "The writer running the apply first: a click on a page would wait on a walk of the docs after a pull, and every gate call runs it already."
+      - "A drop on a shell refused for want of a note: an open shell could never be closed."

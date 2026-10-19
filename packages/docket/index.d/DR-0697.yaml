@@ -1,15 +1,16 @@
 decisions:
   - id: DR-0697
-    title: The history rewrite blanks each listed op's other lines in every blob of the op files, and retention will mask ops as a forget does
+    title: The history rewrite blanks each listed op's other lines in every blob under ledger/ops on any ref, and retention will mask ops as a forget does
     status: proposed
     at: "2026-10-19"
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#212"]
-    description: The rewrite's scoped.txt (DR-0594, DR-0598) gains every line whose op id the list holds and whose text isn't its mask, from every blob, in any commit on any ref, of the op files that hold a listed op, by blob id and line hash, blanked by the same callback. A line lives only in the file its day and machine name, so those files are the only ones read. It is read from git once the forget's line is in force, so it covers earlier forgets and other clones' ops-only lines too, and nothing in it is text. HEAD holds only masks once the apply committed, so docket forget --check-rewrite passes and names older branches as before. An old commit loses that op's line; nothing reads op files from history. Retention by age, in phase 3, will write list lines as a forget does, so this rule masks the ops built on what expires; it never removes an op line, since numbers, links and history hang on it.
+    description: The rewrite's scoped.txt (DR-0594, DR-0598) gains every line whose op id the list holds and whose text isn't its mask, from every blob under ledger/ops/ in any commit on any ref, the blobs of deleted files included, as doc_blobs reads processed/, by blob id and line hash, blanked by the same callback. The blobs are pre-filtered by the listed ids' bytes, so only those holding one are read line by line. It is read from git once the forget's line is in force, so it covers earlier forgets and the ops-only lines that came before; an ops-only line that arrives later is covered by the next forget's files. Nothing in it is text. HEAD holds only masks once the apply committed, so docket forget --check-rewrite passes and names older branches as before. An old commit loses that op's line; nothing reads op files from history. Retention by age, in phase 3, will write list lines as a forget does, so this rule masks the ops built on what expires; it never removes an op line, since numbers, links and history hang on it.
     binds:
-      - The rewrite changes an op file's line only when its id is listed and its text isn't its mask.
+      - The rewrite changes an op file's line only when its id is listed and its text isn't its mask, in any blob under ledger/ops/ on any ref, deleted files included.
       - Retention masks ops; it never removes one.
     not_chosen:
+      - "Only the op files holding a listed op now: a file the import's revert deleted keeps its lines in older commits."
       - "--replace-text expressions by the op's id: they would reach copies outside the vault, the owner's own (DR-0598)."
       - "The mask written into old blobs instead of a blank: a callback with text per line, for commits nothing reads."
