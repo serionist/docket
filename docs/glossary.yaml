@@ -117,6 +117,12 @@ terms:
   - term: media key export
     definition: "One file holding every media key of a clone, sealed with age's passphrase mode under a passphrase Docket draws and shows once: how a second machine gets the keys, and the backup. Its format is pinned by schema_version; a later Docket reads every earlier one."
     see: [packages/docket/src/docket/media/backup.py]
+  - term: meeting
+    definition: "A meeting in the ledger: made by a meeting op, keyed by its calendar event when it has one, with its fields, materials and talking points; the adds of one event are one meeting."
+    see: [packages/docket/src/docket/ledger/meetings.py]
+  - term: meeting number
+    definition: "A meeting's M- number, as M-0040: held by its add as an item's A- number is, in a sequence of its own; a number another add of the meeting held still names it."
+    see: [packages/docket/src/docket/ledger/meetings.py]
   - term: mention
     definition: "A chunk naming an entity: by an alias in its text, its speaker or author, or its doc's entities. Mentions lift search results; they never filter them."
     see: [packages/docket/src/docket/index/matching.py]
@@ -161,6 +167,9 @@ terms:
   - term: retry set
     definition: The ids a sync run skipped with a reason (later, too-large, gone, rate-limited), fetched by id on later runs. An id held back for the budget waits as long as it takes; any other leaves after 30 days.
     see: [packages/docket/src/docket/vault/cursors.py]
+  - term: rollover
+    definition: "The writer's change that copies each open point of a meeting that is over, or cancelled, to the next meeting of its series and marks the old one rolled: two ops a point, undone together."
+    see: [packages/docket/src/docket/ledger/store.py]
   - term: round
     definition: "A curate round: at most 15 cards mined from one machine's index, decided by accept, reject or an edit; kept per machine in the vault's private folder, its decisions in the curate log."
     see: [packages/docket/src/docket/curate/batch.py]
@@ -199,10 +208,16 @@ terms:
   - term: stoplist
     definition: "The keys curation never proposes again in the role they name: those a rejection or an undo put on and no lift took off. Folded from the curate log; it has no file of its own."
     see: [packages/docket/src/docket/vault/curatelog.py]
+  - term: stream
+    definition: A line of work items and meetings belong to, named by a slug, with a status, where it stands, what is next and a deadline; its STATUS.md is rendered from the ledger.
+    see: [packages/docket/src/docket/ledger/meetings.py]
   - term: sync run
     definition: "One harvest of one source from a Claude Code session: opened by run_open, fed by the capture hook, closed by ingest. It lives in the service's memory, closes only whole, and is dropped otherwise, with nothing staged and the mark kept."
     see: [packages/docket/src/docket/service/runs.py]
     close_terms: [run]
+  - term: talking point
+    definition: "A point to raise in a meeting, kept as ops on the meeting: open, answered, dropped or rolled, maybe proposed by the sync; shown as M-0040#2, named in ops by its id."
+    see: [packages/docket/src/docket/ledger/meetings.py]
   - term: vault
     definition: "Where Docket keeps a user's data, private and in git: by default a folder of the repo the user already works in, or a repo of its own. It holds raw records written once, encrypted media, processed docs, entities and the ledger, and is never part of this repo."
   - term: waiting set

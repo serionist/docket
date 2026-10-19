@@ -1,0 +1,18 @@
+decisions:
+  - id: DR-0623
+    title: "A talking point is ops on its meeting: point adds one, its id the point's, and point_set changes it; from and to name the other point of a roll"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#199"]
+    description: "point names the meeting by item; its id is the point's id, and its fields are text, required, and item, from and proposed (true), optional. point_set carries point, the point's id, and fields, any of text, state (open, answered, dropped, rolled), answer, item, to and proposed, null clearing one. One op per change; the writer writes what todo.py inferred, so an answer to an open point also sets state answered, and an answer or a keep clears proposed. A point's n is its place among its meeting's standing points by its point op's id, todo.py's list order, shown as M-0040#2 and never stored; ops name a point by id. Removing a point is an undo of its point op; dropping one keeps it. A rolled point changes only by an undo; any other point_set on it is idle. from names the point a copy came from and to the copy (DR-0624). A copy stands only while its source stands and the source's winning roll, its first, names it in to: a second copy, or one whose source rolled elsewhere, is idle, and the fold settles copies along their from chains before it counts a meeting's open points. An op or a from that names an idle copy reads as naming the copy its source's winning roll names: the op applies there, in id order with that copy's own ops, so an answer given on a losing copy still counts, and a copy the losing copy rolled on to stands, its chain going through the winning copy; with no winning roll they are idle. So two clones rolling one point, to one meeting or to two, leave one copy, lose no answer and lose no point. A roll whose copy stands nowhere, the meeting it rolled into removed on this clone or another, or its copy undone alone, is idle: the point reads as open, so it is never lost, the day lists it and the next rollover rolls it on, that roll winning; with the meeting brought back, its copy wins again and the later copy's ops follow it. A roll from an import that names a meeting lands while that meeting stands, and a roll whose to names no point and no meeting is left out and named. A copy that loses, and the copies of a point whose meeting was removed, stay idle. The owner's export script, outside Docket (roadmap step 15), pairs them in todo.py's order; one it can't pair names the meeting instead, which the index tells apart, both being ULIDs."
+    binds:
+      - Ops name a point by its id; n is never stored.
+      - A rolled point changes only by an undo.
+      - An op or a from naming an idle copy reads as naming the copy its source's winning roll names.
+      - A roll whose copy stands nowhere, its meeting removed here or on another clone, is idle, so its point reads as open.
+    not_chosen:
+      - "from and to naming meetings, todo.py's: a point couldn't be followed through a series once its text changed, and two clones' copies couldn't be told from two points."
+      - "A point that moves to the next meeting: the old meeting would lose what was on it."
+      - "Stored point numbers: two clones adding a point to one meeting would clash, and todo.py's numbers already shift on a removal."

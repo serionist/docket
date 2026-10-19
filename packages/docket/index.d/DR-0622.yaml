@@ -1,0 +1,19 @@
+decisions:
+  - id: DR-0622
+    title: A meeting is made by a meeting op with an M- number and its fields, start and end with their offset, and changed by set, material, archive, log, undo and renumber
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#199"]
+    description: "meeting carries number, an M- number under the A- number's rule in a sequence of its own (DR-0613), and fields: subject, start and end required; event, continues (DR-0621), series, organiser, where, response, attendees, stream, notes and outcome optional. event is DR-0105's key: the event's own id plus, for an occurrence of a recurring event, its original start, as text compared exactly, which #200 and the owner's export script, outside Docket (roadmap step 15), build the same way; series is the series' id. start and end are YYYY-MM-DDTHH:MM+HH:MM (or -HH:MM), the local time with its offset: they read as local time, and a DST change or a change of vault.yaml's zone stays exact; todo.py's naive times take the zone's offset at that time, and its HH:MM end lands on the start's day or the next. response is accepted, tentative, declined, none, organiser or cancelled; attendees is a list of names; stream is a slug; the rest is text. Responses are read as text and checked when written, as DR-0611 has kinds. set changes any field but event and continues, null clearing an optional one. material links a recording, a chat or a mail as an item's does (todo.py's recordings and links). archive takes a meeting with no open point out of the day's lists and keeps its history; it meets a meeting with an open point idle, and only its undo brings the meeting back. A set on an archived meeting is idle (DR-0624). log, undo (DR-0614) and renumber are an item's."
+    binds:
+      - M- numbers follow DR-0613 in a sequence of their own.
+      - start and end carry their offset.
+      - "event is DR-0105's key: the event's id plus an occurrence's original start."
+    not_chosen:
+      - "start as a naive local time, todo.py's: a time in the hour DST repeats is two instants, and a change of vault.yaml's zone would move every meeting."
+      - "start as UTC: every read of a meeting's local time and day would need the zone."
+      - "end as HH:MM, todo.py's: a meeting past midnight or over days needs a rule."
+      - "A link op of its own for recordings and chats: material already says it."
+      - "attendees as one comma-separated text, todo.py's: briefs need each name."

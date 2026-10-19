@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0625
+    title: A stream is made by a stream op keyed by its name, with status, where, next and deadline; its updated is the day of its latest change
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#199"]
+    description: "stream carries fields name, a slug and its key (DR-0621), and status (active, waiting or closed), with where, next and deadline (a day) optional; set changes any but name. updated is the day of the stream's latest op that changed a field, so nothing reads the clock. An item's stream stays a slug (DR-0611); once the ledger holds a stream, the writer refuses an item's slug no stream holds, as todo.py's list did. The ledger keeps no path: each stream's STATUS.md path is set in vault.yaml, and #208 renders its frontmatter, stream, status, where, next, deadline and updated in todo.py's order (DR-0106)."
+    binds:
+      - A stream's name is its key and never changes.
+      - The ledger keeps a stream's state, never its file's path.
+    not_chosen:
+      - "The path in the ledger: it is the host repo's layout, which vault.yaml holds (DR-0106)."
+      - "updated as a field of its own: the writer would set it on every change, and the day already says it."

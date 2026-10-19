@@ -259,9 +259,25 @@ def test_a_redone_add_takes_its_number_back_from_an_item_another_clone_gave_it()
     assert [i.id for i in ledger.clashes()] == [ulid(3)]
 
 
-def test_an_op_of_a_kind_this_docket_doesnt_know_on_no_item_is_named() -> None:
-    """A later object's ops must name an add's item too (DR-0611): one that names none is left out and named."""
-    assert fold(lines(op("meeting", 1))).problems[0][1] == "names an item no add made; left out"
+def test_an_op_of_a_kind_this_docket_doesnt_know_makes_a_later_object_and_an_op_naming_nothing_is_named() -> None:
+    """An op of an unknown kind whose item is its own id is a later Docket's add: it and the ops naming it are kept,
+    claim no number and fold into nothing. An op naming an id no op made, or a known kind that makes no object naming
+    itself, is left out and named (DR-0620)."""
+    later = fold(lines(op("outbox", 1, number=7), op("log", 2, 1, note="x"), op("pin", 3, 1)))
+    assert (later.items, later.meetings, later.problems, later.highest_number) == ({}, {}, (), 0)
+    assert set(later.lines) == {ulid(1)}
+    named = fold(lines(op("pin", 1, 9), op("log", 2, note="names itself")))
+    assert [message for _, message in named.problems] == ["names an item no add made; left out"] * 2
+
+
+def test_a_set_whose_fields_don_t_hold_what_an_item_s_hold_is_left_out_and_named() -> None:
+    """A set's fields are checked against its object's rules when it is folded, since its line names no kind of
+    object (DR-0620)."""
+    item, ledger = one(op("add", 1), op("set", 2, 1, fields={"due": "soon"}), op("set", 3, 1, fields={"title": 5}))
+    assert (item.due, item.title, len(item.log)) == (None, ADD_FIELDS["title"], 1)
+    assert [message for _, message in ledger.problems] == [
+        "a set whose fields don't hold what an item's hold; left out"
+    ] * 2
 
 
 def test_load_reads_and_folds_the_vault_s_ledger_with_the_cyclic_collector_paused(

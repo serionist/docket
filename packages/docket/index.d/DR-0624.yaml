@@ -1,0 +1,18 @@
+decisions:
+  - id: DR-0624
+    title: "Rollover and a meeting's archive are ops the writer writes: it decides what is due and which meeting is next, and the fold only applies them"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#199"]
+    description: "The fold never reads the clock (DR-0615), so time is the writer's. A roll is two ops in one write: a point on the next meeting with from, then a point_set on the old point with state rolled and to the copy. The writer's undo of either undoes both. The owner's own undo of a roll is refused while its copy has rolled on, until that later roll is undone: the copy folds as rolled, or a roll that isn't undone names it, as for a copy that lost to another clone's and never folds; an undo the waking rule adds inside a write is never refused. For points, the undo's waking rule (DR-0614) counts only rolls and copies, so undoing a roll never undoes an answer or a drop another clone gave the point meanwhile, which then applies. Its rollover change finds the meetings due as todo.py did: a cancelled one at once, one that is over and has an outcome, any other 24 hours after its end. The next meeting is the next by start, not cancelled or declined: the same series when both have one, else the same subject with case and spaces folded, else one subject starting with the other, 15 characters or more, with the same organiser (todo.py's next_in_series). The owner's export script, outside Docket (roadmap step 15), writes series from the record it matched, and #200 whenever it updates a meeting, so the subject decides only for meetings no record matched. A point with nowhere to go stays open and the day lists it. The sync asks for rollover (#210), the scheduler later; todo.py's roll on every write goes, since nothing in Docket writes unasked. The sync archives a meeting that started 14 days back or more with no open point, and skips one whose archive was undone. A set on an archived meeting is idle: the writer finds the meeting before it checks a field, writes nothing for it and refuses nothing, so the sync's all-or-nothing write never fails on an old meeting, which #200 relies on. Any other change to an archived meeting is refused but an undo."
+    binds:
+      - Rolls and archives are ops, so a rebuild gives the same meetings on any day.
+      - The owner's undo of a roll is refused while its copy has rolled on; an undo the waking rule adds never is.
+      - A set on an archived meeting never refuses a write.
+    not_chosen:
+      - "Rollover in the fold: a rebuild on another day would give another day."
+      - "A roll on every write, todo.py's after three days: a write would change meetings nobody asked about."
+      - "The waking undo over every point_set: undoing a roll would also undo an answer given on another clone."
+      - "Refusing a set on an archived meeting: one old meeting would fail the sync's whole write."

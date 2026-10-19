@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0627
+    title: Meetings', points' and streams' text passes the gate's rules for derived text, as an item's does
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#199"]
+    description: "As DR-0618: subject, organiser, where, each attendee, notes, outcome, a point's text and answer, and a stream's where and next are text, written redacted, and a never-store keyword in any of them refuses the write. An organiser or attendee on the never-store people list refuses it, as who does; #200 leaves such a name out before it writes. event, series and a material's ref are locators, and a slug, a state, a response and a day aren't text: a redaction rule's match there refuses the write."
+    binds: ["Every meeting, point and stream op goes through ledger/store.py, as an item's does."]
+    not_chosen:
+      - "A never-store attendee written as a marker: a name list with a marker in it would still say someone was there."

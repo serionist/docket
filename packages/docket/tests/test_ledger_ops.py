@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from ledger_kit import ADD_FIELDS, DAY, op, ulid
+from ledger_kit import ADD_FIELDS, DAY, MEETING, op, ulid
 from pydantic import ValidationError
 
 from docket.errors import DocketError
@@ -150,6 +150,61 @@ def test_a_known_kind_without_what_it_needs_doesnt_read(kind: str, drop: str) ->
     data.pop(drop)
     with pytest.raises(ValidationError):
         Op.model_validate_json(json.dumps(data))
+
+
+def test_a_meeting_a_stream_and_their_points_are_their_golden_lines() -> None:
+    """Each kind's fields in its own order (DR-0622, DR-0623, DR-0625): a time with its offset, attendees as a list,
+    `point` naming the point a point_set changes."""
+    cases = [
+        (made("meeting", item=B, number=40, fields={
+            "end": MEETING["end"], "subject": "Weekly pilot sync", "attendees": ["Ada", "Ben"], "event": "calendar:E1",
+            "start": MEETING["start"]}),
+         ',"number":40,"fields":{"subject":"Weekly pilot sync","start":"2026-10-19T09:00+02:00",'
+         '"end":"2026-10-19T09:30+02:00","event":"calendar:E1","attendees":["Ada","Ben"]}}'),
+        (made("stream", item=B, fields={"status": "active", "deadline": "2026-11-02", "name": "pilot"}),
+         ',"fields":{"name":"pilot","status":"active","deadline":"2026-11-02"}}'),
+        (made("point", after=A, fields={"proposed": True, "text": "Dates", "from": A}),
+         ',"after":"@","fields":{"text":"Dates","from":"@","proposed":true}}'),
+        (made("point_set", after=A, point=A, fields={"to": A, "state": "rolled"}),
+         ',"after":"@","point":"@","fields":{"state":"rolled","to":"@"}}'),
+    ]  # fmt: skip
+    for written, tail in cases:
+        assert written.text() == HEAD % (B, written.item, written.op, A) + tail.replace("@", A)
+        assert Op.model_validate_json(written.text()) == written
+
+
+@pytest.mark.parametrize(
+    ("kind", "keys"),
+    [
+        ("meeting", {"item": B, "fields": dict(MEETING)}),
+        ("meeting", {"number": 1, "fields": dict(MEETING)}),
+        ("meeting", {"item": B, "number": 1, "fields": {**MEETING, "start": "2026-10-19T09:00"}}),
+        ("meeting", {"item": B, "number": 1, "fields": {**MEETING, "end": "2026-10-19T25:00+02:00"}}),
+        ("meeting", {"item": B, "number": 1, "fields": {**MEETING, "attendees": "Ada"}}),
+        ("meeting", {"item": B, "number": 1, "fields": {**MEETING, "attendees": ["Ada", 5]}}),
+        ("meeting", {"item": B, "number": 1, "fields": {**MEETING, "continues": "M-0001"}}),
+        ("meeting", {"item": B, "number": 1, "fields": {"subject": "x", "start": MEETING["start"]}}),
+        ("stream", {"item": B, "fields": {"name": "pilot"}}),
+        ("stream", {"item": B, "fields": {"name": "pilot", "status": "active", "deadline": "soon"}}),
+        ("point", {"item": B, "fields": {"text": "x"}}),
+        ("point", {"fields": {"item": "A-0001", "text": "x"}}),
+        ("point", {"fields": {"text": "x", "proposed": "yes"}}),
+        ("point", {"fields": {}}),
+        ("point_set", {"fields": {"state": "answered"}}),
+        ("point_set", {"point": A, "fields": {"state": "rolled"}}),
+        ("point_set", {"point": A, "fields": {}}),
+        ("add", {"number": 1, "fields": {**ADD_FIELDS, "meeting": "M-0001"}}),
+    ],
+)
+def test_a_line_that_breaks_its_object_s_rules_doesnt_read(kind: str, keys: dict[str, Any]) -> None:
+    with pytest.raises(ValidationError):
+        made(kind, **keys)
+
+
+def test_a_set_reads_with_any_values_since_its_object_s_rules_hold_when_it_is_folded() -> None:
+    """A set names no object kind on its line, and a later object may give one of an item's names another meaning:
+    its fields are checked against its object's rules in the fold (DR-0620)."""
+    assert made("set", fields={"due": 5, "start": "Monday"}).fields == {"due": 5, "start": "Monday"}
 
 
 def test_an_op_goes_in_its_machine_s_file_for_the_month_of_its_day() -> None:

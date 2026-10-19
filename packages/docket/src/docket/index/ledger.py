@@ -8,6 +8,10 @@ claimants, and the op files read, so a write and `docket ledger show` ask the in
 | `item_numbers` | each number and every item that claimed it, by its first claim; an undone add's item is hidden |
 | `ledger_files` | each op file read: its size, time (0 while racily clean), sha256, the highest op id a line names |
 
+`item_log` holds a meeting's and a stream's lines too, by the add they name, with fate `object` and no log line, so a
+write reads every meeting from it and folds them all (#199), and a later Docket's object's with fate `later`; tables
+of their own for meetings and streams come with #199's second PR.
+
 `rebuild` folds every op file through `ledger.load`. `update` follows a file that only grew, its old bytes the same up
 to a line's end: it reads the lines after them, folds again from `item_log` the items they name, then gives each
 number those items claim, now or before, to its first claimant again, so a clash or an undone add moves a number as a
@@ -30,7 +34,7 @@ from typing import Any
 
 from docket.errors import DocketError
 from docket.ledger import ops
-from docket.ledger.fold import NUMBER, Entry, Folded, Item, Material, fold_item, load, number_text, paused
+from docket.ledger.fold import NUMBER, Entry, Folded, Item, Material, fold_item, load, made, number_text, paused
 from docket.ledger.ops import Line, Op
 
 TABLES = ("items", "item_log", "item_numbers", "ledger_files")
@@ -43,6 +47,9 @@ LOG_COLUMNS = ("item", "id", "version", "after", "day", "at", "by", "via", "kind
 NEWLINE = 0x0A
 # Lines as the fold orders them: by id, and one id's texts by their text.
 TEXT_ORDER = attrgetter("op.id", "text")
+# The fate of a meeting's or a stream's line, which a write folds again, and of a later Docket's object's.
+OBJECT = "object"
+LATER = "later"
 # Git's rule for a racily clean file: a file written this close to its read could be written again within the same
 # tick of the file clock, keeping its size and time. Its time is stored as 0, so the next update hashes it again.
 RACY_NS = 2_000_000_000
@@ -98,6 +105,20 @@ class _Rows:
         self.log: list[tuple[Any, ...]] = []
         self.numbers: list[tuple[Any, ...]] = []
         self.days: dict[date, str] = {}
+
+    def lines_of(self, item_id: str, lines: Iterable[Line], fate: str) -> None:
+        """The rows of an object no item is, each with `fate` and no log line: a meeting's or a stream's, `OBJECT`, or
+        a later Docket's object's, `LATER`."""
+        days, append = self.days, self.log.append
+        previous, version = "", 0
+        for line in sorted(lines, key=TEXT_ORDER):
+            op = line.op
+            version = version + 1 if op.id == previous else 0
+            previous = op.id
+            day = days.get(op.day) or days.setdefault(op.day, op.day.isoformat())
+            when = None if op.at is None else op.at.isoformat()
+            append((item_id, op.id, version, op.after, day, when, op.by, op.via, op.op, op.batch, line.text, None,
+                    None, fate))  # fmt: skip
 
     def add(self, item_id: str, lines: Iterable[Line], folded: Folded, number: int | None) -> None:
         """An item's rows: every line it has, the item when its add stands, holding `number`, and its claims."""
@@ -173,6 +194,9 @@ def rebuild(conn: sqlite3.Connection, root: Path) -> int:
         for item_id, folded in ledger.folds.items():
             item = folded.item
             rows.add(item_id, ledger.lines[item_id], folded, None if item is None else item.number)
+        for item_id, group in ledger.lines.items():
+            if item_id not in ledger.folds:
+                rows.lines_of(item_id, group, OBJECT if item_id in ledger.objects.owner else LATER)
         rows.write(conn)
         del ledger, rows
     return sum(f.lines for f in files)
@@ -225,7 +249,8 @@ def update(conn: sqlite3.Connection, root: Path) -> int:
 
 def refold(conn: sqlite3.Connection, fresh: Iterable[Line]) -> None:
     """Fold again, from their item_log rows and the new lines, the items the new lines name; then give each number
-    those items claim, or claimed before, to its first claimant, as the fold of every item gives it."""
+    those items claim, or claimed before, to its first claimant, as the fold of every item gives it. A meeting's, a
+    stream's or a later Docket's object's lines are kept as a rebuild keeps them."""
     by_item: dict[str, list[Line]] = {}
     for line in fresh:
         by_item.setdefault(line.op.item, []).append(line)
@@ -239,6 +264,10 @@ def refold(conn: sqlite3.Connection, fresh: Iterable[Line]) -> None:
         numbers.update(n for (n,) in conn.execute("SELECT number FROM item_numbers WHERE item = ?", (item_id,)))
         for table, key in (("items", "id"), ("item_log", "item"), ("item_numbers", "item")):
             conn.execute(f"DELETE FROM {table} WHERE {key} = ?", (item_id,))  # noqa: S608 - the module's own names
+        what = made(item_id, list(lines.values()))
+        if what != "item":
+            rows.lines_of(item_id, lines.values(), LATER if what == "later" else OBJECT)
+            continue
         folded = fold_item(item_id, list(lines.values()))
         numbers.update(n for _, n in folded.claims)
         rows.add(item_id, lines.values(), folded, None)
@@ -274,6 +303,14 @@ class Held:
 
     def lines(self, item_id: str) -> list[Line]:
         return held_lines(self.conn, item_id)
+
+    def object_lines(self) -> dict[str, list[Line]]:
+        """Every meeting's and stream's lines, by the add they name, each in id order: a write folds them all (#199)."""
+        out: dict[str, list[Line]] = {}
+        sql = "SELECT item, keys FROM item_log WHERE fate = ? ORDER BY item, id, version"
+        for item_id, keys in self.conn.execute(sql, (OBJECT,)):
+            out.setdefault(item_id, []).append(_line(keys))
+        return out
 
     def items_of(self, op_id: str) -> list[str]:
         """The items with a line of this op id: one, unless a fault put the id on two texts."""

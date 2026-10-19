@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0620
+    title: "An add makes an object: add an item, meeting a meeting, stream a stream, each with item equal to its own id; an object of a kind this Docket doesn't know is kept, claims no number and changes nothing"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#199"]
+    description: "DR-0611 has every op name an add's item and left #199 to say how other objects are named. Three kinds this Docket knows make objects, each an op whose item is its own id: add an item (DR-0611), meeting a meeting (DR-0622), stream a stream (DR-0625). Every other op names its object by item, the add's id, whatever the object is: the key keeps its name. An op naming an id no add made is a problem and is left out, as before, and so is an op of any other known kind whose item is its own id. So is an op of a known kind its object doesn't take, a point on an item or a triage on a meeting: an item takes add, set, log, triage, snooze, done, drop, reopen, material, archive, undo and renumber; a meeting takes meeting, set, log, material, archive, point, point_set, undo and renumber; a stream takes stream, set, log and undo. An op whose item is its own id and whose kind this Docket doesn't know is a later Docket's add: it and the ops naming it are kept, claim no number, change nothing and are no problem, so a later object joins the same files in schema 1. A talking point is part of its meeting, not an object: its ops name the meeting (DR-0623). The rules for fields are per object: an item's field names are checked on an item's ops only. The fold merged with #198 finds an item's add by op == add, so it would read every meeting and stream line as naming no add; #199's first PR changes it to find adds by this rule."
+    binds:
+      - Among the kinds this Docket knows, only add, meeting and stream make objects; another known kind with item equal to its own id is a problem and is left out.
+      - An op naming an object of a kind this Docket doesn't know is kept, claims no number, changes nothing and is no problem.
+      - An op of a known kind its object doesn't take, a point on an item or a triage on a meeting, is a problem and is left out.
+    not_chosen:
+      - "Meetings as items of kind meeting: they would take A- numbers and need an item's who and source, and an older Docket would list them as items."
+      - "An add with a key naming the object's kind: a Docket that doesn't know the key would read a meeting's add as an item's."
+      - "Points as objects of their own: a meeting's points would fold from many objects, and a roll's undo would span them."
