@@ -376,13 +376,38 @@ def test_an_index_that_stops_answering_refuses_the_import_once(tmp_path: Path, m
     vault = kept_and_dropped(tmp_path)
     failing = sqlite3.connect(":memory:")
     failing.close()
-    monkeypatch.setattr(imports, "open_index", lambda _: failing)
+    monkeypatch.setattr(imports, "open_index", lambda *_: failing)
     text = import_lines("mail:AAMkADmsg1", "mail:AAMkADmsg2", "mail:AAMkADmsg9")
     said = imports.run(vault, text, "export.jsonl", dry_run=True).plan.refusals
     where = index_build.db_path(vault).relative_to(vault.root).as_posix()
     assert said == (
         f"the index ({where}) didn't answer while the never-store containers were checked; try the import again",
     )
+
+
+def test_an_index_locked_or_stale_at_open_refuses_the_import_once_saying_why(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An index that is there but can't be read is never taken for none: busy, the import is tried again; built
+    under other settings, the index is rebuilt. Only the rids' text could be checked, so the import is refused."""
+    vault = kept_and_dropped(tmp_path)
+    text = import_lines("mail:AAMkADmsg1", "mail:AAMkADmsg9")
+    monkeypatch.setattr(imports, "INDEX_WAIT", 0.05)
+    holder = sqlite3.connect(index_build.db_path(vault), isolation_level=None)
+    try:
+        holder.execute("BEGIN EXCLUSIVE")
+        said = imports.run(vault, text, "export.jsonl", dry_run=True).plan.refusals
+    finally:
+        holder.close()
+    assert said == ("the never-store containers can't be checked: the index is busy; try the import again",)
+    path = vault.root / "vault.yaml"
+    config = VaultConfig.load(path)
+    config.owner.languages = ["en"]
+    path.write_text(config.dump(), encoding="utf-8", newline="\n")
+    commit_config(vault.root)
+    (why,) = imports.run(Vault.open(vault.root), text, "export.jsonl", dry_run=True).plan.refusals
+    assert why.startswith("the never-store containers can't be checked: the index can't be used: ")
+    assert why.endswith("; run docket index rebuild")
 
 
 def test_an_index_that_doesn_t_answer_refuses_the_locator_it_can_t_check(tmp_path: Path) -> None:

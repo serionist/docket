@@ -88,7 +88,7 @@ Over what your run read and the recordings above, with older context from `searc
 | Line | What |
 |---|---|
 | OWED | each ask of the owner since {OWED_SINCE} where the ball is in their court: a question, a review, a decision, a file, an intro, a promise they made; left out when they answered it, here or anywhere else you can see. A promise whose speaker is a guess says so |
-| INVITES | an invite still waiting for the owner's answer, only when it matters: a new series since the window's start, a customer's meeting, or a clash with another meeting. A calendar reports such an event with no response; mail adds the invite mails that matter. No response alone is the normal state for an owner who rarely answers, and gets no line |
+| INVITES | an invite still waiting for the owner's answer, only when it matters: a new series since the window's start, a customer's meeting, or a clash with a meeting the owner accepted, never with focus time or the owner's own blocks, whose organiser is the owner. A calendar reports such an event with no response; mail adds the invite mails that matter. No response alone is the normal state for an owner who rarely answers, and gets no line |
 | WAITING | what the owner asked others for and still waits on |
 | CLOSES | for each open item from step 1, evidence here that it was answered or done, or became moot |
 | MEETINGS | a meeting's `response` and `attendees`, and `start` and `end` for a move seen only in mail; a calendar's records make and move meetings themselves |
@@ -108,7 +108,7 @@ This block and nothing else long, about 800 words: a line per finding, no line f
 ```
 RUN:      <source> | <run> | captures <n> | ready <n>, pending <n> | skipped <n> | mark moved yes/no | <a note>
 OWED:     <who> | <locator> | <asked, a day> | <the ask, short> | <why still open> | today / this week / whenever
-INVITES:  <organiser> | <the event's or the invite mail's rid> | <when> | <clashes>
+INVITES:  <organiser> | <the event's or the invite mail's rid> | <when> | <why it matters: the clash, new series or customer>
 WAITING:  <who> | <locator> | <since> | <what the owner waits for>
 CLOSES:   <A- ref> | done / moot | <locator of the evidence> | <how, one line>
 MEETINGS: <M- ref> | <field>=<value>; ... | <locator of the evidence>
@@ -123,8 +123,8 @@ LEARNED:  SKILL.md / sync.md | <what differs from it, for next time>
   (`r:<rid>#2` for a paragraph, `r:<rid>@12:08` for a moment), or a doc id, or an old path with its time.
 - The day an ask was made is `YYYY-MM-DD`, with its local `HH:MM` after it when the source gives a time: the
   reconcile links an ask made in a meeting by it.
-- An INVITES line's last field says why it matters: the meeting it clashes with, `new series` or `customer`. Without
-  one there is no line.
+- An INVITES line's last field says why it matters: the accepted meeting it clashes with, by its M- ref, `new series`
+  or `customer`. Without one there is no line.
 - `who` is the name the ledger already uses for the person (`ledger` view `list` with `who`), else the name the source
   writes. Times are local in {ZONE}.
 - A run with nothing to report returns its RUN line alone; a run that didn't open returns `RUN: {SOURCE} | none |
