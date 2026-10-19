@@ -26,7 +26,7 @@ from docket.ledger.fold import load
 from docket.ledger.meetings import Stream
 from docket.ledger.status import Fields
 from docket.ledger.store import Written, write
-from docket.vault import rendered
+from docket.vault import rendered, staging
 from docket.vault.config import CONFIG_FILE, RenderedFile, VaultConfig
 from docket.vault.home import Home
 from docket.vault.host import Probe
@@ -141,6 +141,7 @@ def with_files(vault: Vault, *files: RenderedFile, commit: bool = True) -> Vault
 def fresh_process(monkeypatch: pytest.MonkeyPatch) -> None:
     """Each test starts as a new process would: no remote's answer or list kept."""
     monkeypatch.setattr(rendered, "_PROBED", {})
+    monkeypatch.setattr(rendered, "_UNREACHED", {})
     monkeypatch.setattr(rendered, "_REMOTES", {})
 
 
@@ -323,7 +324,7 @@ def test_op_files_that_can_t_be_listed_read_the_ledger(vault: Vault, monkeypatch
 
 
 def render_held(vault: Vault, fields: Fields = HELD, probe: Callable[[str], Probe] | None = None) -> rendered.Outcome:
-    (outcome,) = status.render(vault, [status_file()], {"pilot": fields}, **({"probe": probe} if probe else {}))
+    (outcome,) = status.render(vault, [status_file()], {"pilot": fields}.get, **({"probe": probe} if probe else {}))
     return outcome
 
 
@@ -420,6 +421,74 @@ def test_a_value_edited_in_docket_s_frontmatter_is_left_until_the_two_agree(vaul
     assert status.holds(status.read_file(path.read_bytes().decode("utf-8")).head or ())
 
 
+COMMENTED = 'where: "PR #12 merged; waiting on: review"  # Ben asked to keep 11 open'
+STRAY_4 = "its frontmatter holds a line besides the stream's fields, line 4; move it below the closing ---"
+
+
+def test_a_comment_after_a_field_s_value_is_left_never_dropped(vault: Vault) -> None:
+    add_pilot(vault)
+    path = the_file(vault)
+    edited = path.read_bytes().decode("utf-8").replace('where: "PR #12 merged; waiting on: review"', COMMENTED)
+    path.write_text(edited, encoding="utf-8", newline="\n")
+    assert set_pilot(vault, next="Ada signs the order").rendered == (left(STRAY_4),)
+    assert path.read_bytes().decode("utf-8") == edited
+
+
+def test_a_comment_after_a_field_s_value_is_left_by_a_write_that_moves_only_updated(vault: Vault) -> None:
+    add_pilot(vault)
+    path = the_file(vault)
+    edited = path.read_bytes().decode("utf-8").replace('where: "PR #12 merged; waiting on: review"', COMMENTED)
+    path.write_text(edited, encoding="utf-8", newline="\n")
+    assert [str(p) for p in vault.check()] == [f"{PATH}: {STRAY_4}"]
+    logged = write(vault, [{"op": "log", "item": "pilot", "note": "called Ada"}], now=NOW + dt.timedelta(days=1))
+    assert logged.rendered == (left(STRAY_4),)
+    assert path.read_bytes().decode("utf-8") == edited
+
+
+SECRET = "password: hunter2hunter2"  # noqa: S105 - an invented one
+REDACTED = "password: [redacted:password]"
+
+
+def test_a_value_the_writer_redacted_is_taken_over_as_the_ledger_holds_it(vault: Vault) -> None:
+    # todo.py wrote the value as given; the writer stored it redacted, so the import's stream holds the marker.
+    the_file(vault).write_text(todo_write({**TODO_FM, "next": f"send the {SECRET} to site"}, BODY), encoding="utf-8",
+                               newline="\n")  # fmt: skip
+    held = Fields(HELD.stream, HELD.status, HELD.where, f"send the {REDACTED} to site", HELD.deadline, HELD.updated)
+    assert render_held(vault, held).state == "written"
+    text = the_file(vault).read_bytes().decode("utf-8")
+    assert text == status.frontmatter(held) + "\n" + BODY
+    assert "hunter2" not in text
+
+
+def test_a_report_shows_a_file_s_value_redacted_and_one_that_isn_t_text_as_not_text(vault: Vault) -> None:
+    the_file(vault).write_text(todo_write({**TODO_FM, "where": SECRET}, BODY).replace('next: "yes"', "next: 42"),
+                               encoding="utf-8", newline="\n")  # fmt: skip
+    outcome = render_held(vault)
+    assert (outcome.state, outcome.line) == ("edited", left(
+        f'a hand edit holds its frontmatter: where "{REDACTED}" in the file, "PR #12 merged; waiting on: review" in '
+        "the ledger; next not text in the file, \"yes\" in the ledger; set the stream to the file's, or put the "
+        "ledger's back"))  # fmt: skip
+    assert "hunter2" not in outcome.line
+
+
+@pytest.mark.parametrize(
+    ("old", "eol"),
+    [
+        ("--- " + todo_write(TODO_FM, BODY)[3:], "\n"),
+        (todo_write(TODO_FM, BODY).replace("\n---\n", "\n---  \n"), "\n"),
+        (todo_write(TODO_FM, BODY).replace("\n---\n", "\n---\t\n"), "\n"),
+        (todo_write(TODO_FM, BODY).replace("\n", "\r\n").replace("\r\n---\r\n", "\r\n--- \r\n"), "\r\n"),
+        ("".join(line + "  \n" if ": " in line else line + "\n" for line in todo_write(TODO_FM, "").splitlines())
+         + BODY, "\n"),
+    ],
+    ids=["opening line", "closing line", "closing tab", "closing crlf", "field lines"],
+)  # fmt: skip
+def test_spaces_after_a_frontmatter_s_lines_are_read_as_todo_py_read_them(vault: Vault, old: str, eol: str) -> None:
+    the_file(vault).write_bytes(old.encode("utf-8"))
+    assert render_held(vault).state == "written"
+    assert the_file(vault).read_bytes().decode("utf-8") == (GOLDEN + "\n" + BODY).replace("\n", eol)
+
+
 NOT_CLOSED = "its frontmatter has no closing --- line; close it, or take the opening one out"
 
 
@@ -436,6 +505,11 @@ NOT_CLOSED = "its frontmatter has no closing --- line; close it, or take the ope
          "line 3; move it below the closing ---"),
         (f"---\nstream: pilot\n{status.COMMENT}0123456789abcdef\n{status.COMMENT}0123456789abcdef\n---\n",
          "its frontmatter holds a line besides the stream's fields, line 4; move it below the closing ---"),
+        # A comment after a field's value, or after an empty one, would be dropped by the render.
+        ("---\nstream: pilot\nwhere: PR 12  # kept open on purpose\n---\n", "its frontmatter holds a line besides "
+         "the stream's fields, line 3; move it below the closing ---"),
+        ("---\nstream: pilot\nstatus: waiting\nnext: # Ben's call\n---\n", "its frontmatter holds a line besides the "
+         "stream's fields, line 4; move it below the closing ---"),
     ],
 )  # fmt: skip
 def test_a_frontmatter_that_doesn_t_close_or_parse_or_holds_more_is_left(vault: Vault, text: str, why: str) -> None:
@@ -446,7 +520,7 @@ def test_a_frontmatter_that_doesn_t_close_or_parse_or_holds_more_is_left(vault: 
 
 
 def test_a_stream_the_ledger_doesn_t_hold_is_left(vault: Vault) -> None:
-    (outcome,) = status.render(vault, [status_file("harbour", PATH)], {"pilot": HELD})
+    (outcome,) = status.render(vault, [status_file("harbour", PATH)], {"pilot": HELD}.get)
     why = "the ledger holds no stream harbour; add it, or take the file out of vault.yaml's rendered"
     assert (outcome.state, outcome.why) == ("edited", why)
     assert not the_file(vault).exists()
@@ -463,7 +537,7 @@ def test_a_file_that_isn_t_utf8_a_folder_and_a_path_out_of_place_are_refused(vau
     ]
     held = {name: Fields(name, "active", None, None, None, dt.date(2026, 10, 18))
             for name in ("pilot", "folder", "inside", "nowhere")}  # fmt: skip
-    assert [(o.state, o.why) for o in status.render(vault, files, held)] == [
+    assert [(o.state, o.why) for o in status.render(vault, files, held.get)] == [
         ("refused", "it isn't UTF-8 text, so its body can't be kept; save it as UTF-8"),
         ("refused", "projects/folder.md is a folder"),
         ("refused", f"it must stay in {top(vault).resolve()} and outside the vault, after links are followed"),
@@ -497,13 +571,29 @@ def test_a_public_remote_gets_no_file_even_when_nothing_changes(vault: Vault, mo
     assert len(asked) == 1
 
 
-def test_a_remote_that_couldn_t_be_checked_keeps_the_file_unwritten_this_time(vault: Vault) -> None:
-    outcome = render_held(vault, probe=lambda _url: "unreachable")
+def test_a_remote_that_couldn_t_be_checked_keeps_the_file_unwritten_and_is_asked_again_after_five_minutes(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked: list[str] = []
+
+    def dropped(url: str) -> Probe:
+        asked.append(url)
+        return "unreachable"
+
+    outcome = render_held(vault, probe=dropped)
     assert outcome.state == "refused"
     assert outcome.why.startswith("couldn't check the remote ")
     assert outcome.why.endswith("; not written")
     assert not the_file(vault).exists()
+    # Within five minutes the answer is kept, so a write's render never waits on the probe again: still not written.
+    assert render_held(vault, probe=lambda _url: "sign-in").why == outcome.why
+    assert len(asked) == 1
+    assert not the_file(vault).exists()
+    # Five minutes on, the remote is asked again.
+    monkeypatch.setattr(rendered, "_UNREACHED", {url: at - rendered.UNREACHED_FOR for url, at in
+                                                 rendered._UNREACHED.items()})  # fmt: skip
     assert render_held(vault, probe=lambda _url: "sign-in").state == "written"
+    assert rendered._UNREACHED == {}
 
 
 def test_a_vault_in_no_repo_is_refused_and_checked_for_nothing(tmp_path: Path) -> None:
@@ -624,6 +714,115 @@ def test_a_second_render_racing_the_one_more_is_left(vault: Vault, monkeypatch: 
     outcome = render_held(vault)
     assert (outcome.state, outcome.why) == ("edited", "it changed while Docket rendered it; docket render looks again")
     assert len(asked) == 2
+
+
+HARBOUR = "projects/harbour/STATUS.md"
+
+
+def two_streams(vault: Vault) -> Vault:
+    (top(vault) / "projects" / "harbour").mkdir()
+    made = with_files(vault, status_file(), status_file("harbour", HARBOUR))
+    write(made, [{"op": "stream", "fields": {"name": name, "status": "active"}} for name in ("pilot", "harbour")],
+          now=NOW)  # fmt: skip
+    return made
+
+
+def a_later_write_while_probing(monkeypatch: pytest.MonkeyPatch, vault: Vault) -> list[Written]:
+    """The process's first remote probe lets another write to harbour land and render its file, as another process's
+    later write would while this render waits on the network."""
+    real = rendered._probed
+    landed: list[Written] = []
+    fired: list[str] = []
+
+    def probing(url: str, _probe: Callable[[str], Probe]) -> Probe:
+        if not fired:
+            fired.append(url)
+            change = {"op": "set", "item": "harbour", "fields": {"next": "the later write"}}
+            landed.append(write(vault, [change], now=NOW + dt.timedelta(days=2)))
+        return real(url, lambda _url: "sign-in")
+
+    monkeypatch.setattr(rendered, "_PROBED", {})
+    monkeypatch.setattr(rendered, "_probed", probing)
+    return landed
+
+
+def harbour_next(vault: Vault) -> object:
+    return todo_read((top(vault) / HARBOUR).read_bytes().decode("utf-8"))[0].get("next")
+
+
+def test_a_write_s_render_decides_each_file_as_it_comes_to_it(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
+    made = two_streams(vault)
+    landed = a_later_write_while_probing(monkeypatch, made)
+    changes = [{"op": "set", "item": name, "fields": {"next": "this write"}} for name in ("pilot", "harbour")]
+    written = write(made, changes, now=NOW + dt.timedelta(days=1))
+    assert [w.rendered for w in landed] == [(f"rendered   {HARBOUR}",)]
+    # Pilot from the write's own fold; harbour from the ledger, the later write in it, which its file already shows.
+    assert written.rendered == (f"rendered   {PATH}",)
+    assert harbour_next(made) == stream_of(made, "harbour").next == "the later write"
+
+
+def test_docket_render_reads_a_stream_again_when_a_write_lands_while_it_renders(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    made = two_streams(vault)
+    the_file(made).unlink()
+    landed = a_later_write_while_probing(monkeypatch, made)
+    assert [o.line for o in status.render_all(made)] == [f"rendered   {PATH}", f"unchanged  {HARBOUR}"]
+    assert len(landed) == 1
+    assert harbour_next(made) == "the later write"
+
+
+IN_USE = "The file is in use by another program"
+
+
+def held_open(
+    monkeypatch: pytest.MonkeyPatch, path: Path, times: int | None, meanwhile: Callable[[], object] = lambda: None
+) -> list[Path]:
+    """A rename over `path` refused, as Windows refuses one over a file another program holds open: `times` times, or
+    every time; `meanwhile` runs at the first refusal. Sharing modes can't be made the same way on every system."""
+    real = Path.replace
+    refused: list[Path] = []
+
+    def replace(self: Path, target: str | os.PathLike[str]) -> Path:
+        if Path(target).resolve() == path.resolve() and (times is None or len(refused) < times):
+            refused.append(self)
+            if len(refused) == 1:
+                meanwhile()
+            raise PermissionError(13, IN_USE)
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "replace", replace)
+    monkeypatch.setattr(staging, "RETRY_SECONDS", 0.2)
+    return refused
+
+
+def test_a_file_held_open_past_the_retries_is_refused_and_the_others_still_render(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    made = two_streams(vault)
+    held_open(monkeypatch, the_file(made), None)
+    changes = [{"op": "set", "item": name, "fields": {"next": "this write"}} for name in ("pilot", "harbour")]
+    written = write(made, changes, now=NOW + dt.timedelta(days=1))
+    assert written.commit is not None
+    assert written.rendered == (f"refused    {PATH}: it couldn't be written: {IN_USE}", f"rendered   {HARBOUR}")
+    # docket render says the same and exits 1, never with a traceback.
+    assert main(["render", "--vault", str(made.root)]) == 1
+    assert capsys.readouterr().out.splitlines() == [f"refused    {PATH}: it couldn't be written: {IN_USE}",
+                                                    f"unchanged  {HARBOUR}"]  # fmt: skip
+
+
+def test_a_save_made_while_the_file_is_held_open_is_kept(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
+    add_pilot(vault)
+    path = the_file(vault)
+    saved = path.read_bytes().decode("utf-8") + "\nNotes the owner just saved.\n"
+    # The owner's editor saves while it holds the file, after the check before the rename passed.
+    refused = held_open(monkeypatch, path, 2, lambda: path.write_text(saved, encoding="utf-8", newline="\n"))
+    assert set_pilot(vault, next="Ada signs the order").rendered == (f"rendered   {PATH}",)
+    text = path.read_bytes().decode("utf-8")
+    # Seen before the next try at the rename, so the save stands, its frontmatter rendered again from the ledger.
+    assert after_closing(text) == "\nNotes the owner just saved.\n"
+    assert todo_read(text)[0]["next"] == "Ada signs the order"
+    assert len(refused) == 2
 
 
 # -- docket render and docket vault check -----------------------------------------------------------------------------

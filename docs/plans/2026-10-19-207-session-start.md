@@ -144,7 +144,8 @@ the first at or above it holding `.git`, is the vault's repo, so a separate repo
 
 | Planned | Built |
 |---|---|
-| the render after a write reads the stream | from the write's own fold while the op files are as its commit left them, else the ledger as it stands, so a render that runs late never puts back an older state (DR-0675) |
+| the render after a write reads the stream | each file's fields from the write's own fold while the op files are as its commit left them, looked at right after the file is read, else the ledger as it stands, so a render that runs late never puts back an older state; `docket render` alike (DR-0675) |
 | `vault/rendered.py` shares the checks, the probe and the write | and finds the consuming repo by a stat and keeps its remote URLs while `.git/config` stays: four git processes a render, about 150 ms on Windows, would pass a write's budget (DR-0676); a write's render now takes about 5 ms |
-| a change before the rename is left | `write_replacing` asks a check of the caller's right before its rename, so the file is read again there |
+| a change before the rename is left | `write_replacing` asks a check of the caller's right before each try at its rename, so the file is read again there, and a file held open past the retries is refused alone |
+| an unreached remote is asked again (DR-0554) | its answer kept five minutes: a dead probe waits about 20 s, on every write that changes a stream (DR-0676) |
 | the check names a missing stream, a hand edit, a stale file | and a file not rendered yet, absent or one the render would take over: `not rendered yet; docket render` (DR-0675) |

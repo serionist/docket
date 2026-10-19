@@ -75,6 +75,7 @@ def set_rendered(vault: Vault, *files: RenderedFile, commit: bool = True) -> Vau
 def fresh_probes(monkeypatch: pytest.MonkeyPatch) -> None:
     """Each test starts as a new process would: no remote's answer kept."""
     monkeypatch.setattr(rendered, "_PROBED", {})
+    monkeypatch.setattr(rendered, "_UNREACHED", {})
 
 
 @pytest.fixture
@@ -311,7 +312,9 @@ def test_a_public_remote_is_reported_even_when_nothing_changes(vault: Vault, mon
     assert len(asked) == 1
 
 
-def test_a_remote_that_couldn_t_be_checked_keeps_a_file_unwritten_this_time(tmp_path: Path) -> None:
+def test_a_remote_that_couldn_t_be_checked_keeps_a_file_unwritten_and_is_asked_again_after_five_minutes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     made = set_rendered(folder_vault(tmp_path), RenderedFile(kind="people", path="people.md"))
     asked: list[str] = []
 
@@ -323,8 +326,14 @@ def test_a_remote_that_couldn_t_be_checked_keeps_a_file_unwritten_this_time(tmp_
     assert (outcome.state, outcome.why.endswith("; not written")) == ("refused", True)
     assert outcome.why.startswith("couldn't check the remote ")
     assert not (top(made) / "people.md").exists()
+    # Kept five minutes (DR-0676): not asked again, and still not written.
+    assert [o.state for o in render_all(made, probe=lambda url: "sign-in")] == ["refused"]
+    assert len(asked) == 1
+    monkeypatch.setattr(rendered, "_UNREACHED", {url: at - rendered.UNREACHED_FOR for url, at in
+                                                 rendered._UNREACHED.items()})  # fmt: skip
     render_all(made, probe=offline)
     assert len(asked) == 2
+    monkeypatch.setattr(rendered, "_UNREACHED", {})
     assert [o.state for o in render_all(made, probe=lambda url: "sign-in")] == ["written"]
 
 

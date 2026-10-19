@@ -110,14 +110,16 @@ class Decided:
         return any(kind != "cut" for kind in self.kinds.get(rid_digest, {}).values())
 
 
-def retry(op: Callable[[], object]) -> None:
+def retry(op: Callable[[], object], still: Callable[[], bool] | None = None) -> bool:
     """Run a rename or delete, trying again for a moment when another process (an indexer, an antivirus, a reader on
-    Windows) holds the file open."""
+    Windows) holds the file open. `still`, asked before each try, stops it when it says no: whether `op` ran."""
     deadline = time.monotonic() + RETRY_SECONDS
     while True:
+        if still is not None and not still():
+            return False
         try:
             op()
-            return
+            return True
         except PermissionError:
             if time.monotonic() >= deadline:
                 raise
@@ -127,17 +129,15 @@ def retry(op: Callable[[], object]) -> None:
 def write_replacing(home: Home, path: Path, text: str, tmp_name: str, still: Callable[[], bool] | None = None) -> bool:
     """Write a vault file through a temp file in Docket's private folder and a rename, so a crash leaves the old file
     or the new, and a link planted at the path is replaced, never written through. `still`, asked once the temp file
-    is written, right before the rename, keeps the path as it is when it says no: whether the rename happened."""
+    is written, right before each try at the rename, keeps the path as it is when it says no, so a save made while
+    another program held the file open is kept: whether the rename happened."""
     tmp = make_private(home.git_dir, home.tmp_dir) / f"{tmp_name}.{os.getpid()}.tmp"
     try:
         with tmp.open("w", encoding="utf-8", newline="\n") as out:
             out.write(text)
             out.flush()
             os.fsync(out.fileno())
-        if still is not None and not still():
-            return False
-        retry(lambda: tmp.replace(path))
-        return True
+        return retry(lambda: tmp.replace(path), still)
     finally:
         tmp.unlink(missing_ok=True)
 

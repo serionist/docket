@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import re
 import secrets
+import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,8 +41,13 @@ HEADER = re.compile(
 ENTITY_FILES = (":(glob)entities/*.yaml", ":(glob)entities/*/*.yaml")
 ENTITY_KINDS = ("people", "glossary")
 State = Literal["written", "unchanged", "edited", "refused"]
-# Each remote's answer, kept for the process once it is sure: one that couldn't be reached is asked again (DR-0554).
+# Each remote's answer, kept for the process once it is sure (DR-0554).
 _PROBED: dict[str, Probe] = {}
+# When a remote couldn't be reached, kept for UNREACHED_FOR seconds and then asked again: a probe of one that drops
+# packets waits about 20 s, and every ledger write that changes a stream would wait on it. A file stays unwritten
+# meanwhile (DR-0676).
+_UNREACHED: dict[str, float] = {}
+UNREACHED_FOR = 300.0
 # Each repo's remote URLs, kept for the process while its git config file keeps its size and time: three git calls a
 # render saved, a tenth of a second on Windows, after every ledger write that changes a stream.
 _REMOTES: dict[Path, tuple[tuple[int, int], list[str]]] = {}
@@ -76,7 +82,7 @@ def render_all(vault: Vault, probe: Callable[[str], Probe] = probe_remote) -> li
     """Every people and glossary file `vault.yaml` names, rendered from the entities as they are in the vault's folder.
     The consuming repo's remotes are checked whenever a file Docket wrote sits at a path or one would be written, each
     once per process while its answer is sure: a public one is reported even when nothing changes, and one that
-    couldn't be reached keeps a file from being written this time."""
+    couldn't be reached keeps a file from being written, and is asked again after five minutes."""
     files = [f for f in vault.config.rendered if f.kind in ENTITY_KINDS]
     if not files:
         return []
@@ -164,7 +170,7 @@ def no_folder(target: Path) -> str:
 
 class Remotes:
     """The consuming repo's remotes, listed and probed on the first ask, each answer kept for the process while it is
-    sure (DR-0554)."""
+    sure (DR-0554), and five minutes when a remote couldn't be reached (DR-0676)."""
 
     def __init__(self, repo: Path, probe: Callable[[str], Probe]) -> None:
         self.repo = repo
@@ -215,21 +221,22 @@ def file_bytes(target: Path) -> bytes | None:
 
 def write_unless_changed(vault: Vault, target: Path, text: str, before: bytes | None) -> tuple[bool, bytes | None]:
     """A status file written through a temp file and a rename, unless it changed since it was read as `before`: it is
-    read again right before the rename. Whether it was written, and when it wasn't, what was found there (None for no
-    file, or one that couldn't be read)."""
-    found: list[bytes | None] = []
+    read again right before each try at the rename, so a save made while another program held it open is kept. Whether
+    it was written, and when it wasn't, what was found there (None for no file, or one that couldn't be read)."""
+    found: list[bytes | None] = [None]
 
     def still() -> bool:
         try:
-            found.append(file_bytes(target))
+            found[0] = file_bytes(target)
         except OSError:
+            found[0] = None
             return False
         return found[0] == before
 
     # A temp name of its own: two renders in one process never share one.
     if write_replacing(vault.home, target, text, f"rendered-status-{secrets.token_hex(4)}", still):
         return True, None
-    return False, found[0] if found else None
+    return False, found[0]
 
 
 # A file at a path that isn't UTF-8 text: one kept by hand, never Docket's.
@@ -248,12 +255,20 @@ def _existing(target: Path) -> str | None:
 
 
 def _probed(url: str, probe: Callable[[str], Probe]) -> Probe:
-    """A remote's answer, from this process's memory when it was sure."""
+    """A remote's answer, from this process's memory when it was sure, or for five minutes when it couldn't be
+    reached."""
     found = _PROBED.get(url)
-    if found is None:
-        found = probe(url)
-        if found != "unreachable":
-            _PROBED[url] = found
+    if found is not None:
+        return found
+    since = _UNREACHED.get(url)
+    if since is not None and time.monotonic() - since < UNREACHED_FOR:
+        return "unreachable"
+    found = probe(url)
+    if found == "unreachable":
+        _UNREACHED[url] = time.monotonic()
+    else:
+        _PROBED[url] = found
+        _UNREACHED.pop(url, None)
     return found
 
 

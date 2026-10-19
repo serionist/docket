@@ -1,14 +1,16 @@
 decisions:
   - id: DR-0676
-    title: A render finds the consuming repo by a stat and keeps its remote URLs while the repo's git config stays, so a write's render runs no git process once warm
+    title: A render finds the consuming repo by a stat, keeps its remote URLs while its git config stays, and keeps an unreached remote's answer five minutes
     status: proposed
     at: "2026-10-19"
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#208"]
-    description: "The files vault.yaml's rendered names, the entities' and the streams', go in the consuming repo: a folder vault's host, or for a vault of its own the first folder above it holding a .git git would take, a .git file or a folder git reads as a git dir, found by a stat as DR-0671's walk is, instead of git rev-parse. The repo's remote URLs, which DR-0554 probes, are kept for the process while its .git/config keeps its size and modification time, and listed again once it changes; a repo whose .git is a file, a worktree's, is listed each time, and a URL rewrite in the user's own global git config is seen at the next start of the process. Each remote's answer stays kept as DR-0554 has it. A git process costs about 40 ms on the maintainer's Windows machine, and a render ran four (rev-parse, remote, and get-url twice), past the tenth of a second a ledger write has (DR-0635); warm, a write's render of one STATUS.md takes about 5 ms."
+    description: "The files vault.yaml's rendered names, the entities' and the streams', go in the consuming repo: a folder vault's host, or for a vault of its own the first folder above it holding a .git git would take, a .git file or a folder git reads as a git dir, found by a stat as DR-0671's walk is, instead of git rev-parse. The repo's remote URLs, which DR-0554 probes, are kept for the process while its .git/config keeps its size and modification time, and listed again once it changes; a repo whose .git is a file, a worktree's, is listed each time, and a URL rewrite in the user's own global git config is seen at the next start of the process. Each remote's sure answer stays kept as DR-0554 has it; one that couldn't be reached is kept five minutes, then asked again, where DR-0554 asked it at every render: a probe of a remote that drops packets waits about 20 s, and every ledger write that changes a stream, and every curate write, would wait on it. The file stays unwritten meanwhile, so nothing is lost: the first render after the five minutes writes it. A git process costs about 40 ms on the maintainer's Windows machine, and a render ran four (rev-parse, remote, and get-url twice), past the tenth of a second a ledger write has (DR-0635); warm, a write's render of one STATUS.md takes about 5 ms."
     binds:
       - A render after a ledger write runs no git process once its process has listed the repo's remotes.
+      - An unreached remote's answer is kept five minutes in the process, then asked again; a file stays unwritten meanwhile.
     not_chosen:
       - "Listing the remotes on every render: four git processes, past a write's budget on Windows."
       - "Keeping the list for the process whatever its config does: a remote added later, a public one among them, would go unseen until a restart."
+      - "Asking an unreached remote again at every render: about 20 s on every write that changes a stream while the remote drops packets."

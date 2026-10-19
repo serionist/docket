@@ -18,10 +18,11 @@ holds only the field lines and the five the owner sets as the ledger has them is
 after the import; any other is left and reported, never overwritten, and never read into the ledger. The body's bytes,
 its line endings and a BOM are kept, and the frontmatter takes the file's line ending.
 
-A write that changed a stream renders its file once its lock is let go, from the write's own fold while no other write
-has landed since, else from the ledger as it stands; `docket render` renders every file. The file is read again right
-before the rename: changed since, it is left, unless another render put Docket's own valid hash there first, when the
-stream is read again and rendered once more. `docket vault check` reads the files and writes nothing.
+A write that changed a stream renders its file once its lock is let go; `docket render` renders every file. Each file's
+fields are decided right after it is read: the write's own fold, or the streams as `docket render` read them, while the
+op files are as they were then, else the ledger as it stands. The file is read again right before each try at the
+rename: changed since, it is left, unless another render put Docket's own valid hash there first, when the stream is
+read again and rendered once more. `docket vault check` reads the files and writes nothing.
 """
 
 from __future__ import annotations
@@ -45,6 +46,7 @@ from docket.ledger.meetings import Stream
 from docket.vault import rendered
 from docket.vault.config import RenderedFile, UniqueKeyLoader, yaml_problem
 from docket.vault.host import Probe, probe_remote
+from docket.vault.redact import Redactor
 from docket.vault.rendered import Outcome, Remotes
 from docket.vault.vault import Vault
 
@@ -59,8 +61,13 @@ UNSAFE = re.compile("[\x7f-\x9f\u2028\u2029\ufeff\ufffe\uffff]")
 BOM = "\ufeff"
 # A value a report shows is cut to this.
 SHOWN = 40
-# What a status file's op files looked like when a write committed: each file's name, size and time.
+# What the ledger's op files looked like at a moment: each file's name, size and time.
 Mark = tuple[tuple[str, int, int], ...]
+# Tokens around a line's key and value that end no line: what a field line's last token is looked for among.
+FRAME = (yaml.StreamStartToken, yaml.StreamEndToken, yaml.BlockMappingStartToken, yaml.BlockEndToken)
+SCAN = cast(Callable[[str], Iterable[yaml.Token]], yaml.scan)  # pyright: ignore[reportUnknownMemberType]
+# A file's value that isn't text, nor a day for deadline: the writer refuses it, so it equals no ledger value.
+OTHER = object()
 
 
 @dataclass(frozen=True)
@@ -134,7 +141,7 @@ def read_file(text: str) -> File:
     end = body.find("\n")
     first = body if end == -1 else body[:end]
     eol = "\r\n" if first.endswith("\r") else "\n"
-    if first.removesuffix("\r") != "---":
+    if not _fence(first.removesuffix("\r")):
         return File(bom, eol, None, body)
     head: list[str] = []
     pos = len(body) if end == -1 else end + 1
@@ -142,11 +149,16 @@ def read_file(text: str) -> File:
         nl = body.find("\n", pos)
         after = len(body) if nl == -1 else nl + 1
         line = body[pos:after].removesuffix("\n").removesuffix("\r")
-        if line == "---":
+        if _fence(line):
             return File(bom, eol, tuple(head), body[after:])
         head.append(line)
         pos = after
     return File(bom, eol, tuple(head), "", closed=False)
+
+
+def _fence(line: str) -> bool:
+    """Whether a line opens or closes a frontmatter: `---`, spaces or tabs after it allowed, as todo.py read it."""
+    return line.rstrip(" \t") == "---"
 
 
 def holds(head: Sequence[str]) -> bool:
@@ -155,8 +167,9 @@ def holds(head: Sequence[str]) -> bool:
     return len(found) == 1 and digest(line for line in head if not HASHED.fullmatch(line)) == found[0]
 
 
-def planned(file: File | None, fields: Fields) -> tuple[str | None, str]:
-    """A file's text once rendered, from the file as read (None when there is none); or None and why it is left."""
+def planned(file: File | None, fields: Fields, screen: Callable[[str], str]) -> tuple[str | None, str]:
+    """A file's text once rendered, from the file as read (None when there is none); or None and why it is left.
+    `screen` is the writer's redaction, `writer_screen`'s."""
     if file is None:
         return frontmatter(fields), ""
     if file.head is None:
@@ -164,19 +177,21 @@ def planned(file: File | None, fields: Fields) -> tuple[str | None, str]:
     if not file.closed:
         return None, "its frontmatter has no closing --- line; close it, or take the opening one out"
     if not holds(file.head):
-        why = hand_edit(file.head, fields)
+        why = hand_edit(file.head, fields, screen)
         if why:
             return None, why
     return file.bom + frontmatter(fields, file.eol) + file.rest, ""
 
 
-def hand_edit(head: Sequence[str], fields: Fields) -> str:
-    """Why a frontmatter Docket's hash doesn't hold is left, or "" when it holds only the field lines, and Docket's
-    comment line at most once, with the five the owner sets as the ledger has them: the render takes that one over."""
+def hand_edit(head: Sequence[str], fields: Fields, screen: Callable[[str], str]) -> str:
+    """Why a frontmatter Docket's hash doesn't hold is left, or "" when it holds only the field lines, each ending
+    with its value, and Docket's comment line at most once, with the five the owner sets as the ledger has them, as the
+    writer would store them: the render takes that one over. A report shows a file's value as the writer would store
+    it, redacted, never as the file has it."""
     seen = False
     for n, line in enumerate(head, start=2):
         comment = HASHED.fullmatch(line) is not None
-        if (comment and seen) or not (comment or FIELD_LINE.fullmatch(line)):
+        if (comment and seen) or not (comment or (FIELD_LINE.fullmatch(line) and _alone(line))):
             return f"its frontmatter holds a line besides the stream's fields, line {n}; move it below the closing ---"
         seen = seen or comment
     try:
@@ -185,31 +200,54 @@ def hand_edit(head: Sequence[str], fields: Fields) -> str:
     except yaml.YAMLError as e:
         return f"its frontmatter isn't YAML Docket reads ({yaml_problem(e)}); fix it, or take it out to render it"
     given = cast(dict[str, object], found or {})
-    differ = [name for name in SET if _as_stored(name, given.get(name)) != fields.held(name)]
+    stored = {name: _as_stored(name, given.get(name), screen) for name in SET}
+    differ = [name for name in SET if stored[name] != fields.held(name)]
     if not differ:
         return ""
-    said = "; ".join(f"{name} {_shown(given.get(name))} in the file, {_shown(fields.held(name))} in the ledger"
-                     for name in differ)  # fmt: skip
+    said = "; ".join(f"{name} {_shown(stored[name], screen)} in the file, {_shown(fields.held(name), screen)} in the "
+                     "ledger" for name in differ)  # fmt: skip
     return f"a hand edit holds its frontmatter: {said}; set the stream to the file's, or put the ledger's back"
 
 
-def _as_stored(name: str, value: object) -> object:
-    """A file's value as the writer would store it: unset as None, a day as YYYY-MM-DD, `where` and `next` on one line.
-    A value that isn't text the writer refuses, so it never equals the ledger's."""
+def _alone(line: str) -> bool:
+    """Whether a field line ends with its value: a comment after it, which a render would drop, makes it a line of
+    its own. A line YAML can't read alone is left to the whole frontmatter's read to report."""
+    try:
+        tokens = [token for token in SCAN(line) if not isinstance(token, FRAME)]
+    except yaml.YAMLError:
+        return True
+    return int(tokens[-1].end_mark.column) == len(line.rstrip(" \t"))
+
+
+def writer_screen(vault: Vault) -> Callable[[str], str]:
+    """The writer's redaction of a text (DR-0618): what a take-over compares `where` and `next` as, and what a report
+    shows a file's value as."""
+    return Redactor.from_config(vault.config.redaction).text
+
+
+def _as_stored(name: str, value: object, screen: Callable[[str], str]) -> object:
+    """A file's value as the writer would store it: unset as None, a day as YYYY-MM-DD, `where` and `next` on one line
+    and redacted. A value that isn't text the writer refuses: OTHER, which never equals the ledger's."""
     if value is None or value in ("", "-"):
         return None
     if name == "deadline" and isinstance(value, date):
         return value.isoformat()
-    if isinstance(value, str) and name in ("where", "next"):
+    if not isinstance(value, str):
+        return OTHER
+    if name in ("where", "next"):
         # Read when called: the writer imports this module, so it may still be loading when this one is.
-        return store.one_line(value) or None
+        text = store.one_line(value)
+        return screen(text) if text else None
     return value
 
 
-def _shown(value: object) -> str:
-    if value is None or value in ("", "-"):
+def _shown(value: object, screen: Callable[[str], str]) -> str:
+    """A value as a report shows it: redacted, and cut."""
+    if value is None:
         return "unset"
-    text = json.dumps(value.isoformat() if isinstance(value, date) else str(value), ensure_ascii=False)
+    if not isinstance(value, str):
+        return "not text"
+    text = json.dumps(screen(value), ensure_ascii=False)
     return text if len(text) <= SHOWN else text[: SHOWN - 2] + '\u2026"'
 
 
@@ -238,19 +276,19 @@ def read_streams(vault: Vault, names: Iterable[str]) -> dict[str, Fields]:
 
 
 def render_all(vault: Vault, probe: Callable[[str], Probe] = probe_remote) -> list[Outcome]:
-    """Every status file `vault.yaml` names, from the ledger as it stands: `docket render`."""
+    """Every status file `vault.yaml` names, from the ledger as it stands: `docket render`. The streams are read once,
+    and again before a file when another write landed since."""
     found = entries(vault)
     if not found:
         return []
-    held = read_streams(vault, (cast(str, f.stream) for f in found))
-    return render(vault, found, held, probe=probe)
+    names = [cast(str, f.stream) for f in found]
+    marked = op_files(vault)
+    return render(vault, found, Streams(vault, names, read_streams(vault, names), marked).get, probe=probe)
 
 
-def mark(vault: Vault, touched: Mapping[str, Stream | None]) -> Mark | None:
-    """What the op files look like as a write that changed these streams commits, under its lock; None when no status
-    file names one of them, so the write renders nothing."""
-    if not any(f.stream in touched for f in entries(vault)):
-        return None
+def op_files(vault: Vault) -> Mark:
+    """What the ledger's op files look like now: each file's name, size and time; empty when they can't be listed,
+    which no later look equals."""
     try:
         with os.scandir(ops.folder(vault.root)) as found:
             return tuple(sorted((e.name, (s := e.stat()).st_size, s.st_mtime_ns) for e in found if e.is_file()))
@@ -259,19 +297,44 @@ def mark(vault: Vault, touched: Mapping[str, Stream | None]) -> Mark | None:
         return ()
 
 
+def mark(vault: Vault, touched: Mapping[str, Stream | None]) -> Mark | None:
+    """What the op files look like as a write that changed these streams commits, under its lock; None when no status
+    file names one of them, so the write renders nothing."""
+    if not any(f.stream in touched for f in entries(vault)):
+        return None
+    return op_files(vault)
+
+
+class Streams:
+    """The streams a render takes each file's fields from, by name: as given while the op files are as `marked` saw
+    them, else the ledger as it stands, read again right before the file once they moved, so a render that runs late
+    never puts back a state older than a write that landed meanwhile (DR-0675)."""
+
+    def __init__(self, vault: Vault, names: Iterable[str], held: Mapping[str, Fields], marked: Mark) -> None:
+        self.vault = vault
+        self.names = sorted(set(names))
+        self.held = dict(held)
+        self.marked = marked
+
+    def get(self, name: str) -> Fields | None:
+        now = op_files(self.vault)
+        if not now or now != self.marked:
+            # Marked before the read, so a write landing during it is read again at the next file.
+            self.marked = now
+            self.held = read_streams(self.vault, self.names)
+        return self.held.get(name)
+
+
 def after_write(vault: Vault, touched: Mapping[str, Stream | None], marked: Mark | None) -> tuple[str, ...]:
-    """The files of the streams a write changed, rendered once its lock is let go: from the write's own fold while the
-    op files are as it left them, else from the ledger as it stands, so the last writer's state lands. What it says,
-    each file written, left or refused; a render that fails says so and never fails the write (DR-0554)."""
+    """The files of the streams a write changed, rendered once its lock is let go: each from the write's own fold while
+    the op files are as it left them, else from the ledger as it stands, so the last writer's state lands. What it
+    says, each file written, left or refused; a render that fails says so and never fails the write (DR-0554)."""
     if marked is None:
         return ()
     try:
         found = [f for f in entries(vault) if f.stream in touched]
-        if mark(vault, touched) == marked and marked:
-            held = {name: Fields.of(stream) for name, stream in touched.items() if stream is not None}
-        else:
-            held = read_streams(vault, touched)
-        return tuple(rendered.rendered_lines(render(vault, found, held)))
+        own = {name: Fields.of(stream) for name, stream in touched.items() if stream is not None}
+        return tuple(rendered.rendered_lines(render(vault, found, Streams(vault, touched, own, marked).get)))
     except (DocketError, OSError) as e:
         return (f"render failed: {e}",)
     except Exception as e:  # the write is committed: a render's failure is reported, never raised
@@ -281,38 +344,55 @@ def after_write(vault: Vault, touched: Mapping[str, Stream | None], marked: Mark
 def render(
     vault: Vault,
     files: Sequence[RenderedFile],
-    held: Mapping[str, Fields],
+    held: Callable[[str], Fields | None],
     *,
     probe: Callable[[str], Probe] = probe_remote,
 ) -> list[Outcome]:
-    """These status files rendered from the streams `held` gives, by name. The consuming repo's remotes are checked
-    when a file would be written or Docket's sits at a path, as the entity files' are (DR-0554)."""
+    """These status files rendered from the streams `held` gives by name, asked right after each file is read. The
+    consuming repo's remotes are checked when a file would be written or Docket's sits at a path, as the entity files'
+    are (DR-0554). A file that can't be written is refused, and the others still render."""
     repo = rendered.consuming_repo(vault)
     if repo is None:
         return [Outcome(f.path, "refused", rendered.no_repo(vault)) for f in files]
-    remotes = Remotes(repo, probe)
-    return [_one(vault, repo, f, held.get(cast(str, f.stream)), remotes) for f in files]
+    run = _Run(vault, repo, Remotes(repo, probe), writer_screen(vault))
+    return [_one(run, f, held) for f in files]
 
 
 # Bytes that aren't UTF-8: a file kept by hand, never Docket's.
 _NOT_TEXT = "\x00not text"
 
 
-def _one(vault: Vault, repo: Path, file: RenderedFile, fields: Fields | None, remotes: Remotes) -> Outcome:
-    target, why = rendered.target_of(vault, repo, file)
-    if target is None:
-        return Outcome(file.path, "refused", why)
-    done = _attempt(vault, target, file, fields, remotes, last=False)
-    if done is None:
-        # Another render got there first: the stream read again and rendered once more, so the last writer's state
-        # lands, with no lock taken.
-        name = cast(str, file.stream)
-        done = _attempt(vault, target, file, read_streams(vault, [name]).get(name), remotes, last=True)
-    return cast(Outcome, done)
+@dataclass(frozen=True)
+class _Run:
+    """What each file of one render shares: the repo, its remotes, the writer's redaction."""
+
+    vault: Vault
+    repo: Path
+    remotes: Remotes
+    screen: Callable[[str], str]
+
+    def fresh(self, name: str) -> Fields | None:
+        return read_streams(self.vault, [name]).get(name)
+
+
+def _one(run: _Run, file: RenderedFile, held: Callable[[str], Fields | None]) -> Outcome:
+    try:
+        target, why = rendered.target_of(run.vault, run.repo, file)
+        if target is None:
+            return Outcome(file.path, "refused", why)
+        done = _attempt(run, target, file, held, last=False)
+        if done is None:
+            # Another render got there first: the stream read again and rendered once more, so the last writer's
+            # state lands, with no lock taken.
+            done = _attempt(run, target, file, run.fresh, last=True)
+        return cast(Outcome, done)
+    except OSError as e:
+        # Held open past the rename's retries on Windows, or a disk that failed: this file only.
+        return Outcome(file.path, "refused", f"it couldn't be written: {e.strerror or type(e).__name__}")
 
 
 def _attempt(
-    vault: Vault, target: Path, file: RenderedFile, fields: Fields | None, remotes: Remotes, *, last: bool
+    run: _Run, target: Path, file: RenderedFile, held: Callable[[str], Fields | None], *, last: bool
 ) -> Outcome | None:
     """One render of a file; None, unless it is the `last`, when the file changed before the rename to a frontmatter
     Docket's own hash holds."""
@@ -323,23 +403,25 @@ def _attempt(
     text = _text(before)
     if text is _NOT_TEXT:
         return Outcome(file.path, "refused", "it isn't UTF-8 text, so its body can't be kept; save it as UTF-8")
+    # Asked once the file is read: a write that lands later and renders this file changes it before the rename.
+    fields = held(cast(str, file.stream))
     if fields is None:
         why = f"the ledger holds no stream {file.stream}; add it, or take the file out of vault.yaml's rendered"
         return Outcome(file.path, "edited", why)
-    new, why = planned(read_file(text) if text is not None else None, fields)
+    new, why = planned(read_file(text) if text is not None else None, fields, run.screen)
     if new is None:
         return Outcome(file.path, "edited", why)
-    public = remotes.public()
+    public = run.remotes.public()
     if public:
         return Outcome(file.path, "refused", public)
     if new == text:
         return Outcome(file.path, "unchanged")
-    unreached = remotes.unreached()
+    unreached = run.remotes.unreached()
     if unreached:
         return Outcome(file.path, "refused", unreached)
     if before is None and not target.parent.is_dir():
         return Outcome(file.path, "refused", rendered.no_folder(target))
-    written, now = rendered.write_unless_changed(vault, target, new, before)
+    written, now = rendered.write_unless_changed(run.vault, target, new, before)
     if written:
         return Outcome(file.path, "written")
     if not last and _docket(now):
@@ -377,6 +459,7 @@ def problems(vault: Vault, streams: Iterable[Stream]) -> list[tuple[str, str]]:
     if repo is None:
         return []
     held = {s.name: Fields.of(s) for s in streams}
+    screen = writer_screen(vault)
     out: list[tuple[str, str]] = []
     for file in found:
         name = cast(str, file.stream)
@@ -394,7 +477,7 @@ def problems(vault: Vault, streams: Iterable[Stream]) -> list[tuple[str, str]]:
         if text is _NOT_TEXT or (text is None and not target.parent.is_dir()):
             continue
         read = read_file(text) if text is not None else None
-        new, why = planned(read, fields)
+        new, why = planned(read, fields, screen)
         if new is None:
             out.append((file.path, why))
         elif new != text:
