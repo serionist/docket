@@ -107,13 +107,13 @@ class RunKey:  # pragma: no cover - winreg exists only on Windows, where test_se
             return
 
 
-def task_xml(launch: Launch, sid: str, start: datetime) -> str:
+def task_xml(launch: Launch, sid: str, start: datetime, every_minutes: int = 5) -> str:
     """The task, in the form Task Scheduler exports: at the user's own logon, only while they're logged on, on
     battery too (both battery settings default to true, and a laptop on battery would never start it), and restarted
     after a failure. A service that exited comes back within 5 minutes: the restart setting alone doesn't restart a
     process that ran and ended, and a logon trigger's repetition only begins at the next logon, so a time trigger from
     `start` (install's moment, in local time) repeats every 5 minutes. IgnoreNew keeps either from starting a second
-    one."""
+    one. The live test asks for every minute, Task Scheduler's shortest, so CI doesn't wait 5 for it."""
     begins = start.replace(microsecond=0, tzinfo=None).isoformat()
     command = escape(launch.python)
     arguments = escape(subprocess.list2cmdline(list(launch.args)))
@@ -130,7 +130,7 @@ def task_xml(launch: Launch, sid: str, start: datetime) -> str:
     </LogonTrigger>
     <TimeTrigger>
       <Repetition>
-        <Interval>PT5M</Interval>
+        <Interval>PT{every_minutes}M</Interval>
         <StopAtDurationEnd>false</StopAtDurationEnd>
       </Repetition>
       <StartBoundary>{begins}</StartBoundary>
@@ -188,8 +188,10 @@ class Windows:
         work: Path,
         name: str = TASK,
         now: Callable[[], datetime] = datetime.now,
+        every_minutes: int = 5,
     ) -> None:
         self.now = now
+        self.every_minutes = every_minutes
         self.runner = runner
         self.registry = registry
         self.start = start or _start_detached
@@ -208,7 +210,7 @@ class Windows:
         Path(launch.log_dir).mkdir(parents=True, exist_ok=True)
         xml = self.work / f"{self.name}-task.xml"
         xml.parent.mkdir(parents=True, exist_ok=True)
-        xml.write_text(task_xml(launch, windows_sid(self.runner), self.now()), encoding="utf-16")
+        xml.write_text(task_xml(launch, windows_sid(self.runner), self.now(), self.every_minutes), encoding="utf-16")
         try:
             created = self._schtasks("/Create", "/TN", self.name, "/XML", str(xml), "/F")
         finally:
@@ -232,7 +234,7 @@ class Windows:
     def stop(self) -> None:
         if self._has_task():
             self._schtasks("/End", "/TN", self.name)
-            # Disabled, or the 5-minute repetition would start it again; install enables it.
+            # Disabled, or the repetition would start it again; install enables it.
             self._schtasks("/Change", "/TN", self.name, "/DISABLE")
         if self.registry().get(self.name) is not None:
             self.stop_pid()

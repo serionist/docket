@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import platform
 import tempfile
 import threading
 from collections.abc import Callable
@@ -9,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from devkit import commits, content, coverage, gate
+from devkit import commits, content, coverage, evalfloors, gate
 from devkit.cli import cmd_commit_msg
 from devkit.repo import KitError
 
@@ -319,21 +320,21 @@ def test_slowest_tests_are_read_from_pytest_s_output() -> None:
     ]
 
 
-def test_a_tests_step_past_eleven_minutes_warns_on_github_actions_only(
+def test_a_tests_step_past_four_and_a_half_minutes_warns_on_github_actions_only(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     took = [0.0]
     monkeypatch.setattr(gate, "STEPS", [gate.Step("tests", ("os",), "", lambda _ctx: gate.Outcome.ok("1 passed"))])
     monkeypatch.setattr(gate, "_timed", lambda step, ctx: (step.run(ctx), took[0]))
-    for actions, seconds, warned in (("true", 661.0, True), ("true", 660.0, False), ("", 900.0, False)):
+    for actions, seconds, warned in (("true", 271.0, True), ("true", 270.0, False), ("", 900.0, False)):
         monkeypatch.setenv("GITHUB_ACTIONS", actions)
         took[0] = seconds
         assert gate.run("os") == 0
         warnings = [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("::warning")]
         assert warnings == (
             [
-                "::warning title=Slow tests::the tests step took 11.0 minutes, past 11: its job is "
-                "past 12 about then; the step's slowest tests are in its log"
+                "::warning title=Slow tests::the tests step took 4.5 minutes, past 4.5: its job is "
+                "past 5 about then; the step's slowest tests are in its log"
             ]
             if warned
             else []
@@ -466,16 +467,185 @@ def test_a_share_s_two_runs_keep_the_same_share_of_the_files(tmp_path: Path, mon
     calls = _fake_pytest(monkeypatch)
     ctx = gate.Ctx(root=tmp_path, lane="os", ci=False, base=None, pr=None, shard="2/2")
     assert gate.step_tests(ctx).status == "ok"
+    weights = f"--shard-weights={tmp_path / 'tools' / 'devkit' / 'test-weights.json'}"
+    times: list[str] = []
     for run in calls:
-        assert run[run.index("devkit.shard") - 1] == "-p" and "--shard=2/2" in run
+        # The root conftest.py loads the plugin: a `-p` would import it before coverage starts.
+        assert "--shard=2/2" in run and weights in run and "devkit.shard" not in run
+        times += [a.removeprefix("--shard-times=") for a in run if a.startswith("--shard-times=")]
+    # Each run writes its files' times to a file of its own, for `gate weights`.
+    system = platform.system()
+    assert [Path(t).relative_to(tmp_path).as_posix() for t in times] == [
+        f".local/times/{system}-2-of-2-tests.json",
+        f".local/times/{system}-2-of-2-timed.json",
+    ]
 
 
-def test_only_the_os_lane_takes_a_share_and_only_k_of_n(repo: Path) -> None:
-    with pytest.raises(KitError, match="full lane runs every test"):
-        gate.run("full", shard="1/2")
+def test_the_os_and_full_lanes_take_a_share_and_only_k_of_n(repo: Path) -> None:
+    with pytest.raises(KitError, match="os lane, or of the full lane"):
+        gate.run("models", shard="1/2")
     with pytest.raises(KitError, match="K/N"):
         gate.run("os", shard="3/2")
+    with pytest.raises(KitError, match="K/N"):
+        gate.run("full", shard="0/2", only=["tests"])
     assert gate.main(["os", "--shard", "0/2"]) == 2
+
+
+def test_a_covered_share_saves_its_coverage_data_and_holds_no_floor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[tuple[list[str], dict[str, str]]] = []
+
+    def fake_run(_ctx: gate.Ctx, cmd: list[str], *, env: dict[str, str] | None = None) -> tuple[int, list[str]]:
+        seen.append((cmd, dict(env or {})))
+        Path((env or {})["COVERAGE_FILE"]).write_bytes(b"data")
+        return 0, ["12.34s call     t.py::test_slow", "9 passed in 3.00s"]
+
+    monkeypatch.setattr(gate, "_run", fake_run)
+    ctx = gate.Ctx(root=tmp_path, lane="full", ci=False, base=None, pr=None, shard="2/4")
+    out = gate.step_tests(ctx)
+    [(cmd, env)] = seen
+    assert "--cov" in cmd and "--cov-report=" in cmd and not any(a.startswith("--cov-report=json") for a in cmd)
+    # Under coverage the timed tests stay in the one run, as in the whole lane.
+    assert "-m" not in cmd[3:] and "--shard=2/4" in cmd
+    assert Path(env["COVERAGE_FILE"]) == tmp_path / ".local" / "coverage" / "share-2-of-4"
+    assert Path(env[evalfloors.REPORT_ENV]) == tmp_path / evalfloors.REPORT
+    assert out.status == "ok"
+    assert out.detail == [
+        "9 passed in 3.00s",
+        "coverage data in .local/coverage/share-2-of-4; `gate coverage` holds the floors on all shares",
+        "slowest: 12.34s call     t.py::test_slow",
+    ]
+
+
+def test_a_covered_share_that_fails_or_saves_nothing_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for code, saved in ((1, True), (0, False)):
+
+        def fake_run(
+            _ctx: gate.Ctx, cmd: list[str], *, env: dict[str, str] | None = None, code: int = code, saved: bool = saved
+        ) -> tuple[int, list[str]]:
+            if saved:
+                Path((env or {})["COVERAGE_FILE"]).write_bytes(b"data")
+            return code, ["a test broke"]
+
+        monkeypatch.setattr(gate, "_run", fake_run)
+        out = gate.step_tests(gate.Ctx(root=tmp_path, lane="full", ci=False, base=None, pr=None, shard="1/2"))
+        nothing = "the run saved no coverage data to .local/coverage/share-1-of-2"
+        assert out.status == "fail"
+        assert out.detail == (["a test broke"] if code else [nothing])
+
+
+def floors_repo(root: Path) -> None:
+    """A root with coverage and eval floors, and the numbers the question set's share saved."""
+    kit = root / "tools" / "devkit"
+    kit.mkdir(parents=True)
+    (kit / "coverage-floors.json").write_text(json.dumps({"app": 100}), encoding="utf-8")
+    (kit / "eval-floors.json").write_text(json.dumps({"names": {"recall": 0.5, "mrr": 0.4}}), encoding="utf-8")
+    (root / ".local").mkdir()
+    (root / evalfloors.REPORT).write_text(json.dumps({"names": {"recall": 0.5, "mrr": 0.4}}), encoding="utf-8")
+
+
+def _fake_coverage(monkeypatch: pytest.MonkeyPatch, covered: int) -> list[list[str]]:
+    calls: list[list[str]] = []
+
+    def fake_run(_ctx: gate.Ctx, cmd: list[str], *, env: dict[str, str] | None = None) -> tuple[int, list[str]]:
+        calls.append(cmd)
+        if cmd[3] == "json":
+            lines = {"covered_lines": covered, "num_statements": 10}
+            report = {"files": {"packages/app/src/app/a.py": {"summary": lines, "missing_lines": [4][: 10 - covered]}}}
+            Path(cmd[cmd.index("-o") + 1]).write_text(json.dumps(report), encoding="utf-8")
+        return 0, []
+
+    monkeypatch.setattr(gate, "_run", fake_run)
+    return calls
+
+
+def test_the_coverage_lane_combines_every_share_and_holds_the_floors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    floors_repo(tmp_path)
+    data = tmp_path / ".local" / "coverage"
+    data.mkdir()
+    for k in (2, 1):
+        (data / f"share-{k}-of-2").write_bytes(b"data")
+    # What a share's run leaves beside its data is no share's.
+    (data / ".coverage.host.1234").write_bytes(b"x")
+    calls = _fake_coverage(monkeypatch, covered=10)
+    ctx = gate.Ctx(root=tmp_path, lane="coverage", ci=False, base=None, pr=None)
+    out = gate.step_floors(ctx)
+    combine, report = calls
+    assert combine[3:5] == ["combine", "--keep"]
+    assert combine[-2:] == [str(data / "share-1-of-2"), str(data / "share-2-of-2")]
+    assert report[3] == "json" and report[4] == combine[5]
+    assert out.status == "ok"
+    assert out.detail[:3] == ["2 shares' coverage combined", "app 100.0%", "eval recall@10/MRR: names 0.50/0.40"]
+    # Under its floor, the combined coverage fails and names the lines no share ran.
+    _fake_coverage(monkeypatch, covered=9)
+    out = gate.step_floors(ctx)
+    assert out.status == "fail"
+    assert out.detail == ["app: 90.0% is below its floor of 100%", "  packages/app/src/app/a.py: line 4"]
+
+
+@pytest.mark.parametrize(
+    ("names", "problem"),
+    [
+        ([], "holds no share's coverage data"),
+        (["share-1-of-3", "share-3-of-3"], "no coverage data for share 2 of 3"),
+        (["share-1-of-2", "share-1-of-3"], "runs split [2, 3] ways"),
+    ],
+)
+def test_the_coverage_lane_wants_every_share_of_one_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, names: list[str], problem: str
+) -> None:
+    floors_repo(tmp_path)
+    for name in names:
+        (tmp_path / ".local" / "coverage").mkdir(exist_ok=True)
+        (tmp_path / ".local" / "coverage" / name).write_bytes(b"data")
+    calls = _fake_coverage(monkeypatch, covered=10)
+    out = gate.step_floors(gate.Ctx(root=tmp_path, lane="coverage", ci=False, base=None, pr=None))
+    assert out.status == "fail" and problem in out.detail[0]
+    assert calls == []
+
+
+def test_a_failed_combine_fails_the_lane(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    floors_repo(tmp_path)
+    (tmp_path / ".local" / "coverage").mkdir()
+    (tmp_path / ".local" / "coverage" / "share-1-of-1").write_bytes(b"data")
+    monkeypatch.setattr(gate, "_run", lambda _ctx, _cmd, **_: (1, ["Couldn't combine"]))
+    out = gate.step_floors(gate.Ctx(root=tmp_path, lane="coverage", ci=False, base=None, pr=None))
+    assert out.status == "fail" and out.detail == ["Couldn't combine"]
+
+
+def test_skip_leaves_a_step_out_of_the_lane(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ran: list[str] = []
+
+    def step(name: str) -> gate.Step:
+        return gate.Step(name, ("full",), "", lambda _ctx: ran.append(name) or gate.Outcome.ok())
+
+    monkeypatch.setattr(gate, "STEPS", [step("types"), step("tests")])
+    assert gate.main(["full", "--skip", "tests"]) == 0
+    assert ran == ["types"]
+    assert "gate full: passed" in capsys.readouterr().out
+    with pytest.raises(KitError, match="no step nope"):
+        gate.run("full", skip=["nope"])
+
+
+def test_weights_folds_a_run_s_times_into_the_weights_file(
+    repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (repo / "tools" / "devkit").mkdir(parents=True)
+    times = tmp_path / "times" / "times-linux-1"
+    times.mkdir(parents=True)
+    record = {"system": "Linux", "share": "1/1", "marks": "", "workers": 4, "files": {"a.py": 2.0}}
+    (times / "Linux-1-of-1-tests.json").write_text(json.dumps(record), encoding="utf-8")
+    assert gate.main(["weights", str(tmp_path / "times")]) == 0
+    written = json.loads((repo / "tools" / "devkit" / "test-weights.json").read_text(encoding="utf-8"))
+    assert written["Linux"] == {"a.py": 2.0}
+    assert "Linux: 1 files timed, 2 s; 0 kept as they were" in capsys.readouterr().out
+    assert gate.main(["weights"]) == 2
+    assert gate.main(["weights", str(tmp_path / "nowhere")]) == 2
 
 
 def test_a_failure_in_either_run_shows_its_tail(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -484,6 +654,18 @@ def test_a_failure_in_either_run_shows_its_tail(tmp_path: Path, monkeypatch: pyt
         out = gate.step_tests(gate.Ctx(root=tmp_path, lane="os", ci=False, base=None, pr=None))
         assert out.status == "fail"
         assert [ln for ln in out.detail if "broke" in ln] == broke
+
+
+def test_a_share_with_no_timed_test_passes_but_one_with_no_test_at_all_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fake_pytest(monkeypatch, codes=(0, gate.NO_TESTS))
+    out = gate.step_tests(gate.Ctx(root=tmp_path, lane="os", ci=False, base=None, pr=None, shard="9/12"))
+    assert out.status == "ok"
+    assert out.detail[:2] == ["9 passed, 2 deselected in 3.00s", "timed alone: none in these files"]
+    _fake_pytest(monkeypatch, codes=(gate.NO_TESTS, 0))
+    out = gate.step_tests(gate.Ctx(root=tmp_path, lane="os", ci=False, base=None, pr=None, shard="9/12"))
+    assert out.status == "fail"
 
 
 def test_each_step_gives_both_runs_one_templates_folder_and_the_timed_run_a_temp_folder(
@@ -530,6 +712,8 @@ def test_under_coverage_the_timed_tests_stay_in_the_one_run(tmp_path: Path, monk
     assert gate.TEMPLATES_ENV not in envs[0]
     assert "-m" not in run[3:] and run[run.index("-n") + 1] == "auto"
     assert "--cov" in run and any(a.startswith("--cov-report=json:") for a in run) and "--cov-append" not in run
+    # Its one run is the lane's one share, so the shard plugin runs as it does in each of CI's covered shares.
+    assert "--shard=1/1" in run and any(a.endswith("-1-of-1-tests.json") for a in run)
     assert out.status == "fail" and "a test broke" in out.detail
 
 

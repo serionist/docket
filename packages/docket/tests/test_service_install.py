@@ -142,10 +142,25 @@ def test_windows_install_writes_utf16_xml_and_starts_the_task(tmp_path: Path) ->
     assert how == "the Task Scheduler task DocketTest, at your logon"
     assert seen[0].startswith(b"\xff\xfe")
     assert "<UserId>S-1-5-21" in seen[0].decode("utf-16")
+    assert "<Interval>PT5M</Interval>" in seen[0].decode("utf-16")
     assert [c[:2] for c in runner.calls[1:]] == [["schtasks", "/Create"], ["schtasks", "/End"], ["schtasks", "/Run"]]
     assert registry.values == {}
     assert list((tmp_path / "work").iterdir()) == []
     assert (tmp_path / "home" / "docket" / "log").is_dir()
+
+
+def test_a_task_asked_to_repeat_every_minute_says_so(tmp_path: Path) -> None:
+    seen: list[str] = []
+
+    def create(argv: list[str]) -> tuple[int, str]:
+        seen.append(Path(argv[argv.index("/XML") + 1]).read_text(encoding="utf-16"))
+        return (0, "")
+
+    runner = Commands({"whoami": (0, WHOAMI), "schtasks /Create": create})
+    quick = Windows(runner=runner, registry=Memory, work=tmp_path / "work", name="DocketTest", every_minutes=1)
+    quick.install(launch(str(tmp_path / "home")))
+    assert "<Interval>PT1M</Interval>" in seen[0]
+    assert "PT5M" not in seen[0]
 
 
 def test_windows_falls_back_to_the_run_key_when_task_scheduler_refuses(tmp_path: Path) -> None:

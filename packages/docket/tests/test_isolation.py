@@ -8,7 +8,7 @@ from pathlib import Path
 
 import keyring
 import pytest
-from conftest import HOME_VAR
+from docket_testkit import HOME_VAR
 from keyring.backends.fail import Keyring as FailKeyring
 
 from docket import userconfig
