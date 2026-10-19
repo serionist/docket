@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from docket_testkit import best_of, commit_config, empty_vault, git, make_config, make_record, sh, traced
+from forget_kit import forget
 
 from docket.cli import main
 from docket.index.build import ledger_tables
@@ -357,6 +358,25 @@ def test_a_rerun_writes_nothing_and_a_stopped_import_finishes(vault: Vault) -> N
     assert (third.plan.held, third.plan.ops, third.commits, commits(vault)) == (len(export().lines), 0, (), before)
     assert imports.lines(third)[-1] == "nothing to write: the ledger holds it all"
     assert summary(vault) == whole
+
+
+def test_a_rerun_after_a_forget_compares_and_writes_its_listed_ops_masked(vault: Vault) -> None:
+    """The export derives the same ids again, so a forget's listed op is compared as its mask and, after a revert,
+    written as one: no rerun brings its text back (DR-0696)."""
+    text = export().text()
+    run(vault, text)
+    raw = {line.op.id: line.text for line in ops.read_all(vault.root, masked=frozenset()).lines}
+    (asked,) = [op_id for op_id, line in raw.items() if "asked in the thread" in line]
+    forget(vault, ops=[asked])
+    before = commits(vault)
+    again = run(vault, text)
+    assert (again.plan.refusals, again.plan.ops, again.commits, commits(vault)) == ((), 0, (), before)
+    store.revert_import(vault)
+    run(vault, text)
+    written = {line.op.id: line.text for line in ops.read_all(vault.root, masked=frozenset()).lines}
+    assert written[asked] == ops.mask(raw[asked])
+    assert {i: t for i, t in written.items() if i != asked} == {i: t for i, t in raw.items() if i != asked}
+    assert not any("asked in the thread" in p.read_text(encoding="utf-8") for _, p in ops.listing(vault.root)[0])
 
 
 def test_a_changed_line_or_an_op_from_elsewhere_on_its_objects_refuses_a_rerun(vault: Vault) -> None:

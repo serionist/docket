@@ -31,6 +31,11 @@ its object's rules say (text, a day, a time with its offset, a list of names, an
 object's own ops as they are read and on a set when it is folded; a name it doesn't know holds any value. Kinds,
 verdicts, states, streams, `by` and `via` are read as text and checked when written. The format is a one-way door: a
 later one writes schema_version 2.
+
+A committed line changes only to its mask, its id on the forgotten list (DR-0693, DR-0695): the same keys, its text
+`[forgotten]`, its locators `[forgotten:<32 hex>]`, its attendees none. `parse`, given the listed ids, reads each one's
+line as its mask, so every reader of the ledger reads one ledger, and a line a merge brought back beside its mask
+reads as the same op; the forget's apply, `docket vault check` and the history rewrite read raw lines.
 """
 
 from __future__ import annotations
@@ -39,7 +44,7 @@ import hashlib
 import json
 import os
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Iterator
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -49,7 +54,10 @@ from pydantic import ConfigDict, Field, StringConstraints, ValidationError, mode
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 
 from docket.errors import DocketError
+from docket.vault import forgotten
 from docket.vault import machine as machines
+from docket.vault.config import CONFIG_FILE
+from docket.vault.staging import digest
 
 OPS_DIR = "ledger/ops"
 SUFFIX = ".jsonl"
@@ -296,8 +304,13 @@ class Op:
                 out[key] = {name: value[name] for name in sorted(value, key=lambda name: (order.get(name, last), name))}
             else:
                 out[key] = value
-        text = json.dumps(out, ensure_ascii=False, separators=(",", ":"))
-        return text.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+        return _dumped(out)
+
+
+def _dumped(data: dict[str, Any]) -> str:
+    """A line's text: compact JSON in UTF-8, the two line separators escaped so no reader splits a line on them."""
+    text = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    return text.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
 
 
 _VALIDATE = cast(Any, Op).__pydantic_validator__.validate_json
@@ -342,6 +355,130 @@ def mint(highest: str | None, now: datetime, count: int, rand: Callable[[int], b
     return [encode(first + k) for k in range(count)]
 
 
+# -- a forget's mask (DR-0693) ----------------------------------------------------------------------------------
+
+MARK = "[forgotten]"
+# What a mask writes: the marker, or a locator's, staging's digest of its value, so the adds of one event still make one
+# meeting and a material's remove still finds its add, while no rid reads as it.
+MARKED = re.compile(r"^\[forgotten(?::[0-9a-f]{32})?\]$")
+# The keys and the names in fields whose text a mask takes, and the locators it digests. A name this Docket doesn't
+# know is taken too, at any depth: a later Docket's text.
+TEXT_KEYS = ("note", "label")
+TEXT_FIELDS = (
+    "title", "who", "description", "notes", "outcome", "subject", "organiser", "where", "text", "answer", "next",
+)  # fmt: skip
+LOCATOR_KEYS = ("ref",)
+LOCATOR_FIELDS = ("source", "event", "series")
+ATTENDEES = "attendees"
+# What a mask keeps as it is: ids, numbers, days, times, kinds, verdicts, states, responses, streams, a stream's name
+# and status, by, via, machine and booleans.
+KEPT_KEYS = frozenset(KEY_ORDER) - {*TEXT_KEYS, *LOCATOR_KEYS, "fields"}
+KEPT_FIELDS = frozenset((*FIELDS, *MEETING_FIELDS, *STREAM_FIELDS, *POINT_FIELDS)) - {
+    *TEXT_FIELDS, *LOCATOR_FIELDS, ATTENDEES,
+}  # fmt: skip
+
+
+def _marked(value: Any) -> Any:
+    """Every string in a value as the marker, one that is a marker already kept; its shape and every other value
+    kept."""
+    if isinstance(value, str):
+        return value if MARKED.fullmatch(value) else MARK
+    if isinstance(value, list):
+        return [_marked(one) for one in cast(list[Any], value)]
+    if isinstance(value, dict):
+        return {name: _marked(one) for name, one in cast(dict[str, Any], value).items()}
+    return value
+
+
+def _located(value: Any) -> Any:
+    if isinstance(value, str) and not MARKED.fullmatch(value):
+        return f"[forgotten:{digest(value)}]"
+    return _marked(value)
+
+
+def _masked_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for name, value in fields.items():
+        if name in KEPT_FIELDS:
+            out[name] = value
+        elif name in LOCATOR_FIELDS:
+            out[name] = _located(value)
+        elif name == ATTENDEES and isinstance(value, list):
+            out[name] = []
+        else:
+            out[name] = _marked(value)
+    return out
+
+
+def mask(text: str) -> str:
+    """An op's line as a forget leaves it (DR-0693), from the line of a JSON object: its keys in their order, its text
+    and any string under a name this Docket doesn't know `[forgotten]`, its locators `[forgotten:<32 hex>]`, its
+    attendees none, every other value as it was. Idempotent: a value that is a marker already stays, so a mask's mask
+    is the mask, and a line a merge brought back beside its mask masks to that same text."""
+    out: dict[str, Any] = {}
+    for key, value in cast(dict[str, Any], json.loads(text)).items():
+        if key in KEPT_KEYS:
+            out[key] = value
+        elif key in LOCATOR_KEYS:
+            out[key] = _located(value)
+        elif key == "fields" and isinstance(value, dict):
+            out[key] = _masked_fields(cast(dict[str, Any], value))
+        else:
+            out[key] = _marked(value)
+    return _dumped(out)
+
+
+# The writer's lines begin with their id, so one whose id isn't listed is passed over without reading its JSON.
+_FIRST = re.compile(r'\{"schema_version":1,"id":"([0-7][0-9A-HJKMNP-TV-Z]{25})"')
+
+
+def _listed_id(raw: str, listed: Collection[str]) -> str | None:
+    """The op id a line names, when the list holds it. A line the writer wrote, its id first and once, is read that
+    far; any other is read as JSON, so a line that isn't a JSON object names no op."""
+    first = _FIRST.match(raw)
+    if first is not None and first.group(1) not in listed and raw.count('"id":') == 1:
+        return None
+    found = id_of(raw)
+    return found if found is not None and found in listed else None
+
+
+def listed_lines(text: str, listed: Collection[str]) -> Iterator[tuple[int, str, str]]:
+    """Each line of an op file's raw text whose op id is listed, by its number, with its mask."""
+    if not listed:
+        return
+    for n, raw in enumerate(text.split("\n"), start=1):
+        if _listed_id(raw, listed) is not None:
+            yield n, raw, mask(raw)
+
+
+def masked_file(text: str, listed: Collection[str]) -> str | None:
+    """An op file's text as a forget leaves it: each listed op's line as its mask, and one that masks to a line before
+    it dropped, as a union merge leaves an op's text beside its mask (DR-0695). None when that changes nothing."""
+    masks = {n: masked for n, _, masked in listed_lines(text, listed)}
+    if not masks:
+        return None
+    out: list[str] = []
+    seen: set[str] = set()
+    for n, raw in enumerate(text.split("\n"), start=1):
+        masked = masks.get(n)
+        if masked is None:
+            out.append(raw)
+        elif masked not in seen:
+            seen.add(masked)
+            out.append(masked)
+    left = "\n".join(out)
+    return None if left == text else left
+
+
+def masked_ids(root: Path) -> frozenset[str]:
+    """The op ids the forgotten list in force names, each read as its mask (DR-0695): a vault's, HEAD's lines and the
+    disk's; a folder that isn't a vault's, its disk's alone. A list that doesn't read stops the reader, as it stops
+    every reader of raw."""
+    if (root / ".git").exists() or (root / CONFIG_FILE).exists():
+        return forgotten.at(root).ops
+    return forgotten.load(root, None).ops
+
+
 # -- reading ----------------------------------------------------------------------------------------------------
 
 
@@ -382,6 +519,15 @@ def folder(root: Path) -> Path:
     return path
 
 
+def utf8(path: Path) -> str | None:
+    """An op file's raw text, None when it isn't UTF-8: every reader skips such a file, and `docket vault check` names
+    it."""
+    try:
+        return path.read_bytes().decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
 def text_of(path: Path, rel: str) -> str:
     """An op file's text. One that isn't UTF-8 is refused, naming it: a write appends to it."""
     try:
@@ -400,9 +546,10 @@ def id_of(raw: str) -> str | None:
     return found if isinstance(found, str) and ULID.fullmatch(found) else None
 
 
-def parse(text: str, rel: str) -> Read:
-    """The lines of an op file that read and sit in the right file, and a problem for each other one, by number.
-    Lines are split on LF alone: an op's text never holds one."""
+def parse(text: str, rel: str, masked: Collection[str] = frozenset()) -> Read:
+    """The lines of an op file that read and sit in the right file, each one whose op id `masked` holds read as its
+    mask (DR-0695), and a problem for each other one, by number. Lines are split on LF alone: an op's text never holds
+    one."""
     lines: list[Line] = []
     problems: list[tuple[str, str]] = []
     ids: list[str] = []
@@ -411,11 +558,15 @@ def parse(text: str, rel: str) -> Read:
     year, month, machine = (int(m.group(1)), int(m.group(2)), m.group(3)) if m else (0, 0, "")
     validate = _VALIDATE
     append = lines.append
-    for n, raw in enumerate(text.split("\n"), start=1):
-        if not raw or raw.isspace():
+    for n, read in enumerate(text.split("\n"), start=1):
+        if not read or read.isspace():
             continue
+        raw = read
         try:
             op: Op = validate(raw)
+            if op.id in masked:
+                raw = mask(raw)
+                op = validate(raw)
         except ValidationError:
             problems.append((f"{rel}:{n}", "isn't a ledger op of schema 1; skipped"))
             unread = id_of(raw)
@@ -474,10 +625,12 @@ def listing(root: Path) -> tuple[list[tuple[str, Path]], list[tuple[str, str]]]:
     return files, problems
 
 
-def read_all(root: Path, files: list[FileRead] | None = None) -> Read:
-    """Every machine's op files. A file there not named `<yyyy-mm>-<machine>.jsonl`, a link, or one that isn't UTF-8
-    is a problem and is skipped; a folder that is a link is read as empty, and said. With `files`, each file read is
-    added to it as it was read."""
+def read_all(root: Path, files: list[FileRead] | None = None, masked: Collection[str] | None = None) -> Read:
+    """Every machine's op files, each op `masked` holds as its mask, the forgotten list's when none is given
+    (DR-0695). A file there not named `<yyyy-mm>-<machine>.jsonl`, a link, or one that isn't UTF-8 is a problem and is
+    skipped; a folder that is a link is read as empty, and said. With `files`, each file read is added to it as it was
+    read."""
+    hidden = masked_ids(root) if masked is None else masked
     listed, problems = listing(root)
     lines: list[Line] = []
     ids: list[str] = []
@@ -490,7 +643,7 @@ def read_all(root: Path, files: list[FileRead] | None = None) -> Read:
         except UnicodeDecodeError:
             problems.append((rel, "isn't UTF-8; skipped"))
             continue
-        found = parse(text, rel)
+        found = parse(text, rel, hidden)
         if files is not None:
             sha = hashlib.sha256(data).hexdigest()
             files.append(FileRead(rel, mtime, len(data), sha, found.highest, len(found.lines)))

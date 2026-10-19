@@ -70,7 +70,7 @@ terms:
     definition: "docket forget: takes a record out of the vault for good, on every clone, through the forgotten list: its run file lines, the doc lines built on it, its audio and the audio's keys. A dry run by default; --now only at the owner's console, after a code typed back. The text stays in git's history, for which it writes a git filter-repo rewrite and never runs it."
     see: [packages/docket/src/docket/forget/now.py]
   - term: forgotten list
-    definition: "state/forgotten.jsonl: one line per forget, what it took by hash only (rids forgotten whole, versions, a folder file's identity, media rids, key ids, a removed legacy note's old paths and body hash), merged by union. HEAD's lines and the disk's act together; every reader of raw skips a line it takes, intake drops what it lists, the index is built under its digest, and every gate call applies it to the tree, staging and the key store."
+    definition: "state/forgotten.jsonl: one line per forget, what it took by hash only (rids forgotten whole, versions, a folder file's identity, media rids, key ids, a removed legacy note's old paths and body hash), and the ids of the ledger ops it masked, merged by union. HEAD's lines and the disk's act together; every reader of raw skips a line it takes, every reader of the ledger reads a listed op as its mask, intake drops what it lists, the index is built under its digest, and every gate call applies it to the tree, staging and the key store."
     see: [packages/docket/src/docket/vault/forgotten.py]
   - term: gate
     definition: The one set of checks every change passes, `uv run gate`. The quick lane runs in seconds before every push; `gate full` is the merge rule.
@@ -111,6 +111,9 @@ terms:
   - term: mapper
     definition: "A source's code in the consuming project, map_run(run) in .claude/skills/sources/<source>/mapper.py: a run's captures and manifest in, records in the core's shape out, as plain JSON. Docket runs it in its own process and checks what it returns."
     see: [packages/docket/src/docket/sources/contract.py]
+  - term: mask
+    definition: "An op line as a forget leaves it, in place: its id, keys and structure kept, its text [forgotten], its locators [forgotten:<32 hex>], its attendees none. Its id goes on the forgotten list's ops, every reader of the ledger reads the op so, and every clone's next gate call writes it."
+    see: [packages/docket/src/docket/ledger/ops.py]
   - term: media
     definition: "A record's audio or file, put with media_put: encrypted with a key of its own, waiting in staging beside its record, stored in media/ in LFS once the record is in raw. One media file per rid."
     see: [packages/docket/src/docket/media/__init__.py]

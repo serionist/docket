@@ -178,6 +178,9 @@ same result on any day.
   by union, saying who made it, `user`, `claude` or `sync` (DR-0610, DR-0611). An item folds from its own ops.
 - Undo is an op that leaves one op out of the fold, and an undone undo puts it back; archive is a flag on a closed
   item that keeps its history (DR-0614, DR-0615). `docket vault check` names what the fold leaves out (DR-0617).
+- A forget masks an op in place, the one change a committed line takes: its id, keys and structure kept, its text
+  `[forgotten]`, its locators `[forgotten:<32 hex>]`. The list names it, so every reader of the ledger reads it masked
+  at once and each clone's next gate call writes the mask (DR-0693, DR-0695, DR-0696).
 - Meetings and streams are objects in the same files: an add, a meeting or a stream op whose item is its own id makes
   one, and an object of a kind this Docket doesn't know is kept and changes nothing (DR-0620). The adds of one key, a
   meeting's event or a stream's name, are one object, and a keyed add may continue a meeting that had none, whose id
@@ -471,10 +474,11 @@ Prevention first: the gate keeps private, uncut and unredacted content out of gi
 |---|---|
 | the command | `docket forget <rid>...`, `--never-store` or `--held`: a dry run by default, in counts and line numbers; `--now` forgets at the owner's own console, on the OS prompt or a code typed back (DR-0572), never in Claude Code's shell, a pipe or a redirect (DR-0577) |
 | the family | a rid and every rid under it, the audio on it and on the rids it sits under with every key, and the Whisper transcripts of that audio; a held rid and a folder file by their versions, a folder file by its identity too (DR-0578) |
-| the list | `state/forgotten.jsonl`, hashes only, merged by union, committed alone first: every reader of raw skips its lines, intake drops what it lists, and media's screen and reader refuse a rid it holds (DR-0579) |
+| the list | `state/forgotten.jsonl`, hashes and masked op ids only, merged by union, committed alone first: every reader of raw skips its lines, intake drops what it lists, and media's screen and reader refuse a rid it holds (DR-0579, DR-0695) |
 | the index | built under the list's digest, refused under another until rebuilt; a forget rebuilds it after the vault lock (DR-0593) |
-| the apply | the list against the tree, staging and the key store: raw lines, audio and its keys, doc lines and what was built on them, cursor entries, in one commit. Every gate call on every clone runs it first; the tree waits while the owner's git is mid-rebase or mid-merge (DR-0581, DR-0597) |
+| the apply | the list against the tree, staging and the key store: raw lines, audio and its keys, doc lines and what was built on them, cursor entries, listed ops' lines as their masks, in one commit. Every gate call on every clone runs it first; the tree waits while the owner's git is mid-rebase or mid-merge (DR-0581, DR-0597) |
 | docs | a line anchored on what was forgotten goes, and every line built on it; an empty doc goes, but a confirmed or rejected decision keeps its title and links (DR-0580) |
+| the ledger | each op the list names is masked in place, its id and keys kept and its text `[forgotten]`: every reader of the ledger reads it so at once, the apply writes the masks in its one commit, and `docket vault check` explains a line changed to its mask and names one not masked yet (DR-0693, DR-0695, DR-0696) |
 | keys | deleted on this clone at once, on the others at their next gate call, read or service start; kept out of every export and import made from then on (DR-0595) |
 | history | the text stays in the history of the repo the vault lives in: Docket never rewrites it, and writes the `git filter-repo` files for a fresh clone, which leave the owner's files outside the vault as they are and are checked read-only by `docket forget --check-rewrite`: HEAD stays as it is, and each older branch is named (DR-0594, DR-0598) |
 

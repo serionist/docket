@@ -117,8 +117,8 @@ agrees in the issue or, under an autonomy grant, with its decision recorded as p
   path, lines and keys (DR-0460, DR-0461), a folder source's rids, `<source>:<12 hex>` with `/page<n>`, `/slide<n>` and
   `/sheet<n>` under them (DR-0482), media's paths, staged and stored, and its sidecar and withheld marks (DR-0547), the
   sidecar's cuts and `_decided.jsonl`'s kinds (DR-0561), the media cut log and the sidecar's replaced keys (DR-0562), a
-  Whisper transcript's rid suffix `/whisper`, its engine string and its `via` (DR-0570), the forgotten list (DR-0579),
-  the ledger's op files, lines, kinds, objects, undo and its `of_batch`, archive, ids and numbers (DR-0610 to DR-0615, DR-0620 to DR-0626),
+  Whisper transcript's rid suffix `/whisper`, its engine string and its `via` (DR-0570), the forgotten list and its `ops` (DR-0579, DR-0695),
+  the ledger's op files, lines, kinds, objects, undo and its `of_batch`, archive, ids and numbers (DR-0610 to DR-0615, DR-0620 to DR-0626), a line's mask (DR-0693),
   a stream's STATUS.md: `rendered`'s `status` kind and `stream` (DR-0673), its frontmatter's lines and hash (DR-0674);
 - a source's mapper interface (DR-0119) and what the core reads from an event record (DR-0646), and its name and keys in `vault.yaml` (DR-0124, DR-0125), among them `folder`,
   `exclude` (DR-0481), `media_folders` (DR-0604) and `lookback_days` (DR-0606), `media_hosts` read and ignored;

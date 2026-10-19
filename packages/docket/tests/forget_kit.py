@@ -33,9 +33,11 @@ def line(
     keys: Sequence[str] = (),
     old_paths: Sequence[str] = (),
     import_hashes: Sequence[str] = (),
+    ops: Sequence[str] = (),
     machine: str = "test-box",
 ) -> Forget:
-    """One forget's line, from rids, records and paths as they are, hashed as the list holds them."""
+    """One forget's line, from rids, records and paths as they are, hashed as the list holds them, and the ids of the
+    ledger ops it masks."""
     return Forget(
         rids=[rid_hash(rid) for rid in rids],
         versions=[Version(rid=rid_hash(r.rid), key=key_of(r.rid, stored(r).v)) for r in versions],
@@ -44,6 +46,7 @@ def line(
         keys=list(keys),
         old_paths=[forgotten.old_path_hash(path) for path in old_paths],
         import_hashes=list(import_hashes),
+        ops=list(ops),
         at=AT,
         machine=machine,
     )

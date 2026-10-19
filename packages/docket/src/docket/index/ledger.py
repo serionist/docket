@@ -466,15 +466,16 @@ def _number_rows(folded: ObjectFold) -> list[tuple[Any, ...]]:
 # -- building -----------------------------------------------------------------------------------------------------
 
 
-def rebuild(conn: sqlite3.Connection, root: Path) -> int:
+def rebuild(conn: sqlite3.Connection, root: Path, masked: Collection[str] | None = None) -> int:
     """Every op file folded into the tables, replacing what they held, inside the caller's transaction; how many op
-    lines it read. The collector stays paused from the read to the last row (`ledger.load`), and the fold is let go
-    before it runs again: its first pass would walk every object the fold made, still young, for nothing."""
+    lines it read. Each op `masked` holds, the forgotten list's when none is given, is read as its mask (DR-0695). The
+    collector stays paused from the read to the last row (`ledger.load`), and the fold is let go before it runs again:
+    its first pass would walk every object the fold made, still young, for nothing."""
     files: list[ops.FileRead] = []
     # Taken before any file is read, so a file counts as racily clean for at least as long as it can be.
     read_ns = time.time_ns()
     with paused():
-        ledger = load(root, files)
+        ledger = load(root, files, masked)
         for table in TABLES:
             conn.execute(f"DELETE FROM {table}")  # noqa: S608 - the module's own table names
         conn.executemany(
@@ -505,12 +506,14 @@ def _grew(data: bytes, size: int, sha: str) -> bool:
     return len(data) >= size and (size == 0 or data[size - 1] == NEWLINE) and _sha(data[:size]) == sha
 
 
-def update(conn: sqlite3.Connection, root: Path) -> int:
+def update(conn: sqlite3.Connection, root: Path, masked: Collection[str] | None = None) -> int:
     """The tables brought up to date with the op files, inside the caller's transaction: the lines each file gained
     since it was read folded into the items they name and the meetings and streams they touch; anything else folds
-    every file again. How many op lines it read. A file stored with time 0 (`RACY_NS`) is hashed again, so a rewrite
-    that kept its size and time is seen."""
+    every file again. How many op lines it read. Each op `masked` holds, the forgotten list's when none is given, is
+    read as its mask (DR-0695), so a line a merge brought back beside its mask folds as that op. A file stored with
+    time 0 (`RACY_NS`) is hashed again, so a rewrite that kept its size and time is seen."""
     read_ns = time.time_ns()
+    hidden = ops.masked_ids(root) if masked is None else masked
     stored: dict[str, tuple[int, int, str, str | None]] = {
         path: (size, mtime, sha, highest)
         for path, size, mtime, sha, highest in conn.execute(
@@ -519,7 +522,7 @@ def update(conn: sqlite3.Connection, root: Path) -> int:
     }
     listed, _ = ops.listing(root)
     if set(stored) - {rel for rel, _ in listed}:
-        return rebuild(conn, root)
+        return rebuild(conn, root, hidden)
     fresh: list[Line] = []
     for rel, path in listed:
         st = path.stat()
@@ -529,15 +532,15 @@ def update(conn: sqlite3.Connection, root: Path) -> int:
         data = path.read_bytes()
         start = 0 if old is None else old[0]
         if old is not None and not _grew(data, start, old[2]):
-            return rebuild(conn, root)
+            return rebuild(conn, root, hidden)
         try:
             text = data[start:].decode("utf-8")
         except UnicodeDecodeError:
             if old is not None:
-                return rebuild(conn, root)
+                return rebuild(conn, root, hidden)
             # Left out, as every read leaves out a file that isn't UTF-8; the next update reads it again.
             continue
-        found = ops.parse(text, rel)
+        found = ops.parse(text, rel, hidden)
         highest = max((i for i in (old[3] if old else None, found.highest) if i is not None), default=None)
         conn.execute(INSERT_FILE, (rel, len(data), settled(st.st_mtime_ns, read_ns), _sha(data), highest))
         fresh += found.lines

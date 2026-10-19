@@ -9,11 +9,12 @@ Each add's id is 2000-01-01 plus its number in milliseconds (DR-0658), before an
 of the file holds against a claim Docket made first (DR-0613); a file whose adds aren't is refused.
 
 The ledger may hold the file's ops, each line for line as the import would write it, which are skipped, so a rerun
-writes nothing and an import stopped after a month finishes; and objects of its own that name none of the file's,
-such as the calendar step's meetings (DR-0647). An op from elsewhere naming one of the file's objects, or a held line
-with another text, refuses the import: revert first (DR-0656). So does a problem `docket vault check` would name in
-the fold of the result that the ledger didn't have already, and a number one of the file's objects would lose; one
-the ledger's own object loses goes through, and the import's last write renumbers that object (DR-0613).
+writes nothing and an import stopped after a month finishes, an op the forgotten list masks compared and written as its
+mask, so a rerun after a forget brings none of its text back (DR-0696); and objects of its own that name none of the
+file's, such as the calendar step's meetings (DR-0647). An op from elsewhere naming one of the file's objects, or a
+held line with another text, refuses the import: revert first (DR-0656). So does a problem `docket vault check` would
+name in the fold of the result that the ledger didn't have already, and a number one of the file's objects would
+lose; one the ledger's own object loses goes through, and the import's last write renumbers that object (DR-0613).
 
 The months are written oldest first, each one write through `store.py` and one commit. Old meetings come in keyless,
 and `docket ledger calendar` joins them afterwards (DR-0655); the dry run shows those joins by running the catch-up's
@@ -25,7 +26,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any, cast
@@ -38,6 +39,7 @@ from docket.ledger import calendar, fold, ops, store
 from docket.ledger.fold import Ledger, number_text
 from docket.ledger.meetings import Meeting, ObjectFold, meeting_text
 from docket.ledger.ops import Line, Op
+from docket.vault import forgotten
 from docket.vault.vault import Vault
 
 # The keys the writer sets, never the export (DR-0653).
@@ -129,12 +131,13 @@ def plan(vault: Vault, text: str, name: str, *, report: bool = False) -> Plan:
     """The import of `text` as it would be written, each refusal by its line, and with `report` the dry run's counts.
     Lines that don't read are refused before anything is folded: the fold of a file missing them would only name what
     hangs on them."""
+    listed = forgotten.load(vault.root, vault.home).ops
     with fold.paused():
-        read = _read(vault, text, name)
+        read = _read(vault, text, name, listed)
     refusals = read.refusals
     if refusals:
         return Plan((), 0, tuple(refusals))
-    held = ops.read_all(vault.root)
+    held = ops.read_all(vault.root, masked=listed)
     texts: dict[str, set[str]] = {}
     for line in held.lines:
         texts.setdefault(line.op.id, set()).add(line.text)
@@ -175,9 +178,10 @@ def plan(vault: Vault, text: str, name: str, *, report: bool = False) -> Plan:
 # -- reading the file ---------------------------------------------------------------------------------------------
 
 
-def _read(vault: Vault, text: str, name: str) -> _Lines:
+def _read(vault: Vault, text: str, name: str, masked: Collection[str]) -> _Lines:
     """Each line as an op the import would write: the writer's keys set, its values screened, read as DR-0611 reads
-    it. Two lines of one id are one op when they say the same, and are refused when they don't."""
+    it, and as its mask when `masked` holds its id. Two lines of one id are one op when they say the same, and are
+    refused when they don't."""
     out = _Lines()
     given: dict[str, tuple[int, dict[str, Any]]] = {}
     for n, raw in enumerate(text.split("\n"), start=1):
@@ -224,7 +228,11 @@ def _read(vault: Vault, text: str, name: str) -> _Lines:
         if op.by not in ops.BY:
             out.refusals.append(f"{name}:{n}: by is one of {', '.join(ops.BY)}")
             continue
-        out.ops[op.id] = (op, op.text(), n)
+        written = op.text()
+        if op.id in masked:
+            written = ops.mask(written)
+            op = ops.read_op(written)
+        out.ops[op.id] = (op, written, n)
         before[op.item] = op.id
         if op.op in ops.MAKES and ops.decode(op.id) >> ops.RANDOM_BITS != ADDS_AT + (op.number or 0):
             late.append(n)
