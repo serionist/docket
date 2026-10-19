@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
-from typing import Literal
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel
@@ -17,6 +17,9 @@ from docket import briefs, decisions, index, recall, render
 from docket.briefs import BriefsReport
 from docket.decisions import DecisionsReport
 from docket.index import SearchResult
+from docket.ledger import batch, store
+from docket.ledger.batch import BatchResult
+from docket.ledger.ops import By
 from docket.media import put as media
 from docket.media.keystore import KeyStore
 from docket.recall import ReadResult, VerifyResult
@@ -121,6 +124,19 @@ async def transcribe(service: Service, rid: str) -> tuple[SpeechJob, str]:
     job.checked(rid)
     found = await asyncio.to_thread(service.speech.add, rid)
     return found, f"{rid}: {speech_line(found)}"
+
+
+async def ledger_batch(
+    service: Service, ops: list[dict[str, Any]], by: By = "claude", dry_run: bool = False
+) -> tuple[BatchResult, str]:
+    """One batch through the writer, one at a time with every other write, via tool (DR-0637, DR-0639); the index is
+    brought up to date after a write, without waiting. A refused change refuses the batch, and a dry run lists every
+    refusal it can."""
+    written = await service.writer.run(lambda: store.write(service.vault(), ops, by=by, via="tool", dry_run=dry_run))
+    if written.commit is not None:
+        service.updater.poke()
+    found = batch.result(ops, written, dry_run=dry_run)
+    return found, render.text(batch.lines(found))
 
 
 class MediaPut(BaseModel):

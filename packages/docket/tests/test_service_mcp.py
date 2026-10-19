@@ -14,6 +14,7 @@ from mcp.types import CallToolResult, TextContent
 from media_kit import CALL, audio, media_vault
 from starlette.testclient import TestClient
 
+from docket.ledger import ops
 from docket.media.put import drop_folder
 from docket.service.app import create_app
 from docket.service.state import Service, Settings
@@ -71,9 +72,11 @@ def text_of(result: CallToolResult) -> str:
 
 
 def contract(value: Any) -> Any:
-    """A schema without its prose: names, types, defaults, bounds and enums are the door; descriptions are not."""
+    """A schema without its prose: names, types, defaults, bounds and enums are the door; descriptions are not. A
+    field named title or description is a dict, and stays."""
     if isinstance(value, dict):
-        return {k: contract(v) for k, v in sorted(value.items()) if k not in ("description", "title")}
+        prose = ("description", "title")
+        return {k: contract(v) for k, v in sorted(value.items()) if not (k in prose and isinstance(v, str))}
     if isinstance(value, list):
         return [contract(v) for v in value]
     return value
@@ -82,12 +85,14 @@ def contract(value: Any) -> Any:
 # -- the door --------------------------------------------------------------------------------------------------------
 
 
-def test_the_tools_names_parameters_and_annotations_match_the_golden_file(service: Service) -> None:
+def test_the_tools_names_parameters_results_and_annotations_match_the_golden_file(service: Service) -> None:
+    """Results only gain fields (DR-0150): a renamed or retyped field of a result model fails here."""
     listed = with_client(service, lambda c: c.list_tools())
     found = [
         {
             "name": tool.name,
             "input_schema": contract(tool.input_schema),
+            "output_schema": contract(tool.output_schema),
             "annotations": tool.annotations.model_dump(mode="json", exclude_none=True) if tool.annotations else None,
         }
         for tool in listed.tools
@@ -104,6 +109,7 @@ def test_the_tools_names_parameters_and_annotations_match_the_golden_file(servic
         "ingest": True,
         "media_put": True,
         "transcribe": True,
+        "ledger_batch": True,
     }
 
 
@@ -316,3 +322,37 @@ def test_decisions_answers_each_decision_s_fields(service: Service) -> None:
     assert text_of(result).startswith("proposed   decision:2026-10-13-offer-in-writing  the offer comes in writing")
     assert call(service, "decisions", {"status": "confirmed"}).structured_content == {"decisions": [], "hidden": 0}
     assert call(service, "decisions", {"status": "decided"}).is_error
+
+
+LEDGER_ADD = {"op": "add", "fields": {"kind": "reply", "title": "Send Ada the dates", "who": "Ada Example",
+                                      "stream": "pilot", "source": "chat:C0TEST/1791000001.000100"}}  # fmt: skip
+
+
+def test_ledger_batch_writes_one_batch_via_tool_and_names_what_as_gave(service: Service) -> None:
+    batch = [{**LEDGER_ADD, "as": "x"}, {"op": "triage", "item": "$x", "verdict": "chase", "by": "user"}]
+    dry = call(service, "ledger_batch", {"ops": batch, "by": "sync", "dry_run": True})
+    assert not dry.is_error, text_of(dry)
+    assert text_of(dry).splitlines()[-1] == "dry run: 2 op(s) would be written; nothing written"
+    done = call(service, "ledger_batch", {"ops": batch, "by": "sync"})
+    assert not done.is_error, text_of(done)
+    data = done.structured_content
+    assert data is not None
+    assert (data["dry_run"], data["ops"], data["names"], data["changes"][1]["wrote"]) == (
+        False, 2, {"x": "A-0001"}, ["A-0001 triage: chase"],
+    )  # fmt: skip
+    assert data["commit"] and data["batch"] == data["ids"]["x"]
+    written = [line.op for line in ops.read_all(service.vault().root).lines]
+    assert [(o.op, o.by, o.via) for o in written] == [("add", "sync", "tool"), ("triage", "user", "tool")]
+
+
+def test_a_refused_change_is_a_tool_error_and_a_dry_run_lists_every_refusal(service: Service) -> None:
+    batch = [{"op": "log", "item": "A-0009", "note": "x"}, {"op": "done", "item": "A-0010"}]
+    refused = call(service, "ledger_batch", {"ops": batch})
+    assert refused.is_error
+    assert text_of(refused).endswith("change 1 (log): no item A-0009; nothing written")
+    dry = call(service, "ledger_batch", {"ops": batch, "dry_run": True})
+    assert not dry.is_error
+    assert dry.structured_content is not None
+    assert [c["refused"] for c in dry.structured_content["changes"]] == ["no item A-0009", "no item A-0010"]
+    assert call(service, "ledger_batch", {"ops": [LEDGER_ADD], "by": "me"}).is_error
+    assert call(service, "ledger_batch", {"ops": ["add"]}).is_error

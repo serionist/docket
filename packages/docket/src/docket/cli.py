@@ -31,6 +31,9 @@ from docket.index import flags as index_flags
 from docket.index import ledger as index_ledger
 from docket.index.build import db_path, ledger_tables
 from docket.index.embedpass import fill
+from docket.ledger import batch as ledger_batches
+from docket.ledger import ops as ledger_ops
+from docket.ledger import store as ledger_store
 from docket.media import backup as media_backup
 from docket.media import confirm as media_confirm
 from docket.media import sources as media_sources
@@ -2032,6 +2035,42 @@ def ledger_show(
     with ledger_tables(v) as conn:
         shown = index_ledger.find(conn, item)
     say_all(render.ledger_item(shown, ZoneInfo(v.config.owner.time_zone)))
+
+
+@ledger_app.command("batch")
+def ledger_batch(
+    source: Annotated[
+        str, typer.Argument(help="The ops: a file with a JSON array or JSON lines, or - to read stdin.")
+    ] = "-",
+    by: Annotated[str, typer.Option("--by", help="Who decided, unless an op says: user, claude or sync.")] = "claude",
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Check every change and write nothing.")] = False,
+    vault: VaultOption = None,
+) -> None:
+    """Change the ledger in one write, every change or none, as the ledger_batch tool does: the same ops, via cli. A
+    dry run lists every change it would refuse; a refused change exits 1, and a batch that doesn't read exits 2."""
+    if source == "-":
+        data = sys.stdin.buffer.read()
+    elif Path(source).is_file():
+        data = Path(source).read_bytes()
+    else:
+        raise DocketError(f"no file {source}")
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        raise DocketError(f"{source} isn't UTF-8; write the batch as UTF-8") from None
+    if by not in ledger_ops.BY:
+        raise DocketError(f"--by is {', '.join(ledger_ops.BY)}, not {by!r}")
+    changes = ledger_batches.parse(text)
+    try:
+        written = ledger_store.write(find_vault(vault), changes, by=by, via="cli", dry_run=dry_run)
+    except ledger_store.RefusedError as e:
+        # A refused change is the batch's answer, as in a dry run (DR-0645); anything else stays a failure, exit 2.
+        typer.echo(f"docket: {e}", err=True)
+        raise typer.Exit(1) from None
+    found = ledger_batches.result(changes, written, dry_run=dry_run)
+    say_all(ledger_batches.lines(found))
+    if any(change.refused is not None for change in found.changes):
+        raise typer.Exit(1)
 
 
 @hook_app.command("session-start")

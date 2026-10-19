@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0639
+    title: ledger_batch takes the writer's changes as ops, with by on any op and a dry run, in one write
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#201"]
+    description: "ops is a list of objects, each a change its op names: add, set, log, triage, snooze, done, drop, reopen, notes, material, archive, undo, meeting, stream, point, point_set, keep, point_item and rollover, each with the keys the writer takes for it, as (DR-0640) and by. by is user, claude or sync: the op's own, else the batch's, claude by default, and every op line written carries it. done and drop take outcome, written as a set of the outcome before the close; notes takes append, a line added at the end, or set, the whole text, null clearing it, written as a set (DR-0611); add takes force (DR-0642). The batch is one write: each change is checked against the ledger as the changes before it left it, and one refused change refuses the whole batch, naming its place, its op and why. dry_run writes nothing and goes on past a refusal, leaving that change out: it lists every refusal it can, and marks each change naming a refused change's $name as hanging on it, unchecked, so a sync batch with three look-alikes needs one dry run. The result gives per change the lines of what it wrote or that it changed nothing, what the writer says of it (the same-source items of an add, the meetings a rollover left stranded), each as with what it named, the batch's id (its first op's) for an undo of the whole, and the commit. todo.py's op names stay for 12 of its 20 ops; the other 8 map to one change each, and every reference to an item, a meeting or a stream is item."
+    binds:
+      - "The op names and their keys only gain: none is renamed, retyped or removed. A golden file in the tests, ledger-batch.json, holds them."
+      - via is tool for ledger_batch and cli for docket ledger batch.
+    not_chosen:
+      - "todo.py's op names and shapes as aliases: two names for one change in the door for good, for skills #209 and #210 write afresh."
+      - "One by per batch: the tasks skill records what the owner decided and what Claude did in one outcome."
+      - "A schema per op in the tool's input: the door would hold every key's type twice, and the writer's refusal already names the op and the key."

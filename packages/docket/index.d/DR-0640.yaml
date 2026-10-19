@@ -1,0 +1,13 @@
+decisions:
+  - id: DR-0640
+    title: as names what a change made, and $name stands for its id in a later change of the same batch
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#201"]
+    description: "as is a lowercase letter then up to 31 lowercase letters, digits or underscores, on add and point_item (the new item), meeting (the meeting, new, set by its event or joined by continues) and point (the point). $name in a later change's item, point or of, or in its fields' item, meeting or continues, stands for that id, so it holds while a number clashes. A $name no earlier change gave, or one name given twice, refuses the batch; text elsewhere starting with $ stays text. The result names each with its number, or a point as M-0040#3. A point named by its n (2 or #2) is the point that held that place on its meeting when the batch began, so removing #2 and then answering #3 answers the point that was #3; a point the batch added is named by its $name or its id."
+    binds: [$name is read only in those six keys.]
+    not_chosen:
+      - "todo.py's substitution in every value: a title starting with $ would read as a name."
+      - "Naming a change by its place: a batch edited by hand would point at the wrong one."

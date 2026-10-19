@@ -61,6 +61,502 @@
       ],
       "type": "object"
     },
+    "output_schema": {
+      "$defs": {
+        "DocRef": {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "rev": {
+              "type": "integer"
+            },
+            "title": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "type",
+            "rev",
+            "title"
+          ],
+          "type": "object"
+        },
+        "EntityFound": {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "words": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "words"
+          ],
+          "type": "object"
+        },
+        "Group": {
+          "properties": {
+            "first": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "hits": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/Hit"
+              },
+              "type": "array"
+            },
+            "key": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "last": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "summary": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/DocRef"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key",
+            "kind",
+            "title"
+          ],
+          "type": "object"
+        },
+        "Hit": {
+          "properties": {
+            "also": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "anchors": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "authors": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "doc": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "entities": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "found_by": {
+              "default": "",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "lines": {
+              "anyOf": [
+                {
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "prefixItems": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "integer"
+                    }
+                  ],
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "locator": {
+              "type": "string"
+            },
+            "marks": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "place": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "rank": {
+              "default": 0,
+              "type": "integer"
+            },
+            "rid": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "snippet": {
+              "default": "",
+              "type": "string"
+            },
+            "speakers": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "start": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "ts": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "locator",
+            "kind"
+          ],
+          "type": "object"
+        },
+        "QueryReading": {
+          "properties": {
+            "absent": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "boosts": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "entities": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/EntityFound"
+              },
+              "type": "array"
+            },
+            "left_out": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "phrases": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "since": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "text": {
+              "type": "string"
+            },
+            "time_words": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "unknown": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "until": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "words": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "type": "object"
+        },
+        "RerankRun": {
+          "properties": {
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "pairs": {
+              "default": 0,
+              "type": "integer"
+            },
+            "state": {
+              "default": "off",
+              "enum": [
+                "off",
+                "on",
+                "skipped"
+              ],
+              "type": "string"
+            },
+            "why": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "type": "object"
+        },
+        "VectorsRun": {
+          "properties": {
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "state": {
+              "default": "off",
+              "enum": [
+                "off",
+                "on",
+                "skipped"
+              ],
+              "type": "string"
+            },
+            "why": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "type": "object"
+        }
+      },
+      "properties": {
+        "candidates": {
+          "default": 0,
+          "type": "integer"
+        },
+        "facets": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "groups": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Group"
+          },
+          "type": "array"
+        },
+        "models": {
+          "$ref": "#/$defs/VectorsRun",
+          "default": {
+            "model": null,
+            "state": "off",
+            "why": null
+          }
+        },
+        "query": {
+          "$ref": "#/$defs/QueryReading"
+        },
+        "rerank": {
+          "$ref": "#/$defs/RerankRun",
+          "default": {
+            "model": null,
+            "pairs": 0,
+            "state": "off",
+            "why": null
+          }
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
     "annotations": {
       "read_only_hint": true,
       "open_world_hint": false
@@ -105,6 +601,419 @@
       ],
       "type": "object"
     },
+    "output_schema": {
+      "$defs": {
+        "CitingLine": {
+          "properties": {
+            "anchors": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "doc": {
+              "type": "string"
+            },
+            "n": {
+              "type": "integer"
+            },
+            "rev": {
+              "type": "integer"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "doc",
+            "rev",
+            "n",
+            "text",
+            "anchors"
+          ],
+          "type": "object"
+        },
+        "DocLine": {
+          "properties": {
+            "anchors": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "flags": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "n": {
+              "type": "integer"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "n",
+            "text"
+          ],
+          "type": "object"
+        },
+        "DocView": {
+          "properties": {
+            "by": {
+              "type": "string"
+            },
+            "covers": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "current": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "entities": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "id": {
+              "type": "string"
+            },
+            "lines": {
+              "items": {
+                "$ref": "#/$defs/DocLine"
+              },
+              "type": "array"
+            },
+            "note": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "old_paths": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "path": {
+              "type": "string"
+            },
+            "rev": {
+              "type": "integer"
+            },
+            "status": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "superseded_by": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "supersedes": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "type",
+            "rev",
+            "path",
+            "by",
+            "covers",
+            "supersedes",
+            "entities",
+            "superseded_by",
+            "text",
+            "lines"
+          ],
+          "type": "object"
+        },
+        "LegacyRef": {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "old_paths": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "id",
+            "old_paths"
+          ],
+          "type": "object"
+        },
+        "Segment": {
+          "additionalProperties": false,
+          "properties": {
+            "end_ms": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "speaker": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "start_ms": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "start_ms",
+            "end_ms",
+            "text"
+          ],
+          "type": "object"
+        },
+        "Span": {
+          "properties": {
+            "anchor": {
+              "type": "string"
+            },
+            "author": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "end_ms": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "kind": {
+              "default": "",
+              "type": "string"
+            },
+            "note": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "paragraphs": {
+              "anyOf": [
+                {
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "prefixItems": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "integer"
+                    }
+                  ],
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "problem": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "rid": {
+              "type": "string"
+            },
+            "segments": {
+              "items": {
+                "$ref": "#/$defs/Segment"
+              },
+              "type": "array"
+            },
+            "start_ms": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "text": {
+              "default": "",
+              "type": "string"
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "ts": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "versions": {
+              "default": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "rid",
+            "anchor"
+          ],
+          "type": "object"
+        }
+      },
+      "properties": {
+        "doc": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DocView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "legacy": {
+          "items": {
+            "$ref": "#/$defs/LegacyRef"
+          },
+          "type": "array"
+        },
+        "lines": {
+          "items": {
+            "$ref": "#/$defs/CitingLine"
+          },
+          "type": "array"
+        },
+        "locator": {
+          "type": "string"
+        },
+        "problems": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "resolved": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "spans": {
+          "items": {
+            "$ref": "#/$defs/Span"
+          },
+          "type": "array"
+        },
+        "view": {
+          "enum": [
+            "summary",
+            "raw",
+            "both"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "locator",
+        "view"
+      ],
+      "type": "object"
+    },
     "annotations": {
       "read_only_hint": true,
       "open_world_hint": false
@@ -142,6 +1051,292 @@
       ],
       "type": "object"
     },
+    "output_schema": {
+      "$defs": {
+        "Segment": {
+          "additionalProperties": false,
+          "properties": {
+            "end_ms": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "speaker": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "start_ms": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "start_ms",
+            "end_ms",
+            "text"
+          ],
+          "type": "object"
+        },
+        "Span": {
+          "properties": {
+            "anchor": {
+              "type": "string"
+            },
+            "author": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "end_ms": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "kind": {
+              "default": "",
+              "type": "string"
+            },
+            "note": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "paragraphs": {
+              "anyOf": [
+                {
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "prefixItems": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "integer"
+                    }
+                  ],
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "problem": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "rid": {
+              "type": "string"
+            },
+            "segments": {
+              "items": {
+                "$ref": "#/$defs/Segment"
+              },
+              "type": "array"
+            },
+            "start_ms": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "text": {
+              "default": "",
+              "type": "string"
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "ts": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "versions": {
+              "default": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "rid",
+            "anchor"
+          ],
+          "type": "object"
+        },
+        "VerifiedLine": {
+          "properties": {
+            "anchors": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "cite": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "n": {
+              "type": "integer"
+            },
+            "problems": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "refs": {
+              "items": {
+                "$ref": "#/$defs/VerifiedRef"
+              },
+              "type": "array"
+            },
+            "spans": {
+              "items": {
+                "$ref": "#/$defs/Span"
+              },
+              "type": "array"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "n",
+            "text"
+          ],
+          "type": "object"
+        },
+        "VerifiedRef": {
+          "properties": {
+            "doc": {
+              "type": "string"
+            },
+            "n": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "problem": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "ref": {
+              "type": "string"
+            },
+            "spans": {
+              "items": {
+                "$ref": "#/$defs/Span"
+              },
+              "type": "array"
+            },
+            "text": {
+              "default": "",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ref",
+            "doc"
+          ],
+          "type": "object"
+        }
+      },
+      "properties": {
+        "doc": {
+          "type": "string"
+        },
+        "lines": {
+          "items": {
+            "$ref": "#/$defs/VerifiedLine"
+          },
+          "type": "array"
+        },
+        "rev": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "doc",
+        "rev",
+        "lines"
+      ],
+      "type": "object"
+    },
     "annotations": {
       "read_only_hint": true,
       "open_world_hint": false
@@ -168,6 +1363,120 @@
         "stale_only": {
           "default": true,
           "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "output_schema": {
+      "$defs": {
+        "BriefState": {
+          "properties": {
+            "entity": {
+              "type": "string"
+            },
+            "flagged": {
+              "default": 0,
+              "type": "integer"
+            },
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "new": {
+              "$ref": "#/$defs/NewRecords"
+            },
+            "orphaned": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "rev": {
+              "type": "integer"
+            },
+            "rev_time": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "state": {
+              "enum": [
+                "stale",
+                "current",
+                "orphaned"
+              ],
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            },
+            "why": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "id",
+            "entity",
+            "name",
+            "type",
+            "rev",
+            "state"
+          ],
+          "type": "object"
+        },
+        "NewRecords": {
+          "properties": {
+            "count": {
+              "default": 0,
+              "type": "integer"
+            },
+            "newest": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "properties": {
+        "briefs": {
+          "items": {
+            "$ref": "#/$defs/BriefState"
+          },
+          "type": "array"
+        },
+        "hidden": {
+          "default": 0,
+          "type": "integer"
+        },
+        "missing": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "type": "object"
@@ -214,6 +1523,130 @@
       },
       "type": "object"
     },
+    "output_schema": {
+      "$defs": {
+        "DecisionState": {
+          "properties": {
+            "by": {
+              "type": "string"
+            },
+            "cite": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "contradicted_by": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "contradicts": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "current": {
+              "type": "boolean"
+            },
+            "flagged": {
+              "default": 0,
+              "type": "integer"
+            },
+            "id": {
+              "type": "string"
+            },
+            "note": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "replaces": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "rev": {
+              "type": "integer"
+            },
+            "rev_time": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "status": {
+              "type": "string"
+            },
+            "subject": {
+              "type": "string"
+            },
+            "superseded_by": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "supersedes": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "subject",
+            "title",
+            "status",
+            "current",
+            "rev",
+            "by"
+          ],
+          "type": "object"
+        }
+      },
+      "properties": {
+        "decisions": {
+          "items": {
+            "$ref": "#/$defs/DecisionState"
+          },
+          "type": "array"
+        },
+        "hidden": {
+          "default": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "annotations": {
       "read_only_hint": true,
       "open_world_hint": false
@@ -229,6 +1662,75 @@
       },
       "required": [
         "text"
+      ],
+      "type": "object"
+    },
+    "output_schema": {
+      "properties": {
+        "changed": {
+          "type": "boolean"
+        },
+        "commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "type": "string"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "path": {
+          "type": "string"
+        },
+        "pinned_lines": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "redacted_lines": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "redactions": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "rev": {
+          "type": "integer"
+        },
+        "taken_in": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "rev",
+        "path",
+        "changed"
       ],
       "type": "object"
     },
@@ -264,6 +1766,135 @@
       },
       "required": [
         "source"
+      ],
+      "type": "object"
+    },
+    "output_schema": {
+      "$defs": {
+        "Due": {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "since": {
+              "format": "date",
+              "type": "string"
+            },
+            "why": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "why",
+            "since"
+          ],
+          "type": "object"
+        }
+      },
+      "properties": {
+        "budget": {
+          "type": "integer"
+        },
+        "final": {
+          "type": "boolean"
+        },
+        "held": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kept": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kept_whole": {
+          "type": "boolean"
+        },
+        "media": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "retry": {
+          "items": {
+            "$ref": "#/$defs/Due"
+          },
+          "type": "array"
+        },
+        "run": {
+          "type": "string"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "skill": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "steps": {
+          "type": "string"
+        },
+        "tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "waiting": {
+          "items": {
+            "$ref": "#/$defs/Due"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "run",
+        "source",
+        "final",
+        "since",
+        "until",
+        "skill",
+        "tools",
+        "budget",
+        "held",
+        "kept",
+        "kept_whole",
+        "waiting",
+        "retry",
+        "notes",
+        "steps"
       ],
       "type": "object"
     },
@@ -338,6 +1969,183 @@
       ],
       "type": "object"
     },
+    "output_schema": {
+      "$defs": {
+        "SetAsideEntry": {
+          "properties": {
+            "id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "type": "string"
+            },
+            "tool": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "reason",
+            "tool",
+            "key"
+          ],
+          "type": "object"
+        },
+        "WaitingEntry": {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "waits_for": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "waits_for"
+          ],
+          "type": "object"
+        }
+      },
+      "properties": {
+        "cursor_problem": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "dropped": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "expired": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "final": {
+          "type": "boolean"
+        },
+        "held_in_raw": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mark_after": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "mark_before": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "moved": {
+          "default": false,
+          "type": "boolean"
+        },
+        "on_hold": {
+          "default": 0,
+          "type": "integer"
+        },
+        "pending": {
+          "default": 0,
+          "type": "integer"
+        },
+        "ready": {
+          "default": 0,
+          "type": "integer"
+        },
+        "repeated": {
+          "default": false,
+          "type": "boolean"
+        },
+        "retry_count": {
+          "default": 0,
+          "type": "integer"
+        },
+        "run": {
+          "type": "string"
+        },
+        "set_aside": {
+          "items": {
+            "$ref": "#/$defs/SetAsideEntry"
+          },
+          "type": "array"
+        },
+        "skipped": {
+          "default": 0,
+          "type": "integer"
+        },
+        "source": {
+          "type": "string"
+        },
+        "waiting": {
+          "items": {
+            "$ref": "#/$defs/WaitingEntry"
+          },
+          "type": "array"
+        },
+        "waiting_count": {
+          "default": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run",
+        "source",
+        "final"
+      ],
+      "type": "object"
+    },
     "annotations": {
       "read_only_hint": false,
       "destructive_hint": false,
@@ -380,6 +2188,25 @@
       ],
       "type": "object"
     },
+    "output_schema": {
+      "properties": {
+        "bytes": {
+          "type": "integer"
+        },
+        "ext": {
+          "type": "string"
+        },
+        "rid": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "rid",
+        "ext",
+        "bytes"
+      ],
+      "type": "object"
+    },
     "annotations": {
       "read_only_hint": false,
       "destructive_hint": false,
@@ -397,6 +2224,213 @@
       },
       "required": [
         "rid"
+      ],
+      "type": "object"
+    },
+    "output_schema": {
+      "properties": {
+        "ahead": {
+          "default": 0,
+          "type": "integer"
+        },
+        "at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "percent": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rid": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "queued",
+            "running",
+            "staged",
+            "not staged"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "rid",
+        "state",
+        "at"
+      ],
+      "type": "object"
+    },
+    "annotations": {
+      "read_only_hint": false,
+      "destructive_hint": false,
+      "idempotent_hint": false,
+      "open_world_hint": false
+    }
+  },
+  {
+    "name": "ledger_batch",
+    "input_schema": {
+      "properties": {
+        "by": {
+          "default": "claude",
+          "enum": [
+            "user",
+            "claude",
+            "sync"
+          ],
+          "type": "string"
+        },
+        "dry_run": {
+          "default": false,
+          "type": "boolean"
+        },
+        "ops": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ops"
+      ],
+      "type": "object"
+    },
+    "output_schema": {
+      "$defs": {
+        "BatchChange": {
+          "properties": {
+            "hangs_on": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "n": {
+              "type": "integer"
+            },
+            "op": {
+              "type": "string"
+            },
+            "refused": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "said": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "wrote": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "n",
+            "op",
+            "wrote"
+          ],
+          "type": "object"
+        }
+      },
+      "properties": {
+        "batch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/BatchChange"
+          },
+          "type": "array"
+        },
+        "commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "ids": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "names": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "ops": {
+          "type": "integer"
+        },
+        "renumbered": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "dry_run",
+        "ops",
+        "batch",
+        "commit",
+        "changes",
+        "names",
+        "ids"
       ],
       "type": "object"
     },

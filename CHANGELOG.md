@@ -8,6 +8,11 @@ Unreleased in the same PR.
 
 ### Added
 
+- Claude changes the ledger with the `ledger_batch` tool, and you with `docket ledger batch`: items, meetings, talking
+  points and streams in one write, every change or none, each saying who decided it, `as` naming what one made for a
+  later op's `$name`, and a dry run that lists every change it would refuse. An add that looks like an open item is
+  refused unless forced, and so is a meeting without an event that doubles one.
+
 - Slack, Teams, Outlook mail and the calendar ship as example sources beside Plaud, in `examples/sources/`:
   `docket source new <name> --example` copies one into your project with its sensitivity, tools and lookback. Slack
   reads through the Slack plugin; Teams, mail and the calendar read Teams and Outlook on the web through Claude in

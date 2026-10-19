@@ -27,7 +27,8 @@ from docket.vault.config import RedactionPattern, VaultConfig
 from docket.vault.vault import UnmergedError, Vault
 
 FILE = "ledger/ops/2026-10-test-box.jsonl"
-ADD: dict[str, Any] = {"op": "add", "fields": dict(ADD_FIELDS)}
+# Forced: these tests add the one ask more than once on purpose, past the look-alike check (DR-0642).
+ADD: dict[str, Any] = {"op": "add", "fields": dict(ADD_FIELDS), "force": True}
 
 
 @pytest.fixture(params=["memory", "index"])
@@ -109,7 +110,7 @@ def test_a_change_that_changes_nothing_writes_no_op(vault: Vault) -> None:
         ],
         now=NOW,
     )
-    assert nothing == store.Written((), None, {})
+    assert (nothing.ops, nothing.commit, nothing.numbers, nothing.changes) == ((), None, {}, ((), (), ()))
     assert write(vault, [], now=NOW).ops == ()
     (later_day,) = write(vault, [{"op": "snooze", "item": "A-0002", "until": "2026-10-26"}], now=NOW).ops
     assert later_day.until == date(2026, 10, 26)
@@ -145,7 +146,7 @@ REFUSALS: list[tuple[dict[str, Any], str]] = [
     ({"op": "nope"}, "op is one of add, set"),
     ({"op": 5}, "op is one of"),
     ({"op": "renumber", "item": "A-0001", "number": 9}, "op is one of"),
-    ({"op": "log", "item": "A-0001", "note": "x", "colour": "red"}, "log takes only item, note, not colour"),
+    ({"op": "log", "item": "A-0001", "note": "x", "colour": "red"}, "log takes only item, note, by, not colour"),
     ({"op": "log", "item": "A-0001", "note": 5}, "note is text"),
     ({"op": "log", "item": "A-0001"}, "a log needs a note"),
     ({"op": "log", "item": "A-0001", "note": "  \n "}, "a log needs a note"),

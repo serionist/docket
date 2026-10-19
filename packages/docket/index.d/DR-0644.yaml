@@ -1,0 +1,10 @@
+decisions:
+  - id: DR-0644
+    title: "History counts come from the ops: an item is chased once per standing triage to chase"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#201"]
+    description: "An item's counts: times chased (its triage ops to chase that stand), snoozes, due changes, reopens, and days open or to its close. list's counts over everything that matches: by state, overdue, chased (items and times), and the median days to done, so how many asks to Ada went unanswered is list with who Ada, kind waiting, state all and a since. They read the index's item_log, never the log's words. The import (#202) and the owner's export script write an old log line that records a chase, a snooze, a due change or a reopen as that op, with its day and by, so the counts reach back to the old ledger's first day."
+    not_chosen: ["Counting log lines such as 'chase drafted': words, not changes (DR-0611)."]
