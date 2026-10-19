@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0685
+    title: "The plugin's skills sync and tasks: /docket:sync reconciles the sources into the ledger, /docket:tasks works the queue"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#209", "#210"]
+    description: "The plugin gains two skills under plugin/skills/: sync (/docket:sync), which runs each live source and writes what they found into the ledger, and tasks (/docket:tasks), which opens the Queue page and works the queue in chat. DR-0161 kept the design's names for later skills; this sets them. Users invoke them by name, their permission rules name them, and a project's own sync and tasks skills point at them at the cut-over (DR-0692)."
+    binds: [The skill names sync and tasks are a one-way door (AGENTS.md).]
+    not_chosen:
+      - "One skill for both: a sync and a session over the queue are asked for apart, and the sync's summary already hands over to tasks."

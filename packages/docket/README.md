@@ -99,6 +99,9 @@ once you commit it, and `docket vault status` says when one waits (DR-0521).
   A doc is screened as written as well as redacted, so a keyword inside an address, a number or a password a rule
   redacts still refuses it, as a record holding it is dropped. `docket redaction set` changes a setting, and `docket
   doc redact` applies it to the docs already there.
+- The ledger refuses an item's `source` or a material's `ref` that points into a container on `never_store.containers`:
+  a Slack or Teams rid by its own text, any rid by the container and thread the index holds for it. The refusal names
+  the field, never the value, for every writer and the import (DR-0690).
 - Turning a rule off leaves the markers already stored, but a record a source sends again then lands as a new version
   holding the value, records you classified wait in staging again, and the next `docket import notes` writes a new
   rev of each note the rule matched. Turning credentials off stores passwords, keys and tokens as written, in raw,
@@ -311,7 +314,9 @@ sources:
 
 A source syncs from any Claude Code session with the plugin: ask Claude to sync it, and it calls `run_open`, follows
 the source's skill, and closes the run with `ingest` (DR-0240 to DR-0252). The plugin's capture hook hands Docket what
-each of the source's tools returned, so Claude never retypes a payload.
+each of the source's tools returned, so Claude never retypes a payload. `/docket:sync` runs every live source this way,
+each in an agent of its own, and writes what they found into the ledger in one batch (DR-0686, DR-0689); the plugin's
+README says how.
 
 | Part | What |
 |---|---|

@@ -79,8 +79,9 @@ from docket.ledger.ops import (
     Via,
 )  # fmt: skip
 from docket.vault import forgotten
+from docket.vault.anchors import AnchorError, parse_anchor
 from docket.vault.home import make_private
-from docket.vault.neverstore import matches_text, names_person
+from docket.vault.neverstore import in_container, matches_text, names_person
 from docket.vault.redact import Redactor
 from docket.vault.staging import write_replacing
 from docket.vault.vault import UnmergedError, Vault
@@ -154,6 +155,8 @@ REDACTED = (
     "text", "answer", "next",
 )  # fmt: skip
 LOCATORS = ("source", "ref", "event", "series")
+# The locators that point at a record an item or a material rests on: refused into a never-store container (DR-0690).
+POINTERS = ("source", "ref")
 PEOPLE = ("who", "organiser", "attendee")
 TIMES = ("start", "end")
 SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
@@ -256,15 +259,24 @@ class TextRefusedError(LedgerError):
 
 class TextRules:
     """The text rules every op's values pass (DR-0618, DR-0627), for the writer and the import alike: text redacted, a
-    never-store keyword, a person on the people list in who, an organiser or an attendee, or a redaction rule's match
-    in a value that isn't text refused."""
+    never-store keyword, a person on the people list in who, an organiser or an attendee, a source or a material's ref
+    pointing into a never-store container (DR-0690), or a redaction rule's match in a value that isn't text refused.
+    `index` is the index's connection the containers are asked of, when the caller holds one. With `once`, the import's,
+    an index that fails is asked no more and `unanswered` says so, for the caller to refuse once; else each value it
+    can't check is refused."""
 
-    def __init__(self, vault: Vault) -> None:
+    def __init__(self, vault: Vault, index: sqlite3.Connection | None = None, *, once: bool = False) -> None:
         self.lists = vault.config.never_store
         self.redactor = Redactor.from_config(vault.config.redaction)
+        self.index = index
+        self.once = once
+        self.unanswered = False
+        # Whether `index` has the records table: a writer folding the op files in memory holds the ledger's alone.
+        self.records: bool | None = None
 
-    def screen(self, name: str, value: str) -> str:
-        """A value as it may be written: text redacted, anything else as given; `TextRefusedError` when it may not."""
+    def screen(self, name: str, value: str, *, removing: bool = False) -> str:
+        """A value as it may be written: text redacted, anything else as given; `TextRefusedError` when it may not. A
+        material's removal adds no pointer, so `removing` skips the containers."""
         lists = self.lists
         counts: Counter[str] = Counter()
         redacted = self.redactor.text(value, counts)
@@ -272,6 +284,8 @@ class TextRules:
             raise TextRefusedError(f"{name} says something on the never-store keywords list; leave it out")
         if name in PEOPLE and names_person(value, lists):
             raise TextRefusedError(f"{name} names someone on the never-store people list; leave them out")
+        if name in POINTERS and not removing and self.contained(name, value):
+            raise TextRefusedError(f"{name} points into a never-store container; leave it out")
         if name in REDACTED:
             return redacted
         if counts:
@@ -281,6 +295,54 @@ class TextRules:
             )  # fmt: skip
             raise TextRefusedError(f"{name} matches the {min(counts)} redaction rule, and a {what} can't hold a marker")
         return value
+
+    def contained(self, name: str, value: str) -> bool:
+        """Whether a locator's rid sits in a container on the never-store list: by its own text up to each slash, which
+        holds a Slack or Teams rid's conversation, then by the container and thread the index holds for it, which a
+        mail rid doesn't carry."""
+        lists = self.lists
+        if not any(c.strip() for c in lists.containers):
+            return False
+        rid = locator_rid(value)
+        parts = rid.split("/")
+        if any(in_container("/".join(parts[:i]), lists) for i in range(1, len(parts) + 1)):
+            return True
+        return any(in_container(where, lists) for where in self.places(name, rid))
+
+    def places(self, name: str, rid: str) -> list[str]:
+        """The container and thread the index holds for a rid; none without the index. An index that doesn't answer
+        refuses the value, since it can't be checked; with `once`, it is marked and asked no more."""
+        if self.index is None or self.unanswered:
+            return []
+        try:
+            if self.records is None:
+                probe = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'records'"
+                self.records = self.index.execute(probe).fetchone() is not None
+            if not self.records:
+                return []
+            row = self.index.execute("SELECT container, thread FROM records WHERE rid = ?", (rid,)).fetchone()
+        except sqlite3.Error:
+            if self.once:
+                self.unanswered = True
+                return []
+            raise TextRefusedError(
+                f"{name} can't be checked against the never-store containers: the index didn't answer; try again"
+            ) from None
+        return [str(where) for where in (row or ()) if where]
+
+
+def locator_rid(value: str) -> str:
+    """The rid a locator names, as `read` takes one: brackets and a leading `r:` taken off, then the position the
+    anchor grammar reads at its end (DR-0198), so a `@thread.v2` in a Teams chat's id stays. Anything that isn't a rid
+    comes back as written."""
+    text = value.strip()
+    if text.startswith("[") and text.endswith("]"):
+        text = text[1:-1]
+    text = text.removeprefix("r:")
+    try:
+        return parse_anchor(f"[r:{text}]").rid or text
+    except AnchorError:
+        return text
 
 
 def one_line(text: str) -> str:
@@ -407,7 +469,7 @@ class _Write:
         self.new: list[Op] = []
         self.given: dict[int, str] = {}
         self.given_meetings: dict[int, str] = {}
-        self.rules = TextRules(vault)
+        self.rules = TextRules(vault, held.conn)
         self.kind = ""
         # The meetings' and streams' adds read so far, whole parts (DR-0633), and their fold; the streams' names as the
         # tables hold them, for the streams no part read holds.
@@ -665,10 +727,10 @@ class _Write:
 
     # -- the text rules (DR-0618, DR-0627) --------------------------------------------------------------------------
 
-    def screen(self, n: int, name: str, value: str) -> str:
+    def screen(self, n: int, name: str, value: str, *, removing: bool = False) -> str:
         """A value as it may be written (`TextRules.screen`), or the write refused, naming the change."""
         try:
-            return self.rules.screen(name, value)
+            return self.rules.screen(name, value, removing=removing)
         except TextRefusedError as e:
             self.refuse(n, str(e))
 
@@ -896,7 +958,7 @@ class _Write:
             self.refuse(n, "a material needs ref: a path, a URL or a locator")
         if not isinstance(remove, bool) or (label is not None and not isinstance(label, str)):
             self.refuse(n, "remove is true or false, and label is text")
-        ref = self.screen(n, "ref", material_ref(self.vault, raw))
+        ref = self.screen(n, "ref", material_ref(self.vault, raw), removing=remove)
         text = self.screen(n, "label", one_line(label)) if label and one_line(label) else None
         held = next((m for m in materials if m.ref == ref), None)
         if remove and held is None:

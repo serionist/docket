@@ -25,17 +25,21 @@ against the old ledger's own counts (DR-0654).
 
 from __future__ import annotations
 
+import contextlib
 import json
+import sqlite3
 from collections import Counter
-from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Generator, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime
+from pathlib import Path
 from typing import Any, cast
 
 from pydantic import ValidationError
 
 from docket import recall
-from docket.index.build import ledger_tables, ledger_tables_of
+from docket.errors import DocketError
+from docket.index.build import BUSY_SECONDS, db_path, ledger_tables, ledger_tables_of, open_index
 from docket.ledger import calendar, fold, ops, store
 from docket.ledger.fold import Ledger, number_text
 from docket.ledger.meetings import Meeting, ObjectFold, meeting_text
@@ -55,6 +59,8 @@ NO_SCHEME = "(no scheme)"
 # An add's id is this time plus its number in ms, a stream's this time itself: before any id Docket mints, so an old
 # number holds against a claim Docket made before the import (DR-0658).
 ADDS_AT = int(datetime(2000, 1, 1, tzinfo=UTC).timestamp() * 1000)
+# How long the import waits for an index an update holds, as a read waits.
+INDEX_WAIT = BUSY_SECONDS
 
 
 @dataclass(frozen=True)
@@ -207,7 +213,31 @@ def _read(vault: Vault, text: str, name: str, masked: Collection[str]) -> _Lines
             given[op_id] = (n, found)
         elif twice[1] != found:
             out.refusals.append(f"{name}:{n}: op {op_id} is on line {twice[0]} with another text")
-    rules = _Screen(vault)
+    with _records(vault) as index:
+        rules = _Screen(vault, None if isinstance(index, str) else index)
+        _fill(out, vault, given, name, masked=masked, rules=rules)
+    if isinstance(index, str):
+        out.refusals.append(f"the never-store containers can't be checked: {index}")
+    elif rules.rules.unanswered:
+        # Once, not on every line after it: the index stopped answering, and a later try is all it needs.
+        where = db_path(vault).relative_to(vault.root).as_posix()
+        out.refusals.append(
+            f"the index ({where}) didn't answer while the never-store containers were checked; try the import again"
+        )
+    return out
+
+
+def _fill(
+    out: _Lines,
+    vault: Vault,
+    given: Mapping[str, tuple[int, dict[str, Any]]],
+    name: str,
+    *,
+    masked: Collection[str],
+    rules: _Screen,
+) -> None:
+    """Each line given as the op the import would write, into `out`: the writer's keys set, a listed one cleaned and
+    masked, then its values screened."""
     firsts: dict[str, str] = {}
     before: dict[str, str] = {}
     late: list[int] = []
@@ -242,7 +272,39 @@ def _read(vault: Vault, text: str, name: str, masked: Collection[str]) -> _Lines
             f"{len(late):,} add(s) don't sort early ({name}:{min(late)} first): an export gives each add the id "
             "2000-01-01 plus its number in ms, so every old number holds against one Docket gave (DR-0658)"
         )
-    return out
+
+
+@contextlib.contextmanager
+def _records(vault: Vault) -> Generator[sqlite3.Connection | str | None]:
+    """The index, for the containers and threads of the records a source or a ref names (DR-0690). None when nothing is
+    listed or there is no index yet, and the rids' own text alone is checked; why, when an index is there and can't be
+    read: busy, or built for another Docket, and the import is refused once, saying so."""
+    db = db_path(vault)
+    if not any(c.strip() for c in vault.config.never_store.containers) or not db.exists():
+        yield None
+        return
+    try:
+        conn = open_index(vault, INDEX_WAIT)
+    except DocketError as e:
+        yield "the index is busy; try the import again" if _busy(db) else str(e)
+        return
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def _busy(db: Path) -> bool:
+    """Whether another connection holds the index locked: what the index's own check reads as no index, after its
+    wait, though a later try would read it."""
+    conn = sqlite3.connect(db, timeout=0)
+    try:
+        conn.execute("PRAGMA user_version").fetchone()
+    except sqlite3.DatabaseError as e:
+        return isinstance(e, sqlite3.OperationalError)
+    finally:
+        conn.close()
+    return False
 
 
 def _refused_keys(data: Mapping[str, Any]) -> str | None:
@@ -281,8 +343,8 @@ class _Screen:
     """The text rules over a file's values, each name and value screened once: an export repeats its people, streams,
     kinds and log lines on line after line."""
 
-    def __init__(self, vault: Vault) -> None:
-        self.rules = store.TextRules(vault)
+    def __init__(self, vault: Vault, index: sqlite3.Connection | None = None) -> None:
+        self.rules = store.TextRules(vault, index, once=True)
         self.seen: dict[tuple[str, str], tuple[str | None, str | None]] = {}
 
     @staticmethod

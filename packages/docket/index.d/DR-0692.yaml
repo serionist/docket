@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0692
+    title: At the cut-over a project's own sync and tasks skills keep their names and point at /docket:sync and /docket:tasks; their lore moves to the project's CLAUDE.md and each source's sync.md
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#209", "#210"]
+    description: "An owner whose project has its own sync and tasks skills keeps their names and descriptions, so their words still reach them, and replaces each body with one line: run /docket:sync, or /docket:tasks, with the same arguments, through the Skill tool. An old mail argument names the mail and calendar sources, and an old quick argument is dropped, with a line saying so. The lore in the old skill bodies moves into the project's CLAUDE.md, which the sync's main thread reads and which is no door: the drafting routes and rules (mail drafted in the owner's mail app, one Slack draft per channel and never over one already there, the writing-style file, which language for whom), the who convention and stream hints, and how to link meetings that share a slot. The lore in the old fork prompts moves into each source's sync.md (DR-0688), their route notes into its SKILL.md; before the first rehearsal Claude writes the sync.md files in the owner's clone from the old fork prompts, as the owner's step. The old skills go a week later, once the plugin's have run a working week. The plugin's README says so for anyone moving from a sync of their own."
+    not_chosen:
+      - "Deleting the old skills at once: a week of the pointers keeps the way back one edit."
+      - "The old bodies' lore in the plugin: it is one owner's, and the project's CLAUDE.md is where Claude reads a project's rules anyway."

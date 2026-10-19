@@ -401,6 +401,26 @@ def test_a_listed_op_is_masked_before_the_text_rules_see_it(vault: Vault) -> Non
     assert said.endswith(": who names someone on the never-store people list; leave them out")
 
 
+def test_a_listed_op_is_masked_before_its_source_meets_the_never_store_containers(vault: Vault) -> None:
+    """The containers screen sits where the other rules do, after the clean and the mask: a forgotten op whose source
+    sits in a container listed afterwards comes back as its mask, and unlisted, the same line stops the import
+    (DR-0690, DR-0696)."""
+    text = export().text()
+    run(vault, text)
+    raw = {line.op.id: line.text for line in ops.read_all(vault.root, masked=frozenset()).lines}
+    (budget,) = [op_id for op_id, line in raw.items() if '"source":"app:tasks"' in line]
+    forget(vault, ops=[budget])
+    vault = configured(vault, containers=["tasks"])
+    store.revert_import(vault)
+    again = run(vault, text)
+    assert again.plan.refusals == () and again.commits
+    written = {line.op.id: line.text for line in ops.read_all(vault.root, masked=frozenset()).lines}
+    assert written[budget] == ops.mask(raw[budget])
+    fresh = configured(empty_vault(vault.root.parent / "two", config()), containers=["tasks"])
+    (said,) = run(fresh, text).plan.refusals
+    assert said.endswith(": source points into a never-store container; leave it out")
+
+
 def test_a_changed_line_or_an_op_from_elsewhere_on_its_objects_refuses_a_rerun(vault: Vault) -> None:
     e = export()
     run(vault, e.text())
