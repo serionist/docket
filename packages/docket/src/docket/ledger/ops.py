@@ -43,9 +43,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Any, Literal, Self, cast
+from typing import Annotated, Any, Literal, NamedTuple, Self, cast
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator
+from pydantic import ConfigDict, Field, StringConstraints, ValidationError, model_validator
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 
 from docket.errors import DocketError
 from docket.vault import machine as machines
@@ -168,10 +169,15 @@ RULES: dict[str, dict[str, Callable[[object], bool]]] = {
 }  # fmt: skip
 # The object whose rules an op's own fields follow; a set's are its object's, known only when it is folded.
 OBJECT_OF = {"add": "item", "meeting": "meeting", "stream": "stream", "point": "point", "point_set": "point"}
+# Each object's names whose rule is plain text: fields holding only these, each as text, fit without a rule run, as an
+# item's add, a point and most answers do (#218).
+TEXT_ONLY = {kind: frozenset(name for name, rule in rules.items() if rule is _text) for kind, rules in RULES.items()}
 
 
 def fits(kind: str, fields: dict[str, Any]) -> bool:
     """Whether every name the object knows holds what its rules say, or null."""
+    if fields.keys() <= TEXT_ONLY[kind] and all(type(value) is str for value in fields.values()):
+        return True
     rules = RULES[kind]
     for name, value in fields.items():
         rule = rules.get(name)
@@ -224,10 +230,11 @@ _ORDERS = {
 }  # fmt: skip
 
 
-class Op(BaseModel):
-    """One op, as one line of an op file. Strict, so a number written as text or a day as a number doesn't read."""
-
-    model_config = ConfigDict(extra="ignore", frozen=True, strict=True)
+@pydantic_dataclass(config=ConfigDict(extra="ignore", strict=True), frozen=True, slots=True, kw_only=True)
+class Op:
+    """One op, as one line of an op file. Strict, so a number written as text or a day as a number doesn't read. A
+    dataclass with slots, not a model: a fold holds tens of thousands, and a model's dict and set of the fields given
+    took three times the memory and a tenth more time to read (#218)."""
 
     schema_version: Literal[1]
     id: Ulid
@@ -291,6 +298,14 @@ class Op(BaseModel):
         return text.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
 
 
+_VALIDATE = cast(Any, Op).__pydantic_validator__.validate_json
+
+
+def read_op(text: str) -> Op:
+    """An op from its line, held to the rules above; a ValidationError when it isn't one."""
+    return cast(Op, _VALIDATE(text))
+
+
 def rel_of(op: Op) -> str:
     """The file an op goes in: its machine's, for the month of its day."""
     return f"{OPS_DIR}/{op.day:%Y-%m}-{op.machine}{SUFFIX}"
@@ -328,9 +343,9 @@ def mint(highest: str | None, now: datetime, count: int, rand: Callable[[int], b
 # -- reading ----------------------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class Line:
-    """An op as it was read: its text, which orders two ops of one id, and where it was."""
+class Line(NamedTuple):
+    """An op as it was read: its text, which orders two ops of one id, and where it was. A tuple, which a fold of
+    70,000 lines makes at half a frozen dataclass's cost."""
 
     op: Op
     text: str
@@ -392,11 +407,13 @@ def parse(text: str, rel: str) -> Read:
     # The file's month and machine, compared field by field: formatting each op's file name costs as much as reading it.
     m = FILE_NAME.fullmatch(rel.rsplit("/", 1)[-1])
     year, month, machine = (int(m.group(1)), int(m.group(2)), m.group(3)) if m else (0, 0, "")
+    validate = _VALIDATE
+    append = lines.append
     for n, raw in enumerate(text.split("\n"), start=1):
-        if not raw.strip():
+        if not raw or raw.isspace():
             continue
         try:
-            op = Op.model_validate_json(raw)
+            op: Op = validate(raw)
         except ValidationError:
             problems.append((f"{rel}:{n}", "isn't a ledger op of schema 1; skipped"))
             unread = id_of(raw)
@@ -404,10 +421,11 @@ def parse(text: str, rel: str) -> Read:
                 ids.append(unread)
             continue
         ids.append(op.id)
-        if op.day.month != month or op.day.year != year or op.machine != machine:
+        day = op.day
+        if day.month != month or day.year != year or op.machine != machine:
             problems.append((f"{rel}:{n}", f"belongs in {rel_of(op)}, by its day and machine; skipped"))
             continue
-        lines.append(Line(op, raw, rel, n))
+        append(Line(op, raw, rel, n))
     return Read(tuple(lines), tuple(problems), max(ids, default=None))
 
 

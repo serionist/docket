@@ -183,6 +183,9 @@ same result on any day.
   meeting's event or a stream's name, are one object, and a keyed add may continue a meeting that had none, whose id
   and M- number hold (DR-0621, DR-0622). Talking points are ops on their meeting; a roll copies a point to the next
   meeting of its series, and rollover and a meeting's archive are ops the writer writes (DR-0623, DR-0624).
+- The index holds the folded ledger (DR-0616, DR-0628). A meeting folds with its part, the meetings tied to it by a
+  key, a join or a roll, so an update and a write fold only the parts their ops touch (DR-0633). `suggest` reads what
+  is worth raising in a meeting from the same tables (DR-0629, DR-0634).
 
 - Meetings come from the calendar. The core turns its records into meeting ops keyed by the event's own id (iCalUId or
   the provider's id), plus the occurrence's original start for a recurring event, so a moved, renamed or cancelled
@@ -428,7 +431,7 @@ the earlier ones (DR-0112).
 | `entities`, `aliases`, `alias_terms`, `entity_links`, `external_ids` | the keyword layer loaded from YAML, with each alias's forms and misspellings |
 | `mentions`, `extracts` | which chunk mentions which entity; typed values (ticket, amount, date, URL) |
 | `items`, `item_log`, `item_numbers`, `ledger_files` | the ledger folded from its ops (DR-0616): each item's fields and state, every op with its keys, `after`, its log line and the undo that left it out, each number and the items that held it, and each op file's size, time and sha256, so an update reads a file that only grew from where it stopped |
-| `meetings`, `points`, `streams` | meetings, their talking points and streams, folded the same way (#199) |
+| `meetings`, `points`, `meeting_log`, `meeting_numbers`, `streams`, `stream_log` | meetings, their talking points and streams, folded the same way, with each log row's key and link, so an update finds the meetings an op touches from the rows (DR-0628, DR-0633) |
 | `links`, `runs` | meetings to records, items to records; sync history |
 
 A write and `docket ledger show` bring the ledger's tables up to date first, and fold the op files in memory instead

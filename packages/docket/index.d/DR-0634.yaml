@@ -1,0 +1,13 @@
+decisions:
+  - id: DR-0634
+    title: "suggest, by todo.py's rule: linked items but prep ones, then replies, waits and decisions on someone in the meeting by a word of their name, then waits in its stream, each group by the day it opened, 15 at most"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#199"]
+    description: "DR-0629's rules as built, over the index's tables, writing nothing, and the same as todo.py's. A prep item is any item whose title starts with prep, any case, whatever its kind: what a sync wrote to prepare a meeting before it proposed points instead (DR-0623). It is left out of the items linked to the meeting only, so one on someone in it still comes as that. Someone in the meeting is its organiser or an attendee, and an item is on them when its who shares a word of three letters or more with their name, lowercased, as todo.py's name_tokens splits it: Ada matches Ada Example, a surname matches, a who naming two people matches either, and a name of two letters matches nothing. The items are open or snoozed, come once each, in the first group that takes them, by the day they opened within it and then by number, with why: linked to the meeting, on the first of its people whose name matches, organiser first, or waiting in its stream. An item on a standing point of the meeting is left out. The meeting is named by the id of any add of it, so a key's add and a continued meeting's id both find it."
+    not_chosen:
+      - "A who matched as a whole name only: Ada would miss Ada Example, the calendar's name for her."
+      - "Every task linked to the meeting taken for prep: a task to raise there would be left out."
+      - "A who matched by a whole name or its first word, prep only for tasks, and each group by number, as the first build had it: todo.py's rule differs on all three, and the owner knows its behaviour."

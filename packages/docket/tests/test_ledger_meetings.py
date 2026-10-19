@@ -547,7 +547,7 @@ def test_any_order_of_the_lines_with_lines_twice_folds_to_one_ledger(seed: int) 
     texts = [(ops.rel_of(o), o.text()) for o in history(seed)]
 
     def read(order: list[tuple[str, str]]) -> Ledger:
-        return fold(Line(Op.model_validate_json(t), t, rel, k) for k, (rel, t) in enumerate(order, start=1))
+        return fold(Line(ops.read_op(t), t, rel, k) for k, (rel, t) in enumerate(order, start=1))
 
     base = snapshot(read(texts))
     rng = random.Random(seed + 7)  # noqa: S311

@@ -12,6 +12,7 @@ import pytest
 from docket_testkit import commit_config, empty_vault, make_config, sh
 from ledger_kit import ADD_FIELDS, MEETING, NOW
 
+from docket.index.ledger import Held
 from docket.ledger import ops, store
 from docket.ledger.fold import Ledger, fold
 from docket.ledger.meetings import Meeting, fold_objects
@@ -469,6 +470,42 @@ def test_the_writer_folds_the_meetings_again_with_the_collector_paused(
     monkeypatch.setattr(store, "fold_objects", lambda groups: seen.append(gc.isenabled()) or real(groups))
     write(vault, [add_meeting(), {"op": "point", "item": "M-0001", "fields": {"text": "Dates"}}], now=NOW)
     assert (bool(seen), any(seen), gc.isenabled()) == (True, False, True)
+
+
+def test_a_write_reads_only_the_meetings_it_touches(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each meeting a change names is read from the tables with the rest of its part, and no other (DR-0633): a point
+    on one meeting reads that one; a rollover reads the meetings due with an open point and those they roll to; an
+    event's update reads the meeting holding it; an undo reads the meeting its op is on."""
+    write(vault, [
+        slot(19), slot(20), slot(26, subject="Hiring"), slot(27, event="calendar:E1"),
+        {"op": "point", "item": "M-0001", "fields": {"text": "Dates"}},
+        {"op": "point", "item": "M-0003", "fields": {"text": "Not due yet"}},
+    ], now=NOW)  # fmt: skip
+    ids = {m.number: m.id for m in ledger(vault).meetings.values()}
+    read: list[list[str]] = []
+    real = Held.object_lines
+    monkeypatch.setattr(Held, "object_lines", lambda self, adds: read.append(sorted(adds)) or real(self, adds))
+    (budget,) = write(vault, [{"op": "point", "item": "M-0002", "fields": {"text": "Budget"}}], now=later(1)).ops
+    assert read == [[ids[2]]]
+    read.clear()
+    # A day and a half after the 19th's sync: it rolls to the 20th's, which isn't due; Hiring isn't due either.
+    rolled = write(vault, [{"op": "rollover"}], now=datetime(2026, 10, 21, tzinfo=UTC)).ops
+    assert ([o.item for o in rolled], read) == ([ids[2], ids[1]], [[ids[1]], [ids[2]]])
+    read.clear()
+    write(vault, [{"op": "meeting", "fields": {"event": "calendar:E1", "where": "Room 2"}}], now=later(3))
+    write(vault, [{"op": "undo", "of": budget.id}], now=later(4))
+    assert read == [[ids[4]], [ids[1], ids[2]]]
+
+
+def test_a_rollover_after_a_change_in_the_same_write_sees_the_point_it_added(vault: Vault) -> None:
+    """A meeting the write has read already is taken from its fold, a point added a change before included."""
+    write(vault, [slot(19), slot(20)], now=NOW)
+    (point, copy, rolled) = write(vault, [
+        {"op": "point", "item": "M-0001", "fields": {"text": "Dates"}}, {"op": "rollover"},
+    ], now=datetime(2026, 10, 21, tzinfo=UTC)).ops  # fmt: skip
+    assert (copy.fields, rolled.point, rolled.fields) == (
+        {"text": "Dates", "from": point.id}, point.id, {"state": "rolled", "to": copy.id},
+    )  # fmt: skip
 
 
 def test_an_undo_of_a_meeting_s_op_takes_what_it_woke_of_its_kind(vault: Vault) -> None:

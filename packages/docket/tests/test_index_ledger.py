@@ -9,6 +9,7 @@ import os
 import sqlite3
 import time
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -41,7 +42,7 @@ def same_as_rebuild(conn: sqlite3.Connection, root: Path, change: Callable[[], o
 
 
 def laptop(o: Op) -> Op:
-    return o.model_copy(update={"machine": "laptop"})
+    return replace(o, machine="laptop")
 
 
 def append(root: Path, rel: str, text: str) -> None:
@@ -77,11 +78,11 @@ def test_a_rebuild_holds_each_item_every_op_each_number_and_each_file(tmp_path: 
     items = {r[0]: r for r in rows(conn, "SELECT * FROM items")}
     assert set(items) == {ulid(1), ulid(7)}
     assert items[ulid(1)] == (
-        ulid(1), 1, 1, "reply", "Send Ada the dates", "Ada Example", "pilot", ADD_FIELDS["source"], "2026-10-18", None,
-        None, "line one\nline two", None, "open", None, None, "chase", 0,
+        ulid(1), 1, 1, "reply", "Send Ada the dates", "Ada Example", "pilot", ADD_FIELDS["source"], None, "2026-10-18",
+        None, None, "line one\nline two", None, "open", None, None, "chase", 0,
         '[{"ref":"docs/plan.md","label":"the plan"},{"ref":"https://example.invalid/x"}]', "claude", ulid(6),
     )  # fmt: skip
-    assert items[ulid(7)][13:18] == ("done", None, "2026-10-18", None, 0)
+    assert items[ulid(7)][14:19] == ("done", None, "2026-10-18", None, 0)
     log = {r[1]: r for r in rows(conn, "SELECT * FROM item_log")}
     assert len(log) == 14
     fate = {op_id: (r[11], r[12], r[13]) for op_id, r in log.items()}
@@ -276,27 +277,35 @@ def test_an_undone_add_gives_its_number_to_the_item_waiting_for_it(tmp_path: Pat
     assert rows(conn, "SELECT id, number FROM items ORDER BY id") == [(ulid(1), 5), (ulid(2), None)]
 
 
-def test_a_meeting_s_a_stream_s_and_a_later_object_s_lines_are_kept_as_a_rebuild_keeps_them(
+def test_a_meeting_s_and_a_stream_s_lines_are_their_logs_and_a_later_object_s_kept_as_a_rebuild_keeps_them(
     tmp_path: Path, conn: sqlite3.Connection
 ) -> None:
-    """item_log holds every line of a meeting and a stream, fate object, for the writer to fold (#199), and a later
-    Docket's object's, fate later; an update keeps them as a rebuild does, a line read before its meeting's add too."""
-    write_ops(tmp_path, [op("add", 1), meeting(2), point(3, 2), op("stream", 4), op("outbox", 5, number=7)])
+    """A meeting's lines are meeting_log's and a stream's stream_log's, each row with its object, the key its add
+    carries and the op it links to; a later Docket's object's stay in item_log, fate later. An update keeps them as a
+    rebuild does, a line read before its meeting's add too, which moves to meeting_log once the add comes."""
+    write_ops(tmp_path, [
+        op("add", 1), meeting(2, "calendar:E1"), point(3, 2), op("stream", 4), op("outbox", 5, number=7),
+    ])  # fmt: skip
     rebuild(conn, tmp_path)
-    assert rows(conn, "SELECT item, id, fate FROM item_log WHERE fate IN ('object', 'later') ORDER BY id") == [
-        (ulid(2), ulid(2), "object"), (ulid(2), ulid(3), "object"), (ulid(4), ulid(4), "object"),
-        (ulid(5), ulid(5), "later"),
+    assert rows(conn, "SELECT item, id, meeting, kind, key, link, fate FROM meeting_log ORDER BY id") == [
+        (ulid(2), ulid(2), ulid(2), "meeting", "calendar:E1", None, "applied"),
+        (ulid(2), ulid(3), ulid(2), "point", None, None, "applied"),
     ]  # fmt: skip
+    assert rows(conn, "SELECT item, id, stream, kind, key, fate FROM stream_log") == [
+        (ulid(4), ulid(4), ulid(4), "stream", "pilot", "applied"),
+    ]  # fmt: skip
+    assert rows(conn, "SELECT item, fate FROM item_log WHERE fate = 'later'") == [(ulid(5), "later")]
     early = laptop(point(7, 6, "Read before its meeting's add"))
     grown = [point_set(8, 2, 3, answer="the 21st"), op("log", 9, 5, note="kept"), early]
     assert same_as_rebuild(conn, tmp_path, lambda: write_ops(tmp_path, grown)) == 3
     assert rows(conn, "SELECT fate FROM item_log WHERE id = ?", ulid(7)) == [("left out",)]
     assert same_as_rebuild(conn, tmp_path, lambda: write_ops(tmp_path, [laptop(meeting(6))])) == 1
-    held = Held(conn).object_lines()
+    held = ledger_index.object_lines(conn, [ulid(2), ulid(4), ulid(6)])
     assert {add_id: [line.op.id for line in lines] for add_id, lines in held.items()} == {
         ulid(2): [ulid(2), ulid(3), ulid(8)], ulid(4): [ulid(4)], ulid(6): [ulid(6), ulid(7)],
     }  # fmt: skip
     assert rows(conn, "SELECT count(*) FROM items") == [(1,)]
+    assert rows(conn, "SELECT count(*) FROM item_log WHERE item = ?", ulid(6)) == [(0,)]
 
 
 def test_ops_read_before_their_add_fold_once_it_comes(tmp_path: Path, conn: sqlite3.Connection) -> None:

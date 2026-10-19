@@ -139,6 +139,9 @@ terms:
     definition: "The system's own yes, which only a person answers: Windows Hello, LocalAuthentication on macOS (Touch ID, an Apple Watch or the login password), or polkit on Linux. Where a machine has one set up, turning credentials redaction off and forgetting for real ask it at the owner's console, and its no is never answered by the code instead; where it has none, the console code is asked."
     see: [packages/docket/src/docket/osprompt/__init__.py]
     close_terms: [console code]
+  - term: part
+    definition: "The meetings and streams that fold together: the adds of one key, a meeting a continues names and every add continuing it, and the meetings tied by a point's from or a roll's to, followed until nothing new comes. An update and a write fold only the parts their ops touch (DR-0633)."
+    see: [packages/docket/src/docket/index/ledger.py]
   - term: processed doc
     definition: "A summary, note, digest, brief or minutes in the vault: markdown with frontmatter naming the raw records it covers, every line ending with its anchors, written through doc_put."
     see: [packages/docket/src/docket/vault/processed.py]

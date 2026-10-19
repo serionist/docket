@@ -40,7 +40,7 @@ def test_an_add_is_its_golden_line_and_reads_back_the_same() -> None:
         '"source":"chat:C0X/1"}}'
     )
     assert add.text() == want
-    assert Op.model_validate_json(want) == add
+    assert ops.read_op(want) == add
 
 
 @pytest.mark.parametrize(
@@ -67,13 +67,13 @@ def test_each_kind_writes_its_own_keys_in_order(kind: str, keys: dict[str, Any],
     written = made(kind, after=A, **keys)
     # @ stands for the add the op names.
     assert written.text() == HEAD % (B, A, kind, A) + tail.replace("@", A)
-    assert Op.model_validate_json(written.text()) == written
+    assert ops.read_op(written.text()) == written
 
 
 def test_a_key_a_field_or_a_kind_this_docket_doesnt_know_reads_and_is_kept() -> None:
     data = json.loads(made("set", fields={"due": "2026-10-21"}).text())
     data |= {"op": "pin_item", "colour": "red", "fields": {"later": "x"}, "by": "scheduler", "via": "timer"}
-    read = Op.model_validate_json(json.dumps(data))
+    read = ops.read_op(json.dumps(data))
     assert (read.op, read.fields, read.by, read.via) == ("pin_item", {"later": "x"}, "scheduler", "timer")
     assert "colour" not in read.text()
 
@@ -83,7 +83,7 @@ def test_a_later_docket_s_field_may_hold_any_value_and_the_add_still_reads() -> 
     or null, so an add carrying one still makes its item (DR-0611)."""
     data = json.loads(made("add", number=1, fields=dict(ADD_FIELDS)).text())
     data["fields"] |= {"estimate": 30, "tags": ["a", "b"], "parts": {"x": 1}}
-    read = Op.model_validate_json(json.dumps(data))
+    read = ops.read_op(json.dumps(data))
     assert read.fields is not None and read.fields["estimate"] == 30
     assert json.loads(read.text())["fields"]["tags"] == ["a", "b"]
 
@@ -94,10 +94,10 @@ def test_a_later_docket_s_field_may_hold_any_value_and_the_add_still_reads() -> 
 def test_an_op_s_kind_is_a_lowercase_word_of_letters_and_underscores(kind: str, reads: bool) -> None:
     data = json.loads(made("done").text()) | {"op": kind}
     if reads:
-        assert Op.model_validate_json(json.dumps(data)).op == kind
+        assert ops.read_op(json.dumps(data)).op == kind
     else:
         with pytest.raises(ValidationError):
-            Op.model_validate_json(json.dumps(data))
+            ops.read_op(json.dumps(data))
 
 
 @pytest.mark.parametrize(
@@ -129,7 +129,7 @@ def test_an_op_s_kind_is_a_lowercase_word_of_letters_and_underscores(kind: str, 
 def test_a_line_that_breaks_the_format_doesnt_read(change: dict[str, Any]) -> None:
     data = json.loads(made("add", number=1, fields=dict(ADD_FIELDS)).text()) | change
     with pytest.raises(ValidationError):
-        Op.model_validate_json(json.dumps(data))
+        ops.read_op(json.dumps(data))
 
 
 @pytest.mark.parametrize(
@@ -146,10 +146,10 @@ def test_a_line_that_breaks_the_format_doesnt_read(change: dict[str, Any]) -> No
 def test_a_known_kind_without_what_it_needs_doesnt_read(kind: str, drop: str) -> None:
     full = {"fields": {"due": "2026-10-21"}, "note": "x", "until": "2026-10-25", "ref": "a.md", "of": A, "number": 3}
     data = json.loads(made("done").text()) | {"op": kind} | full
-    Op.model_validate_json(json.dumps(data))
+    ops.read_op(json.dumps(data))
     data.pop(drop)
     with pytest.raises(ValidationError):
-        Op.model_validate_json(json.dumps(data))
+        ops.read_op(json.dumps(data))
 
 
 def test_a_meeting_a_stream_and_their_points_are_their_golden_lines() -> None:
@@ -170,7 +170,7 @@ def test_a_meeting_a_stream_and_their_points_are_their_golden_lines() -> None:
     ]  # fmt: skip
     for written, tail in cases:
         assert written.text() == HEAD % (B, written.item, written.op, A) + tail.replace("@", A)
-        assert Op.model_validate_json(written.text()) == written
+        assert ops.read_op(written.text()) == written
 
 
 @pytest.mark.parametrize(
@@ -335,6 +335,6 @@ def test_a_trailing_newline_never_passes_an_anchored_pattern(key: str) -> None:
     data = json.loads(made("done").text())
     data[key] += "\n"
     with pytest.raises(ValidationError):
-        Op.model_validate_json(json.dumps(data))
+        ops.read_op(json.dumps(data))
     assert ops.id_of(json.dumps({"id": A + "\n"})) is None
     assert ops.FILE_NAME.fullmatch("2026-10-desk.jsonl\n") is None

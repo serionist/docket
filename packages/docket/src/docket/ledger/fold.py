@@ -27,8 +27,9 @@ from collections.abc import Generator, Iterable, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import date
+from operator import attrgetter
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 from docket.ledger.ops import DAYS, MAKES, OPS, REFUSES, REQUIRED, FileRead, Line, Op, fits, read_all
 
@@ -46,6 +47,9 @@ SETTABLE = ("kind", "title", "who", "stream", "source", "meeting", "opened", "du
 KEPT = (*REQUIRED, "opened")
 # An item's number as a change or a command names it: A-0302, a-302 or 302.
 NUMBER = re.compile(r"^(?:A-?)?(\d{1,9})$", re.IGNORECASE)
+# Lines in the fold's order: by id, and one id's texts by their text (DR-0612).
+ORDER = attrgetter("op.id", "text")
+TEXT = attrgetter("text")
 
 
 def family(kind: str) -> str:
@@ -62,10 +66,10 @@ class Material:
     label: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class Entry:
+class Entry(NamedTuple):
     """One op in an item's log: whether it changed anything, the undo that left it out, and for an undo the op it
-    undid. Its line is what the log shows: None for an imported op other than a log line (DR-0611)."""
+    undid. Its line is what the log shows: None for an imported op other than a log line (DR-0611). A tuple, as a
+    fold makes one per op."""
 
     op: Op
     applied: bool
@@ -83,7 +87,7 @@ class Entry:
         return words if self.applied or self.undone_by is not None else f"{words} (nothing to do)"
 
 
-@dataclass
+@dataclass(slots=True)
 class Item:
     id: str
     # The number it holds; None while a clash waits for its renumber. `claimed` is its latest claim's.
@@ -153,13 +157,12 @@ class Ledger:
         return [item for item in self.items.values() if item.number is None]
 
 
-def _key(line: Line) -> tuple[str, str]:
-    return (line.op.id, line.text)
-
-
 def describe(op: Op) -> str:
     """An op in a few words, as its log line shows it. Not a door: the words can change."""
     kind = op.op
+    plain = WORDS.get(kind)
+    if plain is not None:
+        return plain
     if kind == "set":
         parts: list[str] = []
         for name, value in (op.fields or {}).items():
@@ -320,7 +323,9 @@ def undos(kept: list[Line], by_id: dict[str, Op]) -> tuple[list[Line], dict[str,
 def maker(item_id: str, group: Sequence[Line]) -> str | None:
     """The kind of the op that makes an object: the first by text of its own lines (whose id is the item's) that is
     an add, a meeting or a stream, else one of a kind this Docket doesn't know; None when no such line makes it."""
-    own = sorted((line for line in group if line.op.id == item_id), key=lambda line: line.text)
+    own = [line for line in group if line.op.id == item_id]
+    if len(own) > 1:
+        own.sort(key=TEXT)
     known = next((line.op.op for line in own if line.op.op in MAKES), None)
     return known or next((line.op.op for line in own if line.op.op not in OPS), None)
 
@@ -335,74 +340,97 @@ def made(item_id: str, group: Sequence[Line]) -> str:
 
 
 def fold_item(item_id: str, lines: Sequence[Line]) -> Folded:
-    """One item from its own lines, in any order."""
-    ordered = sorted(lines, key=_key)
+    """One item from its own lines, in any order. Most items have no undo, so the undos are read only when one is
+    there: a rebuild folds thousands of items (#218)."""
+    ordered = sorted(lines, key=ORDER)
     add = next((line for line in ordered if line.op.op == "add"), None)
     if add is None:
         left = tuple((line.where, "names an item no add made; left out") for line in ordered)
         return Folded(None, (), {}, frozenset(), (), left)
     problems: list[tuple[str, str]] = []
     kept = [add]
+    add_op = add.op
+    add_id = add_op.id
     refused = REFUSES["item"]
+    renumbers: list[Line] = []
+    any_undo = False
     for line in ordered:
         if line is add:
             continue
-        if line.op.id < add.op.id:
+        op = line.op
+        kind = op.op
+        if op.id < add_id:
             problems.append((line.where, "sorts before its item's add; left out"))
             continue
-        if line.op.op in refused:
-            problems.append((line.where, f"an item takes no {line.op.op}; left out"))
+        if kind in refused:
+            problems.append((line.where, f"an item takes no {kind}; left out"))
             continue
-        if line.op.op == "set" and not fits("item", line.op.fields or {}):
+        if kind == "set" and not fits("item", op.fields or {}):
             problems.append((line.where, "a set whose fields don't hold what an item's hold; left out"))
             continue
+        if kind == "undo":
+            any_undo = True
+        elif kind == "renumber":
+            renumbers.append(line)
         kept.append(line)
-    by_id = {line.op.id: line.op for line in kept}
-    kept, undone, bad = undos(kept, by_id)
-    problems += bad
+    by_id: dict[str, Op] = {}
+    undone: dict[str, str] = {}
+    if any_undo:
+        by_id = {line.op.id: line.op for line in kept}
+        kept, undone, bad = undos(kept, by_id)
+        problems += bad
     # The add the item stands on claims its number, and each renumber after it; a second add with its id claims none.
-    claims = (
-        (add.op.id, add.op.number or 0),
-        *((ln.op.id, ln.op.number or 0) for ln in kept if ln.op.op == "renumber"),
-    )
-    if add.op.id in undone:
+    claims = ((add_id, add_op.number or 0), *((ln.op.id, ln.op.number or 0) for ln in renumbers))
+    if add_id in undone:
         return Folded(None, tuple(kept), undone, frozenset(), claims, tuple(problems))
-    item = _new(add.op)
+    item = _new(add_op)
     idle: set[str] = set()
-    log = item.log
+    append = item.log.append
+    last = add_id
     for line in kept:
         op = line.op
-        target = by_id.get(op.of) if op.of is not None and op.op == "undo" else None
-        if op.id in undone:
-            log.append(Entry(op, False, undone[op.id], target))
+        kind = op.op
+        op_id = op.id
+        target = by_id.get(op.of or "") if kind == "undo" else None
+        if op_id in undone:
+            append(Entry(op, False, undone[op_id], target))
             continue
-        applied = line is add or op.op == "undo" or _apply(item, op)
+        applied = line is add or kind == "undo" or _apply(item, op)
         if not applied:
-            idle.add(op.id)
-        log.append(Entry(op, applied, None, target))
-        item.last = op.id
+            idle.add(op_id)
+        append(Entry(op, applied, None, target))
+        last = op_id
+    item.last = last
     return Folded(item, tuple(kept), undone, frozenset(idle), claims, tuple(problems))
 
 
 def fold(lines: Iterable[Line]) -> Ledger:
-    """Every item from every line read."""
+    """Every item from every line read: a line twice is one op, and one id on two texts keeps each (DR-0612)."""
     first: dict[str, Line] = {}
     others: dict[str, dict[str, Line]] = {}
-    for line in lines:
-        seen = first.setdefault(line.op.id, line)
-        if seen is not line and seen.text != line.text:
-            others.setdefault(line.op.id, {seen.text: seen})[line.text] = line
-    problems: list[tuple[str, str]] = []
     by_item: dict[str, list[Line]] = {}
-    for op_id, line in first.items():
-        versions = others.get(op_id)
-        if versions is None:
-            by_item.setdefault(line.op.item, []).append(line)
-            continue
-        places = ", ".join(sorted(v.where for v in versions.values()))
-        problems.append((places, f"op {op_id} is on {len(versions)} texts; each is kept, ordered by its text"))
-        for version in versions.values():
-            by_item.setdefault(version.op.item, []).append(version)
+    # One pass groups the lines by item as it takes each id once: a rebuild reads 70,000 of them (#218).
+    for line in lines:
+        op = line.op
+        seen = first.get(op.id)
+        if seen is None:
+            first[op.id] = line
+            group = by_item.get(op.item)
+            if group is None:
+                by_item[op.item] = [line]
+            else:
+                group.append(line)
+        elif seen.text != line.text:
+            others.setdefault(op.id, {seen.text: seen})[line.text] = line
+    problems: list[tuple[str, str]] = []
+    if others:
+        for op_id in [op_id for op_id in first if op_id in others]:
+            versions = others[op_id]
+            places = ", ".join(sorted(v.where for v in versions.values()))
+            problems.append((places, f"op {op_id} is on {len(versions)} texts; each is kept, ordered by its text"))
+            for version in versions.values():
+                if version is not first[op_id]:
+                    by_item.setdefault(version.op.item, []).append(version)
     item_groups: dict[str, list[Line]] = {}
     object_groups: dict[str, list[Line]] = {}
     for item_id, group in sorted(by_item.items()):
