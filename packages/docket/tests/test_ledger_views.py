@@ -522,6 +522,12 @@ def test_the_tool_s_kinds_are_the_ledger_s() -> None:
     assert views.KINDS == ops.KINDS
 
 
+def test_finding_an_item_alone_refuses_what_is_no_number_or_id(conn: sqlite3.Connection) -> None:
+    """show refuses such a ref before it asks for an item; the index's find, which any read may call, still does."""
+    with pytest.raises(DocketError, match="'B-1' isn't an item: name one by its A- number or its id"):
+        ledger_index.find(conn, "B-1")
+
+
 def test_a_day_in_another_year_is_said_whole(tmp_path: Path) -> None:
     made = [
         item(1, 1, due="2027-01-04"),

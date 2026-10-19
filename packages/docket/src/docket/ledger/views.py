@@ -87,10 +87,11 @@ BY_OPENED = " ORDER BY opened, claimed, id"
 CHASE = '"verdict":"chase"'
 DUE = '"due":'
 STANDS = "item IN ({marks}) AND fate IN ('applied', 'idle') AND kind IN ('triage', 'snooze', 'set', 'reopen')"
-# A line that names a chase or a due but not as the writer spaces them.
+# A line that names a chase or a due but not as the writer spaces them; the writer's spacing is ruled out first, so a
+# line as the writer wrote it is searched once.
 ODD = (
-    f"(kind = 'triage' AND instr(keys, '\"chase\"') > 0 AND instr(keys, '{CHASE}') = 0) "
-    f"OR (kind = 'set' AND instr(keys, '\"due\"') > 0 AND instr(keys, '{DUE}') = 0)"
+    f"(kind = 'triage' AND instr(keys, '{CHASE}') = 0 AND instr(keys, '\"chase\"') > 0) "
+    f"OR (kind = 'set' AND instr(keys, '{DUE}') = 0 AND instr(keys, '\"due\"') > 0)"
 )
 # The module's own SQL, never a user's text.
 COUNTS = (
@@ -383,8 +384,7 @@ class _Reader:
             due_day = _day(due)
             closed_day = _day(closed)
             late = (today - due_day).days if due_day is not None and state in OPEN and due_day < today else None
-            # Built from the tables' own typed values without checking them again: a snapshot builds thousands.
-            out.append(ItemRow.model_construct(
+            out.append(ItemRow(
                 ref=self.item_ref(item_id, number), id=item_id, number=number, kind=kind,
                 title=title if whole else cut(title), who=" ".join(who.split()), stream=stream, source=source,
                 meeting=meetings[meeting] if meeting else None, opened=opened_day, due=due_day, state=state,
