@@ -31,6 +31,7 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -59,6 +60,11 @@ FIELD_LINE = re.compile(r"(?:stream|status|where|next|deadline|updated):(?: .*)?
 # todo.py's: characters a JSON-quoted value writes as \u escapes, since an editor or a terminal would act on them.
 UNSAFE = re.compile("[\x7f-\x9f\u2028\u2029\ufeff\ufffe\uffff]")
 BOM = "\ufeff"
+# What the check says of a file only `docket render` has to settle, not the owner (DR-0675).
+STALE = "stale; docket render"
+NOT_YET = "not rendered yet; docket render"
+# The streams' six fields as the ledger's tables hold them.
+STREAMS = 'SELECT name, status, "where", next, deadline, updated FROM streams'
 # A value a report shows is cut to this.
 SHOWN = 40
 # What the ledger's op files looked like at a moment: each file's name, size and time.
@@ -265,9 +271,17 @@ def read_streams(vault: Vault, names: Iterable[str]) -> dict[str, Fields]:
     if not wanted:
         return {}
     marks = ", ".join("?" * len(wanted))
-    sql = f'SELECT name, status, "where", next, deadline, updated FROM streams WHERE name IN ({marks})'  # noqa: S608
     with ledger_tables(vault) as conn:
-        rows = conn.execute(sql, wanted).fetchall()
+        return _fields(conn.execute(f"{STREAMS} WHERE name IN ({marks})", wanted))
+
+
+def stream_fields(conn: sqlite3.Connection) -> dict[str, Fields]:
+    """Every stream by name, as the ledger's tables open in `conn` hold it: for a read already holding them, as the
+    day does, which a second `ledger_tables` would wait a second for."""
+    return _fields(conn.execute(STREAMS))
+
+
+def _fields(rows: Iterable[tuple[str, str, str | None, str | None, str | None, str]]) -> dict[str, Fields]:
     return {
         name: Fields(name, status, where, nxt, date.fromisoformat(deadline) if deadline else None,
                      date.fromisoformat(updated))
@@ -453,12 +467,16 @@ def _docket(data: bytes | None) -> bool:
 def problems(vault: Vault, streams: Iterable[Stream]) -> list[tuple[str, str]]:
     """What `docket vault check` says of the status files, each as (path, what), read and never written, no remote
     probed: a stream the ledger doesn't hold, a frontmatter a hand edit holds, a file Docket wrote whose fields lag the
-    ledger, and one not rendered yet. A path the render would refuse is the render's to report."""
+    ledger (`STALE`), and one not rendered yet (`NOT_YET`). A path the render would refuse is the render's to report."""
+    return checked(vault, {s.name: Fields.of(s) for s in streams})
+
+
+def checked(vault: Vault, held: Mapping[str, Fields]) -> list[tuple[str, str]]:
+    """`problems`, with the streams' fields by name as given."""
     found = entries(vault)
     repo = rendered.consuming_repo(vault) if found else None
     if repo is None:
         return []
-    held = {s.name: Fields.of(s) for s in streams}
     screen = writer_screen(vault)
     out: list[tuple[str, str]] = []
     for file in found:
@@ -482,5 +500,5 @@ def problems(vault: Vault, streams: Iterable[Stream]) -> list[tuple[str, str]]:
             out.append((file.path, why))
         elif new != text:
             docket = read is not None and read.head is not None and holds(read.head)
-            out.append((file.path, "stale; docket render" if docket else "not rendered yet; docket render"))
+            out.append((file.path, STALE if docket else NOT_YET))
     return out

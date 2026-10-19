@@ -72,6 +72,17 @@ def is_git_dir(path: Path) -> bool:
     return (path / "HEAD").is_file() and (path / "objects").is_dir() and (path / "refs").is_dir()
 
 
+def repo_at(folder: Path) -> Path | None:
+    """The first folder at or above `folder` holding a .git git would take, found by a stat, with no git process
+    (DR-0671, DR-0676); None in no repo. git skips a .git folder that isn't a git dir and looks further up, and a .git
+    file names a worktree's."""
+    for found in (folder, *folder.parents):
+        dot = found / ".git"
+        if dot.is_file() or is_git_dir(dot):
+            return found
+    return None
+
+
 def make_private(git_dir: Path, folder: Path) -> Path:
     """Make a folder for Docket's own files under a git dir, never the git dir itself: the folders made on the way
     would pass for a .git, and the vault would stop saying its history is gone (DR-0270)."""

@@ -8,6 +8,11 @@ Unreleased in the same PR.
 
 ### Added
 
+- Your day at each session's start: in the repo that holds your vault, Claude sees the syncs due, the queue, today's
+  and the next working day's meetings with their points and items, what is overdue, the replies owed, decisions and
+  tasks due this week, invites, waits and your streams, in at most 45 lines; in any other repo, one line of counts.
+  You see a line only when it asks something of you: a sync due, or a status file you edited by hand.
+  `docket ledger day` prints the same day from the vault, with the service down too.
 - Each stream's STATUS.md, its frontmatter written from the ledger: name it in `vault.yaml` under `rendered`, as
   `{kind: status, stream: pilot, path: projects/pilot/STATUS.md}`, and commit it. Docket writes the stream's fields
   and a line hashing them after every ledger write that changes the stream and on `docket render`, and leaves the

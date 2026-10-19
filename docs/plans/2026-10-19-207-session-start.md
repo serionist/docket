@@ -149,3 +149,20 @@ the first at or above it holding `.git`, is the vault's repo, so a separate repo
 | a change before the rename is left | `write_replacing` asks a check of the caller's right before each try at its rename, so the file is read again there, and a file held open past the retries is refused alone |
 | an unreached remote is asked again (DR-0554) | its answer kept five minutes: a dead probe waits about 20 s, on every write that changes a stream (DR-0676) |
 | the check names a missing stream, a hand edit, a stale file | and a file not rendered yet, absent or one the render would take over: `not rendered yet; docket render` (DR-0675) |
+
+## PR 2, as built
+
+| Planned | Built |
+|---|---|
+| the due rule moved beside the cursors | `cursors.marks` and `cursors.due`, with `DUE_AFTER`; the Sync page and the day both ask them |
+| the vault's repo found by a stat | `vault.home.repo_at`, which `rendered.consuming_repo` and the hook share; the route answers the vault's repo, the hook compares its own |
+| the hook prints the day | `session_start` takes the day's call as a third argument; `docket hook session-start` passes one asking `GET /api/day?room=` 45 less the status lines, for 3 s. The hook reads the JSON itself and loads no ledger or index module |
+| a line per hand-edited status file | a line per file the check names: the ones the render leaves (a hand edit, a stream the ledger lacks, a frontmatter that doesn't read) shown to the owner too; `stale` and `not rendered yet` to Claude alone, since `docket render` settles them |
+| the counts line elsewhere | Claude's alone, a sync due included: outside the vault's repo the owner sees nothing of the day |
+| the cuts | each section cut whole, to its count and its read, in DR-0670's order, as few as fit; then rows given back within the room, the last cut first: today's meetings' points and items meeting by meeting, the queue's rows, each section's row by row, each keeping how many more and where. Whole cuts alone left a busy day at 32 of 42 lines with every one of today's points out; it now takes 41 (DR-0670) |
+| the calendar backlog | the day says what `docket vault check` notes beside its problems, `ledger.check.notes` from #224: `<n> calendar record(s) wait for their meetings; docket ledger calendar` |
+| the service down | one line naming `docket ledger day`, and nothing before a vault and a service are set up, or while the running service can't open its vault: the status lines already say what to do (DR-0672) |
+| a last line naming the tool and the skills | it names the ledger tool, `ledger_batch` and `run_open`: the sync and tasks skills come with #209 and #210 |
+| `(/sync)` on the sync line | `(ask Claude to sync them)`: the plugin has no sync skill yet, and a sync starts with `run_open` (DR-0251) |
+| `docket ledger day` | and `--json`, the `Day` itself, as the other reads have |
+| the speed | the route about 80 ms on DR-0635's ledger, its perf test asserting 0.5 s; on an invented vault of 300 items and 40 meetings, ten starts each on the maintainer's Windows machine took 734 ms at the median with the day and 684 ms without it, about 50 ms more |

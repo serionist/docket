@@ -19,6 +19,7 @@ from docket.decisions import DecisionsReport
 from docket.index import SearchResult
 from docket.index.build import ledger_tables
 from docket.ledger import batch, store, views
+from docket.ledger import day as ledger_day
 from docket.ledger.batch import BatchResult
 from docket.ledger.ops import By
 from docket.media import put as media
@@ -138,6 +139,19 @@ async def ledger(service: Service, ask: views.Ask) -> tuple[views.LedgerRead, st
         with ledger_tables(vault) as conn:
             found = views.read(conn, ask, tz, views.now())
         return found, render.text(views.lines(found, tz))
+
+    return await asyncio.to_thread(run)
+
+
+async def day(service: Service, room: int) -> ledger_day.DayAnswer:
+    """The owner's day in at most `room` lines, read beside the writer as any ledger read is, the sources with a run
+    open never due (DR-0670 to DR-0672)."""
+    running = {run.source for run in service.runs.snapshot()}
+
+    def run() -> ledger_day.DayAnswer:
+        vault = service.vault()
+        found = ledger_day.read(vault, views.now(), running)
+        return ledger_day.answer(found, room, ledger_day.repo_of(vault))
 
     return await asyncio.to_thread(run)
 

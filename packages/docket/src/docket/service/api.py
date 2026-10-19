@@ -19,6 +19,7 @@ from docket import capture
 from docket.errors import DocketError
 from docket.index import SearchResult
 from docket.index.query import MAX_K
+from docket.ledger import day as ledger_day
 from docket.recall import ReadResult, VerifyResult
 from docket.service import calls, sync
 from docket.service.models import ModelsStatus
@@ -158,6 +159,13 @@ def router(service: Service) -> APIRouter:
         return SessionLink(
             url=f"{origin}/session?code={code}", expires_at=datetime.now(UTC) + timedelta(seconds=CODE_SECONDS)
         )
+
+    @api.get("/day")
+    async def day(  # pyright: ignore[reportUnusedFunction]
+        room: Annotated[int, Query(ge=0)] = ledger_day.ROOM,
+    ) -> ledger_day.DayAnswer:
+        # The session start's hook asks it with the room its own lines leave (DR-0670).
+        return await calls.day(service, room)
 
     @api.get("/search")
     async def search(  # pyright: ignore[reportUnusedFunction]

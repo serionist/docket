@@ -209,6 +209,12 @@ same result on any day.
   is the owner's, kept byte for byte (DR-0674). It renders after each write that changes the stream, once the lock is
   let go, and on `docket render`, never committed and never into a public repo. A hand edit is left and reported
   until the two agree, and `docket vault check` names it, a file that lags and a stream the ledger lacks (DR-0675).
+- The session start shows the owner's day, todo.py's dashboard from one snapshot read and the Sync page's due rule:
+  the syncs due, the queue, today's and the next working day's meetings with their points and items, then overdue,
+  replies, decisions and tasks, invites, waits and streams, an item listed once among them (DR-0670). It comes whole
+  only in a session whose own repo is the vault's, else as one line of counts (DR-0671), in at most 45 lines, cut from
+  the streams up and given back to the room; the hook waits 3 s for the service and never folds the ledger itself
+  (DR-0672). `docket ledger day` prints the same from the vault.
 
 ### 3.5 Beyond search
 
@@ -352,6 +358,9 @@ vault/
   vault, and offers a repo of its own instead.
 - In a folder, Docket's commits hold only the vault's paths, skip the host's hooks as in a repo of its own, and land
   on whichever branch is checked out; `docket vault status` warns when that isn't the remote's default.
+- The vault's repo is a folder vault's host, or for a repo of its own the first folder above it holding a `.git`
+  git would take, else the vault's own folder, each found by a stat with no git process. The rendered files go there
+  (DR-0676), and the session start shows the whole day only in a session whose own repo it is (DR-0671).
 - Raw text is in plain git, so grep, diffs and partial clones keep working. Only `media/` is in LFS, in both modes,
   so a clone with `lfs.fetchexclude=<vault path>/media/**` can rebuild everything except playback.
 - The vault's own `.gitattributes` holds every attribute it needs, in both modes: its first line stops the host's
@@ -786,7 +795,7 @@ Phase 0's plugin, by piece:
 | Piece | What |
 |---|---|
 | the MCP entry | the server `docket`, http to `127.0.0.1` at `DOCKET_PORT` or 8741, the token from `docket service token --header`; its tools show as `mcp__plugin_docket_docket__<tool>` (DR-0160) |
-| the status hook | SessionStart runs `docket hook session-start`: the service's state, the vault's, the port, and for Claude a curate round due; Claude gets every line, the user the ones that need them (DR-0161, DR-0163, DR-0474) |
+| the status hook | SessionStart runs `docket hook session-start`: the service's state, the vault's, the port, and for Claude a curate round due; then the owner's day from `GET /api/day`, whole in the vault's repo and as counts elsewhere; Claude gets every line, the user the ones that need them, of the day a sync due and a hand-edited status file (DR-0161, DR-0163, DR-0474, DR-0670 to DR-0672) |
 | `recall` | the rules above as a method, with the read-only tools pre-approved and the command line when the service is down (DR-0164) |
 | `setup` | DR-0103's round: sources first, the vault named on every command, each override asked (DR-0165) |
 | `curate` | a round in chat over `docket curate`: the cards in one table with Claude's call and why, each decided only on the user's answer for it; seeding from a people directory or glossary in `seeding.md`; only `status`, `show` and `log` pre-approved (DR-0472) |

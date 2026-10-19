@@ -1,5 +1,5 @@
 """The ledger: items owed and awaited, meetings with their talking points, and streams, kept as ops in the vault and
-folded into their state and history (#198, #199, #200, #201, #202).
+folded into their state and history (#198, #199, #200, #201, #202, #207).
 
 | Module | What |
 |---|---|
@@ -13,6 +13,7 @@ folded into their state and history (#198, #199, #200, #201, #202).
 | `imports` | a ledger brought in with its history from an export's op lines; its dry run (DR-0653 to DR-0656) |
 | `check` | what `docket vault check` says about the ledger (DR-0617) |
 | `status` | each stream's STATUS.md frontmatter, rendered after a write and by `docket render` (DR-0673 to DR-0675) |
+| `day` | the owner's day at the session start and in `docket ledger day`, from one snapshot read (DR-0670 to DR-0672) |
 
 The fold's tables in the index, which the writer and the reads ask, are `docket.index.ledger` (DR-0616).
 """

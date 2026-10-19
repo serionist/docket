@@ -25,7 +25,7 @@ Then add this repo as a marketplace and install the plugin, in Claude Code:
 | Part | What it does |
 |---|---|
 | the MCP server `docket` | the service at `http://127.0.0.1:8741/mcp`; its tools are `search`, `read`, `verify`, `doc_put`, `run_open` and `ingest`, shown as `mcp__plugin_docket_docket__<tool>`; the token comes from `docket service token --header` on each connect |
-| the session-start status | `docket hook session-start`: Claude learns whether the service runs, on which vault, what waits in staging, and whether a curate round is due; you see a line only when something needs you |
+| the session-start status | `docket hook session-start`: Claude learns whether the service runs, on which vault, what waits in staging, and whether a curate round is due, then your day: in the vault's repo the syncs due, the queue, the meetings, what is overdue, owed and awaited, and the streams, in at most 45 lines; in any other repo one line of counts. You see a line only when something needs you: a sync due, a status file you edited by hand |
 | the capture hook | `docket hook post-tool-use` after every MCP call: during a sync run it hands Docket what the source's tools returned, and tells Claude which captures it kept; with no run open it reads one small file and returns |
 | `/docket:recall` | finds what was said or written, reads the summary, checks every fact against its raw, and answers with locators; Claude also uses it on its own when you ask what someone said |
 | `/docket:setup` | checks Docket is installed, asks which sources to set up, where the vault lives and your languages, creates the vault, and on your yes writes each source's skill and mapper with `docket source new` |

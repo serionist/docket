@@ -27,7 +27,7 @@ from docket.vault.anchors import normalize_newlines
 from docket.vault.config import NeverStore, RenderedFile
 from docket.vault.entities import Entity, load_entities
 from docket.vault.git import Git
-from docket.vault.home import is_git_dir
+from docket.vault.home import repo_at
 from docket.vault.host import Probe, probe_remote, remote_urls
 from docket.vault.neverstore import listed, person_listed, slug_listed
 from docket.vault.staging import write_replacing
@@ -137,12 +137,8 @@ def consuming_repo(vault: Vault) -> Path | None:
     holding a .git git would take, found by a stat, so a write's render runs no git process."""
     if vault.home.folder:
         return vault.home.top.resolve()
-    for folder in vault.root.resolve().parents:
-        dot = folder / ".git"
-        # git skips a .git folder that isn't a git dir and looks further up, and a .git file names a worktree's.
-        if dot.is_file() or is_git_dir(dot):
-            return folder
-    return None
+    above = vault.root.resolve().parents
+    return repo_at(above[0]) if above else None
 
 
 def no_repo(vault: Vault) -> str:

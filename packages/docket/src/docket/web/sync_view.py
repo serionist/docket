@@ -29,8 +29,6 @@ RUNS = "/sync/runs"
 DEFAULT_K = 20
 MORE = 20
 MAX_K = history.KEEP
-# A source no machine synced for this long is due a sync (DR-0304).
-DUE_AFTER = timedelta(days=1)
 # How long an expiry, or a held id already in raw, stays among the failures after the close that found it.
 RECENT = timedelta(days=7)
 # The entries a cursor's lists show before saying how many more there are.
@@ -331,19 +329,6 @@ def _paste(source: str, final: bool = False) -> str:
     return f'Sync {source} with Docket: run_open("{source}") and follow its steps.'
 
 
-def _marks(facts: Facts, source: str) -> list[tuple[str, datetime]]:
-    """Each machine's mark of a source that isn't ahead of this clock, newest first."""
-    marks: list[tuple[str, datetime]] = []
-    own = facts.own.get(source)
-    if own is not None and own.mark is not None:
-        marks.append((facts.machine, own.mark))
-    for machine, found in facts.others.items():
-        cursor = found.get(source)
-        if cursor is not None and cursor.mark is not None:
-            marks.append((machine, cursor.mark))
-    return sorted(((m, t) for m, t in marks if t <= facts.now), key=lambda p: p[1], reverse=True)
-
-
 def needs(facts: Facts, wanted: str | None) -> tuple[list[Need], str | None]:
     """What needs the user first, then what needs a Claude session (DR-0304)."""
     running = {r.source for r in facts.open_runs}
@@ -358,8 +343,8 @@ def needs(facts: Facts, wanted: str | None) -> tuple[list[Need], str | None]:
             continue
         if source.name in running:
             continue
-        marks = _marks(facts, source.name)
-        stale = not marks or facts.now - marks[0][1] >= DUE_AFTER
+        marks = cursors.marks(source.name, facts.own, facts.others, facts.machine, facts.now)
+        stale = cursors.due(marks, facts.now)
         owed = [*source.final.waiting.values(), *source.final.retry.values()]
         final = ""
         if owed:
