@@ -8,6 +8,12 @@ Unreleased in the same PR.
 
 ### Added
 
+- `/docket:tasks`: Claude opens the page where you triage your queue, discuss, claude, me or chase, then works it
+  with you in chat on your "go", one item at a time: the facts read from each item's sources, three to five lines
+  and the next step, then the talk, the draft or the nudge, and each outcome written to the ledger before the next
+  item, saying whether you or Claude decided it. A prep item's agenda goes onto its meeting as talking points.
+  Messages stay drafts. Until the Queue page comes, it opens the Ledger page; without the service, you triage in
+  chat.
 - `/docket:sync`: Claude syncs your live sources, each in an agent of its own, then writes what they found into the
   ledger in one batch you can undo whole: what closed, with the evidence; what you owe and await, new asks
   untriaged; invites, attendees, minutes and outcomes on your meetings; proposed points for the coming week's; and

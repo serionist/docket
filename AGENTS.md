@@ -46,7 +46,7 @@ The schema is `docs/docs-regime.yaml`, explained in `docs/docs-regime.md`.
 | Path | What |
 |------|------|
 | `packages/docket/` | the app: the vault, the service (web app, MCP endpoint, scheduler), the source contract, the `docket` command |
-| `plugin/` | the Claude Code plugin: the MCP entry, the session-start status hook, the capture hook, the skills (recall, setup, cuts, curate, brief, decision and sync now; tasks later), no scripts of its own (its hooks run `docket`); source skills live in the consuming project, scaffolded by `docket source new`; `.claude-plugin/marketplace.json` makes the repo its marketplace |
+| `plugin/` | the Claude Code plugin: the MCP entry, the session-start status hook, the capture hook, the skills (recall, setup, cuts, curate, brief, decision, sync and tasks), no scripts of its own (its hooks run `docket`); source skills live in the consuming project, scaffolded by `docket source new`; `.claude-plugin/marketplace.json` makes the repo its marketplace |
 | `examples/` | reference sources to copy into a project, tested in CI and never a dependency: Plaud, Slack, Teams, Outlook mail and the calendar under `sources/<name>` |
 | `tools/devkit/` | the development kit, never published: `gate`, `docs`, `devkit` |
 | `docs/` | the design, the regime, the glossary, plans and reviews |
@@ -127,7 +127,7 @@ agrees in the issue or, under an autonomy grant, with its decision recorded as p
 - the MCP tools' names and parameters: `search`, `read`, `verify` and `doc_put` (DR-0150), `run_open` and `ingest`
   (DR-0241), `media_put` (DR-0547), `briefs` (DR-0556), `decisions` (DR-0565), `transcribe` (DR-0571), `ledger` and
   `ledger_batch`: views, ops, keys, `$name`, results (DR-0637 to DR-0640, DR-0660); the server key `docket` (DR-0160);
-- the plugin's skill and hook names: `recall`, `setup`, `cuts` (DR-0605), `curate` (DR-0472), `brief` (DR-0555), `decision` (DR-0563), `sync` (DR-0685), the SessionStart
+- the plugin's skill and hook names: `recall`, `setup`, `cuts` (DR-0605), `curate` (DR-0472), `brief` (DR-0555), `decision` (DR-0563), `sync` and `tasks` (DR-0685), the SessionStart
   hook running `docket hook session-start` (DR-0161), and the PostToolUse hook running `docket hook post-tool-use`
   for `mcp__.*`, with its line prefixes (DR-0242); the sync's return block (DR-0687); a source's `sync.md` (DR-0688);
 - the release's yes: `docket hold release` lets a held recording in on its owner's yes, at their own terminal or in

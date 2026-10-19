@@ -32,11 +32,11 @@ Then add this repo as a marketplace and install the plugin, in Claude Code:
 | `/docket:curate` | runs a curate round with you: Docket's cards for new people and terms and for spellings search misses, each with Claude's call and why, decided only on your answer for each card; and seeds entities from a people directory or glossary you point at, applied on your yes |
 | `/docket:cuts` | for recordings you held back, turns your words for each left-out stretch into time ranges on the transcript, writes them to a proposals file outside any repo, shows you the cuts and runs `docket hold release` on your yes; it tells you first where the transcripts it reads stay in Claude Code's session files |
 | `/docket:sync` | syncs your live sources, each in an agent of its own, then writes what they found into the ledger in one batch and goes through the list with you (below) |
+| `/docket:tasks` | opens the page where you triage, then works your queue with you in chat, one item at a time, each outcome written to the ledger before the next (below) |
 
 To sync a single source by hand, ask Claude to sync it: Claude calls `run_open`, follows the source's skill in your
 project, and closes the run with `ingest`. Allow `mcp__plugin_docket_docket__run_open` and
-`mcp__plugin_docket_docket__ingest` in your permission rules to skip the two prompts a run asks. The `tasks` skill
-comes next.
+`mcp__plugin_docket_docket__ingest` in your permission rules to skip the two prompts a run asks.
 
 ## The sync
 
@@ -62,6 +62,35 @@ writes what they found into the ledger in one `ledger_batch` by `sync`, and goes
 - Moving from a sync of your own: keep its name and description, so your words still reach it, and make its body one
   line, "Run `/docket:sync` (the Skill tool) with the same arguments". Move its lore into `CLAUDE.md` and each
   source's `sync.md`, and delete it once the plugin's sync has run a working week.
+
+## The tasks
+
+`/docket:tasks`, or "let's do tasks", opens the Ledger page with `docket open /ledger` (the Queue page once it
+comes), where you triage: discuss, claude, me or chase, or done, drop and snooze. Say "go" in chat, and Claude works
+the queue with you, one item at a time.
+
+| Verdict | What Claude does |
+|---|---|
+| discuss | the facts and a proposal, one short question round for a crisp choice, then the outcome you agree |
+| claude | drafts it or does it; a message only you can send stays open, its draft on the item, and moves to me |
+| me | lists it once, at the start |
+| chase | drafts the nudge where the ask is, and clears the verdict |
+
+- Each item's outcome is one `ledger_batch` before the next, each change saying whether you or Claude decided it, and
+  the page shows it within seconds. Claude reads the queue and the item again before it writes.
+- A prep item's agenda goes onto its meeting as talking points, those the sync proposed kept or dropped.
+- Messages are drafts, by your project's `CLAUDE.md`: a chat's draft tool, one draft a channel and never over one
+  already there; a mail left as a draft unless you say send for that mail.
+- Without the service it reads and writes the same through `docket ledger queue`, `show`, `suggest` and `batch`, and
+  you triage in chat.
+- The skill pre-approves only reads: `ledger`, `search`, `read`, `verify`, `docket open`, and `docket ledger day`,
+  `queue`, `show` and `suggest`. Each batch and each draft asks unless your permission rules allow it. In Git Bash on
+  Windows, which turns a lone `/ledger` into a folder, Claude runs `MSYS_NO_PATHCONV=1 docket open /ledger`.
+- Moving from a tasks skill of your own: as for a sync, keep its name and description, make its body "Run
+  `/docket:tasks` (the Skill tool) with the same arguments", move its drafting rules into `CLAUDE.md`, and delete it
+  after a working week.
+
+## Curating and upgrading
 
 To curate, allow `Bash(docket curate status *)`, `Bash(docket curate show *)` and `Bash(docket curate log *)` if you
 like: they leave the vault as it is. Leave every other `docket curate` command to ask. In auto mode Claude Code may run

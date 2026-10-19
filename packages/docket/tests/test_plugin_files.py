@@ -13,17 +13,19 @@ from urllib.parse import urlsplit
 import pytest
 import typer.main
 from docket_testkit import empty_vault, make_config
-from ledger_kit import meeting, op, write_ops
+from ledger_kit import meeting, op, ulid, write_ops
 
 from docket import entry, recall
 from docket.cli import app, main
+from docket.ledger.ops import VERDICTS
 from docket.ledger.store import BATCH
 from docket.ledger.views import VIEWS
-from docket.service import client, state, writer
+from docket.service import client, sessions, state, writer
 from docket.service.token import Tokens
 from docket.sources import scaffold
 from docket.vault.vault import Vault
 from docket.vault.wizard import KNOWN_SOURCES
+from docket.web.pages import NAV
 
 REPO = Path(__file__).resolve().parents[3]
 PLUGIN = REPO / "plugin"
@@ -315,9 +317,9 @@ def test_the_sync_s_block_keeps_its_labels_and_each_line_its_fields() -> None:
     }  # fmt: skip
 
 
-def test_agents_md_names_the_sync_skill_and_its_doors() -> None:
+def test_agents_md_names_the_sync_and_tasks_skills_and_their_doors() -> None:
     agents = (REPO / "AGENTS.md").read_text(encoding="utf-8")
-    for words in ("`sync` (DR-0685)", "(DR-0687)", "`sync.md` (DR-0688)"):
+    for words in ("`sync` and `tasks` (DR-0685)", "(DR-0687)", "`sync.md` (DR-0688)"):
         assert words in agents, words
 
 
@@ -364,3 +366,105 @@ def test_the_worked_batch_runs_clean_through_a_dry_run(tmp_path: Path, capsys: p
     assert code == 0, out
     assert out[-1].startswith("dry run: ") and out[-1].endswith(" op(s) would be written; nothing written"), out
     assert not any(": refused, " in line for line in out), out
+
+
+# -- the tasks skill (DR-0685, DR-0691) -----------------------------------------------------------------------------
+
+
+def tasks_text() -> str:
+    return (PLUGIN / "skills" / "tasks" / "SKILL.md").read_text(encoding="utf-8")
+
+
+def test_tasks_pre_approves_only_reads() -> None:
+    """Each item's batch and every draft ask (DR-0605); opening the page and the ledger's reads don't."""
+    tools = golden_tools()
+    allowed = frontmatter("tasks")["allowed-tools"]
+    prefix = "mcp__plugin_docket_docket__"
+    named = {name.removeprefix(prefix) for name in re.findall(rf"{prefix}\w+", allowed)}
+    assert named == {"ledger", "search", "read", "verify"}
+    assert all(tools[name]["annotations"]["read_only_hint"] for name in named)
+    commands = re.findall(r"Bash\(([^)]*)\)", allowed)
+    assert commands == [
+        "docket open *", "MSYS_NO_PATHCONV=1 docket open *", "docket ledger day", "docket ledger day *",
+        "docket ledger queue", "docket ledger queue *", "docket ledger show *", "docket ledger suggest *",
+    ]  # fmt: skip
+    assert re.sub(rf"{prefix}\w+|Bash\([^)]*\)", "", allowed).split() == []
+
+
+def test_tasks_names_commands_options_views_verdicts_ops_and_parameters_docket_has() -> None:
+    text = tasks_text()
+    tools = golden_tools()
+    seen: set[tuple[str, ...]] = set()
+    for path, flags in used_commands(text):
+        command: Any = typer.main.get_command(app)
+        for word in path:
+            command = command.commands[word]
+        assert not hasattr(command, "commands"), path
+        assert flags <= options(*path), (path, flags)
+        seen.add(tuple(path))
+    assert seen == {("open",), ("ledger", "day"), ("ledger", "queue"), ("ledger", "show"), ("ledger", "suggest"),
+                    ("ledger", "batch")}  # fmt: skip
+    for view in re.findall(r"`ledger` view `([a-z]+)`", text):
+        assert view in VIEWS, view
+    assert set(re.findall(r"view `([a-z]+)`", text)) <= {*VIEWS, *recall.VIEWS}
+    # The verdicts are the ledger's four in its order, and every one but me is worked.
+    for head, verdicts in (
+        ("| Verdict | What it means | What you do |", VERDICTS),
+        ("| Verdict | Do |", tuple(v for v in VERDICTS if v != "me")),
+    ):
+        table = text[text.index(head) :].split("\n\n", 1)[0]
+        assert tuple(re.findall(r"^\| `([a-z]+)` \|", table, re.MULTILINE)) == verdicts, head
+    table = text[text.index("| Op | For |") :].split("\n\n", 1)[0]
+    for row in table.splitlines()[2:]:
+        assert set(re.findall(r"`([a-z_]+)`", row.split("|")[1])) <= set(BATCH), row
+    assert set(re.findall(r'"op": "([a-z_]+)"', text)) <= set(BATCH)
+    for tool, params in re.findall(r"\b(ledger|ledger_batch|read|search|verify)\(([^)]*)\)", text):
+        given = {p.split("=")[0].strip() for p in params.split(",") if "=" in p}
+        assert given <= set(tools[tool]["input_schema"]["properties"]), (tool, given)
+    for tool, param in (("ledger", "ref"), ("ledger_batch", "by")):
+        assert f"`{param}`" in text and param in tools[tool]["input_schema"]["properties"], (tool, param)
+
+
+def test_tasks_opens_a_page_of_the_web_app_and_its_name_door_holds() -> None:
+    """Users invoke /docket:tasks by name (DR-0685). It opens the Ledger page until the Queue page comes, whose change
+    is the one path; Git Bash's form opens the same page."""
+    assert frontmatter("tasks")["name"] == "tasks"
+    text = tasks_text()
+    paths = re.findall(r"`(?:MSYS_NO_PATHCONV=1 )?docket open (\S+)`", text)
+    assert len(paths) >= 2 and "`MSYS_NO_PATHCONV=1 docket open " in text
+    (path,) = set(paths)
+    assert sessions.safe_next(path) == path
+    assert path in {page.path for group in NAV for page in group.pages}
+
+
+def queue_vault(tmp_path: Path) -> Vault:
+    """The worked batches' ledger: the pilot's, with Ben's ask triaged claude, Cleo's chase, a prep task on the next
+    weekly and a point the sync proposed there. Invented people only."""
+    vault = pilot_vault(tmp_path)
+    prep = {"kind": "task", "title": "Prep: the pilot weekly", "who": "Ben Sample", "stream": "pilot",
+            "source": "calendar:AAMkADweekly-1026", "meeting": ulid(5), "due": "2026-10-23"}  # fmt: skip
+    made = [
+        op("triage", 7, 2, verdict="claude", by="user", via="page"),
+        op("triage", 8, 3, verdict="chase", by="user", via="page"),
+        op("add", 9, number=3, fields=prep),
+        op("point", 10, 5, fields={"text": "Ben: is the room booked for the 28th?", "proposed": True}),
+    ]
+    vault.commit(write_ops(vault.root, made), "The pilot's queue")
+    return vault
+
+
+def test_the_tasks_worked_batches_run_clean_through_a_dry_run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    blocks = re.findall(r"```json\n(.*?)```", tasks_text(), re.DOTALL)
+    assert len(blocks) == 3
+    vault = queue_vault(tmp_path / "v")
+    for k, example in enumerate(blocks):
+        batch = tmp_path / f"tasks-{k}.json"
+        batch.write_text(example, encoding="utf-8")
+        capsys.readouterr()
+        code = main(["ledger", "batch", str(batch), "--dry-run", "--vault", str(vault.root)])
+        out = capsys.readouterr().out.splitlines()
+        assert code == 0, out
+        assert out[-1].startswith("dry run: ") and out[-1].endswith(" op(s) would be written; nothing written"), out
+        assert not any(": refused, " in line for line in out), out
