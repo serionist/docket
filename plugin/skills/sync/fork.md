@@ -88,7 +88,7 @@ Over what your run read and the recordings above, with older context from `searc
 | Line | What |
 |---|---|
 | OWED | each ask of the owner since {OWED_SINCE} where the ball is in their court: a question, a review, a decision, a file, an intro, a promise they made; left out when they answered it, here or anywhere else you can see. A promise whose speaker is a guess says so |
-| INVITES | invites still waiting for the owner's answer: a calendar reports those with no response, and mail which of them matter (new series, customer meetings, clashes) |
+| INVITES | an invite still waiting for the owner's answer, only when it matters: a new series since the window's start, a customer's meeting, or a clash with another meeting. A calendar reports such an event with no response; mail adds the invite mails that matter. No response alone is the normal state for an owner who rarely answers, and gets no line |
 | WAITING | what the owner asked others for and still waits on |
 | CLOSES | for each open item from step 1, evidence here that it was answered or done, or became moot |
 | MEETINGS | a meeting's `response` and `attendees`, and `start` and `end` for a move seen only in mail; a calendar's records make and move meetings themselves |
@@ -123,6 +123,8 @@ LEARNED:  SKILL.md / sync.md | <what differs from it, for next time>
   (`r:<rid>#2` for a paragraph, `r:<rid>@12:08` for a moment), or a doc id, or an old path with its time.
 - The day an ask was made is `YYYY-MM-DD`, with its local `HH:MM` after it when the source gives a time: the
   reconcile links an ask made in a meeting by it.
+- An INVITES line's last field says why it matters: the meeting it clashes with, `new series` or `customer`. Without
+  one there is no line.
 - `who` is the name the ledger already uses for the person (`ledger` view `list` with `who`), else the name the source
   writes. Times are local in {ZONE}.
 - A run with nothing to report returns its RUN line alone; a run that didn't open returns `RUN: {SOURCE} | none |

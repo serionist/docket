@@ -261,17 +261,22 @@ class TextRules:
     """The text rules every op's values pass (DR-0618, DR-0627), for the writer and the import alike: text redacted, a
     never-store keyword, a person on the people list in who, an organiser or an attendee, a source or a material's ref
     pointing into a never-store container (DR-0690), or a redaction rule's match in a value that isn't text refused.
-    `index` is the index's connection the containers are asked of, when the caller holds one."""
+    `index` is the index's connection the containers are asked of, when the caller holds one. With `once`, the import's,
+    an index that fails is asked no more and `unanswered` says so, for the caller to refuse once; else each value it
+    can't check is refused."""
 
-    def __init__(self, vault: Vault, index: sqlite3.Connection | None = None) -> None:
+    def __init__(self, vault: Vault, index: sqlite3.Connection | None = None, *, once: bool = False) -> None:
         self.lists = vault.config.never_store
         self.redactor = Redactor.from_config(vault.config.redaction)
         self.index = index
+        self.once = once
+        self.unanswered = False
         # Whether `index` has the records table: a writer folding the op files in memory holds the ledger's alone.
         self.records: bool | None = None
 
-    def screen(self, name: str, value: str) -> str:
-        """A value as it may be written: text redacted, anything else as given; `TextRefusedError` when it may not."""
+    def screen(self, name: str, value: str, *, removing: bool = False) -> str:
+        """A value as it may be written: text redacted, anything else as given; `TextRefusedError` when it may not. A
+        material's removal adds no pointer, so `removing` skips the containers."""
         lists = self.lists
         counts: Counter[str] = Counter()
         redacted = self.redactor.text(value, counts)
@@ -279,7 +284,7 @@ class TextRules:
             raise TextRefusedError(f"{name} says something on the never-store keywords list; leave it out")
         if name in PEOPLE and names_person(value, lists):
             raise TextRefusedError(f"{name} names someone on the never-store people list; leave them out")
-        if name in POINTERS and self.contained(name, value):
+        if name in POINTERS and not removing and self.contained(name, value):
             raise TextRefusedError(f"{name} points into a never-store container; leave it out")
         if name in REDACTED:
             return redacted
@@ -306,8 +311,8 @@ class TextRules:
 
     def places(self, name: str, rid: str) -> list[str]:
         """The container and thread the index holds for a rid; none without the index. An index that doesn't answer
-        refuses the value: it can't be checked."""
-        if self.index is None:
+        refuses the value, since it can't be checked; with `once`, it is marked and asked no more."""
+        if self.index is None or self.unanswered:
             return []
         try:
             if self.records is None:
@@ -317,6 +322,9 @@ class TextRules:
                 return []
             row = self.index.execute("SELECT container, thread FROM records WHERE rid = ?", (rid,)).fetchone()
         except sqlite3.Error:
+            if self.once:
+                self.unanswered = True
+                return []
             raise TextRefusedError(
                 f"{name} can't be checked against the never-store containers: the index didn't answer; try again"
             ) from None
@@ -719,10 +727,10 @@ class _Write:
 
     # -- the text rules (DR-0618, DR-0627) --------------------------------------------------------------------------
 
-    def screen(self, n: int, name: str, value: str) -> str:
+    def screen(self, n: int, name: str, value: str, *, removing: bool = False) -> str:
         """A value as it may be written (`TextRules.screen`), or the write refused, naming the change."""
         try:
-            return self.rules.screen(name, value)
+            return self.rules.screen(name, value, removing=removing)
         except TextRefusedError as e:
             self.refuse(n, str(e))
 
@@ -950,7 +958,7 @@ class _Write:
             self.refuse(n, "a material needs ref: a path, a URL or a locator")
         if not isinstance(remove, bool) or (label is not None and not isinstance(label, str)):
             self.refuse(n, "remove is true or false, and label is text")
-        ref = self.screen(n, "ref", material_ref(self.vault, raw))
+        ref = self.screen(n, "ref", material_ref(self.vault, raw), removing=remove)
         text = self.screen(n, "label", one_line(label)) if label and one_line(label) else None
         held = next((m for m in materials if m.ref == ref), None)
         if remove and held is None:

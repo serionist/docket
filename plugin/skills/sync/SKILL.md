@@ -64,9 +64,9 @@ around its day. Then one batch, in this order:
 | Order | Ops | Rule |
 |---|---|---|
 | closes | `done`, `drop` | only on a CLOSES line, its locator in `note`: `done` when it was done, `drop` with why when moot |
-| asks | `log`, `set`, `add` | OWED, INVITES and WAITING, one item per real ask, the same ask in two sources being one. An open one: a `log` with the new locator, and a `set` of `due` when it moved. An item a CLOSES line closes: a `log` for an ask made before the evidence, an `add` only for one after. A new one: an `add`, untriaged, `who` the ledger's name, `source` where the answer goes, the other locators in `note`, `opened` the ask's day, `due` only a real date, a `stream` the ledger holds; `kind` reply, decision or task from OWED, invite from INVITES, waiting from WAITING |
+| asks | `log`, `set`, `add` | OWED, INVITES and WAITING, one item per real ask, the same ask in two sources being one. An open one: a `log` with the new locator, and a `set` of `due` when it moved. An item a CLOSES line closes: a `log` for an ask made before the evidence, an `add` only for one after. A new one: an `add`, untriaged, `who` the ledger's name, `source` where the answer goes, the other locators in `note`, `opened` the ask's day, `due` only a real date, a `stream` the ledger holds; `kind` reply, decision or task from OWED, invite only from an INVITES line that says why it matters (a clash, a new series, a customer's meeting), waiting from WAITING |
 | meetings | `set` | each MEETINGS line's fields, on its M- ref |
-| links | `material`, `set` | a NOTES line's doc on the meeting the `ledger` view `meetings` finds 10 minutes either side of its recording's start, the line's M- ref when two match; `meeting` on an ask made by someone in that meeting, during it or up to 120 minutes after. Never a cancelled meeting or focus time |
+| links | `material`, `set` | a NOTES line's recording rid as a `material` on the meeting the `ledger` view `meetings` finds 10 minutes either side of its start, the line's M- ref when two match; `meeting` on an ask made by someone in that meeting, during it or up to 120 minutes after. Never a cancelled meeting or focus time |
 | minutes | `point_set`, `set` | each MINUTES line by its point id, then OUTCOME as the meeting's `outcome`; the vendor summary's guessed owners and dates stay out |
 | rollover | `rollover` | rolls the open points of the meetings that are over |
 | prep | `point`, `add` | for the next 5 working days' meetings the user presents in or owns a part of, customer meetings and new series: from `ledger` view `suggest`, the items the user would raise, each a `point` with `proposed` and its `item`, worded as a question for that call; none the dry run shows rolled in, none for dailies, standups or routine syncs. A prep `add`, a task due the working day before, only for real work before the call: a deck, a document, a demo |
@@ -95,7 +95,7 @@ weekly, the weekly's recording answered its point, and the stream moved:
   {"op": "set", "item": "A-0002", "fields": {"due": "2026-10-22"}},
   {"op": "add", "as": "room", "fields": {"kind": "reply", "title": "Confirm the room for the pilot's first day", "who": "Dan Example", "stream": "pilot", "source": "slack:C0PILOT/1791100800.000300", "opened": "2026-10-19", "meeting": "M-0001"}, "note": "also in mail: outlook:AAMkADroom1"},
   {"op": "set", "item": "M-0001", "fields": {"response": "accepted", "attendees": ["Ben Sample", "Dan Example"]}},
-  {"op": "material", "item": "M-0001", "ref": "recording-note:2026-10-19-pilot-starts-on-the-28th", "label": "recording"},
+  {"op": "material", "item": "M-0001", "ref": "plaud:rec-0101", "label": "recording"},
   {"op": "point_set", "item": "M-0001", "point": "01M4QJ9FZ000X93GNMW1YNY5N8", "fields": {"state": "answered", "answer": "the 28th, with Ben's team on site"}, "note": "r:plaud:rec-0101/transcript@12:08"},
   {"op": "set", "item": "M-0001", "fields": {"outcome": "The pilot starts on the 28th.\nDan books the room; Ada sends the plan."}},
   {"op": "rollover"},

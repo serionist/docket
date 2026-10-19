@@ -290,6 +290,18 @@ def test_a_source_or_a_ref_in_a_never_store_container_refuses_the_write_naming_t
     assert len(written.ops) == 3
 
 
+def test_a_material_whose_container_is_listed_later_can_still_be_removed(vault: Vault) -> None:
+    """A removal adds no pointer, so it skips the containers; putting the material back is refused."""
+    ref = "slack:D0LATER/1791000005.000100"
+    write(vault, [ADD, {"op": "material", "item": "A-0001", "ref": ref, "label": "the thread"}], now=NOW)
+    vault = configured(vault, containers=["D0LATER"])
+    (removed,) = write(vault, [{"op": "material", "item": "A-0001", "ref": ref, "remove": True}], now=later(1)).ops
+    assert (removed.ref, removed.remove) == (ref, True)
+    assert item(vault, 1).materials == []
+    with pytest.raises(LedgerError, match=_re(f"ref {INTO}")):
+        write(vault, [{"op": "material", "item": "A-0001", "ref": ref}], now=later(2))
+
+
 def test_a_locator_s_rid_comes_without_r_its_brackets_and_its_position() -> None:
     assert store.locator_rid(" [r:slack:D0X/1791000005.000100#2-3] ") == "slack:D0X/1791000005.000100"
     assert store.locator_rid("r:plaud:rec-01/transcript@12:08-12:40") == "plaud:rec-01/transcript"
@@ -340,18 +352,37 @@ def test_the_index_names_the_container_or_thread_a_rid_doesn_t_carry_and_a_dropp
     assert add.fields is not None and add.fields["source"] == "mail:AAMkADmsg9"
 
 
-def test_the_import_s_dry_run_names_each_line_it_would_refuse_by_its_field(tmp_path: Path) -> None:
-    vault = kept_and_dropped(tmp_path)
+def import_lines(*sources: str) -> str:
+    """An export's adds, one per source, numbered from 1."""
     lines = []
-    for n, source in enumerate(("slack:D0PRIVATE/1791000005.000100", "mail:AAMkADmsg1", "mail:AAMkADmsg9"), start=1):
+    for n, source in enumerate(sources, start=1):
         add_id = ops.encode(((imports.ADDS_AT + n) << ops.RANDOM_BITS) | 7)
         fields = {**ADD_FIELDS, "title": f"Ask {n}", "source": source, "opened": "2026-10-14"}
         lines.append({"schema_version": 1, "id": add_id, "item": add_id, "op": "add", "day": "2026-10-14",
                       "by": "claude", "via": "import", "number": n, "fields": fields})  # fmt: skip
+    return "".join(json.dumps(line) + "\n" for line in lines)
+
+
+def test_the_import_s_dry_run_names_each_line_it_would_refuse_by_its_field(tmp_path: Path) -> None:
+    vault = kept_and_dropped(tmp_path)
     vault = configured(vault, containers=[*vault.config.never_store.containers, "D0PRIVATE"])
-    text = "".join(json.dumps(line) + "\n" for line in lines)
+    text = import_lines("slack:D0PRIVATE/1791000005.000100", "mail:AAMkADmsg1", "mail:AAMkADmsg9")
     said = imports.run(vault, text, "export.jsonl", dry_run=True).plan.refusals
     assert said == (f"export.jsonl:1: source {INTO}", f"export.jsonl:2: source {INTO}")
+
+
+def test_an_index_that_stops_answering_refuses_the_import_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The import asks a failing index no more and is refused once, naming the index, not on every line after it."""
+    vault = kept_and_dropped(tmp_path)
+    failing = sqlite3.connect(":memory:")
+    failing.close()
+    monkeypatch.setattr(imports, "open_index", lambda _: failing)
+    text = import_lines("mail:AAMkADmsg1", "mail:AAMkADmsg2", "mail:AAMkADmsg9")
+    said = imports.run(vault, text, "export.jsonl", dry_run=True).plan.refusals
+    where = index_build.db_path(vault).relative_to(vault.root).as_posix()
+    assert said == (
+        f"the index ({where}) didn't answer while the never-store containers were checked; try the import again",
+    )
 
 
 def test_an_index_that_doesn_t_answer_refuses_the_locator_it_can_t_check(tmp_path: Path) -> None:

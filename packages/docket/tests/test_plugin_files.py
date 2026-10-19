@@ -320,6 +320,13 @@ def test_agents_md_names_the_sync_skill_and_its_doors() -> None:
         assert words in agents, words
 
 
+def test_the_two_name_doors_hold_the_skill_s_name_and_sync_md_beside_skill_md() -> None:
+    """Users invoke /docket:sync by name (DR-0685), and an owner's lore lives in sync.md beside the source's SKILL.md,
+    where the agent looks for it (DR-0688)."""
+    assert frontmatter("sync")["name"] == "sync"
+    assert "names the source's `SKILL.md`: read it, then `sync.md` beside it" in sync_texts()["fork.md"]
+
+
 POINT = "01M4QJ9FZ000X93GNMW1YNY5N8"
 
 

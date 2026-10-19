@@ -38,7 +38,7 @@ from pydantic import ValidationError
 
 from docket import recall
 from docket.errors import DocketError
-from docket.index.build import ledger_tables, ledger_tables_of, open_index
+from docket.index.build import db_path, ledger_tables, ledger_tables_of, open_index
 from docket.ledger import calendar, fold, ops, store
 from docket.ledger.fold import Ledger, number_text
 from docket.ledger.meetings import Meeting, ObjectFold, meeting_text
@@ -211,7 +211,14 @@ def _read(vault: Vault, text: str, name: str, masked: Collection[str]) -> _Lines
         elif twice[1] != found:
             out.refusals.append(f"{name}:{n}: op {op_id} is on line {twice[0]} with another text")
     with _records(vault) as index:
-        _fill(out, vault, given, name, masked=masked, rules=_Screen(vault, index))
+        rules = _Screen(vault, index)
+        _fill(out, vault, given, name, masked=masked, rules=rules)
+    if rules.rules.unanswered:
+        # Once, not on every line after it: the index stopped answering, and a later try is all it needs.
+        where = db_path(vault).relative_to(vault.root).as_posix()
+        out.refusals.append(
+            f"the index ({where}) didn't answer while the never-store containers were checked; try the import again"
+        )
     return out
 
 
@@ -314,7 +321,7 @@ class _Screen:
     kinds and log lines on line after line."""
 
     def __init__(self, vault: Vault, index: sqlite3.Connection | None = None) -> None:
-        self.rules = store.TextRules(vault, index)
+        self.rules = store.TextRules(vault, index, once=True)
         self.seen: dict[tuple[str, str], tuple[str | None, str | None]] = {}
 
     @staticmethod
