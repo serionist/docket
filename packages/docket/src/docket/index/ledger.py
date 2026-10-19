@@ -148,7 +148,8 @@ def _item_row(item: Item, claimed: int, number: int | None) -> tuple[Any, ...]:
 
 def rebuild(conn: sqlite3.Connection, root: Path) -> int:
     """Every op file folded into the tables, replacing what they held, inside the caller's transaction; how many op
-    lines it read. The collector stays paused from the read to the last row (`ledger.load`)."""
+    lines it read. The collector stays paused from the read to the last row (`ledger.load`), and the fold is let go
+    before it runs again: its first pass would walk every object the fold made, still young, for nothing."""
     files: list[ops.FileRead] = []
     with paused():
         ledger = load(root, files)
@@ -160,6 +161,7 @@ def rebuild(conn: sqlite3.Connection, root: Path) -> int:
             item = folded.item
             rows.add(item_id, ledger.lines[item_id], folded, None if item is None else item.number)
         rows.write(conn)
+        del ledger, rows
     return sum(f.lines for f in files)
 
 
