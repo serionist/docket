@@ -108,6 +108,8 @@ def test_each_kind_masks_to_its_golden_line_reads_as_its_kind_and_masks_again_un
     assert ops.mask(masked) == masked
     read = ops.read_op(masked)
     assert (read.id, read.item, read.op, read.machine, read.day) == (raw.id, raw.item, raw.op, raw.machine, raw.day)
+    # The writer writes a masked op as its mask, which the import relies on.
+    assert read.text() == masked
     # Nothing but the masked values moved: every key stays, in its place.
     assert list(json.loads(masked)) == list(json.loads(raw.text()))
 
@@ -118,14 +120,20 @@ def test_a_string_under_a_name_this_docket_doesn_t_know_is_masked_at_any_depth()
         "by": "claude", "via": "cli", "colour": "Ada's red", "weight": 3,
         "fields": {"title": "Pinned by Ada", "kind": "reply", "tags": ["Ada", "pilot"], "ref": REF,
                    "deep": {"who": "Ada Example", "n": 2, "ok": True, "none": None},
+                   "later": {"Ada Example": ["x", 1, True]},
                    "source": ["chat:C0TEST/3"], "attendees": "Ada Example"},
     }  # fmt: skip
     masked = json.loads(ops.mask(json.dumps(later)))
+    # A key nested under a name it doesn't know may hold words too: digested, so two keys stay two.
     assert masked == {
         **later, "colour": MARK,
         "fields": {"title": MARK, "kind": "reply", "tags": [MARK, MARK], "ref": MARK,
-                   "deep": {"who": MARK, "n": 2, "ok": True, "none": None}, "source": [MARK], "attendees": MARK},
+                   "deep": {located("who"): MARK, located("n"): 2, located("ok"): True, located("none"): None},
+                   "later": {located("Ada Example"): [MARK, 1, True]},
+                   "source": [MARK], "attendees": MARK},
     }  # fmt: skip
+    assert "Ada" not in ops.mask(json.dumps(later))
+    assert ops.mask(ops.mask(json.dumps(later))) == ops.mask(json.dumps(later))
     assert ops.read_op(ops.mask(json.dumps(later))).op == "pin"
 
 
@@ -133,6 +141,7 @@ def test_a_marker_already_written_stays_wherever_it_is() -> None:
     marked: dict[str, Any] = {
         "schema_version": 1, "id": ulid(41), "item": ulid(1), "op": "material", "day": "2026-10-18", "machine": "desk",
         "by": "claude", "via": "cli", "ref": located(REF), "label": MARK, "kept": located(EVENT), "fields": None,
+        "nested": {located("Ada Example"): MARK, MARK: [located(REF)]},
     }  # fmt: skip
     text = json.dumps(marked, separators=(",", ":"))
     assert ops.mask(text) == text
@@ -202,8 +211,9 @@ def test_an_op_file_s_listed_lines_are_masked_in_place_and_a_twin_masking_made_d
     listed = frozenset({ulid(2)})
     assert ops.masked_file(text, listed) == f"{add}\n{ops.mask(log)}\n{other}\n"
     assert [(n, raw) for n, raw, _ in ops.listed_lines(text, listed)] == [(2, log), (4, ops.mask(log))]
-    # The mask first and the text after it: the first one stays.
-    assert ops.masked_file(f"{ops.mask(log)}\n{log}\n", listed) == f"{ops.mask(log)}\n"
+    # The mask first and the text after it, an unlisted line between: the first one stays, either way round.
+    assert ops.masked_file(f"{ops.mask(log)}\n{other}\n{log}\n", listed) == f"{ops.mask(log)}\n{other}\n"
+    assert ops.masked_file(f"{log}\n{other}\n{ops.mask(log)}\n", listed) == f"{ops.mask(log)}\n{other}\n"
     # Nothing to change, or nothing listed: None.
     assert ops.masked_file(f"{add}\n{ops.mask(log)}\n", listed) is None
     assert ops.masked_file(text, frozenset()) is None
@@ -219,6 +229,11 @@ def test_an_op_line_is_found_by_its_own_id_whatever_its_key_order_and_never_by_a
     text = f"{reordered}\n{nested}\n{cut}\nnot json\n[1]\n"
     assert [n for n, _, _ in ops.listed_lines(text, frozenset({ulid(2)}))] == [1]
     assert ops.masked_file(text, frozenset({ulid(2)})) == f"{ops.mask(reordered)}\n{nested}\n{cut}\nnot json\n[1]\n"
+    # Text that says "id": can't pass for a key: JSON escapes its quotes, so the writer's line still names one id.
+    quoted = op("log", 6, 1, note='Say "id": to Ada').text()
+    assert quoted.count('"id":') == 1
+    assert list(ops.listed_lines(quoted, frozenset({ulid(2)}))) == []
+    assert [n for n, _, _ in ops.listed_lines(quoted, frozenset({ulid(6)}))] == [1]
 
 
 # -- every reader -------------------------------------------------------------------------------------------------

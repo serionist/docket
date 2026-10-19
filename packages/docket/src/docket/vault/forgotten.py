@@ -290,7 +290,10 @@ def list_path(root: Path) -> Path:
 
 
 def parse(text: str, where: str) -> list[Forget]:
-    """The forgets in the list's text. A bad line is named by its number only, like a release log's."""
+    """The forgets in the list's text. A bad line is named by its number only, like a release log's, with its two
+    causes: a newer Docket's line, such as one naming the ops it masked to a Docket from before #212, which this one
+    can't obey until it is updated, or a damaged one, which git gives back. Deleting a line is never the fix: a line
+    HEAD holds acts all the same."""
     out: list[Forget] = []
     for n, line in enumerate(text.splitlines(), start=1):
         if not line.strip():
@@ -298,7 +301,10 @@ def parse(text: str, where: str) -> list[Forget]:
         try:
             out.append(Forget.model_validate_json(line))
         except ValidationError:
-            problem = f"{where}: line {n} isn't a forget; fix or delete it (the forgotten list fails closed)"
+            problem = (
+                f"{where}: line {n} isn't a forget this Docket reads. Written by a newer Docket: update this one; "
+                f"damaged: git checkout -- {FORGOTTEN} (the forgotten list fails closed)"
+            )
             raise DocketError(problem) from None
     return out
 

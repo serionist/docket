@@ -362,7 +362,7 @@ MARK = "[forgotten]"
 # meeting and a material's remove still finds its add, while no rid reads as it.
 MARKED = re.compile(r"^\[forgotten(?::[0-9a-f]{32})?\]$")
 # The keys and the names in fields whose text a mask takes, and the locators it digests. A name this Docket doesn't
-# know is taken too, at any depth: a later Docket's text.
+# know is taken too, at any depth, and the keys nested under it digested: a later Docket's text.
 TEXT_KEYS = ("note", "label")
 TEXT_FIELDS = (
     "title", "who", "description", "notes", "outcome", "subject", "organiser", "where", "text", "answer", "next",
@@ -378,22 +378,25 @@ KEPT_FIELDS = frozenset((*FIELDS, *MEETING_FIELDS, *STREAM_FIELDS, *POINT_FIELDS
 }  # fmt: skip
 
 
+def _digested(text: str) -> str:
+    """A locator, or a key nested in a value, as staging's digest of it, so two of them stay apart; a marker kept."""
+    return text if MARKED.fullmatch(text) else f"[forgotten:{digest(text)}]"
+
+
 def _marked(value: Any) -> Any:
-    """Every string in a value as the marker, one that is a marker already kept; its shape and every other value
-    kept."""
+    """Every string in a value as the marker and every key in it digested, since a later Docket's key may hold words
+    too; a marker kept, and the value's shape and every other value as they were."""
     if isinstance(value, str):
         return value if MARKED.fullmatch(value) else MARK
     if isinstance(value, list):
         return [_marked(one) for one in cast(list[Any], value)]
     if isinstance(value, dict):
-        return {name: _marked(one) for name, one in cast(dict[str, Any], value).items()}
+        return {_digested(name): _marked(one) for name, one in cast(dict[str, Any], value).items()}
     return value
 
 
 def _located(value: Any) -> Any:
-    if isinstance(value, str) and not MARKED.fullmatch(value):
-        return f"[forgotten:{digest(value)}]"
-    return _marked(value)
+    return _digested(value) if isinstance(value, str) else _marked(value)
 
 
 def _masked_fields(fields: dict[str, Any]) -> dict[str, Any]:
@@ -412,9 +415,10 @@ def _masked_fields(fields: dict[str, Any]) -> dict[str, Any]:
 
 def mask(text: str) -> str:
     """An op's line as a forget leaves it (DR-0693), from the line of a JSON object: its keys in their order, its text
-    and any string under a name this Docket doesn't know `[forgotten]`, its locators `[forgotten:<32 hex>]`, its
-    attendees none, every other value as it was. Idempotent: a value that is a marker already stays, so a mask's mask
-    is the mask, and a line a merge brought back beside its mask masks to that same text."""
+    and any string under a name this Docket doesn't know `[forgotten]`, its locators and any key nested under such a
+    name `[forgotten:<32 hex>]`, its attendees none, every other value as it was. Idempotent: a value or a key that
+    is a marker already stays, so a mask's mask is the mask, and a line a merge brought back beside its mask masks to
+    that same text."""
     out: dict[str, Any] = {}
     for key, value in cast(dict[str, Any], json.loads(text)).items():
         if key in KEPT_KEYS:

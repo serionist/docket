@@ -91,6 +91,10 @@ def test_a_line_that_isn_t_a_forget_stops_every_reader_named_by_its_number(vault
     with pytest.raises(DocketError, match=r"state/forgotten.jsonl: line 2 isn't a forget") as raised:
         listed(vault)
     assert "plaud" not in str(raised.value)
+    # A newer Docket's line or a damaged one: the advice names both, and deleting the line is never it.
+    said = str(raised.value)
+    assert "Written by a newer Docket: update this one" in said
+    assert f"damaged: git checkout -- {FORGOTTEN}" in said and "delete" not in said
     with pytest.raises(DocketError, match="line 2"):
         vault.rawlog.read(PLAUD)
 
