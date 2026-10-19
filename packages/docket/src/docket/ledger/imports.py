@@ -12,8 +12,8 @@ The ledger may hold the file's ops, each line for line as the import would write
 writes nothing and an import stopped after a month finishes, an op the forgotten list masks masked before the text
 rules see it, then compared and written so, and no rerun after a forget brings its text back or stops on it (DR-0696);
 and objects of its own that name none of the file's, such as the calendar step's meetings (DR-0647). A line the list
-doesn't name that holds text on a shell, an item or a meeting whose making op the list holds (DR-0694), refuses the
-import, named by its place: a forget took that object's words. An op from
+doesn't name that holds text on a shell, an item or a meeting whose making op the list holds (DR-0694), or on a point
+the list holds, refuses the import, named by its place: a forget took that object's words. An op from
 elsewhere naming one of the file's objects, or a held line with another text, refuses the import: revert first
 (DR-0656). So does a problem `docket vault check` would name in the fold of the result that the ledger didn't have
 already, and a number one of the file's objects would lose; one the ledger's own object loses goes through, and the
@@ -382,7 +382,8 @@ def _names(op: Op, ids: set[str]) -> bool:
 
 def _on_shells(ledger: Ledger, fresh: Sequence[Line], listed: frozenset[str]) -> list[str]:
     """Each of the file's lines the list doesn't name that holds text on a shell, by its place and the shell's number
-    (DR-0696): an item whose add the list holds, or a meeting one of whose adds it holds."""
+    (DR-0696): an item whose add the list holds, or a meeting one of whose adds it holds; or on a point the list holds,
+    a small shell, by the point's `M-0040#2`."""
     if not listed:
         return []
     shells = {i: number_text(f.claims[-1][1]) for i, f in ledger.folds.items() if i in listed and f.claims}
@@ -392,11 +393,20 @@ def _on_shells(ledger: Ledger, fresh: Sequence[Line], listed: frozenset[str]) ->
             meeting = found.meetings.get(obj_id)
             number = meeting.number or meeting.claimed if meeting is not None else min(folded.numbers)
             shells.update(dict.fromkeys(folded.adds, meeting_text(number)))
-    return [
-        f"{line.where}: holds text on {shells[line.op.item]}, a shell a forget left; leave it out of the file"
-        for line in fresh
-        if line.op.item in shells and line.op.id not in listed and ops.mask(line.text) != line.text
-    ]
+    points = {
+        point.id: f"{meeting_text(meeting.number or meeting.claimed)}#{k}"
+        for meeting in found.meetings.values()
+        for k, point in enumerate(meeting.points, start=1)
+        if point.id in listed
+    }
+    out: list[str] = []
+    for line in fresh:
+        op = line.op
+        on, at = shells.get(op.item), points.get(op.point or "")
+        what = f"{on}, a shell" if on is not None else f"{at}, a point" if at is not None else None
+        if what is not None and op.id not in listed and ops.mask(line.text) != line.text:
+            out.append(f"{line.where}: holds text on {what} a forget left; leave it out of the file")
+    return out
 
 
 def _problems(ledger: Ledger, before: Ledger, objects: set[str]) -> list[str]:

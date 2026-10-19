@@ -11,10 +11,11 @@ apply, which finds a clone's own ops from before its pull.
 
 A point is masked for its own words when it was raised on a shell, when an anchor matched it or a `point_set` setting
 its text, or when a `point_set` on a shell set its text there. Any other copy rolled into a shell goes as that shell's
-op, and the chain beyond it keeps its words. A meeting is never joined to a shell by its event: another clone's add
-of a forgotten event reads on the family itself, and an add of a kept one is that record's meeting, which the calendar
-step brings back. Only an op whose line a mask changes is named: one with no text has nothing to hide, and a listed one
-is masked already.
+op, and the chain beyond it keeps its words. A listed point on a meeting that isn't a shell is followed again at every
+match, a small shell: another clone's answer to it from before its pull goes too. A meeting is never joined to a shell
+by its event: another clone's add of a forgotten event reads on the family itself, and an add of a kept one is that
+record's meeting, which the calendar step brings back. Only an op whose line a mask changes is named: one with no text
+has nothing to hide, and a listed one is masked already.
 
 What it finds is said by number, never a word: the shells it leaves, the open ones among them to drop, an item open or a
 meeting with an open point, which the day's lists would show for good, each object that lost a material or a link and
@@ -273,15 +274,19 @@ class _Rule:
         )  # fmt: skip
 
     def masked(self, judge: _Judge) -> tuple[set[str], dict[str, str]]:
-        """Every op the rule masks, listed ones too, and each add of a shell with its shell."""
+        """Every op the rule masks, listed ones too, and each add of a shell with its shell. A listed point on a meeting
+        that isn't a shell was masked for its own words, or as a copy of a point that was: it is followed again, so
+        another clone's answer to it or copy of it from before its pull is found."""
         direct = self.direct(judge)
         masked = set(self.held) | direct
+        held_points = self.held & self.points
         while True:
             before = len(masked)
             shell = self.shells(masked)
             for add_id in shell:
                 masked.update(line.op.id for line in self.by_item.get(add_id, ()))
-            self.follow(self.own_words(shell, direct), masked)
+            listed = {point_id for point_id in held_points if self.op(point_id).item not in shell}
+            self.follow(self.own_words(shell, direct) | listed, masked)
             if len(masked) == before:
                 return masked, shell
 

@@ -296,8 +296,9 @@ Unreleased in the same PR.
   and the screen name each shell, an open one to drop (an item open, or a meeting with an open point), each item or
   meeting that lost a link and kept its text, and each open point left on a shell, to raise again, by number only.
   Afterwards Claude can't write text or a log on a shell, or a source, a ref or an anchor naming what you forgot; a
-  drop, an archive or a close with an outcome there still goes, its note and outcome `[forgotten]`. Another machine's
-  own ops from before its pull are masked at its next gate call, a link to a doc the forget removed among them, and
+  drop, an archive or a close with an outcome there still goes, its note and outcome `[forgotten]`; a point it masked on
+  a meeting it kept takes no answer or text, and can still be dropped. Another machine's own ops from before its pull
+  are masked at its next gate call, a link to a doc the forget removed and an answer to a masked point among them, and
   the history rewrite takes the op lines out of every commit, a deleted op file's too.
 - `media_put` fetches a URL from any https host, every address it resolves to still checked: `docket media host` is
   gone, and a source's `media_hosts` key in `vault.yaml` is read and ignored. A `vault.yaml` with comments or a layout

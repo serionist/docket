@@ -41,7 +41,9 @@ After a forget (DR-0696): a source, a ref or an anchor naming a rid forgotten wh
 is refused, naming the field, a hash check that keeps new ops from needing a mask; and on a shell, an item or a meeting
 whose making op the list holds (DR-0694), a text field or a log is refused, naming its number, and any op's note and
 outcome are written as `[forgotten]`, so a drop, an archive, a close with an outcome and a sync's due archives still
-go. The rollover leaves a shell's points where they are, and a shell's point makes no item.
+go. The rollover leaves a shell's points where they are, and a shell's point makes no item. A point the list holds on
+a meeting that isn't a shell, masked for its own words, is a small shell: it takes no answer or text and makes no
+item, naming it as `M-0040#2`, while its state still changes, so the owner can close it.
 """
 
 from __future__ import annotations
@@ -690,6 +692,16 @@ class _Write:
             self.refuse(self.n, f"{label} is a shell a forget left; it takes no {texts[0]}")
         return {**keys, "note": ops.MARK} if keys.get("note") is not None else keys
 
+    def on_point(self, add_id: str, keys: dict[str, Any]) -> dict[str, Any]:
+        """A point_set's keys on a point the forgotten list holds, on a meeting that isn't a shell: masked for its own
+        words, a small shell (DR-0696). An answer or text refused, naming the point, since a later match would take
+        it; its state set alone, so the owner can close it; a note written as the marker."""
+        texts = _texts(keys)
+        if texts:
+            label = self.point_label(add_id, str(keys["point"]))
+            self.refuse(self.n, f"{label} is a point a forget left; it takes no {texts[0]}")
+        return {**keys, "note": ops.MARK} if keys.get("note") is not None else keys
+
     def resolve(self, n: int, ref: object) -> str:
         """The item a change names, by its id or its A- number."""
         if not isinstance(ref, str) or not ref.strip():
@@ -774,6 +786,8 @@ class _Write:
         shell = self.shell(item) if item_id is not None else None
         if shell is not None:
             keys = self.on_shell(shell, kind, keys)
+        elif kind == "point_set" and keys.get("point") in self.listed:
+            keys = self.on_point(item, keys)
         mine = self.lines_of(item)
         seen = [line.op.id for add_id in self.same.get(item, {item}) for line in self.lines_of(add_id)]
         op = Op(
@@ -1132,6 +1146,16 @@ class _Write:
     def meeting_label(self, meeting: Meeting) -> str:
         return meeting_text(meeting.number or meeting.claimed)
 
+    def point_label(self, add_id: str, point_id: str) -> str:
+        """A point as `M-0040#3`, its place among its meeting's standing points; one that stands nowhere now, as its
+        meeting's."""
+        objects = self.objects()
+        meeting = objects.meetings.get(objects.owner.get(add_id, ""))
+        if meeting is None:
+            return self.label(add_id)
+        place = next((k for k, p in enumerate(meeting.points, start=1) if p.id == point_id), None)
+        return f"{self.meeting_label(meeting)}#{place}" if place is not None else self.meeting_label(meeting)
+
     def set_meeting(self, n: int, meeting: Meeting, fields: dict[str, Any], note: str | None, *, key_add: str) -> None:
         """A set of what changed, on a meeting that isn't archived: a set on an archived one is idle, and its callers
         write nothing for it before they check a field (DR-0624)."""
@@ -1316,6 +1340,8 @@ class _Write:
         shell = self.shell(meeting.id)
         if shell is not None:
             self.refuse(n, f"{shell} is a shell a forget left; its points make no item")
+        if point.id in self.listed:
+            self.refuse(n, f"{self.point_label(meeting.id, point.id)} is a point a forget left; it makes no item")
         if point.state == "rolled":
             self.refuse(n, "that point rolled on; change it on the meeting it rolled to")
         if point.item is not None:
@@ -2023,16 +2049,6 @@ class _Batch(_Write):
         claims = (self.fold_of(renumber.item) if meeting else self.fold(renumber.item)).claims
         lost = next(number for (_, number), (claim, _) in pairwise(claims) if claim == renumber.id)
         return meeting_text(lost) if meeting else number_text(lost)
-
-    def point_label(self, add_id: str, point_id: str) -> str:
-        """A point as `M-0040#3`, its place among its meeting's standing points; one that stands nowhere now, as its
-        meeting's."""
-        objects = self.objects()
-        meeting = objects.meetings.get(objects.owner.get(add_id, ""))
-        if meeting is None:
-            return self.label(add_id)
-        place = next((k for k, p in enumerate(meeting.points, start=1) if p.id == point_id), None)
-        return f"{self.meeting_label(meeting)}#{place}" if place is not None else self.meeting_label(meeting)
 
 
 def _cut(text: str, width: int) -> str:

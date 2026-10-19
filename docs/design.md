@@ -185,7 +185,8 @@ same result on any day.
     making op it masks: a shell, kept with its number. A point's copies go with it only when its words are its own;
     every clone matches again, so its own ops from before its pull go too (DR-0694).
   - The writer refuses text or a log on a shell and a locator or an anchor on what was forgotten, and writes a note
-    or an outcome there as `[forgotten]`; the import refuses a line bringing text back onto a shell (DR-0696).
+    or an outcome there as `[forgotten]`; the import refuses a line bringing text back onto a shell (DR-0696). A
+    point masked for its own words on a kept meeting is a small shell: no answer or text, no item, its state alone.
 - Meetings and streams are objects in the same files: an add, a meeting or a stream op whose item is its own id makes
   one, and an object of a kind this Docket doesn't know is kept and changes nothing (DR-0620). The adds of one key, a
   meeting's event or a stream's name, are one object, and a keyed add may continue a meeting that had none, whose id

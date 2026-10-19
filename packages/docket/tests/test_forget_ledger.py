@@ -452,6 +452,34 @@ def test_a_meeting_shell_takes_no_point_answer_item_or_join_and_its_points_never
     write(vault, {"op": "point_set", "item": first, "point": 1, "fields": {"state": "dropped"}})
 
 
+def test_a_point_a_forget_left_on_a_live_meeting_takes_no_words_and_makes_no_item_but_closes(
+    vault: Vault, owner: Callable[..., AtConsole]
+) -> None:
+    number = weekly(vault, 1)
+    write(
+        vault,
+        {"op": "point", "item": number, "fields": {"text": "The venue"}},
+        {"op": "point", "item": number, "fields": {"text": f"Ada said so [r:{CHAT}]"}},
+    )
+    forget_now_at(vault, owner, CHAT)
+    assert points_of(vault, number) == [("The venue", "open"), (MARK, "open")]
+    refused = [
+        ({"op": "point_set", "item": number, "point": 2, "fields": {"answer": "Tuesday"}}, "it takes no answer"),
+        ({"op": "point_set", "item": number, "point": 2, "fields": {"text": "Ada again"}}, "it takes no text"),
+        ({"op": "point_item", "item": number, "point": 2, "fields": {"stream": "pilot"}}, "it makes no item"),
+    ]
+    for change, why in refused:
+        with pytest.raises(RefusedError, match=f"{number}#2 is a point a forget left; {why}"):
+            write(vault, change)
+    # Its state alone still changes, so the owner can close it; a note there is the marker.
+    closed = write(vault, {"op": "point_set", "item": number, "point": 2, "fields": {"state": "dropped"},
+                           "note": "Not ours"})  # fmt: skip
+    assert [o.note for o in closed.ops] == [MARK]
+    write(vault, {"op": "point_set", "item": number, "point": 1, "fields": {"answer": "Tuesday"}})
+    assert points_of(vault, number) == [("The venue", "answered"), (MARK, "dropped")]
+    assert vault.check() == []
+
+
 def test_a_stream_whose_ops_are_masked_has_its_status_file_rendered_again(
     tmp_path: Path, owner: Callable[..., AtConsole]
 ) -> None:
@@ -618,6 +646,33 @@ def test_a_point_an_anchor_matched_or_whose_text_one_set_takes_its_copies() -> N
     assert got.kept == tuple(f"M-{n:04d}: {k} masked; the rest kept" for n, k in counts)
 
 
+def test_a_point_listed_for_its_own_words_takes_another_clone_s_answer_and_copy_at_the_next_match() -> None:
+    first, second = meeting(10, event(1)), meeting(20, event(2))
+    anchored = point(11, 10, f"Ada said so [r:{CHAT}]")
+    # Written on another clone before its pull: an answer, a state alone, and a roll.
+    answer = point_set(12, 10, 11, state="answered", answer="Tuesday, as Ada said")
+    state = point_set(13, 10, 11, state="dropped")
+    copy, rolled = roll(21, 10, 11, 20)
+    listed = Forgotten(ops=frozenset({ulid(11)}))
+    read = read_as(first, second, anchored, answer, state, copy, rolled, listed=listed.ops)
+    got = forget_ledger.match(read, Raw(), listed, Docs())
+    # The answer and the copy hold words; the state and the roll's mark hold none, so the list doesn't name them.
+    assert got.new == frozenset({ulid(12), ulid(21)}) and got.shells == ()
+    assert forget_ledger.suspect(answer.text(), listed) and not forget_ledger.suspect(state.text(), listed)
+
+
+def test_a_listed_copy_on_a_shell_doesn_t_take_the_chain_beyond_it_at_the_next_match() -> None:
+    first, shell, third = meeting(10, event(1)), meeting(20, event(2)), meeting(30, event(3))
+    raised = point(11, 10, "The venue")
+    copy_one, rolled_one = roll(21, 10, 11, 20)
+    copy_two, rolled_two = roll(31, 20, 21, 30)
+    # What the forget of the second meeting's record listed: its add and the copy rolled into it.
+    listed = Forgotten(ops=frozenset({ulid(20), ulid(21)}))
+    made = (first, shell, third, raised, copy_one, rolled_one, copy_two, rolled_two)
+    got = forget_ledger.match(read_as(*made, listed=listed.ops), Raw(), listed, Docs())
+    assert got.new == frozenset()
+
+
 def test_a_point_linked_to_a_shell_item_isn_t_suspected_without_rids() -> None:
     assert not forget_ledger.suspect(point(3, 2, item=ulid(1)).text(), Forgotten(ops=frozenset({ulid(1)})))
 
@@ -631,6 +686,17 @@ def test_the_import_names_a_line_with_text_on_a_shell_meeting(vault: Vault) -> N
     assert [r.split(": ", 1)[1] for r in refused] == [
         "holds text on M-0010, a shell a forget left; leave it out of the file",
         "holds text on M-0020, a shell a forget left; leave it out of the file",
+    ]
+
+
+def test_the_import_names_a_line_with_text_on_a_point_a_forget_left_and_passes_its_state() -> None:
+    live, left = meeting(30, event(3)), point(31, 30, f"Ada said so [r:{CHAT}]")
+    answer, state = point_set(32, 30, 31, answer="Tuesday"), point_set(33, 30, 31, state="dropped")
+    listed = frozenset({ulid(31)})
+    folded = folding.fold(read_as(live, left, answer, state, listed=listed))
+    refused = imports._on_shells(folded, lines(answer, state), listed)
+    assert [r.split(": ", 1)[1] for r in refused] == [
+        "holds text on M-0030#1, a point a forget left; leave it out of the file",
     ]
 
 
