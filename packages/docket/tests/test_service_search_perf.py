@@ -8,15 +8,13 @@ its lane, pins the service's search within 150 ms of the one in process.
 
 from __future__ import annotations
 
-import statistics
-import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import copied, git, make_config, make_record, traced
+from docket_testkit import best_of, copied, git, make_config, make_record, traced
 from starlette.testclient import TestClient
 
 from docket import index
@@ -107,19 +105,19 @@ def test_a_warm_search_through_the_service_asks_git_nothing(
 def test_a_warm_search_through_the_service_answers_within_150_ms_of_one_in_process(
     client: TestClient, vault: Vault
 ) -> None:
-    def median(search: Any) -> float:
+    def per_search(search: Any) -> tuple[float, str]:
+        """A search's seconds in the fastest of three runs of ten, after three to warm it, and each run's ten."""
         for _ in range(3):
             search()
-        seconds: list[float] = []
-        for _ in range(ROUNDS):
-            started = time.perf_counter()
-            search()
-            seconds.append(time.perf_counter() - started)
-        return statistics.median(seconds)
+        run = best_of(3, lambda: [search() for _ in range(ROUNDS)])
+        return run.seconds / ROUNDS, run.runs("ms")
 
     opened = Vault.open(vault.root)
-    through = median(lambda: searched(client))
-    alone = median(lambda: index.search(opened, QUERY))
-    print(f"\na warm search through the service: {through * 1000:.0f} ms, in process: {alone * 1000:.0f} ms")
+    through, through_runs = per_search(lambda: searched(client))
+    alone, alone_runs = per_search(lambda: index.search(opened, QUERY))
+    print(
+        f"\na warm search through the service: {through * 1000:.0f} ms (runs of {ROUNDS}: {through_runs}), in process: "
+        f"{alone * 1000:.0f} ms ({alone_runs})"
+    )
     if not traced():
         assert through - alone < MARGIN

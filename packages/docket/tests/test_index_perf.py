@@ -27,6 +27,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 from docket_testkit import (
+    Best,
+    best_of,
     copy_vault,
     fts_and_check,
     index_config,
@@ -38,7 +40,7 @@ from docket_testkit import (
 )
 from models_kit import CANT_SEARCH, FAKE, FAKE_RERANKER
 
-from docket.index import build, matching, search, vectors
+from docket.index import SearchResult, build, matching, search, vectors
 from docket.index import text as text_module
 from docket.index.chunks import Chunk, iso
 from docket.index.schema import create
@@ -225,11 +227,12 @@ def vectors_vault(vault: Vault, tmp_path_factory: pytest.TempPathFactory) -> Vau
     return v
 
 
-def timed(vault: Vault, query: str, **kwargs: object) -> tuple[float, int, str]:
-    """A search's seconds, its hits and whether its vector stage ran."""
-    started = time.monotonic()
-    result = search(vault, query, now=NOW, **kwargs)  # type: ignore[arg-type]
-    return time.monotonic() - started, sum(len(g.hits) for g in result.groups), result.models.state
+def timed(vault: Vault, query: str, **kwargs: object) -> tuple[Best[SearchResult], int, str]:
+    """A search's best of two, its hits and whether its vector stage ran: the shapes' sixty searches take over 3 s on
+    CI, so each is timed twice."""
+    run = best_of(2, lambda: search(vault, query, now=NOW, **kwargs))  # type: ignore[arg-type]
+    result = run.result
+    return run, sum(len(g.hits) for g in result.groups), result.models.state
 
 
 def test_every_chunk_of_the_vectors_vault_has_its_vector(vectors_vault: Vault) -> None:
@@ -280,22 +283,25 @@ def test_queries_answer_in_well_under_a_second(vault: Vault, vectors_vault: Vaul
         "common split": (f"{plain[0] + plain[1]} {rare}", {}),
     }
     for name, (query, kwargs) in shapes.items():
-        seconds, found, _ = timed(vault, query, **kwargs)
+        keyword, found, _ = timed(vault, query, **kwargs)
         # The same with the vector stage on, its scan over 100,000 vectors running beside the FTS stages.
         with_vectors, found_too, state = timed(vectors_vault, query, models=PerfModels(), **kwargs)
         # And with the reranker on: the same search with the core's rerank step around an answer that takes no time.
         reranking = PerfReranking()
         reranked, _, _ = timed(vectors_vault, query, models=reranking, **kwargs)
         print(
-            f"{name:16} {seconds * 1000:7.1f} ms, {with_vectors * 1000:7.1f} with vectors, "
-            f"{reranked * 1000:7.1f} reranked  {found} hits  {query!a}"
+            f"{name:16} {keyword.seconds * 1000:7.1f} ms ({keyword.runs('ms')}), {with_vectors.seconds * 1000:7.1f} "
+            f"with vectors ({with_vectors.runs('ms')}), {reranked.seconds * 1000:7.1f} reranked "
+            f"({reranked.runs('ms')})  {found} hits  {query!a}"
         )
         assert found and found_too, name
-        assert reranking.asked == (0 if name == "a time word" else 1) or CANT_SEARCH is not None, name
+        # The reranker is asked once a run.
+        asked = 0 if name == "a time word" else len(reranked.times)
+        assert reranking.asked == asked or CANT_SEARCH is not None, name
         # A stage skipped for a fault would time keyword search alone; a query of time words has nothing to embed.
         assert state == ("skipped" if name == "a time word" else "on") or CANT_SEARCH is not None, f"{name}: {state}"
         if not traced():
-            assert seconds < SECONDS and with_vectors < SECONDS and reranked < SECONDS, name
+            assert keyword.seconds < SECONDS and with_vectors.seconds < SECONDS and reranked.seconds < SECONDS, name
     result = search(vault, f"{common} múlt héten", now=NOW)
     since, until = result.query.since, result.query.until
     assert since is not None and until is not None
@@ -312,22 +318,32 @@ def test_the_mention_pass_stays_under_two_seconds(vault: Vault, tmp_path: Path) 
         os.fsync(copy.fileno())
     analyzer = Analyzer(build.languages_of(vault))
     conn = sqlite3.connect(db, isolation_level=None)
+
+    def begun() -> None:
+        """Each pass in a transaction of its own, the one before committed: a pass finds every mention from scratch."""
+        if conn.in_transaction:
+            conn.execute("COMMIT")
+        conn.execute("BEGIN")
+
+    def mention_pass(_: None) -> None:
+        matching.judge_forms(conn, analyzer, aliases)
+        matching.mentions(conn, analyzer, aliases)
+
     try:
         before = conn.execute("SELECT count(*) FROM mentions").fetchone()[0]
         aliases = matching.load_aliases(conn)
-        conn.execute("BEGIN")
-        started = time.monotonic()
-        matching.judge_forms(conn, analyzer, aliases)
-        matching.mentions(conn, analyzer, aliases)
-        seconds = time.monotonic() - started
+        run = best_of(3, mention_pass, begun)
         conn.execute("COMMIT")
         after = conn.execute("SELECT count(*) FROM mentions").fetchone()[0]
     finally:
         conn.close()
-    print(f"\nmention pass: {len(aliases)} aliases, {CHUNKS} chunks, {seconds * 1000:.0f} ms, {after} mentions")
+    print(
+        f"\nmention pass: {len(aliases)} aliases, {CHUNKS} chunks, {run.seconds * 1000:.0f} ms ({run.runs('ms')}), "
+        f"{after} mentions"
+    )
     assert after == before > 0
     if not traced():
-        assert seconds < MENTION_SECONDS
+        assert run.seconds < MENTION_SECONDS
 
 
 @functools.cache
@@ -407,13 +423,15 @@ def test_the_word_check_with_splits_stays_fast(vault: Vault, monkeypatch: pytest
     # synthetic words start with few letters, so the first-letter screen lets nearly every word through and the cold
     # cache costs as much with no split at all; a split's own cost is the same cold or warm.
     monkeypatch.setattr(text_module, "_STEMMERS", {})
-    times: list[float] = []
-    for _ in ("cold", "warm"):
-        checker = Checker(analyzer, words, [])
-        started = time.monotonic()
+
+    def examined(checker: Checker) -> Checker:
         for candidate in texts:
             checker.examine(candidate)
-        times.append(time.monotonic() - started)
+        return checker
+
+    cold = best_of(1, examined, lambda: Checker(analyzer, words, []))
+    warm = best_of(3, examined, lambda: Checker(analyzer, words, []))
+    checker = warm.result
     # The gate: a text is scanned for a split only when it holds a term of each half in one column.
     gated = 0
     for candidate in texts:
@@ -424,12 +442,12 @@ def test_the_word_check_with_splits_stays_fast(vault: Vault, monkeypatch: pytest
                 gated += any(all((col, t) in terms for t in seq) for col, seq in word.splits[0].columns)
     print(
         f"\nword check: {CANDIDATES} texts of {CANDIDATE_WORDS} words, {SPLIT_WORDS} splits, "
-        f"{times[0] * 1000:.0f} ms cold, {times[1] * 1000:.0f} ms warm, {checker.scans} scans of "
-        f"{CANDIDATES * SPLIT_WORDS}"
+        f"{cold.seconds * 1000:.0f} ms cold, {warm.seconds * 1000:.0f} ms warm ({warm.runs('ms')}), {checker.scans} "
+        f"scans of {CANDIDATES * SPLIT_WORDS}"
     )
     assert checker.scans == gated < CANDIDATES * SPLIT_WORDS
     if not traced():
-        assert times[1] < SECONDS
+        assert warm.seconds < SECONDS
 
 
 @pytest.mark.perf
@@ -437,12 +455,16 @@ def test_the_fuzzy_walk_over_a_large_vocabulary() -> None:
     rng = random.Random(7)  # noqa: S311 - seeded test words, not secrets
     vocab = vocabulary(rng, 300_000)
     seeds = [w + "x" for w in rng.sample(vocab, ASR)]
-    work = [0]
-    started = time.monotonic()
-    found = sum(len(matching.within(seed, matching.max_distance(seed), vocab, work)) for seed in seeds)
-    seconds = time.monotonic() - started
-    print(f"\nwalked {ASR} words over {len(vocab)} in {seconds:.1f} s: {work[0]} rows, {found} found")
+
+    def walked(work: list[int]) -> tuple[int, list[int]]:
+        return sum(len(matching.within(seed, matching.max_distance(seed), vocab, work)) for seed in seeds), work
+
+    run = best_of(3, walked, lambda: [0])
+    found, work = run.result
+    print(
+        f"\nwalked {ASR} words over {len(vocab)} in {run.seconds:.1f} s ({run.runs()}): {work[0]} rows, {found} found"
+    )
     assert found >= ASR
     assert work[0] < ASR * sum(len(w) for w in vocab) / 20
     if not traced():
-        assert seconds < 10
+        assert run.seconds < 10

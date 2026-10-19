@@ -70,8 +70,8 @@ You need uv (it brings Python 3.12), git, gitleaks, and Claude Code for the full
   by Claude Code. It is the merge rule; CI runs it on Linux and the types and tests on Windows and macOS, Windows in
   two halves (`gate os --shard K/N`, DR-0495).
 - Coverage floors are in `tools/devkit/coverage-floors.json`. Raise one in the change that earns it, never lower one.
-- A test that asserts an elapsed time carries the `perf` marker; a lane without coverage (`gate os`) runs those after
-  the rest, alone (DR-0430), on vaults an untimed test had the parallel run build (DR-0492).
+- A test that asserts an elapsed time carries `perf` and asserts a speed as the best of three runs; `gate os`, without
+  coverage, runs those after the rest, alone (DR-0430), on vaults an untimed test had the parallel run build (DR-0492).
 - Eval floors, recall at 10 and MRR per kind of question on the invented set, are in `tools/devkit/eval-floors.json`:
   the full lane fails a kind above or below its floor, and a lowered one needs a new `lowered` note saying why.
 - The same set with the embedder has floors of its own in `tools/devkit/eval-floors-models.json`, and with the CPU

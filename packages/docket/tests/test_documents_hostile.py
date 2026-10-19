@@ -5,11 +5,11 @@ from __future__ import annotations
 
 import io
 import sys
-import time
 import tracemalloc
 import zipfile
 
 import pytest
+from docket_testkit import best_of
 from documents_kit import (
     DOC_REL,
     Slide,
@@ -158,9 +158,10 @@ def test_entries_that_share_one_stream_are_refused_before_any_is_inflated() -> N
     # 200 entries over one 64 MiB stream took 9 s to inflate one by one before the package's cap stopped them.
     data = overlapping(200, 64 * MIB, 700 * 1024)
     assert len(zipfile.ZipFile(io.BytesIO(data)).infolist()) == 200
-    started = time.perf_counter()
-    assert refused(data, "docx").detail == "damaged (its parts overlap)"
-    assert time.perf_counter() - started < 2.0
+    run = best_of(3, lambda: refused(data, "docx").detail)
+    print(f"overlapping entries refused in {run.seconds:.2f} s ({run.runs()})")
+    assert run.result == "damaged (its parts overlap)"
+    assert run.seconds < 2.0
 
 
 def test_what_is_left_of_the_package_s_cap_caps_the_next_part() -> None:

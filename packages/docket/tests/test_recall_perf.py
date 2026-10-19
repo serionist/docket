@@ -18,7 +18,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from docket_testkit import BIG_NOTE, BIG_OLD, big_raw, note, shared, traced
+from docket_testkit import BIG_NOTE, BIG_OLD, best_of, big_raw, note, shared, traced
 
 from docket import index, recall
 from docket.index.lookup import ReadIndex, open_read
@@ -79,28 +79,21 @@ def big(tmp_path_factory: pytest.TempPathFactory) -> tuple[Vault, str]:
     return vault, legacy.meta.covers[0]
 
 
-def best(read: Callable[[], object], times: int = TIMES) -> tuple[float, object]:
-    out: list[float] = []
-    result: object = None
-    for _ in range(times):
-        started = time.perf_counter()
-        result = read()
-        out.append(time.perf_counter() - started)
-    return min(out), result
-
-
 def both_routes(name: str, call: Callable[[bool], object], monkeypatch: pytest.MonkeyPatch) -> None:
     """A call timed by place, best of five, then once with the source loaded whole: the same result, and by place
     under the limit."""
-    by_place, placed = best(lambda: call(True))
+    by_place = best_of(TIMES, lambda: call(True))
     with monkeypatch.context() as m:
         m.setattr(ReadIndex, "raw_current", lambda self, source: False)
         # Once: it is printed, never asserted, and each costs a whole load of the source.
-        loading, whole = best(lambda: call(False), times=1)
-    assert placed == whole, name
-    print(f"{name:22} by place {by_place * 1000:6.1f} ms, loaded {loading * 1000:7.1f} ms")
+        loading = best_of(1, lambda: call(False))
+    assert by_place.result == loading.result, name
+    print(
+        f"{name:22} by place {by_place.seconds * 1000:6.1f} ms ({by_place.runs('ms')}), loaded "
+        f"{loading.seconds * 1000:7.1f} ms"
+    )
     if not traced():
-        assert by_place < SECONDS, name
+        assert by_place.seconds < SECONDS, name
 
 
 def rid_check(vault: Vault, rid: str, place: bool) -> bool:

@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import random
-import time
 from collections import Counter
 from dataclasses import dataclass
 
 import pytest
-from docket_testkit import make_record
+from docket_testkit import best_of, make_record
 
 from docket.vault import derived
 from docket.vault.config import Redaction, RedactionPattern
@@ -145,11 +144,15 @@ def test_long_runs_of_filler_are_read_in_linear_time(redactor: Redactor) -> None
     ]
     # A pattern that finds a few more characters each pass, after a marker: the cap stops it (DR-0525).
     chain = Redactor.from_config(Redaction(patterns=[pattern("x", "X"), pattern("hash", r"\b[0-9a-f]{8}")]))
-    start = time.perf_counter()
-    for text in inputs:
-        redactor.text(text)
-    chain.text("X" + "0123456789abcdef" * (n // 16))
-    assert time.perf_counter() - start < 5
+
+    def read_all() -> None:
+        for text in inputs:
+            redactor.text(text)
+        chain.text("X" + "0123456789abcdef" * (n // 16))
+
+    run = best_of(3, read_all)
+    print(f"long runs of filler: {run.seconds:.2f} s ({run.runs()})")
+    assert run.seconds < 5
 
 
 @pytest.mark.parametrize("token", [GH_TOKEN, GH_PAT, SLACK_TOKEN, AI_KEY, AWS_ID, GOOGLE_KEY, JWT])

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import empty_vault, make_record, sh, traced
+from docket_testkit import best_of, empty_vault, make_record, sh, traced
 from test_ledger_calendar import NOW, config, event, meetings, said
 
 from docket.cli import main
@@ -162,8 +162,11 @@ def test_a_promotion_of_a_week_s_hundred_events_with_their_meetings_stays_quick(
     vault: Vault, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     week = [event(k, 6 + k % 10, k // 10 % 4 * 15, day=19 + k // 40, title=f"Pilot sync {k}") for k in range(100)]
-    gate = Gate(vault)
-    gate.stage(week)
+    # Each run promotes the week into a vault of its own.
+    gates = [Gate(v) for v in (vault, *(empty_vault(vault.root.parent / f"run-{k}", config()) for k in (2, 3)))]
+    for gate in gates:
+        gate.stage(week)
+    staged = iter(gates)
     real = calendar.step
     stepping: list[float] = []
 
@@ -175,10 +178,12 @@ def test_a_promotion_of_a_week_s_hundred_events_with_their_meetings_stays_quick(
             stepping.append(time.perf_counter() - started)
 
     monkeypatch.setattr(calendar, "step", timed)
-    started = time.perf_counter()
-    result = gate.promote()
-    seconds = time.perf_counter() - started
-    print(f"promotion of 100 events: {seconds:.2f} s, of which the calendar step {stepping[0]:.2f} s")
+    run = best_of(3, lambda gate: gate.promote(), lambda: next(staged))
+    result, seconds = run.result, run.seconds
+    print(
+        f"promotion of 100 events: {seconds:.2f} s ({run.runs()}), of which the calendar step "
+        f"{stepping[run.times.index(seconds)]:.2f} s"
+    )
     assert result.meetings is not None
     assert (result.runs[0].written, result.meetings.counts) == (100, {"added": 100})
     # Under a tracer such as coverage the time says nothing about the code (DR-0430).

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import gc
 import hashlib
 import json
 import os
@@ -15,9 +16,10 @@ import sys
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, overload
 
 import pytest
 from filelock import FileLock
@@ -1172,6 +1174,43 @@ def traced() -> bool:
     except ImportError:  # pragma: no cover - coverage comes with the dev tools
         return False
     return coverage.Coverage.current() is not None
+
+
+@dataclass(frozen=True)
+class Best[T]:
+    """A timed measure's runs: the fastest, which the test asserts, each run's seconds in order, and the last run's
+    result."""
+
+    seconds: float
+    times: tuple[float, ...]
+    result: T
+
+    def runs(self, unit: Literal["s", "ms"] = "s") -> str:
+        """Each run's time, for the test's print: `0.63, 0.70, 0.81 s` or `21.4, 20.9, 23.0 ms`."""
+        if unit == "ms":
+            return ", ".join(f"{t * 1000:.1f}" for t in self.times) + " ms"
+        return ", ".join(f"{t:.2f}" for t in self.times) + " s"
+
+
+@overload
+def best_of[T](n: int, fn: Callable[[], T]) -> Best[T]: ...
+@overload
+def best_of[S, T](n: int, fn: Callable[[S], T], setup: Callable[[], S]) -> Best[T]: ...
+def best_of(n: int, fn: Callable[..., Any], setup: Callable[[], Any] | None = None) -> Best[Any]:
+    """`fn` timed `n` times, for a timed test to assert the fastest: a shared CI runner's slow moment lands on one run,
+    rarely on all of them. Three runs; two when one takes over about 3 s on CI, to keep its time; one under a tracer
+    such as coverage, where no time is asserted. The garbage is collected before each run, so none pays for what came
+    before it. With `setup`, each run takes what it returns, made outside the clock: a run that writes gets fresh
+    state. A bound on a wait (a timeout kept, a lock given up, a worker's exit noticed) is no speed: it's timed once."""
+    times: list[float] = []
+    result: Any = None
+    for _ in range(1 if traced() else n):
+        given = () if setup is None else (setup(),)
+        gc.collect()
+        began = time.perf_counter()
+        result = fn(*given)
+        times.append(time.perf_counter() - began)
+    return Best(min(times), tuple(times), result)
 
 
 def _big_recording(n: int, when: datetime, rng: random.Random) -> list[RawRecord]:
