@@ -10,7 +10,7 @@ dependencies = [
   # Cutting a recording's audio (DR-0559): FFmpeg through PyAV's wheels, in a child with limits, where media runs. A new
   # version comes in by its own reviewed bump. The wheels bundle libx264 and libx265 (GPL): fine for a dependency
   # installed from PyPI, not for an installer that ships it.
-  "av==18.1.0; (sys_platform == 'win32' and platform_machine == 'AMD64') or sys_platform == 'darwin' or (sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64'))",
+  "av==19.0.1; (sys_platform == 'win32' and platform_machine == 'AMD64') or sys_platform == 'darwin' or (sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64'))",
   # Documents' text (DR-0484): XML parts through defusedxml, workbooks through openpyxl, which uses defusedxml once
   # it is installed, and pdfs through pypdf, its crypto extra for AES; all read in a child with limits (DR-0485).
   "defusedxml>=0.7.1",
