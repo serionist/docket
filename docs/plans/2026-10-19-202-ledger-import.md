@@ -16,7 +16,7 @@ scripts over todo.py's own `load()` and `save()`, so no importer for one person'
 
 - Done: items, meetings, points, streams and the archive come in as DR-0611's ops with their history, counted first;
   a rerun adds nothing twice; a revert empties the ledger until the switch; a whole-ledger read feeds the mirror.
-- Out: the export and the mirror, the owner's (roadmap step 15); #200's catch-up, which joins old meetings; the pages.
+- Out: the export and the mirror, the owner's (roadmap step 15); the catch-up joining old meetings (DR-0652); pages.
 
 ## Design
 
@@ -29,7 +29,7 @@ scripts over todo.py's own `load()` and `save()`, so no importer for one person'
 - Held ops: it skips the file's ops the ledger holds line for line, so a rerun writes nothing and a stopped one
   finishes. The ledger's own objects (the step's meetings) stand beside it, renumbered by its last write where a file's
   add claims first (DR-0613). An op from elsewhere on a file's object, or a held line with another text, refuses it.
-- Old meetings come in keyless (DR-0655): no `event` or `series`. After the import, #200's catch-up, `docket ledger
+- Old meetings come in keyless (DR-0655): no `event` or `series`. After the import, the catch-up, `docket ledger
   calendar --since <the calendar's first day>`, joins each one a record matches through `continues`, on the same start
   to the minute and folded subject, the old id and number holding whatever the step made first.
 - It refuses, naming place and field, never the value: a line that isn't an op, a text rule's refusal (a never-store
@@ -45,7 +45,7 @@ scripts over todo.py's own `load()` and `save()`, so no importer for one person'
 | meetings, points, streams | meetings archived; points by state, each chain by number (`M-0031#2 > M-0035#1`), copies whose `from` names a meeting apart; streams by status; the next M- number |
 | ops not from the file | by `via`, kind and machine, and the objects its last write would renumber |
 | sources it can't resolve | by scheme (`mail:`, `app:`), with their items: no rid, processed doc or old path answers them by `read`'s rules (DR-0131), asked of the index |
-| the catch-up's joins | its dry run, read-only, over the ledger as the import would leave it: `M-0040 10-20 10:00 Pilot sync > calendar:<id>`, near misses apart (#200) |
+| the catch-up's joins | its dry run, read-only, over the ledger as the import would leave it: `M-0040 10-20 10:00 Pilot sync > calendar:<id>`, near misses apart (DR-0649, DR-0652) |
 | ops that change nothing | by kind; a right export gives none |
 
 ### Reverting (DR-0656)
@@ -87,8 +87,9 @@ scripts over todo.py's own `load()` and `save()`, so no importer for one person'
 - `docket ledger show --all --json` (PR 2) gives every object whole in #201's `show` model, archived too, with the op
   files' stamp (names, sizes, times) taken under the vault lock before it reads, and the lock's file.
 - The owner's mirror renders todo.py's ledger file and `_archive/` from it with todo.py's dumps, `user` as `me`, under
-  its own lock file and a uniquely named temp file (`save()`'s is fixed), since the old app's polling and the
-  session-start dashboard may render at once; its header carries the read's stamp. STATUS.md is #208's or the mirror's.
+  its own lock and a unique temp file (`save()`'s is fixed), as the old app's polling and the session-start dashboard
+  may render at once; its header carries the read's stamp. STATUS.md is Docket's (#208), so nothing of todo.py writes
+  it under the header.
 - It renders when todo.py loads the file under that header and the stamp moved: Docket's commits run no hook
   (`core.hooksPath` points at a file), the service runs no owner code, the sync skill would miss the pages.
 - Under the header todo.py's writers, `archive` and `stream set` too, refuse; reads work. `--rollback`, the service
@@ -106,7 +107,7 @@ scripts over todo.py's own `load()` and `save()`, so no importer for one person'
 | text | a redaction rule's marker; control characters and trailing spaces cleaned |
 | next numbers | Docket's are one past the highest held |
 | `event`, `series` | Docket's alone |
-| a joined meeting | start, end, subject, organiser, where and response, each only where it is the value its calendar add wrote (#200); a meeting only the step made is Docket's |
+| a joined meeting | start, end, subject, organiser, where and response, each only where it is the value its calendar add wrote (DR-0649); a meeting only the step made is Docket's |
 
 ## Doors and data
 
@@ -117,7 +118,7 @@ the dry run's JSON only gaining fields; `cheap`: DR-0657 to DR-0659. Data: none 
 
 | Where | Step | What | After |
 |---|---|---|---|
-| Docket | PR 1, "Import a ledger with its history" | `ledger/imports.py`: the file, the plan, the dry run; `store.py`'s import and revert; `docket ledger import` | #200's PR 1 |
+| Docket | PR 1, "Import a ledger with its history" | `ledger/imports.py`: the file, the plan, the dry run; `store.py`'s import and revert; `docket ledger import` | #200 (#221) |
 | owner | the export | the export script, with `--compare`: the dry run's JSON against todo.py's own counts | PR 1 |
 | owner | trial runs in the live clone | dry run, compare, import, catch-up, build the pages on it; revert, push, every clone pulls; again | - |
 | Docket | PR 2, "Show the whole ledger as JSON" | `docket ledger show --all --json` with its stamp, or in #201's reads if still open | #201's PR 2 |

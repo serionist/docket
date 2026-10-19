@@ -1,12 +1,12 @@
 decisions:
   - id: DR-0655
-    title: "Old meetings come in keyless, and #200's calendar catch-up joins them after the import; the import sets no key"
+    title: Old meetings come in keyless, and the calendar catch-up (DR-0652) joins them after the import; the import sets no key
     status: proposed
     at: "2026-10-19"
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#202"]
-    description: "As #200's plan decides. The import, as the export, gives no meeting an event or a series. After it, docket ledger calendar --since <the calendar's first day> joins each old meeting a calendar record matches, through a meeting add with continues (DR-0621), on the same start to the minute and the same subject with case and spaces folded, #200's join rule. A join keeps the continued meeting's id and number, so the old M- number holds whichever ran first, the import or the calendar step's meeting for that event. One function builds keys, #200's, for its step and its catch-up. The import's dry run gives the joins by calling the catch-up's dry run, read-only, over the ledger as the import would leave it (DR-0654): the report the roadmap asks to spot-check, a renamed series named as a near miss."
+    description: "As DR-0652 decides. The import, as the export, gives no meeting an event or a series. After it, docket ledger calendar --since <the calendar's first day> joins each old meeting a calendar record matches, through a meeting add with continues (DR-0621), on the same start to the minute and the same subject with case and spaces folded (DR-0649). A join keeps the continued meeting's id and number, so the old M- number holds whichever ran first, the import or the calendar step's meeting for that event. One function builds keys, #200's, for its step and its catch-up. The import's dry run gives the joins by calling the catch-up's dry run, read-only, over the ledger as the import would leave it (DR-0654): the report the roadmap asks to spot-check, a renamed series named as a near miss."
     binds:
       - The import writes no event and no series; old meetings get their keys only through the catch-up's joins.
     not_chosen:

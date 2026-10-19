@@ -13,5 +13,5 @@ decisions:
     not_chosen:
       - "ledger_batch's changes (#201): they take the write's day and mint fresh ids, so the history would land on the import's day and a rerun would double it."
       - "One commit for the whole import: a write's ops fall in one month (DR-0610)."
-      - "A ledger holding nothing but the file's ops: in the live clone the calendar step makes meetings at each promotion, before the import is final (#200)."
+      - "A ledger holding nothing but the file's ops: in the live clone the calendar step makes meetings at each promotion, before the import is final (DR-0647)."
       - "Topping up objects live writes have touched: two writers' states would need merging, for a run made once."
