@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0673
+    title: vault.yaml's rendered takes kind status with the stream it renders, so a stream's STATUS.md path lives there
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#208"]
+    description: "A rendered entry may be {kind: status, stream: <name>, path: <path>}. stream, a stream's name, is needed by status and refused by people and glossary, and one stream has one entry; the path keeps DR-0552's rules: relative to the consuming repo, written with /, no .., a .md file, inside that repo and outside the vault after links, no path twice. rendered stays optional and schema_version stays 1; an older Docket refuses a vault.yaml with a status entry, as it refused rendered. Under #134 HEAD's entries are in force, so naming a path in a committed vault.yaml, or at the console, is the owner's yes before the first render that DR-0106 asks for."
+    binds:
+      - A stream's STATUS.md path lives in vault.yaml's rendered, never in the ledger (DR-0625).
+      - The status kind and its stream key are a one-way door (AGENTS.md).
+    not_chosen:
+      - "A key of its own, such as streams or status_files: a second list with the same path rules, public check and render command."
+      - "Finding STATUS.md files by walking the repo, as todo.py did: Docket writes only a file the owner named."

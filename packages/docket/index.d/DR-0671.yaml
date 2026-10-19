@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0671
+    title: The day comes in full only to a session whose project folder holds the vault's folder or sits in it; elsewhere it is one line of counts
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#207"]
+    description: "The hook compares the session's project folder, CLAUDE_PROJECT_DIR or else its own working folder, with the service's vault folder as paths, with no git: when one holds the other, the full day; otherwise one line, day: n overdue, n due today, n meetings, n untriaged; sync due: the sources. The plugin runs in every project, so titles, names and subjects stay out of other projects' sessions, as the status lines keep to counts and paths (DR-0163). It prints on every start, resume, clear and compact, as the status lines do (DR-0161), so a resumed session gets today's day."
+    binds:
+      - A session outside the vault's folder gets counts only from the day, never a title, a name or a subject.
+    not_chosen:
+      - "The full day in every session: 45 lines of the owner's tasks in every coding session, and the ledger's text in repos others read."
+      - "A setting naming where the day shows: one more key, while the vault's folder already says where the owner works."

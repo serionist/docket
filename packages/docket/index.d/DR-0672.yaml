@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0672
+    title: The day adds at most 0.3 s to a session start at the median and waits 3 s at most; slow or down, it is one line, never a fold in the hook
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#207"]
+    description: "The service builds the day beside the writer, as any ledger read (DR-0619): the index's ledger tables caught up under its lock for at most a second, else the op files folded in memory, so neither a rebuild nor a write holds it, and a read never takes the vault's lock. The hook waits 3 s for it, so the worst case stays 8 s with the status call's 5, under the hook's 15 (DR-0161). Ten starts before and after on the maintainer's Windows machine show the day's cost at the median, at most 0.3 s; a perf test holds the route to half a second over DR-0635's ledger. No answer in 3 s gives \"day: no answer in 3 s; the ledger tool's snapshot reads it\". The service down gives \"day: the service is down; docket ledger day reads the vault\". A vault the service can't open gives \"day: not read\" and why. docket ledger day prints the same lines from the vault directly, as the other read commands do (DR-0645)."
+    binds:
+      - A perf test holds the day's route to half a second over DR-0635's ledger, and the hook waits for it 3 s at most.
+    not_chosen:
+      - "The hook folding the ledger itself when the service is down: it would open the vault and take the index's lock in every session of every project."
+      - "The hook reading the index file directly: stale until the service catches it up, and the hook loads no index module."

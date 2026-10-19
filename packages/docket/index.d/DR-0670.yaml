@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0670
+    title: "The session start shows the owner's day: todo.py's dashboard from one snapshot read, at most 45 lines with the status lines, cut from the streams up"
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#207"]
+    description: "docket hook session-start asks the running service's GET /api/day, after its status lines, for the day: ledger/day.py's Day, built from one snapshot read of the ledger's views (DR-0638), today to the next working day, and the Sync page's due rule (DR-0304). Its sections keep todo.py's dashboard order: the day and each live source's last sync, with the ones due; the queue with the untriaged count, discuss and claude rows, me and chase as refs; meetings today not yet ended and on the next working day, not cancelled or declined, each with its open points and open items; overdue or due today, with snoozes woken today; replies owed; decisions and tasks due within 7 days; invites; waiting on others over 3 days; streams not closed. Rows are the ledger tool's item and meeting lines, an item once, in its first section. The whole hook says at most 45 lines and never cuts a status line; past 45, sections give rows back from the streams up (streams, waiting, invites, decisions and tasks, replies, queue rows, then meeting points and items), each cut section keeping its count and the read that lists it, while the sync line, overdue and each meeting's own line stay. Claude gets every line; the owner sees only the due-sync line and, once #208 lands, a status file a hand edit holds. The Today page (#206) renders the same Day."
+    binds:
+      - The day reads the ledger through the ledger tool's views, never a query of its own (DR-0638).
+      - "The owner is shown a day line only when it asks something of him: a due sync, a hand-edited status file."
+    not_chosen:
+      - "Every day line to the owner as well: the old hook showed him none, and a block that is always there stops being read (DR-0163)."
+      - "Cutting at line 45 from the bottom, as todo.py did: a cut section said nothing; now each keeps its count."

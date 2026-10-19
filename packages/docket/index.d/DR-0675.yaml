@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0675
+    title: A STATUS.md renders after each write that changes its stream and on docket render; the ledger wins, and a hand edit is left and reported until the two agree
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#208"]
+    description: "A ledger write that changed a stream (its add, a set, an undo of either, an import's) renders that stream's file at the end of store.write, once its lock is let go, so every writer renders: the ledger tool, docket ledger batch, the pages and the import; BatchResult gains rendered, saying what was written, left or refused, and a failed render never fails the write (DR-0554). docket render renders every rendered entry and exits 1 when one was left or refused. Nothing renders on a read, at the session start or in docket vault check. By the file at the path: absent with its folder there, or without frontmatter, the frontmatter is written above the body; with Docket's hash holding, it is rewritten when the stream moved; with no hash or a failing one and the fields equal to the ledger's, it is rewritten with the hash, which takes over todo.py's files after the import; with a field differing, the file is left and each field reported, file against ledger; a stream the ledger doesn't hold leaves the file and is reported; a folder, a file not UTF-8, or a public or unreached remote is refused as DR-0554 says. The file is read again just before the rename and left when it changed since. A hand edit never reaches the ledger: Claude, on the owner's word, sets the stream to it or puts the ledger's value back, and the next render takes the file back. docket vault check reads the files, writes nothing and probes no remote, and names a status entry whose stream the ledger doesn't hold and a frontmatter a hand edit holds; the day shows the owner one line per hand-edited file."
+    binds:
+      - "The ledger is a stream's only source: a STATUS.md frontmatter is never read into it."
+      - A hand-edited frontmatter is never overwritten; it is reported in the write's result, by docket render, by docket vault check and at the session start.
+    not_chosen:
+      - "Overwriting a hand edit: DR-0106 says it is reported, and the owner's edit would be gone."
+      - "Merging a hand edit into the ledger: it would decide for the owner which value holds."
+      - "A command to force the ledger's values over a hand edit: putting the value back, or setting the stream, already settles it."
