@@ -1,5 +1,5 @@
 # The models' worker on an NVIDIA GPU (DR-0331, DR-0332): ONNX Runtime's CUDA build and NVIDIA's CUDA 13 and cuDNN
 # wheels, under NVIDIA's own licences. Compiled with hashes by `uv run devkit models-lock`, never by hand.
 onnxruntime-gpu[cuda,cudnn]==1.30.0; sys_platform == "win32" or sys_platform == "linux"
-tokenizers==0.23.2
+tokenizers==0.23.3
 numpy==2.5.3
