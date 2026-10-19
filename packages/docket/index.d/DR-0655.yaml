@@ -1,14 +1,14 @@
 decisions:
   - id: DR-0655
-    title: The import keys an old meeting by the one calendar record matching its start and subject
+    title: "Old meetings come in keyless, and #200's calendar catch-up joins them after the import; the import sets no key"
     status: proposed
     at: "2026-10-19"
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#202"]
-    description: "A keyless meeting add in the file whose start, to the minute in the owner's zone, and subject, case and spaces folded, match exactly one calendar record in the vault (todo.py's upsert rule) gets that record's event and series from #200's own function; its other fields stay as the export wrote them. None or several leaves it keyless, named in the dry run, for #200 to continue (DR-0621). The export writes no key, so DR-0622's key has one builder, the core's."
+    description: "As #200's plan decides. The import, as the export, gives no meeting an event or a series. After it, docket ledger calendar --since <the calendar's first day> joins each old meeting a calendar record matches, through a meeting add with continues (DR-0621), on the same start to the minute and the same subject with case and spaces folded, #200's join rule. A join keeps the continued meeting's id and number, so the old M- number holds whichever ran first, the import or the calendar step's meeting for that event. One function builds keys, #200's, for its step and its catch-up. The import's dry run gives the joins by calling the catch-up's dry run, read-only, over the ledger as the import would leave it (DR-0654): the report the roadmap asks to spot-check, a renamed series named as a near miss."
     binds:
-      - "One function builds a meeting's event and series from a calendar record, #200's; the import calls it."
+      - The import writes no event and no series; old meetings get their keys only through the catch-up's joins.
     not_chosen:
-      - "The export building the key, as #199's plan said: a second builder outside Docket, reading the vault's raw records."
-      - "Leaving every old meeting to #200's continue: a keyed add sets the record's fields over the old ones, and the match report would come after the import instead of in its dry run."
+      - "The import setting the key of the one record matching a meeting's start and subject: in the live clone the calendar step makes keyed meetings at each promotion, before the import runs, so an imported add carrying the same key would be a later add that loses, and its old M- number would survive only as a number the meeting held; a join through continues keeps the old meeting's id and number."
+      - "The export script setting it, as #199's plan said: a second builder of keys outside Docket, with the same loss."
