@@ -20,7 +20,7 @@
 | material | ref, label, remove | a path, URL or locator added, relabelled or removed |
 | point | fields (text; item, from, proposed) | a talking point on a meeting, its id the op's (DR-0623) |
 | point_set | point, fields (text, state, answer, item, to, proposed) | one change to a point |
-| undo | of | the op it names left out of the fold (DR-0614) |
+| undo | of; of_batch, the batch it undid, when asked by batch | the op it names left out of the fold (DR-0614) |
 | renumber | number | a new number after a clash (DR-0613) |
 
 An add, a meeting or a stream makes an object: its item is its own id, and every other op names its object by item
@@ -105,7 +105,7 @@ UTC_OFFSET = timedelta(0)
 # A line's keys in the order the writer puts them, so one op has one text.
 KEY_ORDER = (
     "schema_version", "id", "item", "op", "day", "at", "machine", "by", "via", "batch", "after", "number", "point",
-    "fields", "verdict", "until", "ref", "label", "remove", "of", "note",
+    "fields", "verdict", "until", "ref", "label", "remove", "of", "of_batch", "note",
 )  # fmt: skip
 
 # The writers this Docket writes and the ways in; a line is read with any word in them, as a later Docket may add one.
@@ -257,6 +257,8 @@ class Op:
     label: str | None = None
     remove: bool = False
     of: Ulid | None = None
+    # The batch an undo asked by batch undid, on each undo op it wrote; none on one asked by of (DR-0614).
+    of_batch: Ulid | None = None
     note: str | None = None
 
     @model_validator(mode="after")

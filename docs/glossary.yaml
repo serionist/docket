@@ -90,6 +90,9 @@ terms:
   - term: item number
     definition: "An item's A- number, as A-0302: held by its add op, one past the highest any item has held, and renumbered only after two clones gave out one number."
     see: [packages/docket/src/docket/ledger/fold.py]
+  - term: join
+    definition: "A meeting add with an event and continues: the calendar's record takes over an unkeyed meeting, often one from before the calendar, whose id, number and points stay; the step joins on the same start and subject, and the owner's undo of it alone is a split, never joined again (DR-0621, DR-0649)."
+    see: [packages/docket/src/docket/ledger/calendar.py]
   - term: key store
     definition: One clone's media keys, sealed in its private folder, with the seal in the OS keychain or, where the owner opted in on that machine, in a file in Docket's per-user state folder.
     see: [packages/docket/src/docket/media/keystore.py]

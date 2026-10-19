@@ -126,7 +126,7 @@ DR-0652. The pending file is per clone, never committed. Data: the first catch-u
   DST change; each left-out case named, the rest written; a move, a rename, a cancellation, a show-as-only version; an
   archived meeting's idle set; joins a minute off, by case and spaces, from two candidates, onto an archived meeting,
   from a key that continues one; both near misses; an `of` undo's removal and split kept, a `batch` or sync undo's
-  done again, `of_batch` written; two clones in both orders; the catch-up never setting; perf, 300 records under 2 s.
+  done again, `of_batch` written; two clones in both orders; the catch-up never setting; perf, 300 records under 3 s.
 - PR 2: the example week through promotion, its Friday sync cancelled in a second run; a moved event's two versions
   in one promotion; a stopped step replayed with its sets; a pending rid after a full revert; perf, 30 under 0.5 s.
 

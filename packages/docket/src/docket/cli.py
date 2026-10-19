@@ -10,7 +10,7 @@ import sys
 import time
 import webbrowser
 from collections.abc import Callable, Generator, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated, Any, cast
 from urllib.parse import urlencode
@@ -2157,6 +2157,28 @@ def ledger_batch(
     say_all(ledger_batches.lines(found))
     if any(change.refused is not None for change in found.changes):
         raise typer.Exit(1)
+
+
+@ledger_app.command("calendar")
+def ledger_calendar(
+    since: Annotated[
+        str | None, typer.Option("--since", help="The first day, YYYY-MM-DD: 14 days back by default.")
+    ] = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Say what it would write, and write nothing.")] = False,
+    vault: VaultOption = None,
+) -> None:
+    """Catch the meetings up with the calendar's records in raw, by sync: what a stopped step left pending first, sets
+    included, then each event record from the first day on, adding and joining only. Run it once a calendar is set
+    up, after an import, and after a split; its dry run names the old meetings it would join."""
+    from docket.ledger import calendar as ledger_events  # noqa: PLC0415
+
+    day = None
+    if since is not None:
+        try:
+            day = date.fromisoformat(since)
+        except ValueError:
+            raise DocketError(f"--since is a day, YYYY-MM-DD, not {since!r}") from None
+    say_all(ledger_events.lines(ledger_events.catch_up(find_vault(vault), day, dry_run=dry_run)))
 
 
 @hook_app.command("session-start")

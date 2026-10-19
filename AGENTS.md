@@ -119,8 +119,8 @@ agrees in the issue or, under an autonomy grant, with its decision recorded as p
   `/sheet<n>` under them (DR-0482), media's paths, staged and stored, and its sidecar and withheld marks (DR-0547), the
   sidecar's cuts and `_decided.jsonl`'s kinds (DR-0561), the media cut log and the sidecar's replaced keys (DR-0562), a
   Whisper transcript's rid suffix `/whisper`, its engine string and its `via` (DR-0570), the forgotten list (DR-0579),
-  the ledger's op files, lines, kinds, objects, undo, archive, ids and numbers (DR-0610 to DR-0615, DR-0620 to DR-0626);
-- a source's mapper interface (DR-0119), and its name and keys in `vault.yaml` (DR-0124, DR-0125), among them `folder`,
+  the ledger's op files, lines, kinds, objects, undo and its `of_batch`, archive, ids and numbers (DR-0610 to DR-0615, DR-0620 to DR-0626);
+- a source's mapper interface (DR-0119) and what the core reads from an event record (DR-0646), and its name and keys in `vault.yaml` (DR-0124, DR-0125), among them `folder`,
   `exclude` (DR-0481), `media_folders` (DR-0604) and `lookback_days` (DR-0606), `media_hosts` read and ignored;
 - the question file `docket eval` reads (DR-0290) and its speech file (DR-0571); the user config's `speech` (DR-0568);
 - the media key export's file, `schema_version` 1, which users keep as their backup (DR-0550);

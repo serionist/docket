@@ -774,6 +774,12 @@ class Held:
         sql = "SELECT id FROM meetings WHERE utc = ? ORDER BY id"
         return [str(r) for (r,) in self.conn.execute(sql, (utc_text(start),))]
 
+    def unkeyed_on(self, day: date) -> list[str]:
+        """The meetings with no event on a day, as each one's own offset reads it, by id: where a calendar record's
+        near misses would be (DR-0649)."""
+        sql = "SELECT id FROM meetings WHERE day = ? AND event IS NULL ORDER BY id"
+        return [str(r) for (r,) in self.conn.execute(sql, (day.isoformat(),))]
+
     def archivable(self, day: date) -> list[str]:
         """The meetings not archived that started on the day or before and have no open point, by start: an archive
         may be due for each (DR-0641)."""
