@@ -1,0 +1,16 @@
+# What the build reads, as git pathspecs from this folder. build.json holds the hash of the tracked files they match,
+# line endings made LF, so the gate can tell a source changed since the build without Node (DR-0705). openapi.json
+# is left out: the types made from it are erased, and the typecheck catches drift.
+.npmrc
+.nvmrc
+build-inputs.txt
+index.html
+package-lock.json
+package.json
+scripts/build.js
+scripts/inputs.js
+src
+:(exclude,glob)src/**/*.test.ts
+:(exclude,glob)src/**/*.test.tsx
+:(exclude)src/test
+vite.config.ts

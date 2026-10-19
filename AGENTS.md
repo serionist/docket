@@ -45,7 +45,7 @@ The schema is `docs/docs-regime.yaml`, explained in `docs/docs-regime.md`.
 
 | Path | What |
 |------|------|
-| `packages/docket/` | the app: the vault, the service (web app, MCP endpoint, scheduler), the source contract, the `docket` command |
+| `packages/docket/` | the app: the vault, the service (web app, MCP endpoint, scheduler), the source contract, the `docket` command; the web app's front end in `web/`, built into the package |
 | `plugin/` | the Claude Code plugin: the MCP entry, the session-start status hook, the capture hook, the skills (recall, setup, cuts, curate, brief, decision, sync and tasks), no scripts of its own (its hooks run `docket`); source skills live in the consuming project, scaffolded by `docket source new`; `.claude-plugin/marketplace.json` makes the repo its marketplace |
 | `examples/` | reference sources to copy into a project, tested in CI and never a dependency: Plaud, Slack, Teams, Outlook mail and the calendar under `sources/<name>` |
 | `tools/devkit/` | the development kit, never published: `gate`, `docs`, `devkit` |
@@ -61,7 +61,7 @@ A new top-level folder adds its row in the same change.
 
 ## Build and test
 
-You need uv (it brings Python 3.12), git, gitleaks, and Claude Code for the full gate.
+You need uv (it brings Python 3.12), git, gitleaks, Claude Code for the full gate, and Node only for the front end.
 
 - Once per clone: `uv sync`, then `uv run devkit setup`, which points git at `.githooks/` and checks the tools.
 - `uv run gate` runs the quick lane in seconds: lock file, lint, format, types, docs, commit messages, private names,
@@ -91,7 +91,7 @@ Every change is a GitHub issue on the Docket board, with a milestone per phase, 
 While you build:
 
 - Look up a library's API with Context7 (`.mcp.json`) before coding against it: FastAPI, Pydantic, the MCP SDK,
-  Jinja2, htmx.
+  Jinja2, htmx; React, TanStack Router and Query, Tailwind CSS, shadcn/ui, Radix, Vite, Vitest.
 - Ask the language server about a symbol first; grep is for text in config, docs and strings.
 
 ## Commits and PRs

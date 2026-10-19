@@ -8,6 +8,10 @@ Unreleased in the same PR.
 
 ### Added
 
+- The web app's new shell, at `/design` for now (`docket open /design`): built in React with shadcn/ui and shipped
+  built inside Docket, so installing still needs no Node. A sidebar with the records waiting at the gate and a mark
+  when a sync is due, the theme and keys switches at its foot, and on invented data the design the pages move to one
+  by one: a ledger's colours in light and dark, Atkinson Hyperlegible, the four calls as stamps, a 480 px panel.
 - `/docket:tasks`: Claude opens the page where you triage your queue, discuss, claude, me or chase, then works it
   with you in chat on your "go", one item at a time: the facts read from each item's sources, three to five lines
   and the next step, then the talk, the draft or the nudge, and each outcome written to the ledger before the next
@@ -283,6 +287,8 @@ Unreleased in the same PR.
 
 ### Changed
 
+- Every page's address keeps `:`, `@`, `/` and `,` as they are, as Search's already did, so a cut, a locator or an
+  audio link reads as you would type it; links and bookmarks from before still open.
 - The models' and the speech workers now run ONNX Runtime 1.31, tokenizers 0.23.3, numpy 2.5.4 and PyAV 19, and
   Docket cuts audio with PyAV 19 too. Models and speech stay off after you update until you run `docket models
   install` again, and `docket models install --speech` where you use speech.

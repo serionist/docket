@@ -330,7 +330,8 @@ flowchart TB
 `docket doctor` says what a machine can do and why not.
 
 **Stack:** Python 3.12 and uv; SQLite with FTS5 (and sqlite-vec for vectors); JSONL for the raw log; age for media
-encryption; Pydantic for schemas; the MCP Python SDK; FastAPI with server-rendered HTML and HTMX (no front-end build);
+encryption; Pydantic for schemas; the MCP Python SDK; FastAPI, serving a React app with shadcn/ui that Vite builds into
+the package, so an install needs no Node, its pages moving there from Jinja2 and htmx one by one (DR-0703, DR-0705);
 faster-whisper on CTranslate2, in an environment `docket models install --speech` builds (DR-0567); ONNX Runtime with
 tokenizers for the embedder, in an environment `docket models install` builds (DR-0331, DR-0332); pypdf, openpyxl and
 Docket's own docx and pptx readers on defusedxml for documents' text, in a child process with limits (DR-0484, DR-0485).
@@ -735,8 +736,21 @@ change lands on whoever uses that vendor, while the core still checks every rid 
 Every page has the actions that belong on it. An action runs in the service, runs Claude headless, or hands the job
 to Claude Code with the command ready to paste.
 
-How it is built (DR-0170 to DR-0175, DR-0546):
+How it is built (DR-0170 to DR-0175, DR-0546), and where it is going (#252, DR-0703 to DR-0712):
 
+- The pages move into one React app, a PR a page, the day pages first: TanStack Router keeps each page's state in its
+  URL as a plain query string, encoded by the one rule every page link the service writes follows (DR-0704);
+  TanStack Query reads in memory; shadcn/ui's components on Radix and Tailwind CSS 4. Vite builds it into
+  `docket/web/app/`, committed, and CI builds it again and fails on any difference (DR-0705). The service serves its
+  files under `/static/app/` and its document for each of its routes, with a style nonce of its own each time under a
+  CSP that allows no inline script (DR-0706). It reads and writes only through `/api/web`, the session cookie only,
+  typed from the routes' models (DR-0709).
+- Its look is a ledger's, in light and dark: paper, white sheets, blue-black ink, ledger green, red ink, the four
+  calls as stamps, in Atkinson Hyperlegible, 32 px rows (DR-0707). Its shell is a sidebar of the built pages with
+  their counts, the list and a 480 px panel, folding at 1024 and 768 px (DR-0708); until the Ledger moves it lives at
+  `/design`, with the tokens and every shared component on invented data, and each page goes through screenshot
+  rounds on an invented world with `uv run devkit ui <page>` (DR-0712).
+- A page not moved yet is its Jinja page, as below.
 - Pages rendered by the service with Jinja2, parts of them swapped by htmx; every state is a URL that renders without
   JavaScript, and the navigation shows every page above with its phase.
 - htmx, the fonts and the icons are files in the package, served under `/static/`; nothing comes from the network,

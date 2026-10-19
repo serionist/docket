@@ -1,0 +1,52 @@
+/*
+ * Docket's colours (DR-0707): a ledger's, each a light-dark() pair, so a theme is only a color-scheme. The system's
+ * by default; light or dark when the docket_theme cookie names one, which the server writes as data-theme.
+ *
+ * Text holds 4.5:1 and controls, the focus ring and icons 3:1 on paper, the sheet and the selection, in both themes:
+ * src/styles/tokens.test.ts reads this file and fails below a floor. The rule is a divider between ruled rows, never
+ * a control's edge, so it carries no floor; a control's edge is --control.
+ */
+:root {
+  color-scheme: light dark;
+
+  /* The ground, the sheets the list and panel sit on, and the inks. */
+  --paper: light-dark(#f4f6f1, #121612);
+  --sheet: light-dark(#ffffff, #1a1f1a);
+  --ink: light-dark(#1b2330, #e4e9e1);
+  --ink-muted: light-dark(#59636f, #9aa597);
+  --rule: light-dark(#d3dacd, #2e372e);
+  --control: light-dark(#76837a, #768376);
+  --hover: light-dark(#edf1ea, #222822);
+
+  /* Ledger green: the selection, the focus ring and the main button. */
+  --green: light-dark(#2c6a4e, #80c6a1);
+  --on-green: light-dark(#ffffff, #0e1a13);
+  --selection: light-dark(#e1ece4, #22352a);
+
+  /* Red ink: overdue, drop and errors. */
+  --red: light-dark(#b0281f, #f08a80);
+  --red-wash: light-dark(#fbe9e6, #3b211e);
+
+  /* The verdicts' stamps, each in an ink of its own on a wash of it. */
+  --discuss: light-dark(#1d5b9e, #8db8f0);
+  --discuss-wash: light-dark(#e7eff8, #1b2a3c);
+  --claude: light-dark(#6b3fa0, #c5a8f0);
+  --claude-wash: light-dark(#efeaf7, #2a2340);
+  --me: light-dark(#855700, #ddb15a);
+  --me-wash: light-dark(#f7edd9, #32291a);
+  --chase: light-dark(#a3286e, #f08dc4);
+  --chase-wash: light-dark(#f7e7f0, #38202f);
+
+  /* What lies under a dialog or a sheet, and the one shadow, for what floats: menus, popovers, dialogs. */
+  --scrim: light-dark(rgb(27 35 48 / 0.28), rgb(0 0 0 / 0.56));
+  --shade: light-dark(rgb(27 35 48 / 0.14), rgb(0 0 0 / 0.5));
+  --float-shadow: 0 1px 2px var(--shade), 0 8px 24px var(--shade);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}

@@ -40,6 +40,28 @@ templates folder, so the parallel run builds it and the timed run only times (DR
 Tests never touch the real Docket folders or the keychain, not even to read them: `conftest.py` points the config,
 state and models folders at a temp folder of the session's before any fixture runs, and each test at its own.
 
+## The web app's front end
+
+Only a change under `packages/docket/web/` needs Node: the version in its `.nvmrc`, with the npm it brings.
+
+```
+cd packages/docket/web
+npm ci
+npm run lint && npm run typecheck && npm test
+npm run build
+```
+
+- The build is committed in `packages/docket/src/docket/web/app/`, so an install needs no Node: commit it with the
+  change that made it. `uv run gate` fails while a source differs from what the build was made of, and CI builds again
+  and fails on any difference. A conflict in the folder is settled by building again.
+- A change to an `/api/web` route's models runs `uv run devkit web-schema` first, which writes `openapi.json`, the
+  types' source.
+- `uv run devkit ui design` shoots `/design` on an invented world, in light and dark, wide and narrow, with the
+  accessibility, CSP and console checks, into `.local/ui/design/r<n>/`. It starts a throwaway service with folders of
+  its own, so it never touches yours.
+- `npm run dev` serves the sources on `localhost:5173`, proxying to the service `DOCKET_DEV_TARGET` names: a throwaway
+  one, never your own on 8741.
+
 ## Open the pull request
 
 1. Fork, and branch from `main` as `<issue>-<slug>`, such as `42-search-paging`.

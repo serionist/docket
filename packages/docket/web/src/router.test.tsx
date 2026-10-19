@@ -1,0 +1,97 @@
+import { QueryClientProvider } from "@tanstack/react-query";
+import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
+import { act, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import routes from "@/routes.json";
+import { createQueryClient } from "@/lib/query";
+import { clearLapsed } from "@/lib/session";
+import { createAppRouter, routeTree } from "@/router";
+
+const SHELL = {
+  vault: "vault",
+  machine: "ui-box",
+  zone: "Europe/Budapest",
+  index_line: "12 chunks from 3 records and 1 docs, updated 09:30",
+  untriaged: 4,
+  staging: 3,
+  sync_due: ["chat"],
+  problem: null,
+};
+
+function answer(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+}
+
+function matchMedia(query: string): MediaQueryList {
+  const wide = /min-width: (\d+)px/.exec(query);
+  return {
+    matches: wide ? 1440 >= Number(wide[1]) : false,
+    media: query,
+    onchange: null,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    dispatchEvent: () => false,
+  };
+}
+
+async function open(url: string, fetched: Response) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => fetched.clone()),
+  );
+  vi.stubGlobal("matchMedia", matchMedia);
+  Object.defineProperty(window, "innerWidth", { value: 1440, configurable: true });
+  const router = createAppRouter(createMemoryHistory({ initialEntries: [url] }));
+  render(
+    <QueryClientProvider client={createQueryClient()}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  );
+  await act(async () => {
+    await router.load();
+  });
+  return router;
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  clearLapsed();
+});
+
+describe("the router", () => {
+  it("has the routes routes.json gives the service, and no others", () => {
+    const paths = Object.keys(createAppRouter(createMemoryHistory()).routesByPath)
+      .filter((path) => path !== "/")
+      .sort();
+    expect(paths).toEqual([...routes].sort());
+    expect(routeTree.id).toBe("__root__");
+  });
+
+  it("keeps a page's state as a plain query string, repeated keys repeated", async () => {
+    const router = await open("/design?part=tokens", answer(200, SHELL));
+    await act(async () => {
+      await router.navigate({ to: "/design", search: { part: "components", open: ["A-0012", "A-0015"] } });
+    });
+    expect(router.state.location.href).toBe("/design?part=components&open=A-0012&open=A-0015");
+    expect(router.state.location.search).toEqual({ part: "components", open: ["A-0012", "A-0015"] });
+  });
+});
+
+describe("the shell", () => {
+  it("lists the built pages with the counts /api/web/shell gives", async () => {
+    await open("/design", answer(200, SHELL));
+    expect(await screen.findByRole("link", { name: "Staging, 3 records wait" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Sync, due: chat" })).toBeTruthy();
+    expect(screen.getByText("vault on ui-box")).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Design" })).toBeTruthy();
+    expect(document.title).toBe("Design - Docket");
+  });
+
+  it("says how to sign in again when the session has lapsed, naming this page", async () => {
+    await open("/design?part=components", answer(401, { error: "a bearer token is needed" }));
+    expect(await screen.findByText("Your session has ended")).toBeTruthy();
+    expect(screen.getByText('docket open "/design?part=components"')).toBeTruthy();
+  });
+});

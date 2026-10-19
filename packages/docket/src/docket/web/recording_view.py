@@ -19,7 +19,6 @@ from __future__ import annotations
 import bisect
 from dataclasses import dataclass, field
 from typing import Literal
-from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 from docket.recall import DocView
@@ -28,6 +27,7 @@ from docket.vault.cuts import CUT_MARKER
 from docket.vault.records import TRANSCRIBED_VIA, RawRecord
 from docket.vault.segments import Segment, segments
 from docket.vault.spans import problem
+from docket.web import urls
 from docket.web.panel import Style, anchored_rid, frontmatter_end, line_parts
 from docket.web.recording_state import RecordingState, time_at
 from docket.web.state import SearchState
@@ -293,7 +293,7 @@ def _partner(facts: Facts, shown: RawRecord) -> RawRecord | None:
 
 def _player(rid: str, segs: list[Segment], marked: set[int]) -> str:
     """The audio's URL, starting at the first line `at` marks, so playing starts there without JavaScript too."""
-    url = f"/recording/audio?{urlencode({'rid': rid})}"
+    url = urls.link("/recording/audio", [("rid", rid)])
     first = min(marked, default=None)
     return url if first is None else f"{url}#t={_seconds(segs[first].start_ms)}"
 

@@ -25,7 +25,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from urllib.parse import urlencode
 
 from starlette.datastructures import QueryParams
 
@@ -34,6 +33,7 @@ from docket.ledger import ops
 from docket.ledger.fold import NUMBER, number_text
 from docket.ledger.meetings import meeting_text
 from docket.ledger.store import MEETING_NUMBER, SLUG
+from docket.web import urls
 
 PATHS = {"ledger": "/ledger"}
 PANEL = "/ledger/panel"
@@ -53,8 +53,6 @@ MAX_Q = 200
 MAX_WHO = 120
 MAX_TEXT = 1000
 MAX_SKIPPED = 500
-# Kept as they are in a query string, so a ref and a path read in the address bar as they do everywhere else.
-URL_SAFE = ":/"
 
 
 class DayStateError(DocketError):
@@ -202,9 +200,7 @@ class DayState:
         """This state's canonical URL on its page, or on a fragment's path, which names the page unless it is the
         Ledger."""
         named = [("page", self.page)] if path is not None and self.page != "ledger" else []
-        query = urlencode(named + self.pairs(notice=notice), safe=URL_SAFE)
-        where = path or PATHS[self.page]
-        return f"{where}?{query}" if query else where
+        return urls.link(path or PATHS[self.page], named + self.pairs(notice=notice))
 
     def but(self, **changes: object) -> DayState:
         return replace(self, **changes).canonical()  # pyright: ignore[reportArgumentType]

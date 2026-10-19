@@ -45,6 +45,9 @@ reading:
   - { path: packages/docket/src/docket/ledger/calendar.py, role: contract, note: "what the core reads from an event record, a one-way door (DR-0646); the record's meeting fields and what is left out, the calendar step over a promotion's rids, read under the vault lock, and the pending rids, the catch-up in writes of whole days (DR-0647, DR-0648, DR-0650)" }
   - { path: packages/docket/src/docket/ledger/status.py, role: contract, note: "a stream's STATUS.md, a one-way door: the frontmatter's field lines, scalars and hash line, what a render does with each file it finds, the body kept byte for byte, when it renders and what docket vault check names (DR-0673 to DR-0676)" }
   - { path: packages/docket/src/docket/ledger/whole.py, role: contract, note: "docket ledger show --all --json for a script outside Docket, its shape only gaining fields: every object as show gives it by its ref, the op files' stamp and the vault lock's file, stamped and read under the lock (DR-0659, DR-0684)" }
+  - { path: packages/docket/src/docket/web/urls.py, role: contract, note: "how every page link the service builds encodes its query string, which the web app's router encodes by too (DR-0704)" }
+  - { path: packages/docket/web/src/lib/search.ts, role: contract, note: "the web app's URL: parseSearch and stringifySearch as the server encodes, and the canonical string written back (DR-0704)" }
+  - { path: packages/docket/web/src/styles/tokens.css, role: guide, note: "the web app's colours, each a light-dark() pair, and the contrast floors a test holds (DR-0707)" }
 decisions:
   - id: DR-0019
     title: The vault's layout and run-file names are fixed

@@ -35,7 +35,7 @@ from docket.web.recording_state import RecordingState
 from docket.web.recording_view import NO_AUDIO, Facts, build
 from docket.web.templating import PAGE_CSP
 
-AUDIO = f"/recording/audio?rid={TOUR.replace(':', '%3A')}"
+AUDIO = f"/recording/audio?rid={TOUR}"
 
 
 @pytest.fixture(scope="module")
@@ -332,7 +332,7 @@ def test_whisper_s_lines_in_a_gap_get_their_own_rows_and_the_rid_may_name_either
         assert rows == [(["one"], ["one"]), ([], ["between"]), (["two"], []), ([], ["late"])]
         assert all(s.speaker == "" for r in view.pair.rows for s in r.right), "Whisper names no speaker"
     late = view_of(CALL, (LEFT, RIGHT), "&at=00:30")
-    assert late.player == "/recording/audio?rid=plaud%3Arec-x"
+    assert late.player == "/recording/audio?rid=plaud:rec-x"
     marked = [s for r in late.pair.rows for s in r.right if s.mark]
     assert [s.text for s in marked] == ["late"] and marked[0].target, "a time only Whisper has is marked on its side"
     alone = view_of(f"{CALL}/whisper", (RIGHT,))

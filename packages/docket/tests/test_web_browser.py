@@ -11,8 +11,6 @@ from __future__ import annotations
 import os
 import re
 import shutil
-import threading
-import time
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
@@ -20,8 +18,8 @@ from typing import Any
 from urllib.parse import quote
 
 import pytest
-import uvicorn
 from briefs_kit import NORTHWIND, briefs_template
+from browser_kit import live
 from curate_kit import curate_vault
 from day_kit import day_vault, today
 from decisions_kit import BRIEF, decisions_template
@@ -33,9 +31,8 @@ from staging_kit import staging_vault
 from sync_kit import as_structured, as_text, memo, sync_template
 
 from docket.ledger import store
-from docket.service import client, server
+from docket.service import client
 from docket.service.client import call_json
-from docket.service.token import Tokens
 from docket.vault.config import CONFIG_FILE, VaultConfig
 from docket.vault.vault import Vault
 from docket.web import day as day_routes
@@ -131,26 +128,7 @@ def decisions_service(decisions_project: Path, tmp_path: Path) -> Iterator[tuple
     yield from _serve(tmp_path / "vault")
 
 
-def _serve(vault: Path) -> Iterator[tuple[int, str]]:
-    token = Tokens().ensure().value
-    servers: list[uvicorn.Server] = []
-    runner = threading.Thread(
-        target=server.serve, args=(vault, 0), kwargs={"said": lambda _: None, "running": servers.append}
-    )
-    runner.start()
-    deadline = time.monotonic() + 60
-    record = client.recorded()
-    while record is None and time.monotonic() < deadline:
-        time.sleep(0.05)
-        record = client.recorded()
-    assert record is not None, "the service didn't start"
-    try:
-        yield int(record["port"]), token
-    finally:
-        while not servers:
-            time.sleep(0.05)
-        servers[0].should_exit = True
-        runner.join(30)
+_serve = live
 
 
 def test_the_search_page_in_a_browser(service: tuple[int, str], tmp_path: Path) -> None:

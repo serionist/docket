@@ -12,7 +12,6 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from typing import Literal
-from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 from starlette.datastructures import QueryParams
@@ -23,6 +22,7 @@ from docket.service.history import RunLine
 from docket.service.runs import RUN_ID, OpenRun
 from docket.vault import cursors
 from docket.vault.records import source_name_problem
+from docket.web import urls
 
 PATH = "/sync"
 RUNS = "/sync/runs"
@@ -109,7 +109,7 @@ class SyncState:
         pairs = [(n, v) for n, v in (("source", self.source), ("run", self.run)) if v is not None]
         if self.k != DEFAULT_K:
             pairs.append(("k", str(self.k)))
-        return urlencode(pairs)
+        return urls.query(pairs)
 
     def url(self, path: str = PATH) -> str:
         query = self.query()

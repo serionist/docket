@@ -154,3 +154,25 @@ def test_the_times_of_two_runs_or_of_none_are_refused(tmp_path: Path) -> None:
     (tmp_path / "two" / "a.json").unlink()
     shard.merge_times(tmp_path, weights, tmp_path)
     assert json.loads(weights.read_text(encoding="utf-8"))["$comment"] == shard.COMMENT
+
+
+def test_a_key_of_its_own_reads_its_weights_and_writes_its_times_under_it(tmp_path: Path) -> None:
+    for name in ("a", "b", "c"):
+        (tmp_path / f"test_{name}.py").write_text(f"def test_{name}():\n    pass\n", encoding="utf-8")
+    weights = tmp_path / "weights.json"
+    # Under the system's own key c weighs least, so it shares the first share with a; under the browser's, most.
+    data = {
+        platform.system(): {"test_c.py": 1, "test_a.py": 5, "test_b.py": 5},
+        "Linux browser": {"test_c.py": 9, "test_a.py": 1, "test_b.py": 1},
+    }
+    weights.write_text(json.dumps(data), encoding="utf-8")
+    times = tmp_path / "out" / "times.json"
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "-p", "devkit.shard", "-p", "no:cacheprovider", "-q", "--shard=1/2",
+         f"--shard-weights={weights}", f"--shard-times={times}", "--shard-key=Linux browser"],
+        cwd=tmp_path, capture_output=True, text=True, encoding="utf-8", check=False,
+    )  # fmt: skip
+    assert proc.returncode == 0, proc.stdout
+    record = json.loads(times.read_text(encoding="utf-8"))
+    assert list(record["files"]) == ["test_c.py"]
+    assert record["system"] == "Linux browser"

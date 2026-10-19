@@ -1,0 +1,6 @@
+conventions:
+  - id: CV-0015
+    rule: The web app's TypeScript passes ESLint with typescript-eslint's strict rules, tsc in strict mode and Prettier at 120 columns; the build in packages/docket/src/docket/web/app is what the sources build
+    area: typescript
+    enforced_by: "CI: Web (Linux) (npm run lint, npm run typecheck, the build's diff); gate: web (the build stamp)"
+    decision: DR-0703

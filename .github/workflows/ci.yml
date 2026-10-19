@@ -3,7 +3,9 @@
 # secrets over the whole history, the harness and the plugin validated by Claude Code) in one job, its tests under
 # coverage in shares, and Gate (Linux) holds the coverage floors on every share's data together. Windows and macOS run
 # the types and the tests (`gate os`) in shares, so a change that only works on one system fails here. The shares split
-# the test files by tools/devkit/test-weights.json, which `gate weights` writes from a run's times artifacts.
+# the test files by tools/devkit/test-weights.json, which `gate weights` writes from a run's times artifacts. The web
+# app's sources run in Web (Linux), and its pages in the runner's Chrome in Browser (Linux) shares (DR-0712); Gate
+# (Linux) needs both, so the checks the merge rule names stay the same.
 name: CI
 
 on:
@@ -101,20 +103,22 @@ jobs:
           include-hidden-files: true
           retention-days: 14
 
-  # The check the merge rule names: the full gate's checks and every share passed, and the shares' coverage together
-  # holds the floors, with the question set's numbers held to theirs.
+  # The check the merge rule names: the full gate's checks, every share, the web job and the browser shares passed, and
+  # the shares' coverage together holds the floors, with the question set's numbers held to theirs.
   gate:
     name: Gate (Linux)
-    needs: [checks, linux-shares]
+    needs: [checks, linux-shares, web, browser]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: The checks and every share passed
+      - name: The checks, every share, the web app's sources and its pages in Chrome passed
         env:
           CHECKS: ${{ needs.checks.result }}
           SHARES: ${{ needs.linux-shares.result }}
-        run: test "$CHECKS" = success && test "$SHARES" = success
+          WEB: ${{ needs.web.result }}
+          BROWSER: ${{ needs.browser.result }}
+        run: test "$CHECKS" = success && test "$SHARES" = success && test "$WEB" = success && test "$BROWSER" = success
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The eval floors are held against the base branch's.
@@ -404,13 +408,59 @@ jobs:
           DOCKET_TEST_LIVE_SERVICE: "1"
         run: uv run pytest packages/docket/tests/test_service_install_live.py -v -rs -p no:cacheprovider
 
-  # The web app in a real browser: the runner's own Chrome, which Playwright drives without downloading a browser. It
-  # sees what render tests can't (a CSP violation, a swap that doesn't happen, a key that does nothing); its
-  # screenshots are kept with the run.
+  # The web app's sources (DR-0705): lint and format, types, the Vitest tests, then the build, which must come out byte
+  # for byte as committed, the first page's script within its 250 KB, and every bundled package's licence one that
+  # fits. npm's cache keys on the lockfile; install scripts are off (.npmrc).
   web:
-    name: Web app in Chrome (Linux)
+    name: Web (Linux)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: packages/docket/web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: packages/docket/web/.nvmrc
+          cache: npm
+          cache-dependency-path: packages/docket/web/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Lint and format
+        run: npm run lint
+      - name: Types
+        run: npm run typecheck
+      - name: Vitest
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: The build is the one committed
+        run: |
+          git diff --exit-code --stat -- ../src/docket/web/app
+          test -z "$(git status --porcelain -- ../src/docket/web/app)" || {
+            git status --porcelain -- ../src/docket/web/app
+            echo "the build made files the commit doesn't hold: run npm run build and commit the folder"
+            exit 1
+          }
+      - name: The first page's script budget
+        run: npm run budget
+      - name: The licences
+        run: npm run licences
+
+  # The web app in the runner's own Chrome, which Playwright drives without downloading a browser: one test file per
+  # page, in shares split by test-weights.json's "Linux browser" key (DR-0712), each failing on a console error, a CSP
+  # violation or an axe rule in either theme. axe-core comes from the web app's packages. The screenshots are kept.
+  browser-shares:
+    name: Browser (Linux, ${{ matrix.share }} of 2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        share: [1, 2]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -418,17 +468,48 @@ jobs:
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: packages/docket/web/.nvmrc
+          cache: npm
+          cache-dependency-path: packages/docket/web/package-lock.json
       - name: Install
         run: uv sync --locked
-      - name: Search, Sync, Staging, Curate, Settings, the keys and a lapsed session, in Chrome
+      - name: axe-core
+        working-directory: packages/docket/web
+        run: npm ci
+      - name: Each page in Chrome
         env:
           DOCKET_TEST_BROWSER: chrome
           DOCKET_TEST_SCREENSHOTS: ${{ runner.temp }}/screenshots
-        run: uv run pytest packages/docket/tests/test_web_browser.py -v -rs -p no:cacheprovider
+        run: >-
+          uv run pytest packages/docket/tests/test_web_browser*.py -v -rs -p no:cacheprovider
+          --shard ${{ matrix.share }}/2 --shard-weights tools/devkit/test-weights.json --shard-key "Linux browser"
+          --shard-times .local/times/linux-browser-${{ matrix.share }}-of-2.json
       - name: Keep the screenshots
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: web-screenshots
+          name: web-screenshots-${{ matrix.share }}
           path: ${{ runner.temp }}/screenshots
           if-no-files-found: ignore
+      - name: Keep the times
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: times-browser-${{ matrix.share }}
+          path: .local/times/
+          include-hidden-files: true
+          retention-days: 14
+
+  # Browser (Linux) passes when every share passes, as Tests (Windows) does; Gate (Linux) needs it.
+  browser:
+    name: Browser (Linux)
+    needs: browser-shares
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every share passed
+        env:
+          SHARES: ${{ needs.browser-shares.result }}
+        run: test "$SHARES" = success

@@ -15,7 +15,6 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
-from urllib.parse import urlencode
 
 from starlette.datastructures import QueryParams
 
@@ -31,6 +30,7 @@ from docket.vault.redact import Redactor
 from docket.vault.releaselog import Releases
 from docket.vault.segments import segments
 from docket.vault.staging import Entry, Staged, State
+from docket.web import urls
 
 PATH = "/staging"
 PANEL = "/staging/panel"
@@ -169,8 +169,7 @@ class StagingState:
         return out
 
     def url(self, path: str = PATH, *, done: bool = False) -> str:
-        query = urlencode(self.pairs(done=done))
-        return f"{path}?{query}" if query else path
+        return urls.link(path, self.pairs(done=done))
 
     def listing(self) -> StagingState:
         """The list as this state narrows it, nothing open."""

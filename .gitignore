@@ -45,6 +45,10 @@ coverage.json
 coverage.xml
 htmlcov/
 
+# The web app's packages, and the types `npm run types` makes from openapi.json.
+node_modules/
+packages/docket/web/src/api/schema.d.ts
+
 # Editors and OS
 .vscode/
 .idea/

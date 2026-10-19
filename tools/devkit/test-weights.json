@@ -456,6 +456,10 @@
     "tools/devkit/tests/test_shard.py": 0.7,
     "tools/devkit/tests/test_yamlio.py": 0.0
   },
+  "Linux browser": {
+    "packages/docket/tests/test_web_browser.py": 120.0,
+    "packages/docket/tests/test_web_browser_design.py": 20.0
+  },
   "Windows": {
     "examples/sources/calendar/tests/test_mapper.py": 0.0,
     "examples/sources/calendar/tests/test_with_docket.py": 1.4,

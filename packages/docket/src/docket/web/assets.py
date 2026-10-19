@@ -20,6 +20,7 @@ from starlette.responses import PlainTextResponse, Response
 TYPES = {
     ".css": "text/css; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
+    ".json": "application/json",
     ".svg": "image/svg+xml",
     ".txt": "text/plain; charset=utf-8",
     ".woff2": "font/woff2",
@@ -95,12 +96,14 @@ def _walk(folder: Traversable, prefix: str = "") -> dict[str, Traversable]:
     return out
 
 
-def load(folder: Traversable | None = None) -> dict[str, Asset]:
-    """Every file under `static/`, by its path there. A file whose type isn't in the table stops the service: it would
-    otherwise be served as something a browser guesses at."""
+def load(folder: Traversable | None = None, *, skip: frozenset[str] = frozenset()) -> dict[str, Asset]:
+    """Every file under `static/`, or the folder given, by its path there, but those in `skip`. A file whose type
+    isn't in the table stops the service: it would otherwise be served as something a browser guesses at."""
     found = _walk(folder or files("docket.web").joinpath("static"))
     out: dict[str, Asset] = {}
     for path, item in sorted(found.items()):
+        if path in skip:
+            continue
         suffix = "." + path.rsplit(".", 1)[-1] if "." in path else ""
         if suffix not in TYPES:
             raise ValueError(f"static/{path} has no content type in docket.web.assets.TYPES")
@@ -117,9 +120,10 @@ def integrity(path: str) -> str:
     return "sha256-" + base64.b64encode(bytes.fromhex(VENDORED[path].sha256)).decode("ascii")
 
 
-def serve(request: Request, path: str) -> Response:
-    """A static file, or a plain 404: no page, so a miss names nothing of the user's."""
-    asset = ASSETS.get(path)
+def serve(request: Request, path: str, table: dict[str, Asset] | None = None) -> Response:
+    """A static file of the table, `static/`'s by default, or a plain 404: no page, so a miss names nothing of the
+    user's."""
+    asset = (ASSETS if table is None else table).get(path)
     if asset is None:
         return PlainTextResponse("not found", status_code=404)
     headers = {"ETag": asset.etag, "Cache-Control": "no-cache"}

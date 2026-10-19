@@ -195,6 +195,30 @@ def cmd_models_lock(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ui(args: argparse.Namespace) -> int:
+    """The screenshot loop's round for a page: an invented world, a throwaway service, the shots and the checks."""
+    from devkit import ui  # noqa: PLC0415 - only this command drives a browser
+
+    return ui.run(args.page, root=repo_root())
+
+
+def cmd_web_schema(args: argparse.Namespace) -> int:
+    """The web app's API document, from the /api/web routes' models, into packages/docket/web/openapi.json."""
+    from devkit import web  # noqa: PLC0415
+
+    root = repo_root()
+    if args.check:
+        problem = web.schema_problem(root)
+        if problem:
+            print(problem, file=sys.stderr)
+            return 1
+        print(f"{web.SCHEMA} is current")
+        return 0
+    web.write_schema(root)
+    print(f"wrote {web.SCHEMA}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     utf8_stdio()
     p = argparse.ArgumentParser(prog="devkit")
@@ -214,6 +238,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     sub.add_parser(
         "models-lock", help="compile the models' worker requirements with hashes, from versions a week old"
     ).set_defaults(func=cmd_models_lock)
+    s = sub.add_parser("ui", help="shoot a page of the web app on an invented world, with the machine checks")
+    s.add_argument("page")
+    s.set_defaults(func=cmd_ui)
+    s = sub.add_parser("web-schema", help="write the /api/web routes' OpenAPI document for the web app's types")
+    s.add_argument("--check", action="store_true", help="say whether openapi.json is current, writing nothing")
+    s.set_defaults(func=cmd_web_schema)
     args = p.parse_args(argv)
     try:
         return int(args.func(args))

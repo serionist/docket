@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0713
+    title: The shadcn CLI runs by npx at its pinned version when a component is added, outside the lockfile, and its state variants are copied into the sources
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#252"]
+    description: "The shadcn CLI copies a component into src/components/ui when one is added, run as npx shadcn@4.21.4 at the version DR-0703 pins, and stays out of package.json and the lockfile: at 4.21.4 it brings about 200 packages of its own (the MCP SDK, Babel, ts-morph), a code generator nothing in the build or the tests needs, and npm audit flags one of them (braces) with no fixed version to take. The state variants its components are written with (data-open:, data-checked: and the rest), which its own package's tailwind.css would add, are copied into src/styles/variants.css with shadcn/ui's MIT notice, so the build needs no shadcn package; licences.txt lists shadcn/ui for the copied components and variants."
+    binds: [No package is in the lockfile that neither the build nor the tests use.]
+    not_chosen:
+      - "The CLI as a dev dependency: a pinned generator, about 200 packages more in every npm ci and a standing audit finding, for a step run when a component is added."

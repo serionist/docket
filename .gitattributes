@@ -10,3 +10,7 @@
 *.ogg binary
 *.age binary
 *.woff2 binary
+
+# The web app's build, committed so an install needs no Node (DR-0705): folded in a PR on GitHub, and never -diff, which
+# would hide it from gitleaks. A conflict in it is settled by building again.
+packages/docket/src/docket/web/app/** linguist-generated

@@ -1,0 +1,156 @@
+/*
+ * The app's one stylesheet. Tailwind scans only the sources (DR-0705); the colours are tokens.css's pairs under the
+ * names shadcn/ui's components use (DR-0707).
+ */
+@import "tailwindcss" source(none);
+@import "tw-animate-css";
+@import "@fontsource-variable/atkinson-hyperlegible-next";
+@import "@fontsource-variable/atkinson-hyperlegible-mono";
+@import "./tokens.css";
+@import "./variants.css";
+
+@source "../../src";
+
+/* dark: follows the same switch as the tokens: the data-theme the server wrote, or the system's when it wrote none. */
+@custom-variant dark {
+  &:where([data-theme="dark"], [data-theme="dark"] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where([data-theme="system"], [data-theme="system"] *) {
+      @slot;
+    }
+  }
+}
+
+@theme inline {
+  --font-sans: "Atkinson Hyperlegible Next Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Atkinson Hyperlegible Mono Variable", ui-monospace, monospace;
+
+  /* Bringhurst's scale: meta, the UI, the panel's text, its title, a page's title. */
+  --text-*: initial;
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 14px;
+  --text-sm--line-height: 20px;
+  --text-base: 16px;
+  --text-base--line-height: 24px;
+  --text-lg: 18px;
+  --text-lg--line-height: 24px;
+  --text-xl: 21px;
+  --text-xl--line-height: 28px;
+
+  --font-weight-*: initial;
+  --font-weight-normal: 400;
+  --font-weight-semibold: 600;
+
+  /* By role: controls and stamps, popovers and menus, dialogs. Rows are ruled, never rounded. */
+  --radius-*: initial;
+  --radius-sm: 4px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  --color-paper: var(--paper);
+  --color-sheet: var(--sheet);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-rule: var(--rule);
+  --color-control: var(--control);
+  --color-hover: var(--hover);
+  --color-green: var(--green);
+  --color-on-green: var(--on-green);
+  --color-selection: var(--selection);
+  --color-red: var(--red);
+  --color-red-wash: var(--red-wash);
+  --color-discuss: var(--discuss);
+  --color-discuss-wash: var(--discuss-wash);
+  --color-claude: var(--claude);
+  --color-claude-wash: var(--claude-wash);
+  --color-me: var(--me);
+  --color-me-wash: var(--me-wash);
+  --color-chase: var(--chase);
+  --color-chase-wash: var(--chase-wash);
+  --color-scrim: var(--scrim);
+  --shadow-float: var(--float-shadow);
+
+  /* shadcn/ui's names. */
+  --color-background: var(--paper);
+  --color-foreground: var(--ink);
+  --color-card: var(--sheet);
+  --color-card-foreground: var(--ink);
+  --color-popover: var(--sheet);
+  --color-popover-foreground: var(--ink);
+  --color-primary: var(--green);
+  --color-primary-foreground: var(--on-green);
+  --color-secondary: var(--hover);
+  --color-secondary-foreground: var(--ink);
+  --color-muted: var(--hover);
+  --color-muted-foreground: var(--ink-muted);
+  --color-accent: var(--hover);
+  --color-accent-foreground: var(--ink);
+  --color-destructive: var(--red);
+  --color-border: var(--rule);
+  --color-input: var(--control);
+  --color-ring: var(--green);
+  --color-sidebar: var(--paper);
+  --color-sidebar-foreground: var(--ink);
+  --color-sidebar-primary: var(--green);
+  --color-sidebar-primary-foreground: var(--on-green);
+  --color-sidebar-accent: var(--hover);
+  --color-sidebar-accent-foreground: var(--ink);
+  --color-sidebar-border: var(--rule);
+  --color-sidebar-ring: var(--green);
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--rule);
+  }
+
+  html {
+    font-family: var(--font-sans);
+    font-size: 16px;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-size: var(--text-sm);
+    line-height: var(--text-sm--line-height);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* One focus ring everywhere, keyboard only: two pixels of ledger green, clear of what it rings. */
+  :focus-visible {
+    outline: 2px solid var(--green);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--selection);
+    color: var(--ink);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* A target a finger can hit: 44 px on a coarse pointer, whatever it looks like. */
+@utility tap {
+  @media (pointer: coarse) {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}

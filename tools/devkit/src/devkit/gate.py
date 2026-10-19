@@ -2,7 +2,8 @@
 
 Lanes:
   quick  the static checks, in seconds: lock file, lint, format, types, docs, commit messages, private names, secrets,
-         the harness (AGENTS.md, skills, plugin manifests). The pre-push hook runs it.
+         the harness (AGENTS.md, skills, plugin manifests), the web app's build and API document. The pre-push hook
+         runs it.
   full   quick, then the tests with coverage and its floors, the secret scan over the whole history, and the plugin
          validated by Claude Code itself. finish-work runs it before a PR. CI runs it in parts (DR-0698): `--skip
          tests` once, and `--only tests --shard K/N` on each share, which saves its coverage data instead of holding
@@ -212,6 +213,14 @@ def _frontmatter(text: str) -> dict[str, str]:
         if sep and not line.startswith(" "):
             out[key.strip()] = value.strip()
     return out
+
+
+def step_web(ctx: Ctx) -> Outcome:
+    """The web app's committed build against its sources, and its API document against its routes, with no Node."""
+    from devkit import web  # noqa: PLC0415 - the document's check imports the app in a process of its own
+
+    problems = [p for p in (web.stamp_problem(ctx.root), web.schema_problem(ctx.root)) if p]
+    return Outcome.fail(*problems) if problems else Outcome.ok("the build matches its sources, openapi.json its routes")
 
 
 def step_harness(ctx: Ctx) -> Outcome:
@@ -527,6 +536,7 @@ STEPS = [
     Step("content", ("quick", "full"), "no private names (the deny list)", step_content),
     Step("secrets", ("quick", "full"), "gitleaks", step_secrets),
     Step("harness", ("quick", "full"), "AGENTS.md, skills, plugin manifests", step_harness),
+    Step("web", ("quick", "full"), "the web app's build matches its sources; openapi.json its routes", step_web),
     Step("tests", ("full", "os"), "pytest; coverage floors in the full lane, the timed tests alone in os", step_tests),
     Step("models", ("models",), "the question set with the embedder, against its floors", step_models),
     Step("floors", ("coverage",), "the shares' coverage data combined, against the floors", step_floors),

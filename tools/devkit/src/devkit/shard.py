@@ -9,7 +9,9 @@ builds in the parallel run (DR-0492), never cross to another runner. The share i
 parallel run and the timed run of one share keep the same files.
 
 With `--shard-times=<file>` the run writes what each of its files cost, its tests' time over the run's workers, and
-`gate weights` folds a CI run's files into the weights.
+`gate weights` folds a CI run's files into the weights. Each system's files have weights of their own, under its name;
+`--shard-key` names another key, as the browser shares' "Linux browser" (DR-0712), whose files cost what a browser
+costs, not what they cost skipped.
 """
 
 from __future__ import annotations
@@ -82,7 +84,7 @@ class Times:
     def pytest_sessionfinish(self) -> None:
         workers = int(self.config.getoption("numprocesses", None) or 1)
         record = {
-            "system": platform.system(),
+            "system": key_of(self.config),
             "share": self.config.getoption("--shard"),
             "marks": self.config.option.markexpr,
             "workers": workers,
@@ -96,6 +98,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption("--shard", default=None, metavar="K/N", help="run share K of N of the test files (DR-0698)")
     parser.addoption("--shard-weights", default=None, metavar="FILE", help="split the files by these weights")
     parser.addoption("--shard-times", default=None, metavar="FILE", help="write what each file cost this run")
+    parser.addoption("--shard-key", default=None, metavar="KEY", help="the weights' key: the system's name by default")
+
+
+def key_of(config: pytest.Config) -> str:
+    """The key this run reads its weights under and writes its times under."""
+    return str(config.getoption("--shard-key") or platform.system())
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -118,7 +126,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     k, n = parse(spec)
     named = config.getoption("--shard-weights")
     files = {item.path.relative_to(config.rootpath).as_posix() for item in items}
-    kept = share(files, k, n, load_weights(Path(named)) if named else None)
+    kept = share(files, k, n, load_weights(Path(named), key_of(config)) if named else None)
     selected = [item for item in items if item.path.relative_to(config.rootpath).as_posix() in kept]
     deselected = [item for item in items if item.path.relative_to(config.rootpath).as_posix() not in kept]
     # Always, even with nothing to leave out: `gate full`'s one share runs the same lines as each of CI's shares, so

@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from urllib.parse import urlencode
 
 from starlette.datastructures import QueryParams
 
@@ -23,12 +22,11 @@ from docket.errors import DocketError
 from docket.vault.anchors import Anchor, AnchorError, format_anchor, parse_anchor, parse_locator
 from docket.vault.processed import DOC_TYPES
 from docket.vault.records import is_native_id
+from docket.web import urls
 
 PATH = "/recording"
 # The id the page gives the first transcript line `at` marks, which every link setting `at` names.
 FRAGMENT = "at"
-# Kept as they are in a query string, so a rid and a time read in the address bar as they do everywhere else.
-URL_SAFE = ":@/,"
 
 
 class RecordingStateError(DocketError):
@@ -100,8 +98,7 @@ class RecordingState:
     def url(self) -> str:
         """This state's canonical URL."""
         pairs = [(name, v) for name, v in (("rid", self.rid), ("doc", self.doc), ("at", self.at_text)) if v]
-        query = urlencode(pairs, safe=URL_SAFE)
-        return f"{PATH}?{query}" if query else PATH
+        return urls.link(PATH, pairs)
 
     def link(self) -> str:
         """The URL a link takes: with `at`, it lands on the first line that time marks."""
