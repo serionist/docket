@@ -1,9 +1,9 @@
 ---
 title: Import a ledger with its history
 issue: "#202"
-status: draft
-approved_by:
-approved_at:
+status: approved
+approved_by: claude (autonomy grant)
+approved_at: 2026-10-19
 ---
 
 # Import a ledger with its history
