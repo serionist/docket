@@ -186,3 +186,18 @@ STREAMS in MEETINGS' form; the search fallback moved to tasks and the reconcile;
 | one agent per source | `subagent_type: fork` where Claude Code offers it, else `general-purpose`, since `fork.md` stands alone |
 | `test_plugin_files.py` | the block's labels and each line's fields pinned; every `docket` command and flag, `ledger` view, op and tool parameter the two files name checked; the worked batch dry-run clean on an invented pilot ledger; the two name doors, the skill's `name` and `sync.md` beside `SKILL.md`. AGENTS.md names `sync`; `tasks` comes with PR 2 |
 | docs | the plugin README's sync section with the cut-over for a sync of one's own; `fork.md` on the plugin's reading list as a contract; the package README's gate and live runs; design's Tasks and Claude first |
+
+## PR 2, as built
+
+| Planned | Built |
+|---|---|
+| `docket open /queue` | `docket open /ledger` until the Queue page (#204) is merged: its PR changes the one path in `tasks/SKILL.md`, and the test pins only that the path is a page of the web app. The Ledger page is #203's first PR; merged after this one, the link lands on Not found for a while and the owner triages in chat |
+| Git Bash | found while building: Git Bash on Windows rewrites a lone `/ledger` into `C:/Program Files/Git/ledger`, which `docket open` refuses. The skill runs `MSYS_NO_PATHCONV=1 docket open /ledger` there, pre-approved beside `docket open *`; no code change |
+| reads-only pre-approvals | `ledger`, `search`, `read`, `verify`, `docket open`, `docket ledger day`, and `docket ledger queue`, `show` and `suggest` for the way without the service; no `docket staging`, which tasks never reads |
+| order, each item | `ledger` view `queue` read again before each item and the item `show`n again before its batch; untriaged items left for the page; a recording read in its note, then the vendor's summary and the transcript around the moment; a locator `read` can't open searched by its words a few days either side of its day; what is newer than the last sync read with the source's own tools, read-only |
+| by verdict | as planned; a material the item has already left out of the batch, so a second draft in its thread isn't refused; a prep's `done` naming the meeting its points are on; a proposed point the owner doesn't want a `point_set` to `dropped` before the `keep` |
+| record | one `ledger_batch` per item, `by` on each op the owner decided, the batch's default `claude` for the rest; no dry run first, since a refusal writes nothing; a look-alike `add` a `log` on the item it names |
+| without the service | `docket ledger queue`, `show` and `suggest` with `--vault`, the batch as JSON on stdin to `docket ledger batch`; `read` and `search` as the recall skill's command line |
+| end | three lines; the old skill's closing check goes, since the writer checks every write |
+| `test_plugin_files.py` | the pre-approvals exactly; every `docket` command and flag, `ledger` and `read` view, verdict, op and tool parameter the skill names; the page a page of the web app, Git Bash's form the same; the name door `name: tasks`; AGENTS.md naming `sync` and `tasks`; the three worked batches dry-run clean on the pilot ledger with its queue triaged, a prep task and a proposed point |
+| docs | the plugin README's tasks section with the cut-over for a tasks skill of one's own, and a heading for curating and upgrading; design's Tasks and the plugin's table; AGENTS.md's skills; CHANGELOG; plugin 0.6.0 |
