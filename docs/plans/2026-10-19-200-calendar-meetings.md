@@ -16,8 +16,7 @@ links recordings and asks by time with #201's window read. Two PRs: the step and
 
 - Done: each timed calendar event in raw has its meeting, moved, renamed or cancelled in place as the calendar changes
   it; an old meeting a record matches is joined, its number kept; nothing kept out of raw makes one.
-- Out: writing links, the sync's (#210); joins and splits on the Meetings page (#205); the import (#202) and the
-  export script (roadmap step 15); meetings whose event vanished from the calendar (Risks).
+- Out: writing links (#210), the Meetings page (#205), the import (#202), events that vanished (Risks).
 
 ## Design
 
@@ -29,21 +28,26 @@ links recordings and asks by time with #201's window read. Two PRs: the step and
 | the core, on index update | no: it runs on every clone and on a rebuild, so it would apply a stale version over the sync's own set (a decline the week view no longer shows) |
 | the sync skill through `ledger_batch` | no: a fixed mapping needs no judgement, and every machine's copy of the skill would have to agree |
 
-- `Gate.promote` keeps the event records it wrote; once its lock is released, `ledger/calendar.py` takes them in start
-  order, then rid, as one write `by: sync`, via the caller's `cli` or `page`.
-- It is a change inside the writer that the batch's ops don't take, so its reads and ops are one plan under the vault
-  lock and a dry run shows them. It never refuses: a record it can't take is left out and named, with why. If the
-  write fails, the promotion stands and its output names the catch-up.
-- `docket ledger calendar [--since DAY] [--dry-run]`, the catch-up, takes the latest version of each event record in
-  raw from DAY, 14 days back by default, and only adds and joins: a key the ledger holds gets no set from it, so a
-  stale version never undoes what the sync set by hand. It runs when #200 lands, after an import, after a split.
-- Two clones: one that pulls another's run gets its ops with it and promotes nothing. Two that promote one version
-  write the same ops in the same order: one meeting per key, the first add's id and number (DR-0621), the same numbers
-  when their ledgers agreed, else DR-0613's renumber.
+- `Gate.promote` notes its event records' rids as pending in the vault's private folder before its lock is released.
+  Then `ledger/calendar.py` makes one write `by: sync`, via the caller's `cli` or `page`, and clears them once it
+  commits or has nothing to write. The next promotion or catch-up replays what is pending first, sets included, as
+  DR-0463 finishes a stopped write first.
+- One version per rid, raw's latest by line order, so an event moved twice before one promotion lands at its last
+  time; the adds then go in start order, then rid. A pending rid is read at raw's latest version too, so one left
+  over a full revert (#202) applies as any record would to the ledger it meets.
+- It is a change inside the writer that the batch doesn't take: its reads and ops are one plan under the vault lock,
+  and a dry run shows them. It never refuses: a record it can't take is left out and named, with why.
+- `docket ledger calendar [--since DAY] [--dry-run]`, the catch-up: what is pending, then the latest version of each
+  event record from DAY, 14 days back by default, adding and joining only, so a stale version never undoes what the
+  sync set by hand. It runs when #200 lands, after an import or a reset, after a split.
+- Two clones: a pulled run comes with its ops and is never promoted again; two that promote one version write the same
+  ops in the same order, one meeting per key (DR-0621), renumbered (DR-0613) only when their ledgers differed.
 
 ### The record (one-way, DR-0646) and its fields (DR-0648)
 
-What the core reads from a record of kind `event`, one per occurrence. The reference calendar source writes it all.
+What the core reads from a record of kind `event`, one per occurrence. Every calendar mapper writes `native.end` and
+`native.all_day`; the text's header, its lines before the first blank one, holds the first `Where: `, `Response: ` and
+`Cancelled` lines read, and any body goes after it, never read. The reference calendar source writes it all.
 
 | Meeting field | From the record |
 |---|---|
@@ -52,40 +56,37 @@ What the core reads from a record of kind `event`, one per occurrence. The refer
 | `start`, `end` | `ts` and `native.end`, in `vault.yaml`'s zone with that moment's offset |
 | `subject` | the title, a `Canceled: ` start dropped from a cancelled one; `(no subject)` for none |
 | `organiser` | the author's name without its `<address>`, or the address alone |
-| `where` | the text's `Where: ` line |
-| `response` | `cancelled` when the text has a `Cancelled` line, else its `Response: ` line |
+| `where` | the header's `Where: ` line |
+| `response` | `cancelled` when the header has a `Cancelled` line, else its `Response: ` line |
 | `attendees` | the names in `to`; the reference mapper gives none, since the week view shows none |
 
 - A key the ledger holds gets one `set` of what differs, on the add carrying the key (#199's writer): a move, a
   rename, a new place or response, a cancellation. A version that changes only show-as or the label writes nothing; a
   field the record doesn't carry is never cleared; a set on an archived meeting is idle (DR-0624).
-- Left out: an all-day event (`native.all_day`), a derived record (its rid built from subject and start), one with no
-  end or an end before its start, and a cancelled one that holds no meeting and joins none.
-- The owner's zone, not the record's `native.zone`: the import and the writer use it too, so a join compares like
-  with like, and a week read on a trip doesn't rewrite every meeting.
+- Left out: an all-day event, a derived record (its rid built from subject and start), one with no end or an end
+  before its start, and a cancelled one that holds no meeting and joins none.
+- The owner's zone, not `native.zone`: the import's and the writer's, so a join compares like with like.
 
 ### Joins (DR-0649)
 
-As todo.py's `meeting add` updated the meeting with the same start and subject, the step joins it:
-
-- the match: a standing meeting with no event, archived or not, whose start is the record's to the minute and whose
-  subject is the record's with case and spaces folded; of several, the earliest by id;
+- the match, as todo.py's `meeting add` updated one: a standing meeting with no event, archived or not, whose start
+  is the record's to the minute and whose subject is the record's with case and spaces folded; the earliest by id;
 - the join: a `meeting` add with `continues`, carrying the record's fields as any add does. The old meeting's number,
   points and outcome hold; an open one takes the calendar's fields, as todo.py's update did; an archived one only
-  gains its key, the fields being an idle set there;
-- tried for each version the step takes, key held or not, unless the key continues a meeting already;
-- never a meeting whose join from this key was undone. A key whose adds are all undone gets a new add only when each
-  was a join undone alone (a split, DR-0621); any other was removed, and stays removed after a new version too;
-- an add with an unkeyed meeting at its start under another subject names it, so a renamed series' old meeting can
-  be joined by hand (`ledger_batch`'s `meeting_add` with `continues` now, the Meetings page later).
+  gains its key, the fields being an idle set there. Tried for each version, unless the key continues one already;
+- undos, read by the write that made them: the owner's (`user` or `claude`) that took out only this meeting's adds is
+  meant. A removal stays removed, a new version too; a `continues` add undone alone is a split, never rejoined, its
+  key given an add of its own. One that took out other ops as well (a batch, the step's own write), or by `sync`, is
+  as if never: the step adds or joins again. Undoing a step write that made this one meeting alone reads as removal;
+- near misses named in the output, to join by hand: an unkeyed meeting at the add's start under another subject, and
+  one with its folded subject on its day at another start, so the cut-over spot-check catches moved meetings.
 
 ### Kept out (DR-0650)
 
 - A record makes nothing when media's screen would keep it out now (forgotten, its source private or not in force, a
   never-store match, withheld, classified private by hand: DR-0547) or a hold covers it. The gate keeps those out of
   raw already; this catches one a list, a hold or a decision took after it went in. Its meeting stays, for #182.
-- `to` is part of what never-store matches, so a listed attendee makes the record a never-store one and no name is
-  left out piecemeal. DR-0627's refusal stays the writer's backstop.
+- A listed attendee in `to` makes the record a never-store one: no name is left out piecemeal (DR-0627 as backstop).
 
 ### Links by time (DR-0651)
 
@@ -96,41 +97,38 @@ As todo.py's `meeting add` updated the meeting with the same start and subject, 
 | `meeting link --recording` | a `material` on the meeting, its ref the recording's rid |
 | `meeting link --item` | the item's `meeting` (DR-0626) |
 
-- The sync picks and writes them in its batch (#210), as /sync does today: one meeting, link it; two, the one the
-  note's content names, else none; a cancelled one or the owner's own focus time passed over. The core links nothing,
-  as a 1:1 inside a big invite's slot would link wrong; #201's note that #200 links by time itself changes to this.
+- The sync picks and writes them (#210), as /sync does: one meeting, link it; two, the one the note's content names,
+  else none; skip cancelled ones and focus time. The core links nothing: a 1:1 in a big invite's slot would link wrong.
 
-### Old meetings and the import (DR-0652)
+### Old meetings, the import and resets (DR-0652)
 
-- The export script leaves every old meeting keyless; after the import, `docket ledger calendar --since <the
-  calendar's first day>` joins each one a record matches. Its dry run is the report the roadmap asks to spot-check.
-- A join's number is the continued meeting's, so the old number wins whatever ran first, and one matcher, tested
-  here, does it. DR-0621 had the export script give the event itself, which loses the old number to a meeting the
-  step made first in the live clone.
+- #202's import brings old meetings in keyless; the catch-up after it, from the calendar's first day, joins each one a
+  record matches, its id and number kept. #200 builds every key; its dry run is the roadmap's spot-check report.
+- A rehearsal reset is #202's full `--revert`, which takes every op out, the step's meetings and joins with them, then
+  the import and the catch-up, which makes them again from raw. Resets revert, never undo (DR-0617 compares with HEAD).
 
 ## Doors and data
 
 One-way, PR 1's title naming it: what the core reads from an event record (DR-0646); AGENTS.md's mapper line gains it.
-`medium`: the step and the catch-up (DR-0647), the fields (DR-0648), joins (DR-0649), kept out (DR-0650), links
-(DR-0651), the import's joins (DR-0652). No new op, kind, field or via. Data: the first catch-up writes the window's
-meetings in one write, undone as one batch if wrong.
+`medium`: DR-0647 to DR-0652. No new op, kind, field or via; the pending file is per clone and never committed. Data:
+the first catch-up writes the window's meetings in one write.
 
 ## Steps
 
 1. PR 1, "Make the ledger's meetings from calendar records (one-way door)", on #219: `ledger/calendar.py`, the
-   writer's `calendar` change, `docket ledger calendar`; proven by `test_ledger_calendar.py`.
-2. PR 2, "Make meetings at each promotion": `Gate.promote` runs the step, `docket staging promote` prints its line,
-   the Staging page runs it too; proven by the example calendar's `test_with_docket.py`.
+   writer's `calendar` change, the pending file, `docket ledger calendar`; proven by `test_ledger_calendar.py`.
+2. PR 2, "Make meetings at each promotion": `Gate.promote` notes and runs the step, `docket staging promote` prints its
+   line, the Staging page runs it too; proven by the example calendar's `test_with_docket.py`.
 
 ## Tests
 
-- PR 1, invented people: each field; times either side of the 25 October DST change; each left-out case named while
-  the rest are written; a move, a rename, a cancellation, a show-as-only version; an archived meeting's idle set;
-  joins a minute off, by case and spaces, from two candidates, onto an archived meeting, from a key that continues one
-  already; a split never rejoined, its key given an add; a removed meeting staying removed; the same records on two
-  clones in both orders; the catch-up never setting; `--dry-run`; perf, 300 records into 2,000 meetings under 2 s.
-- PR 2: the example week through close, promotion and the step, the Friday sync cancelled in a second run; a
-  pulled run making no op; a failing step leaving the promotion; the Staging page; perf, 30 records under 0.5 s.
+- PR 1, invented people: each field; the header read, a body after its blank line not; both sides of the 25 October
+  DST change; each left-out case named, the rest written; a move, a rename, a cancellation, a show-as-only version; an
+  archived meeting's idle set; joins a minute off, by case and spaces, from two candidates, onto an archived meeting,
+  from a key that continues one; both near misses; one undo's removal and split kept, a batch's and the step's write's
+  done again; two clones in both orders; the catch-up never setting; perf, 300 records into 2,000 meetings under 2 s.
+- PR 2: the example week through promotion, its Friday sync cancelled in a second run; a moved event's two versions
+  in one promotion; a stopped step replayed with its sets; a pending rid after a full revert; perf, 30 under 0.5 s.
 
 ## Docs
 
@@ -140,10 +138,12 @@ reads; `packages/docket/README.md`'s `docket ledger calendar`; glossary: join; a
 ## Risks
 
 - An event deleted, or moved out of the weeks read, keeps its meeting: accepted, as todo.py did; the sync cancels it
-  by hand. A renamed series' old meetings don't join: named in the dry run, joined by hand.
-- Two clones promoting one week before they sync: one meeting per event, renumbered only if their ledgers differed.
-- An import reverted after the catch-up joined its meetings: undo the catch-up's batch first (#202).
+  by hand. A renamed series' old meetings don't join: named as near misses, joined by hand.
+- Two clones harvesting minutes apart with the event changed between: the older version's set can sort last and win
+  until the next version corrects it. Rare, accepted (DR-0647).
+- A reset by undo instead of `--revert` would read meetings it took out one by one as removed: resets revert.
 
 ## Plan review
 
-Not reviewed yet: `review-plan` runs next.
+Round 1: three majors (one version per rid, a stopped step's sets replayed, which undos count) and four minors (the
+header and the contract keys, the cross-clone race, same-day near misses, the import's reason), all fixed in place.
