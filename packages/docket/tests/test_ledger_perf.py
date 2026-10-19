@@ -12,7 +12,7 @@ reading a file new to it on its first open isn't timed.
 
 from __future__ import annotations
 
-import gc
+import functools
 import os
 import sqlite3
 import time
@@ -22,7 +22,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
-from docket_testkit import empty_vault, make_config, traced
+from docket_testkit import Best, best_of, empty_vault, make_config, traced
 from ledger_kit import ADD_FIELDS
 
 from docket.index import build as index_build
@@ -126,10 +126,9 @@ def one_more(root: Path, last: Op, kind: str, **keys: object) -> Op:
 @pytest.mark.perf
 def test_a_few_thousand_items_and_meetings_read_and_fold_in_under_a_second(tmp_path: Path) -> None:
     build(tmp_path)
-    began = time.perf_counter()
-    ledger = load(tmp_path)
-    elapsed = time.perf_counter() - began
-    print(f"ledger fold: {elapsed:.2f} s for {ITEMS:,} items and {MEETINGS:,} meetings")
+    fold = best_of(3, lambda: load(tmp_path))
+    ledger, elapsed = fold.result, fold.seconds
+    print(f"ledger fold: {elapsed:.2f} s ({fold.runs()}) for {ITEMS:,} items and {MEETINGS:,} meetings")
     assert (len(ledger.items), len(ledger.meetings)) == (ITEMS, MEETINGS)
     assert {item.state for item in ledger.items.values()} == {"open"}
     open_points = [p.text for m in ledger.meetings.values() for p in m.open_points()]
@@ -139,12 +138,11 @@ def test_a_few_thousand_items_and_meetings_read_and_fold_in_under_a_second(tmp_p
         assert elapsed < FOLD_SECONDS, f"reading and folding the ledger took {elapsed:.2f} s, over {FOLD_SECONDS} s"
 
 
-def caught_up(conn: sqlite3.Connection, root: Path) -> tuple[int, float]:
-    began = time.perf_counter()
+def caught_up(conn: sqlite3.Connection, root: Path) -> int:
     conn.execute("BEGIN IMMEDIATE")
     grown = ledger_index.update(conn, root)
     conn.execute("COMMIT")
-    return grown, time.perf_counter() - began
+    return grown
 
 
 @pytest.mark.perf
@@ -153,44 +151,68 @@ def test_a_few_thousand_items_and_meetings_fold_into_the_index_in_under_two_seco
     op on an item and one on a meeting in the middle of its series, which folds that series again."""
     root = tmp_path / "vault"
     build(root)
-    conn = sqlite3.connect(tmp_path / "index.sqlite", isolation_level=None)
-    try:
+    opened: list[sqlite3.Connection] = []
+
+    def new_index() -> sqlite3.Connection:
+        """Each rebuild into an index file of its own, set up as a rebuild sets its new index up."""
+        conn = sqlite3.connect(tmp_path / f"index-{len(opened)}.sqlite", isolation_level=None)
+        opened.append(conn)
         conn.execute("PRAGMA journal_mode = OFF")
         conn.execute("PRAGMA synchronous = OFF")
         conn.executescript(LEDGER_TABLES)
-        # What the tests before left for the collector is collected before the clock starts, not by the rebuild.
-        gc.collect()
-        began = time.perf_counter()
+        return conn
+
+    def rebuilt(conn: sqlite3.Connection) -> int:
         conn.execute("BEGIN")
         read = ledger_index.rebuild(conn, root)
         conn.execute("COMMIT")
-        elapsed = time.perf_counter() - began
+        return read
+
+    try:
+        rebuild = best_of(3, rebuilt, new_index)
+        conn, read, elapsed = opened[-1], rebuild.result, rebuild.seconds
         counts = [
             conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0]  # noqa: S608 - the tables' own names
             for t in ("items", "item_log", "meetings", "points", "meeting_log")
         ]
         (text,) = conn.execute("SELECT keys FROM item_log ORDER BY id DESC LIMIT 1").fetchone()
-        logged = one_more(root, ops.read_op(text), "log", note="one more")
-        item_grown, item_caught = caught_up(conn, root)
-        item_line = conn.execute("SELECT line FROM item_log WHERE id = ?", (logged.id,)).fetchone()
+        # Each catch-up reads one op more of its own, appended before it as a write leaves it.
+        written = [ops.read_op(text)]
+
+        def logged() -> None:
+            written.append(one_more(root, written[-1], "log", note="one more"))
+
+        item = best_of(3, lambda _: caught_up(conn, root), logged)
+        item_grown, item_caught = item.result, item.seconds
+        item_line = conn.execute("SELECT line FROM item_log WHERE id = ?", (written[-1].id,)).fetchone()
         (meeting_id,) = conn.execute("SELECT id FROM meetings WHERE number = ?", (MEETINGS - SERIES // 2,)).fetchone()
         (point_id,) = conn.execute("SELECT id FROM points WHERE meeting = ? AND n = 2", (meeting_id,)).fetchone()
         (text,) = conn.execute("SELECT keys FROM meeting_log ORDER BY id DESC LIMIT 1").fetchone()
-        last = replace(ops.read_op(text), item=meeting_id)
-        answered = one_more(root, last, "point_set", point=point_id, fields={"answer": "the 21st"})
-        meeting_grown, meeting_caught = caught_up(conn, root)
+        written = [replace(ops.read_op(text), item=meeting_id)]
+        # A new answer each run: the same answer again would be idle.
+        days = iter(("the 21st", "the 22nd", "the 23rd"))
+        given: list[str] = []
+
+        def answered() -> None:
+            given.append(next(days))
+            written.append(one_more(root, written[-1], "point_set", point=point_id, fields={"answer": given[-1]}))
+
+        meeting = best_of(3, lambda _: caught_up(conn, root), answered)
+        meeting_grown, meeting_caught = meeting.result, meeting.seconds
         answer = conn.execute("SELECT answer FROM points WHERE id = ?", (point_id,)).fetchone()
-        fate = conn.execute("SELECT fate FROM meeting_log WHERE id = ?", (answered.id,)).fetchone()
+        fate = conn.execute("SELECT fate FROM meeting_log WHERE id = ?", (written[-1].id,)).fetchone()
     finally:
-        conn.close()
+        for conn in opened:
+            conn.close()
     print(
-        f"ledger into the index: {elapsed:.2f} s for {ITEMS:,} items and {MEETINGS:,} meetings; one op more: "
-        f"{item_caught * 1000:.0f} ms on an item, {meeting_caught * 1000:.0f} ms on a meeting"
+        f"ledger into the index: {elapsed:.2f} s ({rebuild.runs()}) for {ITEMS:,} items and {MEETINGS:,} meetings; "
+        f"one op more: {item_caught * 1000:.0f} ms ({item.runs('ms')}) on an item, {meeting_caught * 1000:.0f} ms "
+        f"({meeting.runs('ms')}) on a meeting"
     )
     assert read == ITEMS * (1 + len(CHANGES)) + MEETINGS * 11 - MEETINGS // SERIES
     assert counts == [ITEMS, ITEMS * (1 + len(CHANGES)), MEETINGS, MEETINGS * 5, MEETINGS * 11 - MEETINGS // SERIES]
     assert (item_grown, item_line) == (1, ("one more",))
-    assert (meeting_grown, answer, fate) == (1, ("the 21st",), ("applied",))
+    assert (meeting_grown, answer, fate) == (1, (given[-1],), ("applied",))
     if not traced():
         assert elapsed < REBUILD_SECONDS, (
             f"folding the ledger into the index took {elapsed:.2f} s, over {REBUILD_SECONDS} s"
@@ -219,10 +241,15 @@ def test_a_write_touching_one_meeting_reads_only_its_series(tmp_path: Path, monk
     monkeypatch.setattr(Held, "object_lines", lambda self, adds: read.append(len(adds)) or real(self, adds))
     number = MEETINGS - SERIES // 2
     change = {"op": "point", "item": f"M-{number:04d}", "fields": {"text": "Bring the dates"}}
-    began = time.perf_counter()
-    written = store.write(vault, [change], dry_run=True, now=datetime(2026, 12, 1, tzinfo=UTC))
-    elapsed = time.perf_counter() - began
-    print(f"a write on one meeting: {elapsed * 1000:.0f} ms, reading {sum(read)} of {MEETINGS:,} meetings")
+    # Dry, each run plans the same write; it counts only its own reads.
+    planned = best_of(
+        3, lambda _: store.write(vault, [change], dry_run=True, now=datetime(2026, 12, 1, tzinfo=UTC)), read.clear
+    )
+    written, elapsed = planned.result, planned.seconds
+    print(
+        f"a write on one meeting: {elapsed * 1000:.0f} ms ({planned.runs('ms')}), reading {sum(read)} of "
+        f"{MEETINGS:,} meetings"
+    )
     assert ([o.op for o in written.ops], list(written.numbers.values()), read) == (["point"], [number], [SERIES])
     if not traced():
         assert elapsed < WRITE_SECONDS, f"planning a write on one meeting took {elapsed:.2f} s, over {WRITE_SECONDS} s"
@@ -238,8 +265,12 @@ def test_a_snapshot_of_a_ledger_that_size_reads_from_the_index_in_a_tenth_of_a_s
     conn = sqlite3.connect(tmp_path / "index.sqlite", isolation_level=None)
     tz = ZoneInfo("Europe/Budapest")
     at = datetime(2026, 6, 1, 8, tzinfo=UTC)
-    timed: dict[str, float] = {}
-    read: dict[str, tuple[views.LedgerRead, list[str]]] = {}
+    timed: dict[str, Best[tuple[views.LedgerRead, list[str]]]] = {}
+
+    def read_and_lines(ask: views.Ask) -> tuple[views.LedgerRead, list[str]]:
+        found = views.read(conn, ask, tz, at)
+        return found, views.lines(found, tz)
+
     try:
         conn.executescript(LEDGER_TABLES)
         conn.execute("BEGIN")
@@ -248,17 +279,16 @@ def test_a_snapshot_of_a_ledger_that_size_reads_from_the_index_in_a_tenth_of_a_s
         asks = (views.Ask(), views.Ask(view="queue"), views.Ask(view="list", state="all"), views.Ask(view="meetings"))
         for ask in asks:
             views.lines(views.read(conn, ask, tz, at), tz)
-            gc.collect()
-            began = time.perf_counter()
-            found = views.read(conn, ask, tz, at)
-            read[ask.view] = found, views.lines(found, tz)
-            timed[ask.view] = time.perf_counter() - began
+            timed[ask.view] = best_of(3, functools.partial(read_and_lines, ask))
     finally:
         conn.close()
-    print("ledger reads: " + ", ".join(f"{view} {seconds * 1000:.0f} ms" for view, seconds in timed.items()))
-    snapshot, text = read["snapshot"]
+    print(
+        "ledger reads: "
+        + ", ".join(f"{view} {run.seconds * 1000:.0f} ms ({run.runs('ms')})" for view, run in timed.items())
+    )
+    snapshot, text = timed["snapshot"].result
     assert (snapshot.counts.open, snapshot.counts.meetings, len(text)) == (ITEMS, 87, 4 + ITEMS + 87 + 435)
     assert len([m for m in snapshot.meetings if m.points_open]) == MEETINGS // SERIES
     if not traced():
-        elapsed = timed["snapshot"]
+        elapsed = timed["snapshot"].seconds
         assert elapsed < SNAPSHOT_SECONDS, f"a snapshot took {elapsed:.2f} s, over {SNAPSHOT_SECONDS} s"

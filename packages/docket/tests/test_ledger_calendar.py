@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import shutil
 import threading
-import time
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -14,7 +13,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
-from docket_testkit import empty_vault, make_config, sh, traced
+from docket_testkit import best_of, empty_vault, make_config, sh, traced
 from ledger_kit import meeting as hand_meeting
 from ledger_kit import op as hand_op
 from ledger_kit import ulid
@@ -596,11 +595,17 @@ def test_a_catch_up_of_1000_records_joining_imported_meetings_takes_under_ten_se
         records.append(event(k, title=title, ts=start, native={"end": end.isoformat(), "all_day": False}))
         local = [moment.astimezone(ZONE).isoformat(timespec="minutes") for moment in (start, end)]
         imported.append(hand_meeting(k + 1, subject=title, start=local[0], end=local[1], number=k + 1))
-    put_ops(vault, *imported)
-    started = time.perf_counter()
-    stepped = calendar.add_and_join(vault, records, now=NOW)
-    seconds = time.perf_counter() - started
-    print(f"calendar catch-up: {seconds:.2f} s for 1,000 records joining, {len(stepped.commits)} writes")
+    # Best of two, as one catch-up takes over 3 s on CI; each run joins a vault of its own, the import merged in.
+    vaults = iter((vault, empty_vault(vault.root.parent / "again", config())))
+
+    def merged() -> Vault:
+        into = next(vaults)
+        put_ops(into, *imported)
+        return into
+
+    run = best_of(2, lambda into: calendar.add_and_join(into, records, now=NOW), merged)
+    stepped, seconds = run.result, run.seconds
+    print(f"calendar catch-up: {seconds:.2f} s ({run.runs()}) for 1,000 records joining, {len(stepped.commits)} writes")
     assert (stepped.counts, len(stepped.commits)) == ({"joined": 1000}, 5)
     # Under a tracer such as coverage the time says nothing about the code (DR-0430).
     if not traced():

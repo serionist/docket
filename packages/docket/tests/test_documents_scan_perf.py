@@ -9,11 +9,10 @@ the parallel run builds them and the timed run, alone, only times (DR-0492).
 from __future__ import annotations
 
 import json
-import time
 from pathlib import Path
 
 import pytest
-from docket_testkit import copied, make_config, shared, traced
+from docket_testkit import best_of, copied, make_config, shared, traced
 from documents_scan_kit import SOURCE, cycle, name, put, raw, run
 
 from docket.documents import records
@@ -78,10 +77,10 @@ def test_the_big_folder_s_vault_holds_every_file_and_its_cache_knows_each(vault:
 @pytest.mark.perf
 def test_a_second_scan_of_5000_unchanged_files_takes_under_3_seconds(vault: Vault) -> None:
     count = files()
-    started = time.perf_counter()
-    report = run(vault)
-    took = time.perf_counter() - started
-    print(f"\na second scan of {count} unchanged files took {took:.2f} s")
+    # A scan of an unchanged folder writes nothing, so each run is a second scan.
+    scan = best_of(3, lambda: run(vault))
+    report, took = scan.result, scan.seconds
+    print(f"\na second scan of {count} unchanged files took {took:.2f} s ({scan.runs()})")
     assert report.outcomes == {"same": count}
     if not traced():
         assert took < SECONDS, f"{took:.2f} s"

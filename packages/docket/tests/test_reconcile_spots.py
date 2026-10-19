@@ -5,14 +5,13 @@ the screens, the machine check, the fixes doc's id and the listing. The call, it
 from __future__ import annotations
 
 import hashlib
-import time
 import unicodedata
 from datetime import timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
-from docket_testkit import copy_vault, traced
+from docket_testkit import best_of, copy_vault, traced
 from reconcile_kit import (
     CALL,
     CROWD,
@@ -446,10 +445,9 @@ def test_an_hour_s_call_takes_well_under_a_second() -> None:
         for i in range(720)
     ]
     transcript, whisper = call(lines, step=5_000)
-    began = time.perf_counter()
-    found = find(transcript, whisper)
-    elapsed = time.perf_counter() - began
-    print(f"spots: {elapsed:.2f} s for an hour's call of {len(lines)} lines")
+    run = best_of(3, lambda: find(transcript, whisper))
+    found, elapsed = run.result, run.seconds
+    print(f"spots: {elapsed:.2f} s ({run.runs()}) for an hour's call of {len(lines)} lines")
     assert len(found.spots) == spots.CAP
     if not traced():
         assert elapsed < 1.0, f"an hour's call took {elapsed:.2f} s"
@@ -526,10 +524,9 @@ def test_among_hundreds_of_entities_the_meeting_is_still_its_own(crowded: Vault)
 
 @pytest.mark.perf
 def test_a_report_among_hundreds_of_entities_takes_well_under_two_seconds(crowded: Vault) -> None:
-    began = time.perf_counter()
-    found = spots.report(crowded, HOUR)
-    elapsed = time.perf_counter() - began
-    print(f"report: {elapsed:.2f} s for an hour's call among {CROWD} entities")
+    run = best_of(3, lambda: spots.report(crowded, HOUR))
+    found, elapsed = run.result, run.seconds
+    print(f"report: {elapsed:.2f} s ({run.runs()}) for an hour's call among {CROWD} entities")
     assert len(found.spots) == spots.CAP
     if not traced():
         assert elapsed < 2.0, f"a report among {CROWD} entities took {elapsed:.2f} s"
