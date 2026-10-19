@@ -406,5 +406,42 @@
       "idempotent_hint": false,
       "open_world_hint": false
     }
+  },
+  {
+    "name": "ledger_batch",
+    "input_schema": {
+      "properties": {
+        "by": {
+          "default": "claude",
+          "enum": [
+            "user",
+            "claude",
+            "sync"
+          ],
+          "type": "string"
+        },
+        "dry_run": {
+          "default": false,
+          "type": "boolean"
+        },
+        "ops": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ops"
+      ],
+      "type": "object"
+    },
+    "annotations": {
+      "read_only_hint": false,
+      "destructive_hint": false,
+      "idempotent_hint": false,
+      "open_world_hint": false
+    }
   }
 ]

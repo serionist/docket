@@ -22,7 +22,8 @@ from docket.ledger import fold, store
 from docket.vault import forgotten
 from docket.vault.vault import Vault
 
-ADD: dict[str, Any] = {"op": "add", "fields": dict(ADD_FIELDS)}
+# Forced: these tests add the one ask more than once on purpose, past the look-alike check (DR-0642).
+ADD: dict[str, Any] = {"op": "add", "fields": dict(ADD_FIELDS), "force": True}
 
 
 @pytest.fixture

@@ -21,6 +21,12 @@ Meetings, points and streams (#199): `meeting` adds one, or with an event the le
 add carrying that event, or with `continues` joins an unkeyed meeting (DR-0621); `stream` adds or sets one by name;
 `point`, `point_set`, `keep` and `point_item` change a meeting's talking points; `rollover` rolls the open points of
 the meetings that are due to the next of their series (DR-0624).
+
+A write is a batch (#201): the changes `BATCH` names, each with `by` (DR-0639), `as` on one that makes something and
+`$name` standing for its id in a later one (DR-0640); `done` and `drop` with an outcome, `notes` appending, `archive`
+with no item archiving what is due (DR-0641), an add refused when it looks like an open item and a keyless meeting
+when it doubles one (DR-0642). A point's n is its place when the batch began. A dry run goes on past a refusal and
+lists each one, the changes naming a refused change's `$name` marked as hanging on it.
 """
 
 from __future__ import annotations
@@ -29,7 +35,7 @@ import heapq
 import re
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, NoReturn, cast
@@ -86,6 +92,41 @@ CHANGES: dict[str, tuple[str, ...]] = {
     "point_item": ("item", "point", "fields", "note"),
     "rollover": ("note",),
 }
+# The changes a batch takes, and the keys each takes besides `op` (DR-0639): the writer's own, `notes` (a set of the
+# whole text), `outcome` on a close, `force` on an add (DR-0642), `as` on the four that make something (DR-0640), and
+# `by` on any. The names and keys are a door: they only gain (tests/fixtures/ledger-batch.json).
+BATCH: dict[str, tuple[str, ...]] = {
+    "add": ("fields", "note", "as", "force", "by"),
+    "set": ("item", "fields", "note", "by"),
+    "log": ("item", "note", "by"),
+    "triage": ("item", "verdict", "note", "by"),
+    "snooze": ("item", "until", "note", "by"),
+    "done": ("item", "note", "outcome", "by"),
+    "drop": ("item", "note", "outcome", "by"),
+    "reopen": ("item", "note", "by"),
+    "notes": ("item", "append", "set", "note", "by"),
+    "material": ("item", "ref", "label", "remove", "note", "by"),
+    "archive": ("item", "note", "by"),
+    "undo": ("of", "batch", "note", "by"),
+    "meeting": ("fields", "note", "as", "by"),
+    "stream": ("fields", "note", "by"),
+    "point": ("item", "fields", "note", "as", "by"),
+    "point_set": ("item", "point", "fields", "note", "by"),
+    "keep": ("item", "note", "by"),
+    "point_item": ("item", "point", "fields", "note", "as", "by"),
+    "rollover": ("note", "by"),
+}
+# A name `as` gives, and a `$name` naming it, read only in these keys of a change and of its fields (DR-0640).
+NAME = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+NAMED = re.compile(r"^\$([a-z][a-z0-9_]{0,31})$")
+REFS = ("item", "point", "of")
+FIELD_REFS = ("item", "meeting", "continues")
+# todo.py's: an archive is due this long after a close or a meeting's start (DR-0641).
+ARCHIVE_AFTER = timedelta(days=14)
+# todo.py's look-alike: titles sharing this much of the shorter one's words of this many letters or more (DR-0642).
+ALIKE_SHARE = 0.6
+ALIKE_LETTERS = 4
+WORD_RUN = re.compile(r"\w+")
 MEETING_NUMBER = re.compile(r"^M-?(\d{1,9})$", re.IGNORECASE)
 POINT_NUMBER = re.compile(r"^#?(\d{1,4})$")
 SLUG = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
@@ -117,14 +158,40 @@ class LedgerError(DocketError):
     """A write refused: nothing of it was written."""
 
 
+class RefusedError(LedgerError):
+    """One change refused, by its place and its op, and why."""
+
+    def __init__(self, n: int, kind: str, why: str) -> None:
+        super().__init__(f"change {n} ({kind}): {why}; nothing written")
+        self.n, self.kind, self.why = n, kind, why
+
+
+@dataclass(frozen=True)
+class Refusal:
+    """A change a dry run couldn't make: its place, its op and why; `on`, the refused change whose `$name` it names,
+    when it hangs on one and wasn't checked."""
+
+    n: int
+    op: str
+    why: str
+    on: int | None = None
+
+
 @dataclass(frozen=True)
 class Written:
-    """What a write wrote, or with a dry run would write: its ops in order, its commit, and the number of each item
-    and meeting it touched."""
+    """What a write wrote, or with a dry run would write: its ops in order, its commit, the number of each item and
+    meeting it touched; then per change the ops it wrote (a write's renumbers are in `ops` only); each `as` name and
+    the id it names; how each id an op or a name touched reads (A-0302, M-0040, M-0040#3, a stream's name); what the
+    writer says of a change beyond its ops, by its place; and a dry run's refusals."""
 
     ops: tuple[Op, ...]
     commit: str | None
     numbers: dict[str, int] = field(default_factory=dict[str, int])
+    changes: tuple[tuple[Op, ...], ...] = ()
+    names: dict[str, str] = field(default_factory=dict[str, str])
+    labels: dict[str, str] = field(default_factory=dict[str, str])
+    remarks: tuple[tuple[int, str], ...] = ()
+    refused: tuple[Refusal, ...] = ()
 
 
 def one_line(text: str) -> str:
@@ -149,8 +216,8 @@ def write(
     dry_run: bool = False,
     now: datetime | None = None,
 ) -> Written:
-    """Make the changes, all of them or none, as one write by `by` through `via`; with `dry_run`, check them and say
-    what would be written, writing nothing."""
+    """Make the changes, all of them or none, as one write by `by` through `via`, unless a change gives its own; with
+    `dry_run`, check every change and say what would be written and what is refused, writing nothing."""
     if by not in ops.BY or via not in ops.VIA:
         raise LedgerError(f"by is one of {', '.join(ops.BY)}, via one of {', '.join(ops.VIA)}")
     moment = now or datetime.now(UTC)
@@ -158,16 +225,16 @@ def write(
         ops.folder(vault.root)
         # The tables are asked only while the write is planned: its commit runs with the index free.
         with ledger_tables(vault) as conn:
-            plan = _Write(vault, Held(conn), by, via, moment)
+            plan = _Batch(vault, Held(conn), by, via, moment, dry_run=dry_run)
             plan.renumber()
             for n, change in enumerate(changes, start=1):
-                plan.change(n, change)
+                plan.step(n, change)
             new = tuple(plan.new)
-            numbers = plan.numbers()
+            written = plan.written(new)
             message = plan.message() if new else ""
         if dry_run or not new:
-            return Written(new, None, numbers)
-        return Written(new, commit_ops(vault, new, message), numbers)
+            return written
+        return replace(written, commit=commit_ops(vault, new, message))
 
 
 def _is_roll(op: Op) -> bool:
@@ -324,7 +391,7 @@ class _Write:
         return out
 
     def refuse(self, n: int, why: str) -> NoReturn:
-        raise LedgerError(f"change {n} ({self.kind}): {why}; nothing written")
+        raise RefusedError(n, self.kind, why)
 
     def resolve(self, n: int, ref: object) -> str:
         """The item a change names, by its id or its A- number."""
@@ -614,14 +681,9 @@ class _Write:
     # -- the changes ------------------------------------------------------------------------------------------------
 
     def change(self, n: int, change: Mapping[str, Any]) -> None:
+        """One of the writer's changes, its op and keys checked already against `BATCH` (`_Batch.batch_change`)."""
         kind = change.get("op")
         self.kind = str(kind)
-        allowed = CHANGES.get(kind) if isinstance(kind, str) else None
-        if allowed is None:
-            self.refuse(n, f"op is one of {', '.join(CHANGES)}")
-        extra = sorted(str(key) for key in change if key not in ("op", *allowed))
-        if extra:
-            self.refuse(n, f"{kind} takes only {', '.join(allowed)}, not {', '.join(extra)}")
         note = self.note(n, change.get("note"))
         if kind == "add":
             self.add_item(n, self.fields(n, change.get("fields"), adding=True), note)
@@ -1218,6 +1280,323 @@ def _due(now: datetime, end: datetime, outcome: str | None, response: str | None
     """Whether a meeting's open points roll now, by todo.py's rule (DR-0624): a cancelled meeting at once, one that is
     over with an outcome, any other a day after its end."""
     return response == "cancelled" or (end <= now and (bool(outcome) or now - end >= ROLL_AFTER))
+
+
+class _Batch(_Write):
+    """A write as a batch (#201): each change's own `by`, `as` and `$name`, the changes the writer makes of a batch's
+    own (an outcome, notes appended, the archives due), the look-alike and double-meeting refusals, a point's n as the
+    batch began, what a rollover couldn't roll, and in a dry run every refusal, the refused change's ops taken back.
+    Every change still goes through `_Write.change`."""
+
+    def __init__(self, vault: Vault, held: Held, by: By, via: Via, now: datetime, *, dry_run: bool) -> None:
+        super().__init__(vault, held, by, via, now)
+        self.write_by: By = by
+        self.dry_run = dry_run
+        self.names: dict[str, str] = {}
+        # A refused change's name, and the change, so a later `$name` naming it hangs on it (a dry run's only).
+        self.lost: dict[str, int] = {}
+        self.per_change: list[tuple[Op, ...]] = []
+        self.remarks: list[tuple[int, str]] = []
+        self.refusals: list[Refusal] = []
+        # Each meeting's standing points as the batch began, by id: a point's n is read against them (DR-0640).
+        self.began = {m.id: [p.id for p in m.points] for m in self.objects().meetings.values()}
+        self._held_open: dict[str, tuple[str, str, str]] | None = None
+
+    def step(self, n: int, change: Mapping[str, Any]) -> None:
+        """One change of the batch, all of it or none: refused, it refuses the write, or in a dry run is listed with
+        its ops taken back."""
+        kind = str(change.get("op"))
+        start, given, given_meetings = len(self.new), dict(self.given), dict(self.given_meetings)
+        name = change.get("as")
+        hangs = self.hangs_on(change)
+        if hangs is not None:
+            self.refusals.append(
+                Refusal(n, kind, f"it names ${hangs[0]}, which change {hangs[1]} would give", hangs[1])
+            )
+        else:
+            try:
+                self.batch_change(n, change)
+            except RefusedError as e:
+                if not self.dry_run:
+                    raise RefusedError(n, kind, e.why) from None
+                self.take_back(start, given, given_meetings)
+                self.refusals.append(Refusal(n, kind, e.why))
+            else:
+                self.per_change.append(tuple(self.new[start:]))
+                return
+        if isinstance(name, str):
+            self.lost[name] = n
+        self.per_change.append(())
+
+    def hangs_on(self, change: Mapping[str, Any]) -> tuple[str, int] | None:
+        """The first `$name` a change gives that a refused change would have named, and that change."""
+        fields = change.get("fields")
+        values = [change.get(key) for key in REFS]
+        if isinstance(fields, Mapping):
+            values += [cast(Mapping[str, Any], fields).get(key) for key in FIELD_REFS]
+        for value in values:
+            m = NAMED.fullmatch(value) if isinstance(value, str) else None
+            if m is not None and m.group(1) in self.lost:
+                return m.group(1), self.lost[m.group(1)]
+        return None
+
+    def take_back(self, start: int, given: dict[int, str], given_meetings: dict[int, str]) -> None:
+        """A refused change's ops out of the write again, as if it was never asked: a dry run goes on without it."""
+        dropped = self.new[start:]
+        del self.new[start:]
+        self.given, self.given_meetings = given, given_meetings
+        # Each op's line went last onto its object's lines, and a meeting's or a stream's add joined its group.
+        for op in reversed(dropped):
+            self.lines[op.item].pop()
+            self.same.pop(op.id, set[str]()).discard(op.id)
+        self.object_adds -= {op.id for op in dropped}
+        self._objects = None
+
+    def batch_change(self, n: int, change: Mapping[str, Any]) -> None:
+        kind = change.get("op")
+        self.kind = str(kind)
+        if not isinstance(kind, str) or kind not in BATCH:
+            self.refuse(n, f"op is one of {', '.join(BATCH)}")
+        extra = sorted(str(key) for key in change if key not in ("op", *BATCH[kind]))
+        if extra:
+            self.refuse(n, f"{kind} takes only {', '.join(BATCH[kind])}, not {', '.join(extra)}")
+        by = change.get("by", self.write_by)
+        if by not in ops.BY:
+            self.refuse(n, f"by is one of {', '.join(ops.BY)}")
+        self.by = by
+        name = change.get("as")
+        if name is not None and (not isinstance(name, str) or not NAME.fullmatch(name)):
+            self.refuse(n, "as is a name: a lowercase letter, then lowercase letters, digits or underscores")
+        if name in self.names or name in self.lost:
+            self.refuse(n, f"as {name} is given twice in the batch")
+        inner = self.substituted(n, {key: value for key, value in change.items() if key not in ("as", "by")})
+        start = len(self.new)
+        if kind == "add":
+            self.add_change(n, inner)
+        elif kind in ("done", "drop"):
+            outcome = inner.pop("outcome", None)
+            if outcome not in (None, ""):
+                self.change(n, {"op": "set", "item": inner.get("item"), "fields": {"outcome": outcome}})
+            self.change(n, inner)
+        elif kind == "notes":
+            self.notes_change(n, inner)
+        elif kind == "archive" and inner.get("item") is None:
+            self.archive_due(n, inner.get("note"))
+        elif kind == "meeting":
+            self.meeting_change(n, inner)
+        elif kind in ("point_set", "point_item"):
+            self.change(n, self.point_as_began(n, inner))
+        else:
+            self.change(n, inner)
+            if kind == "rollover":
+                self.stranded(n)
+        if name is not None:
+            self.names[name] = self.made(kind, self.new[start:], inner)
+
+    def substituted(self, n: int, change: dict[str, Any]) -> dict[str, Any]:
+        """The change with each `$name` in its references given as the id it names (DR-0640)."""
+        for key in REFS:
+            if key in change:
+                change[key] = self.named(n, change[key])
+        fields = change.get("fields")
+        if isinstance(fields, Mapping):
+            given = cast(Mapping[str, Any], fields)
+            change["fields"] = {key: self.named(n, v) if key in FIELD_REFS else v for key, v in given.items()}
+        return change
+
+    def named(self, n: int, value: object) -> object:
+        m = NAMED.fullmatch(value) if isinstance(value, str) else None
+        if m is None:
+            return value
+        if m.group(1) not in self.names:
+            self.refuse(n, f"{value} isn't given by an earlier change's as")
+        return self.names[m.group(1)]
+
+    def made(self, kind: str, written: Sequence[Op], change: Mapping[str, Any]) -> str:
+        """The id a change's `as` names: the item an add or a point's item made, the point a point added, the meeting
+        a meeting change added, set or joined."""
+        if kind in ("add", "point_item"):
+            return next(op.id for op in written if op.op == "add")
+        if kind == "point":
+            return next(op.id for op in written if op.op == "point")
+        objects = self.objects()
+        made = next((op for op in written if op.op in ("meeting", "set")), None)
+        if made is not None:
+            return objects.owner[made.id if made.op == "meeting" else made.item]
+        # Nothing changed, or an archived meeting's update: the meeting its event names.
+        event = cast(Mapping[str, Any], change.get("fields"))["event"]
+        return objects.owner[objects.events[one_line(event)]]
+
+    def add_change(self, n: int, change: dict[str, Any]) -> None:
+        """An add, refused when it looks like an open item, as todo.py's was, unless forced; the open items with its
+        source and another title are named (DR-0642)."""
+        force = change.pop("force", False)
+        if not isinstance(force, bool):
+            self.refuse(n, "force is true or false")
+        # Its own checks first, as todo.py checked an add before it looked for one like it.
+        likely, same = self.look_alikes(self.fields(n, change.get("fields"), adding=True))
+        if likely and not force and self.via != "import":
+            named = "; ".join(f"{self.label(item_id)} {_cut(title, SUMMARY)}" for item_id, title in likely)
+            self.refuse(n, f"looks like an open item already: {named}; log the news there, or add with force true")
+        self.change(n, change)
+        self.remarks += [(n, f"{self.label(i)} comes from the same source: {_cut(t, SUMMARY)}") for i, t in same]
+
+    def look_alikes(self, fields: Mapping[str, str | None]) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+        """todo.py's look-alikes of an add's fields as written, as (id, title): the open items with (its source or its
+        who) and a title sharing 60% of the shorter one's long words; then the other open items with its source."""
+        words, who, source = _title_words(str(fields["title"])), str(fields["who"]).lower(), fields["source"]
+        likely: list[tuple[str, str]] = []
+        same: list[tuple[str, str]] = []
+        for item_id, (other, their_who, their_source) in sorted(self.open_rows().items()):
+            if their_source != source and their_who.lower() != who:
+                continue
+            if _alike(words, _title_words(other)):
+                likely.append((item_id, other))
+            elif their_source == source:
+                same.append((item_id, other))
+        return likely, same
+
+    def open_rows(self) -> dict[str, tuple[str, str, str]]:
+        """The open and snoozed items' titles, whos and sources: the tables', with the items this write has read as
+        it leaves them."""
+        if self._held_open is None:
+            self._held_open = {i: (t, w, s) for i, t, w, s in self.held.open_items()}
+        rows = dict(self._held_open)
+        for item_id in self.lines:
+            if item_id in self.object_adds:
+                continue
+            item = self.fold(item_id).item
+            if item is not None and item.state in ("open", "snoozed"):
+                rows[item_id] = (item.title, item.who, item.source)
+            else:
+                rows.pop(item_id, None)
+        return rows
+
+    def notes_change(self, n: int, change: dict[str, Any]) -> None:
+        """todo.py's notes: `append` a line, or `set` the whole text, null clearing it; written as a set of the whole
+        text (DR-0611)."""
+        if ("append" in change) == ("set" in change):
+            self.refuse(n, "notes takes append, a line to add, or set, the whole text")
+        item_id = self.resolve(n, change.get("item"))
+        text = change.get("set")
+        if "append" in change:
+            line = change["append"]
+            if not isinstance(line, str) or clean_text(line) is None:
+                self.refuse(n, "append is text")
+            now = self.standing(item_id).notes
+            text = f"{now}\n{line}" if now else line
+        keys = {"note": change["note"]} if "note" in change else {}
+        self.change(n, {"op": "set", "item": item_id, "fields": {"notes": text}, **keys})
+
+    def archive_due(self, n: int, note: object) -> None:
+        """Every archive that is due (DR-0641): each item closed 14 days back or more, then each meeting started 14
+        days back or more with no open point, skipping one whose archive was undone."""
+        cutoff = self.day - ARCHIVE_AFTER
+        keys = {"note": note} if note is not None else {}
+        for item_id in self.held.closed_by(cutoff):
+            folded = self.fold(item_id)
+            item = folded.item
+            closed = item is not None and item.state in CLOSED and item.closed is not None and item.closed <= cutoff
+            if item is None or not closed or item.archived or _archive_undone(folded):
+                continue
+            self.change(n, {"op": "archive", "item": item_id, **keys})
+        objects = self.objects()
+        due = [
+            m.id for m in sorted(objects.meetings.values(), key=lambda m: (m.start, m.id))
+            if not m.archived and not m.open_points() and m.start.astimezone(self.zone).date() <= cutoff
+            and not _archive_undone(objects.folds[m.id])
+        ]  # fmt: skip
+        for meeting_id in due:
+            self.change(n, {"op": "archive", "item": meeting_id, **keys})
+
+    def meeting_change(self, n: int, change: dict[str, Any]) -> None:
+        """A meeting change; a keyless one refused when a meeting that stands has its start and subject (DR-0642)."""
+        given = cast(Mapping[str, Any], change.get("fields")) if isinstance(change.get("fields"), Mapping) else None
+        if given is not None and all(given.get(key) in (None, "", "-") for key in ("event", "continues")):
+            # The checks a new meeting meets first, so a double is named only of a meeting that could be added.
+            fields = self.meeting_fields(n, given)
+            self.need_meeting_fields(n, fields)
+            start, end = _when(fields["start"]), _when(fields["end"])
+            if end < start:
+                self.refuse(n, "end is before start")
+            meetings = self.objects().meetings.values()
+            twin = next((m for m in meetings if m.start == start and _same_subject(m.subject, fields["subject"])), None)
+            if twin is not None:
+                label = self.meeting_label(twin)
+                self.refuse(n, f"{label} has that start and subject already; change it there, or give it an event")
+        self.change(n, change)
+
+    def point_as_began(self, n: int, change: dict[str, Any]) -> dict[str, Any]:
+        """A point named by its n, as the point that held the place when the batch began (DR-0640)."""
+        ref = change.get("point")
+        plain = isinstance(ref, (str, int)) and not isinstance(ref, bool)
+        m = POINT_NUMBER.fullmatch(str(ref).strip()) if plain else None
+        if m is None:
+            return change
+        meeting = self.resolve_meeting(n, change.get("item"))
+        began = self.began.get(meeting.id)
+        if began is None:
+            return change
+        k, label = int(m.group(1)), self.meeting_label(meeting)
+        if not 1 <= k <= len(began):
+            self.refuse(n, f"{label} had {len(began)} point(s) when the batch began; no point {k}")
+        if began[k - 1] not in {p.id for p in meeting.points}:
+            self.refuse(n, f"{label}'s point {k} was taken off earlier in the batch")
+        return {**change, "point": began[k - 1]}
+
+    def stranded(self, n: int) -> None:
+        """The meetings a rollover couldn't roll: over, not archived, with open points and no next meeting, as todo.py's
+        meeting rollover listed them (DR-0641)."""
+        for meeting in sorted(self.objects().meetings.values(), key=lambda m: (m.start, m.id)):
+            still = meeting.open_points()
+            if still and not meeting.archived and meeting.end <= self.now and self.next_in_series(meeting) is None:
+                what = f"{self.meeting_label(meeting)} {_cut(meeting.subject, 50)}"
+                self.remarks.append((n, f"{what}: {len(still)} open point(s), no next meeting"))
+
+    def written(self, new: tuple[Op, ...]) -> Written:
+        """What the batch wrote, or would write, with how each id it touched or named reads."""
+        labels: dict[str, str] = {}
+        for op in new:
+            if op.item not in labels:
+                labels[op.item] = self.label(op.item)
+            if op.op in ("point", "point_set"):
+                point = op.id if op.op == "point" else str(op.point)
+                labels[point] = self.point_label(op.item, point)
+        for named in self.names.values():
+            if named not in labels:
+                labels[named] = self.label(named)
+        return Written(
+            new, None, self.numbers(), tuple(self.per_change), dict(self.names), labels, tuple(self.remarks),
+            tuple(self.refusals),
+        )  # fmt: skip
+
+    def point_label(self, add_id: str, point_id: str) -> str:
+        """A point as `M-0040#3`, its place among its meeting's standing points; one that stands nowhere now, as its
+        meeting's."""
+        objects = self.objects()
+        meeting = objects.meetings.get(objects.owner.get(add_id, ""))
+        if meeting is None:
+            return self.label(add_id)
+        place = next((k for k, p in enumerate(meeting.points, start=1) if p.id == point_id), None)
+        return f"{self.meeting_label(meeting)}#{place}" if place is not None else self.meeting_label(meeting)
+
+
+def _cut(text: str, width: int) -> str:
+    return text if len(text) <= width else text[: width - 1] + "…"
+
+
+def _title_words(text: str) -> set[str]:
+    return {w for w in WORD_RUN.findall(text.lower()) if len(w) >= ALIKE_LETTERS}
+
+
+def _alike(words: set[str], other: set[str]) -> bool:
+    """todo.py's: both have words, and they share at least 60% of the shorter one's."""
+    return bool(words and other) and len(words & other) / min(len(words), len(other)) >= ALIKE_SHARE
+
+
+def _archive_undone(folded: Folded | ObjectFold) -> bool:
+    """Whether an archive of it was undone: the sync then leaves it be (DR-0615, DR-0624)."""
+    return any(line.op.op == "archive" and line.op.id in folded.undone for line in folded.lines)
 
 
 def _undo_family(op: Op) -> str | None:

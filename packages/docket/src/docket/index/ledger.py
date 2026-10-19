@@ -757,6 +757,32 @@ class Held:
             for i, start, series, subject, organiser in self.conn.execute(sql, (utc_text(after),))
         ]
 
+    def open_items(self) -> list[tuple[str, str, str, str]]:
+        """The open and snoozed items, by id: each one's id, title, who and source, for an add's look-alikes
+        (DR-0642)."""
+        sql = "SELECT id, title, who, source FROM items WHERE state IN ('open', 'snoozed') ORDER BY id"
+        return [(str(i), str(t), str(w), str(s)) for i, t, w, s in self.conn.execute(sql)]
+
+    def closed_by(self, day: date) -> list[str]:
+        """The closed items not archived that closed on the day or before, by id: an archive is due for each
+        (DR-0641)."""
+        sql = "SELECT id FROM items WHERE state IN ('done', 'dropped') AND archived = 0 AND closed <= ? ORDER BY id"
+        return [str(r) for (r,) in self.conn.execute(sql, (day.isoformat(),))]
+
+    def meetings_at(self, start: datetime) -> list[str]:
+        """The meetings starting at a moment, by id: where a keyless meeting's double would be (DR-0642)."""
+        sql = "SELECT id FROM meetings WHERE utc = ? ORDER BY id"
+        return [str(r) for (r,) in self.conn.execute(sql, (utc_text(start),))]
+
+    def archivable(self, day: date) -> list[str]:
+        """The meetings not archived that started on the day or before and have no open point, by start: an archive
+        may be due for each (DR-0641)."""
+        sql = (
+            "SELECT id FROM meetings m WHERE archived = 0 AND day <= ? AND NOT EXISTS (SELECT 1 FROM points p WHERE "
+            "p.meeting = m.id AND p.n IS NOT NULL AND p.state = 'open') ORDER BY utc, id"
+        )
+        return [str(r) for (r,) in self.conn.execute(sql, (day.isoformat(),))]
+
 
 @dataclass(frozen=True)
 class Change:

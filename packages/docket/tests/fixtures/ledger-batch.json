@@ -1,0 +1,117 @@
+{
+  "add": [
+    "fields",
+    "note",
+    "as",
+    "force",
+    "by"
+  ],
+  "set": [
+    "item",
+    "fields",
+    "note",
+    "by"
+  ],
+  "log": [
+    "item",
+    "note",
+    "by"
+  ],
+  "triage": [
+    "item",
+    "verdict",
+    "note",
+    "by"
+  ],
+  "snooze": [
+    "item",
+    "until",
+    "note",
+    "by"
+  ],
+  "done": [
+    "item",
+    "note",
+    "outcome",
+    "by"
+  ],
+  "drop": [
+    "item",
+    "note",
+    "outcome",
+    "by"
+  ],
+  "reopen": [
+    "item",
+    "note",
+    "by"
+  ],
+  "notes": [
+    "item",
+    "append",
+    "set",
+    "note",
+    "by"
+  ],
+  "material": [
+    "item",
+    "ref",
+    "label",
+    "remove",
+    "note",
+    "by"
+  ],
+  "archive": [
+    "item",
+    "note",
+    "by"
+  ],
+  "undo": [
+    "of",
+    "batch",
+    "note",
+    "by"
+  ],
+  "meeting": [
+    "fields",
+    "note",
+    "as",
+    "by"
+  ],
+  "stream": [
+    "fields",
+    "note",
+    "by"
+  ],
+  "point": [
+    "item",
+    "fields",
+    "note",
+    "as",
+    "by"
+  ],
+  "point_set": [
+    "item",
+    "point",
+    "fields",
+    "note",
+    "by"
+  ],
+  "keep": [
+    "item",
+    "note",
+    "by"
+  ],
+  "point_item": [
+    "item",
+    "point",
+    "fields",
+    "note",
+    "as",
+    "by"
+  ],
+  "rollover": [
+    "note",
+    "by"
+  ]
+}

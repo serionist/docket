@@ -21,7 +21,8 @@ from docket.ledger.store import LedgerError, write
 from docket.vault.config import RedactionPattern, VaultConfig
 from docket.vault.vault import Vault
 
-ADD: dict[str, Any] = {"op": "add", "fields": dict(ADD_FIELDS)}
+# Forced: these tests add the one ask more than once on purpose, past the look-alike check (DR-0642).
+ADD: dict[str, Any] = {"op": "add", "fields": dict(ADD_FIELDS), "force": True}
 PILOT: dict[str, Any] = {"op": "stream", "fields": {"name": "pilot", "status": "active"}}
 
 
@@ -584,7 +585,7 @@ REFUSALS: list[tuple[dict[str, Any], str]] = [
     ({"op": "point_set", "item": "M-0001", "point": 1, "fields": {"proposed": "yes"}}, "proposed is true or false"),
     (
         {"op": "point_set", "item": "M-0001", "point": 9, "fields": {"state": "open"}},
-        "M-0001 has 1 point(s); no point 9",
+        "M-0001 had 1 point(s) when the batch began; no point 9",
     ),
     ({"op": "point_set", "item": "M-0001", "point": "nope", "fields": {"state": "open"}}, "M-0001 has no point nope"),
     ({"op": "point_set", "item": "M-0001", "point": True, "fields": {"state": "open"}}, "M-0001 has no point -"),
@@ -592,7 +593,7 @@ REFUSALS: list[tuple[dict[str, Any], str]] = [
     ({"op": "point_item", "item": "M-0001", "point": 1, "fields": "x"}, "fields is kind, who or stream"),
     ({"op": "point_item", "item": "M-0001", "point": 1, "fields": {"title": "x"}}, "takes kind, who and stream"),
     ({"op": "keep", "item": "M-0002"}, "M-0002 is archived"),
-    ({"op": "rollover", "item": "M-0001"}, "rollover takes only note, not item"),
+    ({"op": "rollover", "item": "M-0001"}, "rollover takes only note, by, not item"),
     ({"op": "triage", "item": 5, "verdict": "me"}, "it needs item, an A- number or an item's id"),
     ({"op": "add", "fields": {**ADD_FIELDS, "meeting": "M-0099"}}, "no meeting M-0099"),
 ]
