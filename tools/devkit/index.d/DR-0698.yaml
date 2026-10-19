@@ -1,0 +1,19 @@
+decisions:
+  - id: DR-0698
+    title: CI runs each system's tests in shares split by recorded file times, and Gate (Linux) holds the coverage floors on every share's data together
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: cheap
+    supersedes: [DR-0495]
+    description: "CI runs each system's tests in shares, each on a runner of its own, so every job ends in a few minutes once it starts: Linux's under coverage in 4 (`gate full --only tests --shard K/4`), Windows' in 12 and macOS's in 6 (`gate os --shard K/N`, the first share running the types too), and the full gate's other steps in Checks (Linux) (`gate full --skip tests`). A covered share saves its coverage data to .local/coverage/share-K-of-N, and the share that runs the question set its numbers. Gate (Linux), the check the merge rule names, passes only when Checks (Linux) and every share passed, then combines every share's data (`gate coverage`) and holds the line floors and the eval floors on it as `gate full` does on its one run; `gate full` without options still runs everything in one run. Tests (Windows) and Tests (macOS), the names the merge rule asks for, pass only when every share of their system passed. The shares split the test files by tools/devkit/test-weights.json, what each file cost a share on each system in a CI run: its tests' time over the run's workers plus its timed tests' time alone. The heaviest file goes first, each to the share with the least so far; a file the weights don't know counts as their median, and a system without weights deals the files out in path order, one share after the next, as the two Windows halves did. Each share uploads its files' times as an artifact, and `gate weights <folder>` rewrites the file from one run's. Coverage measures lines through sys.monitoring (`core = \"sysmon\"`, branches off): the floors are line coverage, and the C tracer that branches need on Python 3.12 made a CPU-bound test 75% slower (19.2 s alone, 33.5 s with it, 19.7 s with sysmon). Main's pushes run in a concurrency group per commit: one group for main held each push until the run before it ended (11.9 of the 29 minutes of run 39247653180) and dropped all but the newest push waiting. The live service test asks the Windows task to repeat every minute instead of the user's 5, so its job no longer waits up to 5 minutes for the service to come back, and the OS prompt and the service install share one job per system, a macOS runner fewer. Before this a PR took 15 to 22 minutes once started: Tests (Windows, 2 of 2) 13 to 19, Gate (Linux) 7 to 14, Tests (macOS) 7 to 20. The account runs 20 jobs at once, 5 of them macOS, and a PR now has about 36, so with other runs in flight a PR waits for runners: that, not a job's length, bounds a PR's wall time now."
+    binds:
+      - A share keeps its test files whole, and both pytest runs of a share keep the same files.
+      - Each check the merge rule names fails when a share it stands for fails or doesn't run.
+      - The coverage floors are held on every share's data combined, never on one share's.
+    not_chosen:
+      - "Alternating files in path order, as the two Windows halves did: at 12 shares the heaviest took 60% more than the average, 196 s against 123 s on one run's measured times."
+      - "The timed tests in a job of their own per system: it would build the 100,000-chunk vaults again, 79 to 115 s on Windows, before 150 to 220 s of timing, past 5 minutes."
+      - "Branch coverage kept: no floor reads it, and on Python 3.12 it needs the C tracer."
+      - "A merge queue running every share before a merge and fewer on a PR: GitHub offers it only to repos an organization owns."
+      - "Fewer shares on a PR and the rest on main: a PR would merge untested on part of a system; the maintainer's call, measured apart."

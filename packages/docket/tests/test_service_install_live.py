@@ -26,13 +26,19 @@ from docket.vault.vault import Vault
 pytestmark = pytest.mark.skipif(
     os.environ.get("DOCKET_TEST_LIVE_SERVICE") != "1", reason="registers a real service: DOCKET_TEST_LIVE_SERVICE=1"
 )
-# A Windows task's 5-minute repetition is the slowest way back.
-BACK_SECONDS = 6 * 60
+# The Windows task's repetition is the slowest way back: every minute here, Task Scheduler's shortest, so the job
+# doesn't wait up to 5 minutes for a user's; the same trigger brings the service back either way.
+BACK_SECONDS = 3 * 60
 
 
 def a_test_installer(tag: str, tmp_path: Path) -> Installer:
     if SYSTEM == "Windows":
-        return Windows(work=tmp_path, name=f"DocketTest-{tag}", stop_pid=lambda: install.stop_recorded_pid(_token()))
+        return Windows(
+            work=tmp_path,
+            name=f"DocketTest-{tag}",
+            stop_pid=lambda: install.stop_recorded_pid(_token()),
+            every_minutes=1,
+        )
     if SYSTEM == "Darwin":
         uid: int = getattr(os, "getuid", lambda: 0)()
         return Mac(home=Path.home(), uid=uid, label=f"io.github.serionist.docket-test-{tag}")

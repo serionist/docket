@@ -4,16 +4,21 @@ Lanes:
   quick  the static checks, in seconds: lock file, lint, format, types, docs, commit messages, private names, secrets,
          the harness (AGENTS.md, skills, plugin manifests). The pre-push hook runs it.
   full   quick, then the tests with coverage and its floors, the secret scan over the whole history, and the plugin
-         validated by Claude Code itself. CI runs it on Linux; finish-work runs it before a PR.
+         validated by Claude Code itself. finish-work runs it before a PR. CI runs it in parts (DR-0698): `--skip
+         tests` once, and `--only tests --shard K/N` on each share, which saves its coverage data instead of holding
+         the floors.
   os     types and tests, for the other operating systems CI runs; `--shard K/N` runs share K of N of the test files,
-         so one system's tests can run on several runners.
+         so one system's tests run on several runners.
+  coverage  every share's coverage data combined and held to the floors, with the question set's numbers: the
+         full lane's floors, for a CI run whose shares ran on runners of their own.
 
 In a lane with tests, the tests start first and the other steps run beside them; each run prints its slowest tests. In a
 lane without coverage (os) the timed tests (marked `perf`) run after the rest, alone and one at a time, once the other
 steps are done, and the run prints what they printed: their times. The two runs share one templates folder, so the
 timed run reuses the vaults the parallel run built, and the timed run has a temp folder of its own. Under coverage the
-index's time limits are off, so the full lane keeps them in its one run. On GitHub Actions a tests step past 11 minutes
-prints a warning the PR shows.
+index's time limits are off, so the full lane keeps them in its one run. A share writes what each of its files cost to
+`.local/times/`, and `gate weights <folder>` folds a CI run's into the weights the shares split by. On GitHub Actions a
+tests step past 4 minutes prints a warning the PR shows.
 
 `gate check-text <file>` checks a text that is about to be posted (an issue or PR body) for private names and tool
 attribution.
@@ -44,7 +49,7 @@ from devkit.repo import KitError, default_base, listed_files, repo_root, utf8_st
 from devkit.store import Store
 
 AGENTS_MAX_LINES = 150
-LANES = ("quick", "full", "os", "models")
+LANES = ("quick", "full", "os", "models", "coverage")
 MODELS_ENV = "DOCKET_TEST_MODELS"
 MODELS_TEST = "packages/docket/tests/test_eval_set.py"
 
@@ -76,7 +81,7 @@ class Ctx:
     pr: commits.PullRequest | None
     # Set once the lane's other steps are done; the timed tests wait for it. Set from the start for a step run alone.
     alone: threading.Event = field(default_factory=lambda: _set(threading.Event()))
-    # K/N: the tests step runs share K of N of the test files (DR-0495); None runs them all.
+    # K/N: the tests step runs share K of N of the test files (DR-0698); None runs them all.
     shard: str | None = None
 
 
@@ -286,19 +291,19 @@ def slowest(lines: list[str]) -> list[str]:
     return [f"slowest: {ln.strip()}" for ln in lines if _DURATION.match(ln.strip())]
 
 
-# A CI job spends about a minute around its tests step, so Tests (Windows) passes 12 minutes about when the step
-# passes this (#128).
-TESTS_WARN_MINUTES = 11
+# A CI job spends up to a minute around its tests step, so a share's job passes 5 minutes about when the step passes
+# this (DR-0698).
+TESTS_WARN_MINUTES = 4
 
 
 def slow_tests_warning(step: str, took: float) -> str | None:
-    """On GitHub Actions, a warning the PR shows when the tests step took long enough to put its job past 12 minutes,
+    """On GitHub Actions, a warning the PR shows when the tests step took long enough to put its job past 5 minutes,
     so the suite can't grow slower unseen; the step's time and its slowest tests are in the log beside it."""
     if step != "tests" or os.environ.get("GITHUB_ACTIONS") != "true" or took <= TESTS_WARN_MINUTES * 60:
         return None
     return (
         f"::warning title=Slow tests::the tests step took {took / 60:.1f} minutes, past {TESTS_WARN_MINUTES}: "
-        "its job is past 12 about then; the step's slowest tests are in its log"
+        "its job is past 5 about then; the step's slowest tests are in its log"
     )
 
 
@@ -330,6 +335,22 @@ def _summary(lines: list[str]) -> str:
     return next((ln for ln in reversed(lines) if " passed" in ln or " failed" in ln), "").strip("= ")
 
 
+# Where a covered share saves its coverage data, `share-K-of-N`, for the coverage lane to combine (DR-0698).
+COVERAGE_DATA = ".local/coverage"
+_SHARE_DATA = re.compile(r"^share-([1-9]\d*)-of-([1-9]\d*)$")
+# Where a share writes what each of its files cost, for `gate weights`.
+TIMES = ".local/times"
+
+
+def _times(ctx: Ctx, run: str) -> list[str]:
+    """The option that has a share's run write its files' times, a file per system, share and run."""
+    if ctx.shard is None:
+        return []
+    out = ctx.root / TIMES / f"{platform.system()}-{ctx.shard.replace('/', '-of-')}-{run}.json"
+    out.unlink(missing_ok=True)
+    return [f"--shard-times={out}"]
+
+
 def step_tests(ctx: Ctx) -> Outcome:
     report = ctx.root / ".local" / "coverage.json"
     report.parent.mkdir(exist_ok=True)
@@ -338,16 +359,20 @@ def step_tests(ctx: Ctx) -> Outcome:
     numbers.unlink(missing_ok=True)
     pytest = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
     covered = ctx.lane == "full"
-    if ctx.shard is not None and not covered:
+    if ctx.shard is not None:
+        from devkit.shard import WEIGHTS  # noqa: PLC0415 - the plugin imports pytest, which only a sharded run needs
+
         # Both runs keep the same share of the test files, so the timed run finds what its share's parallel run built.
-        pytest += ["-p", "devkit.shard", f"--shard={ctx.shard}"]
+        pytest += ["-p", "devkit.shard", f"--shard={ctx.shard}", f"--shard-weights={ctx.root / WEIGHTS}"]
     # One worker per core: most of the time goes to git subprocesses that would otherwise wait on each other.
-    cmd = [*pytest, "-n", "auto", f"--durations={SLOWEST}"]
+    cmd = [*pytest, "-n", "auto", f"--durations={SLOWEST}", *_times(ctx, "tests")]
     env: dict[str, str] = {}
     if covered:
-        cmd += ["--cov", f"--cov-report=json:{report.as_posix()}", "--cov-report=term:skip-covered"]
         # The question set's test writes its numbers there, for the eval floors (DR-0295).
         env[evalfloors.REPORT_ENV] = str(numbers)
+        if ctx.shard is not None:
+            return _covered_share(ctx, ctx.shard, cmd, env)
+        cmd += ["--cov", f"--cov-report=json:{report.as_posix()}", "--cov-report=term:skip-covered"]
     else:
         # Without coverage the timed tests assert their limits, so they leave the parallel run and run alone after it;
         # under coverage the index's limits are off and they stay in it (DR-0430).
@@ -358,11 +383,17 @@ def step_tests(ctx: Ctx) -> Outcome:
         with tempfile.TemporaryDirectory(prefix="docket-tests-", ignore_cleanup_errors=True) as at:
             env[TEMPLATES_ENV] = str(Path(at, "templates"))
             code, lines = _run(ctx, cmd, env=env)
-            alone = [*pytest, "-m", PERF, "-raP", f"--basetemp={Path(at, 'timed')}"]
+            alone = [*pytest, "-m", PERF, "-raP", f"--basetemp={Path(at, 'timed')}", *_times(ctx, "timed")]
             return _alone_after(ctx, code, lines, alone, env)
     code, lines = _run(ctx, cmd, env=env)
     if code != 0:
         return Outcome.fail(*lines[-80:])
+    return _floors(ctx, report, _summary(lines), slowest(lines))
+
+
+def _floors(ctx: Ctx, report: Path, first: str, extra: list[str]) -> Outcome:
+    """The coverage report held to the floors, each file under one named with its lines, and the question set's
+    numbers to theirs."""
     data = json.loads(report.read_text(encoding="utf-8"))
     measures = coverage.measure(data)
     floors = coverage.load_floors(ctx.root)
@@ -373,7 +404,56 @@ def step_tests(ctx: Ctx) -> Outcome:
     if failures:
         return Outcome.fail(*failures, *rise)
     per = ", ".join(f"{m.module} {m.percent:.1f}%" for m in measures.values())
-    return Outcome.ok(_summary(lines), per, eval_line, *rise, *slowest(lines))
+    return Outcome.ok(first, per, eval_line, *rise, *extra)
+
+
+def _covered_share(ctx: Ctx, spec: str, cmd: list[str], env: dict[str, str]) -> Outcome:
+    """A share of the full lane's tests under coverage, its data saved for the coverage lane, which holds the floors
+    on every share's together: one share's coverage says nothing about a floor."""
+    data = ctx.root / COVERAGE_DATA / f"share-{spec.replace('/', '-of-')}"
+    data.parent.mkdir(parents=True, exist_ok=True)
+    data.unlink(missing_ok=True)
+    code, lines = _run(ctx, [*cmd, "--cov", "--cov-report="], env={**env, "COVERAGE_FILE": str(data)})
+    if code != 0:
+        return Outcome.fail(*lines[-80:])
+    if not data.is_file():
+        return Outcome.fail(f"the run saved no coverage data to {data.relative_to(ctx.root).as_posix()}")
+    saved = f"coverage data in {data.relative_to(ctx.root).as_posix()}; `gate coverage` holds the floors on all shares"
+    return Outcome.ok(_summary(lines), saved, *slowest(lines))
+
+
+def step_floors(ctx: Ctx) -> Outcome:
+    """The coverage lane: every share's coverage data combined, then held to the floors as the full lane holds its
+    own run's, with the question set's numbers the share that ran it saved (DR-0698)."""
+    folder = ctx.root / COVERAGE_DATA
+    found: dict[tuple[int, int], Path] = {}
+    for path in sorted(folder.iterdir()) if folder.is_dir() else []:
+        named = _SHARE_DATA.match(path.name)
+        if named:
+            found[int(named.group(1)), int(named.group(2))] = path
+    totals = sorted({n for _, n in found})
+    if len(totals) != 1:
+        if not totals:
+            return Outcome.fail(f"{COVERAGE_DATA} holds no share's coverage data: `gate full --shard K/N` saves it")
+        return Outcome.fail(f"{COVERAGE_DATA} holds shares of runs split {totals} ways: one run's shares, all of them")
+    n = totals[0]
+    absent = [str(k) for k in range(1, n + 1) if (k, n) not in found]
+    if absent:
+        return Outcome.fail(f"no coverage data for share {', '.join(absent)} of {n}: each share's run saves it")
+    combined = ctx.root / ".local" / "coverage-combined"
+    report = ctx.root / ".local" / "coverage.json"
+    combined.unlink(missing_ok=True)
+    report.unlink(missing_ok=True)
+    shares = [str(found[k, n]) for k in range(1, n + 1)]
+    python = [sys.executable, "-m", "coverage"]
+    for cmd in (
+        [*python, "combine", "--keep", f"--data-file={combined}", *shares],
+        [*python, "json", f"--data-file={combined}", "-o", str(report)],
+    ):
+        code, lines = _run(ctx, cmd)
+        if code != 0:
+            return Outcome.fail(*lines[-40:])
+    return _floors(ctx, report, f"{n} shares' coverage combined", [])
 
 
 def _alone_after(ctx: Ctx, code: int, lines: list[str], cmd: list[str], env: dict[str, str]) -> Outcome:
@@ -440,15 +520,18 @@ STEPS = [
     Step("harness", ("quick", "full"), "AGENTS.md, skills, plugin manifests", step_harness),
     Step("tests", ("full", "os"), "pytest; coverage floors in the full lane, the timed tests alone in os", step_tests),
     Step("models", ("models",), "the question set with the embedder, against its floors", step_models),
+    Step("floors", ("coverage",), "the shares' coverage data combined, against the floors", step_floors),
 ]
 
 
-def run(lane: str, only: Sequence[str] | None = None, shard: str | None = None) -> int:
+def run(
+    lane: str, only: Sequence[str] | None = None, shard: str | None = None, skip: Sequence[str] | None = None
+) -> int:
     if shard is not None:
         from devkit.shard import parse  # noqa: PLC0415 - the plugin imports pytest, which only a sharded run needs
 
-        if lane != "os":
-            raise KitError("--shard splits the os lane's tests; the full lane runs every test, for its coverage floors")
+        if lane not in ("os", "full"):
+            raise KitError("--shard splits the tests of the os lane, or of the full lane: `gate coverage` joins those")
         try:
             parse(shard)
         except ValueError as e:
@@ -462,8 +545,8 @@ def run(lane: str, only: Sequence[str] | None = None, shard: str | None = None) 
     # own run reads them from the push event, so a fixed title would stay red there until the next push.
     pr_text = pr if os.environ.get("DOCKET_PR_TEXT") == "1" else None
     ctx = Ctx(root=root, lane=lane, ci=os.environ.get("CI") == "true", base=base, pr=pr_text, shard=shard)
-    steps = [s for s in STEPS if lane in s.lanes and (not only or s.name in only)]
-    unknown = sorted(set(only or []) - {s.name for s in STEPS})
+    steps = [s for s in STEPS if lane in s.lanes and (not only or s.name in only) and s.name not in (skip or [])]
+    unknown = sorted({*(only or []), *(skip or [])} - {s.name for s in STEPS})
     if unknown:
         raise KitError(f"no step {', '.join(unknown)}; `gate list` shows them")
     failed: list[str] = []
@@ -512,6 +595,18 @@ def _timed(step: Step, ctx: Ctx) -> tuple[Outcome, float]:
     return out, time.monotonic() - start
 
 
+def weights(folder: Path | None) -> int:
+    """The shares' weights rewritten from a CI run's times: `gh run download <run> -p "times-*" -D <folder>` first."""
+    from devkit.shard import WEIGHTS, merge_times  # noqa: PLC0415 - the plugin imports pytest
+
+    if folder is None or not folder.is_dir():
+        raise KitError('weights needs the folder of a CI run\'s times: gh run download <run> -p "times-*" -D <folder>')
+    for line in merge_times(folder, repo_root() / WEIGHTS):
+        print(line)
+    print(f"wrote {WEIGHTS}")
+    return 0
+
+
 def check_text(path: Path) -> int:
     text = path.read_text(encoding="utf-8")
     problems = [f"tool attribution: {ln.strip()}" for ln in commits.attribution_lines(text)]
@@ -528,10 +623,11 @@ def check_text(path: Path) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     utf8_stdio()
     p = argparse.ArgumentParser(prog="gate", description="The one gate: what passes here is the merge rule.")
-    p.add_argument("lane", nargs="?", default="quick", choices=[*LANES, "list", "check-text"])
-    p.add_argument("file", nargs="?", help="check-text: the text file to check")
+    p.add_argument("lane", nargs="?", default="quick", choices=[*LANES, "list", "check-text", "weights"])
+    p.add_argument("file", nargs="?", help="check-text: the text file to check; weights: the folder of a run's times")
     p.add_argument("--only", help="comma-separated steps of the lane to run")
-    p.add_argument("--shard", metavar="K/N", help="os lane: run share K of N of the test files (DR-0495)")
+    p.add_argument("--skip", help="comma-separated steps of the lane to leave out")
+    p.add_argument("--shard", metavar="K/N", help="os and full lanes: run share K of N of the test files (DR-0698)")
     args = p.parse_args(argv)
     try:
         if args.lane == "list":
@@ -542,7 +638,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not args.file:
                 raise KitError("check-text needs the file to check")
             return check_text(Path(args.file))
-        return run(args.lane, args.only.split(",") if args.only else None, args.shard)
+        if args.lane == "weights":
+            return weights(Path(args.file) if args.file else None)
+        split = [(v.split(",") if v else None) for v in (args.only, args.skip)]
+        return run(args.lane, split[0], args.shard, split[1])
     except KitError as e:
         print(f"gate: {e}", file=sys.stderr)
         return 2
