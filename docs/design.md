@@ -178,6 +178,11 @@ same result on any day.
   by union, saying who made it, `user`, `claude` or `sync` (DR-0610, DR-0611). An item folds from its own ops.
 - Undo is an op that leaves one op out of the fold, and an undone undo puts it back; archive is a flag on a closed
   item that keeps its history (DR-0614, DR-0615). `docket vault check` names what the fold leaves out (DR-0617).
+- Meetings and streams are objects in the same files: an add, a meeting or a stream op whose item is its own id makes
+  one, and an object of a kind this Docket doesn't know is kept and changes nothing (DR-0620). The adds of one key, a
+  meeting's event or a stream's name, are one object, and a keyed add may continue a meeting that had none, whose id
+  and M- number hold (DR-0621, DR-0622). Talking points are ops on their meeting; a roll copies a point to the next
+  meeting of its series, and rollover and a meeting's archive are ops the writer writes (DR-0623, DR-0624).
 
 - Meetings come from the calendar. The core turns its records into meeting ops keyed by the event's own id (iCalUId or
   the provider's id), plus the occurrence's original start for a recurring event, so a moved, renamed or cancelled

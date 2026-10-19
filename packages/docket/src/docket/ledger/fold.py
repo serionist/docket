@@ -2,7 +2,9 @@
 
 The fold never reads the clock: every date comes from an op's day, so a rebuild on any day, on any machine, gives the
 same ledger. Lines are taken by id; a line twice is one op, and one id on two texts keeps both, ordered by their text
-(DR-0612). Per item:
+(DR-0612). The op whose item is its own id makes the object and says what it is (DR-0620): an add's ops fold here into
+an item, a meeting's and a stream's in `meetings`; one of a kind this Docket doesn't know is kept and folds into
+nothing, and any other op naming an item no add made is left out. Per item:
 
 1. Its add is the first add by id and text; an op with no add, or sorting before it, is left out.
 2. Every undo's target is checked first: one naming an op that isn't an earlier one of its item, a renumber or a bad
@@ -25,16 +27,21 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
-from docket.ledger.ops import DAYS, REQUIRED, FileRead, Line, Op, read_all
+from docket.ledger.ops import DAYS, MAKES, OPS, REQUIRED, FileRead, Line, Op, fits, read_all
+
+if TYPE_CHECKING:
+    from docket.ledger.meetings import Meeting, Objects, Stream
 
 CLOSED = ("done", "dropped")
 # done and drop are one kind for the undo that also undoes what the undone op left idle (DR-0614).
 FAMILY = {"drop": "done"}
 SHORT = 160
 # What the log shows for an op whose words don't hang on its keys; a kind this Docket doesn't know shows its name.
-WORDS = {"add": "added", "log": "", "done": "done", "drop": "dropped", "reopen": "reopened", "archive": "archived"}
-SETTABLE = ("kind", "title", "who", "stream", "source", "opened", "due", "description", "notes", "outcome")
+WORDS = {"add": "added", "log": "", "done": "done", "drop": "dropped", "reopen": "reopened", "archive": "archived",
+         "meeting": "added", "stream": "added"}  # fmt: skip
+SETTABLE = ("kind", "title", "who", "stream", "source", "meeting", "opened", "due", "description", "notes", "outcome")
 KEPT = (*REQUIRED, "opened")
 # An item's number as a change or a command names it: A-0302, a-302 or 302.
 NUMBER = re.compile(r"^(?:A-?)?(\d{1,9})$", re.IGNORECASE)
@@ -88,6 +95,8 @@ class Item:
     source: str
     opened: date
     added_by: str
+    # The meeting it hangs on, by the id of an add of that meeting (DR-0626).
+    meeting: str | None = None
     due: date | None = None
     description: str | None = None
     notes: str | None = None
@@ -118,7 +127,8 @@ class Folded:
 @dataclass(frozen=True)
 class Ledger:
     """What the ops add up to: every item whose add stands, every item's fold (hidden ones too), the lines read by
-    item, each number's claimants in claim order, the problems, the highest op id and number any op holds."""
+    the add they name, each number's claimants in claim order, the problems, the highest op id and number any op
+    holds, and the meetings and streams (DR-0620)."""
 
     items: dict[str, Item]
     folds: dict[str, Folded]
@@ -127,6 +137,15 @@ class Ledger:
     problems: tuple[tuple[str, str], ...]
     highest_id: str | None
     highest_number: int
+    objects: Objects
+
+    @property
+    def meetings(self) -> dict[str, Meeting]:
+        return self.objects.meetings
+
+    @property
+    def streams(self) -> dict[str, Stream]:
+        return self.objects.streams
 
     def clashes(self) -> list[Item]:
         """Items whose latest claim lost its number to an earlier one: each waits for a renumber."""
@@ -147,9 +166,16 @@ def describe(op: Op) -> str:
                 parts.append(f"{name} {'cleared' if value is None else 'edited'}")
             elif name == "outcome" and value is not None:
                 parts.append(f"outcome: {_short(value)}")
+            elif isinstance(value, list):
+                parts.append(f"{name}: {', '.join(str(v) for v in cast(list[object], value))}")
             else:
                 parts.append(f"{name}: {'-' if value is None else value}")
         return "; ".join(parts)
+    if kind in ("point", "point_set"):
+        # The meetings' module imports this one, so its words are imported when they are read.
+        from docket.ledger.meetings import describe_point  # noqa: PLC0415
+
+        return describe_point(op)
     if kind == "triage":
         return f"triage: {op.verdict}" if op.verdict else "triage cleared"
     if kind == "snooze":
@@ -183,6 +209,7 @@ def _new(op: Op) -> Item:
         source=f.get("source") or "",
         opened=_day(f.get("opened")) or op.day,
         added_by=op.by,
+        meeting=f.get("meeting"),
         due=_day(f.get("due")),
         description=f.get("description"),
         notes=f.get("notes"),
@@ -206,20 +233,22 @@ def _set(item: Item, fields: dict[str, str | None]) -> bool:
     return changed
 
 
-def _material(item: Item, op: Op) -> bool:
+def change_material(materials: list[Material], op: Op) -> bool:
+    """A material op on an item's or a meeting's materials: added, relabelled or removed; False when it changes
+    nothing."""
     ref = op.ref or ""
-    current = next((m for m in item.materials if m.ref == ref), None)
+    current = next((m for m in materials if m.ref == ref), None)
     if op.remove:
         if current is None:
             return False
-        item.materials.remove(current)
+        materials.remove(current)
         return True
     if current is None:
-        item.materials.append(Material(ref, op.label))
+        materials.append(Material(ref, op.label))
         return True
     if current.label == op.label:
         return False
-    item.materials[item.materials.index(current)] = Material(ref, op.label)
+    materials[materials.index(current)] = Material(ref, op.label)
     return True
 
 
@@ -252,7 +281,7 @@ def _apply(item: Item, op: Op) -> bool:
         item.state, item.closed, item.until, item.archived = "open", None, None, False
         return True
     if kind == "material":
-        return _material(item, op)
+        return change_material(item.materials, op)
     if kind == "archive" and closed and not item.archived:
         item.archived = True
         return True
@@ -260,25 +289,12 @@ def _apply(item: Item, op: Op) -> bool:
     return False
 
 
-def fold_item(item_id: str, lines: Sequence[Line]) -> Folded:
-    """One item from its own lines, in any order."""
-    ordered = sorted(lines, key=_key)
-    add = next((line for line in ordered if line.op.op == "add"), None)
-    if add is None:
-        left = tuple((line.where, "names an item no add made; left out") for line in ordered)
-        return Folded(None, (), {}, frozenset(), (), left)
+def undos(kept: list[Line], by_id: dict[str, Op]) -> tuple[list[Line], dict[str, str], list[tuple[str, str]]]:
+    """An object's undos (DR-0614): every undo's target is checked first, in order, so a bad undo is named even when a
+    later undo undid it, and an undo of a bad undo is bad too; then the undos are read from the latest back, each
+    leaving out the op it names unless it is undone itself. The lines kept, each undone op with its undo, and what was
+    left out."""
     problems: list[tuple[str, str]] = []
-    kept = [add]
-    for line in ordered:
-        if line is add:
-            continue
-        if line.op.id < add.op.id:
-            problems.append((line.where, "sorts before its item's add; left out"))
-            continue
-        kept.append(line)
-    by_id = {line.op.id: line.op for line in kept}
-    # Every undo's target is checked first, in order, so a bad undo is named even when a later undo undid it, and an
-    # undo of a bad undo is bad too.
     bad: set[str] = set()
     for line in kept:
         op = line.op
@@ -297,6 +313,39 @@ def fold_item(item_id: str, lines: Sequence[Line]) -> Folded:
         op = line.op
         if op.op == "undo" and op.id not in undone:
             undone[op.of or ""] = op.id
+    return kept, undone, problems
+
+
+def maker(item_id: str, group: Sequence[Line]) -> str | None:
+    """The kind of the op that makes an object: the first by text of its own lines (whose id is the item's) that is
+    an add, a meeting or a stream, else one of a kind this Docket doesn't know; None when no such line makes it."""
+    own = sorted((line for line in group if line.op.id == item_id), key=lambda line: line.text)
+    known = next((line.op.op for line in own if line.op.op in MAKES), None)
+    return known or next((line.op.op for line in own if line.op.op not in OPS), None)
+
+
+def fold_item(item_id: str, lines: Sequence[Line]) -> Folded:
+    """One item from its own lines, in any order."""
+    ordered = sorted(lines, key=_key)
+    add = next((line for line in ordered if line.op.op == "add"), None)
+    if add is None:
+        left = tuple((line.where, "names an item no add made; left out") for line in ordered)
+        return Folded(None, (), {}, frozenset(), (), left)
+    problems: list[tuple[str, str]] = []
+    kept = [add]
+    for line in ordered:
+        if line is add:
+            continue
+        if line.op.id < add.op.id:
+            problems.append((line.where, "sorts before its item's add; left out"))
+            continue
+        if line.op.op == "set" and not fits("item", line.op.fields or {}):
+            problems.append((line.where, "a set whose fields don't hold what an item's hold; left out"))
+            continue
+        kept.append(line)
+    by_id = {line.op.id: line.op for line in kept}
+    kept, undone, bad = undos(kept, by_id)
+    problems += bad
     # The add the item stands on claims its number, and each renumber after it; a second add with its id claims none.
     claims = (
         (add.op.id, add.op.number or 0),
@@ -340,7 +389,16 @@ def fold(lines: Iterable[Line]) -> Ledger:
         problems.append((places, f"op {op_id} is on {len(versions)} texts; each is kept, ordered by its text"))
         for version in versions.values():
             by_item.setdefault(version.op.item, []).append(version)
-    folds = {item_id: fold_item(item_id, group) for item_id, group in sorted(by_item.items())}
+    item_groups: dict[str, list[Line]] = {}
+    object_groups: dict[str, list[Line]] = {}
+    for item_id, group in sorted(by_item.items()):
+        kind = maker(item_id, group)
+        if kind in ("meeting", "stream"):
+            object_groups[item_id] = group
+        elif kind is None or kind == "add":
+            item_groups[item_id] = group
+        # Else a later Docket's object: its lines are kept and fold into nothing (DR-0620).
+    folds = {item_id: fold_item(item_id, group) for item_id, group in item_groups.items()}
     claims: list[tuple[str, int, str]] = []
     for item_id, folded in folds.items():
         problems += folded.problems
@@ -364,14 +422,19 @@ def fold(lines: Iterable[Line]) -> Ledger:
         if not holds:
             problems.append((number_text(latest), f"held by two items; the next write gives {item_id} a new number"))
     every = [number for folded in folds.values() for _, number in folded.claims]
+    # The meetings' module imports this one, so it is imported when a fold runs.
+    from docket.ledger.meetings import fold_objects  # noqa: PLC0415
+
+    objects = fold_objects(object_groups)
     return Ledger(
         items=items,
         folds=folds,
         lines={item_id: tuple(group) for item_id, group in by_item.items()},
         holders={number: tuple(named) for number, named in holders.items()},
-        problems=tuple(problems),
+        problems=(*problems, *objects.problems),
         highest_id=max(first) if first else None,
         highest_number=max(every, default=0),
+        objects=objects,
     )
 
 

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from docket_testkit import empty_vault, make_config, sh
-from ledger_kit import ADD_FIELDS, NOW, op, ulid, write_ops
+from ledger_kit import ADD_FIELDS, NOW, meeting, op, ulid, write_ops
 
 from docket.ledger import check, store
 from docket.vault.vault import Vault
@@ -58,6 +58,21 @@ def test_every_line_the_fold_leaves_out_is_named(vault: Vault) -> None:
         f"{FILE}:3": "names an item no add made; left out",
         f"{FILE}:4": "sorts before its item's add; left out",
         "A-0001": f"held by two items; the next write gives {ulid(2)} a new number",
+    }
+
+
+def test_meetings_points_and_streams_the_fold_leaves_out_are_named(vault: Vault) -> None:
+    """What the meetings' fold names reaches `docket vault check` too (DR-0617, DR-0620 to DR-0623)."""
+    write_ops(vault.root, [
+        meeting(1, machine="test-box"),
+        meeting(2, number=1, machine="test-box"),
+        op("point_set", 3, 1, point=ulid(77), fields={"state": "answered"}, machine="test-box"),
+        op("pin", 4, 4, machine="test-box"),
+        op("log", 5, 4, note="on a later Docket's object", machine="test-box"),
+    ])  # fmt: skip
+    assert dict(ledger_problems(vault) + [(p.where, p.message) for p in vault.check() if p.where == "M-0001"]) == {
+        f"{FILE}:3": "names no point of its meeting; left out",
+        "M-0001": f"held by two meetings; the next write gives {ulid(2)} a new number",
     }
 
 

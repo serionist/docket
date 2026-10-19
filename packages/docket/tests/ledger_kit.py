@@ -21,6 +21,8 @@ DAY = date(2026, 10, 18)
 ADD_FIELDS = {"kind": "reply", "title": "Send Ada the dates", "who": "Ada Example", "stream": "pilot",
               "source": "chat:C0TEST/1791000001.000100"}  # fmt: skip
 Rows = dict[str, list[tuple[Any, ...]]]
+MEETING = {"subject": "Weekly pilot sync", "start": "2026-10-19T09:00+02:00", "end": "2026-10-19T09:30+02:00"}
+STREAM = {"name": "pilot", "status": "active"}
 
 
 def ulid(n: int, ms: int = 1_790_000_000_000) -> str:
@@ -29,14 +31,48 @@ def ulid(n: int, ms: int = 1_790_000_000_000) -> str:
 
 
 def op(kind: str, n: int, item: int | None = None, **keys: Any) -> Op:
-    """The op with id ulid(n), on the item whose add is ulid(item), by Claude on desk."""
+    """The op with id ulid(n), on the item whose add is ulid(item), by Claude on desk. An add, a meeting or a stream
+    gets fields that make one, and a meeting the number n."""
     base: dict[str, Any] = {
         "schema_version": 1, "id": ulid(n), "item": ulid(n if item is None else item), "op": kind, "day": DAY,
         "machine": "desk", "by": "claude", "via": "cli",
     }  # fmt: skip
-    if kind == "add":
-        base |= {"number": n, "fields": dict(ADD_FIELDS)}
+    if kind in ("add", "meeting"):
+        base |= {"number": n, "fields": dict(ADD_FIELDS if kind == "add" else MEETING)}
+    if kind == "stream":
+        base |= {"fields": dict(STREAM)}
     return Op(**(base | keys))
+
+
+OP_KEYS = ("machine", "day", "by", "via")
+
+
+def meeting(n: int, event: str | None = None, **fields: Any) -> Op:
+    """A meeting's add, ulid(n) numbered n unless `number` says, with its event and any other fields; a machine, a
+    day, by or via is the op's."""
+    number = fields.pop("number", n)
+    keys = {key: fields.pop(key) for key in OP_KEYS if key in fields}
+    keyed = {"event": event} if event else {}
+    return op("meeting", n, number=number, fields={**MEETING, **keyed, **fields}, **keys)
+
+
+def point(n: int, on: int, text: str = "The pilot's dates", **fields: Any) -> Op:
+    """A point ulid(n) on the meeting whose add is ulid(on)."""
+    return op("point", n, on, fields={"text": text, **fields})
+
+
+def point_set(n: int, on: int, which: int, **fields: Any) -> Op:
+    """A change to point ulid(which) on the meeting whose add is ulid(on)."""
+    return op("point_set", n, on, point=ulid(which), fields=fields)
+
+
+def roll(n: int, source_on: int, source: int, copy_on: int) -> tuple[Op, Op]:
+    """A roll as the writer writes it: the copy ulid(n) on ulid(copy_on), then ulid(n + 1) marking the source rolled
+    to it."""
+    return (
+        point(n, copy_on, **{"from": ulid(source)}),
+        point_set(n + 1, source_on, source, state="rolled", to=ulid(n)),
+    )
 
 
 def line(o: Op, n: int = 1) -> Line:

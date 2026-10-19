@@ -7,22 +7,30 @@
 
 | op | its own keys | what it does |
 |---|---|---|
-| add | number, fields (kind, title, who, stream, source; opened, due, description, notes, outcome) | a new item |
-| set | fields, null clearing an optional one | the plain fields |
+| add | number, fields: kind, title, who, stream, source; meeting, opened, due, description, notes, outcome | an item |
+| meeting | number, fields: subject, start, end; event, continues, series, organiser, where, | a meeting |
+| | response, attendees, stream, notes, outcome (DR-0622) | |
+| stream | fields: name, status; where, next, deadline (DR-0625) | a stream |
+| set | fields, null clearing an optional one | the plain fields of an item, a meeting or a stream |
 | log | note | a log line |
 | triage | verdict, or null | an open or snoozed item open with it, or cleared |
 | snooze | until | snoozed |
 | done, drop | note | closed on the op's day |
-| reopen, archive | - | open again; a closed item out of the day's lists |
+| reopen, archive | - | open again; a closed item, or a meeting with no open point, out of the day's lists |
 | material | ref, label, remove | a path, URL or locator added, relabelled or removed |
+| point | fields (text; item, from, proposed) | a talking point on a meeting, its id the op's (DR-0623) |
+| point_set | point, fields (text, state, answer, item, to, proposed) | one change to a point |
 | undo | of | the op it names left out of the fold (DR-0614) |
 | renumber | number | a new number after a clash (DR-0613) |
 
-Every op names one item, its add's id. An op's id is a ULID minted as a hybrid logical clock (DR-0612), and the
-ledger's order is the ids' order. A line that doesn't read is a problem and is skipped; a key, a name in `fields` or
-an op kind this Docket doesn't know is read and changes nothing, so a later Docket can add one in schema 1; a name in
-`fields` this Docket knows holds text or null, one it doesn't any value. Kinds, verdicts, streams, `by` and `via` are
-read as text and checked when written. The format is a one-way door: a later one writes schema_version 2.
+An add, a meeting or a stream makes an object: its item is its own id, and every other op names its object by item
+(DR-0620). An op's id is a ULID minted as a hybrid logical clock (DR-0612), and the ledger's order is the ids' order.
+A line that doesn't read is a problem and is skipped; a key, a name in `fields` or an op kind this Docket doesn't know
+is read and changes nothing, so a later Docket can add one in schema 1. A name in `fields` this Docket knows holds what
+its object's rules say (text, a day, a time with its offset, a list of names, an id, true) or null, checked on the
+object's own ops as they are read and on a set when it is folded; a name it doesn't know holds any value. Kinds,
+verdicts, states, streams, `by` and `via` are read as text and checked when written. The format is a one-way door: a
+later one writes schema_version 2.
 """
 
 from __future__ import annotations
@@ -59,16 +67,34 @@ KINDS = ("reply", "decision", "task", "invite", "waiting")
 VERDICTS = ("discuss", "claude", "me", "chase")
 BY = ("user", "claude", "sync")
 VIA = ("cli", "page", "tool", "import")
-OPS = ("add", "set", "log", "triage", "snooze", "done", "drop", "reopen", "material", "archive", "undo", "renumber")
-FIELDS = ("kind", "title", "who", "stream", "source", "opened", "due", "description", "notes", "outcome")
+OPS = (
+    "add", "set", "log", "triage", "snooze", "done", "drop", "reopen", "material", "archive", "undo", "renumber",
+    "meeting", "stream", "point", "point_set",
+)  # fmt: skip
+# The kinds that make an object, each an op whose item is its own id (DR-0620).
+MAKES = ("add", "meeting", "stream")
+FIELDS = ("kind", "title", "who", "stream", "source", "meeting", "opened", "due", "description", "notes", "outcome")
 REQUIRED = ("kind", "title", "who", "stream", "source")
 DAYS = ("opened", "due")
+MEETING_FIELDS = (
+    "subject", "start", "end", "event", "continues", "series", "organiser", "where", "response", "attendees", "stream",
+    "notes", "outcome",
+)  # fmt: skip
+MEETING_REQUIRED = ("subject", "start", "end")
+STREAM_FIELDS = ("name", "status", "where", "next", "deadline")
+STREAM_REQUIRED = ("name", "status")
+POINT_FIELDS = ("text", "state", "answer", "item", "from", "to", "proposed")
+RESPONSES = ("accepted", "tentative", "declined", "none", "organiser", "cancelled")
+STATUSES = ("active", "waiting", "closed")
+STATES = ("open", "answered", "dropped", "rolled")
 DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# A meeting's start and end: the local time with its offset, so a DST change or a move of zone stays exact (DR-0622).
+TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}[+-]\d{2}:\d{2}$")
 UTC_OFFSET = timedelta(0)
 # A line's keys in the order the writer puts them, so one op has one text.
 KEY_ORDER = (
-    "schema_version", "id", "item", "op", "day", "at", "machine", "by", "via", "batch", "after", "number", "fields",
-    "verdict", "until", "ref", "label", "remove", "of", "note",
+    "schema_version", "id", "item", "op", "day", "at", "machine", "by", "via", "batch", "after", "number", "point",
+    "fields", "verdict", "until", "ref", "label", "remove", "of", "note",
 )  # fmt: skip
 
 # The writers this Docket writes and the ways in; a line is read with any word in them, as a later Docket may add one.
@@ -80,7 +106,68 @@ MachineName = Annotated[str, StringConstraints(pattern=machines.NAME.pattern)]
 # An op's kind, and its by and via: a lowercase word of at most 32 letters and underscores (DR-0611).
 WORD = r"^[a-z][a-z_]{0,31}$"
 Word = Annotated[str, StringConstraints(pattern=WORD)]
-KNOWN_FIELDS = frozenset(FIELDS)
+
+
+def is_day(value: str) -> bool:
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+def is_time(value: str) -> bool:
+    try:
+        datetime.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _text(value: object) -> bool:
+    return isinstance(value, str)
+
+
+def _a_day(value: object) -> bool:
+    return isinstance(value, str) and bool(DAY.fullmatch(value)) and is_day(value)
+
+
+def _a_time(value: object) -> bool:
+    return isinstance(value, str) and bool(TIME.fullmatch(value)) and is_time(value)
+
+
+def _names(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(name, str) for name in cast(list[object], value))
+
+
+def _an_id(value: object) -> bool:
+    return isinstance(value, str) and bool(ULID.fullmatch(value))
+
+
+def _true(value: object) -> bool:
+    return value is True
+
+
+# What each name an object's fields know holds, besides null; a name it doesn't know holds anything (DR-0620).
+RULES: dict[str, dict[str, Callable[[object], bool]]] = {
+    "item": {**dict.fromkeys(FIELDS, _text), "meeting": _an_id, "opened": _a_day, "due": _a_day},
+    "meeting": {**dict.fromkeys(MEETING_FIELDS, _text), "start": _a_time, "end": _a_time, "attendees": _names,
+                "continues": _an_id},
+    "stream": {**dict.fromkeys(STREAM_FIELDS, _text), "deadline": _a_day},
+    "point": {**dict.fromkeys(POINT_FIELDS, _text), "item": _an_id, "from": _an_id, "to": _an_id, "proposed": _true},
+}  # fmt: skip
+# The object whose rules an op's own fields follow; a set's are its object's, known only when it is folded.
+OBJECT_OF = {"add": "item", "meeting": "meeting", "stream": "stream", "point": "point", "point_set": "point"}
+
+
+def fits(kind: str, fields: dict[str, Any]) -> bool:
+    """Whether every name the object knows holds what its rules say, or null."""
+    rules = RULES[kind]
+    for name, value in fields.items():
+        rule = rules.get(name)
+        if rule is not None and value is not None and not rule(value):
+            return False
+    return True
 
 
 def _add(op: Op) -> bool:
@@ -88,16 +175,43 @@ def _add(op: Op) -> bool:
     return op.number is not None and op.item == op.id and all(fields.get(name) for name in REQUIRED)
 
 
+def _meeting(op: Op) -> bool:
+    fields = op.fields or {}
+    return op.number is not None and op.item == op.id and all(fields.get(name) for name in MEETING_REQUIRED)
+
+
+def _stream(op: Op) -> bool:
+    fields = op.fields or {}
+    return op.item == op.id and all(fields.get(name) for name in STREAM_REQUIRED)
+
+
+def _point_set(op: Op) -> bool:
+    fields = op.fields or {}
+    return op.point is not None and bool(fields) and (fields.get("state") != "rolled" or bool(fields.get("to")))
+
+
 # What each kind this Docket knows must carry for the fold to apply it; a kind it doesn't know needs nothing.
 SHAPES: dict[str, Callable[[Op], bool]] = {
     "add": _add,
+    "meeting": _meeting,
+    "stream": _stream,
     "set": lambda op: bool(op.fields),
     "log": lambda op: bool(op.note),
     "snooze": lambda op: op.until is not None,
     "material": lambda op: bool(op.ref),
+    "point": lambda op: op.item != op.id and bool((op.fields or {}).get("text")),
+    "point_set": _point_set,
     "undo": lambda op: op.of is not None,
     "renumber": lambda op: op.number is not None,
 }
+# The names each kind's fields are written in, so one op has one text; a name no list holds goes last.
+_ORDERS = {
+    kind: {name: n for n, name in enumerate(names)}
+    for kind, names in {
+        "add": FIELDS, "meeting": MEETING_FIELDS, "stream": STREAM_FIELDS, "point": POINT_FIELDS,
+        "point_set": POINT_FIELDS, "set": tuple(dict.fromkeys((*FIELDS, *MEETING_FIELDS, *STREAM_FIELDS))),
+    }.items()
+}  # fmt: skip
 
 
 class Op(BaseModel):
@@ -117,7 +231,8 @@ class Op(BaseModel):
     batch: Ulid | None = None
     after: Ulid | None = None
     number: Annotated[int, Field(ge=1)] | None = None
-    # A name this Docket knows holds text or null; a later Docket's name may hold any JSON value, kept unread.
+    point: Ulid | None = None
+    # A name this Docket knows holds what its object's rules say; a later Docket's name any JSON value, kept unread.
     fields: dict[str, Any] | None = None
     verdict: str | None = None
     until: date | None = None
@@ -137,14 +252,9 @@ class Op(BaseModel):
         if shape is not None and not shape(self):
             raise ValueError(f"{self.op} doesn't carry what it needs")
         fields = self.fields
-        if fields:
-            for name, value in fields.items():
-                if value is not None and name in KNOWN_FIELDS and not isinstance(value, str):
-                    raise ValueError(f"{name} is text or null")
-            for name in DAYS:
-                value = fields.get(name)
-                if value is not None and not (DAY.fullmatch(value) and is_day(value)):
-                    raise ValueError(f"{name} is a day, YYYY-MM-DD")
+        kind = OBJECT_OF.get(self.op)
+        if fields and kind is not None and not fits(kind, fields):
+            raise ValueError(f"a {self.op}'s fields don't hold what a {kind}'s hold")
         return self
 
     def text(self) -> str:
@@ -162,23 +272,13 @@ class Op(BaseModel):
             elif isinstance(value, date):
                 out[key] = value.isoformat()
             elif key == "fields":
-                out[key] = {name: value[name] for name in sorted(value, key=_field_order)}
+                order = _ORDERS.get(self.op, _ORDERS["set"])
+                last = len(order)
+                out[key] = {name: value[name] for name in sorted(value, key=lambda name: (order.get(name, last), name))}
             else:
                 out[key] = value
         text = json.dumps(out, ensure_ascii=False, separators=(",", ":"))
         return text.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
-
-
-def is_day(value: str) -> bool:
-    try:
-        date.fromisoformat(value)
-    except ValueError:
-        return False
-    return True
-
-
-def _field_order(name: str) -> tuple[int, str]:
-    return (FIELDS.index(name) if name in FIELDS else len(FIELDS), name)
 
 
 def rel_of(op: Op) -> str:
