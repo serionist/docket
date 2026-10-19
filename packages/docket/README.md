@@ -29,6 +29,7 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 | `docket index rebuild` | build this machine's index from the vault, from scratch |
 | `docket index update` | index what changed since; it rebuilds when it has to |
 | `docket index status` | whether the index is there and current, its languages, counts, what is new, and its problems |
+| `docket ledger show <number or id>` | a ledger item by its A- number or its id: its fields, its state and its history, each change with its day, who made it and how, an undone one marked; a number other items held names them. It reads the index's ledger, brought up to date first, or folds the op files when there is no index |
 | `docket import notes <folder>` | each markdown note in an existing folder becomes a legacy note that keeps its old path, so `doc read notes/x.md` or `notes/x.md@12:08` still finds it; the folder is only read; run it again to pick up changes; `--dry-run` first, `--as` for what old paths start with; says how many markers redaction added |
 | `docket redaction` | which redaction rules run; `docket redaction set <credentials\|phone\|pattern name> on\|off` changes one and commits it; turning credentials off asks at your own console: your OS prompt, or a code typed back |
 
