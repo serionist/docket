@@ -17,13 +17,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from docket_testkit import AtConsole, copied_with_seals, git, make_config, make_record
+from docket_testkit import AtConsole, copied_with_seals, empty_vault, git, make_config, make_record
+from ledger_kit import ADD_FIELDS, NOW
 from media_kit import CALL, POLISHED, audio, call, in_raw, media_vault
 
 from docket import recall
 from docket.forget import now as forget_now
 from docket.forget import plan as planning
 from docket.forget import rewrite
+from docket.ledger import ops as ledger_ops
+from docket.ledger import store
 from docket.media import put as media
 from docket.media.keystore import KeyStore
 from docket.vault import cursors, holds, releaselog
@@ -516,3 +519,44 @@ def test_refs_a_judged_blob_can_t_follow_drop_nothing(tmp_path: Path, owner: Cal
     assert done.written is not None
     assert rewrite.check(vault, done.written.folder) == rewrite.Checked([], {})
     assert "Gone rev." in path.read_text(encoding="utf-8")
+
+
+# -- the ledger's ops (DR-0697) ----------------------------------------------------------------------------------------
+
+LOGGED = "Ada said Tuesday at the venue"
+
+
+def test_the_rewrite_takes_a_listed_op_s_lines_from_every_op_file_blob_a_deleted_file_s_too(
+    tmp_path: Path, owner: Callable[..., AtConsole]
+) -> None:
+    """An item from the starter and a log on it, then a line more, the file deleted by an import's revert and put
+    back as it was before that line: every blob of it holds the two ops, the deleted file's last one included. A file
+    that isn't UTF-8 naming the add's id is left, as every reader leaves it."""
+    vault = empty_vault(tmp_path, make_config())
+    vault.write_run("chat", [make_record(1, rid=STARTER, source="chat", text="The starter.")])
+    (made,) = store.write(vault, [{"op": "add", "fields": {**ADD_FIELDS, "source": STARTER}}], now=NOW).ops
+    store.write(vault, [{"op": "log", "item": "A-0001", "note": LOGGED}], now=NOW)
+    both = git(vault.root, "rev-parse", "HEAD").strip()
+    store.write(vault, [{"op": "log", "item": "A-0001", "note": "A line more"}], now=NOW)
+    rel = ledger_ops.rel_of(made)
+    store.revert_import(vault)
+    assert not (vault.root / rel).exists()
+    git(vault.root, "checkout", both, "--", rel)
+    bad = vault.root / "ledger" / "ops" / "2026-10-desk.jsonl"
+    bad.write_bytes(b"\xff" + made.id.encode("ascii") + b"\n")
+    git(vault.root, "add", "--", rel, "ledger/ops/2026-10-desk.jsonl")
+    git(vault.root, "commit", "-qm", "The ledger back")
+    owner("code")
+    done = forget_now.forget(vault, "rids", [STARTER])
+    assert done.written is not None and len(done.plan.ledger.new) == 2
+    assert rewrite.check(vault, done.written.folder) == rewrite.Checked([], {})
+    scoped = (done.written.folder / rewrite.SCOPED).read_text(encoding="utf-8").splitlines()
+    assert LOGGED not in "".join(scoped) and len(scoped) >= 5
+    head_tree = git(vault.root, "rev-parse", "HEAD^{tree}").strip()
+    fresh = tmp_path / "fresh"
+    git(tmp_path, "clone", "-q", "--no-local", str(vault.root), str(fresh))
+    filter_repo(fresh, done.written.folder)
+    assert git(fresh, "rev-parse", "HEAD^{tree}").strip() == head_tree
+    history = git(fresh, "log", "--all", "-p", "--format=%H", "--", rel)
+    assert LOGGED not in history and ADD_FIELDS["title"] not in history and STARTER not in history
+    assert ledger_ops.MARK in history

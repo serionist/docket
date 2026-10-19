@@ -35,7 +35,8 @@ later one writes schema_version 2.
 A committed line changes only to its mask, its id on the forgotten list (DR-0693, DR-0695): the same keys, its text
 `[forgotten]`, its locators `[forgotten:<32 hex>]`, its attendees none. `parse`, given the listed ids, reads each one's
 line as its mask, so every reader of the ledger reads one ledger, and a line a merge brought back beside its mask
-reads as the same op; the forget's apply, `docket vault check` and the history rewrite read raw lines.
+reads as the same op; the forget's apply, `docket vault check` and the history rewrite read raw lines. Which ops a
+forget masks is `docket.forget.ledger`'s rule (DR-0694): an item or a meeting whose making op is masked is a shell.
 """
 
 from __future__ import annotations
@@ -399,7 +400,8 @@ def _located(value: Any) -> Any:
     return _digested(value) if isinstance(value, str) else _marked(value)
 
 
-def _masked_fields(fields: dict[str, Any]) -> dict[str, Any]:
+def masked_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    """An op's fields as its mask leaves them: what the writer asks of a change to a shell (DR-0696)."""
     out: dict[str, Any] = {}
     for name, value in fields.items():
         if name in KEPT_FIELDS:
@@ -426,7 +428,7 @@ def mask(text: str) -> str:
         elif key in LOCATOR_KEYS:
             out[key] = _located(value)
         elif key == "fields" and isinstance(value, dict):
-            out[key] = _masked_fields(cast(dict[str, Any], value))
+            out[key] = masked_fields(cast(dict[str, Any], value))
         else:
             out[key] = _marked(value)
     return _dumped(out)

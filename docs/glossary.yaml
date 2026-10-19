@@ -203,6 +203,9 @@ terms:
   - term: settings in force
     definition: "What the gate and every job that decides what gets in obey: HEAD's vault.yaml with every part of an uncommitted edit that only keeps more out. The rest of the edit waits until it is committed, and docket vault status and the Settings page say so."
     see: [packages/docket/src/docket/vault/inforce.py]
+  - term: shell
+    definition: "An item or a meeting a forget built its masks on: its making op, any add of a meeting, is on the forgotten list, so every op of it, its points' too, reads [forgotten] on every clone. It keeps its number, state, dates and the shape of its history, so an A- or M- number never names another object; the writer refuses text or a log on it and writes any note or outcome there as [forgotten], and the screen names each one by number, an open one to drop: an item open, or a meeting with an open point."
+    see: [packages/docket/src/docket/forget/ledger.py]
   - term: spot
     definition: A place where a recording's transcript and Whisper's disagree on a name, a number or a word, in one recorder line, its two texts widened until the recorder's stands once there. Worked out from raw on each call and never stored; none sits in a cut stretch, and one naming someone a never-store list holds is counted, never shown.
     see: [packages/docket/src/docket/reconcile/spots.py]

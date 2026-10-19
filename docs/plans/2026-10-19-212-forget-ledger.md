@@ -127,7 +127,7 @@ Forgetting; the glossary's shell; AGENTS.md's door lines; the CHANGELOG with eac
 | a clone's own op from before its pull shows there until its next gate call | accepted: the dry run names other clones |
 | notes set whole lose every word when one set quotes | accepted: the screen names the item, to write again |
 | a meeting from a forgotten calendar record loses the owner's points and notes too | open, for the maintainer: proposed as a shell (DR-0694) |
-| an open shell stays in the queue | open, for the maintainer: proposed, named on the screen to drop, not hidden by the fold |
+| an open shell stays in the queue | open, for the maintainer: proposed, named on the screen to drop, a meeting with an open point among them, not hidden by the fold |
 | an ops-only line makes every clone rebuild its index, re-read its run files and judge its docs again | accepted: rare, since the writer refuses new text on the family and on a shell |
 
 ## Plan review
@@ -147,3 +147,24 @@ Forgetting; the glossary's shell; AGENTS.md's door lines; the CHANGELOG with eac
 | P9: an ops-only line costs more than an index rebuild | minor | accepted, in Risks |
 
 ### Review, round 2: approved; its five minors folded in (a shell's notes, the chain, the screen, raw reads)
+
+## Code review
+
+### PR 2, round 1, at b69d652: one major and five minors, each settled by the maintainer's lead
+
+| Finding | Severity | Status |
+|---|---|---|
+| F1: a meeting the calendar step brought back, after an anchor made the first one a shell, was masked again at the next match by its event's digest, the owner's points with it | major | fixed: no meeting joins a shell by its event; another clone's add of a forgotten event reads on the family itself (DR-0694); the reviewer's path as a test |
+| F2: a close with an outcome on a shell refused the whole batch | minor | fixed: the outcome is written as `[forgotten]`, as the note is (DR-0696); a batch closing a shell beside ten items |
+| F3: every write's next gate call matched the whole ledger, a shell's drop or triage being suspected for good | minor | fixed: a line a mask leaves as it is is never suspected, and every line of a moved file is still scanned, a union merge inserting mid-file (DR-0694); at the perf ledger, 0.88 s before and 0.04 s after, now a perf test |
+| F4: another clone's op from before its pull naming a doc the forget removed was never matched | minor | fixed: a doc a `Forget:` commit on HEAD deleted, not back in the tree, reads as removed to the plan and every match again (DR-0694); a two-clone test |
+| F5: a shell meeting with an open point stayed in the day's list, unnamed | minor | fixed: named among those to drop on both screens |
+| F6: no crash test before the ops-only line, or between it and the masks | minor | fixed: a `listed` seam; both crashes finished by the next gate call |
+| F7, found while fixing: a point an earlier forget listed for its own words on a kept meeting didn't start the chain at a match again, so another clone's answer to it from before its pull was suspected and never masked | minor | fixed by the maintainer's lead: such a point is a small shell, followed at every match (DR-0694); the writer refuses an answer, text or an item on it and passes its state alone, and the import refuses a line with text on it (DR-0696) |
+
+### PR 2, round 2: approved; two minors fixed by the maintainer's lead
+
+| Finding | Severity | Status |
+|---|---|---|
+| R1: an answer on a point a forget left was refused, so a batch answering a meeting's points stopped on it | minor | fixed: written as `[forgotten]`, its state set, as an outcome on a shell is (DR-0696) |
+| R2: the rollover copied a point a forget left on, a copy carrying the marker that no list line names | minor | fixed: the rollover leaves it where it is, and the dry run and the screen name it among those to drop (DR-0694, DR-0696) |

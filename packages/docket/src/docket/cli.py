@@ -884,8 +884,9 @@ def forget_command(
     commit = f", committed {applied.commit[:12]}" if applied.commit else ""
     say(
         f"forgot    {applied.records} record(s), {applied.media} media file(s), {applied.docs + applied.removed} "
-        f"doc(s); {applied.keys} key(s) deleted here{commit}"
+        f"doc(s), {applied.ops} ledger op(s); {applied.keys} key(s) deleted here{commit}"
     )
+    say_all([f"render    {line}" for line in applied.rendered])
     for doc_id in applied.left:
         say(
             f"left      {doc_id}: the forget's rev wasn't written; fix the edit, and the next gate call writes it "

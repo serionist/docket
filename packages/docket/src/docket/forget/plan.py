@@ -12,11 +12,14 @@ screen's (DR-0577).
 
 The docs are judged by the docs' rule against raw as the forget leaves it, its line on the list; a legacy note whose
 every covered rid is in the family, or is a recording a family transcript is under, is removed, and its old paths'
-hashes and `import_hash` go on the line. Raw is read twice, streamed, and only what each version needs is kept.
+hashes and `import_hash` go on the line. Raw is read twice, streamed, and only what each version needs is kept. The
+ledger's ops are judged by the ledger's rule against the same (`forget.ledger`, DR-0694), and the ops it masks go on
+the line by their ids.
 
 The dry run counts by kind and gives line numbers: never a doc's id, a line's text, a title, a note's old path or a
 listed value, and with `--never-store` records are counted by source. The screen at the console shows the same lines
-with ids, but those a never-store list names, which it counts (DR-0558). Every dry run names what a forget can't reach.
+with ids, but those a never-store list names, which it counts (DR-0558). Both name the ledger's shells and what else
+the ops' masks touch by A- and M- numbers, never a word (DR-0697). Every dry run names what a forget can't reach.
 """
 
 from __future__ import annotations
@@ -36,8 +39,10 @@ from docket import index
 from docket.copied import filled
 from docket.documents import records as documents
 from docket.errors import DocketError
-from docket.forget.apply import judge, logged_keys
+from docket.forget import ledger as forget_ledger
+from docket.forget.apply import Judged, judge, logged_keys, removed_before
 from docket.index.build import open_index
+from docket.ledger import ops as ledger_ops
 from docket.media import layout
 from docket.media import staged as media_staged
 from docket.media.keystore import KeyStore
@@ -61,7 +66,8 @@ LEGACY = "legacy-note"
 CANT = (
     "key exports made before (make a new one, then destroy the old); the LFS server's encrypted copies and each "
     "clone's .git/lfs; the source itself; other clones until their next gate call; files outside the vault that "
-    "quote it (question and speech files for docket eval, a Claude session that read it)"
+    "quote it (question and speech files for docket eval, a Claude session that read it, an old ledger's export file "
+    "docket ledger import reads); ledger text that names it in plain words, with no anchor or locator"
 )
 CANT_API = "chunks sent to the API provider vault.yaml allows"
 CANT_NEVER = "docs that say a listed value without citing these records"
@@ -166,6 +172,8 @@ class Plan:
     legacy_kept: list[str] = field(default_factory=list[str])
     entities: list[str] = field(default_factory=list[str])
     ops: list[str] = field(default_factory=list[str])
+    # The ledger's ops the forget masks and what that leaves, by number (DR-0694).
+    ledger: forget_ledger.Found = forget_ledger.NOTHING
     stops: list[Stop] = field(default_factory=list[Stop])
     notes: list[Note] = field(default_factory=list[Note])
     api: bool = False
@@ -181,6 +189,7 @@ class Plan:
             keys=sorted(self.keys),
             old_paths=sorted(old_path_hash(p) for p in self.old_paths),
             import_hashes=sorted(self.import_hashes),
+            ops=sorted(self.ledger.new),
             at=at,
             machine=machine,
         )
@@ -199,6 +208,7 @@ class Plan:
             sorted(self.docs, key=lambda d: d.id),
             sorted(self.legacy_kept),
             sorted(self.stops),
+            self.ledger,
         )
 
 
@@ -435,6 +445,7 @@ def with_line(vault: Vault, plan: Plan, listed: Forgotten) -> Forgotten:
         keys=listed.keys | set(line.keys),
         old_paths=listed.old_paths | set(line.old_paths),
         import_hashes=listed.import_hashes | set(line.import_hashes),
+        ops=listed.ops | set(line.ops),
         root=vault.root,
     )
 
@@ -479,6 +490,10 @@ def _docs(vault: Vault, plan: Plan, listed: Forgotten) -> None:
                     )
                 )
     _unreadable(plan, docs)
+    # The docs this forget removes, and those an earlier one's commit did, as the apply's match again reads them.
+    removed = {*(c.id for c in plan.docs if c.removed), *removed_before(vault)}
+    lines = ledger_ops.read_all(vault.root, masked=listed.ops).lines
+    plan.ledger = forget_ledger.match(lines, after, after.listed, Judged(store, after, after.listed, removed))
 
 
 def _hash(line: str) -> str:
@@ -671,6 +686,7 @@ def lines(plan: Plan, *, screen: bool) -> list[str]:
     if plan.legacy_kept:
         where = named(plan.legacy_kept) if ids is not None else ", named at the console"
         out.append(f"by hand   {_docs_of(LEGACY, len(plan.legacy_kept))} covering more keep their text{where}")
+    out += _ledger_lines(plan.ledger)
     if plan.entities or plan.ops:
         what = f"{_plural(len(plan.entities), 'entity', 'entities')} nothing else mentions and " + _plural(
             len(plan.ops), "curate op"
@@ -689,6 +705,30 @@ def lines(plan: Plan, *, screen: bool) -> list[str]:
     out.append(f"history   the text stays in the history of {plan.repo}; the forget writes how to take it out")
     cant = [CANT, *([CANT_API] if plan.api else []), *([CANT_NEVER] if plan.kind == "never-store" else [])]
     out.append(f"can't     {'; '.join(cant)}")
+    return out
+
+
+def _ledger_lines(found: forget_ledger.Found) -> list[str]:
+    """What the ops' masks leave, by A- and M- numbers on both screens: never a word, a stream's name included."""
+    out: list[str] = []
+
+    def shells(numbers: Sequence[str]) -> str:
+        return f"{_first(numbers)} {'is a shell' if len(numbers) == 1 else 'are shells'}"
+
+    if found.new:
+        left = f"; {shells(found.shells)} now" if found.shells else ""
+        out.append(f"ledger    {_plural(len(found.new), 'op')} masked{left}")
+    if found.open:
+        # Shells, and points masked for their own words on a kept meeting, which never roll on.
+        out.append(f"drop      {_first(found.open)} left open, to drop")
+    out += [f"kept      {one}" for one in found.kept[:SHOWN]]
+    if len(found.kept) > SHOWN:
+        out.append(f"kept      and {len(found.kept) - SHOWN} more")
+    if found.streams:
+        out.append(f"streams   {_plural(found.streams, 'stream op')} masked, the streams kept")
+    out += [f"raise     {head}: raise it again" for head in found.heads[:SHOWN]]
+    if len(found.heads) > SHOWN:
+        out.append(f"raise     and {len(found.heads) - SHOWN} more")
     return out
 
 

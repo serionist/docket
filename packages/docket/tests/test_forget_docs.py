@@ -104,7 +104,7 @@ def test_a_line_on_the_family_and_the_lines_built_on_it_go_in_each_doc_s_next_re
     assert digest is not None
     assert "ten million" not in digest.source and "The channel opened" in digest.source
     body = git(vault.root, "log", "-1", "--format=%B")
-    assert body.startswith("Forget: 1 record(s), 0 media file(s), 3 doc(s) from test-box")
+    assert body.startswith("Forget: 1 record(s), 0 media file(s), 3 doc(s), 0 op(s) from test-box")
     assert f"Doc: {NOTE} rev 2" in body and f"Doc: {DIGEST} rev 2" in body
     # Nothing flagged: what was built on a dropped line went with it.
     stale = recall.stale(vault)

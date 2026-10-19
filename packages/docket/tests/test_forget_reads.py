@@ -220,7 +220,7 @@ PLACES = {
     ("vault/gate.py", "Gate._uncommitted_runs_with"): "looks for a rid in what the next commit takes, listed or not",
     ("documents/scan.py", "_Holdings.__init__"): "skips: the folder scan's holdings",
     ("imports/notes.py", "_latest"): "through RawLog.iter_records",
-    ("forget/apply.py", "apply"): "skips: takes the listed lines out of the run files that moved",
+    ("forget/apply.py", "_apply"): "skips: takes the listed lines out of the run files that moved",
     ("forget/plan.py", "_held"): "through RawLog.iter_records",
     ("forget/plan.py", "_After.__init__"): "through RawLog.iter_records, under the list with the forget's line",
 }

@@ -65,13 +65,14 @@ class Fate:
 
 
 def on_family(anchor: Anchor, rid: str, raw: Raw) -> bool:
-    """Whether an anchor reads on what a forget took (DR-0580)."""
+    """Whether an anchor reads on what a forget took (DR-0580). The list's media, a hash on the list, is asked before
+    raw is: the ledger's anchors are judged here too (DR-0694)."""
     if raw.gone(rid):
         return True
     return (
         anchor.kind == "time"
-        and not raw.timed(rid)
         and raw.media(rid)
+        and not raw.timed(rid)
         and not raw.lands(rid, anchor.start, anchor.last)
     )
 
@@ -117,14 +118,21 @@ class _Rule:
     what it cites, so what it cites, and what that cites, is all the rule reads."""
 
     def __init__(
-        self, docs: Iterable[ProcessedDoc], raw: Raw, listed: Forgotten, current: Current, older: Older
+        self,
+        docs: Iterable[ProcessedDoc],
+        raw: Raw,
+        listed: Forgotten,
+        current: Current,
+        older: Older,
+        *,
+        refs: Iterable[DocRef] = (),
     ) -> None:
         self.docs = {doc.meta.id: doc for doc in docs}
         self.raw = raw
         self.listed = listed
         # Each earlier rev a ref names, with its lines anchored on the family; None when it can't be read.
         self._earlier: dict[tuple[str, int], tuple[ProcessedDoc, set[int]] | None] = {}
-        self._close(current, older)
+        self._close(current, older, list(refs))
         self.removed = {
             doc_id
             for doc_id, doc in self.docs.items()
@@ -132,13 +140,14 @@ class _Rule:
         }
         self.dropped = {doc_id: anchored(doc, raw) for doc_id, doc in self.docs.items() if doc_id not in self.removed}
 
-    def _close(self, current: Current, older: Older) -> None:
+    def _close(self, current: Current, older: Older, seeds: list[DocRef]) -> None:
         """Read every doc a ref leads to, as it reads now, and every earlier rev a ref names, a round of each at a
-        time, so a caller reads each round in one go."""
+        time, so a caller reads each round in one go; `seeds`, refs from outside the docs, go in the first round."""
         frontier = list(self.docs.values())
         missing: set[str] = set()
-        while frontier:
-            refs = [ref for doc in frontier for _, ref in _refs(doc)]
+        while frontier or seeds:
+            refs = [*seeds, *(ref for doc in frontier for _, ref in _refs(doc))]
+            seeds = []
             wanted = {ref.doc for ref in refs} - set(self.docs) - missing
             found = dict(current(wanted)) if wanted else {}
             missing |= wanted - set(found)
@@ -234,3 +243,14 @@ def fates(
         if found is not None:
             out[doc.meta.id] = found
     return out
+
+
+def cited(
+    refs: Iterable[DocRef], raw: Raw, listed: Forgotten, *, current: Current = _nothing, older: Older = _nothing
+) -> set[DocRef]:
+    """The refs, written outside the docs as a ledger op's text holds them (DR-0694), that lead to a line the rule
+    drops or a doc it removes, each judged in the rev it names as a doc's own ref is."""
+    wanted = list(dict.fromkeys(refs))
+    rule = _Rule(current({ref.doc for ref in wanted}).values(), raw, listed, current, older, refs=wanted)
+    rule.settle()
+    return {ref for ref in wanted if rule.cites_dropped(ref, set())}

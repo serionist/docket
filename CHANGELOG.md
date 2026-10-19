@@ -290,6 +290,17 @@ Unreleased in the same PR.
   `show`, the index and an import run again, its number and history kept, and the next gate call on each clone writes
   the mask into the op files. A forgotten list that doesn't read now stops the ledger's reads and writes too. Update
   Docket on every machine before the next forget: an older one stops on a list that names an op.
+- `docket forget` reaches the ledger: an op anchoring on what it takes, a material or a source naming it, and every op
+  of an item or a meeting built on it read `[forgotten]`, the item or meeting kept as a shell with its number. A
+  weekly point rolled through a meeting whose calendar record you forgot loses only that meeting's copy. The dry run
+  and the screen name each shell, an open one to drop (an item open, a meeting with an open point, or a point it masked
+  on a meeting it kept), each item or meeting that lost a link and kept its text, and each open point left on a shell,
+  to raise again, by number only. Afterwards Claude can't write text or a log on a shell, or a source, a ref or an
+  anchor naming what you forgot; a drop, an archive or a close with an outcome there still goes, its note and outcome
+  `[forgotten]`. A point it masked on a meeting it kept takes no text, an answer there reads `[forgotten]`, and the
+  rollover leaves it where it is, to drop. Another machine's own ops from before its pull
+  are masked at its next gate call, a link to a doc the forget removed and an answer to a masked point among them, and
+  the history rewrite takes the op lines out of every commit, a deleted op file's too.
 - `media_put` fetches a URL from any https host, every address it resolves to still checked: `docket media host` is
   gone, and a source's `media_hosts` key in `vault.yaml` is read and ignored. A `vault.yaml` with comments or a layout
   of your own is now edited in place, its comments and order kept, by every command and the Settings page; only a
