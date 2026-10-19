@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0653
+    title: docket ledger import writes an export's op lines a month per commit, skipping what the ledger holds of them, beside the ledger's own objects, and refusing an op on its objects from elsewhere
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#202"]
+    description: "docket ledger import <file> reads JSON lines, each an op line (DR-0611) with via import, day alone and the export's own ids. machine, batch and after are the writer's, so the import sets them: its machine, the month's first op id, the object's op before; a line carrying one of them, or another via, refuses the file. Under the vault lock it writes the months oldest first, each one write through store.py, the one writer (DR-0610): the text rules a live write follows (DR-0618, DR-0627), the month's file through a temp file and a rename, one commit; then the index's ledger tables catch up. The file's ops the ledger holds, each line for line as the import would write it, are skipped and the rest written, so a rerun writes nothing and an import stopped after a month finishes. Objects of the ledger's own that name none of the file's, such as the meetings #200's calendar step makes at each promotion, stand beside the import; its last write is the writer's renumber, for any of them whose number an add of the file claims first (DR-0613). An op outside the file that names one of the file's objects, a live write's or a catch-up's join, or a held line with another text, refuses the import, naming how many. A line that isn't an op, a text rule's refusal, or a problem docket vault check would name in the fold of the result refuses it, naming place and field, never the value."
+    binds:
+      - The file is op lines in DR-0611's format, less the keys the writer sets; the import adds none of its own.
+      - "An import never writes onto an object another write has touched: an op outside the file naming one of its objects refuses it."
+    not_chosen:
+      - "ledger_batch's changes (#201): they take the write's day and mint fresh ids, so the history would land on the import's day and a rerun would double it."
+      - "One commit for the whole import: a write's ops fall in one month (DR-0610)."
+      - "A ledger holding nothing but the file's ops: in the live clone the calendar step makes meetings at each promotion, before the import is final (DR-0647)."
+      - "Topping up objects live writes have touched: two writers' states would need merging, for a run made once."

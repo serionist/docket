@@ -28,6 +28,7 @@ commits or has nothing to write.
 from __future__ import annotations
 
 import re
+import sqlite3
 from collections.abc import Sequence
 from contextlib import closing
 from dataclasses import dataclass, field
@@ -235,6 +236,7 @@ def _step(
     now: datetime | None,
     taken: int = 0,
     renumber: bool = True,
+    tables: sqlite3.Connection | None = None,
 ) -> _Part:
     """One write: with `replay` the pending rids, and `rids`, at raw's latest version with sets; then `adding`, the
     catch-up's own records, adding and joining only. Its reads, its write and the clearing are under the vault lock."""
@@ -258,7 +260,14 @@ def _step(
         events.sort(key=lambda e: (e[0], e[1]))
         written = (
             store.write_calendar(
-                vault, [e for _, _, e in events], via=via, dry_run=dry_run, now=now, taken=taken, renumber=renumber
+                vault,
+                [e for _, _, e in events],
+                via=via,
+                dry_run=dry_run,
+                now=now,
+                taken=taken,
+                renumber=renumber,
+                tables=tables,
             )
             if events
             else None
@@ -295,10 +304,18 @@ def since_default(vault: Vault, now: datetime | None = None) -> date:
     return moment.astimezone(ZoneInfo(vault.config.owner.time_zone)).date() - SINCE
 
 
-def catch_up(vault: Vault, since: date | None = None, *, dry_run: bool = False, now: datetime | None = None) -> Stepped:
+def catch_up(
+    vault: Vault,
+    since: date | None = None,
+    *,
+    dry_run: bool = False,
+    now: datetime | None = None,
+    tables: sqlite3.Connection | None = None,
+) -> Stepped:
     """`docket ledger calendar` (DR-0647): what is pending, then the latest version of each event record in raw that
     starts on `since` or later, in the owner's zone, adding and joining only. The index is brought up to date first,
-    to find the event records."""
+    to find the event records. A dry run may ask `tables`, the ledger as an import not yet made would leave it
+    (DR-0655)."""
     first = since or since_default(vault, now)
     zone = ZoneInfo(vault.config.owner.time_zone)
     start = datetime(first.year, first.month, first.day, tzinfo=zone)
@@ -307,11 +324,16 @@ def catch_up(vault: Vault, since: date | None = None, *, dry_run: bool = False, 
         rids = [str(rid) for (rid,) in conn.execute("SELECT rid FROM records WHERE kind = ? ORDER BY rid", (KIND,))]
     lookup = RawLookup(vault.root)
     found = [r for r in (lookup.latest(rid) for rid in rids) if r is not None and r.ts >= start]
-    return add_and_join(vault, found, dry_run=dry_run, now=now)
+    return add_and_join(vault, found, dry_run=dry_run, now=now, tables=tables)
 
 
 def add_and_join(
-    vault: Vault, records: Sequence[RawRecord], *, dry_run: bool = False, now: datetime | None = None
+    vault: Vault,
+    records: Sequence[RawRecord],
+    *,
+    dry_run: bool = False,
+    now: datetime | None = None,
+    tables: sqlite3.Connection | None = None,
 ) -> Stepped:
     """The catch-up's writes (DR-0647): what is pending, sets included, with the first chunk; then `records`, one
     version per rid, adding and joining only, in start order, in chunks of `CHUNK` records or a few more, each ending
@@ -334,7 +356,7 @@ def add_and_join(
         planned = [p.written for p in parts if p.written is not None]
         parts.append(_step(
             vault, (), chunk, via="cli", replay=k == 0, dry_run=dry_run, now=now,
-            taken=max((w.numbered for w in planned), default=0), renumber=not (dry_run and planned),
+            taken=max((w.numbered for w in planned), default=0), renumber=not (dry_run and planned), tables=tables,
         ))  # fmt: skip
     return _stepped(parts, dry_run)
 

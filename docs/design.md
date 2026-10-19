@@ -816,10 +816,14 @@ No big-bang switch: each piece of an existing setup is replaced only after its r
    holds the vault, after each curate write and on `docket render`, written and never committed. A file edited by hand
    is left and reported, a repo anyone can read gets none, and a never-store value is left out (DR-0552 to DR-0554).
 4. The ledger moves last, imported with its whole history; for a week both run in step, the old one read-only.
-   Until the day pages exist, an existing setup's sync harvests through its own source skills into Docket and keeps
-   reconciling into its own task list. Once the ledger has moved, each stream's STATUS.md frontmatter is rendered
-   from it, as the people directory and the glossary are from the entities: a file the old tool wrote is taken over
-   when its fields agree with the ledger, and left and reported when they don't (DR-0675).
+   `docket ledger import` takes op lines a script in the user's project writes from the old ledger, a month per
+   commit, skipping what it holds, so no importer for one person's format lives in Docket (DR-0653); its dry run
+   counts what it brings (DR-0654), old meetings come in keyless for `docket ledger calendar` to join (DR-0655), and
+   `--revert` deletes every op file until the switch (DR-0656). Until the day pages exist, an existing setup's sync
+   harvests through its own source skills into Docket and keeps reconciling into its own task list. Once the ledger
+   has moved, each stream's STATUS.md frontmatter is rendered from it, as the people directory and the glossary are
+   from the entities: a file the old tool wrote is taken over when its fields agree with the ledger, and left and
+   reported when they don't (DR-0675).
 
 ## 13. How we know it works
 

@@ -2201,6 +2201,53 @@ def ledger_calendar(
     say_all(ledger_events.lines(ledger_events.catch_up(find_vault(vault), day, dry_run=dry_run)))
 
 
+@ledger_app.command("import")
+def ledger_import(
+    source: Annotated[
+        str | None, typer.Argument(help="The export's ops: a file of JSON lines, or - to read stdin.")
+    ] = None,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Count what it would bring and every refusal; write nothing.")
+    ] = False,
+    as_json: Annotated[bool, typer.Option("--json", help="Say it as JSON, each item's log entries included.")] = False,
+    revert: Annotated[
+        bool, typer.Option("--revert", help="Delete every op file in one commit, until the old ledger retires.")
+    ] = False,
+    vault: VaultOption = None,
+) -> None:
+    """Bring a ledger in with its history, from the op lines an export wrote: a month per commit, what the ledger holds
+    already skipped, so a rerun adds nothing twice. A dry run counts it against the old ledger and shows the old
+    meetings `docket ledger calendar` would join after it. --revert takes every op out again; every clone pulls that
+    before it writes. A refused import exits 1."""
+    from docket.ledger import imports as ledger_imports  # noqa: PLC0415
+
+    v = find_vault(vault)
+    if revert:
+        if source is not None:
+            raise DocketError("--revert takes no file: it takes every op out")
+        say_all(ledger_imports.revert_lines(ledger_store.revert_import(v, dry_run=dry_run), dry_run=dry_run))
+        return
+    if source is None:
+        raise DocketError("give the export's file, or - to read stdin")
+    if source == "-":
+        data, name = sys.stdin.buffer.read(), "stdin"
+    elif Path(source).is_file():
+        data, name = Path(source).read_bytes(), Path(source).name
+    else:
+        raise DocketError(f"no file {source}")
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise DocketError(f"{source} isn't UTF-8; write the export as UTF-8") from None
+    imported = ledger_imports.run(v, text, name, dry_run=dry_run)
+    if as_json:
+        typer.echo(ledger_imports.as_json(imported))
+    else:
+        say_all(ledger_imports.lines(imported))
+    if imported.plan.refusals:
+        raise typer.Exit(1)
+
+
 @hook_app.command("session-start")
 def hook_session_start() -> None:
     """What state Docket is in, as JSON for Claude Code's SessionStart hook. It reads nothing from stdin and always

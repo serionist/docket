@@ -46,7 +46,19 @@ from typing import Any, NamedTuple
 
 from docket.errors import DocketError
 from docket.ledger import ops
-from docket.ledger.fold import NUMBER, Entry, Folded, Item, Material, fold_item, load, made, number_text, paused
+from docket.ledger.fold import (
+    NUMBER,
+    Entry,
+    Folded,
+    Item,
+    Ledger,
+    Material,
+    fold_item,
+    load,
+    made,
+    number_text,
+    paused,
+)
 from docket.ledger.meetings import Meeting, ObjectFold, Objects, Point, Stream, fold_objects
 from docket.ledger.ops import Line, Op
 
@@ -468,18 +480,24 @@ def rebuild(conn: sqlite3.Connection, root: Path) -> int:
         conn.executemany(
             INSERT_FILE, [(f.rel, f.size, settled(f.mtime_ns, read_ns), f.sha256, f.highest) for f in files]
         )
-        rows = _Rows()
-        for item_id, folded in ledger.folds.items():
-            item = folded.item
-            rows.add(item_id, ledger.lines[item_id], folded, None if item is None else item.number)
-        owner = ledger.objects.owner
-        for item_id, group in ledger.lines.items():
-            if item_id not in ledger.folds and item_id not in owner:
-                rows.later(item_id, group)
-        rows.objects(ledger.objects, ledger.lines, numbered=True)
-        rows.write(conn)
-        del ledger, rows
+        fill(conn, ledger)
+        del ledger
     return sum(f.lines for f in files)
+
+
+def fill(conn: sqlite3.Connection, ledger: Ledger) -> None:
+    """A whole fold's rows into the tables, which hold none of its ops yet: every item, meeting and stream, and the
+    lines of a later Docket's objects."""
+    rows = _Rows()
+    for item_id, folded in ledger.folds.items():
+        item = folded.item
+        rows.add(item_id, ledger.lines[item_id], folded, None if item is None else item.number)
+    owner = ledger.objects.owner
+    for item_id, group in ledger.lines.items():
+        if item_id not in ledger.folds and item_id not in owner:
+            rows.later(item_id, group)
+    rows.objects(ledger.objects, ledger.lines, numbered=True)
+    rows.write(conn)
 
 
 def _grew(data: bytes, size: int, sha: str) -> bool:

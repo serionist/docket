@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import heapq
 import re
+import sqlite3
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -245,6 +246,39 @@ class CalendarWritten:
 LEFT_OUT = "left out"
 
 
+class TextRefusedError(LedgerError):
+    """A value the text rules refuse: why, naming the field and never the value."""
+
+
+class TextRules:
+    """The text rules every op's values pass (DR-0618, DR-0627), for the writer and the import alike: text redacted, a
+    never-store keyword, a person on the people list in who, an organiser or an attendee, or a redaction rule's match
+    in a value that isn't text refused."""
+
+    def __init__(self, vault: Vault) -> None:
+        self.lists = vault.config.never_store
+        self.redactor = Redactor.from_config(vault.config.redaction)
+
+    def screen(self, name: str, value: str) -> str:
+        """A value as it may be written: text redacted, anything else as given; `TextRefusedError` when it may not."""
+        lists = self.lists
+        counts: Counter[str] = Counter()
+        redacted = self.redactor.text(value, counts)
+        if matches_text(value, lists) or matches_text(redacted, lists):
+            raise TextRefusedError(f"{name} says something on the never-store keywords list; leave it out")
+        if name in PEOPLE and names_person(value, lists):
+            raise TextRefusedError(f"{name} names someone on the never-store people list; leave them out")
+        if name in REDACTED:
+            return redacted
+        if counts:
+            what = (
+                "locator" if name in LOCATORS else "day" if name in (*DAYS, "until", "deadline")
+                else "time" if name in TIMES else name
+            )  # fmt: skip
+            raise TextRefusedError(f"{name} matches the {min(counts)} redaction rule, and a {what} can't hold a marker")
+        return value
+
+
 def one_line(text: str) -> str:
     return " ".join(CONTROL.sub("", text).split())
 
@@ -302,17 +336,21 @@ def write_calendar(
     now: datetime | None = None,
     taken: int = 0,
     renumber: bool = True,
+    tables: sqlite3.Connection | None = None,
 ) -> CalendarWritten:
     """The calendar step's one write, by sync (DR-0647): each record's meeting added, joined or set, in the order
     given. It never refuses: a record it can't take is an outcome left out, with why, and the rest is written. A
     catch-up's dry run, whose chunks write nothing, gives `taken`, the highest M- number its chunks before gave, so
-    this one numbers after them, and renumbers in its first chunk alone."""
+    this one numbers after them, and renumbers in its first chunk alone. A dry run may plan against `tables`, the
+    ledger as a write not yet made would leave it, as the import's dry run asks (DR-0655)."""
     if via not in ops.VIA:
         raise LedgerError(f"via is one of {', '.join(ops.VIA)}")
+    if tables is not None and not dry_run:
+        raise LedgerError("only a dry run plans against tables of its own")
     moment = now or datetime.now(UTC)
     with vault.writing():
         ops.folder(vault.root)
-        with ledger_tables(vault) as conn:
+        with ledger_tables(vault, tables) as conn:
             plan = _Write(vault, Held(conn), "sync", via, moment)
             plan.highest_meeting = max(plan.highest_meeting, taken)
             if renumber:
@@ -365,7 +403,7 @@ class _Write:
         self.new: list[Op] = []
         self.given: dict[int, str] = {}
         self.given_meetings: dict[int, str] = {}
-        self.redactor = Redactor.from_config(vault.config.redaction)
+        self.rules = TextRules(vault)
         self.kind = ""
         # The meetings' and streams' adds read so far, whole parts (DR-0633), and their fold; the streams' names as the
         # tables hold them, for the streams no part read holds.
@@ -624,25 +662,11 @@ class _Write:
     # -- the text rules (DR-0618, DR-0627) --------------------------------------------------------------------------
 
     def screen(self, n: int, name: str, value: str) -> str:
-        """A value as it may be written: text redacted, anything else as given. A never-store keyword, a person on the
-        people list in who, an organiser or an attendee, or a redaction rule's match in a value that isn't text
-        refuses the write."""
-        lists = self.vault.config.never_store
-        counts: Counter[str] = Counter()
-        redacted = self.redactor.text(value, counts)
-        if matches_text(value, lists) or matches_text(redacted, lists):
-            self.refuse(n, f"{name} says something on the never-store keywords list; leave it out")
-        if name in PEOPLE and names_person(value, lists):
-            self.refuse(n, f"{name} names someone on the never-store people list; leave them out")
-        if name in REDACTED:
-            return redacted
-        if counts:
-            what = (
-                "locator" if name in LOCATORS else "day" if name in (*DAYS, "until", "deadline")
-                else "time" if name in TIMES else name
-            )  # fmt: skip
-            self.refuse(n, f"{name} matches the {min(counts)} redaction rule, and a {what} can't hold a marker")
-        return value
+        """A value as it may be written (`TextRules.screen`), or the write refused, naming the change."""
+        try:
+            return self.rules.screen(name, value)
+        except TextRefusedError as e:
+            self.refuse(n, str(e))
 
     def note(self, n: int, value: object) -> str | None:
         if value is None:
@@ -1959,6 +1983,62 @@ def _save_calendar_pending(vault: Vault, rids: Sequence[str]) -> None:
         return
     make_private(vault.home.git_dir, path.parent)
     write_replacing(vault.home, path, "".join(f"{rid}\n" for rid in kept), "calendar-pending")
+
+
+# -- the import (#202) -------------------------------------------------------------------------------------------
+
+
+def write_import(vault: Vault, months: Sequence[Sequence[Op]]) -> tuple[str, ...]:
+    """An import's months (DR-0653), oldest first, each the ops of one month, at least one, as `ledger.imports` made
+    them from an export's lines: one write of this machine's month file, through a temp file and a rename, and one
+    commit. The commits, in order."""
+    commits: list[str] = []
+    with vault.writing():
+        ops.folder(vault.root)
+        for made in months:
+            said = f"{len(made):,} op{'' if len(made) == 1 else 's'}"
+            commit = commit_ops(vault, made, f"Ledger: import {made[0].day:%Y-%m}, {said} on {vault.machine}")
+            if commit is not None:
+                commits.append(commit)
+    return tuple(commits)
+
+
+@dataclass(frozen=True)
+class Reverted:
+    """What a revert took out, or with a dry run would: the op files, how many ops of each via, and its commit."""
+
+    files: tuple[str, ...]
+    vias: dict[str, int]
+    commit: str | None = None
+
+
+def revert_import(vault: Vault, *, dry_run: bool = False) -> Reverted:
+    """`docket ledger import --revert` (DR-0656): every op file deleted, the import's ops and any written since, in one
+    commit, as `git rm` leaves them, so a clone that wrote to one meanwhile meets a modify/delete conflict at its
+    merge instead of a union merge taking every line back; then the index's ledger tables catch up. For the trial
+    imports and a rollback, until the old ledger retires; git keeps the lines."""
+    with vault.writing():
+        ops.folder(vault.root)
+        listed, _ = ops.listing(vault.root)
+        vias = Counter(line.op.via for line in ops.read_all(vault.root).lines)
+        files = tuple(rel for rel, _ in listed)
+        if dry_run or not files:
+            return Reverted(files, dict(sorted(vias.items())))
+        tracked = set(vault.git.in_head(OPS_DIR) or ())
+        # A write that stopped between its add and its commit left its new file staged: kept so, the next commit,
+        # the user's own too, would bring it back. Unstaged first, so a failure leaves every file where it was.
+        staged = vault.git.staged_new(OPS_DIR)
+        if staged:
+            vault.git.run("reset", "-q", "--", *staged)
+        for _, path in listed:
+            path.unlink()
+        out = sum(vias.values())
+        message = f"Ledger: import reverted, {out:,} op{'' if out == 1 else 's'} out on {vault.machine}"
+        gone = sorted(rel for rel in files if rel in tracked)
+        commit = vault.commit(gone, console.signed(message)) if gone else None
+    with ledger_tables(vault):
+        pass
+    return Reverted(files, dict(sorted(vias.items())), commit)
 
 
 # -- committing -------------------------------------------------------------------------------------------------

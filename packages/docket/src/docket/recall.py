@@ -21,7 +21,7 @@ DR-0522). A put holds the index only while it checks, never under the vault's lo
 from __future__ import annotations
 
 import os
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
@@ -312,6 +312,37 @@ def absent(root: Path, rid: str) -> str:
     if listed.whole(rid) or listed.versioned(rid):
         return f"{rid} was forgotten"
     return f"{rid} isn't in the raw log"
+
+
+def resolves(vault: Vault, locators: Iterable[str]) -> set[str]:
+    """The locators `read` finds something at, by its rules (DR-0131), asked without building a read: a rid in the raw
+    log, a doc, a processed doc's path, or a legacy note's old path, with a time or not, a doc as the forget leaves it
+    (DR-0580). One that doesn't parse, names nothing or several, or names a doc the forget empties, doesn't resolve."""
+    call = _Call(vault)
+    try:
+        return {locator for locator in dict.fromkeys(locators) if _resolves(call, locator)}
+    finally:
+        call.close()
+
+
+def _resolves(call: _Call, locator: str) -> bool:
+    value = locator.strip()
+    try:
+        path = None if value.startswith(("[", "r:")) else split_path_locator(value)
+        if path is not None and not call.raw.has(value):
+            given = Path(os.path.normpath(call.store.root / path[0].replace("\\", "/")))
+            if given.is_relative_to((call.store.root / "processed").resolve()) and given.is_file():
+                call.left(_load(call.store, "path", str(given), None))
+            else:
+                call.left(_load(call.store, "doc", call.old_path(path[0]), None))
+            return True
+        loc = parse_locator(value, DOC_TYPES)
+        if loc.kind != "record":
+            call.left(_load(call.store, loc.kind, loc.value, None))
+            return True
+        return call.raw.has(loc.value)
+    except (AnchorError, DocketError):
+        return False
 
 
 def _read(call: _Call, locator: str, view: View, around: int, rev: int | None) -> ReadResult:

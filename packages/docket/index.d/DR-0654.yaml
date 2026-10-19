@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0654
+    title: The import's dry run counts the ledger as the import would leave it, with --json for a comparison
+    status: proposed
+    at: "2026-10-19"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#202"]
+    description: "docket ledger import --dry-run writes nothing, folds the ledger as the import would leave it and lists every refusal. It counts items by kind and state with the archived apart, log entries per item (its log ops), meetings archived, points by state, streams by status, and the next A- and M- numbers; lists the ops not from the file by via, kind and machine, and the objects its last write would renumber (DR-0653), so at cut-over, after the live clone is merged into the owner's checkout, a dry run shows that nothing but the calendar step's meetings stands outside the file; gives each point chain by number (M-0031#2 > M-0035#1) and the copies whose from names a meeting; the sources no rid, processed doc or legacy note's old path answers by read's rules (DR-0131), asked of the index, by scheme with their items; the joins #200's catch-up would make, from the catch-up's own dry run over the ledger as the import would leave it, read-only, with its near misses (DR-0655); and the ops that change nothing, by kind. --json gives the same as data, so an owner's script can check it against the old ledger's own counts; its shape only gains fields."
+    not_chosen:
+      - "Comparing with the old ledger inside Docket: Docket would have to read one person's YAML."
+      - "Resolving each source by reading its record: the index says whether a locator resolves without loading it."

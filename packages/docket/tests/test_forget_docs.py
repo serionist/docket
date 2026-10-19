@@ -179,6 +179,9 @@ def test_a_doc_left_with_no_line_is_removed_and_read_says_forgotten(vault: Vault
     forget_transcript(vault)
     with pytest.raises(Exception, match="was forgotten"):
         recall.read(vault, "recording-note:2026-10-14-price")
+    # Nor does `resolves` find it, by its id or its path, as `read` doesn't.
+    path = DocStore(vault).file("recording-note:2026-10-14-price").relative_to(vault.root).as_posix()
+    assert recall.resolves(vault, ["recording-note:2026-10-14-price", path, NOTE]) == {NOTE}
     done = apply(vault)
     assert done.removed == 1
     assert not DocStore(vault).file("recording-note:2026-10-14-price").exists()
