@@ -89,7 +89,7 @@ class Times:
             "files": {f: round(s / workers, 2) for f, s in sorted(self.seconds.items())},
         }
         self.out.parent.mkdir(parents=True, exist_ok=True)
-        self.out.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        self.out.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8", newline="\n")
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -126,9 +126,10 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         items[:] = selected
 
 
-def merge_times(folder: Path, weights_path: Path) -> list[str]:
-    """Each system's weights rewritten from one CI run's times files under the folder, the runs of each share summed
-    per file; a system with no times keeps its weights. A line per system written."""
+def merge_times(folder: Path, weights_path: Path, root: Path) -> list[str]:
+    """Each system's weights updated from one CI run's times files under the folder, the runs of each share summed per
+    file. A file the run has no time for keeps its weight, so a share that failed or wasn't downloaded leaves its files
+    as they were; a file no longer under the root is dropped. A line per system written."""
     found: dict[str, dict[str, float]] = {}
     seen: set[tuple[str, str, str]] = set()
     for path in sorted(folder.rglob("*.json")):
@@ -151,8 +152,12 @@ def merge_times(folder: Path, weights_path: Path) -> list[str]:
     data: dict[str, Any] = (
         json.loads(weights_path.read_text(encoding="utf-8")) if weights_path.is_file() else {"$comment": COMMENT}
     )
-    for system, per in found.items():
-        data[system] = {f: round(s, 1) for f, s in sorted(per.items())}
+    lines: list[str] = []
+    for system, per in sorted(found.items()):
+        before: dict[str, Any] = data.get(system) or {}
+        kept = {f: float(w) for f, w in before.items() if f not in per and (root / f).is_file()}
+        data[system] = {f: round(s, 1) for f, s in sorted({**kept, **per}.items())}
+        lines.append(f"{system}: {len(per)} files timed, {sum(per.values()):.0f} s; {len(kept)} kept as they were")
     ordered = {k: data[k] for k in sorted(data, key=lambda k: (not k.startswith("$"), k))}
-    weights_path.write_text(json.dumps(ordered, indent=2) + "\n", encoding="utf-8")
-    return [f"{system}: {len(per)} files, {sum(per.values()):.0f} s" for system, per in sorted(found.items())]
+    weights_path.write_text(json.dumps(ordered, indent=2) + "\n", encoding="utf-8", newline="\n")
+    return lines

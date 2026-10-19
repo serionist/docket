@@ -114,9 +114,13 @@ def times_file(path: Path, run: tuple[str, str, str], files: dict[str, float]) -
     path.write_text(json.dumps(record), encoding="utf-8")
 
 
-def test_a_run_s_times_rewrite_each_system_s_weights_and_keep_the_others(tmp_path: Path) -> None:
-    weights = tmp_path / "test-weights.json"
-    before = {"$comment": "kept", "Darwin": {"a.py": 7}, "Windows": {"old.py": 1}}
+def test_a_run_s_times_update_each_system_s_weights_and_keep_the_others(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    # A file a share that failed ran: still in the repo, no time from this run.
+    (root / "kept.py").write_text("", encoding="utf-8")
+    weights = root / "test-weights.json"
+    before = {"$comment": "kept", "Darwin": {"a.py": 7}, "Windows": {"gone.py": 1, "kept.py": 2, "a.py": 9}}
     weights.write_text(json.dumps(before), encoding="utf-8")
     run = tmp_path / "run"
     # As gh run download leaves them: an artifact a folder.
@@ -125,24 +129,28 @@ def test_a_run_s_times_rewrite_each_system_s_weights_and_keep_the_others(tmp_pat
     times_file(run / "times-windows-2" / "w2.json", ("Windows", "2/2", "not perf"), {"c.py": 4.0})
     times_file(run / "times-linux-1" / "l1.json", ("Linux", "1/1", ""), {"a.py": 1.04})
     (run / "notes.json").write_text("[]", encoding="utf-8")
-    lines = shard.merge_times(run, weights)
+    lines = shard.merge_times(run, weights, root)
     data = json.loads(weights.read_text(encoding="utf-8"))
     assert list(data) == ["$comment", "Darwin", "Linux", "Windows"]
     assert data["$comment"] == "kept" and data["Darwin"] == {"a.py": 7}
-    assert data["Windows"] == {"a.py": 5.5, "b.py": 1.0, "c.py": 4.0}
+    # The run's times win; kept.py keeps its weight; gone.py, no longer in the repo, goes.
+    assert data["Windows"] == {"a.py": 5.5, "b.py": 1.0, "c.py": 4.0, "kept.py": 2.0}
     assert data["Linux"] == {"a.py": 1.0}
-    assert lines == ["Linux: 1 files, 1 s", "Windows: 3 files, 10 s"]
+    assert lines == [
+        "Linux: 1 files timed, 1 s; 0 kept as they were",
+        "Windows: 3 files timed, 10 s; 1 kept as they were",
+    ]
 
 
 def test_the_times_of_two_runs_or_of_none_are_refused(tmp_path: Path) -> None:
     weights = tmp_path / "test-weights.json"
     with pytest.raises(KitError, match="no times files"):
-        shard.merge_times(tmp_path, weights)
+        shard.merge_times(tmp_path, weights, tmp_path)
     times_file(tmp_path / "one" / "a.json", ("Windows", "1/2", "not perf"), {"a.py": 1.0})
     times_file(tmp_path / "two" / "a.json", ("Windows", "1/2", "not perf"), {"a.py": 1.2})
     with pytest.raises(KitError, match="twice"):
-        shard.merge_times(tmp_path, weights)
+        shard.merge_times(tmp_path, weights, tmp_path)
     assert not weights.exists()
     (tmp_path / "two" / "a.json").unlink()
-    shard.merge_times(tmp_path, weights)
+    shard.merge_times(tmp_path, weights, tmp_path)
     assert json.loads(weights.read_text(encoding="utf-8"))["$comment"] == shard.COMMENT

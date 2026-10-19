@@ -456,14 +456,19 @@ def step_floors(ctx: Ctx) -> Outcome:
     return _floors(ctx, report, f"{n} shares' coverage combined", [])
 
 
+# pytest's exit code when it ran no test: a share whose files hold no timed test has nothing to time.
+NO_TESTS = 5
+
+
 def _alone_after(ctx: Ctx, code: int, lines: list[str], cmd: list[str], env: dict[str, str]) -> Outcome:
     """The timed tests after the rest's run, once the lane's other steps are done too, one at a time: no other work
     shares the CPUs with what they time. -raP adds the passed tests' output, which holds their times, to the summary."""
     ctx.alone.wait()
     timed_code, timed_lines = _run(ctx, cmd, env=env)
-    if code != 0 or timed_code != 0:
+    none_timed = timed_code == NO_TESTS
+    if code != 0 or (timed_code != 0 and not none_timed):
         return Outcome.fail(*(lines[-80:] if code else []), *(timed_lines[-80:] if timed_code else []))
-    alone = f"timed alone: {_summary(timed_lines)}"
+    alone = "timed alone: none in these files" if none_timed else f"timed alone: {_summary(timed_lines)}"
     return Outcome.ok(_summary(lines), alone, *timed(timed_lines), *slowest(lines))
 
 
@@ -601,7 +606,8 @@ def weights(folder: Path | None) -> int:
 
     if folder is None or not folder.is_dir():
         raise KitError('weights needs the folder of a CI run\'s times: gh run download <run> -p "times-*" -D <folder>')
-    for line in merge_times(folder, repo_root() / WEIGHTS):
+    root = repo_root()
+    for line in merge_times(folder, root / WEIGHTS, root):
         print(line)
     print(f"wrote {WEIGHTS}")
     return 0

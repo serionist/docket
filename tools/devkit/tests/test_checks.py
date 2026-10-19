@@ -642,7 +642,7 @@ def test_weights_folds_a_run_s_times_into_the_weights_file(
     assert gate.main(["weights", str(tmp_path / "times")]) == 0
     written = json.loads((repo / "tools" / "devkit" / "test-weights.json").read_text(encoding="utf-8"))
     assert written["Linux"] == {"a.py": 2.0}
-    assert "Linux: 1 files, 2 s" in capsys.readouterr().out
+    assert "Linux: 1 files timed, 2 s; 0 kept as they were" in capsys.readouterr().out
     assert gate.main(["weights"]) == 2
     assert gate.main(["weights", str(tmp_path / "nowhere")]) == 2
 
@@ -653,6 +653,18 @@ def test_a_failure_in_either_run_shows_its_tail(tmp_path: Path, monkeypatch: pyt
         out = gate.step_tests(gate.Ctx(root=tmp_path, lane="os", ci=False, base=None, pr=None))
         assert out.status == "fail"
         assert [ln for ln in out.detail if "broke" in ln] == broke
+
+
+def test_a_share_with_no_timed_test_passes_but_one_with_no_test_at_all_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fake_pytest(monkeypatch, codes=(0, gate.NO_TESTS))
+    out = gate.step_tests(gate.Ctx(root=tmp_path, lane="os", ci=False, base=None, pr=None, shard="9/12"))
+    assert out.status == "ok"
+    assert out.detail[:2] == ["9 passed, 2 deselected in 3.00s", "timed alone: none in these files"]
+    _fake_pytest(monkeypatch, codes=(gate.NO_TESTS, 0))
+    out = gate.step_tests(gate.Ctx(root=tmp_path, lane="os", ci=False, base=None, pr=None, shard="9/12"))
+    assert out.status == "fail"
 
 
 def test_each_step_gives_both_runs_one_templates_folder_and_the_timed_run_a_temp_folder(
