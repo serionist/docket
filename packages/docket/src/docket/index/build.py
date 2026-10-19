@@ -75,7 +75,7 @@ REPLACE_SECONDS = 5.0
 REPLACE_WAIT = 0.1
 BUSY_SECONDS = 5.0
 JOURNALS = ("-journal", "-wal", "-shm")
-# How long a ledger write or `docket ledger show` waits for the index before it folds the op files in memory: a
+# How long a ledger write or a ledger read waits for the index before it folds the op files in memory: a
 # rebuild can hold the index for minutes, and a write never waits on a cache (DR-0619).
 LEDGER_WAIT = 1.0
 

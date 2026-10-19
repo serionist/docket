@@ -8,6 +8,12 @@ Unreleased in the same PR.
 
 ### Added
 
+- The ledger: the items you owe and await, meetings with their talking points, and streams, kept as ops in your vault.
+  Claude reads it with the `ledger` tool, and you with `docket ledger snapshot`, `show`, `queue`, `list`, `meetings`
+  and `suggest`: counts first, then a line per item, meeting, point or stream, each source a locator `read` opens.
+  Notes, outcomes and the history come only in `show`, which now takes a meeting or a stream too. An item's counts
+  come from its ops: how many asks to someone went unanswered is a `list` with `--who`, `--kind waiting` and
+  `--state all`. `--json` gives every field and every row.
 - Claude changes the ledger with the `ledger_batch` tool, and you with `docket ledger batch`: items, meetings, talking
   points and streams in one write, every change or none, each saying who decided it, `as` naming what one made for a
   later op's `$name`, and a dry run that lists every change it would refuse. An add that looks like an open item is

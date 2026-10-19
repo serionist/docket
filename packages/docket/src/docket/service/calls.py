@@ -17,7 +17,8 @@ from docket import briefs, decisions, index, recall, render
 from docket.briefs import BriefsReport
 from docket.decisions import DecisionsReport
 from docket.index import SearchResult
-from docket.ledger import batch, store
+from docket.index.build import ledger_tables
+from docket.ledger import batch, store, views
 from docket.ledger.batch import BatchResult
 from docket.ledger.ops import By
 from docket.media import put as media
@@ -124,6 +125,21 @@ async def transcribe(service: Service, rid: str) -> tuple[SpeechJob, str]:
     job.checked(rid)
     found = await asyncio.to_thread(service.speech.add, rid)
     return found, f"{rid}: {speech_line(found)}"
+
+
+async def ledger(service: Service, ask: views.Ask) -> tuple[views.LedgerRead, str]:
+    """One read of the ledger's tables, brought up to date first, beside the writer: a read never waits in a write's
+    queue, and the index's lock keeps an update from moving the tables while it asks them. With no index, or one it
+    can't have within a second, the op files are folded in memory (DR-0619, DR-0638)."""
+
+    def run() -> tuple[views.LedgerRead, str]:
+        vault = service.vault()
+        tz = ZoneInfo(vault.config.owner.time_zone)
+        with ledger_tables(vault) as conn:
+            found = views.read(conn, ask, tz, views.now())
+        return found, render.text(views.lines(found, tz))
+
+    return await asyncio.to_thread(run)
 
 
 async def ledger_batch(

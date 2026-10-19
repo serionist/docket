@@ -8,9 +8,10 @@ folded into their state and history (#198, #199, #201).
 | `meetings` | meetings, points and streams from theirs: keys, copies, M- numbers (DR-0621 to DR-0625) |
 | `store` | the one writer of ops, a batch's changes among them (DR-0639 to DR-0642) |
 | `batch` | a batch's ops read from JSON, and what a write wrote as the `ledger_batch` tool's result and lines |
+| `views` | the `ledger` tool's reads: snapshot, show, queue, list, meetings and suggest (DR-0638, DR-0660) |
 | `check` | what `docket vault check` says about the ledger (DR-0617) |
 
-The fold's tables in the index, which the writer and `docket ledger show` ask, are `docket.index.ledger` (DR-0616).
+The fold's tables in the index, which the writer and the reads ask, are `docket.index.ledger` (DR-0616).
 """
 
 from docket.ledger.fold import load

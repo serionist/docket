@@ -1,7 +1,8 @@
 """A ledger of a few years: 5,000 items and 50,000 ops, and 2,000 meetings with 20,000 point ops, read and folded by
 `load` in under a second; all of it folded into the index's tables in under two seconds; one op more, on an item or
-a meeting, as a write leaves it, read into them in a tenth of a second; and a write touching one meeting planned in a
-tenth of a second, reading only its part (DR-0616, DR-0628, DR-0633, DR-0635).
+a meeting, as a write leaves it, read into them in a tenth of a second; a write touching one meeting planned in a
+tenth of a second, reading only its part (DR-0616, DR-0628, DR-0633, DR-0635); and a snapshot of it, every item open,
+read from the tables with its lines in a tenth of a second (DR-0638).
 
 The ops are written as the writer writes them, a month file per machine, each item an add and nine changes, each
 meeting four points answered and a point rolled from the meeting before it in its weekly series of fifty. Wall time
@@ -18,6 +19,7 @@ import time
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 from docket_testkit import empty_vault, make_config, traced
@@ -27,7 +29,7 @@ from docket.index import build as index_build
 from docket.index import ledger as ledger_index
 from docket.index.ledger import Held
 from docket.index.schema import LEDGER_TABLES
-from docket.ledger import load, ops, store
+from docket.ledger import load, ops, store, views
 from docket.ledger.ops import Op
 
 ITEMS = 5_000
@@ -39,6 +41,7 @@ FOLD_SECONDS = 1.0
 REBUILD_SECONDS = 2.0
 CATCH_UP_SECONDS = 0.1
 WRITE_SECONDS = 0.1
+SNAPSHOT_SECONDS = 0.1
 CHANGES = ("log", "triage", "set", "log", "snooze", "triage", "log", "done", "reopen")
 
 
@@ -223,3 +226,39 @@ def test_a_write_touching_one_meeting_reads_only_its_series(tmp_path: Path, monk
     assert ([o.op for o in written.ops], list(written.numbers.values()), read) == (["point"], [number], [SERIES])
     if not traced():
         assert elapsed < WRITE_SECONDS, f"planning a write on one meeting took {elapsed:.2f} s, over {WRITE_SECONDS} s"
+
+
+@pytest.mark.perf
+def test_a_snapshot_of_a_ledger_that_size_reads_from_the_index_in_a_tenth_of_a_second(tmp_path: Path) -> None:
+    """Every item is open, so the snapshot lists all 5,000, and the 40 meetings left with an open point beside those
+    of its window; read once before the clock starts, so SQLite's cache is warm as a running service's is. The other
+    views are timed for the print only."""
+    root = tmp_path / "vault"
+    build(root)
+    conn = sqlite3.connect(tmp_path / "index.sqlite", isolation_level=None)
+    tz = ZoneInfo("Europe/Budapest")
+    at = datetime(2026, 6, 1, 8, tzinfo=UTC)
+    timed: dict[str, float] = {}
+    read: dict[str, tuple[views.LedgerRead, list[str]]] = {}
+    try:
+        conn.executescript(LEDGER_TABLES)
+        conn.execute("BEGIN")
+        ledger_index.rebuild(conn, root)
+        conn.execute("COMMIT")
+        asks = (views.Ask(), views.Ask(view="queue"), views.Ask(view="list", state="all"), views.Ask(view="meetings"))
+        for ask in asks:
+            views.lines(views.read(conn, ask, tz, at), tz)
+            gc.collect()
+            began = time.perf_counter()
+            found = views.read(conn, ask, tz, at)
+            read[ask.view] = found, views.lines(found, tz)
+            timed[ask.view] = time.perf_counter() - began
+    finally:
+        conn.close()
+    print("ledger reads: " + ", ".join(f"{view} {seconds * 1000:.0f} ms" for view, seconds in timed.items()))
+    snapshot, text = read["snapshot"]
+    assert (snapshot.counts.open, snapshot.counts.meetings, len(text)) == (ITEMS, 87, 4 + ITEMS + 87 + 435)
+    assert len([m for m in snapshot.meetings if m.points_open]) == MEETINGS // SERIES
+    if not traced():
+        elapsed = timed["snapshot"]
+        assert elapsed < SNAPSHOT_SECONDS, f"a snapshot took {elapsed:.2f} s, over {SNAPSHOT_SECONDS} s"

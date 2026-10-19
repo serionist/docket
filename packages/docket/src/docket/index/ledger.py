@@ -1,6 +1,6 @@
 """The ledger in the index (DR-0616, DR-0628): each item, meeting and stream as its ops leave it, every op with its log
-line, each number's claimants, and the op files read, so a write and `docket ledger show` ask the index instead of
-folding every op.
+line, each number's claimants, and the op files read, so a write and the ledger's reads (`docket.ledger.views`) ask the
+index instead of folding every op.
 
 | Table | What |
 |---|---|

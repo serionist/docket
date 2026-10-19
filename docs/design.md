@@ -189,6 +189,10 @@ same result on any day.
 - Changes come as a batch, from Claude's `ledger_batch` or `docket ledger batch`: every change or none, each saying
   who, `as` naming what one made for a later change's `$name`, a point's n as the batch began; a dry run lists every
   refusal. An add like an open item and a keyless meeting doubling one are refused (DR-0637, DR-0639 to DR-0642).
+- Reads come from Claude's `ledger` or `docket ledger snapshot`, `show`, `queue`, `list`, `meetings` and `suggest`, off
+  the same tables: counts first, then a line per item, meeting, point or stream, each source a locator; notes, outcomes
+  and the history only in `show`; an item's counts from its ops, never its log's words (DR-0638, DR-0643, DR-0644,
+  DR-0660).
 
 - Meetings come from the calendar. The core turns its records into meeting ops keyed by the event's own id (iCalUId or
   the provider's id), plus the occurrence's original start for a recurring event, so a moved, renamed or cancelled
@@ -437,7 +441,7 @@ the earlier ones (DR-0112).
 | `meetings`, `points`, `meeting_log`, `meeting_numbers`, `streams`, `stream_log` | meetings, their talking points and streams, folded the same way, with each log row's key and link, so an update finds the meetings an op touches from the rows (DR-0628, DR-0633) |
 | `links`, `runs` | meetings to records, items to records; sync history |
 
-A write and `docket ledger show` bring the ledger's tables up to date first, and fold the op files in memory instead
+A write and the ledger's reads bring the ledger's tables up to date first, and fold the op files in memory instead
 when the index is missing, of another build, or held past a second (DR-0619): nothing in the index is a door.
 
 ### 5.5 Retention and forgetting
@@ -759,7 +763,7 @@ MCP tools:
 | `ingest` | closes a run: the captures the hook kept and the manifest; the source's mapper makes normalized records, the core checks their rids and computes their versions, and they go to staging (DR-0241) |
 | `media_put` | audio or an attachment by path or URL, within the limits in Sources (named folders, https to the hosts `vault.yaml` lists for the source, no private addresses, few redirects, a size cap); the service fetches, encrypts and stores it (phase 2, #42) |
 | `transcribe` | queue a stored recording for Whisper in the service, one job at a time; answers with the job's place (phase 2, DR-0571) |
-| `ledger` | read-only: snapshot, show, queue, list, meetings and suggest, as counts, short lines and locators (DR-0638) |
+| `ledger` | read-only: snapshot, show, queue, list, meetings and suggest, as counts, short lines and locators (DR-0638, DR-0660) |
 | `ledger_batch` | the ledger's changes in one write, every one or none, `by` on any, `as` and `$name`, a dry run listing every refusal (DR-0639, DR-0640) |
 | `secret` | a named secret, with a confirmation |
 
