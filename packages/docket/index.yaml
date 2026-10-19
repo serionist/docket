@@ -42,7 +42,7 @@ reading:
   - { path: packages/docket/src/docket/index/ledger.py, role: contract, note: "the ledger in the index, not a door: items, item_log, item_numbers and ledger_files, an update that reads a file that only grew from where it stopped, what a write and the ledger's reads ask (DR-0616, DR-0619)" }
   - { path: packages/docket/src/docket/ledger/batch.py, role: guide, note: "a ledger batch read from a JSON array or JSON lines, and what a write wrote as the ledger_batch tool's result and lines (DR-0639, DR-0645)" }
   - { path: packages/docket/src/docket/ledger/views.py, role: contract, note: "the ledger tool's reads, a one-way door in their result: snapshot, show, queue, list, meetings and suggest over the index's tables; LedgerRead's fields, the refs a batch takes, the lines, the counts from the ops (DR-0638, DR-0643, DR-0644, DR-0660)" }
-  - { path: packages/docket/src/docket/ledger/calendar.py, role: contract, note: "what the core reads from an event record, a one-way door (DR-0646); the record's meeting fields and what is left out, the calendar step over a promotion's records and the pending rids, the catch-up (DR-0647, DR-0648, DR-0650)" }
+  - { path: packages/docket/src/docket/ledger/calendar.py, role: contract, note: "what the core reads from an event record, a one-way door (DR-0646); the record's meeting fields and what is left out, the calendar step over a promotion's rids, read under the vault lock, and the pending rids, the catch-up in writes of whole days (DR-0647, DR-0648, DR-0650)" }
 decisions:
   - id: DR-0019
     title: The vault's layout and run-file names are fixed

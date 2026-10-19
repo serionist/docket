@@ -18,9 +18,11 @@ Left out, named with why: an all-day record (`native.all_day` true), a derived o
 its start, one media's screen or a hold keeps out now (DR-0650), and in the writer a cancelled one no meeting holds or
 joins. A field the record doesn't carry is never cleared.
 
-A promotion's records drive sets; the catch-up's own records, read from raw, only add and join (DR-0647). The rids a
-promotion notes as pending, in this clone's private folder, are replayed first by the next step, each at raw's latest
-version, sets included, and cleared once the step's write commits or has nothing to write.
+A promotion's records drive sets, each read at raw's latest version under the vault lock; the catch-up's own records,
+read from raw, only add and join, in chunks of about 200 records cut at a day's end, each chunk its own write, so the
+lock is let go between them (DR-0647). The rids a promotion notes as pending, in this clone's private folder, are
+replayed first by the next step, each at raw's latest version, sets included, and cleared once the step's write
+commits or has nothing to write.
 """
 
 from __future__ import annotations
@@ -48,6 +50,9 @@ from docket.vault.vault import Vault
 KIND = "event"
 # The catch-up's own pass reaches back this far by default: a meeting older than that is the archive's (DR-0641).
 SINCE = timedelta(days=14)
+# The catch-up writes this many records or so at a time, cut at a day's end: a write folds again what it has read
+# after each meeting it writes, so one write of thousands would hold the vault lock for minutes (DR-0647).
+CHUNK = 200
 CANCELLED = re.compile(r"^(?:Canceled|Cancelled): ?", re.IGNORECASE)
 ADDRESS = re.compile(r"<([^<>]*)>")
 NO_SUBJECT = "(no subject)"
@@ -60,15 +65,30 @@ RESPONSES = tuple(r for r in ops.RESPONSES if r != "cancelled")
 
 @dataclass(frozen=True)
 class Stepped:
-    """What a calendar step did: an outcome per record, in the order written, then the records left out before the
-    write; its ops and commit; and the pending rids it replayed."""
+    """What a calendar step or a catch-up did: an outcome per record, in the order written, then the records left out
+    before the writes; their ops and commits; and the pending rids replayed."""
 
     outcomes: tuple[Outcome, ...]
     ops: tuple[Op, ...] = ()
-    commit: str | None = None
+    commits: tuple[str, ...] = ()
     replayed: tuple[str, ...] = ()
     dry_run: bool = False
     counts: dict[str, int] = field(default_factory=dict[str, int])
+
+    @property
+    def commit(self) -> str | None:
+        """The last commit written, None for none."""
+        return self.commits[-1] if self.commits else None
+
+
+@dataclass(frozen=True)
+class _Part:
+    """One write of a step: what reached the writer, None when nothing did, the records left out before it, and the
+    pending rids it replayed."""
+
+    written: CalendarWritten | None
+    left: list[Outcome]
+    replayed: tuple[str, ...]
 
 
 # -- the record ---------------------------------------------------------------------------------------------------
@@ -195,48 +215,76 @@ clear_pending = store.clear_calendar_pending
 
 
 def step(
+    vault: Vault, rids: Sequence[str] = (), *, via: ops.Via, dry_run: bool = False, now: datetime | None = None
+) -> Stepped:
+    """One calendar step after a promotion (DR-0647): the pending rids and `rids`, the promotion's event records, each
+    read at raw's latest version under the vault lock, so a version another promotion wrote meanwhile is the one set;
+    one version per rid, the adds in start order then rid, in one write by sync. The pending rids it replayed are
+    cleared once that write commits or has nothing to write; a dry run writes nothing and clears nothing."""
+    return _stepped([_step(vault, rids, (), via=via, replay=True, dry_run=dry_run, now=now)], dry_run)
+
+
+def _step(
     vault: Vault,
-    records: Sequence[RawRecord] = (),
+    rids: Sequence[str],
+    adding: Sequence[RawRecord],
     *,
     via: ops.Via,
-    catch_up: Sequence[RawRecord] = (),
-    dry_run: bool = False,
-    now: datetime | None = None,
-) -> Stepped:
-    """One calendar step (DR-0647): the pending rids at raw's latest version and `records`, a promotion's, with sets;
-    then `catch_up`, the catch-up's own records, adding and joining only; one version per rid, the adds in start order
-    then rid, in one write by sync. The pending rids it replayed are cleared once that write commits or has nothing to
-    write; a dry run writes nothing and clears nothing."""
-    zone = ZoneInfo(vault.config.owner.time_zone)
-    replayed = pending(vault)
-    lookup = RawLookup(vault.root)
-    given = {r.rid: r for r in latest(records)}
-    driven = [*(r for rid in replayed if rid not in given and (r := lookup.latest(rid)) is not None), *given.values()]
-    driving = {r.rid: r for r in latest(driven)}
-    adding = {r.rid: r for r in latest(catch_up) if r.rid not in driving}
-    screen = _Screen(vault)
-    events: list[tuple[datetime, str, Event]] = []
-    left: list[Outcome] = []
-    for record, adds_only in [*((r, False) for r in driving.values()), *((r, True) for r in adding.values())]:
-        why = screen.why(record)
-        made = meeting_fields(record, zone) if why is None else why
-        if isinstance(made, str):
-            left.append(Outcome(record.rid, store.LEFT_OUT, why=made))
-            continue
-        events.append((record.ts.astimezone(UTC), record.rid, Event(record.rid, made, adds_only)))
-    events.sort(key=lambda e: (e[0], e[1]))
-    written = (
-        store.write_calendar(vault, [e for _, _, e in events], via=via, dry_run=dry_run, now=now)
-        if events
-        else CalendarWritten((), None, ())
+    replay: bool,
+    dry_run: bool,
+    now: datetime | None,
+    taken: int = 0,
+    renumber: bool = True,
+) -> _Part:
+    """One write: with `replay` the pending rids, and `rids`, at raw's latest version with sets; then `adding`, the
+    catch-up's own records, adding and joining only. Its reads, its write and the clearing are under the vault lock."""
+    with vault.writing():
+        zone = ZoneInfo(vault.config.owner.time_zone)
+        replayed = pending(vault) if replay else []
+        lookup = RawLookup(vault.root)
+        found = [r for r in (lookup.latest(rid) for rid in dict.fromkeys([*replayed, *rids])) if r is not None]
+        driving = {r.rid: r for r in latest(found)}
+        screen = _Screen(vault)
+        events: list[tuple[datetime, str, Event]] = []
+        left: list[Outcome] = []
+        taking = [*((r, False) for r in driving.values()), *((r, True) for r in adding if r.rid not in driving)]
+        for record, adds_only in taking:
+            why = screen.why(record)
+            made = meeting_fields(record, zone) if why is None else why
+            if isinstance(made, str):
+                left.append(Outcome(record.rid, store.LEFT_OUT, why=made))
+                continue
+            events.append((record.ts.astimezone(UTC), record.rid, Event(record.rid, made, adds_only)))
+        events.sort(key=lambda e: (e[0], e[1]))
+        written = (
+            store.write_calendar(
+                vault, [e for _, _, e in events], via=via, dry_run=dry_run, now=now, taken=taken, renumber=renumber
+            )
+            if events
+            else None
+        )
+        if not dry_run and replayed:
+            clear_pending(vault, replayed)
+    return _Part(written, left, tuple(replayed))
+
+
+def _stepped(parts: Sequence[_Part], dry_run: bool) -> Stepped:
+    """The parts' outcomes, those written in order, then those left out before a write by rid, with the counts."""
+    outcomes = (
+        *(o for p in parts if p.written is not None for o in p.written.outcomes),
+        *sorted((o for p in parts for o in p.left), key=lambda o: o.rid),
     )
-    if not dry_run and replayed:
-        clear_pending(vault, replayed)
-    outcomes = (*written.outcomes, *sorted(left, key=lambda o: o.rid))
     counts: dict[str, int] = {}
     for outcome in outcomes:
         counts[outcome.what] = counts.get(outcome.what, 0) + 1
-    return Stepped(outcomes, written.ops, written.commit, tuple(replayed), dry_run, counts)
+    return Stepped(
+        outcomes,
+        tuple(o for p in parts if p.written is not None for o in p.written.ops),
+        tuple(p.written.commit for p in parts if p.written is not None and p.written.commit is not None),
+        tuple(rid for p in parts for rid in p.replayed),
+        dry_run,
+        counts,
+    )
 
 
 def since_default(vault: Vault, now: datetime | None = None) -> date:
@@ -257,7 +305,36 @@ def catch_up(vault: Vault, since: date | None = None, *, dry_run: bool = False, 
         rids = [str(rid) for (rid,) in conn.execute("SELECT rid FROM records WHERE kind = ? ORDER BY rid", (KIND,))]
     lookup = RawLookup(vault.root)
     found = [r for r in (lookup.latest(rid) for rid in rids) if r is not None and r.ts >= start]
-    return step(vault, via="cli", catch_up=found, dry_run=dry_run, now=now)
+    return add_and_join(vault, found, dry_run=dry_run, now=now)
+
+
+def add_and_join(
+    vault: Vault, records: Sequence[RawRecord], *, dry_run: bool = False, now: datetime | None = None
+) -> Stepped:
+    """The catch-up's writes (DR-0647): what is pending, sets included, with the first chunk; then `records`, one
+    version per rid, adding and joining only, in start order, in chunks of `CHUNK` records or a few more, each ending
+    at a day's end in the owner's zone and each its own write by sync, so the vault lock is let go between them. A
+    chunk holds whole days, so what one joins or names as a near miss no other chunk reads; a dry run's chunk numbers
+    after the chunks before it, and only its first renumbers, as the writes would."""
+    zone = ZoneInfo(vault.config.owner.time_zone)
+    waiting = set(pending(vault))
+    ordered = sorted((r for r in latest(records) if r.rid not in waiting), key=lambda r: (r.ts.astimezone(UTC), r.rid))
+    chunks: list[list[RawRecord]] = []
+    day: date | None = None
+    for record in ordered:
+        on = record.ts.astimezone(zone).date()
+        if not chunks or (on != day and len(chunks[-1]) >= CHUNK):
+            chunks.append([])
+        chunks[-1].append(record)
+        day = on
+    parts: list[_Part] = []
+    for k, chunk in enumerate(chunks or [[]]):
+        planned = [p.written for p in parts if p.written is not None]
+        parts.append(_step(
+            vault, (), chunk, via="cli", replay=k == 0, dry_run=dry_run, now=now,
+            taken=max((w.numbered for w in planned), default=0), renumber=not (dry_run and planned),
+        ))  # fmt: skip
+    return _stepped(parts, dry_run)
 
 
 # -- what it says -------------------------------------------------------------------------------------------------
@@ -284,6 +361,7 @@ def lines(stepped: Stepped) -> list[str]:
         out.append(f"replayed {len(stepped.replayed)} pending record(s)")
     if stepped.dry_run:
         out.append(f"dry run: {len(stepped.ops)} op(s) would be written; nothing written")
-    elif stepped.commit:
-        out.append(f"{len(stepped.ops)} op(s) written, commit {stepped.commit[:7]}")
+    elif stepped.commit is not None:
+        many = f" in {len(stepped.commits)} commits, the last" if len(stepped.commits) > 1 else ", commit"
+        out.append(f"{len(stepped.ops)} op(s) written{many} {stepped.commit[:7]}")
     return out

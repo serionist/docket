@@ -5,6 +5,7 @@ catch-up. Invented people and events only."""
 from __future__ import annotations
 
 import shutil
+import threading
 import time
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -14,6 +15,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from docket_testkit import empty_vault, make_config, sh, traced
 from ledger_kit import meeting as hand_meeting
+from ledger_kit import op as hand_op
 from ledger_kit import ulid
 
 from docket.cli import main
@@ -31,9 +33,10 @@ from docket.vault.vault import Vault
 NOW = datetime(2026, 10, 19, 5, 0, tzinfo=UTC)
 ZONE = ZoneInfo("Europe/Budapest")
 BEN = "Ben Sample <ben@example.invalid>"
+CLEO = "Cleo Test <cleo@example.invalid>"
 SERIES = "cal:S1"
-# A catch-up writes its meetings in one write, each add folding again what it read: 300 records in this time.
-CATCH_UP_SECONDS = 3.0
+# A catch-up of 1,000 records joining as many imported meetings, in chunks of whole days, in this time on CI.
+CATCH_UP_SECONDS = 10.0
 
 
 def config(**changes: Any) -> VaultConfig:
@@ -85,7 +88,11 @@ def meetings(vault: Vault) -> dict[str, Meeting]:
 
 
 def step(vault: Vault, *records: RawRecord, minutes: int = 0, **keys: Any) -> calendar.Stepped:
-    return calendar.step(vault, list(records), via="cli", now=NOW + timedelta(minutes=minutes), **keys)
+    """A promotion's step: its records written to raw first, as the gate writes them, then the step over their rids."""
+    at = NOW + timedelta(minutes=minutes)
+    for source in dict.fromkeys(r.source for r in records):
+        vault.write_run(source, [r for r in records if r.source == source], at)
+    return calendar.step(vault, [r.rid for r in records], via="cli", now=at, **keys)
 
 
 def said(stepped: calendar.Stepped) -> list[tuple[str, str | None]]:
@@ -94,12 +101,15 @@ def said(stepped: calendar.Stepped) -> list[tuple[str, str | None]]:
 
 def put_ops(vault: Vault, *written: Op) -> None:
     """Ops another clone wrote and the user's git merged in."""
+    by_path: dict[str, list[str]] = {}
     for o in written:
-        path = vault.root / ops.rel_of(o)
+        by_path.setdefault(ops.rel_of(o), []).append(o.text() + "\n")
+    for rel, texts in by_path.items():
+        path = vault.root / rel
         before = path.read_text(encoding="utf-8") if path.exists() else ""
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(before + o.text() + "\n", encoding="utf-8", newline="\n")
-    vault.commit(sorted({ops.rel_of(o) for o in written}), "Merge another clone's ops")
+        path.write_text(before + "".join(texts), encoding="utf-8", newline="\n")
+    vault.commit(sorted(by_path), "Merge another clone's ops")
 
 
 # -- the record -----------------------------------------------------------------------------------------------------
@@ -344,6 +354,19 @@ def test_removing_a_joined_meeting_removes_it_for_good(vault: Vault) -> None:
     assert said(step(vault, event(1), minutes=2)) == [("removed", None)]
 
 
+def test_an_undo_naming_another_add_of_the_key_as_its_item_is_read_like_any_other(vault: Vault) -> None:
+    # Lines another writer may write (DR-0621): an op naming any add of a key is the meeting's, an undo too.
+    theirs = hand_meeting(1, "cal:E1", machine="laptop", by="sync", number=1)
+    other = hand_meeting(2, "cal:E1", machine="laptop", by="sync", number=1)
+    put_ops(vault, theirs, other, hand_op("undo", 3, item=2, of=ulid(1), by="user", machine="laptop"))
+    # One add undone by of: the meeting stands on the other, and the record sets it.
+    assert said(step(vault, event(1, where="Room 2"))) == [("set", "M-0001")]
+    assert meetings(vault)["cal:E1"].where == "Room 2"
+    # The other undone too, by of from the first add's lines: the owner removed it, and it stays out.
+    put_ops(vault, hand_op("undo", 4, item=1, of=ulid(2), by="user", machine="laptop"))
+    assert said(step(vault, event(1, where="Room 3"), minutes=1)) == [("removed", None)]
+
+
 # -- kept out -------------------------------------------------------------------------------------------------------
 
 
@@ -434,6 +457,37 @@ def test_a_pending_rid_after_a_full_revert_applies_to_the_ledger_it_meets(vault:
     assert (nothing.outcomes, calendar.lines(nothing)) == ((), ["no event records"])
 
 
+def test_a_step_reads_raw_under_the_vault_lock_so_a_newer_version_written_meanwhile_wins(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    step(vault, event(1))
+    vault.write_run("cal", [event(1, where="Room 2")], NOW + timedelta(minutes=1))
+    calendar.note_pending(vault, ["cal:E1"])
+    real = store.write_calendar
+    racing: list[threading.Thread] = []
+
+    def promote() -> None:
+        # Another promotion, as another process makes it: its own vault object, waiting for the vault lock.
+        other = Vault.open(vault.root)
+        other.write_run("cal", [event(1, where="Room 3")], NOW + timedelta(minutes=2))
+        calendar.step(other, ["cal:E1"], via="page", now=NOW + timedelta(minutes=3))
+
+    def write_calendar(*args: Any, **keys: Any) -> store.CalendarWritten:
+        if not racing:
+            # Between this step's reads and its write the other promotion starts, and can't get in.
+            racing.append(threading.Thread(target=promote))
+            racing[0].start()
+            racing[0].join(timeout=0.5)
+            assert racing[0].is_alive()
+        return real(*args, **keys)
+
+    monkeypatch.setattr(store, "write_calendar", write_calendar)
+    replayed = step(vault, minutes=4)
+    racing[0].join()
+    assert said(replayed) == [("set", "M-0001")]
+    assert meetings(vault)["cal:E1"].where == "Room 3"
+
+
 # -- the catch-up -------------------------------------------------------------------------------------------------
 
 
@@ -449,6 +503,46 @@ def test_the_catch_up_adds_and_joins_from_raw_but_never_sets(vault: Vault) -> No
     assert (said(again), again.ops) == ([("kept", "M-0009"), ("kept", "M-0010")], ())
     assert (meetings(vault)["cal:E2"].where, calendar.lines(again)) == ("Room 1", ["2 kept"])
     assert calendar.since_default(vault, NOW) == date(2026, 10, 5)
+
+
+def test_a_catch_up_join_on_a_held_key_keeps_what_was_set_by_hand(vault: Vault) -> None:
+    vault.write_run("cal", [event(1, response="accepted", to=[CLEO])], NOW)
+    first = calendar.catch_up(vault, date(2026, 10, 18), now=NOW)
+    assert said(first) == [("added", "M-0001")]
+    # The sync declines it by hand, as the week view no longer shows it, and the owner fixes the room and who comes.
+    hand = {"response": "declined", "where": "Room 7", "attendees": ["Cleo Test", "Dan Example"]}
+    write(vault, [{"op": "set", "item": "M-0001", "fields": hand}], by="sync", now=NOW + timedelta(minutes=1))
+    # The import brings the old meeting for the same slot, keyless; the catch-up after it joins it and sets nothing.
+    put_ops(vault, hand_meeting(1, number=40))
+    caught = calendar.catch_up(vault, date(2026, 10, 18), now=NOW + timedelta(minutes=2))
+    assert said(caught) == [("joined", "M-0040")]
+    m = meetings(vault)["cal:E1"]
+    assert (m.number, m.response, m.where, m.attendees) == (40, "declined", "Room 7", ("Cleo Test", "Dan Example"))
+
+
+def test_the_catch_up_writes_chunks_of_whole_days_and_its_dry_run_says_what_they_write(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(calendar, "CHUNK", 2)
+    # Two meetings that both claim M-0003, from two clones: the first write renumbers the later one to M-0004.
+    put_ops(vault, hand_meeting(1, "cal:X1", number=3), hand_meeting(2, "cal:X2", number=3, machine="laptop"))
+    week = [event(1, day=20), event(2, 8, day=20), event(3, day=21), event(4, day=22), event(5, 8, day=22)]
+    vault.write_run("cal", week, NOW)
+    # A promotion noted E4 and stopped: it goes with the first chunk, sets included, and in no other.
+    calendar.note_pending(vault, ["cal:E4"])
+    dry = calendar.catch_up(vault, date(2026, 10, 20), dry_run=True, now=NOW)
+    caught = calendar.catch_up(vault, date(2026, 10, 20), now=NOW + timedelta(minutes=1))
+    numbered = [("added", f"M-{n:04d}") for n in range(5, 10)]
+    assert (said(dry), said(caught), dry.replayed, caught.replayed) == (numbered, numbered, ("cal:E4",), ("cal:E4",))
+    assert [o.op for o in dry.ops] == [o.op for o in caught.ops] == ["renumber", *["meeting"] * 5]
+    # Each chunk its own write: E1 and E2 fill the first with E4; E3's day is short, so E5's day goes with it.
+    writes: dict[str, list[str]] = {}
+    for o in caught.ops:
+        writes.setdefault(str(o.batch), []).append((o.fields or {}).get("event", "renumber"))
+    assert list(writes.values()) == [["renumber", "cal:E1", "cal:E2", "cal:E4"], ["cal:E3", "cal:E5"]]
+    assert (dry.commits, len(caught.commits)) == ((), 2)
+    assert calendar.lines(dry)[-1] == "dry run: 6 op(s) would be written; nothing written"
+    assert calendar.lines(caught)[-1] == f"6 op(s) written in 2 commits, the last {caught.commits[-1][:7]}"
 
 
 def test_the_command_catches_up_and_says_what_it_did(vault: Vault, capsys: pytest.CaptureFixture[str]) -> None:
@@ -473,14 +567,24 @@ def said_line(capsys: pytest.CaptureFixture[str]) -> list[str]:
 
 
 @pytest.mark.perf
-def test_a_catch_up_of_300_records_takes_under_three_seconds(vault: Vault) -> None:
-    records = [event(k, 6 + k % 12, k % 4 * 15, day=1 + k // 12) for k in range(300)]
-    found = calendar.latest(records)
+def test_a_catch_up_of_1000_records_joining_imported_meetings_takes_under_ten_seconds(vault: Vault) -> None:
+    # Ten meetings a day from 5 January, each with the old meeting the import brought for its slot.
+    first = datetime(2026, 1, 5, 7, 0, tzinfo=UTC)
+    records: list[RawRecord] = []
+    imported: list[Op] = []
+    for k in range(1000):
+        start = first + timedelta(days=k // 10, hours=k % 10)
+        end = start + timedelta(minutes=30)
+        title = f"Pilot sync {k % 37}"
+        records.append(event(k, title=title, ts=start, native={"end": end.isoformat(), "all_day": False}))
+        local = [moment.astimezone(ZONE).isoformat(timespec="minutes") for moment in (start, end)]
+        imported.append(hand_meeting(k + 1, subject=title, start=local[0], end=local[1], number=k + 1))
+    put_ops(vault, *imported)
     started = time.perf_counter()
-    stepped = calendar.step(vault, via="cli", catch_up=found, now=NOW)
+    stepped = calendar.add_and_join(vault, records, now=NOW)
     seconds = time.perf_counter() - started
-    print(f"calendar catch-up: {seconds:.2f} s for 300 records")
-    assert stepped.counts == {"added": 300}
+    print(f"calendar catch-up: {seconds:.2f} s for 1,000 records joining, {len(stepped.commits)} writes")
+    assert (stepped.counts, len(stepped.commits)) == ({"joined": 1000}, 5)
     # Under a tracer such as coverage the time says nothing about the code (DR-0430).
     if not traced():
-        assert seconds < CATCH_UP_SECONDS, f"a catch-up of 300 records took {seconds:.2f} s, over {CATCH_UP_SECONDS} s"
+        assert seconds < CATCH_UP_SECONDS, f"1,000 records took {seconds:.2f} s, over {CATCH_UP_SECONDS} s"

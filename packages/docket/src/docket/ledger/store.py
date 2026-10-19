@@ -31,8 +31,9 @@ lists each one, the changes naming a refused change's `$name` marked as hanging 
 
 The calendar step (#200) writes through `write_calendar`, by sync and never refusing: each event record's meeting set
 to what differs, the unkeyed meeting with its start and subject joined, or a new meeting, and nothing for a key whose
-meeting the owner removed; an undo asked by batch or written by sync is as if never (DR-0647, DR-0649). This module
-also keeps the step's pending rids, in this clone's private folder.
+meeting the owner removed; an undo asked by batch or written by sync is as if never (DR-0647, DR-0649). In the
+catch-up's own pass, which never sets, a held key's join carries the held meeting's values. This module also keeps the
+step's pending rids, in this clone's private folder.
 """
 
 from __future__ import annotations
@@ -230,11 +231,13 @@ class Outcome:
 
 @dataclass(frozen=True)
 class CalendarWritten:
-    """What a calendar step wrote, or with a dry run would write: its ops, its commit, and an outcome per record."""
+    """What a calendar step wrote, or with a dry run would write: its ops, its commit, an outcome per record, and the
+    highest M- number it gave, 0 for none."""
 
     ops: tuple[Op, ...]
     commit: str | None
     outcomes: tuple[Outcome, ...]
+    numbered: int = 0
 
 
 LEFT_OUT = "left out"
@@ -284,10 +287,19 @@ def write(
 
 
 def write_calendar(
-    vault: Vault, events: Sequence[Event], *, via: Via, dry_run: bool = False, now: datetime | None = None
+    vault: Vault,
+    events: Sequence[Event],
+    *,
+    via: Via,
+    dry_run: bool = False,
+    now: datetime | None = None,
+    taken: int = 0,
+    renumber: bool = True,
 ) -> CalendarWritten:
     """The calendar step's one write, by sync (DR-0647): each record's meeting added, joined or set, in the order
-    given. It never refuses: a record it can't take is an outcome left out, with why, and the rest is written."""
+    given. It never refuses: a record it can't take is an outcome left out, with why, and the rest is written. A
+    catch-up's dry run, whose chunks write nothing, gives `taken`, the highest M- number its chunks before gave, so
+    this one numbers after them, and renumbers in its first chunk alone."""
     if via not in ops.VIA:
         raise LedgerError(f"via is one of {', '.join(ops.VIA)}")
     moment = now or datetime.now(UTC)
@@ -295,13 +307,16 @@ def write_calendar(
         ops.folder(vault.root)
         with ledger_tables(vault) as conn:
             plan = _Write(vault, Held(conn), "sync", via, moment)
-            plan.renumber()
+            plan.highest_meeting = max(plan.highest_meeting, taken)
+            if renumber:
+                plan.renumber()
             outcomes = tuple(plan.calendar(n, event) for n, event in enumerate(events, start=1))
             new = tuple(plan.new)
             message = plan.message() if new else ""
+        numbered = max(plan.given_meetings, default=0)
         if dry_run or not new:
-            return CalendarWritten(new, None, outcomes)
-        return CalendarWritten(new, commit_ops(vault, new, message), outcomes)
+            return CalendarWritten(new, None, outcomes, numbered)
+        return CalendarWritten(new, commit_ops(vault, new, message), outcomes, numbered)
 
 
 def _is_roll(op: Op) -> bool:
@@ -1203,6 +1218,10 @@ class _Write:
         except RefusedError as e:
             return Outcome(event.rid, LEFT_OUT, why=e.why)
         key, subject, start = str(fields["event"]), str(fields["subject"]), str(fields["start"])
+        # What the record may touch is read in one go, its key's adds, the meetings at its start and its day's unkeyed
+        # ones, so the write folds what it has read once per record, not again for each read.
+        when = _when(start)
+        self.load([*self.held.keyed("meeting", key), *self.held.meetings_at(when), *self.held.unkeyed_on(when.date())])
 
         def said(what: str, meeting: str | None = None, near: tuple[str, ...] = (), why: str | None = None) -> Outcome:
             return Outcome(event.rid, what, meeting, subject, start, why, near)
@@ -1210,7 +1229,7 @@ class _Write:
         held = self.by_event(key)
         removed, split = self.undone_of(key)
         if held is not None:
-            joined = self.join(key, held, fields, split)
+            joined = self.join(key, held, fields, split, keep=event.adds_only)
             if joined is not None:
                 return said("joined", joined)
             label = self.meeting_label(held)
@@ -1246,10 +1265,12 @@ class _Write:
             add = self.adds_line(add_id)
             if (add.fields or {}).get("event") != key:
                 continue
-            undo_id = objects.folds[objects.owner[add_id]].undone.get(add_id)
+            folded = objects.folds[objects.owner[add_id]]
+            undo_id = folded.undone.get(add_id)
             if undo_id is None:
                 continue
-            undo = next(line.op for line in self.lines[add_id] if line.op.id == undo_id)
+            # Read from the meeting's lines: an undo may name any add of the key as its item (DR-0621).
+            undo = next(line.op for line in folded.lines if line.op.id == undo_id)
             if undo.of_batch is not None or undo.by == "sync":
                 continue
             joined = (add.fields or {}).get("continues")
@@ -1260,10 +1281,14 @@ class _Write:
                 removed = True
         return removed, split
 
-    def join(self, key: str, held: Meeting | None, fields: dict[str, Any], split: set[str]) -> str | None:
+    def join(
+        self, key: str, held: Meeting | None, fields: dict[str, Any], split: set[str], *, keep: bool = False
+    ) -> str | None:
         """A join of the unkeyed meeting with the record's start and subject, the earliest by id, unless the key
         continues one already or a split took that meeting off it (DR-0649): a meeting add with continues, the
-        record's fields on it as on any add. The joined meeting, as it reads; None when there is none to join."""
+        record's fields on it as on any add. In the catch-up's own pass (`keep`) a held key's join carries instead the
+        held meeting's values of the fields the record gives, so it sets nothing on it (DR-0647). The joined meeting,
+        as it reads; None when there is none to join."""
         if held is not None and not self.keyed(held.id):
             return None
         start = _when(str(fields["start"]))
@@ -1278,6 +1303,8 @@ class _Write:
         joined = self.objects().meetings[found[0]]
         # The continued meeting's number goes on the add, so the object claims no new one (DR-0621).
         number = joined.number or joined.claimed
+        if keep and held is not None:
+            fields = {**fields, **{name: _as_written(held, name) for name in fields if name != "event"}}
         self.emit("meeting", None, number=number, fields={**_present(fields), "continues": joined.id})
         return self.meeting_label(joined)
 
@@ -1820,6 +1847,16 @@ def _present(fields: dict[str, Any]) -> dict[str, Any]:
 
 def _when(value: str) -> datetime:
     return datetime.fromisoformat(value)
+
+
+def _as_written(meeting: Meeting, name: str) -> Any:
+    """A meeting field's value as an op carries it: a time to the minute with its offset, attendees as a list."""
+    value = getattr(meeting, name)
+    if name in TIMES:
+        return cast(datetime, value).isoformat(timespec="minutes")
+    if name == "attendees":
+        return list(cast(tuple[str, ...], value)) or None
+    return value
 
 
 def _meeting_differs(meeting: Meeting, name: str, value: Any) -> bool:

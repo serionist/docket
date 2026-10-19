@@ -1,5 +1,5 @@
 """The ledger: items owed and awaited, meetings with their talking points, and streams, kept as ops in the vault and
-folded into their state and history (#198, #199, #201).
+folded into their state and history (#198, #199, #200, #201).
 
 | Module | What |
 |---|---|
@@ -9,6 +9,7 @@ folded into their state and history (#198, #199, #201).
 | `store` | the one writer of ops, a batch's changes among them (DR-0639 to DR-0642) |
 | `batch` | a batch's ops read from JSON, and what a write wrote as the `ledger_batch` tool's result and lines |
 | `views` | the `ledger` tool's reads: snapshot, show, queue, list, meetings and suggest (DR-0638, DR-0660) |
+| `calendar` | meetings from calendar records: the step after a promotion and the catch-up (DR-0646 to DR-0652) |
 | `check` | what `docket vault check` says about the ledger (DR-0617) |
 
 The fold's tables in the index, which the writer and the reads ask, are `docket.index.ledger` (DR-0616).
