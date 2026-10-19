@@ -206,10 +206,11 @@ def router(service: Service) -> APIRouter:
             except DocketError as e:
                 return await whole(request, StagingState(), status=400, problem=str(e))
             try:
-                result = await service.writer.run(lambda: Gate(service.vault()).promote(source))
+                result = await service.writer.run(lambda: Gate(service.vault()).promote(source, via="page"))
             except DocketError as e:
                 return await whole(request, back, status=400, problem=str(e))
-            if any(run.written for run in result.runs):
+            # The calendar step's meetings are a write too, even with no record written: a stopped one replayed.
+            if any(run.written for run in result.runs) or (result.meetings is not None and result.meetings.commits):
                 service.updater.poke()
             written = sum(run.written for run in result.runs)
             done = StagingState(

@@ -20,7 +20,7 @@ reading:
   - { path: packages/docket/src/docket/service/runs.py, role: contract, note: "open sync runs in memory: bind, captures, close, drop, the caps, the marker the capture hook reads" }
   - { path: packages/docket/src/docket/questions.py, role: contract, note: "the question file docket eval reads, a one-way door (DR-0290), and what answers a wanted locator (DR-0291)" }
   - { path: packages/docket/src/docket/service/history.py, role: contract, note: "the run history: one line of ids and counts per ended run, in the vault's private folder; disposable, not a door" }
-  - { path: packages/docket/src/docket/web/staging.py, role: contract, note: "the Staging page's two writes, through the staging gate's own calls on the writer thread, and no release (DR-0381, DR-0382)" }
+  - { path: packages/docket/src/docket/web/staging.py, role: contract, note: "the Staging page's two writes, through the staging gate's own calls on the writer thread, and no release; a promotion's calendar step writes by page (DR-0381, DR-0382, DR-0647)" }
   - { path: packages/docket/src/docket/models/worker.py, role: contract, note: "the models' worker and its JSON-lines protocol: what the core sends (embed, rerank), what it answers, what it never logs, and a reranker that can't run left off with the embedder serving (DR-0330, DR-0451)" }
   - { path: packages/docket/src/docket/vault/curatelog.py, role: contract, note: "the curate log, a one-way door: its file, its lines and their keys, how they fold into the stoplist (DR-0460, DR-0461)" }
   - { path: packages/docket/src/docket/vault/entitystore.py, role: contract, note: "entity writes: the changes file, the checks, apply and undo, finishing a stopped write (DR-0462 to DR-0464, DR-0476)" }

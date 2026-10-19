@@ -806,6 +806,16 @@ def staging_promote(source: SourceOption = None, vault: VaultOption = None) -> N
         typer.echo(f"media     waits: {problem}")
     if result.media_dropped:
         typer.echo(f"media     {result.media_dropped} file(s) deleted, failing their checks")
+    if result.meetings is not None:
+        from docket.ledger import calendar as ledger_events  # noqa: PLC0415
+
+        for line in ledger_events.brief(result.meetings):
+            typer.echo(f"meetings  {line}")
+    if result.meetings_stopped is not None:
+        typer.echo(
+            f"meetings  not made: {result.meetings_stopped}; their records stay pending for the next promotion or "
+            "docket ledger calendar"
+        )
     if not result.runs and not result.held and not result.on_hold and not result.media:
         typer.echo("nothing ready")
 
