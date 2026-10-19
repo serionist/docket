@@ -325,6 +325,15 @@ def maker(item_id: str, group: Sequence[Line]) -> str | None:
     return known or next((line.op.op for line in own if line.op.op not in OPS), None)
 
 
+def made(item_id: str, group: Sequence[Line]) -> str:
+    """What the lines naming one id fold into: `item` (an add's, or none, each line then left out), `meeting` or
+    `stream`, or `later`, a later Docket's object, whose lines are kept and fold into nothing (DR-0620)."""
+    kind = maker(item_id, group)
+    if kind is None or kind == "add":
+        return "item"
+    return kind if kind in ("meeting", "stream") else "later"
+
+
 def fold_item(item_id: str, lines: Sequence[Line]) -> Folded:
     """One item from its own lines, in any order."""
     ordered = sorted(lines, key=_key)
@@ -397,12 +406,11 @@ def fold(lines: Iterable[Line]) -> Ledger:
     item_groups: dict[str, list[Line]] = {}
     object_groups: dict[str, list[Line]] = {}
     for item_id, group in sorted(by_item.items()):
-        kind = maker(item_id, group)
-        if kind in ("meeting", "stream"):
-            object_groups[item_id] = group
-        elif kind is None or kind == "add":
+        what = made(item_id, group)
+        if what == "item":
             item_groups[item_id] = group
-        # Else a later Docket's object: its lines are kept and fold into nothing (DR-0620).
+        elif what != "later":
+            object_groups[item_id] = group
     folds = {item_id: fold_item(item_id, group) for item_id, group in item_groups.items()}
     claims: list[tuple[str, int, str]] = []
     for item_id, folded in folds.items():

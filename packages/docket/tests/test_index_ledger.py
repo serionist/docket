@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from ledger_kit import ADD_FIELDS, fresh_tables, op, rebuilt, tables, ulid, write_ops
+from ledger_kit import ADD_FIELDS, fresh_tables, meeting, op, point, point_set, rebuilt, tables, ulid, write_ops
 
 from docket.index import ledger as ledger_index
 from docket.index.ledger import RACY_NS, Held, rebuild, settled, update
@@ -274,6 +274,29 @@ def test_an_undone_add_gives_its_number_to_the_item_waiting_for_it(tmp_path: Pat
     assert rows(conn, "SELECT id, number FROM items") == [(ulid(2), 5)]
     assert same_as_rebuild(conn, tmp_path, lambda: write_ops(tmp_path, [op("undo", 4, 1, of=ulid(3))])) == 1
     assert rows(conn, "SELECT id, number FROM items ORDER BY id") == [(ulid(1), 5), (ulid(2), None)]
+
+
+def test_a_meeting_s_a_stream_s_and_a_later_object_s_lines_are_kept_as_a_rebuild_keeps_them(
+    tmp_path: Path, conn: sqlite3.Connection
+) -> None:
+    """item_log holds every line of a meeting and a stream, fate object, for the writer to fold (#199), and a later
+    Docket's object's, fate later; an update keeps them as a rebuild does, a line read before its meeting's add too."""
+    write_ops(tmp_path, [op("add", 1), meeting(2), point(3, 2), op("stream", 4), op("outbox", 5, number=7)])
+    rebuild(conn, tmp_path)
+    assert rows(conn, "SELECT item, id, fate FROM item_log WHERE fate IN ('object', 'later') ORDER BY id") == [
+        (ulid(2), ulid(2), "object"), (ulid(2), ulid(3), "object"), (ulid(4), ulid(4), "object"),
+        (ulid(5), ulid(5), "later"),
+    ]  # fmt: skip
+    early = laptop(point(7, 6, "Read before its meeting's add"))
+    grown = [point_set(8, 2, 3, answer="the 21st"), op("log", 9, 5, note="kept"), early]
+    assert same_as_rebuild(conn, tmp_path, lambda: write_ops(tmp_path, grown)) == 3
+    assert rows(conn, "SELECT fate FROM item_log WHERE id = ?", ulid(7)) == [("left out",)]
+    assert same_as_rebuild(conn, tmp_path, lambda: write_ops(tmp_path, [laptop(meeting(6))])) == 1
+    held = Held(conn).object_lines()
+    assert {add_id: [line.op.id for line in lines] for add_id, lines in held.items()} == {
+        ulid(2): [ulid(2), ulid(3), ulid(8)], ulid(4): [ulid(4)], ulid(6): [ulid(6), ulid(7)],
+    }  # fmt: skip
+    assert rows(conn, "SELECT count(*) FROM items") == [(1,)]
 
 
 def test_ops_read_before_their_add_fold_once_it_comes(tmp_path: Path, conn: sqlite3.Connection) -> None:

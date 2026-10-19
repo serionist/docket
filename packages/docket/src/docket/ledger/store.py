@@ -39,7 +39,7 @@ from docket.errors import DocketError
 from docket.index.build import ledger_tables
 from docket.index.ledger import Held
 from docket.ledger import check, ops
-from docket.ledger.fold import CLOSED, NUMBER, Folded, Item, family, fold_item, load, number_text, paused
+from docket.ledger.fold import CLOSED, NUMBER, Folded, Item, family, fold_item, number_text, paused
 from docket.ledger.meetings import Meeting, ObjectFold, Objects, Point, Stream, fold_objects, meeting_text
 from docket.ledger.ops import (
     DAYS,
@@ -209,16 +209,17 @@ class _Write:
         self.given_meetings: dict[int, str] = {}
         self.redactor = Redactor.from_config(vault.config.redaction)
         self.kind = ""
-        # Every meeting's and stream's lines, folded from the op files, and for each add the adds of its object, so an
-        # op's `after` sees them all.
-        ledger = load(vault.root)
-        self.lines.update((add_id, list(ledger.lines[add_id])) for add_id in ledger.objects.owner)
-        self.object_adds = set(ledger.objects.owner)
+        # Every meeting's and stream's lines as the tables hold them, all folded, and for each add the adds of its
+        # object, so an op's `after` sees them all. The index folds only items so far: #199's second PR folds the
+        # meetings there too, and a write then reads only the ones it touches.
+        with paused():
+            self.lines.update(held.object_lines())
+        self.object_adds = set(self.lines)
+        self._objects: Objects | None = None
         self.same: dict[str, set[str]] = {}
-        for add_id, obj_id in ledger.objects.owner.items():
+        for add_id, obj_id in self.objects().owner.items():
             self.same.setdefault(obj_id, set()).add(add_id)
             self.same[add_id] = self.same[obj_id]
-        self._objects: Objects | None = ledger.objects
 
     # -- what stands ------------------------------------------------------------------------------------------------
 

@@ -1,6 +1,6 @@
 """A ledger of a few years: 5,000 items and 50,000 ops, and 2,000 meetings with 20,000 point ops, read and folded by
-`load`, and folded into the index's tables, each in under a second; one op more, as a write leaves it, read into
-them in a tenth of one (DR-0616, #199).
+`load` in under a second; the items folded into the index's tables in under a second too, and one op more, as a write
+leaves it, read into them in a tenth of one (DR-0616, #199).
 
 The ops are written as the writer writes them, a month file per machine, each item an add and nine changes, each
 meeting four points answered and a point rolled from the meeting before through every one of them. Wall time is
@@ -30,7 +30,8 @@ CATCH_UP_SECONDS = 0.1
 CHANGES = ("log", "triage", "set", "log", "snooze", "triage", "log", "done", "reopen")
 
 
-def build(root: Path) -> None:
+def build(root: Path, *, meetings: bool = True) -> None:
+    """The items' ops, and with `meetings` the meetings' too, in their month files under root."""
     files: dict[str, list[str]] = {}
     highest: str | None = None
     start = datetime(2026, 1, 5, 8, tzinfo=UTC)
@@ -55,14 +56,15 @@ def build(root: Path) -> None:
         ]  # fmt: skip
         for o in made:
             files.setdefault(ops.rel_of(o), []).append(o.text())
-    meetings(files, start)
+    if meetings:
+        add_meetings(files, start)
     for rel, texts in files.items():
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("\n".join(texts) + "\n", encoding="utf-8", newline="\n")
 
 
-def meetings(files: dict[str, list[str]], start: datetime) -> None:
+def add_meetings(files: dict[str, list[str]], start: datetime) -> None:
     """Each meeting: its add, the dates point rolled in from the one before and that one's roll, four points and
     their answers: ten point ops a meeting."""
     highest: str | None = None
@@ -110,9 +112,10 @@ def test_a_few_thousand_items_and_meetings_read_and_fold_in_under_a_second(tmp_p
 
 @pytest.mark.perf
 def test_a_few_thousand_items_fold_into_the_index_in_under_a_second(tmp_path: Path) -> None:
-    """The rebuild's ledger part, on a file set up as a rebuild sets its new index up; then a write's catch-up."""
+    """The rebuild's ledger part, on a file set up as a rebuild sets its new index up; then a write's catch-up. Items
+    only: the meetings fold into tables of their own with #199's second PR, and are timed there."""
     root = tmp_path / "vault"
-    build(root)
+    build(root, meetings=False)
     conn = sqlite3.connect(tmp_path / "index.sqlite", isolation_level=None)
     try:
         conn.execute("PRAGMA journal_mode = OFF")
