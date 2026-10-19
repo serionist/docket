@@ -320,20 +320,20 @@ def test_slowest_tests_are_read_from_pytest_s_output() -> None:
     ]
 
 
-def test_a_tests_step_past_four_minutes_warns_on_github_actions_only(
+def test_a_tests_step_past_four_and_a_half_minutes_warns_on_github_actions_only(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     took = [0.0]
     monkeypatch.setattr(gate, "STEPS", [gate.Step("tests", ("os",), "", lambda _ctx: gate.Outcome.ok("1 passed"))])
     monkeypatch.setattr(gate, "_timed", lambda step, ctx: (step.run(ctx), took[0]))
-    for actions, seconds, warned in (("true", 241.0, True), ("true", 240.0, False), ("", 900.0, False)):
+    for actions, seconds, warned in (("true", 271.0, True), ("true", 270.0, False), ("", 900.0, False)):
         monkeypatch.setenv("GITHUB_ACTIONS", actions)
         took[0] = seconds
         assert gate.run("os") == 0
         warnings = [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("::warning")]
         assert warnings == (
             [
-                "::warning title=Slow tests::the tests step took 4.0 minutes, past 4: its job is "
+                "::warning title=Slow tests::the tests step took 4.5 minutes, past 4.5: its job is "
                 "past 5 about then; the step's slowest tests are in its log"
             ]
             if warned
@@ -470,7 +470,8 @@ def test_a_share_s_two_runs_keep_the_same_share_of_the_files(tmp_path: Path, mon
     weights = f"--shard-weights={tmp_path / 'tools' / 'devkit' / 'test-weights.json'}"
     times: list[str] = []
     for run in calls:
-        assert run[run.index("devkit.shard") - 1] == "-p" and "--shard=2/2" in run and weights in run
+        # The root conftest.py loads the plugin: a `-p` would import it before coverage starts.
+        assert "--shard=2/2" in run and weights in run and "devkit.shard" not in run
         times += [a.removeprefix("--shard-times=") for a in run if a.startswith("--shard-times=")]
     # Each run writes its files' times to a file of its own, for `gate weights`.
     system = platform.system()
@@ -711,6 +712,8 @@ def test_under_coverage_the_timed_tests_stay_in_the_one_run(tmp_path: Path, monk
     assert gate.TEMPLATES_ENV not in envs[0]
     assert "-m" not in run[3:] and run[run.index("-n") + 1] == "auto"
     assert "--cov" in run and any(a.startswith("--cov-report=json:") for a in run) and "--cov-append" not in run
+    # Its one run is the lane's one share, so the shard plugin runs as it does in each of CI's covered shares.
+    assert "--shard=1/1" in run and any(a.endswith("-1-of-1-tests.json") for a in run)
     assert out.status == "fail" and "a test broke" in out.detail
 
 

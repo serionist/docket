@@ -37,6 +37,8 @@ from docket.vault.vault import Vault, remove_tree
 # background, could repack a template while a test copies it (DR-0221).
 # The files ref format pinned, so a git that defaults to reftable (Git 3.0) can't change which git calls a test sees.
 TEST_GITCONFIG = "[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n[init]\n\tdefaultRefFormat = files\n"
+# The session's own folder, which conftest.py makes before any fixture runs and names here.
+HOME_VAR = "DOCKET_TEST_HOME"
 
 # The fixture vault's records: a call over an hour long, a recording in a vendor's own shape, a chat thread, two
 # side messages, and a mail whose rid holds @, % and ].

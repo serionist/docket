@@ -8,7 +8,7 @@ from pathlib import Path
 
 import keyring
 import pytest
-from docket_testkit import TEST_GITCONFIG, AtConsole, FakePrompt, make_config, make_record, use_factory
+from docket_testkit import HOME_VAR, TEST_GITCONFIG, AtConsole, FakePrompt, make_config, make_record, use_factory
 from keyring.backends.fail import Keyring as FailKeyring
 
 from docket import console, osprompt
@@ -17,8 +17,7 @@ from docket.vault.config import VaultConfig
 from docket.vault.records import RawRecord
 
 # The session's own folders, set before any fixture runs: tests never touch the real Docket folders, not even to read
-# them, and a module's fixtures run before `isolated` gives each test folders of its own.
-HOME_VAR = "DOCKET_TEST_HOME"
+# them, and a module's fixtures run before `isolated` gives each test folders of its own. HOME_VAR names the folder.
 
 
 def pytest_configure(config: pytest.Config) -> None:

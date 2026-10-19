@@ -18,7 +18,7 @@ steps are done, and the run prints what they printed: their times. The two runs 
 timed run reuses the vaults the parallel run built, and the timed run has a temp folder of its own. Under coverage the
 index's time limits are off, so the full lane keeps them in its one run. A share writes what each of its files cost to
 `.local/times/`, and `gate weights <folder>` folds a CI run's into the weights the shares split by. On GitHub Actions a
-tests step past 4 minutes prints a warning the PR shows.
+tests step past 4.5 minutes prints a warning the PR shows.
 
 `gate check-text <file>` checks a text that is about to be posted (an issue or PR body) for private names and tool
 attribution.
@@ -291,9 +291,9 @@ def slowest(lines: list[str]) -> list[str]:
     return [f"slowest: {ln.strip()}" for ln in lines if _DURATION.match(ln.strip())]
 
 
-# A CI job spends up to a minute around its tests step, so a share's job passes 5 minutes about when the step passes
-# this (DR-0698).
-TESTS_WARN_MINUTES = 4
+# A CI job spends half a minute or so around its tests step, so a share's job passes 5 minutes about when the step
+# passes this (DR-0698). At 4 it warned on green runs: macOS's shares' steps took up to 4.3 minutes.
+TESTS_WARN_MINUTES = 4.5
 
 
 def slow_tests_warning(step: str, took: float) -> str | None:
@@ -342,11 +342,11 @@ _SHARE_DATA = re.compile(r"^share-([1-9]\d*)-of-([1-9]\d*)$")
 TIMES = ".local/times"
 
 
-def _times(ctx: Ctx, run: str) -> list[str]:
+def _times(ctx: Ctx, spec: str | None, run: str) -> list[str]:
     """The option that has a share's run write its files' times, a file per system, share and run."""
-    if ctx.shard is None:
+    if spec is None:
         return []
-    out = ctx.root / TIMES / f"{platform.system()}-{ctx.shard.replace('/', '-of-')}-{run}.json"
+    out = ctx.root / TIMES / f"{platform.system()}-{spec.replace('/', '-of-')}-{run}.json"
     out.unlink(missing_ok=True)
     return [f"--shard-times={out}"]
 
@@ -359,13 +359,17 @@ def step_tests(ctx: Ctx) -> Outcome:
     numbers.unlink(missing_ok=True)
     pytest = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
     covered = ctx.lane == "full"
-    if ctx.shard is not None:
+    # The full lane always runs as a share, its one share 1/1 when it isn't split: `gate full` then runs the shard
+    # plugin's lines as each of CI's covered shares does, and both read the same coverage (DR-0698). The repo's root
+    # conftest.py loads the plugin.
+    spec = ctx.shard or ("1/1" if covered else None)
+    if spec is not None:
         from devkit.shard import WEIGHTS  # noqa: PLC0415 - the plugin imports pytest, which only a sharded run needs
 
         # Both runs keep the same share of the test files, so the timed run finds what its share's parallel run built.
-        pytest += ["-p", "devkit.shard", f"--shard={ctx.shard}", f"--shard-weights={ctx.root / WEIGHTS}"]
+        pytest += [f"--shard={spec}", f"--shard-weights={ctx.root / WEIGHTS}"]
     # One worker per core: most of the time goes to git subprocesses that would otherwise wait on each other.
-    cmd = [*pytest, "-n", "auto", f"--durations={SLOWEST}", *_times(ctx, "tests")]
+    cmd = [*pytest, "-n", "auto", f"--durations={SLOWEST}", *_times(ctx, spec, "tests")]
     env: dict[str, str] = {}
     if covered:
         # The question set's test writes its numbers there, for the eval floors (DR-0295).
@@ -383,7 +387,7 @@ def step_tests(ctx: Ctx) -> Outcome:
         with tempfile.TemporaryDirectory(prefix="docket-tests-", ignore_cleanup_errors=True) as at:
             env[TEMPLATES_ENV] = str(Path(at, "templates"))
             code, lines = _run(ctx, cmd, env=env)
-            alone = [*pytest, "-m", PERF, "-raP", f"--basetemp={Path(at, 'timed')}", *_times(ctx, "timed")]
+            alone = [*pytest, "-m", PERF, "-raP", f"--basetemp={Path(at, 'timed')}", *_times(ctx, spec, "timed")]
             return _alone_after(ctx, code, lines, alone, env)
     code, lines = _run(ctx, cmd, env=env)
     if code != 0:

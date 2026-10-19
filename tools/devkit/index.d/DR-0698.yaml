@@ -11,6 +11,7 @@ decisions:
       - A share keeps its test files whole, and both pytest runs of a share keep the same files.
       - Each check the merge rule names fails when a share it stands for fails or doesn't run.
       - The coverage floors are held on every share's data combined, never on one share's.
+      - "The shard plugin loads from the root conftest.py, never with -p, which imports it before coverage starts, and gate full runs its tests as one share, 1/1: CI's covered shares and gate full then read the same coverage."
     not_chosen:
       - "Alternating files in path order, as the two Windows halves did: at 12 shares the heaviest took 60% more than the average, 196 s against 123 s on one run's measured times."
       - "The timed tests in a job of their own per system: it would build the 100,000-chunk vaults again, 79 to 115 s on Windows, before 150 to 220 s of timing, past 5 minutes."

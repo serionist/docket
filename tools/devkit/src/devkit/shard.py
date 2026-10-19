@@ -121,9 +121,10 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     kept = share(files, k, n, load_weights(Path(named)) if named else None)
     selected = [item for item in items if item.path.relative_to(config.rootpath).as_posix() in kept]
     deselected = [item for item in items if item.path.relative_to(config.rootpath).as_posix() not in kept]
-    if deselected:
-        config.hook.pytest_deselected(items=deselected)
-        items[:] = selected
+    # Always, even with nothing to leave out: `gate full`'s one share runs the same lines as each of CI's shares, so
+    # both read the same coverage of this file.
+    config.hook.pytest_deselected(items=deselected)
+    items[:] = selected
 
 
 def merge_times(folder: Path, weights_path: Path, root: Path) -> list[str]:
