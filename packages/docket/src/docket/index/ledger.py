@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 import time
 from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
@@ -592,7 +593,10 @@ def _refold_objects(
     meetings and streams they held before; the M- numbers to give again. A seed's lines may have sat in `item_log`,
     read before the add that makes its meeting; one whose maker now makes an item goes back there."""
     fresh = [line for lines in seeds.values() for line in lines]
-    adds = part(conn, seeds, fresh)
+    # A seed's own rows are followed as lines too: a stream's rows keep no link, so a stream's add that a second text
+    # turns into a meeting (DR-0612) would hide the links of the points its rows held.
+    held = object_lines(conn, seeds)
+    adds = part(conn, seeds, [*fresh, *(line for lines in held.values() for line in lines)])
     groups = object_lines(conn, adds)
     for add_id, lines in seeds.items():
         groups[add_id] = _merged(groups.get(add_id, []), lines)
@@ -864,15 +868,18 @@ class Suggestion:
     why: str
 
 
-def _folded(name: str) -> str:
-    return " ".join(name.casefold().split())
+def name_tokens(name: str | None) -> set[str]:
+    """A name's words of three letters or more, lowercased: todo.py's `name_tokens`, by which an item is on someone in a
+    meeting when its who shares one with their name."""
+    return {word for word in re.split(r"[^\w]+", (name or "").lower()) if len(word) >= 3}
 
 
 def suggest(conn: sqlite3.Connection, meeting_ref: str) -> list[Suggestion]:
-    """The open items worth raising in a meeting, by todo.py's rules (DR-0629): those linked to it, prep items left
-    out; then replies, waits and decisions on someone in it, its organiser or an attendee, in its stream when it has
-    one; then waits in its stream. An item already on one of its points is left out, and at most 15 come, each once,
-    by number within its group. `meeting_ref` is the id of any add of the meeting. A read: it writes nothing."""
+    """The open items worth raising in a meeting, by todo.py's rules (DR-0629, DR-0634): those linked to it but any
+    whose title starts with prep; then replies, waits and decisions on someone in it, its organiser or an attendee, in
+    its stream when it has one; then waits in its stream. An item already on one of its points is left out, and at most
+    15 come, each once, by the day it opened within its group. `meeting_ref` is the id of any add of the meeting. A
+    read: it writes nothing."""
     found = conn.execute(
         "SELECT meeting FROM meeting_log WHERE item = ? LIMIT 1", (meeting_ref.strip(),)
     ).fetchone()  # fmt: skip
@@ -884,10 +891,7 @@ def suggest(conn: sqlite3.Connection, meeting_ref: str) -> list[Suggestion]:
     if row is None:
         raise DocketError(f"no meeting {meeting_ref}")
     meeting_id, organiser, attendees, stream, adds = row
-    # Someone in the meeting by their name or its first word, case and spaces folded; a whole name wins.
-    names = [name for name in [organiser, *json.loads(attendees)] if name and name.strip()]
-    people = {_folded(name).split(" ")[0]: name for name in names}
-    people.update({_folded(name): name for name in names})
+    people = [(name, name_tokens(name)) for name in [organiser, *json.loads(attendees)] if name]
     on_points = {
         str(item)
         for (item,) in conn.execute(
@@ -896,8 +900,8 @@ def suggest(conn: sqlite3.Connection, meeting_ref: str) -> list[Suggestion]:
     }  # fmt: skip
     marks = ", ".join("?" * len(OPEN))
     items = conn.execute(
-        f"SELECT id, number, claimed, kind, title, who, stream, meeting FROM items WHERE state IN ({marks}) "  # noqa: S608
-        "ORDER BY claimed, id",
+        f"SELECT id, number, kind, title, who, stream, meeting FROM items WHERE state IN ({marks}) "  # noqa: S608
+        "ORDER BY opened, claimed, id",
         OPEN,
     ).fetchall()
     held = set(json.loads(adds))
@@ -907,16 +911,19 @@ def suggest(conn: sqlite3.Connection, meeting_ref: str) -> list[Suggestion]:
         if item_id not in on_points and item_id not in out and len(out) < SUGGESTED:
             out[item_id] = Suggestion(item_id, number, title, why)
 
-    for item_id, number, _, kind, title, _, _, linked in items:
-        prep = kind == "task" and _folded(title).startswith("prep")
-        if linked in held and not prep:
+    for item_id, number, _, title, _, _, linked in items:
+        # A prep item was written to prepare the meeting, not to raise there; on someone in it, it still comes.
+        if linked in held and not title.lower().startswith("prep"):
             take(item_id, number, title, "linked to the meeting")
-    for item_id, number, _, kind, title, who, item_stream, _ in items:
-        person = people.get(_folded(who))
-        if kind in ON_PEOPLE and person is not None and (stream is None or item_stream == stream):
+    for item_id, number, kind, title, who, item_stream, _ in items:
+        if kind not in ON_PEOPLE or (stream is not None and item_stream != stream):
+            continue
+        words = name_tokens(who)
+        person = next((name for name, tokens in people if tokens & words), None)
+        if person is not None:
             take(item_id, number, title, f"on {person}, in the meeting")
     if stream is not None:
-        for item_id, number, _, kind, title, _, item_stream, _ in items:
+        for item_id, number, kind, title, _, item_stream, _ in items:
             if kind == "waiting" and item_stream == stream:
                 take(item_id, number, title, f"waiting in {stream}")
     return list(out.values())

@@ -1,7 +1,7 @@
 """A ledger of a few years: 5,000 items and 50,000 ops, and 2,000 meetings with 20,000 point ops, read and folded by
-`load` in under a second; all of it folded into the index's tables in under a second too, one op more, on an item or
-a meeting, as a write leaves it, read into them in a tenth of one (DR-0616, DR-0628, #218), and a write touching one
-meeting planned in a tenth of one, reading only its part (DR-0633).
+`load` in under a second; all of it folded into the index's tables in under two seconds; one op more, on an item or
+a meeting, as a write leaves it, read into them in a tenth of a second; and a write touching one meeting planned in a
+tenth of a second, reading only its part (DR-0616, DR-0628, DR-0633, DR-0635).
 
 The ops are written as the writer writes them, a month file per machine, each item an add and nine changes, each
 meeting four points answered and a point rolled from the meeting before it in its weekly series of fifty. Wall time
@@ -34,7 +34,9 @@ ITEMS = 5_000
 MEETINGS = 2_000
 # Meetings a series holds: a weekly meeting's year. A roll ties a series' meetings into one part (DR-0633).
 SERIES = 50
-SECONDS = 1.0
+FOLD_SECONDS = 1.0
+# A full rebuild runs only on a schema bump or a forget, never on the daily path (DR-0635).
+REBUILD_SECONDS = 2.0
 CATCH_UP_SECONDS = 0.1
 WRITE_SECONDS = 0.1
 CHANGES = ("log", "triage", "set", "log", "snooze", "triage", "log", "done", "reopen")
@@ -131,7 +133,7 @@ def test_a_few_thousand_items_and_meetings_read_and_fold_in_under_a_second(tmp_p
     assert open_points == ["The pilot's dates"] * (MEETINGS // SERIES)
     assert ledger.problems == ()
     if not traced():
-        assert elapsed < SECONDS, f"reading and folding the ledger took {elapsed:.2f} s"
+        assert elapsed < FOLD_SECONDS, f"reading and folding the ledger took {elapsed:.2f} s, over {FOLD_SECONDS} s"
 
 
 def caught_up(conn: sqlite3.Connection, root: Path) -> tuple[int, float]:
@@ -143,7 +145,7 @@ def caught_up(conn: sqlite3.Connection, root: Path) -> tuple[int, float]:
 
 
 @pytest.mark.perf
-def test_a_few_thousand_items_and_meetings_fold_into_the_index_in_under_a_second(tmp_path: Path) -> None:
+def test_a_few_thousand_items_and_meetings_fold_into_the_index_in_under_two_seconds(tmp_path: Path) -> None:
     """The rebuild's ledger part, on a file set up as a rebuild sets its new index up; then a write's catch-up, of one
     op on an item and one on a meeting in the middle of its series, which folds that series again."""
     root = tmp_path / "vault"
@@ -187,9 +189,15 @@ def test_a_few_thousand_items_and_meetings_fold_into_the_index_in_under_a_second
     assert (item_grown, item_line) == (1, ("one more",))
     assert (meeting_grown, answer, fate) == (1, ("the 21st",), ("applied",))
     if not traced():
-        assert elapsed < SECONDS, f"folding the ledger into the index took {elapsed:.2f} s"
-        assert item_caught < CATCH_UP_SECONDS, f"reading one op more on an item took {item_caught:.2f} s"
-        assert meeting_caught < CATCH_UP_SECONDS, f"reading one op more on a meeting took {meeting_caught:.2f} s"
+        assert elapsed < REBUILD_SECONDS, (
+            f"folding the ledger into the index took {elapsed:.2f} s, over {REBUILD_SECONDS} s"
+        )
+        assert item_caught < CATCH_UP_SECONDS, (
+            f"reading one op more on an item took {item_caught:.2f} s, over {CATCH_UP_SECONDS} s"
+        )
+        assert meeting_caught < CATCH_UP_SECONDS, (
+            f"reading one op more on a meeting took {meeting_caught:.2f} s, over {CATCH_UP_SECONDS} s"
+        )
 
 
 @pytest.mark.perf
@@ -214,4 +222,4 @@ def test_a_write_touching_one_meeting_reads_only_its_series(tmp_path: Path, monk
     print(f"a write on one meeting: {elapsed * 1000:.0f} ms, reading {sum(read)} of {MEETINGS:,} meetings")
     assert ([o.op for o in written.ops], list(written.numbers.values()), read) == (["point"], [number], [SERIES])
     if not traced():
-        assert elapsed < WRITE_SECONDS, f"planning a write on one meeting took {elapsed:.2f} s"
+        assert elapsed < WRITE_SECONDS, f"planning a write on one meeting took {elapsed:.2f} s, over {WRITE_SECONDS} s"

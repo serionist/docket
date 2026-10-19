@@ -233,6 +233,24 @@ def test_a_meeting_s_add_on_a_second_text_that_makes_an_item_folds_as_an_item_as
     assert rows(conn, "SELECT count(*) FROM meeting_log WHERE item = ?", ulid(1)) == [(0,)]
 
 
+def test_a_stream_s_add_on_a_second_text_that_makes_a_meeting_follows_the_stream_s_lines_as_a_rebuild_has_it(
+    tmp_path: Path, conn: sqlite3.Connection
+) -> None:
+    """One id on two texts (DR-0612): a stream's add, then another clone's meeting add on its id, whose text sorts
+    first, so the id makes a meeting. A point the stream's rows held, left out there since a stream takes none, stands
+    on the meeting now, so a copy on another meeting naming it, which stood while its source stood nowhere, is idle,
+    as a rebuild has it: the stream's rows keep no link, so the update follows the lines they hold."""
+    write_ops(tmp_path, [op("stream", 1), point(2, 1, "Dates"), meeting(5), point(6, 5, "Dates", **{"from": ulid(2)})])
+    rebuild(conn, tmp_path)
+    assert rows(conn, "SELECT id, meeting, n FROM points") == [(ulid(6), ulid(5), 1)]
+    assert same_as_rebuild(conn, tmp_path, [laptop(meeting(1))]) == 1
+    assert rows(conn, "SELECT id FROM streams") == []
+    assert rows(conn, "SELECT id, meeting, n FROM points ORDER BY id") == [
+        (ulid(2), ulid(1), 1), (ulid(6), ulid(5), None),
+    ]  # fmt: skip
+    assert rows(conn, "SELECT fate FROM meeting_log WHERE id = ?", ulid(6)) == [("idle",)]
+
+
 # -- update equals rebuild, at random ------------------------------------------------------------------------------
 
 
@@ -347,21 +365,21 @@ def item(n: int, number: int, title: str, **fields: Any) -> Op:
 
 
 def test_suggest_names_what_to_raise_in_a_meeting_and_why(tmp_path: Path, conn: sqlite3.Connection) -> None:
-    """Items linked to the meeting, a prep task left out; then replies, waits and decisions on someone in it, by
-    name or first name, in its stream; then waits in its stream. Closed items, items on its points and items
-    elsewhere are left out; a meeting with no stream asks no stream of the people's items."""
+    """Items linked to the meeting, a prep task left out; then replies, waits and decisions on someone in it, in its
+    stream; then waits in its stream. Closed items, items on its points and items elsewhere are left out; a meeting
+    with no stream asks no stream of the people's items."""
     write_ops(tmp_path, [
         meeting(1, organiser="Ada Example", attendees=["Ada Example", "Ben Example"], stream="pilot"),
         item(2, 1, "Send the dates", meeting=ulid(1)),
         item(3, 2, "Prep the agenda", kind="task", meeting=ulid(1)),
         item(4, 3, "Ben's numbers", kind="waiting", who="Ben"),
         item(5, 4, "The vendor", kind="decision", stream="ops"),
-        item(6, 5, "Cleo's quote", kind="waiting", who="Cleo Example"),
+        item(6, 5, "Cleo's quote", kind="waiting", who="Cleo"),
         item(7, 6, "On a point", kind="reply"),
         point(8, 1, "The quote", item=ulid(7)),
         item(9, 7, "Done already", meeting=ulid(1)), op("done", 10, 9),
         item(11, 8, "A task on Ada", kind="task"),
-        meeting(12, number=2, organiser="Ben Example", start="2026-10-20T09:00+02:00", end="2026-10-20T09:30+02:00"),
+        meeting(12, number=2, organiser="Ben", start="2026-10-20T09:00+02:00", end="2026-10-20T09:30+02:00"),
     ])  # fmt: skip
     rebuild(conn, tmp_path)
     assert [(s.item, s.number, s.title, s.why) for s in ledger_index.suggest(conn, ulid(1))] == [
@@ -372,6 +390,40 @@ def test_suggest_names_what_to_raise_in_a_meeting_and_why(tmp_path: Path, conn: 
     assert [s.item for s in ledger_index.suggest(conn, ulid(12))] == [ulid(4)]
     with pytest.raises(DocketError, match="no meeting"):
         ledger_index.suggest(conn, ulid(2))
+
+
+def test_suggest_takes_todo_s_rule_for_prep_people_and_order(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    """todo.py's rule: an item whose title starts with prep, whatever its kind, isn't taken as linked but still comes
+    on someone in the meeting; an item is on someone when its who shares a word of three letters or more with their
+    name, so a full name, a first name, a surname and two people all match, and a two-letter name never does; each
+    group comes by the day its items opened."""
+    write_ops(tmp_path, [
+        meeting(1, organiser="Ada", attendees=["Ben", "Cleo Example", "Bo"], stream="pilot"),
+        item(2, 1, "Prep notes for the sync", kind="reply", who="Ada", meeting=ulid(1)),
+        item(3, 2, "Ada's numbers", kind="waiting", who="Ada Example"),
+        item(4, 3, "Ben and Cleo's quote", kind="waiting", who="Ben, Cleo"),
+        item(5, 4, "Cleo's sign-off", kind="decision", who="Example"),
+        item(6, 6, "Older", kind="reply", who="Ben", opened="2026-09-01"),
+        item(7, 5, "Newer", kind="reply", who="Ben", opened="2026-10-01"),
+        item(8, 7, "Bo's slides", kind="reply", who="Bo"),
+        item(9, 8, "PREP the room", kind="task", meeting=ulid(1), opened="2026-09-01"),
+        item(10, 9, "Send the agenda", kind="task", meeting=ulid(1)),
+        item(11, 10, "Book the room", kind="task", meeting=ulid(1), opened="2026-10-02"),
+        item(12, 11, "Ada's other numbers", kind="waiting", who="Ada", stream="ops"),
+    ])  # fmt: skip
+    rebuild(conn, tmp_path)
+    assert [(s.title, s.why) for s in ledger_index.suggest(conn, ulid(1))] == [
+        ("Book the room", "linked to the meeting"),
+        ("Send the agenda", "linked to the meeting"),
+        ("Older", "on Ben, in the meeting"),
+        ("Newer", "on Ben, in the meeting"),
+        ("Prep notes for the sync", "on Ada, in the meeting"),
+        ("Ada's numbers", "on Ada, in the meeting"),
+        ("Ben and Cleo's quote", "on Ben, in the meeting"),
+        ("Cleo's sign-off", "on Cleo Example, in the meeting"),
+    ]  # fmt: skip
+    assert ledger_index.name_tokens("Ben, Cleo Example-Sample") == {"ben", "cleo", "example", "sample"}
+    assert ledger_index.name_tokens(None) == set()
 
 
 def test_suggest_reads_a_joined_meeting_by_any_add_and_brings_fifteen_at_most(
