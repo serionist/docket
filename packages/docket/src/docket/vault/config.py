@@ -80,6 +80,8 @@ TOOL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 # A source's key from before media came from any https host (DR-0604): read and ignored, never written.
 OLD_SOURCE_KEYS = frozenset({"media_hosts"})
 MAX_LOOKBACK_DAYS = 30
+# A stream's name, the ledger writer's slug (DR-0625): what a status file's stream is held to.
+STREAM_NAME = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 
 
 class SourceConfig(_Model):
@@ -222,10 +224,13 @@ def rendered_path_problem(value: str) -> str | None:
 
 
 class RenderedFile(_Model):
-    """A file in the consuming repo Docket writes from the entities and never commits (DR-0552): the people directory
-    or the glossary."""
+    """A file in the consuming repo Docket writes and never commits (DR-0552): the people directory or the glossary,
+    from the entities, or a stream's STATUS.md, its frontmatter from the ledger (DR-0673)."""
 
-    kind: Literal["people", "glossary"]
+    kind: Literal["people", "glossary", "status"]
+    # The stream a status file renders: needed by status, refused by the others. Written only when set, so a
+    # vault.yaml without a status file keeps its bytes.
+    stream: str | None = None
     path: str
 
     @field_validator("path")
@@ -235,6 +240,25 @@ class RenderedFile(_Model):
         if problem is not None:
             raise ValueError(problem)
         return value
+
+    @model_validator(mode="after")
+    def _stream(self) -> RenderedFile:
+        if self.kind != "status":
+            if self.stream is not None:
+                raise ValueError(f"stream goes with kind status; a {self.kind} file is rendered from the entities")
+            return self
+        if self.stream is None:
+            raise ValueError("a status file needs stream: the name of the stream it renders")
+        if not STREAM_NAME.fullmatch(self.stream):
+            raise ValueError(f"{self.stream!r} isn't a stream's name: lowercase letters, digits and inner hyphens")
+        return self
+
+    @model_serializer(mode="wrap")
+    def _dump(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        data: dict[str, Any] = handler(self)
+        if self.stream is None:
+            data.pop("stream", None)
+        return data
 
 
 class NeverStore(_Model):
@@ -304,8 +328,8 @@ class VaultConfig(_Model):
     # key added later to the settings in force: it applies once committed (DR-0521), by a write of Docket's or the
     # owner's own commit (DR-0601).
     api_provider: Literal["voyage"] | None = None
-    # Files Docket writes in the consuming repo from the entities (DR-0552); none when absent. A key added later too,
-    # written only when set (`_written`).
+    # Files Docket writes in the consuming repo from the entities (DR-0552) and the ledger (DR-0673); none when absent.
+    # A key added later too, written only when set (`_written`).
     rendered: list[RenderedFile] = Field(default_factory=list[RenderedFile])
 
     @field_validator("rendered")
@@ -315,6 +339,10 @@ class VaultConfig(_Model):
         twice = sorted({path for path in paths if paths.count(path) > 1})
         if twice:
             raise ValueError(f"{twice[0]} is rendered twice; give each file one kind")
+        streams = [f.stream for f in value if f.stream is not None]
+        twice = sorted({name for name in streams if streams.count(name) > 1})
+        if twice:
+            raise ValueError(f"stream {twice[0]} has two status files; give each stream one")
         return value
 
     @field_validator("sources")

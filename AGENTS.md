@@ -72,9 +72,8 @@ You need uv (it brings Python 3.12), git, gitleaks, and Claude Code for the full
 - Coverage floors are in `tools/devkit/coverage-floors.json`. Raise one in the change that earns it, never lower one.
 - A test that asserts an elapsed time carries the `perf` marker; a lane without coverage (`gate os`) runs those after
   the rest, alone (DR-0430), on vaults an untimed test had the parallel run build (DR-0492).
-- Eval floors, recall at 10 and MRR per kind of question on the invented set, are in
-  `tools/devkit/eval-floors.json`: the full lane fails a kind above or below its floor, and a lowered one needs a new
-  `lowered` note saying why.
+- Eval floors, recall at 10 and MRR per kind of question on the invented set, are in `tools/devkit/eval-floors.json`:
+  the full lane fails a kind above or below its floor, and a lowered one needs a new `lowered` note saying why.
 - The same set with the embedder has floors of its own in `tools/devkit/eval-floors-models.json`, and with the CPU
   reranker in `tools/devkit/eval-floors-rerank.json`, held by `uv run gate models` with `DOCKET_TEST_MODELS` naming a
   folder `docket models install --device cpu` filled; the models CI job runs it and is required for merge.
@@ -119,7 +118,8 @@ agrees in the issue or, under an autonomy grant, with its decision recorded as p
   `/sheet<n>` under them (DR-0482), media's paths, staged and stored, and its sidecar and withheld marks (DR-0547), the
   sidecar's cuts and `_decided.jsonl`'s kinds (DR-0561), the media cut log and the sidecar's replaced keys (DR-0562), a
   Whisper transcript's rid suffix `/whisper`, its engine string and its `via` (DR-0570), the forgotten list (DR-0579),
-  the ledger's op files, lines, kinds, objects, undo and its `of_batch`, archive, ids and numbers (DR-0610 to DR-0615, DR-0620 to DR-0626);
+  the ledger's op files, lines, kinds, objects, undo and its `of_batch`, archive, ids and numbers (DR-0610 to DR-0615, DR-0620 to DR-0626),
+  a stream's STATUS.md: `rendered`'s `status` kind and `stream` (DR-0673), its frontmatter's lines and hash (DR-0674);
 - a source's mapper interface (DR-0119) and what the core reads from an event record (DR-0646), and its name and keys in `vault.yaml` (DR-0124, DR-0125), among them `folder`,
   `exclude` (DR-0481), `media_folders` (DR-0604) and `lookback_days` (DR-0606), `media_hosts` read and ignored;
 - the question file `docket eval` reads (DR-0290) and its speech file (DR-0571); the user config's `speech` (DR-0568);

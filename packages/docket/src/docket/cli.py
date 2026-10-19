@@ -32,6 +32,7 @@ from docket.index.build import db_path, ledger_tables
 from docket.index.embedpass import fill
 from docket.ledger import batch as ledger_batches
 from docket.ledger import ops as ledger_ops
+from docket.ledger import status as ledger_status
 from docket.ledger import store as ledger_store
 from docket.ledger import views as ledger_views
 from docket.media import backup as media_backup
@@ -322,10 +323,11 @@ def vault_status(vault: VaultOption = None) -> None:
 
 @vault_app.command("check")
 def vault_check(vault: VaultOption = None) -> None:
-    """Check that the raw log is intact: every file parses, and nothing written once was changed."""
+    """Check that the raw log is intact: every file parses, and nothing written once was changed. Each stream's
+    STATUS.md is read against the ledger too, and nothing is written."""
     problems = find_vault(vault).check()
     for problem in problems:
-        typer.echo(str(problem))
+        say(str(problem))
     if problems:
         typer.echo(f"{len(problems)} problem(s)")
         raise typer.Exit(1)
@@ -370,14 +372,16 @@ def ingest(
 
 @app.command("render")
 def render_files(vault: VaultOption = None) -> None:
-    """Write the people directory and the glossary from the entities, at the paths vault.yaml's rendered names in the
-    repo that holds the vault. A file edited by hand is left as it is, a repo anyone can read gets none, and nothing is
-    committed: the files are yours to commit."""
+    """Write the files vault.yaml's rendered names in the repo that holds the vault: the people directory and the
+    glossary from the entities, and each stream's STATUS.md frontmatter from the ledger, its body left as it is. A file
+    edited by hand is left as it is, a repo anyone can read gets none, and nothing is committed: the files are yours to
+    commit."""
     found = find_vault(vault)
     if not found.config.rendered:
         say(f"nothing to render: vault.yaml names no file under rendered{inforce.note(found.waiting)}")
         return
-    outcomes = rendered.render_all(found)
+    order = {f.path: n for n, f in enumerate(found.config.rendered)}
+    outcomes = sorted(rendered.render_all(found) + ledger_status.render_all(found), key=lambda o: order[o.path])
     say_all([o.line for o in outcomes])
     if any(o.state in ("edited", "refused") for o in outcomes):
         raise typer.Exit(1)

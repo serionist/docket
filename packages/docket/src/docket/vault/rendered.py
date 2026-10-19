@@ -1,18 +1,21 @@
-"""Files Docket writes in the user's repo from the entities and never commits (DR-0552 to DR-0554): the people
-directory and the glossary, at the paths `vault.yaml`'s `rendered` names in the consuming repo.
+"""Files Docket writes in the user's repo and never commits (DR-0552 to DR-0554): the people directory and the
+glossary from the entities, at the paths `vault.yaml`'s `rendered` names in the consuming repo; and what a stream's
+STATUS.md render shares with them (`docket.ledger.status`, DR-0673 to DR-0676): the repo, found by a stat, the path
+check, the remotes and their probe, `Outcome`, and the write that reads the file again right before its rename.
 
-Each is a markdown table. Its first line says it was rendered from the vault, names the last commit that changed an
-entity file, and holds a hash of the rest, so a hand edit is told apart from Docket's own text on any machine, and left
-as it is. The same entities give the same bytes, so an unchanged set rewrites nothing. A repo whose remote anyone can
-read gets no file. An entity whose id or name a never-store list holds now is left out, and so is a person the people
-list names by any of their values; a keyword drops only the alias, id or role it is in, as Curate and `docket curate
-show` hide them.
+Each entity file is a markdown table. Its first line says it was rendered from the vault, names the last commit that
+changed an entity file, and holds a hash of the rest, so a hand edit is told apart from Docket's own text on any
+machine, and left as it is. The same entities give the same bytes, so an unchanged set rewrites nothing. A repo whose
+remote anyone can read gets no file. An entity whose id or name a never-store list holds now is left out, and so is a
+person the people list names by any of their values; a keyword drops only the alias, id or role it is in, as Curate and
+`docket curate show` hide them.
 """
 
 from __future__ import annotations
 
 import hashlib
 import re
+import secrets
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,9 +23,10 @@ from typing import Literal
 
 from docket.errors import DocketError
 from docket.vault.anchors import normalize_newlines
-from docket.vault.config import NeverStore
+from docket.vault.config import NeverStore, RenderedFile
 from docket.vault.entities import Entity, load_entities
-from docket.vault.git import Git, toplevel
+from docket.vault.git import Git
+from docket.vault.home import is_git_dir
 from docket.vault.host import Probe, probe_remote, remote_urls
 from docket.vault.neverstore import listed, person_listed, slug_listed
 from docket.vault.staging import write_replacing
@@ -34,14 +38,19 @@ HEADER = re.compile(
 )
 # The entity files, never the curate log beside them, so a logged rejection rewrites nothing.
 ENTITY_FILES = (":(glob)entities/*.yaml", ":(glob)entities/*/*.yaml")
+ENTITY_KINDS = ("people", "glossary")
 State = Literal["written", "unchanged", "edited", "refused"]
 # Each remote's answer, kept for the process once it is sure: one that couldn't be reached is asked again (DR-0554).
 _PROBED: dict[str, Probe] = {}
+# Each repo's remote URLs, kept for the process while its git config file keeps its size and time: three git calls a
+# render saved, a tenth of a second on Windows, after every ledger write that changes a stream.
+_REMOTES: dict[Path, tuple[tuple[int, int], list[str]]] = {}
 
 
 @dataclass(frozen=True)
 class Outcome:
-    """What a render did with one file, by its path in `vault.yaml`."""
+    """What a render did with one file, by its path in `vault.yaml`: a left one says why when it isn't an entity
+    file's hand edit."""
 
     path: str
     state: State
@@ -53,6 +62,8 @@ class Outcome:
             return f"rendered   {self.path}"
         if self.state == "unchanged":
             return f"unchanged  {self.path}"
+        if self.state == "edited" and self.why:
+            return f"left       {self.path}: {self.why}"
         if self.state == "edited":
             return (
                 f"left       {self.path}: it was edited by hand, or Docket didn't write it; move what it holds into "
@@ -62,63 +73,163 @@ class Outcome:
 
 
 def render_all(vault: Vault, probe: Callable[[str], Probe] = probe_remote) -> list[Outcome]:
-    """Every file `vault.yaml` names, rendered from the entities as they are in the vault's folder. The consuming
-    repo's remotes are checked whenever a file Docket wrote sits at a path or one would be written, each once per
-    process while its answer is sure: a public one is reported even when nothing changes, and one that couldn't be
-    reached keeps a file from being written this time."""
-    files = vault.config.rendered
+    """Every people and glossary file `vault.yaml` names, rendered from the entities as they are in the vault's folder.
+    The consuming repo's remotes are checked whenever a file Docket wrote sits at a path or one would be written, each
+    once per process while its answer is sure: a public one is reported even when nothing changes, and one that
+    couldn't be reached keeps a file from being written this time."""
+    files = [f for f in vault.config.rendered if f.kind in ENTITY_KINDS]
     if not files:
         return []
-    repo = toplevel(vault.root.parent)
+    repo = consuming_repo(vault)
     if repo is None:
-        why = f"{vault.root} isn't inside a git repo, so there is no repo to render into"
-        return [Outcome(f.path, "refused", why) for f in files]
-    repo = repo.resolve()
+        return [Outcome(f.path, "refused", no_repo(vault)) for f in files]
     entities = [e for e in load_entities(vault.root).entities if e.status == "active"]
     commit = Git(vault.root, home=vault.home).out("log", "-1", "--format=%h", "--abbrev=12", "--", *ENTITY_FILES)
     texts = {"people": people, "glossary": glossary}
     languages = vault.config.owner.languages
     lists = vault.config.never_store
-    remotes: dict[str, Probe] | None = None
+    remotes = Remotes(repo, probe)
     out: list[Outcome] = []
     for file in files:
-        target = (repo / file.path).resolve()
-        if not target.is_relative_to(repo) or target.is_relative_to(vault.root.resolve()):
-            why = f"it must stay in {repo} and outside the vault, after links are followed"
+        target, why = target_of(vault, repo, file)
+        if target is None:
             out.append(Outcome(file.path, "refused", why))
-            continue
-        if target.is_dir():
-            out.append(Outcome(file.path, "refused", f"{file.path} is a folder"))
             continue
         try:
             existing = _existing(target)
         except OSError as e:
-            out.append(Outcome(file.path, "refused", f"it can't be read: {e.strerror or type(e).__name__}"))
+            out.append(Outcome(file.path, "refused", unreadable(e)))
             continue
         if existing is not None and (existing is _NOT_TEXT or not written_by_docket(existing)):
             out.append(Outcome(file.path, "edited"))
             continue
-        if remotes is None:
-            remotes = {url: _probed(url, probe) for url in remote_urls(repo)}
-        public = [url for url, found in remotes.items() if found == "public"]
+        public = remotes.public()
         if public:
-            why = f"{public[0]} can be read without signing in; Docket renders nothing into a public repo"
-            out.append(Outcome(file.path, "refused", why))
+            out.append(Outcome(file.path, "refused", public))
             continue
         text = with_header(commit.strip() or "none", texts[file.kind](entities, languages, lists))
         if existing == text:
             out.append(Outcome(file.path, "unchanged"))
             continue
-        unreached = [url for url, found in remotes.items() if found == "unreachable"]
+        unreached = remotes.unreached()
         if unreached:
-            out.append(Outcome(file.path, "refused", f"couldn't check the remote {unreached[0]}; not written"))
+            out.append(Outcome(file.path, "refused", unreached))
             continue
         if not target.parent.is_dir():
-            out.append(Outcome(file.path, "refused", f"its folder {target.parent} doesn't exist"))
+            out.append(Outcome(file.path, "refused", no_folder(target)))
             continue
         write_replacing(vault.home, target, text, f"rendered-{file.kind}")
         out.append(Outcome(file.path, "written"))
     return out
+
+
+# -- what a status file's render shares ------------------------------------------------------------------------------
+
+
+def consuming_repo(vault: Vault) -> Path | None:
+    """The repo the files go in, resolved: a folder vault's host; for a repo of its own, the first folder above it
+    holding a .git git would take, found by a stat, so a write's render runs no git process."""
+    if vault.home.folder:
+        return vault.home.top.resolve()
+    for folder in vault.root.resolve().parents:
+        dot = folder / ".git"
+        # git skips a .git folder that isn't a git dir and looks further up, and a .git file names a worktree's.
+        if dot.is_file() or is_git_dir(dot):
+            return folder
+    return None
+
+
+def no_repo(vault: Vault) -> str:
+    return f"{vault.root} isn't inside a git repo, so there is no repo to render into"
+
+
+def target_of(vault: Vault, repo: Path, file: RenderedFile) -> tuple[Path | None, str]:
+    """A file's place after links are followed, or None and why it is refused: outside the repo, in the vault, or a
+    folder (DR-0552)."""
+    target = (repo / file.path).resolve()
+    if not target.is_relative_to(repo) or target.is_relative_to(vault.root.resolve()):
+        return None, f"it must stay in {repo} and outside the vault, after links are followed"
+    if target.is_dir():
+        return None, f"{file.path} is a folder"
+    return target, ""
+
+
+def unreadable(e: OSError) -> str:
+    return f"it can't be read: {e.strerror or type(e).__name__}"
+
+
+def no_folder(target: Path) -> str:
+    return f"its folder {target.parent} doesn't exist"
+
+
+class Remotes:
+    """The consuming repo's remotes, listed and probed on the first ask, each answer kept for the process while it is
+    sure (DR-0554)."""
+
+    def __init__(self, repo: Path, probe: Callable[[str], Probe]) -> None:
+        self.repo = repo
+        self.probe = probe
+        self._found: dict[str, Probe] | None = None
+
+    def found(self) -> dict[str, Probe]:
+        if self._found is None:
+            self._found = {url: _probed(url, self.probe) for url in remotes(self.repo)}
+        return self._found
+
+    def public(self) -> str:
+        """Why nothing is rendered when a remote anyone can read is among them, else ""."""
+        public = [url for url, found in self.found().items() if found == "public"]
+        if not public:
+            return ""
+        return f"{public[0]} can be read without signing in; Docket renders nothing into a public repo"
+
+    def unreached(self) -> str:
+        """Why nothing is written this time when a remote couldn't be checked, else ""."""
+        unreached = [url for url, found in self.found().items() if found == "unreachable"]
+        return f"couldn't check the remote {unreached[0]}; not written" if unreached else ""
+
+
+def remotes(repo: Path) -> list[str]:
+    """The repo's remote URLs as git will use them, from this process's memory while `.git/config` keeps its size and
+    time; a repo whose .git is a file, a worktree's, is asked each time."""
+    try:
+        stat = (repo / ".git" / "config").stat()
+    except OSError:
+        return remote_urls(repo)
+    key = (stat.st_size, stat.st_mtime_ns)
+    held = _REMOTES.get(repo)
+    if held is not None and held[0] == key:
+        return list(held[1])
+    urls = remote_urls(repo)
+    _REMOTES[repo] = (key, urls)
+    return list(urls)
+
+
+def file_bytes(target: Path) -> bytes | None:
+    """A rendered file's bytes, or None when there is none."""
+    try:
+        return target.read_bytes()
+    except FileNotFoundError:
+        return None
+
+
+def write_unless_changed(vault: Vault, target: Path, text: str, before: bytes | None) -> tuple[bool, bytes | None]:
+    """A status file written through a temp file and a rename, unless it changed since it was read as `before`: it is
+    read again right before the rename. Whether it was written, and when it wasn't, what was found there (None for no
+    file, or one that couldn't be read)."""
+    found: list[bytes | None] = []
+
+    def still() -> bool:
+        try:
+            found.append(file_bytes(target))
+        except OSError:
+            return False
+        return found[0] == before
+
+    # A temp name of its own: two renders in one process never share one.
+    if write_replacing(vault.home, target, text, f"rendered-status-{secrets.token_hex(4)}", still):
+        return True, None
+    return False, found[0] if found else None
 
 
 # A file at a path that isn't UTF-8 text: one kept by hand, never Docket's.

@@ -124,16 +124,20 @@ def retry(op: Callable[[], object]) -> None:
             time.sleep(_RETRY_PAUSE)
 
 
-def write_replacing(home: Home, path: Path, text: str, tmp_name: str) -> None:
+def write_replacing(home: Home, path: Path, text: str, tmp_name: str, still: Callable[[], bool] | None = None) -> bool:
     """Write a vault file through a temp file in Docket's private folder and a rename, so a crash leaves the old file
-    or the new, and a link planted at the path is replaced, never written through."""
+    or the new, and a link planted at the path is replaced, never written through. `still`, asked once the temp file
+    is written, right before the rename, keeps the path as it is when it says no: whether the rename happened."""
     tmp = make_private(home.git_dir, home.tmp_dir) / f"{tmp_name}.{os.getpid()}.tmp"
     try:
         with tmp.open("w", encoding="utf-8", newline="\n") as out:
             out.write(text)
             out.flush()
             os.fsync(out.fileno())
+        if still is not None and not still():
+            return False
         retry(lambda: tmp.replace(path))
+        return True
     finally:
         tmp.unlink(missing_ok=True)
 

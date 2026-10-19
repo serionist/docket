@@ -11,6 +11,7 @@ folded into their state and history (#198, #199, #200, #201).
 | `views` | the `ledger` tool's reads: snapshot, show, queue, list, meetings and suggest (DR-0638, DR-0660) |
 | `calendar` | meetings from calendar records: the step after a promotion and the catch-up (DR-0646 to DR-0652) |
 | `check` | what `docket vault check` says about the ledger (DR-0617) |
+| `status` | each stream's STATUS.md frontmatter, rendered after a write and by `docket render` (DR-0673 to DR-0675) |
 
 The fold's tables in the index, which the writer and the reads ask, are `docket.index.ledger` (DR-0616).
 """

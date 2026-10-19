@@ -41,8 +41,8 @@ class BatchChange(BaseModel):
 
 class BatchResult(BaseModel):
     """What `ledger_batch` wrote, or with a dry run would write: how many ops, the batch's id (its first op's, for an
-    undo of the whole), the commit, each change, each `as` name as it reads and its id, and the renumbers a write
-    starts with."""
+    undo of the whole), the commit, each change, each `as` name as it reads and its id, the renumbers a write starts
+    with, and what the render of the streams' STATUS.md files after it said: each file written, left or refused."""
 
     dry_run: bool
     ops: int
@@ -52,6 +52,7 @@ class BatchResult(BaseModel):
     names: dict[str, str]
     ids: dict[str, str]
     renumbered: list[str] = []
+    rendered: list[str] = []
 
 
 def parse(text: str) -> list[dict[str, Any]]:
@@ -99,6 +100,7 @@ def result(changes: Sequence[Mapping[str, Any]], written: Written, *, dry_run: b
         dry_run=dry_run, ops=len(written.ops), batch=written.ops[0].batch if written.ops else None,
         commit=written.commit, changes=out, names={name: labels[i] for name, i in written.names.items()},
         ids=dict(written.names), renumbered=[op_line(op, labels) for op in written.ops if op.id not in mine],
+        rendered=list(written.rendered),
     )  # fmt: skip
 
 
@@ -149,7 +151,7 @@ def lines(found: BatchResult) -> list[str]:
         out.append(f"{found.ops} op(s) written, batch {found.batch}, commit {found.commit[:7]}")
     else:
         out.append("nothing to write")
-    return out
+    return out + found.rendered
 
 
 def _cut(text: str) -> str:
