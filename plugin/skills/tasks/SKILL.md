@@ -79,7 +79,7 @@ For each item:
 |---|---|
 | `discuss` | talk it through; for a crisp choice, one short question round (AskUserQuestion) with the recommended option first. It lands on done, drop, snooze, another verdict, a due date or a new item. Nothing is drafted until it lands on a draft |
 | `claude` | the verdict means do it: draft it or do it, show it, take their edits. A message only they can send stays open: a `log` of where the draft is, a `material` labelled "draft, not sent", and `triage` to `me`; the next sync closes it on evidence. Work bigger than this sitting, such as a deck, a design or a review: agree the next step, `log` it, `set` a `due`, `notes` on where it stands, and go on unless they say do it now |
-| `chase` | draft the nudge in the thread or chat the ask is in; a `log` "chase drafted in <where>", a `material` labelled "draft, not sent", and the triage cleared, `verdict` `-`. The item stays open, waiting |
+| `chase` | draft the nudge in the thread or chat the ask is in; a `log` "chase drafted in <where>", and the triage cleared, `verdict` `-`. The item stays open, waiting |
 
 A prep item, a task whose `meeting` is the call it prepares: the agenda goes onto the meeting as points, not into
 the log. Agree the points with the user, starting from `ledger` view `suggest` with the meeting's `ref`. The sync's
@@ -97,12 +97,12 @@ snooze, a verdict, a due).
 | Op | For |
 |---|---|
 | `log` | what happened, its locator in `note` |
-| `done` | closed on evidence: the locator in `note`, what came of it in `outcome` |
+| `done` | closed on evidence: the locator in `note`, what came of it in `outcome`; for a prep item, the meeting its points are on |
 | `drop` | moot: why in `note` |
 | `snooze` | parked: `until`, a day after today |
 | `triage` | a new `verdict`, or `-` to clear it |
 | `set` | `fields`, such as `due` |
-| `material` | what the work made or the user needs: a file, a link, a draft, whose `ref` is its thread's or chat's locator |
+| `material` | what the work made or the user needs: a file, a link, a draft, whose `ref` is its thread's or chat's locator; one the item has already is left out, so a second draft in the same thread isn't refused |
 | `notes` | where longer work stands: `append` a line, or `set` the whole text |
 | `add` | a new item the talk made, untriaged unless they gave it a verdict |
 | `point`, `point_set`, `keep`, `point_item` | a meeting's points, as above |
@@ -126,7 +126,6 @@ Cleo's quote, `chase`, and the user moved its day:
 ```json
 [
   {"op": "log", "item": "A-0002", "note": "chase drafted in the chat with Cleo: slack:D0CLEO/1791101000.000100"},
-  {"op": "material", "item": "A-0002", "ref": "slack:D0CLEO/1791101000.000100", "label": "draft, not sent"},
   {"op": "triage", "item": "A-0002", "verdict": "-"},
   {"op": "set", "item": "A-0002", "fields": {"due": "2026-10-23"}, "by": "user"}
 ]
@@ -138,7 +137,7 @@ The prep for the next weekly, agreed with the user:
 [
   {"op": "keep", "item": "M-0002", "by": "user"},
   {"op": "point", "item": "M-0002", "fields": {"text": "Cleo: when does the sensor quote come?", "item": "A-0002"}, "by": "user"},
-  {"op": "done", "item": "A-0003", "note": "agreed in chat", "outcome": "2 points on M-0002", "by": "user"}
+  {"op": "done", "item": "A-0003", "note": "points on M-0002, agreed in chat", "outcome": "2 points on M-0002", "by": "user"}
 ]
 ```
 

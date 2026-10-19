@@ -468,3 +468,23 @@ def test_the_tasks_worked_batches_run_clean_through_a_dry_run(
         assert code == 0, out
         assert out[-1].startswith("dry run: ") and out[-1].endswith(" op(s) would be written; nothing written"), out
         assert not any(": refused, " in line for line in out), out
+    # A chase's log says where its draft is, as a claude draft's material does.
+    assert '"op": "material"' not in blocks[1] and "chase drafted in " in blocks[1]
+
+
+def test_a_second_draft_in_the_same_thread_leaves_out_the_material_the_item_has(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The skill's rule for a material the item has already: written again, it refuses the whole batch."""
+    assert "one the item has already is left out, so a second draft in the same thread isn't refused" in tasks_text()
+    first = re.findall(r"```json\n(.*?)```", tasks_text(), re.DOTALL)[0]
+    vault = queue_vault(tmp_path / "v")
+    batch = tmp_path / "draft.json"
+    batch.write_text(first, encoding="utf-8")
+    assert main(["ledger", "batch", str(batch), "--vault", str(vault.root)]) == 0
+    capsys.readouterr()
+    assert main(["ledger", "batch", str(batch), "--dry-run", "--vault", str(vault.root)]) == 1
+    assert "it has that material already" in capsys.readouterr().out
+    again = [change for change in json.loads(first) if change["op"] != "material"]
+    batch.write_text(json.dumps(again), encoding="utf-8")
+    assert main(["ledger", "batch", str(batch), "--dry-run", "--vault", str(vault.root)]) == 0
