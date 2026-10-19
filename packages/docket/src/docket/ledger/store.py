@@ -32,8 +32,8 @@ lists each one, the changes naming a refused change's `$name` marked as hanging 
 The calendar step (#200) writes through `write_calendar`, by sync and never refusing: each event record's meeting set
 to what differs, the unkeyed meeting with its start and subject joined, or a new meeting, and nothing for a key whose
 meeting the owner removed; an undo asked by batch or written by sync is as if never (DR-0647, DR-0649). In the
-catch-up's own pass, which never sets, a held key's join carries the held meeting's values. This module also keeps the
-step's pending rids, in this clone's private folder.
+catch-up's own pass, which never sets, a held key's join carries the held meeting's values, an empty one as null. This
+module also keeps the step's pending rids, in this clone's private folder.
 """
 
 from __future__ import annotations
@@ -1287,8 +1287,9 @@ class _Write:
         """A join of the unkeyed meeting with the record's start and subject, the earliest by id, unless the key
         continues one already or a split took that meeting off it (DR-0649): a meeting add with continues, the
         record's fields on it as on any add. In the catch-up's own pass (`keep`) a held key's join carries instead the
-        held meeting's values of the fields the record gives, so it sets nothing on it (DR-0647). The joined meeting,
-        as it reads; None when there is none to join."""
+        held meeting's values of the fields the record gives, an empty one as null, so it sets nothing on it, and a
+        field cleared by hand stays cleared over an imported add sorting later (DR-0647). The joined meeting, as it
+        reads; None when there is none to join."""
         if held is not None and not self.keyed(held.id):
             return None
         start = _when(str(fields["start"]))
@@ -1303,9 +1304,10 @@ class _Write:
         joined = self.objects().meetings[found[0]]
         # The continued meeting's number goes on the add, so the object claims no new one (DR-0621).
         number = joined.number or joined.claimed
+        carried = _present(fields)
         if keep and held is not None:
-            fields = {**fields, **{name: _as_written(held, name) for name in fields if name != "event"}}
-        self.emit("meeting", None, number=number, fields={**_present(fields), "continues": joined.id})
+            carried |= {name: _as_written(held, name) for name in fields if name != "event"}
+        self.emit("meeting", None, number=number, fields={**carried, "continues": joined.id})
         return self.meeting_label(joined)
 
     def near_misses(self, fields: dict[str, Any]) -> tuple[str, ...]:

@@ -7,6 +7,7 @@ from __future__ import annotations
 import shutil
 import threading
 import time
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -518,6 +519,22 @@ def test_a_catch_up_join_on_a_held_key_keeps_what_was_set_by_hand(vault: Vault) 
     assert said(caught) == [("joined", "M-0040")]
     m = meetings(vault)["cal:E1"]
     assert (m.number, m.response, m.where, m.attendees) == (40, "declined", "Room 7", ("Cleo Test", "Dan Example"))
+
+
+def test_a_catch_up_join_on_a_held_key_keeps_a_field_cleared_by_hand_over_a_newer_import(vault: Vault) -> None:
+    vault.write_run("cal", [event(1, where="Room 1")], NOW)
+    calendar.catch_up(vault, date(2026, 10, 18), now=NOW)
+    cleared = {"op": "set", "item": "M-0001", "fields": {"where": None}}
+    write(vault, [cleared], by="user", now=NOW + timedelta(minutes=1))
+    # The import's add is minted after the clear, so it sorts after it and carries the old meeting's place.
+    minted = ops.encode((int((NOW + timedelta(minutes=5)).timestamp() * 1000) << ops.RANDOM_BITS) + 1)
+    put_ops(vault, replace(hand_meeting(1, number=40, where="Old room"), id=minted, item=minted))
+    caught = calendar.catch_up(vault, date(2026, 10, 18), now=NOW + timedelta(minutes=6))
+    assert said(caught) == [("joined", "M-0040")]
+    (join,) = caught.ops
+    assert (join.fields or {})["where"] is None
+    m = meetings(vault)["cal:E1"]
+    assert (m.number, m.where) == (40, None)
 
 
 def test_the_catch_up_writes_chunks_of_whole_days_and_its_dry_run_says_what_they_write(
