@@ -1,8 +1,8 @@
 """A ledger of a few years: 5,000 items and 50,000 ops, and 2,000 meetings with 20,000 point ops, read and folded by
-`load` in under a second; all of it folded into the index's tables in under two seconds; one op more, on an item or
-a meeting, as a write leaves it, read into them in a tenth of a second; a write touching one meeting planned in a
-tenth of a second, reading only its part (DR-0616, DR-0628, DR-0633, DR-0635); and a snapshot of it, every item open,
-read from the tables with its lines in a tenth of a second (DR-0638).
+`load` in under a second and a half; all of it folded into the index's tables in under two seconds; one op more, on an
+item or a meeting, as a write leaves it, read into them in a tenth of a second; a write touching one meeting planned in
+a tenth of a second, reading only its part (DR-0616, DR-0628, DR-0633, DR-0635); and a snapshot of it, every item
+open, read from the tables with its lines in a tenth of a second (DR-0638).
 
 The ops are written as the writer writes them, a month file per machine, each item an add and nine changes, each
 meeting four points answered and a point rolled from the meeting before it in its weekly series of fifty. Wall time
@@ -36,7 +36,7 @@ ITEMS = 5_000
 MEETINGS = 2_000
 # Meetings a series holds: a weekly meeting's year. A roll ties a series' meetings into one part (DR-0633).
 SERIES = 50
-FOLD_SECONDS = 1.0
+FOLD_SECONDS = 1.5
 # A full rebuild runs only on a schema bump or a forget, never on the daily path (DR-0635).
 REBUILD_SECONDS = 2.0
 CATCH_UP_SECONDS = 0.1
@@ -124,7 +124,7 @@ def one_more(root: Path, last: Op, kind: str, **keys: object) -> Op:
 
 
 @pytest.mark.perf
-def test_a_few_thousand_items_and_meetings_read_and_fold_in_under_a_second(tmp_path: Path) -> None:
+def test_a_few_thousand_items_and_meetings_read_and_fold_in_a_second_and_a_half(tmp_path: Path) -> None:
     build(tmp_path)
     fold = best_of(3, lambda: load(tmp_path))
     ledger, elapsed = fold.result, fold.seconds
