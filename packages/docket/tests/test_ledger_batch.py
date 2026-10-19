@@ -408,18 +408,24 @@ def test_a_dry_run_s_lines_say_what_would_be_written_or_what_is_refused(vault: V
     assert (found.changes[0].refused, found.changes[0].hangs_on) == ("no item A-0009", None)
 
 
-def test_the_renumbers_a_write_starts_with_are_named_apart(vault: Vault) -> None:
-    (ours,) = write(vault, [ADD], now=NOW).ops
-    theirs_id = ops.mint(ledger(vault).highest_id, NOW + timedelta(minutes=30), 1)[0]
-    theirs = Op(schema_version=1, id=theirs_id, item=theirs_id, op="add", day=date(2026, 10, 18), machine="laptop",
-                by="user", via="page", number=1, fields={**ADD_FIELDS, "title": "Another ask"})  # fmt: skip
-    (vault.root / ops.rel_of(theirs)).write_text(theirs.text() + "\n", encoding="utf-8", newline="\n")
-    vault.commit([ops.rel_of(theirs)], "Merge the laptop's ops")
+def test_the_renumbers_a_write_starts_with_are_named_apart_by_the_number_each_lost(vault: Vault) -> None:
+    (ours, _) = write(vault, [ADD, {"op": "meeting", "fields": {**MEETING, "event": "calendar:E1"}}], now=NOW).ops
+    highest = ledger(vault).highest_id
+    item_id, meeting_id = ops.mint(highest, NOW + timedelta(minutes=30), 2)
+    base: dict[str, Any] = {"schema_version": 1, "day": date(2026, 10, 18), "machine": "laptop", "by": "user",
+                            "via": "page", "number": 1}  # fmt: skip
+    theirs = [
+        Op(**base, id=item_id, item=item_id, op="add", fields={**ADD_FIELDS, "title": "Another ask"}),
+        Op(**base, id=meeting_id, item=meeting_id, op="meeting", fields={**MEETING, "event": "calendar:E2"}),
+    ]
+    rel = ops.rel_of(theirs[0])
+    (vault.root / rel).write_text("".join(f"{o.text()}\n" for o in theirs), encoding="utf-8", newline="\n")
+    vault.commit([rel], "Merge the laptop's ops")
     changes: list[dict[str, Any]] = [{"op": "log", "item": ours.id, "note": "after the merge"}]
     written = write(vault, changes, now=NOW + timedelta(minutes=40))
     found = batch.result(changes, written, dry_run=False)
-    assert found.renumbered == ["A-0002 renumbered to A-0002"]
-    assert batch.lines(found)[0] == "renumbered: A-0002 renumbered to A-0002"
+    assert found.renumbered == ["A-0001 renumbered to A-0002", "M-0001 renumbered to M-0002"]
+    assert batch.lines(found)[:2] == [f"renumbered: {line}" for line in found.renumbered]
     assert isinstance(written, Written)
 
 
@@ -463,8 +469,12 @@ def test_the_command_reads_stdin_and_exits_1_on_a_refusal(
     code, out, _ = run(capsys, "-", "--dry-run")
     assert (code, out) == (1, ["1. log: refused, no item A-0009", "dry run: 1 change(s) refused; nothing written"])
     monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(data), encoding="utf-8"))
+    code, out, err = run(capsys)
+    assert (code, out, err) == (1, [], "docket: change 1 (log): no item A-0009; nothing written")
+    # A batch that doesn't read is no answer: it fails, exit 2.
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b"[nope"), encoding="utf-8"))
     code, _, err = run(capsys)
-    assert (code, err) == (2, "docket: change 1 (log): no item A-0009; nothing written")
+    assert (code, err.startswith("docket: the batch isn't a JSON array")) == (2, True)
 
 
 def test_the_command_refuses_a_missing_file_bytes_that_aren_t_utf8_and_a_bad_by(

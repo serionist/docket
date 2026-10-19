@@ -2047,7 +2047,7 @@ def ledger_batch(
     vault: VaultOption = None,
 ) -> None:
     """Change the ledger in one write, every change or none, as the ledger_batch tool does: the same ops, via cli. A
-    dry run lists every change it would refuse; anything refused exits 1."""
+    dry run lists every change it would refuse; a refused change exits 1, and a batch that doesn't read exits 2."""
     if source == "-":
         data = sys.stdin.buffer.read()
     elif Path(source).is_file():
@@ -2061,7 +2061,12 @@ def ledger_batch(
     if by not in ledger_ops.BY:
         raise DocketError(f"--by is {', '.join(ledger_ops.BY)}, not {by!r}")
     changes = ledger_batches.parse(text)
-    written = ledger_store.write(find_vault(vault), changes, by=by, via="cli", dry_run=dry_run)
+    try:
+        written = ledger_store.write(find_vault(vault), changes, by=by, via="cli", dry_run=dry_run)
+    except ledger_store.RefusedError as e:
+        # A refused change is the batch's answer, as in a dry run (DR-0645); anything else stays a failure, exit 2.
+        typer.echo(f"docket: {e}", err=True)
+        raise typer.Exit(1) from None
     found = ledger_batches.result(changes, written, dry_run=dry_run)
     say_all(ledger_batches.lines(found))
     if any(change.refused is not None for change in found.changes):

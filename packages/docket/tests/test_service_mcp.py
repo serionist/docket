@@ -72,9 +72,11 @@ def text_of(result: CallToolResult) -> str:
 
 
 def contract(value: Any) -> Any:
-    """A schema without its prose: names, types, defaults, bounds and enums are the door; descriptions are not."""
+    """A schema without its prose: names, types, defaults, bounds and enums are the door; descriptions are not. A
+    field named title or description is a dict, and stays."""
     if isinstance(value, dict):
-        return {k: contract(v) for k, v in sorted(value.items()) if k not in ("description", "title")}
+        prose = ("description", "title")
+        return {k: contract(v) for k, v in sorted(value.items()) if not (k in prose and isinstance(v, str))}
     if isinstance(value, list):
         return [contract(v) for v in value]
     return value
@@ -83,12 +85,14 @@ def contract(value: Any) -> Any:
 # -- the door --------------------------------------------------------------------------------------------------------
 
 
-def test_the_tools_names_parameters_and_annotations_match_the_golden_file(service: Service) -> None:
+def test_the_tools_names_parameters_results_and_annotations_match_the_golden_file(service: Service) -> None:
+    """Results only gain fields (DR-0150): a renamed or retyped field of a result model fails here."""
     listed = with_client(service, lambda c: c.list_tools())
     found = [
         {
             "name": tool.name,
             "input_schema": contract(tool.input_schema),
+            "output_schema": contract(tool.output_schema),
             "annotations": tool.annotations.model_dump(mode="json", exclude_none=True) if tool.annotations else None,
         }
         for tool in listed.tools

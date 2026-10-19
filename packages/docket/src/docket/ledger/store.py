@@ -37,6 +37,7 @@ from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, NoReturn, cast
 from zoneinfo import ZoneInfo
@@ -1349,7 +1350,7 @@ class _Batch(_Write):
         for op in reversed(dropped):
             self.lines[op.item].pop()
             self.same.pop(op.id, set[str]()).discard(op.id)
-        self.object_adds -= {op.id for op in dropped}
+        self.object_adds.difference_update(op.id for op in dropped)
         self._objects = None
 
     def batch_change(self, n: int, change: Mapping[str, Any]) -> None:
@@ -1562,6 +1563,8 @@ class _Batch(_Write):
             if op.op in ("point", "point_set"):
                 point = op.id if op.op == "point" else str(op.point)
                 labels[point] = self.point_label(op.item, point)
+            if op.op == "renumber":
+                labels[op.id] = self.lost_label(op)
         for named in self.names.values():
             if named not in labels:
                 labels[named] = self.label(named)
@@ -1569,6 +1572,13 @@ class _Batch(_Write):
             new, None, self.numbers(), tuple(self.per_change), dict(self.names), labels, tuple(self.remarks),
             tuple(self.refusals),
         )  # fmt: skip
+
+    def lost_label(self, renumber: Op) -> str:
+        """The number a renumber's item or meeting lost to an earlier claim: the claim before the renumber's."""
+        meeting = renumber.item in self.object_adds
+        claims = (self.fold_of(renumber.item) if meeting else self.fold(renumber.item)).claims
+        lost = next(number for (_, number), (claim, _) in pairwise(claims) if claim == renumber.id)
+        return meeting_text(lost) if meeting else number_text(lost)
 
     def point_label(self, add_id: str, point_id: str) -> str:
         """A point as `M-0040#3`, its place among its meeting's standing points; one that stands nowhere now, as its

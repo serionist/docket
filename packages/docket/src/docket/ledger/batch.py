@@ -104,6 +104,9 @@ def result(changes: Sequence[Mapping[str, Any]], written: Written, *, dry_run: b
 
 def op_line(op: Op, labels: Mapping[str, str]) -> str:
     """One op as a batch's line says it: what it names, then what it did."""
+    if op.op == "renumber":
+        # Named by the number it lost, so the line says what moved: A-0301 renumbered to A-0303.
+        return f"{labels.get(op.id, op.item)} renumbered to {labels.get(op.item, op.item)}"
     if op.op == "point":
         what = labels.get(op.id, op.item)
     elif op.op == "point_set":
