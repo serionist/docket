@@ -227,8 +227,10 @@ same result on any day.
   (DR-0672). `docket ledger day` prints the same from the vault.
 - The plugin's sync writes into the ledger: its agents run from a sync folder outside the vault, the ledger read from
   one file and each block written to one (DR-0720, DR-0722), and report from what raw keeps after their own promotion;
-  one batch by `sync` closes on evidence, logs or adds the asks, sets and links meetings, writes minutes, rolls over,
-  proposes points and moves streams, with no proposal queue (DR-0721, DR-0689). The writer refuses a `source` or a
+  `docket sync reconcile` drafts the batch from the blocks by fixed rules, an op they can't settle marked unsure for
+  Claude, and one batch by `sync`, written from that file, closes on evidence, logs or adds the asks, sets and links
+  meetings, writes minutes, rolls over, proposes points and moves streams, with no proposal queue (DR-0721, DR-0723,
+  DR-0724). The writer refuses a `source` or a
   material's `ref` pointing into a never-store container, by a Slack or Teams rid's text or the index's container and
   thread for any rid (DR-0690).
 - The plugin's tasks works the queue the owner triaged on the page, in chat, one item at a time, each outcome one
@@ -849,7 +851,7 @@ Phase 0's plugin, by piece:
 | `curate` | a round in chat over `docket curate`: the cards in one table with Claude's call and why, each decided only on the user's answer for it; seeding from a people directory or glossary in `seeding.md`; only `status`, `show` and `log` pre-approved (DR-0472) |
 | `cuts` | the owner's words for a held recording's left-out stretches placed as time ranges, in a proposals file, shown to the owner, and the release run on their yes; only `docket hold list` and `show` pre-approved (DR-0605) |
 | the capture hook | PostToolUse for `mcp__.*` runs `docket hook post-tool-use`: binds a run, posts the captures an open run of this session wants, one line to Claude each (DR-0242) |
-| `sync` | `docket sync start` writes a sync folder outside the vault, `context.md` (the ledger, an item a line) and each agent's prompt; each live source in an agent of its own through `run_open`, the source's `SKILL.md` and its `sync.md`: it classifies a mixed source's plain records, promotes its own, reads its recordings and writes one block to a file, every locator read; each recording note an agent of its own in the background; then one `ledger_batch` by `sync`, dry run first, in a fixed order, and the list in chat; only reads and the sync folder's commands pre-approved (DR-0685, DR-0688, DR-0689, DR-0720 to DR-0722) |
+| `sync` | `docket sync start` writes a sync folder outside the vault, `context.md` (the ledger, an item a line) and each agent's prompt; each live source in an agent of its own through `run_open`, the source's `SKILL.md` and its `sync.md`: it classifies a mixed source's plain records, promotes its own, reads its recordings and writes one block to a file, every locator read; each recording note an agent of its own in the background; then `docket sync reconcile` drafts the batch into the sync folder, Claude settles its unsure lines and adds the prep points, and one `ledger_batch` by `sync` writes the file, dry run first, and the list in chat; only reads and the sync folder's commands pre-approved (DR-0685, DR-0688, DR-0720 to DR-0724) |
 | `tasks` | `docket open` on the Queue page, the owner's triage there or in chat, then on "go" the queue in chat: the `me` items in one line, then discuss, claude and chase, each item read again, its sources read as far as the facts need, and its outcome one `ledger_batch` before the next; messages only drafts; `docket ledger queue`, `show`, `suggest` and `batch` without the service; only reads pre-approved (DR-0685, DR-0691) |
 
 - The plugin holds no scripts: its hook and token helper run the `docket` command, which must be on PATH (DR-0162).

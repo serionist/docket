@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0724
+    title: ledger_batch takes file, a batch file's absolute path in a sync folder of the service's vault, with ops []
+    status: proposed
+    at: "2026-10-20"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#258"]
+    description: "ledger_batch(ops, by, dry_run, file) gains file, optional and none by default: an absolute path to a batch file, a JSON array or JSON lines with # comments skipped, as docket ledger batch reads one. The service reads it only from a sync folder of this machine (DR-0720) whose sync.json names the service's vault, where the path resolves with links followed, at most 4 MB of UTF-8; any other path is refused, as media_put reads only the media folders. ops stays required and is [] with file; both given is refused. The result is the one ops would give. The sync writes its reconcile's draft this way, the dry run and then the write (DR-0723)."
+    binds:
+      - "DR-0637's door, gaining only: file is optional, its default keeping today's behaviour, and the result gains nothing."
+      - The service reads a batch file only from a sync folder of its own vault.
+    not_chosen:
+      - "ops made optional: a default changed in the door."
+      - "Any path: the service reads only its own folder, as media_put only the media folders."
+      - "The draft passed as ops: Claude would retype every op the reconcile wrote, the rehearsal's large batch sent again."

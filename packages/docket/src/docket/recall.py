@@ -318,11 +318,32 @@ def resolves(vault: Vault, locators: Iterable[str]) -> set[str]:
     """The locators `read` finds something at, by its rules (DR-0131), asked without building a read: a rid in the raw
     log, a doc, a processed doc's path, or a legacy note's old path, with a time or not, a doc as the forget leaves it
     (DR-0580). One that doesn't parse, names nothing or several, or names a doc the forget empties, doesn't resolve."""
-    call = _Call(vault)
-    try:
-        return {locator for locator in dict.fromkeys(locators) if _resolves(call, locator)}
-    finally:
-        call.close()
+    with Lookup(vault) as lookup:
+        return {locator for locator in dict.fromkeys(locators) if lookup.opens(locator)}
+
+
+class Lookup:
+    """Many locators asked through one index, as the sync's reconcile asks them: whether each opens as `read` opens it
+    (`resolves`), a record at its latest version, and many rids' threads and containers at once. The index is opened at
+    the first question and held until the lookup closes."""
+
+    def __init__(self, vault: Vault) -> None:
+        self._call = _Call(vault)
+
+    def __enter__(self) -> Lookup:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self._call.close()
+
+    def opens(self, locator: str) -> bool:
+        return _resolves(self._call, locator)
+
+    def record(self, rid: str) -> RawRecord | None:
+        return self._call.raw.latest(rid)
+
+    def threads(self, rids: Iterable[str]) -> dict[str, tuple[str | None, str | None]]:
+        return self._call.raw.threads(rids)
 
 
 def _resolves(call: _Call, locator: str) -> bool:

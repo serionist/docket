@@ -86,6 +86,8 @@ class Places(Protocol):
 
     def of_kind(self, source: str, kind: str) -> list[str]: ...
 
+    def threads(self, rids: list[str], source: str) -> dict[str, tuple[str | None, str | None]]: ...
+
 
 class _MovedError(Exception):
     """A line isn't what the index says is there: its file changed since the check."""
@@ -234,6 +236,24 @@ class RawLookup:
         latest = [versions[-1] for versions in self._source(source).values()]
         found = sorted((r for r in latest if r.kind == kind), key=lambda r: (r.ts, r.rid), reverse=True)
         return [r.rid for r in found]
+
+    def threads(self, rids: Iterable[str]) -> dict[str, tuple[str | None, str | None]]:
+        """The thread and container of each rid the raw log holds, at its latest version: from a current index's rows,
+        a query per 500 rids of a source, else from the loaded source. A rid it doesn't hold is left out."""
+        by_source: dict[str, list[str]] = {}
+        for rid in dict.fromkeys(rids):
+            m = RID.match(rid)
+            if m is not None:
+                by_source.setdefault(m.group(1), []).append(rid)
+        out: dict[str, tuple[str | None, str | None]] = {}
+        for source, wanted in by_source.items():
+            index = self._index(source)
+            if index is not None:
+                out |= index.threads(wanted, source)
+                continue
+            loaded = self._source(source)
+            out |= {rid: (loaded[rid][-1].thread, loaded[rid][-1].container) for rid in wanted if rid in loaded}
+        return out
 
     def transcripts(self, rid: str) -> list[RawRecord]:
         """The transcripts under rid, by rid: where a time on a record without segments of its own lands (DR-0370)."""

@@ -50,7 +50,8 @@ reading:
   - { path: packages/docket/web/src/styles/tokens.css, role: guide, note: "the web app's colours, each a light-dark() pair, and the contrast floors a test holds (DR-0707)" }
   - { path: packages/docket/src/docket/sync/agent.md, role: contract, note: "the sync's agent prompt docket sync start fills, and its block: the labels and fields are a one-way door (DR-0722)" }
   - { path: packages/docket/src/docket/sync/note.md, role: contract, note: "the note prompt docket sync notes fills: #211's method, run in the background (DR-0721)" }
-  - { path: packages/docket/src/docket/sync/folder.py, role: contract, note: "the sync folder: where it lives, its id and sync.json, scratch cleared after 7 days and at a forget (DR-0720)" }
+  - { path: packages/docket/src/docket/sync/folder.py, role: contract, note: "the sync folder: where it lives, its id and sync.json, scratch cleared after 7 days and at a forget, and the only place ledger_batch reads a batch file from (DR-0720, DR-0724)" }
+  - { path: packages/docket/src/docket/sync/reconcile.py, role: guide, note: "docket sync reconcile: the sync's batch drafted from the blocks by fixed rules, and what it leaves unsure for Claude (DR-0723)" }
 decisions:
   - id: DR-0019
     title: The vault's layout and run-file names are fixed

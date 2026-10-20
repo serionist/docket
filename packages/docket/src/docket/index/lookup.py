@@ -166,6 +166,16 @@ class ReadIndex:
         sql = "SELECT rid FROM records WHERE source = ? AND kind = ? ORDER BY ts DESC, rid DESC"
         return [str(r) for (r,) in self.conn.execute(sql, (source, kind))]
 
+    def threads(self, rids: list[str], source: str) -> dict[str, tuple[str | None, str | None]]:
+        """The thread and container of each of a source's rids the records hold, at its latest version."""
+        out: dict[str, tuple[str | None, str | None]] = {}
+        for i in range(0, len(rids), BATCH):
+            part = rids[i : i + BATCH]
+            marks = ", ".join("?" * len(part))
+            sql = f"SELECT rid, thread, container FROM records WHERE source = ? AND rid IN ({marks})"  # noqa: S608 - placeholders only
+            out |= {str(rid): (thread, container) for rid, thread, container in self.conn.execute(sql, (source, *part))}
+        return out
+
     def group(self, field: str, value: str, source: str) -> list[tuple[str, str]]:
         """The records of a source whose latest version has this thread or container, with their times to the
         millisecond, in `(ts, rid)` order."""
