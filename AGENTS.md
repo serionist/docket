@@ -129,7 +129,7 @@ agrees in the issue or, under an autonomy grant, with its decision recorded as p
   `ledger_batch`: views, ops, keys, `$name`, results (DR-0637 to DR-0640, DR-0660), its `file` (DR-0724), `read`'s `more` and `ledger`'s `refs` (DR-0725); the server key `docket` (DR-0160);
 - the plugin's skill and hook names: `recall`, `setup`, `cuts` (DR-0605), `curate` (DR-0472), `brief` (DR-0555), `decision` (DR-0563), `sync` and `tasks` (DR-0685), the SessionStart
   hook running `docket hook session-start` (DR-0161), and the PostToolUse hook running `docket hook post-tool-use`
-  for `mcp__.*`, with its line prefixes (DR-0242); the sync's block (DR-0722); a source's `sync.md` (DR-0688);
+  for `mcp__.*`, with its line prefixes (DR-0242); the sync's block (DR-0722) and a recording's block file (DR-0748); a source's `sync.md` (DR-0750);
 - the release's yes: `docket hold release` lets a held recording in on its owner's yes, at their own terminal or in
   chat to Claude, the cuts shown first; no page, route or tool releases one (DR-0600, DR-0382). It lasts for good.
 - the forget's yes: only the owner forgets, at their own console, on the OS prompt or a code typed back (DR-0572); no

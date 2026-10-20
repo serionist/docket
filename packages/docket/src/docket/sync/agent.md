@@ -2,7 +2,7 @@
 
 `docket sync start` fills the placeholders and writes everything below the line to `agents/<source>.md` in the sync
 folder, one per source. Its block is a one-way door (DR-0722): the labels stay, a line gains fields only at its end,
-and `docket.sync.block` reads it.
+and `docket.sync.block` reads it. NOTES, MINUTES and OUTCOME are the recording agents' lines, in `recording.md`.
 
 ---
 
@@ -50,12 +50,16 @@ other sources at the same time, and only the sync's main thread writes the ledge
 ## 3. Classify and promote
 
 `docket staging list --source {SOURCE} --state pending --vault {VAULT}` lists what waits; a work source has none.
-Look at each with `docket staging show <rid> --vault {VAULT}`, then:
+Judge each record your run fetched from what it fetched, already in your context: a transcript's pages are its
+segments, each page's `start_time` and `end_time` in milliseconds the times a cut takes, as `mm:ss-mm:ss` (754000 is
+12:34). `docket staging show <rid> --vault {VAULT}` only for a record your run didn't fetch, a new version of one
+classified before, whose version in raw it shows, or a cut by characters, whose offsets it numbers; it shows a
+transcript once, a segment a line as `@mm:ss-mm:ss Speaker: text`. Then:
 
 | It is | Run |
 |---|---|
 | plainly work | `docket staging classify <rid> work --by claude --vault {VAULT}` |
-| work with a stretch that isn't | the same with `--cut <from>-<to>` per stretch: a time on a transcript, characters on a text, which `docket staging show` numbers |
+| work with a stretch that isn't | the same with `--cut <from>-<to>` per stretch: a time on a transcript, characters on a text |
 | plainly private | `docket staging classify <rid> private --by claude --vault {VAULT}`, for each record of it |
 | a new version of one classified before | the same label and cuts, which `docket staging show` shows on the version in raw |
 | anything else | nothing: it waits for the owner on the Staging page |
@@ -68,26 +72,14 @@ make their meetings. Another process holding the vault: run it again a minute la
 
 ## 4. Recordings, for a source with them
 
-Read whole, and report from, only the work recordings your run brought and those {CONTEXT} lists under recordings with
-no note; when it says the index can't say, the recordings in your window whose transcript `read`, view `summary`,
-shows no doc line on. The rest of the window was reconciled by earlier syncs. Write no note: the sync gives each note
-an agent of its own, from your NOTES line.
-
-For each:
-
-1. Read the vendor's summary and the whole transcript with `read`, view `raw`, in 15-minute stretches to the end.
-2. Its meeting: the one {CONTEXT} lists within 10 minutes either side of its start, else `ledger` view `meetings`,
-   since and until 10 minutes either side. One meeting, not cancelled and not the owner's own block: answer each of
-   its open points from the transcript as a MINUTES line, then OUTCOME. Two: the one the content names, its M- ref in
-   the NOTES line.
-3. The vendor's summary guesses owners and dates: check each in the transcript before it goes anywhere.
-4. A NOTES line names the note to write: its id `recording-note:<yyyy-mm-dd>-<slug>`, the recording's local day, at
-   most 80 characters after the colon in lowercase letters, digits and inner hyphens; the recording's rid; its start
-   and end. One meeting over two recordings: one id on both lines. One recording over several meetings: one line.
+Read none, and write no line from one. Once you are back, the sync gives each recording in raw with no note an agent
+of its own, which reads it from a file and writes its lines and its note. A recording you left pending waits for the
+owner, and its agent comes in a later sync.
 
 ## 5. Find
 
-Over what your run read and the recordings above, with older context from `search` and `read`:
+Over what your run read, with older context from `search` and `read`. A recording source writes no line from a
+recording; its recordings' agents do.
 
 | Line | What |
 |---|---|
@@ -97,7 +89,6 @@ Over what your run read and the recordings above, with older context from `searc
 | CLOSES | for each open or snoozed item in {CONTEXT}, evidence here that it was answered or done, or became moot |
 | MEETINGS | a meeting's `response` and `attendees`, and `start` and `end` for a move seen only in mail; a calendar's records make and move meetings themselves |
 | STREAMS | where a stream stands, its next step or its deadline, when that changed |
-| NOTES, MINUTES, OUTCOME | from step 4 |
 | LEARNED | what differs from the source's `SKILL.md` (the route) or `sync.md` (the rest), for next time |
 
 An ask that continues an open item's work, from the same person and in the same thread or on the same topic, names
@@ -106,11 +97,10 @@ that item in its line's continues field: the sync logs it there. A new piece of 
 ## 6. Check
 
 Every locator in your block, in one call: `read(locator="<the first>", more=["<the second>", "<the third>"],
-view="raw")`. A recording's line is checked at its moment (`r:<rid>@mm:ss`), since step 4 read it whole; a doc id is
-checked in a read of its own, with the default summary view. Each comes back under its own `== <locator>` line, and
-one that doesn't open says why there while the rest still read. A line whose locator doesn't open, or opens a record
-that doesn't say it, is dropped. While the answer lists locators in `later`, past the room, read again, its first as
-`locator` and the rest in `more`, until `later` is empty.
+view="raw")`. A doc id is checked in a read of its own, with the default summary view. Each comes back under its own
+`== <locator>` line, and one that doesn't open says why there while the rest still read. A line whose locator doesn't
+open, or opens a record that doesn't say it, is dropped. While the answer lists locators in `later`, past the room,
+read again, its first as `locator` and the rest in `more`, until `later` is empty.
 
 ## 7. Write the block, return its RUN line
 
@@ -125,14 +115,10 @@ WAITING:  <who> | <locator> | <since> | <what the owner waits for> | <stream> | 
 CLOSES:   <A- ref> | done / moot | <locator of the evidence> | <how, one line>
 MEETINGS: <M- ref> | <field>=<value>; ... | <locator of the evidence>
 STREAMS:  <stream> | <field>=<value>; ... | <the news, one line> | <locator>
-NOTES:    <doc id> | <recording rid> | <start> | <end> | <M- ref when its content names one>
-MINUTES:  <M- ref> | <point id> | answered / dropped / open | <the answer, one line> | <locator>
-OUTCOME:  <M- ref> | <2 to 4 short lines: what was decided, who does what> | <locator>
 LEARNED:  SKILL.md / sync.md | <what differs from it, for next time>
 ```
 
-- No field holds ` | `. OUTCOME's lines are joined by ` / `; MEETINGS' and STREAMS' pairs by `; `, and `attendees`'
-  names by `, `.
+- No field holds ` | `. MEETINGS' and STREAMS' pairs are joined by `; `, and `attendees`' names by `, `.
 - A locator is one `read` opens: a rid with its anchor, built as the source's `SKILL.md` says under What it makes
   (`r:<rid>#2` for a paragraph, `r:<rid>@12:08` for a moment), or a doc id, or an old path with its time.
 - The day an ask was made is `YYYY-MM-DD`, with its local `HH:MM` after it when the source gives a time: the

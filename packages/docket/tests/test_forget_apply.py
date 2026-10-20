@@ -155,16 +155,19 @@ BEFORE, SAME_SECOND, AFTER = (f"sync-{stamp}-0a0b0c0d" for stamp in ("20261018T0
 
 
 def sync_folders(*names: str) -> list[Path]:
-    """Sync folders as a start leaves them, each with a block that quotes the call."""
+    """Sync folders as a sync leaves them, each with a block that quotes the call and the call's own file, which
+    `docket sync recordings` writes from raw (#267)."""
     made = [sync_folder.root() / name for name in names]
     for path in made:
         (path / "blocks").mkdir(parents=True)
         (path / "blocks" / "plaud.txt").write_text(f"NOTES:    recording-note:2026-10-14-a-call | {CALL}\n", "utf-8")
+        (path / "recordings" / "plaud").mkdir(parents=True)
+        (path / "recordings" / "plaud" / "a-call.1.txt").write_text(f"recording {CALL} | part 1 of 1\n", "utf-8")
     return made
 
 
 def test_a_forget_applied_removes_the_sync_folders_started_before_it(vault: Vault) -> None:
-    """A block or a prompt in a sync folder can quote what the list takes (DR-0720): the apply removes each folder
+    """A block or a prompt in a sync folder can quote what the list takes (DR-0746): the apply removes each folder
     started before the newest line or in its second, which an id can't tell apart, and leaves a later sync alone, on
     this call and every next one."""
     before, same, after = sync_folders(BEFORE, SAME_SECOND, AFTER)

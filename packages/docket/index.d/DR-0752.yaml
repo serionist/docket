@@ -1,0 +1,11 @@
+decisions:
+  - id: DR-0752
+    title: docket staging show prints a transcript once, a segment a line with the times a cut takes
+    status: proposed
+    at: "2026-10-20"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#267"]
+    description: "For a staged record with segments, docket staging show prints its JSON without text, segments and native, then each segment once as @mm:ss-mm:ss Speaker: text, whole seconds down, so a time read off a line cuts that segment and no other; its after-the-cuts and cut-before parts print the same. A record without segments prints as before, its text with the character offsets a cut takes. The gate is unchanged."
+    not_chosen:
+      - "The JSON with the segments and their copy in native, then the text: about four times the transcript, past what a Bash result keeps."

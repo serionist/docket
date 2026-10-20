@@ -289,7 +289,7 @@ def init(
 @sync_app.callback()
 def sync(ctx: typer.Context, vault: VaultOption = None) -> None:
     """Alone, move the vault with its remote: in a repo of its own, fetch and rebase; in a folder, your own git does
-    it. `docket sync start`, `notes` and `reconcile` write the sync folder /docket:sync runs from instead."""
+    it. `docket sync start`, `recordings` and `reconcile` write the sync folder /docket:sync runs from instead."""
     if ctx.invoked_subcommand is not None:
         # `docket sync --vault <vault> start` names the vault for the subcommand.
         ctx.obj = vault
@@ -317,18 +317,20 @@ def sync_start(
     say_all(start.lines(start.start(found, sources or [], ledger_views.now())))
 
 
-@sync_app.command("notes")
-def sync_notes(
+@sync_app.command("recordings")
+def sync_recordings(
     ctx: typer.Context,
     sync: Annotated[str, typer.Argument(help="The sync: its id, or its folder, as docket sync start printed it.")],
+    source: Annotated[str, typer.Argument(help="The source whose agent is back.")],
     vault: VaultOption = None,
 ) -> None:
-    """Write a prompt per recording note the sync's blocks name, from their NOTES lines, one note for two lines with
-    one doc id; print a line per note with its prompt's path, and each line that gets none and why."""
-    from docket.sync import start  # noqa: PLC0415
+    """Give each recording of the source that needs reading an agent of its own: the recording from raw as files in
+    the sync folder, and its prompt; print a line per recording with its prompt's path, and each one skipped and why.
+    Run it as each source's agent comes back; a recording given an agent in this sync gets no second."""
+    from docket.sync import recordings  # noqa: PLC0415
 
     found = find_vault(vault if vault is not None else ctx.obj)
-    say_all(start.note_lines(start.notes(found, sync)))
+    say_all(recordings.lines(recordings.recordings(found, sync, source, ledger_views.now())))
 
 
 @sync_app.command("reconcile")

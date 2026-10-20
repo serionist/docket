@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0749
+    title: docket sync reconcile reads the recordings' blocks too, and a continues ref whose item looks like another ask is unsure
+    status: proposed
+    at: "2026-10-20"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#267"]
+    supersedes: [DR-0723]
+    description: "DR-0723 as it stands, but: it reads each source's block and then each of its recordings' blocks that recordings/<source>.json names, quoting a line by its file, as blocks/plaud/rec-0101.txt:3, and says each block file that isn't there. A log on the open item a line's continues ref names, sure before, is unsure when the line's title isn't a DR-0642 look-alike of the item's and neither the line's thread, nor its locator's rid where its record has none, is in the item's trail; a thread that is its record's container, a chat or a recording, never backs one. The log stays the op, the add is its alternative, and the item's context.md line is quoted. A log on an item a CLOSES line closes, asked before its evidence, is held to the same rule."
+    binds:
+      - "DR-0689's binds: nothing closes without a locator that shows it, no proposal queue, rollover before the proposed points, no message sent without the owner's word."
+      - "Nothing in the draft is written without Claude's batch: the command writes only the sync folder."
+      - An op the rules can't settle is drafted unsure, with its block line, its candidates and its alternatives, never sure.
+    not_chosen:
+      - "A sure log on any open item the agent names: the second rehearsal logged an ask to put the lane calls in the team's calendars on an item about sending the lane leads the sprints."
+      - "The add as the op and the log its alternative: a reworded ask in a chat or a recording continues its item more often than not."

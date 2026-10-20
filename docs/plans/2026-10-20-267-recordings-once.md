@@ -224,3 +224,20 @@ Round 1, 20 Oct, of 449ef65: ready once one major is fixed; one major and four m
 
 The second wave, the block path, the file caps, the note ids, the lock, the two notes per meeting, both misses and
 the LEARNED rule checked out.
+
+## Built
+
+One PR, as planned: DR-0746 to DR-0752 proposed, DR-0720, DR-0721, DR-0723 and DR-0688 superseded. Where the build
+departed from the plan, and why:
+
+| Where | What | Why |
+|---|---|---|
+| the ids | DR-0746 the sync folder, DR-0747 the agents, DR-0748 the block file, DR-0749 the reconcile, DR-0750 `sync.md`, DR-0751 the Sonnet trial, DR-0752 the compact `staging show` | the next ids when the docs tool added them; `supersede` writes both sides after the add |
+| the key | a recording's own id shaped like a hashed key, `x` and 16 hex, is hashed too | otherwise one recording's own id could be another's hashed key |
+| the window | the recordings listed run from the source's window's start to now, not to the start's end | a recording made while the sync runs is brought by the run and has no note |
+| the block's folder | `docket sync recordings` makes `blocks/<source>/` | the agent's Write lands in a folder that is there |
+| a recording's block | no RUN line; the agent answers its one line instead | it runs no source; the reconcile says a block file that isn't there |
+| the meetings by time | `reconcile.Owner`, `overlapping` and `recorded_in` at module level, shared by the prompt and the NOTES link | the prompt names the meetings the link takes, by one rule |
+| the summary | says the notes not put and why, in place of the notes still being written | the summary now waits for every recording agent |
+| the rehearsal case | in `test_sync_recordings.py`, its draft settled and dry-run through `docket ledger batch` | the files and both blocks come from the recordings step there |
+| the perf test | a recording of 1,500 segments, 0.05 s here, the budget 1 s | a recorder's long day |

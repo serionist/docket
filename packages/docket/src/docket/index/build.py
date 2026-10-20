@@ -1062,7 +1062,7 @@ class Unnoted(NamedTuple):
 
 def unnoted(vault: Vault, windows: dict[str, tuple[datetime, datetime]]) -> list[Unnoted]:
     """Each source's recordings in raw whose time falls in its window and that no current summary covers, oldest
-    first: what a sync's agent reads whole and reports from (DR-0721)."""
+    first: what a sync's agent reads whole and reports from (DR-0747)."""
     conn = open_index(vault)
     try:
         out = [

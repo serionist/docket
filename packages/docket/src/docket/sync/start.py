@@ -1,13 +1,12 @@
-"""`docket sync start` and `docket sync notes` (DR-0720, DR-0721): the sync folder's prompts and the ledger its agents
-read, written from the vault directly, so they work with the service down; nothing else is written.
+"""`docket sync start` (DR-0746): the sync folder's prompts and the ledger its agents read, written from the vault
+directly, so it works with the service down; nothing else is written. `docket sync recordings` adds each recording's
+agent later, once its source's agent is back (`docket.sync.recordings`).
 
 `context.md`, every agent's one file of the ledger:
 
     sync sync-20261020T071500-1a2b3c4d  Tue 2026-10-20 09:15 Europe/Berlin  owed since: the run's window
     sources
     plaud | from 2026-10-13 09:15 | agents/plaud.md | blocks/plaud.txt
-    recordings with no note (1)
-    plaud:rec-0101 | 10-19 10:01 | Pilot weekly
     open items (1)
     A-0001 | reply | Ben Sample | Send Ben the pilot dates | slack:C0PILOT/1791100000.000100
     snoozed (0)
@@ -32,26 +31,21 @@ from importlib import resources
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from docket import __version__, recall
+from docket import __version__
 from docket.errors import DocketError
 from docket.index import build as index_build
 from docket.ledger import day as ledger_day
 from docket.ledger import views
-from docket.sources import runner
-from docket.sync import block, folder
+from docket.sync import folder
 from docket.vault import cursors
-from docket.vault.processed import id_problem
 from docket.vault.vault import Vault
 
 THE_WINDOW = "the run's window"
-# While the ledger holds no item, what is owed is looked for this many working days back (DR-0721).
+# While the ledger holds no item, what is owed is looked for this many working days back (DR-0747).
 FIRST_DAYS = 40
 # The meetings run to this many working days after today: the prep week.
 PREP_DAYS = 5
-NOTE_TYPE = "recording-note"
 PLACEHOLDER = re.compile(r"\{([A-Z_]+)\}")
-LAYOUT = "a title, who spoke, the notes with every number, date, name and commitment said, and the actions at the end"
-TIME_FINDS = "none named: the one 10 minutes either side of its start, by `ledger` view `meetings`"
 
 
 @dataclass(frozen=True)
@@ -59,20 +53,6 @@ class Started:
     folder: Path
     info: folder.Info
     cleared: int
-
-
-@dataclass(frozen=True)
-class Note:
-    doc: str
-    prompt: Path
-
-
-@dataclass(frozen=True)
-class Noted:
-    """The note prompts written, and what was said instead of one."""
-
-    notes: list[Note]
-    said: list[str]
 
 
 def template(name: str) -> str:
@@ -107,12 +87,6 @@ def windows(vault: Vault, sources: Sequence[str], now: datetime) -> dict[str, cu
     }  # fmt: skip
 
 
-def _when(moment: datetime, tz: ZoneInfo, today: date) -> str:
-    local = moment.astimezone(tz)
-    day = f"{local:%m-%d}" if local.year == today.year else f"{local:%Y-%m-%d}"
-    return f"{day} {local:%H:%M}"
-
-
 def start(vault: Vault, named: Sequence[str], at: datetime) -> Started:
     """A sync folder for the live sources, or those named: refused, writing nothing, when this machine's cursor file
     doesn't read, no source syncs live, or a name isn't a live source's. Old sync folders go first."""
@@ -139,12 +113,6 @@ def start(vault: Vault, named: Sequence[str], at: datetime) -> Started:
         snapshot = views.read(conn, ask, tz, now)
         empty = conn.execute("SELECT 1 FROM items LIMIT 1").fetchone() is None
     owed = working_days_back(today, FIRST_DAYS).isoformat() if empty else THE_WINDOW
-    try:
-        recordings: list[index_build.Unnoted] | str = index_build.unnoted(
-            vault, {source: (w.since, w.until) for source, w in found.items()}
-        )
-    except DocketError as e:
-        recordings = str(e)
     cleared = folder.clear(now)
     sync_id = folder.new_id(now)
     path = folder.make(sync_id)
@@ -159,7 +127,7 @@ def start(vault: Vault, named: Sequence[str], at: datetime) -> Started:
         ],
     )  # fmt: skip
     context = path / folder.CONTEXT
-    _write(context, "\n".join(_context(info, snapshot, recordings, tz)) + "\n")
+    _write(context, "\n".join(_context(info, snapshot, tz)) + "\n")
     prompt = template("agent.md")
     for source in info.sources:
         values = {"SOURCE": source.source, "VAULT": str(vault.root), "TODAY": today.isoformat(), "ZONE": info.zone,
@@ -174,9 +142,7 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
-def _context(
-    info: folder.Info, snapshot: views.LedgerRead, recordings: list[index_build.Unnoted] | str, tz: ZoneInfo
-) -> list[str]:
+def _context(info: folder.Info, snapshot: views.LedgerRead, tz: ZoneInfo) -> list[str]:
     made = info.made.astimezone(tz)
     day = ledger_day.WEEKDAYS[made.weekday()]
     out = [f"sync {info.sync}  {day} {made:%Y-%m-%d %H:%M} {info.zone}  owed since: {info.owed_since}", "sources"]
@@ -185,11 +151,6 @@ def _context(
         f"{folder.BLOCKS}/{s.source}.txt"
         for s in info.sources
     ]
-    if isinstance(recordings, str):
-        out.append(f"recordings with no note: the index can't say ({recordings})")
-    else:
-        out.append(f"recordings with no note ({len(recordings)})")
-        out += [f"{r.rid} | {_when(r.ts, tz, info.today)} | {views.as_field(r.title or '-')}" for r in recordings]
     return out + views.context_lines(snapshot)
 
 
@@ -199,77 +160,4 @@ def lines(started: Started) -> list[str]:
     out += [f"agent {s.source}: {s.prompt}" for s in started.info.sources]
     if started.cleared:
         out.append(f"cleared {started.cleared} sync folder(s) over 7 days old")
-    return out
-
-
-# -- docket sync notes -------------------------------------------------------------------------------------------------
-
-
-def notes(vault: Vault, sync: str) -> Noted:
-    """A prompt per note the blocks' NOTES lines name, two lines with one doc id making one note over both recordings.
-    A line that doesn't read, names no recording note, or whose recording doesn't open gets none, and is said."""
-    path, info = folder.find(sync, vault.root)
-    wanted: dict[str, list[tuple[str, block.Line]]] = {}
-    said: list[str] = []
-    for source in info.sources:
-        rel = f"{folder.BLOCKS}/{source.source}.txt"
-        file = path / rel
-        if not file.is_file():
-            said.append(f"{rel} isn't there: no block from {source.source}")
-            continue
-        for line in block.parse(file.read_bytes().decode("utf-8", "replace")):
-            if line.label != "NOTES":
-                continue
-            where = f"{rel}:{line.n}"
-            doc = line.fields[0]
-            problem = line.problem or id_problem(doc)
-            if problem is None and not doc.startswith(f"{NOTE_TYPE}:"):
-                problem = f"{doc} isn't a {NOTE_TYPE}"
-            if problem is not None:
-                said.append(f"{where}: {problem}")
-                continue
-            wanted.setdefault(doc, []).append((where, line))
-    rids = [line.fields[1] for lines in wanted.values() for _, line in lines]
-    opens = recall.resolves(vault, rids) if rids else set[str]()
-    tz = ZoneInfo(info.zone)
-    prompt = template("note.md")
-    made: list[Note] = []
-    for doc, found in wanted.items():
-        kept: list[block.Line] = []
-        for where, line in found:
-            if line.fields[1] in opens:
-                kept.append(line)
-            else:
-                said.append(f"{where}: {line.fields[1]} doesn't open, so it gets no note")
-        if not kept:
-            continue
-        refs = list(dict.fromkeys(line.fields[4] for line in kept if len(line.fields) > 4 and line.fields[4] != "-"))
-        values = {
-            "VAULT": str(vault.root), "DOC": doc, "TODAY": info.today.isoformat(), "ZONE": info.zone,
-            "SYNC_AT": f"{info.made.astimezone(tz):%Y-%m-%dT%H:%M}",
-            "RECORDINGS": "; ".join(dict.fromkeys(f"{ln.fields[1]}, {ln.fields[2]} to {ln.fields[3]}" for ln in kept)),
-            "MEETING": f"{', '.join(refs)}, which its content names" if refs else TIME_FINDS,
-            "LAYOUT": _layout(vault, kept[0].fields[1].removeprefix("r:").partition(":")[0]),
-        }  # fmt: skip
-        file = path / folder.NOTES / f"{doc.partition(':')[2]}.md"
-        _write(file, fill(prompt, values))
-        made.append(Note(doc, file))
-    return Noted(made, said)
-
-
-def _layout(vault: Vault, source: str) -> str:
-    """The note's layout: the one the source's `sync.md` gives, when it has one (DR-0688), else Docket's."""
-    try:
-        sync_md = runner.skill_folder(runner.consuming_repo(vault.root), vault.root, source) / "sync.md"
-    except DocketError:
-        return LAYOUT
-    return f"the one {sync_md} gives for a recording note, else {LAYOUT}" if sync_md.is_file() else LAYOUT
-
-
-def note_lines(noted: Noted) -> list[str]:
-    """What `docket sync notes` prints: a line per note with its prompt's path, then what was said instead."""
-    out = [f"note {n.doc}: {n.prompt}" for n in noted.notes]
-    out += noted.said
-    if not out:
-        out.append("no note to write: the blocks name none")
     return out

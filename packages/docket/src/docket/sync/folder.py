@@ -1,5 +1,9 @@
-"""Where sync folders live (DR-0720): `<state>/sync/<sync id>/`, beside the service's pid file and `docket open`'s
+"""Where sync folders live (DR-0746): `<state>/sync/<sync id>/`, beside the service's pid file and `docket open`'s
 redirect page, never in the vault and never committed. The id is `sync-<yyyymmddThhmmss>-<8 hex>`, its time in UTC.
+
+`docket sync recordings` adds each recording's files under `recordings/<source>/`, its prompt under
+`agents/<source>/` and its block's path under `blocks/<source>/`, and lists them in `recordings/<source>.json`, a file
+per source, so two sources' calls at once never lose each other's.
 
 A start removes the folders over 7 days old by their id's time. The forget's apply, on every gate call while there is
 a list, removes the folders started before its newest line, since a block or a prompt can quote what it forgets: one
@@ -32,7 +36,7 @@ INFO = "sync.json"
 CONTEXT = "context.md"
 AGENTS = "agents"
 BLOCKS = "blocks"
-NOTES = "notes"
+RECORDINGS = "recordings"
 SCHEMA_VERSION = 1
 # A batch file the service reads: a sync's draft is a few hundred lines, so far less.
 BATCH_BYTES = 4 * 2**20
@@ -46,6 +50,27 @@ class Source(BaseModel):
     until: datetime
     prompt: str
     block: str
+
+
+class Recording(BaseModel):
+    """A recording given an agent of its own: its rid and key, its title and start, its prompt, its block and the
+    files that hold it, by absolute path."""
+
+    rid: str
+    key: str
+    title: str | None
+    start: datetime
+    prompt: str
+    block: str
+    files: list[str]
+
+
+class Recordings(BaseModel):
+    """`recordings/<source>.json`: a source's recordings given agents in this sync."""
+
+    schema_version: int = SCHEMA_VERSION
+    source: str
+    recordings: list[Recording]
 
 
 class Info(BaseModel):
@@ -83,7 +108,7 @@ def make(sync_id: str) -> Path:
         raise DocketError(f"{top} is a link; Docket writes sync folders only into a plain folder")
     folder = top / sync_id
     folder.mkdir(mode=0o700, parents=True)
-    for sub in (AGENTS, BLOCKS, NOTES):
+    for sub in (AGENTS, BLOCKS, RECORDINGS):
         (folder / sub).mkdir(mode=0o700)
     return folder
 
@@ -177,3 +202,19 @@ def batch_file(given: str, vault_root: Path) -> str:
         return file.read_bytes().decode("utf-8")
     except UnicodeDecodeError:
         raise DocketError(f"{given} isn't UTF-8; write the batch as UTF-8") from None
+
+
+def recordings_file(path: Path, source: str) -> Path:
+    return path / RECORDINGS / f"{source}.json"
+
+
+def recordings(path: Path, source: str) -> list[Recording]:
+    """A source's recordings given agents in this sync folder, none when it has no list; refused when its list
+    doesn't read."""
+    file = recordings_file(path, source)
+    if not file.is_file():
+        return []
+    try:
+        return Recordings.model_validate_json(file.read_bytes()).recordings
+    except ValidationError:
+        raise DocketError(f"{file} doesn't read; start another sync") from None

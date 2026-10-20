@@ -453,7 +453,7 @@ def batch_lines(conn: sqlite3.Connection, batch: str) -> list[BatchLine]:
     return [BatchLine(ref=ref, kind=kind, line=line) for _, _, ref, kind, line in rows]
 
 
-# -- the sync's reconcile (DR-0723) ------------------------------------------------------------------------------------
+# -- the sync's reconcile (DR-0749) ------------------------------------------------------------------------------------
 
 
 def trails(conn: sqlite3.Connection) -> dict[str, list[str]]:
@@ -1225,7 +1225,7 @@ def _meetings_with_points(found: LedgerRead) -> list[str]:
     return out
 
 
-# -- the short form (DR-0720) ------------------------------------------------------------------------------------------
+# -- the short form (DR-0746) ------------------------------------------------------------------------------------------
 
 
 def context_lines(found: LedgerRead) -> list[str]:
