@@ -14,12 +14,11 @@ import os
 import shutil
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
 
 import pytest
 from browser_kit import WATCH_CSP, live, sign_in, watched
 from docket_testkit import index_template
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import Browser, sync_playwright
 
 from docket.web import frontend, pages
 
@@ -28,6 +27,16 @@ pytestmark = [
     pytest.mark.smoke,
     pytest.mark.skipif(not BROWSER, reason="drives a real browser: DOCKET_TEST_BROWSER=chrome, msedge or chromium"),
 ]
+
+
+@pytest.fixture(scope="module")
+def browser() -> Iterator[Browser]:
+    """One browser for the module, open until after the service stops, as the browser files have it: closing it under a
+    running service resets the service's connections, and on Windows the service then outlives its stop."""
+    with sync_playwright() as p:
+        launched = p.chromium.launch(channel=None if BROWSER == "chromium" else BROWSER)
+        yield launched
+        launched.close()
 
 
 @pytest.fixture
@@ -42,7 +51,7 @@ def every_page() -> list[str]:
     return [*found, *(route for route in frontend.BUILD.routes if route not in found)]
 
 
-def problems(browser: Any, port: int, token: str, path: str) -> list[str]:
+def problems(browser: Browser, port: int, token: str, path: str) -> list[str]:
     """What went wrong on one page, opened signed in in a context of its own, once it settled."""
     context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
     context.add_init_script(WATCH_CSP)
@@ -59,14 +68,11 @@ def problems(browser: Any, port: int, token: str, path: str) -> list[str]:
         context.close()
 
 
-def test_every_page_of_both_apps_loads_clean_in_the_system_s_browser(service: tuple[int, str]) -> None:
+def test_every_page_of_both_apps_loads_clean_in_the_system_s_browser(
+    browser: Browser, service: tuple[int, str]
+) -> None:
     port, token = service
     paths = every_page()
     assert {"/search", "/ledger", "/queue", "/design"} <= set(paths)
-    with sync_playwright() as p:
-        browser = p.chromium.launch(channel=None if BROWSER == "chromium" else BROWSER)
-        try:
-            found = {path: problems(browser, port, token, path) for path in paths}
-        finally:
-            browser.close()
+    found = {path: problems(browser, port, token, path) for path in paths}
     assert {path: said for path, said in found.items() if said} == {}
