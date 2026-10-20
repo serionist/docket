@@ -1,7 +1,7 @@
 # The speech worker on an NVIDIA GPU (DR-0567): the CPU's packages and NVIDIA's CUDA 12 cuBLAS, which CTranslate2's
 # wheels are built against, under NVIDIA's own licence. Compiled with hashes by `uv run devkit models-lock`.
 faster-whisper==1.2.1
-ctranslate2==4.8.2
+ctranslate2==4.8.3
 av==19.0.1
 onnxruntime==1.31.0
 tokenizers==0.23.3
