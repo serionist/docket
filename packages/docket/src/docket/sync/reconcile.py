@@ -41,7 +41,7 @@ from docket.index import build as index_build
 from docket.index.ledger import name_tokens
 from docket.ledger import day as ledger_day
 from docket.ledger import views
-from docket.ledger.ops import MEETING_FIELDS, STREAM_FIELDS
+from docket.ledger.ops import STREAM_FIELDS
 from docket.ledger.store import alike, locator_rid, title_words
 from docket.sync import block, folder
 from docket.vault.records import RawRecord
@@ -51,6 +51,8 @@ DRAFT = "draft.jsonl"
 OWES = ("reply", "decision", "task")
 OPEN = ("open", "snoozed")
 MINUTES = ("answered", "dropped", "open")
+# What a MEETINGS line sets, as agent.md says: a calendar's records set the rest, and the minutes the outcome.
+MEETING_SETS = ("response", "attendees", "start", "end")
 # An ask links to a meeting it was asked in or up to 120 minutes after, from 10 minutes before its start (DR-0651); a
 # recording to one 10 minutes either side of its start.
 ASKED_BEFORE = timedelta(minutes=10)
@@ -250,6 +252,10 @@ class _Drafting:
         self.by_ref: dict[str, views.ItemRow] = {}
         self.by_who: dict[str, list[tuple[views.ItemRow, set[str]]]] = {}
         self.by_source: dict[str, list[views.ItemRow]] = {}
+        # The items whose source is a record of a recording, by the recording's rid, and the recordings' rids: a
+        # recording's records share it as their thread and container, and it is a record itself.
+        self.by_recording: dict[str, list[views.ItemRow]] = {}
+        self.recordings: set[str] = set()
         self.by_thread: dict[str, list[str]] = {}
         self.meetings: dict[str, views.MeetingFacts] = {}
         self.points: dict[str, views.PointRow] = {}
@@ -301,10 +307,18 @@ class _Drafting:
             if row.state in OPEN:
                 self.by_who.setdefault(_who(row.who), []).append((row, title_words(row.title)))
         trails = {item: [locator_rid(loc) for loc in trail] for item, trail in self.ledger.trails.items()}
-        threads = lookup.threads(rid for rids in trails.values() for rid in rids)
+        threads = lookup.threads([*(rid for rids in trails.values() for rid in rids), *self.by_source])
         for item, rids in trails.items():
             for thread in dict.fromkeys((threads.get(rid, (None, None))[0] or rid) for rid in rids):
                 self.by_thread.setdefault(thread, []).append(item)
+        shared = {container for thread, container in threads.values() if container is not None and thread == container}
+        shared |= {r.container for r in self.records.values() if r.container is not None and r.thread == r.container}
+        # A chat's records share it too, but a chat isn't a record: only a recording is.
+        self.recordings = set(lookup.threads(shared))
+        for rid, rows in self.by_source.items():
+            recording = self.recording(*threads.get(rid, (None, None)))
+            if recording is not None:
+                self.by_recording.setdefault(recording, []).extend(rows)
         self.meetings = {m.row.id: m for m in self.ledger.meetings}
         self.points = {p.id: p for p in self.ledger.points}
         self.streams = {s.name for s in self.ledger.streams}
@@ -343,6 +357,19 @@ class _Drafting:
             m for m in self.ledger.meetings
             if self.at <= m.row.start < self.prep_until and m.row.response != "cancelled" and not m.row.archived
         ]  # fmt: skip
+
+    def recording(self, thread: str | None, container: str | None) -> str | None:
+        """The recording a record is of, by its thread and container: none for a record of no recording."""
+        return container if container is not None and thread == container and container in self.recordings else None
+
+    def sourced(self, locator: str) -> list[views.ItemRow]:
+        """The items, in any state, whose source is the locator's rid, anchor aside, or another record of the
+        recording it is of: a recording reported again cites its summary or its transcript as it likes."""
+        found = {row.id: row for row in self.by_source.get(locator_rid(locator), [])}
+        record = self.records.get(locator)
+        recording = None if record is None else self.recording(record.thread, record.container)
+        found |= {row.id: row for row in self.by_recording.get(recording or "", [])}
+        return list(found.values())
 
     def item(self, ref: str | None) -> views.ItemRow | None:
         return None if ref is None else self.by_ref.get(ref.strip())
@@ -501,7 +528,9 @@ class _Drafting:
         head = group[0]
         d = Draft(self.log(group, row), head.found)
         due = self.due(group)
-        if due is not None and _is_day(due) and due != (row.due.isoformat() if row.due else None):
+        if due is not None and not _is_day(due):
+            d.unsure(f"the due, {due!r}, isn't YYYY-MM-DD: fix it")
+        elif due is not None and due != (row.due.isoformat() if row.due else None):
             d.then.append({"op": "set", "item": row.ref, "fields": {"due": due}})
         others = [other for other in self.threaded(head) if other.id != row.id]
         if others:
@@ -586,9 +615,7 @@ class _Drafting:
                 *(self.candidate(row) for row in alikes),
             )  # fmt: skip
             d.alternatives += [self.log(group, row) for row in alikes]
-        sourced = list(
-            {row.id: row for a in group for row in self.by_source.get(locator_rid(a.found.locator), [])}.values()
-        )
+        sourced = list({row.id: row for a in group for row in self.sourced(a.found.locator)}.values())
         if sourced:
             d.unsure(
                 f"its locator is already the source of {', '.join(row.ref for row in sourced)}, as a recording or a "
@@ -601,7 +628,8 @@ class _Drafting:
                 "one, else add the other too",
                 *(a.found.quoted for a in group[1:]),
             )  # fmt: skip
-            d.alternatives += [self.add([a], beside).op for a in group[1:]]
+            # Forced, since the writer refuses an add that looks like one before it in the batch.
+            d.alternatives += [self.add([a], beside).op | {"force": True} for a in group[1:]]
 
     def alikes(self, ask: _Ask) -> list[views.ItemRow]:
         """DR-0642's look-alikes of the ask: the open items of its who whose title shares 60% of the shorter one's
@@ -673,6 +701,13 @@ class _Drafting:
             d.unsure("it names no stream: add one the ledger holds")
         elif stream not in self.streams:
             d.unsure(f"the stream {stream} isn't one the ledger holds: name one it holds")
+        sourced = self.sourced(f.locator)
+        if sourced:
+            d.unsure(
+                f"its rid is already the source of {', '.join(row.ref for row in sourced)}, as an invite left "
+                "unanswered is reported again: keep the add for a new invite, else delete the line",
+                *(self.candidate(row, state=True) for row in sourced),
+            )  # fmt: skip
         return self.doubled(d, f.field(0), title or "")
 
     # -- meetings, links, minutes, streams -----------------------------------------------------------------------------
@@ -694,10 +729,11 @@ class _Drafting:
         return out
 
     def meeting_set(self, f: Found) -> Draft:
-        """A set of the line's fields on its meeting, sure when the meeting stands."""
+        """A set of the line's fields on its meeting, sure when the meeting stands and every field is one a MEETINGS
+        line sets."""
         ref = f.field(0)
         d = Draft({"op": "set", "item": ref}, f)
-        d.op |= {"fields": self.pairs(f.field(1), MEETING_FIELDS, d), "note": f.locator}
+        d.op |= {"fields": self.pairs(f.field(1), MEETING_SETS, d), "note": f.locator}
         if self.meeting(ref) is None:
             d.unsure(f"{ref or 'its ref'} names no meeting: fix the ref, or delete the line")
         return d

@@ -379,8 +379,9 @@ def test_a_thread_match_with_no_continues_ref_is_unsure_the_add_first_the_log_it
 
 
 def test_a_thread_counts_only_for_the_same_who_and_side_and_never_in_a_chat_or_a_recording(vault: Vault) -> None:
-    """Another person's ask in Ben's thread, Ben's own wait there, Ben's next message in the team chat his reply came
-    from, and his ask in the weekly's recording beside an item from it: each a sure add."""
+    """Another person's ask in Ben's thread, Ben's own wait there and Ben's next message in the team chat his reply
+    came from: each a sure add. His ask in the weekly's recording beside an item from it is no thread match either,
+    only unsure as the recording reported again."""
     store.write(vault, [{"op": "add", "fields": {"kind": "reply", "title": "Send Ben the minutes", "who": "Ben Sample",
                                                  "stream": "pilot", "source": WEEKLY}}], by="claude")  # fmt: skip
     done, lines = run(vault, slack=[
@@ -391,12 +392,13 @@ def test_a_thread_counts_only_for_the_same_who_and_side_and_never_in_a_chat_or_a
     ], plaud=[
         owed("Ben Sample", f"r:{WEEKLY}/transcript@05:00", "2026-10-19 10:10", "Book the shuttle bus"),
     ])  # fmt: skip
-    found = ops(lines)
+    recorded, *found = ops(lines)
     assert [(o["fields"]["who"], o["fields"]["title"], "unsure" in o) for o in found] == [
-        ("Ben Sample", "Book the shuttle bus", False), ("Hal Example", "Share the venue address", False),
-        ("Ben Sample", "his badge list", False), ("Ben Sample", "Share the venue address", False),
+        ("Hal Example", "Share the venue address", False), ("Ben Sample", "his badge list", False),
+        ("Ben Sample", "Share the venue address", False),
     ]  # fmt: skip
-    assert done.unsure == [] and done.merges == []
+    assert [why.split(",")[0] for why in unsure(recorded)] == ["its locator is already the source of A-0008"]
+    assert done.merges == []
 
 
 def test_a_continues_ref_a_thread_disagrees_with_and_two_items_in_one_thread_are_unsure(vault: Vault) -> None:
@@ -505,7 +507,8 @@ def test_one_message_asking_for_the_dates_and_the_budget_is_an_unsure_merge_two_
         "2 lines with the same who and a look-alike title, drafted as one ask: keep it if they are one, else add the "
         "other too"
     ]
-    budget = {"op": "add", "fields": {**merged["fields"], "title": "Send Hal the pilot budget"}, "note": "not yet"}
+    budget = {"op": "add", "fields": {**merged["fields"], "title": "Send Hal the pilot budget"}, "note": "not yet",
+              "force": True}  # fmt: skip
     assert around(lines, merged) == ([quoted("slack", 2, given[0]), quoted("slack", 3, given[1])], [budget])
     assert done.merges == [reconcile.Merge([quoted("slack", 2, given[0]), quoted("slack", 3, given[1])], sure=False)]
     assert reconcile.lines(done)[2].startswith("merged, unsure: ")
@@ -934,3 +937,105 @@ def test_a_notes_locators_are_read_as_read_takes_them() -> None:
     assert views.note_locators(f"Cleo sent it: {PLAN_MAIL}. Then [r:{WEEKLY}/transcript@12:08] and {NOTE}, 10:30") == [
         PLAN_MAIL, f"r:{WEEKLY}/transcript@12:08", NOTE,
     ]  # fmt: skip
+
+
+# -- the first review's cases -----------------------------------------------------------------------------------------
+
+
+def dry_run(vault: Vault, draft: Path, capsys: pytest.CaptureFixture[str]) -> tuple[int, list[str]]:
+    capsys.readouterr()
+    code = main(["ledger", "batch", str(draft), "--by", "sync", "--dry-run", "--vault", str(vault.root)])
+    return code, capsys.readouterr().out.splitlines()
+
+
+def every_choice_taken(lines: list[str]) -> str:
+    """A draft settled by keeping each unsure op and taking every alternative too: two adds where a merge was."""
+    out: list[str] = []
+    for line in lines:
+        if line.startswith("{") and '"unsure"' in line:
+            op = json.loads(line)
+            del op["unsure"]
+            out.append(json.dumps(op))
+        else:
+            out.append(line[2:] if line.startswith("# {") else line)
+    return "\n".join(out) + "\n"
+
+
+def test_an_invite_dropped_but_reported_again_is_unsure_its_item_quoted_with_its_state(vault: Vault) -> None:
+    """Ivy's offsite was dropped, not answered, so the calendar reports it again each sync: the writer's net holds
+    only open items, so the add would go in sure."""
+    store.write(vault, [{"op": "drop", "item": "A-0007", "note": "not going"}], by="user", now=NOW)
+    given = [f"INVITES:  Ivy Example | {OFFSITE} | 2026-11-02 09:00 | clashes with M-0002 | pilot"]
+    _, lines = run(vault, calendar=given)
+    (add,) = ops(lines)
+    assert add["op"] == "add" and unsure(add) == [
+        "its rid is already the source of A-0007, as an invite left unanswered is reported again: keep the add for a "
+        "new invite, else delete the line"
+    ]
+    a7 = f"A-0007 | invite | Ivy Example | Offsite day | {OFFSITE} | dropped 2026-10-20"
+    assert around(lines, add) == ([quoted("calendar", 2, given[0]), a7], [])
+
+
+@pytest.mark.parametrize("source", [WEEKLY, f"r:{WEEKLY}/summary#1"])
+def test_a_recording_reported_again_by_another_of_its_records_is_unsure(vault: Vault, source: str) -> None:
+    """Ben's ask came from the weekly, cited by the recording's rid or its summary's paragraph, and is done; the note
+    never landed, so this sync reports the recording again from its transcript's moment."""
+    summary = make_record(rid=f"{WEEKLY}/summary", source="plaud", kind="summary", container=WEEKLY, thread=WEEKLY,
+                          ts=at(19, 8, 5), text="Ben wants the shuttle times.")  # fmt: skip
+    vault.write_run("plaud", [summary])
+    index_build.rebuild(vault)
+    shuttle = {"kind": "reply", "title": "Send Ben the shuttle times", "who": "Ben Sample", "stream": "pilot",
+               "source": source}  # fmt: skip
+    store.write(vault, [{"op": "add", "as": "ben", "fields": shuttle}, {"op": "done", "item": "$ben", "note": SENT}],
+                by="sync", now=NOW)  # fmt: skip
+    _, lines = run(vault, plaud=[owed("Ben Sample", f"r:{WEEKLY}/transcript@05:00", "2026-10-19 10:10",
+                                      "Send Ben the bus times for the shuttle")])  # fmt: skip
+    (add,) = ops(lines)
+    assert [why.split(",")[0] for why in unsure(add)] == ["its locator is already the source of A-0008"]
+    a8 = f"A-0008 | reply | Ben Sample | Send Ben the shuttle times | {source} | done 2026-10-20"
+    assert around(lines, add)[0][1:] == [a8]
+
+
+def test_a_due_that_isn_t_a_day_makes_a_log_unsure_as_it_does_an_add(vault: Vault) -> None:
+    _, lines = run(vault, outlook=[
+        waiting("Cleo Test", QUOTE_AGAIN, "2026-10-19 09:00", "the quote, now by Thursday", continues="A-0002",
+                due="Thursday"),
+        waiting("Cleo Test", PLAN_MAIL, "2026-10-19 10:00", "the floor plan", due="2026-02-30"),
+    ])  # fmt: skip
+    log, add = ops(lines)
+    assert log["op"] == "log" and unsure(log) == ["the due, 'Thursday', isn't YYYY-MM-DD: fix it"]
+    assert add["op"] == "add" and unsure(add)[0] == "the due, '2026-02-30', isn't YYYY-MM-DD: fix it"
+
+
+def test_a_merge_s_alternative_adds_are_forced_so_both_adds_dry_run_clean(
+    vault: Vault, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Two lines merge only on a look-alike title, so the writer would refuse the second add: taken as the alternative,
+    it is forced. One message asking for the dates and the budget, and two pings after a close."""
+    for blocks in (
+        {"slack": [owed("Hal Example", TWO_ASKS, "2026-10-19", "Send Hal the pilot dates"),
+                   owed("Hal Example", TWO_ASKS, "2026-10-19", "Send Hal the pilot budget")]},
+        {"slack": [f"CLOSES:   A-0001 | done | {SENT} | Sent Ben the dates",
+                   owed("Ben Sample", BEN_LATER, "2026-10-19 16:00", "Send Ben the pilot dates", continues="A-0001"),
+                   owed("Ben Sample", DAN_ASK, "2026-10-21", "Send Ben the pilot dates for his team",
+                        continues="A-0001")]},
+    ):  # fmt: skip
+        done, lines = run(vault, **blocks)
+        done.path.write_text(every_choice_taken(lines), encoding="utf-8")
+        code, out = dry_run(vault, done.path, capsys)
+        assert code == 0 and not [line for line in out if ": refused, " in line], out
+
+
+def test_a_meetings_line_sets_only_what_agent_md_lets_it(vault: Vault) -> None:
+    """A MEETINGS line's fields are the response, the attendees, the start and the end: an outcome there, which would
+    overwrite the minutes' as a sure op, is unsure."""
+    _, lines = run(vault, outlook=[
+        f"MEETINGS: M-0003 | outcome=Gail draws it | {QUOTE_AGAIN}",
+        f"MEETINGS: M-0001 | start=2026-10-19T10:15; end=2026-10-19T10:45 | {QUOTE_AGAIN}",
+    ])  # fmt: skip
+    outcome, moved = ops(lines)
+    assert outcome["fields"] == {} and unsure(outcome) == [
+        "'outcome=Gail draws it' isn't field=value with a field of response, attendees, start, end"
+    ]
+    assert moved == {"op": "set", "item": "M-0001", "note": QUOTE_AGAIN,
+                     "fields": {"start": "2026-10-19T10:15", "end": "2026-10-19T10:45"}}  # fmt: skip
