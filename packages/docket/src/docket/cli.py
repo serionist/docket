@@ -348,6 +348,29 @@ def sync_reconcile(
     say_all(reconcile.lines(reconcile.reconcile(found, sync, ledger_views.now())))
 
 
+@sync_app.command("settle")
+def sync_settle(
+    ctx: typer.Context,
+    sync: Annotated[str, typer.Argument(help="The sync: its id, or its folder, as docket sync start printed it.")],
+    choices: Annotated[
+        list[str],
+        typer.Argument(
+            help="<line>=<choice> for each unsure line of the draft, by its number: keep, alt (alt2, ...) for an "
+            "alternative in its place, keep+alt2 for both, or drop.",
+            show_default=False,
+        ),
+    ],
+    vault: VaultOption = None,
+) -> None:
+    """Settle the draft's unsure lines in one call and rewrite draft.jsonl: each named line kept with its unsure taken
+    out, swapped for an alternative, or dropped, and what goes with it after it. Every choice is checked first; one
+    that doesn't apply changes nothing. Prints the unsure lines left and the # prep line, by their new numbers."""
+    from docket.sync import settle  # noqa: PLC0415
+
+    found = find_vault(vault if vault is not None else ctx.obj)
+    say_all(settle.lines(settle.settle(found, sync, choices)))
+
+
 @vault_app.command("status")
 def vault_status(vault: VaultOption = None) -> None:
     """Records per source, runs, and what isn't committed yet."""

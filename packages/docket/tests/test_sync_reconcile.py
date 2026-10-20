@@ -965,28 +965,6 @@ def test_with_no_index_the_raw_and_the_ledger_are_read_whole_and_draft_the_same(
 # -- written by file ---------------------------------------------------------------------------------------------------
 
 
-def settled(lines: list[str], choices: dict[int, str]) -> str:
-    """A draft settled as Claude settles it: each unsure line by its number, `keep` taking the key out, `alt` swapping
-    in its first alternative, `drop` deleting it."""
-    out: list[str] = []
-    skip = 0
-    for n, line in enumerate(lines, start=1):
-        if skip:
-            skip -= 1
-            continue
-        if n not in choices:
-            out.append(line)
-            continue
-        op = json.loads(line)
-        del op["unsure"]
-        if choices[n] == "keep":
-            out.append(json.dumps(op))
-        elif choices[n] == "alt":
-            out.append(lines[n][2:])
-            skip = 1
-    return "\n".join(out) + "\n"
-
-
 def by_file(vault: Vault, draft: Path, *, dry_run: bool) -> tuple[CallToolResult, str]:
     """The `ledger_batch` tool by `file`, as the sync calls it, on a service over the vault that serves no port."""
     service = Service(Settings(port=8750, vault=vault.root, token=lambda: "t0ken-for-tests-only"))
@@ -1008,7 +986,7 @@ def by_file(vault: Vault, draft: Path, *, dry_run: bool) -> tuple[CallToolResult
 def test_the_draft_settled_dry_runs_clean_and_unsettled_is_refused_naming_unsure(
     vault: Vault, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    done, lines = run(vault, slack=[
+    done, _ = run(vault, slack=[
         f"CLOSES:   A-0001 | done | {SENT} | Sent Ben the dates",
         owed("Dan Example", DAN_ASK, "2026-10-19 10:40", "Book the room for the pilot's first day", kind="task"),
         owed("Hal Example", TWO_ASKS, "2026-10-19", "Send Hal the pilot dates"),
@@ -1034,8 +1012,12 @@ def test_the_draft_settled_dry_runs_clean_and_unsettled_is_refused_naming_unsure
         line.split(": refused, ", 1)[1] for line in refused
     ]
     assert text.splitlines()[-1] == f"dry run: {len(refused)} change(s) refused; nothing written"
+    # Settled as the skill settles it: one docket sync settle for every unsure line (#272).
     untitled, dan, hal = done.unsure
-    draft.write_text(settled(lines, {untitled: "drop", dan: "alt", hal: "keep"}), encoding="utf-8")
+    sync = ["sync", "settle", draft.parent.name, f"{untitled}=drop", f"{dan}=alt", f"{hal}=keep", *vault_arg]
+    assert main(sync) == 0
+    assert capsys.readouterr().out.splitlines()[0] == "settled 3 line(s): 1 kept, 1 alternative(s) taken, 1 dropped"
+    assert not any('"unsure"' in line for line in draft.read_text(encoding="utf-8").splitlines())
     answer, text = by_file(vault, draft, dry_run=True)
     assert not answer.is_error and text.splitlines()[-1] == "dry run: 9 op(s) would be written; nothing written"
     assert main(["ledger", "batch", str(draft), "--by", "sync", "--dry-run", *vault_arg]) == 0
