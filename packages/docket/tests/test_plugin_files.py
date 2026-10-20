@@ -244,7 +244,7 @@ def golden_tools() -> dict[str, Any]:
 
 def test_sync_pre_approves_only_reads_and_the_sync_folder_s_commands() -> None:
     """The sync's own writes, the ledger batch and the agents' runs, classifies and promotions, ask (DR-0605); the
-    sync folder's commands write only scratch outside the vault (DR-0720)."""
+    sync folder's commands write only scratch outside the vault (DR-0720, DR-0723)."""
     tools = golden_tools()
     allowed = frontmatter("sync")["allowed-tools"]
     prefix = "mcp__plugin_docket_docket__"
@@ -255,6 +255,7 @@ def test_sync_pre_approves_only_reads_and_the_sync_folder_s_commands() -> None:
     assert commands == [
         "docket ledger day", "docket ledger day *", "docket staging list", "docket staging list *",
         "docket staging show *", "docket sync start", "docket sync start *", "docket sync notes *",
+        "docket sync reconcile *",
     ]  # fmt: skip
     assert re.sub(rf"{prefix}\w+|Bash\([^)]*\)", "", allowed).split() == []
 
@@ -295,9 +296,10 @@ def test_sync_names_commands_options_ops_views_and_tools_docket_has() -> None:
             given = {p.split("=")[0].strip() for p in params.split(",") if "=" in p}
             assert given <= set(tools[tool]["input_schema"]["properties"]), (name, tool)
     assert seen == {("ledger", "day"), ("staging", "list"), ("staging", "show"), ("staging", "classify"),
-                    ("staging", "promote"), ("sync", "start"), ("sync", "notes")}  # fmt: skip
+                    ("staging", "promote"), ("sync", "start"), ("sync", "notes"), ("sync", "reconcile"),
+                    ("ledger", "batch")}  # fmt: skip
     skill = sync_texts()["SKILL.md"]
-    table = skill[skill.index("| Order | Ops | Rule |") : skill.index("### A worked batch")]
+    table = skill[skill.index("| Order | Ops | Drafted from |") : skill.index("### A worked draft")]
     for row in table.splitlines()[2:]:
         cells = row.split("|")
         if len(cells) > 3:
@@ -307,8 +309,10 @@ def test_sync_names_commands_options_ops_views_and_tools_docket_has() -> None:
         named = re.search(r"ToolSearch for Docket's tools you will use[ :(]+([^)\n]*)", sync_texts()[name])
         assert named is not None, name
         assert set(re.findall(r"`([a-z_]+)`", named.group(1))) <= set(tools), name
-    for key in ("dry_run", "by"):
-        assert f"`{key}: " in skill and key in tools["ledger_batch"]["input_schema"]["properties"]
+    # The batch is written from the draft's file, its dry run first (DR-0724).
+    calls = re.findall(r"\bledger_batch\(([^)]*)\)", skill)
+    assert [c.split(", ")[:2] for c in calls] == [["ops=[]", 'file="<the draft\'s path>"']] * 2
+    assert calls[0].endswith("dry_run=true") and "dry_run" not in calls[1]
 
 
 def test_the_sync_s_block_keeps_its_labels_and_each_line_its_fields() -> None:
@@ -394,14 +398,28 @@ def pilot_vault(tmp_path: Path) -> Vault:
     return vault
 
 
-def test_the_worked_batch_runs_clean_through_a_dry_run(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    skill = sync_texts()["SKILL.md"]
-    example = skill.split("### A worked batch", 1)[1].split("```json\n", 1)[1].split("```", 1)[0]
-    batch = tmp_path / "sync-ops.json"
-    batch.write_text(example, encoding="utf-8")
+def test_the_worked_draft_is_refused_unsettled_and_runs_clean_settled(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The skill's draft as the reconcile writes it, its unsure line refused; settled as the skill says, its line 7
+    taking its alternative and the prep point added at `# prep`, it dry-runs clean (DR-0723)."""
+    worked = sync_texts()["SKILL.md"].split("### A worked draft", 1)[1]
+    draft = worked.split("```jsonl\n", 1)[1].split("```", 1)[0].splitlines()
+    prep = worked.split("```json\n", 1)[1].split("```", 1)[0].strip()
+    assert "line 7 becomes its alternative" in worked and '"unsure": ' in draft[6] and draft[7].startswith("# {")
+    assert draft[0].endswith(f": {sum(not line.startswith('#') for line in draft)} ops, 1 unsure")
     vault = pilot_vault(tmp_path / "v")
+    batch = tmp_path / "draft.jsonl"
+    command = ["ledger", "batch", str(batch), "--by", "sync", "--dry-run", "--vault", str(vault.root)]
+    batch.write_text("\n".join(draft) + "\n", encoding="utf-8")
     capsys.readouterr()
-    code = main(["ledger", "batch", str(batch), "--by", "sync", "--dry-run", "--vault", str(vault.root)])
+    assert main(command) == 1
+    refused = "2. add: refused, add takes only fields, note, as, force, by, not unsure"
+    assert refused in capsys.readouterr().out.splitlines()
+    settled = [*draft[:6], draft[7][2:], *draft[8:]]
+    at = settled.index("# prep: the next five working days: M-0002")
+    batch.write_text("\n".join([*settled[: at + 1], prep, *settled[at + 1 :]]) + "\n", encoding="utf-8")
+    code = main(command)
     out = capsys.readouterr().out.splitlines()
     assert code == 0, out
     assert out[-1].startswith("dry run: ") and out[-1].endswith(" op(s) would be written; nothing written"), out

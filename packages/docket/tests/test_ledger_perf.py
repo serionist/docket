@@ -6,8 +6,8 @@ op more, on an item or a meeting, as a write leaves it, read into them in a tent
 meeting planned in a tenth of a second, reading only its part (DR-0616, DR-0628, DR-0633, DR-0635); a snapshot of
 it, every item open, read from the tables with its lines in a fifth of a second (DR-0638); the day's route on a vault
 holding it in half a second (DR-0672); all of it as `docket ledger show --all --json` gives it, stamped, with its
-JSON, in under two seconds (DR-0659); and a sync folder written from it, every open item a line, in under a second
-(DR-0720).
+JSON, in under two seconds (DR-0659); a sync folder written from it, every open item a line, in under a second
+(DR-0720); and a sync's batch drafted against it from 200 block lines in under three (DR-0723).
 
 The ops are written as the writer writes them, a month file per machine, each item an add and nine changes, each
 meeting four points answered and a point rolled from the meeting before it in its weekly series of fifty. Wall time
@@ -24,13 +24,13 @@ import sqlite3
 import time
 from collections.abc import Collection
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
-from docket_testkit import Best, best_of, empty_vault, git, make_config, traced
+from docket_testkit import Best, best_of, empty_vault, git, make_config, make_record, traced
 from ledger_kit import CHANGES, ITEMS, MEETINGS, SERIES, build
 from starlette.testclient import TestClient
 
@@ -45,6 +45,7 @@ from docket.ledger.ops import Op
 from docket.media.keystore import KeyStore
 from docket.service.app import create_app
 from docket.service.state import Settings
+from docket.sync import reconcile as sync_reconcile
 from docket.sync import start as sync_start
 from docket.vault import forgotten
 from docket.vault.anchors import DocRef
@@ -63,6 +64,7 @@ SNAPSHOT_SECONDS = 0.2
 DAY_SECONDS = 0.5
 SHOW_ALL_SECONDS = 2.0
 SYNC_START_SECONDS = 1.0
+SYNC_RECONCILE_SECONDS = 3.0
 
 
 def one_more(root: Path, last: Op, kind: str, **keys: object) -> Op:
@@ -404,3 +406,61 @@ def test_a_sync_folder_from_that_ledger_is_written_in_under_a_second(tmp_path: P
     assert f"open items ({ITEMS})" in context and len(context) > ITEMS
     if not traced():
         assert run.seconds < SYNC_START_SECONDS, f"a sync start took {run.seconds:.2f} s, over {SYNC_START_SECONDS} s"
+
+
+# Twenty invented people the perf block's asks come from.
+PEOPLE = [f"{first} {last}" for first in ("Ben", "Cleo", "Dan", "Eve", "Finn") for last in
+          ("Sample", "Test", "Example", "Placeholder")]  # fmt: skip
+
+
+def perf_block(start: datetime) -> list[str]:
+    """200 lines, each on a record of its own: 40 asks continuing an open item, 40 new asks and 40 waits from twenty
+    people, 30 new asks from the ledger's own Ada that no title of hers looks like, 30 closes and 20 meetings set. No
+    two titles look alike, so nothing merges."""
+    rid = [f"chat:C0PERF/{1791000000 + n}.000100" for n in range(200)]
+    asked = [f"{start + timedelta(minutes=n * 20):%Y-%m-%d %H:%M}" for n in range(200)]
+    tail = "not yet | this week"
+    out = [f"OWED:     Ada Example | {rid[n]} | {asked[n]} | Send Ada the dates again | {tail} | reply | - | "
+           f"A-{n + 1:04d} | -" for n in range(40)]  # fmt: skip
+    out += [f"OWED:     {PEOPLE[n % 20]} | {rid[n]} | {asked[n]} | Book hall{n:03d} for crew{n:03d} | {tail} | task "
+            "| - | - | 2026-06-05" for n in range(40, 80)]  # fmt: skip
+    out += [f"WAITING:  {PEOPLE[n % 20]} | {rid[n]} | {asked[n]} | Plan of floor{n:03d} and wing{n:03d} | - | - | -"
+            for n in range(80, 120)]  # fmt: skip
+    out += [f"OWED:     Ada Example | {rid[n]} | {asked[n]} | Approve menu{n:03d} for party{n:03d} | {tail} | "
+            "decision | - | - | -" for n in range(120, 150)]  # fmt: skip
+    out += [f"CLOSES:   A-{n - 49:04d} | done | {rid[n]} | sent" for n in range(150, 180)]
+    out += [f"MEETINGS: M-{n + 1620:04d} | response=accepted | {rid[n]}" for n in range(180, 200)]
+    return out
+
+
+@pytest.mark.perf
+def test_a_sync_reconcile_over_that_ledger_drafts_200_block_lines_in_under_three_seconds(tmp_path: Path) -> None:
+    """docket sync reconcile on a vault holding it, its index built, with a block of 200 lines over 200 records in raw:
+    every locator resolved through the index, the ledger read with the open items' trails and threads, each ask matched
+    against the 5,000 open items, the draft written. Run once before the clock starts (DR-0723)."""
+    config = make_config()
+    config.sources = {"chat": SourceConfig(tools=["read_chat"])}
+    vault = empty_vault(tmp_path, config)
+    build(vault.root)
+    start = datetime(2026, 5, 25, 7, tzinfo=UTC)
+    vault.write_run("chat", [
+        make_record(rid=f"chat:C0PERF/{1791000000 + n}.000100", source="chat", container="chat:C0PERF",
+                    thread=f"chat:C0PERF/{1791000000 + n - n % 10}.000100", ts=start + timedelta(minutes=n * 20))
+        for n in range(200)
+    ])  # fmt: skip
+    index_build.rebuild(vault)
+    at = datetime(2026, 6, 1, 8, tzinfo=UTC)
+    started = sync_start.start(vault, [], at)
+    block = "\n".join(perf_block(start)) + "\n"
+    (started.folder / "blocks" / "chat.txt").write_text(block, encoding="utf-8")
+    sync_reconcile.reconcile(vault, started.info.sync, at)
+    run = best_of(3, lambda: sync_reconcile.reconcile(vault, started.info.sync, at))
+    done = run.result
+    print(f"docket sync reconcile: {run.seconds * 1000:.0f} ms ({run.runs('ms')}), {done.ops} ops, "
+          f"{len(done.unsure)} unsure, over {ITEMS:,} open items")  # fmt: skip
+    # Every line drafted, none dropped: the asks with no stream the ledger holds are unsure.
+    assert (done.ops, done.dropped, len(done.unsure)) == (202, [], 110)
+    if not traced():
+        assert run.seconds < SYNC_RECONCILE_SECONDS, (
+            f"a sync reconcile took {run.seconds:.2f} s, over {SYNC_RECONCILE_SECONDS} s"
+        )

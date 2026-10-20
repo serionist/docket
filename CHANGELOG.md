@@ -293,6 +293,11 @@ Unreleased in the same PR.
 
 ### Changed
 
+- `/docket:sync` drafts its batch with `docket sync reconcile`: the closes, asks, invites, meetings, links, minutes and
+  streams its agents found go into one file by fixed rules, an ask that continues an open item logged there, and only
+  what the rules can't settle (a look-alike, a thread another item shares, a recording reported again, two meetings at
+  one time) is left to Claude, marked unsure beside its line and its choices. The batch is written from that file,
+  dry run first, so the sync no longer retypes it. The `ledger_batch` tool takes `file`, a batch file in a sync folder.
 - Credentials redaction takes a password of several words whole, `Temporary password: Kq7 x!Lm 22`, up to the first
   word of prose or the next label on its line, and takes dial-in PINs: `PIN code` and `PIN-kód` are password labels
   now, and `PIN` before digits, so `pin: GPIO4` stays. The Outlook and calendar examples' scripts strip both the same
