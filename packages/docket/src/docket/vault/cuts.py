@@ -200,10 +200,12 @@ def spec(cut: Cut) -> str:
     milliseconds where it has them."""
     if cut.unit == "char":
         return f"{cut.start}-{cut.end}"
-    return f"{_exact(cut.start)}-{_exact(cut.end)}"
+    return f"{exact(cut.start)}-{exact(cut.end)}"
 
 
-def _exact(ms: int) -> str:
+def exact(ms: int) -> str:
+    """A time as `parse` reads it back to the same millisecond: `12:40`, or `12:40.500` when it isn't a whole
+    second."""
     seconds, fraction = divmod(ms, 1000)
     return _clock(seconds * 1000) + (f".{fraction:03d}" if fraction else "")
 

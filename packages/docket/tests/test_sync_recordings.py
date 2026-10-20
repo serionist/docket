@@ -227,6 +227,15 @@ def test_a_source_not_of_the_sync_is_refused(vault: Vault) -> None:
         recordings.recordings(vault, started.info.sync, "plaud", AT)
 
 
+def test_a_recording_whose_agent_wrote_no_block_is_said_by_the_reconcile(vault: Vault) -> None:
+    started = start.start(vault, [], NOW)
+    for source in ("plaud", "slack"):
+        (started.folder / "blocks" / f"{source}.txt").write_text(f"RUN:      {source} | none | -\n", encoding="utf-8")
+    (given,) = recordings.recordings(vault, started.info.sync, "plaud", AT).given
+    done = reconcile.reconcile(vault, started.info.sync, NOW)
+    assert done.said == [f"blocks/plaud/{given.key}.txt isn't there: no block from {WEEKLY}'s agent"]
+
+
 def test_the_command_prints_a_line_per_recording(vault: Vault, capsys: pytest.CaptureFixture[str]) -> None:
     started = start.start(vault, [], NOW)
     assert main(["sync", "--vault", str(vault.root), "recordings", started.info.sync, "plaud"]) == 0

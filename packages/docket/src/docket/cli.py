@@ -59,7 +59,6 @@ from docket.sources.ingest import IngestReport, ingest_run
 from docket.sources.local import record as record_import_folder
 from docket.sources.runner import MapperFailedError
 from docket.vault import convert, curatelog, cuts, holds, inforce, redaction, releaselog, rendered
-from docket.vault.anchors import format_time
 from docket.vault.config import MAX_LOOKBACK_DAYS
 from docket.vault.docstore import DocStore
 from docket.vault.entitystore import EntityStore, RefusedError, Written, load_changes
@@ -853,12 +852,13 @@ def _echo_text(heading: str, text: str) -> None:
 
 
 def _echo_segments(heading: str, record: RawRecord) -> None:
-    """A transcript's segments, a line each, `@mm:ss-mm:ss Speaker: text`: the times a time cut takes, whole seconds
-    down, so a cut read off a line takes that segment and no other."""
+    """A transcript's segments, a line each, `@mm:ss-mm:ss Speaker: text`: the times a time cut takes, to the
+    millisecond where they aren't a whole second, since a cut takes every segment it overlaps and a start rounded down
+    would take the one before it too. A segment with no length ends a millisecond on, the cut that takes it."""
     typer.echo(f"{heading}:")
     for seg in record.segments or []:
         said = " ".join(seg.text.split())
-        start, end = format_time(seg.start_ms // 1000), format_time(seg.end_ms // 1000)
+        start, end = cuts.exact(seg.start_ms), cuts.exact(max(seg.end_ms, seg.start_ms + 1))
         typer.echo(f"@{start}-{end} {f'{seg.speaker}: {said}' if seg.speaker else said}")
 
 

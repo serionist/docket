@@ -500,8 +500,8 @@ def test_show_prints_a_transcript_once_a_segment_a_line_and_a_time_read_off_a_li
     assert '"segments"' not in shown
     assert '"native"' not in shown
     assert '"text"' not in shown
-    assert "@00:00-00:04 Ben Sample: Morning, Cleo." in shown
-    assert "@12:34-12:41 Cleo Test: My hearing is on Friday, keep it quiet." in shown
+    assert "@0:00-0:04 Ben Sample: Morning, Cleo." in shown
+    assert "@12:34-12:41.500 Cleo Test: My hearing is on Friday, keep it quiet." in shown
     assert "@1:01:40-1:01:45 Thanks, bye." in shown
     line = next(ln for ln in shown.splitlines() if "hearing" in ln)
     cut = line.split()[0].removeprefix("@")
@@ -509,8 +509,8 @@ def test_show_prints_a_transcript_once_a_segment_a_line_and_a_time_read_off_a_li
     classified = capsys.readouterr().out
     assert "after the cuts:" in classified
     assert "hearing" not in classified
-    assert "@12:34-12:41 [cut]" in classified
-    assert "@12:41-12:50 Ben Sample: The pilot starts on the 28th." in classified
+    assert "@12:34-12:41.500 [cut]" in classified
+    assert "@12:41.500-12:50 Ben Sample: The pilot starts on the 28th." in classified
     assert main(["staging", "promote", *v]) == 0
     capsys.readouterr()
     gate.stage(
@@ -523,8 +523,43 @@ def test_show_prints_a_transcript_once_a_segment_a_line_and_a_time_read_off_a_li
     assert main(["staging", "show", "calls:rec-1/transcript", *v]) == 0
     again = capsys.readouterr().out
     assert "cut before, in raw run" in again
-    assert "@12:34-12:41 [cut]" in again
+    assert "@12:34-12:41.500 [cut]" in again
     assert again.count("hearing") == 1
+
+
+def test_a_cut_read_off_a_line_whose_start_is_not_a_whole_second_takes_that_segment_alone(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Back-to-back segments, the private one starting at 760.5 s: a start rounded down to 12:40 would overlap the
+    work line before it, which a cut takes whole. A segment shorter than a second, or with no length, still reads as a
+    cut that takes it."""
+    path, gate = staging_vault(tmp_path)
+    said = [
+        Segment(start_ms=0, end_ms=4_000, speaker="Ben Sample", text="Morning, Cleo."),
+        Segment(start_ms=754_000, end_ms=760_500, speaker="Ben Sample", text="The pilot starts on the 28th."),
+        Segment(start_ms=760_500, end_ms=765_000, speaker="Cleo Test", text="My hearing is on Friday."),
+        Segment(start_ms=765_000, end_ms=770_000, speaker="Ben Sample", text="Good luck with it."),
+        Segment(start_ms=770_100, end_ms=770_900, speaker="Cleo Test", text="Thanks."),
+        Segment(start_ms=771_000, end_ms=771_000, speaker="Ben Sample", text="Right."),
+    ]
+    transcript = make_record(
+        1, rid="calls:rec-1/transcript", source="calls", kind="transcript", segments=said, text=render(said),
+        native={"segments": [s.model_dump() for s in said]},
+    )  # fmt: skip
+    gate.stage([transcript])
+    v = ["--vault", str(path)]
+    assert main(["staging", "show", "calls:rec-1/transcript", *v]) == 0
+    shown = capsys.readouterr().out.splitlines()
+    assert "@12:40.500-12:45 Cleo Test: My hearing is on Friday." in shown
+    assert "@12:50.100-12:50.900 Cleo Test: Thanks." in shown
+    assert "@12:51-12:51.001 Ben Sample: Right." in shown
+    cut = next(line for line in shown if "hearing" in line).split()[0].removeprefix("@")
+    assert main(["staging", "classify", "calls:rec-1/transcript", "work", "--cut", cut, *v]) == 0
+    classified = capsys.readouterr().out
+    assert "@12:34-12:40.500 Ben Sample: The pilot starts on the 28th." in classified
+    assert "@12:40.500-12:45 [cut]" in classified
+    assert "@12:45-12:50 Ben Sample: Good luck with it." in classified
+    assert "hearing" not in classified
 
 
 def test_show_says_why_a_cut_can_t_be_made(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

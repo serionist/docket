@@ -57,7 +57,8 @@ This file holds only what is Plaud's own.
 A page of 100 utterances stays under the 50,000 characters past which Claude Code hands the hook a file note instead
 of the result; a larger `limit` makes long calls too large to keep. The pages are what a classify judges a
 recording by: each utterance's `start_time` and `end_time`, in milliseconds, are the times a cut takes as
-`mm:ss-mm:ss`, so a recording the run fetched needs no `docket staging show`.
+`mm:ss-mm:ss`, the milliseconds kept where they aren't a whole second (`12:40.500`), so a recording the run fetched
+needs no `docket staging show`.
 
 A backfill, for recordings fetched before Docket: first `docket ingest plaud <folder> --vault <vault>` in the user's
 own terminal, which reads the folder's `hold.txt` and lets a run name the folder. Then `run_open("plaud",

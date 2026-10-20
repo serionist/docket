@@ -34,8 +34,7 @@ other sources at the same time, and only the sync's main thread writes the ledge
 
 - One ToolSearch for Docket's tools you will use (`run_open`, `ingest`, `read`, `search`, `ledger`) and the source's
   own, as its skill names them.
-- Read {CONTEXT} whole, with the Read tool: the sync's sources and their windows, the recordings with no note, every
-  open item a line (`A-0012 | kind | who | title | source @M-0003`), the snoozed, the meetings with their points by
+- Read {CONTEXT} whole, with the Read tool: the sync's sources and their windows, every open item a line (`A-0012 | kind | who | title | source @M-0003`), the snoozed, the meetings with their points by
   id, and the streams. It is the ledger as the sync started: find in it, never page through `ledger` for it. `ledger`
   view `show` only for an item whose line can't settle a question, its log or its description.
 
@@ -51,8 +50,9 @@ other sources at the same time, and only the sync's main thread writes the ledge
 
 `docket staging list --source {SOURCE} --state pending --vault {VAULT}` lists what waits; a work source has none.
 Judge each record your run fetched from what it fetched, already in your context: a transcript's pages are its
-segments, each page's `start_time` and `end_time` in milliseconds the times a cut takes, as `mm:ss-mm:ss` (754000 is
-12:34). `docket staging show <rid> --vault {VAULT}` only for a record your run didn't fetch, a new version of one
+segments, each page's `start_time` and `end_time` in milliseconds the times a cut takes, as `mm:ss-mm:ss` with the
+milliseconds kept where they aren't a whole second (754000 is 12:34, 760500 is 12:40.500): a cut takes every segment
+it overlaps, so a start rounded down takes the one before it too. `docket staging show <rid> --vault {VAULT}` only for a record your run didn't fetch, a new version of one
 classified before, whose version in raw it shows, or a cut by characters, whose offsets it numbers; it shows a
 transcript once, a segment a line as `@mm:ss-mm:ss Speaker: text`. Then:
 

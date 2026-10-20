@@ -242,3 +242,14 @@ departed from the plan, and why:
 | the rehearsal case | in `test_sync_recordings.py`, its draft settled and dry-run through `docket ledger batch` | the files and both blocks come from the recordings step there |
 | the perf test | a recording of 1,500 segments, 0.05 s here, the budget 1 s | a recorder's long day |
 | the index | `docket sync recordings` brings the index up to date before it lists, as a search does | a promotion just made is in raw before the index has it; the index is derived, so the pre-approval stands |
+
+## Review, round 1
+
+20 Oct, on 1a7f995: approved, no blocker or major; two minors, both fixed here, and the missing-block test the plan
+listed added.
+
+| Finding | Fixed |
+|---|---|
+| minor: a cut read off a `staging show` line took the work segment before it too, since the line rounded its start down to the whole second and a cut takes every segment it overlaps: Ben's work line at 12:34 to 12:40.5 went with Cleo's private one shown as 12:40 | each time keeps its milliseconds where it isn't a whole second, as `cuts.exact` writes them for `parse` (`@12:40.500-12:45`); a segment with no length ends a millisecond on; `agent.md` and Plaud's `SKILL.md` say the same of a page's times; a test with back-to-back segments, a sub-second one and one with no length, in `test_cli.py` |
+| minor: `agent.md`'s step 1 still said `context.md` lists the recordings with no note | the words are gone |
+| the plan's "a recording with no block said" had no test | `test_sync_recordings.py` holds it |
