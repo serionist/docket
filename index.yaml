@@ -421,7 +421,7 @@ conventions:
     area: python
     enforced_by: .gitattributes (LF); review for the explicit encoding
   - id: CV-0009
-    rule: The line coverage of docket and devkit together stays at or above the one floor in tools/devkit/coverage-floors.json, which only the owner moves
+    rule: Each module's line coverage stays at or above its floor in tools/devkit/coverage-floors.json; a floor rises with the measure and falls only by a decided decision
     area: tests
     enforced_by: "gate: tests (full lane)"
     decision: DR-0747

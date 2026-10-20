@@ -1,15 +1,16 @@
 decisions:
   - id: DR-0748
     title: Tests prove behaviour at the edges, not every line
-    status: decided
+    status: proposed
     at: "2026-10-20"
-    by: Soma Osvay
+    by: Claude (autonomy grant)
     cost: medium
-    sources: ["#266", "20 Oct, in chat"]
-    description: "A test stays when it proves behaviour at an edge or a rule that guards data: the CLI's, the MCP tools' and the pages' contracts, the ledger's data rules, forget, redaction, the never-store lists, the one-way doors (AGENTS.md), the security guards, recovery from a crash or a conflict, and the gate's own checks. Every CLI command group, MCP tool and page route keeps at least one test. A test whose lines other tests run, and which proves another case of a rule a kept test proves, is dropped or merged into that test; a refusal keeps at least one case. A test starts a docket process only where the process is what it tests: its arguments, its streams or its exit. Each PR that drops tests names them with the test that keeps their lines. The owner's words, 20 Oct: it doesn't make sense to test every line."
+    sources: ["#266", DR-0750]
+    description: "How the owner's \"it doesnt make sense to test every line\" (DR-0750) decides which tests go. Whole areas stay, wherever their tests live, found by the file and by the repo's own words in a test's name, its cases and its body: never-store (a list holds, listed, says someone, private), forget and masks, cuts, holds and releases, redaction, the security guards (paths inside and outside, sessions, CSRF and Origin, CSP, nonces and SRI, escaping, a child's environment, network allow-lists, shell and unit quoting, refusals, no names in logs), recovery and integrity (a crash, a failed or missing commit, puts back, locks, fallbacks, clones and rebases), the one-way doors (AGENTS.md), the page contracts and the gate's own checks. Every case of a parametrized guard stays. Every test that is the only runner of a line, on Windows or on Linux, stays. In an OS-sensitive file (DR-0746) every test stays: a test there checks what the system decides, which coverage on one system can't see. Elsewhere a test goes only when a kept test asserts what it asserts and the kept tests run every line it runs, on both systems; its PR names that test. Merging tests that share a setup into one, and turning copies into one parametrized test, are fine. A test starts a docket process only where the process is what it tests: its arguments, its streams, its hash seed or the server. Measured on 20 Oct: 206 of 6,468 tests go, each a case of a parametrized test whose kept case asserts the same, or a test a kept one asserts word for word; coverage stays where it is on both systems."
     binds:
-      - Every CLI command, MCP tool and page route keeps at least one test.
-      - A test that pins a one-way door, forget, redaction, a never-store list, a security guard or a recovery from a crash or a conflict stays.
-      - A PR that drops tests names each beside the kept test that runs its lines.
+      - "Whole areas stay: never-store, forget, cuts and holds, redaction, the security guards, recovery and integrity, the one-way doors, the page contracts, the gate's own checks."
+      - Every case of a parametrized guard, every only runner of a line on any system, and every test in an OS-sensitive file stays.
+      - A test goes only beside a kept test that asserts what it asserts, named in its PR.
     not_chosen:
-      - "Keeping every test and only making them faster: the levers that drop nothing take 60% off CI's test runner-minutes and 28% off this PC's worker-seconds."
+      - "Keeping by test-name patterns and a greedy cover to 95% of statements, the first draft: a review of 75 of its 2,595 drops found about 50 that guarded something no kept test asserts."
+      - "Judging coverage on Windows alone: Windows-only tests looked covered by tests that never ran their lines on Linux."
