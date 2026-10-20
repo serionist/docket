@@ -143,10 +143,11 @@ def test_verify_and_a_put_s_checks_by_place_don_t_grow_with_their_source(
 
 @pytest.mark.perf
 def test_a_read_of_40_locators_by_place_answers_in_under_a_second(big: tuple[Vault, str]) -> None:
-    """An agent's check: forty moments on forty transcripts in one read with more, each read by place and the result
-    measured against the room as the tool measures it, every read kept (DR-0725). Run once before the clock starts."""
+    """An agent's check: forty moments, two on each of twenty transcripts, which the traced vault's 5 MB holds too, in
+    one read with more, each read by place and the result measured against the room as the tool measures it, every
+    read kept (DR-0725). Run once before the clock starts."""
     vault, _ = big
-    asked = [f"r:plaud:of_{n:032x}/transaction@00:10" for n in range(40)]
+    asked = [f"r:plaud:of_{n:032x}/transaction@{at}" for n in range(20) for at in ("00:10", "01:00")]
 
     def fits(result: recall.ReadResult) -> bool:
         return service_calls.size(result, render.reads(result)) <= service_calls.ROOM
