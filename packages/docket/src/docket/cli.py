@@ -288,7 +288,7 @@ def init(
 @sync_app.callback()
 def sync(ctx: typer.Context, vault: VaultOption = None) -> None:
     """Alone, move the vault with its remote: in a repo of its own, fetch and rebase; in a folder, your own git does
-    it. `docket sync start` and `docket sync notes` write the sync folder /docket:sync's agents run from instead."""
+    it. `docket sync start`, `notes` and `reconcile` write the sync folder /docket:sync runs from instead."""
     if ctx.invoked_subcommand is not None:
         # `docket sync --vault <vault> start` names the vault for the subcommand.
         ctx.obj = vault
@@ -328,6 +328,22 @@ def sync_notes(
 
     found = find_vault(vault if vault is not None else ctx.obj)
     say_all(start.note_lines(start.notes(found, sync)))
+
+
+@sync_app.command("reconcile")
+def sync_reconcile(
+    ctx: typer.Context,
+    sync: Annotated[str, typer.Argument(help="The sync: its id, or its folder, as docket sync start printed it.")],
+    vault: VaultOption = None,
+) -> None:
+    """Draft the sync's batch from its blocks into draft.jsonl in the sync folder, by fixed rules, each op the rules
+    can't settle marked unsure beside its block line, its candidates and its alternative; print the report: the RUN
+    lines, the draft's unsure lines, every merge, the lines dropped, the closes skipped, the LEARNED lines and the
+    meetings to prep. Writes nothing else: the batch stays yours, by ledger_batch with file."""
+    from docket.sync import reconcile  # noqa: PLC0415
+
+    found = find_vault(vault if vault is not None else ctx.obj)
+    say_all(reconcile.lines(reconcile.reconcile(found, sync, ledger_views.now())))
 
 
 @vault_app.command("status")

@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from docket import briefs, decisions, index, recall, render
 from docket.briefs import BriefsReport
 from docket.decisions import DecisionsReport
+from docket.errors import DocketError
 from docket.index import SearchResult
 from docket.index.build import ledger_tables
 from docket.ledger import batch, store, views
@@ -29,6 +30,7 @@ from docket.service.speech import SpeechJob
 from docket.service.speech import line as speech_line
 from docket.service.state import Service
 from docket.speech import job
+from docket.sync import folder as sync_folder
 from docket.vault.docstore import PutResult
 
 View = Literal["summary", "raw", "both"]
@@ -157,11 +159,17 @@ async def day(service: Service, room: int) -> ledger_day.DayAnswer:
 
 
 async def ledger_batch(
-    service: Service, ops: list[dict[str, Any]], by: By = "claude", dry_run: bool = False
+    service: Service, ops: list[dict[str, Any]], by: By = "claude", dry_run: bool = False, file: str | None = None
 ) -> tuple[BatchResult, str]:
     """One batch through the writer, one at a time with every other write, via tool (DR-0637, DR-0639); the index is
     brought up to date after a write, without waiting. A refused change refuses the batch, and a dry run lists every
-    refusal it can."""
+    refusal it can. With `file`, the ops are a batch file's in a sync folder of the service's vault, and `ops` is []
+    (DR-0724)."""
+    if file is not None:
+        if ops:
+            raise DocketError("give ops or file, not both: with file, ops is []")
+        root = service.vault().root
+        ops = await asyncio.to_thread(lambda: batch.parse(sync_folder.batch_file(file, root)))
     written = await service.writer.run(lambda: store.write(service.vault(), ops, by=by, via="tool", dry_run=dry_run))
     if written.commit is not None:
         service.updater.poke()

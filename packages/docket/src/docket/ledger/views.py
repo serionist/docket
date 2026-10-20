@@ -26,6 +26,7 @@ too.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import statistics
 from collections import Counter
@@ -147,6 +148,16 @@ BATCH_STREAM_LINES = (
     "SELECT l.id, l.version, coalesce(s.name, l.item), l.kind, l.line FROM stream_log l "
     "LEFT JOIN streams s ON s.id = l.stream WHERE l.batch = ? AND l.line IS NOT NULL"
 )
+# An open item's trail: its source and materials, then the notes of its ops that stand, which only an op with a note
+# holds as a key.
+TRAIL_ITEMS = "SELECT id, source, materials FROM items WHERE state IN ('open', 'snoozed') ORDER BY id"
+TRAIL_NOTES = (
+    "SELECT item, keys FROM item_log WHERE item IN ({marks}) AND undone_by IS NULL AND instr(keys, '\"note\"') > 0 "
+    "ORDER BY item, id, version"
+)
+# A locator in a note's words, its source holding a letter so a time isn't one, and what ends a sentence after one.
+NOTE_LOCATOR = re.compile(r"(?:r:)?(?=[a-z0-9._-]*[a-z])[a-z0-9][a-z0-9._-]*:[^\s\[\]]+")
+TRAILING = ".,;:)"
 
 
 class ItemRow(BaseModel):
@@ -422,6 +433,89 @@ def batch_lines(conn: sqlite3.Connection, batch: str) -> list[BatchLine]:
     rows += conn.execute(BATCH_STREAM_LINES, (batch,)).fetchall()
     rows.sort(key=lambda row: (row[0], row[1]))
     return [BatchLine(ref=ref, kind=kind, line=line) for _, _, ref, kind, line in rows]
+
+
+# -- the sync's reconcile (DR-0723) ------------------------------------------------------------------------------------
+
+
+def trails(conn: sqlite3.Connection) -> dict[str, list[str]]:
+    """Each open or snoozed item's trail, by id: its source, its materials' refs and the locators the notes of its ops
+    that stand name, each once in that order. The sync's reconcile finds the item a later ask in the same thread
+    continues by it."""
+    out: dict[str, list[str]] = {}
+    for item_id, source, materials in conn.execute(TRAIL_ITEMS):
+        out[item_id] = [source, *(m.ref for m in _materials(materials))]
+    for chunk in _chunks(out):
+        sql = TRAIL_NOTES.replace("{marks}", ", ".join("?" * len(chunk)))
+        for item_id, keys in conn.execute(sql, chunk):
+            note = json.loads(keys).get("note")
+            if isinstance(note, str):
+                out[item_id] += note_locators(note)
+    return {item_id: list(dict.fromkeys(trail)) for item_id, trail in out.items()}
+
+
+def note_locators(text: str) -> list[str]:
+    """The locators a note's words name, as `read` takes them: a rid with its anchor, `r:` before it or not, or a doc
+    id; a word that only looks like one names nothing `read` opens, and nothing matches it."""
+    return [found.rstrip(TRAILING) for found in NOTE_LOCATOR.findall(text)]
+
+
+class MeetingFacts(BaseModel):
+    """A meeting as the sync's reconcile matches an ask or a recording to it: its row, read whole, its attendees, its
+    outcome, its materials' refs and its event."""
+
+    row: MeetingRow
+    attendees: list[str]
+    outcome: str | None
+    materials: list[str]
+    event: str | None
+
+
+@dataclass(frozen=True)
+class SyncRead:
+    """What the sync's reconcile reads of the ledger in one go: every item, any state; the open ones' trails; the
+    meetings overlapping its window and those its lines name, by start; each name given (an M- ref, an id or an event)
+    with the id of the meeting it names; the standing points its lines name, whole; the streams."""
+
+    items: list[ItemRow]
+    trails: dict[str, list[str]]
+    meetings: list[MeetingFacts]
+    named: dict[str, str]
+    points: list[PointRow]
+    streams: list[StreamRow]
+
+
+def sync_read(
+    conn: sqlite3.Connection, tz: ZoneInfo, at: datetime, window: tuple[datetime, datetime], *,
+    meetings: Iterable[str] = (), events: Iterable[str] = (), points: Iterable[str] = (),
+) -> SyncRead:  # fmt: skip
+    """The ledger as the sync's reconcile reads it, today the owner's day at `at`; a name that names no meeting, and a
+    point that isn't standing, are left out. It writes nothing."""
+    reader = _Reader(conn, tz, at, chased=False)
+    overlap, values = reader.overlapping(*window)
+    raws = conn.execute(f"{MEETINGS_WHOLE} WHERE {overlap}", values).fetchall()
+    named: dict[str, str] = {}
+    for ref in dict.fromkeys(meetings):
+        try:
+            named[ref] = reader.meeting_named(ref, "show")[0]
+        except DocketError:
+            continue
+    named |= dict(reader.select("SELECT event, id FROM meetings WHERE event IN ({marks})", events))
+    seen = {raw[0] for raw in raws}
+    raws += reader.select(MEETINGS_WHOLE + " WHERE id IN ({marks})", set(named.values()) - seen)
+    rows = reader.meeting_rows([raw[:10] for raw in raws], whole=True)
+    facts = [
+        MeetingFacts(row=row, attendees=json.loads(raw[10]), outcome=raw[15],
+                     materials=[m.ref for m in _materials(raw[16])], event=raw[13])
+        for raw, row in zip(raws, rows, strict=True)
+    ]  # fmt: skip
+    facts.sort(key=lambda f: (f.row.start, f.row.id))
+    standing = dict(reader.select("SELECT id, meeting FROM points WHERE id IN ({marks}) AND n IS NOT NULL", points))
+    holders = reader.meeting_rows(reader.select(MEETINGS + " WHERE id IN ({marks})", set(standing.values())))
+    return SyncRead(
+        items=reader.items(whole=True), trails=trails(conn), meetings=facts, named=named,
+        points=[p for p in reader.point_rows(holders, whole=True) if p.id in standing], streams=reader.stream_rows(),
+    )  # fmt: skip
 
 
 def cut(text: str, width: int = TITLE) -> str:
@@ -1107,7 +1201,7 @@ def context_lines(found: LedgerRead) -> list[str]:
     points = _points_by_meeting(found)
     out.append(f"meetings {_window(found)}, or with an open point ({len(found.meetings)})")
     for m in found.meetings:
-        out.append(_short_meeting(m, today))
+        out.append(short_meeting(m, today))
         out += [
             f"  #{p.n} {p.state} | {as_field(p.text)}" + (f" -> {p.item}" if p.item else "") + f" | {p.id}"
             for p in points.get(m.ref, [])
@@ -1131,7 +1225,7 @@ def short_item(item: ItemRow) -> str:
     return text + (f" @{item.meeting}" if item.meeting else "")
 
 
-def _short_meeting(meeting: MeetingRow, today: date) -> str:
+def short_meeting(meeting: MeetingRow, today: date) -> str:
     """`M-0040 | 10-20 10:00-10:30 | Pilot sync | Ada Example`, then `stream pilot` and a response that changes
     whether the owner goes, each a field of its own when there is one."""
     start, end = meeting.start, meeting.end

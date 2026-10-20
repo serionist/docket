@@ -5,6 +5,8 @@ A start removes the folders over 7 days old by their id's time. The forget's app
 a list, removes the folders started before its newest line, since a block or a prompt can quote what it forgets: one
 listing of the folder, so a removal a file in use stopped is tried again, and a sync started after the forget stays.
 Only a folder named by a sync id is ever removed, never a link. Imports stay light, as the apply reaches this module.
+
+The service reads a batch file for `ledger_batch` by `file` only from a sync folder of its own vault (DR-0724).
 """
 
 from __future__ import annotations
@@ -32,6 +34,8 @@ AGENTS = "agents"
 BLOCKS = "blocks"
 NOTES = "notes"
 SCHEMA_VERSION = 1
+# A batch file the service reads: a sync's draft is a few hundred lines, so far less.
+BATCH_BYTES = 4 * 2**20
 
 
 class Source(BaseModel):
@@ -144,3 +148,32 @@ def find(sync: str, vault_root: Path) -> tuple[Path, Info]:
     if not _same(Path(info.vault), vault_root):
         raise DocketError(f"{name} is a sync of {info.vault}, not of {vault_root}")
     return folder, info
+
+
+def batch_file(given: str, vault_root: Path) -> str:
+    """The text of the batch file `ledger_batch` takes by `file` (DR-0724): an absolute path to a file in a sync folder
+    of this machine whose `sync.json` names this vault, where it resolves, links followed, and at most 4 MB of UTF-8.
+    Any other path is refused, as `media_put` reads only the media folders."""
+    path = Path(given)
+    if not path.is_absolute():
+        raise DocketError(f"file is the batch file's absolute path, not {given!r}")
+    top = root()
+    outside = DocketError(f"{given} isn't in a sync folder; the service reads a batch file only from one, under {top}")
+    if _linked(top):
+        raise outside
+    try:
+        parts = path.resolve().relative_to(top.resolve()).parts
+    except ValueError:
+        raise outside from None
+    if len(parts) < 2 or ID.match(parts[0]) is None:
+        raise outside
+    folder, _ = find(parts[0], vault_root)
+    file = folder.joinpath(*parts[1:])
+    if not file.is_file():
+        raise DocketError(f"no batch file {given}")
+    if file.stat().st_size > BATCH_BYTES:
+        raise DocketError(f"{given} is over {BATCH_BYTES:,} bytes, too big for a batch file")
+    try:
+        return file.read_bytes().decode("utf-8")
+    except UnicodeDecodeError:
+        raise DocketError(f"{given} isn't UTF-8; write the batch as UTF-8") from None

@@ -354,15 +354,25 @@ def create_mcp(service: Service) -> MCPServer:
             "point_set (point: its n as the batch began, or its id), keep, point_item, rollover. Streams: stream "
             "(fields). item is an A- or M- number, an id or a stream's name; as on add, point_item, meeting and point "
             "names what it made, for a later op's $name. Any op takes by and note. A dry run writes nothing and lists "
-            "every refusal."
+            "every refusal. file names a batch file in a sync folder instead, such as the draft docket sync reconcile "
+            "writes, with ops []."
         ),
     )
     async def ledger_batch(  # pyright: ignore[reportUnusedFunction]
-        ops: Annotated[list[dict[str, Any]], Field(description="The changes, in order.")],
+        ops: Annotated[list[dict[str, Any]], Field(description="The changes, in order; [] with file.")],
         by: Annotated[By, Field(description="Who decided, unless an op says: user, claude or sync.")] = "claude",
         dry_run: Annotated[bool, Field(description="Check every change and write nothing.")] = False,
+        file: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Instead of ops: a batch file's absolute path in a sync folder of this vault, JSON lines or a "
+                    "JSON array, # lines skipped."
+                )
+            ),
+        ] = None,
     ) -> Annotated[CallToolResult, BatchResult]:
-        found, text = await _guarded(calls.ledger_batch(service, ops, by=by, dry_run=dry_run))
+        found, text = await _guarded(calls.ledger_batch(service, ops, by=by, dry_run=dry_run, file=file))
         return result(found, text)
 
     return server

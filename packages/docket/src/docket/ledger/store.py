@@ -1898,13 +1898,13 @@ class _Batch(_Write):
     def look_alikes(self, fields: Mapping[str, str | None]) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
         """todo.py's look-alikes of an add's fields as written, as (id, title): the open items with (its source or its
         who) and a title sharing 60% of the shorter one's long words; then the other open items with its source."""
-        words, who, source = _title_words(str(fields["title"])), str(fields["who"]).lower(), fields["source"]
+        words, who, source = title_words(str(fields["title"])), str(fields["who"]).lower(), fields["source"]
         likely: list[tuple[str, str]] = []
         same: list[tuple[str, str]] = []
         for item_id, (other, their_who, their_source) in sorted(self.open_rows().items()):
             if their_source != source and their_who.lower() != who:
                 continue
-            if _alike(words, _title_words(other)):
+            if alike(words, title_words(other)):
                 likely.append((item_id, other))
             elif their_source == source:
                 same.append((item_id, other))
@@ -2064,11 +2064,11 @@ def _cut(text: str, width: int) -> str:
     return text if len(text) <= width else text[: width - 1] + "…"
 
 
-def _title_words(text: str) -> set[str]:
+def title_words(text: str) -> set[str]:
     return {w for w in WORD_RUN.findall(text.lower()) if len(w) >= ALIKE_LETTERS}
 
 
-def _alike(words: set[str], other: set[str]) -> bool:
+def alike(words: set[str], other: set[str]) -> bool:
     """todo.py's: both have words, and they share at least 60% of the shorter one's."""
     return bool(words and other) and len(words & other) / min(len(words), len(other)) >= ALIKE_SHARE
 

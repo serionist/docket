@@ -4,6 +4,7 @@ import asyncio
 import json
 import shutil
 from collections.abc import Awaitable, Callable, Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,7 @@ from docket.media.put import drop_folder
 from docket.service.app import create_app
 from docket.service.state import Service, Settings
 from docket.service.tools import create_mcp
+from docket.sync import folder as sync_folder
 from docket.vault.docstore import DocStore
 
 TOKEN = "t0ken-for-tests-only"  # noqa: S105 - an invented token
@@ -357,6 +359,73 @@ def test_a_refused_change_is_a_tool_error_and_a_dry_run_lists_every_refusal(serv
     assert [c["refused"] for c in dry.structured_content["changes"]] == ["no item A-0009", "no item A-0010"]
     assert call(service, "ledger_batch", {"ops": [LEDGER_ADD], "by": "me"}).is_error
     assert call(service, "ledger_batch", {"ops": ["add"]}).is_error
+
+
+def a_sync_folder(vault: Path) -> Path:
+    """A sync folder of a vault, its sync.json as docket sync start writes it."""
+    made = datetime.now(UTC)
+    sync_id = sync_folder.new_id(made)
+    path = sync_folder.make(sync_id)
+    info = sync_folder.Info(sync=sync_id, vault=str(vault), made=made, today=made.date(), zone="Europe/Budapest",
+                            owed_since="the run's window", sources=[], docket="0.0.0")  # fmt: skip
+    (path / sync_folder.INFO).write_text(info.model_dump_json(), encoding="utf-8")
+    return path
+
+
+def test_ledger_batch_takes_a_file_from_a_sync_folder_of_its_vault_with_ops_empty(service: Service) -> None:
+    """The dry run and the write by file, as the sync writes its draft (DR-0724); an op left unsure is refused."""
+    draft = a_sync_folder(service.vault().root) / "draft.jsonl"
+    draft.write_text(f"# docket sync reconcile: 1 op\n{json.dumps(LEDGER_ADD)}\n", encoding="utf-8")
+    dry = call(service, "ledger_batch", {"ops": [], "file": str(draft), "by": "sync", "dry_run": True})
+    assert not dry.is_error, text_of(dry)
+    assert text_of(dry).splitlines()[-1] == "dry run: 1 op(s) would be written; nothing written"
+    done = call(service, "ledger_batch", {"ops": [], "file": str(draft), "by": "sync"})
+    assert not done.is_error and done.structured_content is not None, text_of(done)
+    assert done.structured_content["changes"][0]["wrote"] == ["A-0001 added: Send Ada the dates"]
+    assert [(line.op.op, line.op.by, line.op.via) for line in ops.read_all(service.vault().root).lines] == [
+        ("add", "sync", "tool")
+    ]
+    draft.write_text(json.dumps({**LEDGER_ADD, "unsure": "a look-alike"}) + "\n", encoding="utf-8")
+    left = call(service, "ledger_batch", {"ops": [], "file": str(draft), "dry_run": True})
+    assert left.structured_content is not None
+    assert left.structured_content["changes"][0]["refused"].endswith("not unsure")
+
+
+def test_ledger_batch_reads_no_file_outside_a_sync_folder_of_its_vault(
+    service: Service, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = service.vault().root
+    folder = a_sync_folder(root)
+    draft = folder / "draft.jsonl"
+    draft.write_text(json.dumps(LEDGER_ADD) + "\n", encoding="utf-8")
+    outside = tmp_path / "draft.jsonl"
+    outside.write_text(json.dumps(LEDGER_ADD) + "\n", encoding="utf-8")
+    loose = sync_folder.root() / "notes-of-mine" / "draft.jsonl"
+    loose.parent.mkdir()
+    loose.write_text(json.dumps(LEDGER_ADD) + "\n", encoding="utf-8")
+    other = a_sync_folder(tmp_path / "another-vault") / "draft.jsonl"
+    other.write_text(json.dumps(LEDGER_ADD) + "\n", encoding="utf-8")
+    (folder / "latin1.jsonl").write_bytes(b'{"op": "log", "item": "A-0001", "note": "caf\xe9"}\n')
+    refused = {
+        str(draft): ("give ops or file, not both", [LEDGER_ADD]),
+        "draft.jsonl": ("file is the batch file's absolute path, not 'draft.jsonl'", []),
+        str(outside): ("isn't in a sync folder; the service reads a batch file only from one", []),
+        str(loose): ("isn't in a sync folder", []),
+        str(folder): ("isn't in a sync folder", []),
+        str(folder / "nothing.jsonl"): ("no batch file", []),
+        str(other): (f"is a sync of {tmp_path / 'another-vault'}, not of {root}", []),
+        str(folder / "latin1.jsonl"): ("isn't UTF-8; write the batch as UTF-8", []),
+    }
+    for given, (said, batch) in refused.items():
+        answer = call(service, "ledger_batch", {"ops": batch, "file": given, "dry_run": True})
+        assert answer.is_error and said in text_of(answer), (given, text_of(answer))
+    monkeypatch.setattr(sync_folder, "BATCH_BYTES", 10)
+    assert "is over 10 bytes, too big for a batch file" in text_of(
+        call(service, "ledger_batch", {"ops": [], "file": str(draft)})
+    )
+    monkeypatch.setattr(sync_folder, "_linked", lambda path: path == sync_folder.root())
+    assert "isn't in a sync folder" in text_of(call(service, "ledger_batch", {"ops": [], "file": str(draft)}))
+    assert ops.read_all(root).lines == ()
 
 
 def test_ledger_reads_what_ledger_batch_wrote_as_lines_and_rows(service: Service) -> None:
