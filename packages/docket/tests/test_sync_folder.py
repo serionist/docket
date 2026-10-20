@@ -261,7 +261,7 @@ def test_nothing_is_written_through_a_linked_folder_of_sync_folders(
     monkeypatch.setattr(folder, "_linked", lambda path: path == folder.root())
     with pytest.raises(DocketError, match="is a link; Docket writes sync folders only into a plain folder"):
         start.start(vault, [], NOW)
-    assert folder.clear(NOW, every=True) == 0
+    assert folder.clear_before(NOW) == 0
 
 
 # -- finding a sync ----------------------------------------------------------------------------------------------------
@@ -392,13 +392,28 @@ def test_the_block_reads_each_label_s_fields_and_says_a_shape_it_doesn_t_take() 
     assert lines[1].fields == ["Ben Sample", "slack:C0PILOT/1", "2026-10-19 11:05", "the dates", "not sent", "today"]
 
 
+def test_a_block_field_whose_bar_moved_a_field_along_is_said() -> None:
+    """An ask that ended or began with `|`: the line splits into a field starting with it, and its count still fits."""
+    owed, waiting = block.parse(
+        "OWED:     Ben Sample | slack:C0PILOT/1 | 2026-10-19 | pick A | | not yet | today\n"
+        "WAITING:  Cleo Test | outlook:AAMkADquote1 | 2026-10-19 | the quote | pilot | - |\n"
+    )
+    assert owed.fields[4] == "| not yet"
+    assert owed.problem == "OWED's field 5 starts or ends with |: a field holds no bar"
+    assert waiting.problem == "WAITING's field 6 starts or ends with |: a field holds no bar"
+
+
 def test_a_prompt_is_filled_in_one_pass_so_a_path_holding_a_placeholder_s_name_stays() -> None:
     filled = start.fill("vault {VAULT}, block {BLOCK}, {OTHER}", {"VAULT": "/v/{BLOCK}", "BLOCK": "/b.txt"})
     assert filled == "vault /v/{BLOCK}, block /b.txt, {OTHER}"
 
 
-def test_a_short_form_field_never_holds_the_split_even_in_a_run_of_them() -> None:
+def test_a_short_form_field_holds_no_bar_inside_or_at_an_end() -> None:
     assert views.as_field("the quote | | the\n sensors") == "the quote / / the sensors"
+    title = views.as_field("Send Ben the pilot dates |")
+    assert title == "Send Ben the pilot dates /"
+    fields = f"A-0001 | reply | Ben Sample | {title} | slack:C0PILOT/1".split(" | ")
+    assert fields[3:] == ["Send Ben the pilot dates /", "slack:C0PILOT/1"]
 
 
 # -- the commands ------------------------------------------------------------------------------------------------------

@@ -1,9 +1,10 @@
 """Where sync folders live (DR-0720): `<state>/sync/<sync id>/`, beside the service's pid file and `docket open`'s
 redirect page, never in the vault and never committed. The id is `sync-<yyyymmddThhmmss>-<8 hex>`, its time in UTC.
 
-A start removes the folders over 7 days old by their id's time; a forget applied on this machine removes all of them,
-since a block or a prompt can quote what it forgets. Only a folder named by a sync id is ever removed, never a link.
-Imports stay light: the forget's apply reaches this module on every gate call that applies a new line.
+A start removes the folders over 7 days old by their id's time. The forget's apply, on every gate call while there is
+a list, removes the folders started before its newest line, since a block or a prompt can quote what it forgets: one
+listing of the folder, so a removal a file in use stopped is tried again, and a sync started after the forget stays.
+Only a folder named by a sync id is ever removed, never a link. Imports stay light, as the apply reaches this module.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import os
 import re
 import secrets
 import shutil
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -82,13 +84,24 @@ def make(sync_id: str) -> Path:
     return folder
 
 
-def clear(now: datetime, *, every: bool = False) -> int:
-    """Remove the sync folders over 7 days old by their id's time, or with `every` all of them; how many went. A name
-    that isn't a sync id and a link are left alone, and so is a folder a file in use keeps, until the next try."""
+def clear(now: datetime) -> int:
+    """Remove the sync folders over 7 days old by their id's time; how many went."""
+    return clear_made(lambda made: now - made > KEEP)
+
+
+def clear_before(at: datetime) -> int:
+    """Remove the sync folders started before `at`, a forget's time, or in its second, which their ids can't tell
+    apart; how many went. A folder started later stays."""
+    return clear_made(lambda made: made <= at)
+
+
+def clear_made(gone: Callable[[datetime], bool]) -> int:
+    """Remove the sync folders whose id's time `gone` takes; how many went. A name that isn't a sync id and a link are
+    left alone, and so is a folder a file in use keeps, until the next try."""
     top = root()
     if _linked(top) or not top.is_dir():
         return 0
-    gone = 0
+    removed = 0
     for path in sorted(top.iterdir()):
         found = ID.match(path.name)
         if found is None or _linked(path) or not path.is_dir():
@@ -98,14 +111,14 @@ def clear(now: datetime, *, every: bool = False) -> int:
         except ValueError:
             # Digits that aren't a time: not a name a start gives.
             continue
-        if not every and now - made <= KEEP:
+        if not gone(made):
             continue
         try:
             shutil.rmtree(path)
         except OSError:
             continue
-        gone += 1
-    return gone
+        removed += 1
+    return removed
 
 
 def _same(a: Path, b: Path) -> bool:

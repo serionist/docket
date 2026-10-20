@@ -43,7 +43,8 @@ class Line:
 
 def parse(text: str) -> list[Line]:
     """The block's lines in order. A line with too few or too many fields for its label keeps its fields and says so;
-    a field that held ` | ` splits, which shows as too many."""
+    a field that held ` | ` splits, which shows as too many, and one that ended or began with `|` leaves a field
+    starting or ending with it, which is said too: its bar moved a field along."""
     out: list[Line] = []
     for n, raw in enumerate(text.splitlines(), start=1):
         found = _LINE.match(raw.strip())
@@ -52,9 +53,12 @@ def parse(text: str) -> list[Line]:
         label = found["label"]
         fields = [field.strip() for field in found["rest"].split(SPLIT)]
         least, most = FIELDS[label]
+        barred = [k for k, field in enumerate(fields, start=1) if field.startswith("|") or field.endswith("|")]
         problem = None
         if not least <= len(fields) <= most:
             took = str(least) if least == most else f"{least} to {most}"
             problem = f"{label} takes {took} fields, not {len(fields)}"
+        elif barred:
+            problem = f"{label}'s field {barred[0]} starts or ends with |: a field holds no bar"
         out.append(Line(label=label, fields=fields, n=n, problem=problem))
     return out

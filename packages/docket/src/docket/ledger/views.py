@@ -1096,7 +1096,7 @@ def _meetings_with_points(found: LedgerRead) -> list[str]:
 def context_lines(found: LedgerRead) -> list[str]:
     """A snapshot in the sync folder's short form, a line a row, its fields split by ` | `: each open item, a snooze
     whose day has come among them, `A-0012 | kind | who | title | source @M-0003`; the snoozed with their day; each
-    meeting with its standing points by id; the streams. A field's own ` | ` reads ` / `, so a line splits as it
+    meeting with its standing points by id; the streams. A field's own `|` reads `/`, so a line splits as it
     reads."""
     today = found.today
     awake = [i for i in found.items if i.state == "open" or i.woke]
@@ -1120,11 +1120,9 @@ def context_lines(found: LedgerRead) -> list[str]:
 
 
 def as_field(text: str) -> str:
-    """Text as one field of a short-form line: on one line, its own ` | ` read ` / `, a run of them too."""
-    one = " ".join(text.split())
-    while " | " in one:
-        one = one.replace(" | ", " / ")
-    return one
+    """Text as one field of a short-form line: on one line, each `|` read `/`, so no bar, inside or at an end, moves
+    into the next field."""
+    return " ".join(text.split()).replace("|", "/")
 
 
 def short_item(item: ItemRow) -> str:

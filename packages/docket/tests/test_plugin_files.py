@@ -359,6 +359,17 @@ def test_the_two_name_doors_hold_the_skill_s_name_and_sync_md_beside_skill_md() 
     assert "names the source's `SKILL.md`: read it, then `sync.md` beside it" in sync_texts()["agent.md"]
 
 
+def test_the_readme_allows_the_sync_folder_by_read_and_edit_rules() -> None:
+    """Claude Code checks a file's write against Edit rules and never Write ones, so a Write rule would leave every
+    block's write asking (DR-0720): a Read and an Edit rule per system, each on the folder of sync folders."""
+    readme = (PLUGIN / "README.md").read_text(encoding="utf-8")
+    section = readme[readme.index("## The sync") : readme.index("## The tasks")]
+    assert "Write(" not in section
+    for tool in ("Read", "Edit"):
+        found = re.findall(rf"`{tool}\((~/[^)]*)\)`", section)
+        assert len(found) == 3 and all(path.endswith("/docket/sync/**") for path in found), tool
+
+
 POINT = "01M4QJ9FZ000X93GNMW1YNY5N8"
 
 

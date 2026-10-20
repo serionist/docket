@@ -463,7 +463,7 @@ forget: an older one reads what a merge brings back until a newer one's gate cal
   forgets on your OS prompt's yes, or a code typed back where the machine has none.
 - A forget writes `state/forgotten.jsonl`, hashes and op ids only, and commits it first. Every read, search and gate call obeys it
   at once, on every clone after its pull; the next gate call there takes the lines, audio and keys out too, and removes
-  that machine's sync folders, whose blocks can quote it.
+  that machine's sync folders started before it, whose blocks can quote it.
 - A folder file is taken by its content: move it out of the folder too, since a forget never writes there.
 - A confirmed or rejected decision whose evidence was all forgotten keeps its title, and says so.
 - A ledger op the list names keeps its place, number and history, and reads `[forgotten]` where its words were, in

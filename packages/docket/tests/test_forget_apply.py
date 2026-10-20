@@ -8,13 +8,14 @@ machine's op file, a twin a merge brought back dropped (DR-0693, DR-0695). Lines
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from docket_testkit import copied_with_seals, empty_vault, git, make_config, make_record, sh
-from forget_kit import forget, line, stored
+from forget_kit import KEY, forget, line, stored
 from ledger_kit import ADD_FIELDS, NOW, write_ops
 from media_kit import CALL, POLISHED, audio, call, in_raw, media_vault
 
@@ -148,20 +149,63 @@ def test_staged_media_and_versions_of_the_family_go_with_their_keys(tmp_path: Pa
     assert rid_hash(CALL) in media_staged.read_withheld(vault.root)
 
 
-def test_a_forget_applied_removes_this_machine_s_sync_folders(vault: Vault) -> None:
-    """A block or a prompt in a sync folder can quote what the list takes (DR-0720): a new line's apply removes every
-    one, young ones too; an apply with nothing new leaves the next sync's alone."""
-    top = sync_folder.root()
-    folders = [top / "sync-20261020T071500-0a0b0c0d", top / "sync-20261019T071500-0a0b0c0e"]
-    for path in folders:
+# The forget's line is written at 09:14:02 on 18 October: a sync started before it, in its second, and after it.
+BEFORE, SAME_SECOND, AFTER = (f"sync-{stamp}-0a0b0c0d" for stamp in ("20261018T091000", "20261018T091402",
+                                                                       "20261018T091500"))  # fmt: skip
+
+
+def sync_folders(*names: str) -> list[Path]:
+    """Sync folders as a start leaves them, each with a block that quotes the call."""
+    made = [sync_folder.root() / name for name in names]
+    for path in made:
         (path / "blocks").mkdir(parents=True)
         (path / "blocks" / "plaud.txt").write_text(f"NOTES:    recording-note:2026-10-14-a-call | {CALL}\n", "utf-8")
+    return made
+
+
+def test_a_forget_applied_removes_the_sync_folders_started_before_it(vault: Vault) -> None:
+    """A block or a prompt in a sync folder can quote what the list takes (DR-0720): the apply removes each folder
+    started before the newest line or in its second, which an id can't tell apart, and leaves a later sync alone, on
+    this call and every next one."""
+    before, same, after = sync_folders(BEFORE, SAME_SECOND, AFTER)
+    # A line that takes keys alone takes nothing a block can quote.
+    assert forgotten.fold([line(keys=[KEY])]).last is None
     forget_call(vault)
     done = forget_apply.apply(vault, KeyStore(vault.home), first=True)
-    assert done.sync_folders == 2 and not any(path.exists() for path in folders)
-    folders[0].mkdir()
+    assert done.sync_folders == 2 and not before.exists() and not same.exists() and after.is_dir()
     assert forget_apply.apply(vault, KeyStore(vault.home)).sync_folders == 0
-    assert folders[0].is_dir()
+    assert after.is_dir()
+
+
+def test_a_sync_folder_a_file_in_use_kept_goes_at_the_next_gate_call(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (held,) = sync_folders(BEFORE)
+
+    def in_use(path: Path) -> None:
+        raise PermissionError(f"{path} is open in another program")
+
+    forget_call(vault)
+    with monkeypatch.context() as patched:
+        patched.setattr(shutil, "rmtree", in_use)
+        done = forget_apply.apply(vault, KeyStore(vault.home), first=True)
+    assert done.sync_folders == 0 and held.is_dir()
+    # The list didn't move, and the folder is still tried.
+    assert forget_apply.apply(vault, KeyStore(vault.home)).sync_folders == 1
+    assert not held.exists()
+
+
+def test_while_the_tree_waits_a_sync_started_after_the_forget_stays(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (before,) = sync_folders(BEFORE)
+    forget_call(vault)
+    monkeypatch.setattr(Vault, "blocked", lambda _self: "a rebase is under way")
+    first = forget_apply.apply(vault, KeyStore(vault.home))
+    assert first.waits is not None and first.sync_folders == 1 and not before.exists()
+    (after,) = sync_folders(AFTER)
+    second = forget_apply.apply(vault, KeyStore(vault.home))
+    assert second.waits is not None and second.sync_folders == 0 and after.is_dir()
 
 
 def test_this_machine_s_cursor_entries_on_a_forgotten_rid_go(vault: Vault) -> None:

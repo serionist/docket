@@ -46,7 +46,7 @@ with you.
 
 | Part | What |
 |---|---|
-| the sync folder | `docket sync start` writes it in Docket's state folder, never in the vault: `context.md`, the ledger as the agents read it, an item a line, and each agent's prompt; it goes 7 days after its start, or at your next forget |
+| the sync folder | `docket sync start` writes it in Docket's state folder, never in the vault: `context.md`, the ledger as the agents read it, an item a line, and each agent's prompt; it goes 7 days after its start, or once a forget made after it is applied |
 | the agents | one per source, side by side, each from its prompt file: it opens a run, follows the source's `SKILL.md` and its `sync.md`, classifies the plainly work or plainly private records of a mixed source, promotes its own, reads its recordings whole, and writes a block of what you owe and await, what closed, invites, minutes and outcomes to the sync folder |
 | the notes | `docket sync notes` writes a prompt per recording note the blocks name; an agent each writes the note in the background, and the sync never waits for them |
 | the reconcile | one batch, dry run first: closes on a locator that shows it, asks logged or added (new ones untriaged), meetings set and linked, minutes, rollover, proposed points for the coming week's meetings, streams, archive |
@@ -62,14 +62,15 @@ with you.
 - The agents' runs, classifies, promotions and notes and the batch ask unless your permission rules allow them. The
   skill pre-approves only reads, `ledger`, `search`, `read`, `verify`, `briefs`, `decisions`, `docket ledger day`,
   `docket staging list` and `show`, and `docket sync start` and `notes`, which write only the sync folder.
-- The sync folder is outside your project, so each agent's Read and Write there asks unless you allow them, and the
-  note agents run in the background, where a prompt waits for nobody. Allow these, with your system's folder:
+- The sync folder is outside your project, so each agent's read and write there asks unless you allow them, and the
+  note agents run in the background, where a prompt waits for nobody. Claude Code checks a file's write against
+  `Edit` rules, never `Write`. Allow these, with your system's folder:
 
   | System | The rules |
   |---|---|
-  | Linux | `Read(~/.local/state/docket/sync/**)`, `Write(~/.local/state/docket/sync/**)` |
-  | macOS | `Read(~/Library/Application Support/docket/sync/**)`, `Write(~/Library/Application Support/docket/sync/**)` |
-  | Windows | `Read(~/AppData/Local/docket/sync/**)`, `Write(~/AppData/Local/docket/sync/**)` |
+  | Linux | `Read(~/.local/state/docket/sync/**)`, `Edit(~/.local/state/docket/sync/**)` |
+  | macOS | `Read(~/Library/Application Support/docket/sync/**)`, `Edit(~/Library/Application Support/docket/sync/**)` |
+  | Windows | `Read(~/AppData/Local/docket/sync/**)`, `Edit(~/AppData/Local/docket/sync/**)` |
 
   and `mcp__plugin_docket_docket__doc_put`, `mcp__plugin_docket_docket__read`, `mcp__plugin_docket_docket__search`,
   `mcp__plugin_docket_docket__ledger` and `mcp__plugin_docket_docket__verify` for the note agents. A `DOCKET_STATE_DIR`

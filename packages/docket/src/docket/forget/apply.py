@@ -6,7 +6,7 @@ the next call. Until then every reader skips what the list takes.
 | Part | What goes |
 |---|---|
 | keys | every listed key this clone holds |
-| sync folders | every one this machine keeps, since a block or a prompt can quote what the list takes (DR-0720) |
+| sync folders | each one this machine started before the newest line, which its blocks can quote (DR-0720) |
 | staging | each staged version the list takes, with the media on it and the rids it sits under; a whole rid withheld |
 | raw | each listed line, out of the run files in the tree; a file left with no line stays, empty |
 | media | each stored file on a rid the list's `media` holds or forgotten whole, or whose key is listed, and its keys |
@@ -679,8 +679,10 @@ def _apply(vault: Vault, keys: KeyStore, listed: Forgotten, key: str, *, first: 
         done = Applied()
         done.keys = drop_keys(listed, keys)
         _reached("keys")
+        if listed.last is not None:
+            # On every call, one listing: a removal a file in use stopped is tried again, and a later sync stays.
+            done.sync_folders = sync_folder.clear_before(listed.last)
         if moved:
-            done.sync_folders = sync_folder.clear(datetime.now(UTC), every=True)
             done.staged, done.staged_media = _staging(vault, keys, listed)
         _reached("staging")
         # Each stamp is taken before its file is read, HEAD's too, so what a pull changes meanwhile is read again on the
