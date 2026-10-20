@@ -364,7 +364,12 @@ def test_a_new_item_adds_and_a_look_alike_asks_first(browser: Browser, day_servi
     assert axe(page) == []
     dialog.get_by_role("button", name="Add anyway").click()
     page.wait_for_url("**/ledger?open=A-0008")
-    expect(page.get_by_label("Title")).to_have_value("Send Ada the dates again")
+    # The form closes, emptied, and the new item opens beside the list.
+    expect(dialog).to_have_count(0)
+    expect(panel(page).get_by_label("Title")).to_have_value("Send Ada the dates again")
+    page.keyboard.press("Escape")
+    page.keyboard.press("n")
+    expect(dialog.get_by_label("Title")).to_have_value("")
     # The look-alike's 400, as the console logs it, is the one failure the page expects.
     assert [e for e in errors if "400" not in e] == []
 
