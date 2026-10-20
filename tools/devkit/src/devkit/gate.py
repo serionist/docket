@@ -560,7 +560,9 @@ STEPS = [
     Step("secrets", ("quick", "full"), "gitleaks", step_secrets),
     Step("harness", ("quick", "full"), "AGENTS.md, skills, plugin manifests", step_harness),
     Step("web", ("quick", "full"), "the web app's build matches its sources; openapi.json its routes", step_web),
-    Step("tests", ("full", "os"), "pytest; coverage floors in the full lane, the timed tests alone in os", step_tests),
+    Step(
+        "tests", ("full", "os"), "pytest; floors in full; in os what differs by system, timed tests alone", step_tests
+    ),
     Step("models", ("models",), "the question set with the embedder, against its floors", step_models),
     Step("floors", ("coverage",), "the shares' coverage data combined, against the floors", step_floors),
 ]
