@@ -411,6 +411,8 @@ def test_the_date_picker_stays_on_screen_a_sheet_on_a_phone_and_a_capped_popover
     short.locator("#f-A-0003-due").click()
     month = short.get_by_role("dialog", name="Due")
     expect(month).to_have_attribute("data-slot", "popover-content")
+    # Radix draws the popover off screen until it has measured where it goes, so the box is read once it has.
+    expect(month).to_be_in_viewport(ratio=1)
     assert inside(month.bounding_box(), 380)
     # The month is taller than the room it has here, so it scrolls within the window rather than past it.
     scrolls = "(el => el.scrollHeight > el.clientHeight && getComputedStyle(el).overflowY === 'auto')"
