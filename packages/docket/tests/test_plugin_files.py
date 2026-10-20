@@ -316,17 +316,23 @@ def test_sync_names_commands_options_ops_views_and_tools_docket_has() -> None:
 
 
 def test_the_agents_check_in_one_read_and_the_prep_asks_one_suggest() -> None:
-    """An agent checks every locator of its block in one read with more, and the prep asks suggest once for all its
-    meetings with refs, each naming what comes back past the room (DR-0725)."""
+    """An agent checks every locator of its block in one read with more, a recording at its moment and a doc by its
+    summary, and the prep asks suggest once for all its meetings with refs; each asks again from what `later` lists
+    until it is empty, never from the locator it already read (DR-0725)."""
     texts = {name: " ".join(text.split()) for name, text in sync_texts().items()}
     check = texts["agent.md"].split("## 6. Check", 1)[1].split("## 7.", 1)[0]
     assert re.findall(r"\bread\(([^)]*)\)", check) == [
         'locator="<the first>", more=["<the second>", "<the third>"], view="raw"'
     ]
     assert "in one call" in check and "past the room" in check
+    assert "A recording's line is checked at its moment (`r:<rid>@mm:ss`)" in check
+    assert "a doc id is checked in a read of its own, with the default summary view" in check
+    again = "its first as `locator` and the rest in `more`, until `later` is empty"
+    assert again in check and again in " ".join(tasks_text().split())
     prep = texts["SKILL.md"].split("2. Prep, at the `# prep` line", 1)[1].split("3. `ledger_batch", 1)[0]
     assert re.findall(r"\bledger\(([^)]*)\)", prep) == ['view="suggest", refs=["M-0002", "M-0003"]']
-    assert "one `ledger` view `suggest` for all of them" in prep and "`suggested_for`" in prep and "`later`" in prep
+    assert "one `ledger` view `suggest` for all of them" in prep and "`suggested_for`" in prep
+    assert "While `later` lists meetings past the room, ask again with those as `refs`, until `later` is empty" in prep
 
 
 def test_the_sync_s_block_keeps_its_labels_and_each_line_its_fields() -> None:

@@ -46,3 +46,17 @@ def test_a_doc_nothing_supersedes_names_no_successor() -> None:
         "recording-note:2026-10-14-call rev 1  processed/x.md",
         "   1  # A note",
     ]
+
+
+def test_a_read_of_several_asks_again_from_the_first_left_until_later_is_empty() -> None:
+    """The read already made isn't asked for again: the first locator left is the next call's locator (DR-0725)."""
+    one = ReadResult(locator="calls:rec-0042", view="raw", later=["calls:rec-0043"])
+    assert render.reads(one) == [
+        "== calls:rec-0042",
+        "past the room, not read: ask again with locator calls:rec-0043, until later is empty",
+    ]
+    two = one.model_copy(update={"later": ["calls:rec-0043", "calls:rec-0044", "calls:rec-0045"]})
+    assert render.reads(two)[-1] == (
+        "past the room, not read: ask again with locator calls:rec-0043, more calls:rec-0044, calls:rec-0045, until "
+        "later is empty"
+    )

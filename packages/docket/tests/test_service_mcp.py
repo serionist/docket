@@ -221,7 +221,9 @@ def test_read_with_more_answers_up_to_the_room_and_leaves_the_rest_in_later(serv
     assert size <= calls.ROOM < size + size // (1 + len(kept)), size
     assert as_claude_gets_it(found) < 50_000
     last = text_of(found).splitlines()[-1]
-    assert last == f"past the room, not read: ask again with more for {', '.join(model.later)}"
+    assert last == render.reads(model)[-1] and last.startswith(
+        f"past the room, not read: ask again with locator {model.later[0]}"
+    )
 
 
 def test_ledger_suggest_with_refs_answers_up_to_the_room_and_only_suggest_takes_refs(service: Service) -> None:

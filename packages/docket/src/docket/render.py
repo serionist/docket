@@ -126,12 +126,15 @@ def read(result: LocatorRead) -> list[str]:
 
 def reads(result: ReadResult) -> list[str]:
     """A read of several locators (DR-0725): each read under a `== <locator>` line, in order, and last the locators
-    left past the room, to ask for again."""
+    left past the room, to ask for again: the first of them as the locator, so the read already made isn't made
+    again."""
     lines: list[str] = []
     for one in (result, *result.more):
         lines += [f"== {one.locator}", *read(one)]
     if result.later:
-        lines.append(f"past the room, not read: ask again with more for {', '.join(result.later)}")
+        first, *rest = result.later
+        again = f"locator {first}" + (f", more {', '.join(rest)}" if rest else "")
+        lines.append(f"past the room, not read: ask again with {again}, until later is empty")
     return lines
 
 

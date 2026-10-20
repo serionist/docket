@@ -58,7 +58,8 @@ For each item:
    next as it reads now. Then `ledger` view `show` with its `ref`: its fields, notes, materials and log.
 2. **The facts.** Read its `source` and its log's locators only as far as the facts need:
    - `read` them in one call, its source first: `read(locator="<its source>", more=["<a log's locator>"])`, each
-     under its own `== <locator>` line, those past the room in `later` for one more call. A recording: its note, then
+     under its own `== <locator>` line. While `later` lists locators past the room, read again, its first as
+     `locator` and the rest in `more`, until `later` is empty. A recording: its note, then
      the vendor's summary and the transcript around the moment (`read(locator="r:<rid>@<mm:ss>", view="raw",
      around=2)`), the whole exchange: a note is a compression and loses detail.
    - A locator `read` can't open, such as an old path or a record that moved: `search` its words around its day

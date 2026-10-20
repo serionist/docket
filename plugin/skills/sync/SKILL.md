@@ -107,9 +107,9 @@ Then, in this thread:
    a line left unsure, so none slips through.
 2. Prep, at the `# prep` line: for its meetings the user presents in or owns a part of, customer meetings and new
    series, one `ledger` view `suggest` for all of them, `ledger(view="suggest", refs=["M-0002", "M-0003"])`, each
-   item row naming in `suggested_for` the meeting it is for, and the meetings past the room in `later`, for one more
-   call. Then the items the user would raise, each a `point` with `proposed` and its `item`, worded as a question for
-   that call; none the dry run shows rolled in, none for dailies, standups or routine syncs. A prep `add`, a task due
+   item row naming in `suggested_for` the meeting it is for. While `later` lists meetings past the room, ask again
+   with those as `refs`, until `later` is empty. Then the items the user would raise, each a `point` with `proposed`
+   and its `item`, worded as a question for that call; none the dry run shows rolled in, none for dailies, standups or routine syncs. A prep `add`, a task due
    the working day before, only for real work before the call: a deck, a document, a demo.
 3. `ledger_batch(ops=[], file="<the draft's path>", by="sync", dry_run=true)`. It lists every refusal: fix each in
    the file and dry run again. A look-alike becomes a `log` on the item it names, unless it really is another ask
