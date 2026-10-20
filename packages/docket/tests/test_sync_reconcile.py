@@ -6,6 +6,7 @@ calendar."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from datetime import UTC, date, datetime
@@ -15,6 +16,8 @@ from typing import Any
 import pytest
 from docket_testkit import copy_vault, empty_vault, make_config, make_record, template_with
 from ledger_kit import meeting, op, point_set, ulid, write_ops
+from mcp import Client
+from mcp.types import CallToolResult, TextContent
 from recording_kit import doc
 
 from docket import recall
@@ -22,6 +25,8 @@ from docket.cli import main
 from docket.errors import DocketError
 from docket.index import build as index_build
 from docket.ledger import store, views
+from docket.service.state import Service, Settings
+from docket.service.tools import create_mcp
 from docket.sync import reconcile, start
 from docket.vault.config import SourceConfig
 from docket.vault.records import RawRecord
@@ -848,6 +853,24 @@ def settled(lines: list[str], choices: dict[int, str]) -> str:
     return "\n".join(out) + "\n"
 
 
+def by_file(vault: Vault, draft: Path, *, dry_run: bool) -> tuple[CallToolResult, str]:
+    """The `ledger_batch` tool by `file`, as the sync calls it, on a service over the vault that serves no port."""
+    service = Service(Settings(port=8750, vault=vault.root, token=lambda: "t0ken-for-tests-only"))
+
+    async def call() -> CallToolResult:
+        async with Client(create_mcp(service)) as client:
+            arguments = {"ops": [], "file": str(draft), "by": "sync", "dry_run": dry_run}
+            return await client.call_tool("ledger_batch", arguments)
+
+    try:
+        answer = asyncio.run(call())
+    finally:
+        service.writer.close()
+    first = answer.content[0]
+    assert isinstance(first, TextContent)
+    return answer, first.text
+
+
 def test_the_draft_settled_dry_runs_clean_and_unsettled_is_refused_naming_unsure(
     vault: Vault, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -871,8 +894,16 @@ def test_the_draft_settled_dry_runs_clean_and_unsettled_is_refused_naming_unsure
     assert main(["ledger", "batch", str(draft), "--by", "sync", "--dry-run", *vault_arg]) == 1
     refused = [line for line in capsys.readouterr().out.splitlines() if ": refused, " in line]
     assert len(refused) == len(done.unsure) and all("not unsure" in line for line in refused)
+    answer, text = by_file(vault, draft, dry_run=True)
+    assert answer.structured_content is not None
+    assert [c["refused"] for c in answer.structured_content["changes"] if c["refused"]] == [
+        line.split(": refused, ", 1)[1] for line in refused
+    ]
+    assert text.splitlines()[-1] == f"dry run: {len(refused)} change(s) refused; nothing written"
     untitled, dan, hal = done.unsure
     draft.write_text(settled(lines, {untitled: "drop", dan: "alt", hal: "keep"}), encoding="utf-8")
+    answer, text = by_file(vault, draft, dry_run=True)
+    assert not answer.is_error and text.splitlines()[-1] == "dry run: 9 op(s) would be written; nothing written"
     assert main(["ledger", "batch", str(draft), "--by", "sync", "--dry-run", *vault_arg]) == 0
     out = capsys.readouterr().out.splitlines()
     # The done writes its outcome too; nothing is due to roll over or to archive.
