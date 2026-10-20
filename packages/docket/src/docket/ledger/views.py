@@ -1074,15 +1074,72 @@ def stream_line(stream: StreamRow, today: date) -> str:
     return text + (f"; deadline {_date(stream.deadline, today)}" if stream.deadline else "")
 
 
-def _meetings_with_points(found: LedgerRead) -> list[str]:
+def _points_by_meeting(found: LedgerRead) -> dict[str, list[PointRow]]:
     points: dict[str, list[PointRow]] = {}
     for point in found.points:
         points.setdefault(point.meeting, []).append(point)
+    return points
+
+
+def _meetings_with_points(found: LedgerRead) -> list[str]:
+    points = _points_by_meeting(found)
     out: list[str] = []
     for meeting in found.meetings:
         out.append(meeting_line(meeting, found.today))
         out += [f"  {point_line(p)}" for p in points.get(meeting.ref, [])]
     return out
+
+
+# -- the short form (DR-0720) ------------------------------------------------------------------------------------------
+
+
+def context_lines(found: LedgerRead) -> list[str]:
+    """A snapshot in the sync folder's short form, a line a row, its fields split by ` | `: each open item, a snooze
+    whose day has come among them, `A-0012 | kind | who | title | source @M-0003`; the snoozed with their day; each
+    meeting with its standing points by id; the streams. A field's own ` | ` reads ` / `, so a line splits as it
+    reads."""
+    today = found.today
+    awake = [i for i in found.items if i.state == "open" or i.woke]
+    asleep = [i for i in found.items if i.state == "snoozed" and not i.woke]
+    out = [f"open items ({len(awake)})", *(short_item(i) for i in awake)]
+    out.append(f"snoozed ({len(asleep)})")
+    out += [short_item(i) + (f" | until {_date(i.until, today)}" if i.until else "") for i in asleep]
+    points = _points_by_meeting(found)
+    out.append(f"meetings {_window(found)}, or with an open point ({len(found.meetings)})")
+    for m in found.meetings:
+        out.append(_short_meeting(m, today))
+        out += [
+            f"  #{p.n} {p.state} | {as_field(p.text)}" + (f" -> {p.item}" if p.item else "") + f" | {p.id}"
+            for p in points.get(m.ref, [])
+        ]
+    out.append(f"streams ({len(found.streams)})")
+    for s in found.streams:
+        text = f"{s.name} | {s.status} | {as_field(s.where or '-')} | {as_field(s.next or '-')}"
+        out.append(text + (f" | deadline {_date(s.deadline, today)}" if s.deadline else ""))
+    return out
+
+
+def as_field(text: str) -> str:
+    """Text as one field of a short-form line: on one line, its own ` | ` read ` / `."""
+    return " ".join(text.split()).replace(" | ", " / ")
+
+
+def short_item(item: ItemRow) -> str:
+    """`A-0012 | reply | Ada Example | Send the dates | chat:C0X/1 @M-0003`."""
+    text = f"{item.ref} | {item.kind} | {as_field(item.who)} | {as_field(item.title)} | {as_field(item.source)}"
+    return text + (f" @{item.meeting}" if item.meeting else "")
+
+
+def _short_meeting(meeting: MeetingRow, today: date) -> str:
+    """`M-0040 | 10-20 10:00-10:30 | Pilot sync | Ada Example`, then `stream pilot` and a response that changes
+    whether the owner goes, each a field of its own when there is one."""
+    start, end = meeting.start, meeting.end
+    until = f"{end:%H:%M}" if end.date() == start.date() else f"{_date(end.date(), today)} {end:%H:%M}"
+    fields = [meeting.ref, f"{_date(start.date(), today)} {start:%H:%M}-{until}", as_field(meeting.subject),
+              as_field(meeting.organiser or "-")]  # fmt: skip
+    fields += [f"stream {meeting.stream}"] if meeting.stream else []
+    fields += [meeting.response] if meeting.response is not None and meeting.response in SAID else []
+    return " | ".join(fields)
 
 
 def _rows(rows: Iterable[tuple[str, str]]) -> list[str]:

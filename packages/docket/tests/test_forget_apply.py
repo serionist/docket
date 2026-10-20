@@ -29,6 +29,7 @@ from docket.media import layout, reader
 from docket.media import put as media
 from docket.media import staged as media_staged
 from docket.media.keystore import KeyStore
+from docket.sync import folder as sync_folder
 from docket.vault import cursors, forgotten
 from docket.vault.cursors import Cursor, Retry, Waiting
 from docket.vault.gate import Gate
@@ -145,6 +146,22 @@ def test_staged_media_and_versions_of_the_family_go_with_their_keys(tmp_path: Pa
     assert Staging(vault.root, vault.home).scan().entries == []
     assert KeyStore(vault.home).ids() == []
     assert rid_hash(CALL) in media_staged.read_withheld(vault.root)
+
+
+def test_a_forget_applied_removes_this_machine_s_sync_folders(vault: Vault) -> None:
+    """A block or a prompt in a sync folder can quote what the list takes (DR-0720): a new line's apply removes every
+    one, young ones too; an apply with nothing new leaves the next sync's alone."""
+    top = sync_folder.root()
+    folders = [top / "sync-20261020T071500-0a0b0c0d", top / "sync-20261019T071500-0a0b0c0e"]
+    for path in folders:
+        (path / "blocks").mkdir(parents=True)
+        (path / "blocks" / "plaud.txt").write_text(f"NOTES:    recording-note:2026-10-14-a-call | {CALL}\n", "utf-8")
+    forget_call(vault)
+    done = forget_apply.apply(vault, KeyStore(vault.home), first=True)
+    assert done.sync_folders == 2 and not any(path.exists() for path in folders)
+    folders[0].mkdir()
+    assert forget_apply.apply(vault, KeyStore(vault.home)).sync_folders == 0
+    assert folders[0].is_dir()
 
 
 def test_this_machine_s_cursor_entries_on_a_forgotten_rid_go(vault: Vault) -> None:

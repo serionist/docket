@@ -1042,6 +1042,39 @@ def kept(vault: Vault, source: str, since: datetime, until: datetime) -> list[st
     return [str(row[0]) for row in rows]
 
 
+# A recording no current summary covers: no minutes, recording note or thread summary, not superseded, covering it, a
+# record under it (`<rid>/...`, between `<rid>/` and `<rid>0` byte by byte) or a record of its thread, as the Recording
+# page and search find a recording's summary.
+UNNOTED = (
+    "SELECT r.rid, r.ts, r.title FROM records r WHERE r.source = ? AND r.kind = 'recording' "
+    "AND r.ts >= ? AND r.ts <= ? AND NOT EXISTS (SELECT 1 FROM doc_covers c JOIN docs d ON d.id = c.doc "
+    "WHERE d.superseded_by IS NULL AND d.type IN ('minutes', 'recording-note', 'thread-summary') AND (c.rid = r.rid "
+    "OR (c.rid >= r.rid || '/' AND c.rid < r.rid || '0') "
+    "OR c.rid IN (SELECT rid FROM records WHERE thread = r.thread))) ORDER BY r.ts, r.rid"
+)
+
+
+class Unnoted(NamedTuple):
+    rid: str
+    ts: datetime
+    title: str | None
+
+
+def unnoted(vault: Vault, windows: dict[str, tuple[datetime, datetime]]) -> list[Unnoted]:
+    """Each source's recordings in raw whose time falls in its window and that no current summary covers, oldest
+    first: what a sync's agent reads whole and reports from (DR-0721)."""
+    conn = open_index(vault)
+    try:
+        out = [
+            Unnoted(str(rid), datetime.fromisoformat(str(ts)), title)
+            for source, (since, until) in sorted(windows.items())
+            for rid, ts, title in conn.execute(UNNOTED, (source, iso(since), iso(until)))
+        ]
+    finally:
+        conn.close()
+    return sorted(out, key=lambda r: (r.ts, r.rid))
+
+
 def holds_kind(vault: Vault, source: str, kind: str) -> bool:
     """Whether raw holds a record of a source whose latest version is of this kind, from the index: one query, so a run
     asks it before any scan of raw."""

@@ -1,11 +1,12 @@
 decisions:
   - id: DR-0687
     title: Each sync agent returns one block, RUN, OWED, INVITES, WAITING, CLOSES, MEETINGS, STREAMS, NOTES, MINUTES, OUTCOME and LEARNED, every locator one read opens
-    status: proposed
+    status: superseded
     at: "2026-10-19"
     by: Claude (autonomy grant)
     cost: one-way
     sources: ["#210"]
+    superseded_by: [DR-0722]
     description: "An owner's old fork contract, adapted to Docket. Each agent returns the block and nothing else long, about 800 words, a line per finding. RUN: the source, the run, captures, ready and pending, skipped, whether the mark moved, a note; or the source, none and why. OWED: who, the locator, the day asked, the ask, why still open, today, this week or whenever. INVITES: the organiser, the event's or the invite mail's rid, when, and why it matters: an invite is reported only when it does, a clash with a meeting the owner accepted (never focus time or the owner's own blocks, whose organiser is the owner), a new series since the window's start, or a customer's meeting. The calendar's agent reports such an event with no response, and the mail agent adds the invite mails that matter; for an owner who rarely answers, no response alone is the normal state and gets no line, and the reconcile makes an invite item only from a line that says why. WAITING: who, the locator, since, what the owner waits for. CLOSES: the A- ref, done or moot, the evidence's locator, how. MEETINGS: the M- ref, field=value pairs split by semicolons, the evidence's locator; the fields are response, attendees, and start and end for a move seen only in mail, since the calendar's records make and move meetings at promotion (DR-0647). STREAMS: the stream, field=value pairs split by semicolons, of status, where, next and deadline, the news in one line, the locator. NOTES: the doc id, the recording's rid, start, end, an M- ref its content names. MINUTES: the M- ref, the point id, answered, dropped or open, the answer, the locator. OUTCOME: the M- ref, two to four lines on what was decided and who does what, the locator. LEARNED: SKILL.md or sync.md, and what differs from it. A locator is one read opens: a rid with its anchor, built as the source's SKILL.md says under What it makes, or a doc id or old path with its line or time. A line whose locator doesn't open is dropped. The old FILE line goes with the harvest files, and its DOCKET line becomes RUN."
     binds:
       - "The labels are a one-way door (AGENTS.md): never renamed or removed, and a line gains fields only at its end."

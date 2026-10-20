@@ -40,12 +40,15 @@ project, and closes the run with `ingest`. Allow `mcp__plugin_docket_docket__run
 
 ## The sync
 
-`/docket:sync`, or `/docket:sync <source>...` for some of them, runs each live source in an agent of its own, then
-writes what they found into the ledger in one `ledger_batch` by `sync`, and goes through the list with you.
+`/docket:sync`, or `/docket:sync <source>...` for some of them, runs each live source in an agent of its own from a
+sync folder, then writes what they found into the ledger in one `ledger_batch` by `sync`, and goes through the list
+with you.
 
 | Part | What |
 |---|---|
-| the agents | one per source, side by side: each opens a run, follows the source's `SKILL.md` and its `sync.md`, classifies the plainly work or plainly private records of a mixed source, promotes its own, writes a note for each work recording, and reports what you owe and await, what closed, invites, minutes and outcomes |
+| the sync folder | `docket sync start` writes it in Docket's state folder, never in the vault: `context.md`, the ledger as the agents read it, an item a line, and each agent's prompt; it goes 7 days after its start, or at your next forget |
+| the agents | one per source, side by side, each from its prompt file: it opens a run, follows the source's `SKILL.md` and its `sync.md`, classifies the plainly work or plainly private records of a mixed source, promotes its own, reads its recordings whole, and writes a block of what you owe and await, what closed, invites, minutes and outcomes to the sync folder |
+| the notes | `docket sync notes` writes a prompt per recording note the blocks name; an agent each writes the note in the background, and the sync never waits for them |
 | the reconcile | one batch, dry run first: closes on a locator that shows it, asks logged or added (new ones untriaged), meetings set and linked, minutes, rollover, proposed points for the coming week's meetings, streams, archive |
 | the list | in chat: meetings and prep, today, this week, whenever, invites, waiting on others; then what changed, the sources that didn't run, what waits on the Staging page, and the batch, to undo whole |
 
@@ -57,8 +60,20 @@ writes what they found into the ledger in one `ledger_batch` by `sync`, and goes
 - Your project's `CLAUDE.md` holds the rest: how you draft and in which language, the names the ledger uses for
   people, which stream a topic goes to, how to tell apart meetings that share a slot.
 - The agents' runs, classifies, promotions and notes and the batch ask unless your permission rules allow them. The
-  skill pre-approves only reads: `ledger`, `search`, `read`, `verify`, `briefs`, `decisions`, `docket ledger day`,
-  `docket staging list` and `show`.
+  skill pre-approves only reads, `ledger`, `search`, `read`, `verify`, `briefs`, `decisions`, `docket ledger day`,
+  `docket staging list` and `show`, and `docket sync start` and `notes`, which write only the sync folder.
+- The sync folder is outside your project, so each agent's Read and Write there asks unless you allow them, and the
+  note agents run in the background, where a prompt waits for nobody. Allow these, with your system's folder:
+
+  | System | The rules |
+  |---|---|
+  | Linux | `Read(~/.local/state/docket/sync/**)`, `Write(~/.local/state/docket/sync/**)` |
+  | macOS | `Read(~/Library/Application Support/docket/sync/**)`, `Write(~/Library/Application Support/docket/sync/**)` |
+  | Windows | `Read(~/AppData/Local/docket/sync/**)`, `Write(~/AppData/Local/docket/sync/**)` |
+
+  and `mcp__plugin_docket_docket__doc_put`, `mcp__plugin_docket_docket__read`, `mcp__plugin_docket_docket__search`,
+  `mcp__plugin_docket_docket__ledger` and `mcp__plugin_docket_docket__verify` for the note agents. A `DOCKET_STATE_DIR`
+  moves the folder to its `sync` folder.
 - Moving from a sync of your own: keep its name and description, so your words still reach it, and make its body one
   line, "Run `/docket:sync` (the Skill tool) with the same arguments". Move its lore into `CLAUDE.md` and each
   source's `sync.md`, and delete it once the plugin's sync has run a working week.

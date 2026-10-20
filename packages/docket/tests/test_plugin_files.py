@@ -23,6 +23,7 @@ from docket.ledger.views import VIEWS
 from docket.service import client, sessions, state, writer
 from docket.service.token import Tokens
 from docket.sources import scaffold
+from docket.sync import block as sync_block
 from docket.vault.vault import Vault
 from docket.vault.wizard import KNOWN_SOURCES
 from docket.web.pages import NAV
@@ -200,11 +201,12 @@ def test_setup_adds_each_source_on_the_user_s_yes_and_leaves_the_key_to_them() -
     assert "Then commit `vault.yaml`" in plaud
 
 
-# -- the sync skill (DR-0685 to DR-0690) ------------------------------------------------------------------------------
+# -- the sync skill (DR-0685, DR-0688 to DR-0690, DR-0720 to DR-0722) -----------------------------------------------
 
 SYNC = PLUGIN / "skills" / "sync"
-# The return block (DR-0687): each label with the fields its line starts with. A door: a line gains fields only at
-# its end, and no label is renamed or removed.
+PROMPTS = REPO / "packages" / "docket" / "src" / "docket" / "sync"
+# The block before it went to a file: each label with the fields its line started with. A door: a line gains fields
+# only at its end, and no label is renamed or removed (DR-0722).
 BLOCK = {
     "RUN": ["<source>", "<run>", "captures <n>", "ready <n>, pending <n>", "skipped <n>", "mark moved yes/no",
             "<a note>"],
@@ -221,10 +223,18 @@ BLOCK = {
     "OUTCOME": ["<M- ref>", "<2 to 4 short lines: what was decided, who does what>", "<locator>"],
     "LEARNED": ["SKILL.md / sync.md", "<what differs from it, for next time>"],
 }  # fmt: skip
+# The fields DR-0722 adds at the ends, which the reconcile drafts from.
+GAINED = {
+    "OWED": ["reply / decision / task", "<stream>", "<the A- ref it continues, else ->", "<due: YYYY-MM-DD, else ->"],
+    "INVITES": ["<stream>"],
+    "WAITING": ["<stream>", "<the A- ref it continues, else ->", "<due: YYYY-MM-DD, else ->"],
+}
 
 
 def sync_texts() -> dict[str, str]:
-    return {name: (SYNC / name).read_text(encoding="utf-8") for name in ("SKILL.md", "fork.md")}
+    """The skill, and the prompts Docket ships beside the block's parser."""
+    texts = {"SKILL.md": (SYNC / "SKILL.md").read_text(encoding="utf-8")}
+    return texts | {name: (PROMPTS / name).read_text(encoding="utf-8") for name in ("agent.md", "note.md")}
 
 
 def golden_tools() -> dict[str, Any]:
@@ -232,8 +242,9 @@ def golden_tools() -> dict[str, Any]:
     return {t["name"]: t for t in golden}
 
 
-def test_sync_pre_approves_only_reads() -> None:
-    """The sync's own writes, the ledger batch and the agents' runs, classifies and promotions, ask (DR-0605)."""
+def test_sync_pre_approves_only_reads_and_the_sync_folder_s_commands() -> None:
+    """The sync's own writes, the ledger batch and the agents' runs, classifies and promotions, ask (DR-0605); the
+    sync folder's commands write only scratch outside the vault (DR-0720)."""
     tools = golden_tools()
     allowed = frontmatter("sync")["allowed-tools"]
     prefix = "mcp__plugin_docket_docket__"
@@ -243,7 +254,7 @@ def test_sync_pre_approves_only_reads() -> None:
     commands = re.findall(r"Bash\(([^)]*)\)", allowed)
     assert commands == [
         "docket ledger day", "docket ledger day *", "docket staging list", "docket staging list *",
-        "docket staging show *",
+        "docket staging show *", "docket sync start", "docket sync start *", "docket sync notes *",
     ]  # fmt: skip
     assert re.sub(rf"{prefix}\w+|Bash\([^)]*\)", "", allowed).split() == []
 
@@ -284,7 +295,7 @@ def test_sync_names_commands_options_ops_views_and_tools_docket_has() -> None:
             given = {p.split("=")[0].strip() for p in params.split(",") if "=" in p}
             assert given <= set(tools[tool]["input_schema"]["properties"]), (name, tool)
     assert seen == {("ledger", "day"), ("staging", "list"), ("staging", "show"), ("staging", "classify"),
-                    ("staging", "promote")}  # fmt: skip
+                    ("staging", "promote"), ("sync", "start"), ("sync", "notes")}  # fmt: skip
     skill = sync_texts()["SKILL.md"]
     table = skill[skill.index("| Order | Ops | Rule |") : skill.index("### A worked batch")]
     for row in table.splitlines()[2:]:
@@ -292,34 +303,52 @@ def test_sync_names_commands_options_ops_views_and_tools_docket_has() -> None:
         if len(cells) > 3:
             assert set(re.findall(r"`([a-z_]+)`", cells[2])) <= set(BATCH), row
     assert set(re.findall(r'"op": "([a-z_]+)"', skill)) <= set(BATCH)
-    fork = sync_texts()["fork.md"]
-    named = re.search(r"ToolSearch for Docket's tools you will use \(([^)]*)\)", fork)
-    assert named is not None
-    assert set(re.findall(r"`([a-z_]+)`", named.group(1))) <= set(tools)
+    for name in ("agent.md", "note.md"):
+        named = re.search(r"ToolSearch for Docket's tools you will use[ :(]+([^)\n]*)", sync_texts()[name])
+        assert named is not None, name
+        assert set(re.findall(r"`([a-z_]+)`", named.group(1))) <= set(tools), name
     for key in ("dry_run", "by"):
         assert f"`{key}: " in skill and key in tools["ledger_batch"]["input_schema"]["properties"]
 
 
 def test_the_sync_s_block_keeps_its_labels_and_each_line_its_fields() -> None:
-    fork = sync_texts()["fork.md"]
-    block = fork.split("```\nRUN:", 1)[1].split("```", 1)[0]
+    """agent.md's block is the old one with fields gained only at the ends, and the parser takes both shapes."""
+    agent = sync_texts()["agent.md"]
+    block = agent.split("```\nRUN:", 1)[1].split("```", 1)[0]
     found: dict[str, list[str]] = {}
     for line in filter(None, f"RUN:{block}".splitlines()):
         label, _, rest = line.partition(":")
         found[label] = [field.strip() for field in rest.split(" | ")]
-    assert list(found) == list(BLOCK)
+    assert list(found) == list(BLOCK) == list(sync_block.FIELDS)
     for label, fields in BLOCK.items():
-        assert found[label][: len(fields)] == fields, label
-    # The placeholders the skill fills are the ones the prompt uses.
-    filled = set(re.findall(r"\{([A-Z_]+)\}", fork))
-    assert filled == set(re.findall(r"`\{([A-Z_]+)\}`", sync_texts()["SKILL.md"])) == {
-        "SOURCE", "VAULT", "TODAY", "ZONE", "OWED_SINCE",
+        assert found[label] == fields + GAINED.get(label, []), label
+        # RUN's fewest is its `none` form; NOTES' M- ref comes only when its content names one.
+        least = {"RUN": 3, "NOTES": 4}.get(label, len(fields))
+        assert sync_block.FIELDS[label] == (least, len(found[label])), label
+
+
+def test_the_prompts_placeholders_are_the_ones_docket_fills_and_the_skill_launches_by_path() -> None:
+    texts = sync_texts()
+    assert set(re.findall(r"\{([A-Z_]+)\}", texts["agent.md"])) == {
+        "SOURCE", "VAULT", "TODAY", "ZONE", "OWED_SINCE", "CONTEXT", "BLOCK",
     }  # fmt: skip
+    assert set(re.findall(r"\{([A-Z_]+)\}", texts["note.md"])) == {
+        "VAULT", "DOC", "RECORDINGS", "MEETING", "TODAY", "ZONE", "LAYOUT", "SYNC_AT",
+    }  # fmt: skip
+    # The skill writes no prompt out: each Agent call's prompt is the one line naming its file.
+    skill = " ".join(texts["SKILL.md"].split())
+    assert skill.count("`Read and follow <the prompt's path>`") == 2
+    assert "`subagent_type: fork`" in skill and "`subagent_type: general-purpose`" in skill
+    assert "{SOURCE}" not in skill and "fork.md" not in skill
+    # The agent writes its block to its file and answers with the RUN line alone.
+    agent = " ".join(texts["agent.md"].split())
+    assert "Write the block to {BLOCK} with the Write tool" in agent
+    assert "answer with the RUN line alone" in agent
 
 
 def test_agents_md_names_the_sync_and_tasks_skills_and_their_doors() -> None:
     agents = (REPO / "AGENTS.md").read_text(encoding="utf-8")
-    for words in ("`sync` and `tasks` (DR-0685)", "(DR-0687)", "`sync.md` (DR-0688)"):
+    for words in ("`sync` and `tasks` (DR-0685)", "(DR-0722)", "`sync.md` (DR-0688)"):
         assert words in agents, words
 
 
@@ -327,7 +356,7 @@ def test_the_two_name_doors_hold_the_skill_s_name_and_sync_md_beside_skill_md() 
     """Users invoke /docket:sync by name (DR-0685), and an owner's lore lives in sync.md beside the source's SKILL.md,
     where the agent looks for it (DR-0688)."""
     assert frontmatter("sync")["name"] == "sync"
-    assert "names the source's `SKILL.md`: read it, then `sync.md` beside it" in sync_texts()["fork.md"]
+    assert "names the source's `SKILL.md`: read it, then `sync.md` beside it" in sync_texts()["agent.md"]
 
 
 POINT = "01M4QJ9FZ000X93GNMW1YNY5N8"

@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0720
+    title: "docket sync start writes a sync folder in Docket's state folder: sync.json, context.md and an agent prompt per source, never in the vault"
+    status: proposed
+    at: "2026-10-20"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#258"]
+    description: "docket sync start [SOURCE...] --vault <vault> writes <state>/sync/<sync id>/ in Docket's state folder, beside the service's pid file: the id is sync-<yyyymmddThhmmss>-<8 hex>, its time in UTC. sync.json holds the id, the vault's root, when it was made, today, the owner's zone, the owed-since day or the run's window, each source with its window and its prompt's and block's paths, and Docket's version. context.md holds the sync's head line; each source's window, as run_open would open it with this machine's clock; the kept recordings in it that no current minutes, recording note or thread summary covers, by the index; each open item a line, A-0012 | kind | who | title | source @M-0003; the snoozed with their day; the meetings from the earliest window's day to the fifth working day after today, or with an open point, each with its points by id; and the streams. A field's own \" | \" is written \" / \". agents/<source>.md is the package's agent.md filled. The sources are docket ledger day's syncs, or those named: an unknown name, or a cursor file that doesn't read, is refused before any file is written. It works with the service down and writes nothing else. An agent's prompt is the one line naming its file. docket sync becomes a group: alone it still fetches and rebases; start and notes are its commands, which the sync skill pre-approves since they write only this scratch, as the tasks skill pre-approves docket open; DR-0605 stands. A start removes the sync folders over 7 days old by their id's time; a forget applied on a machine removes all of that machine's, since a block or a prompt can quote what it forgets. Only a folder named by a sync id is removed, never through a link."
+    binds:
+      - "The agent prompt, the note prompt and the block's parser ship together in the package: docket/sync/agent.md, note.md and block.py."
+      - "A sync folder is scratch: never in the vault, never committed, and gone 7 days after its start or at the machine's next forget."
+    not_chosen:
+      - "The vault's private folder: it sits in the git dir, where Claude's file tools have no business writing."
+      - "The session's scratchpad: Docket can't know it, and a skill can't count on one."
+      - "An MCP tool: a new door for what a command does."

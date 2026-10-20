@@ -6,7 +6,9 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 | Command | What it does |
 |---|---|
 | `docket init` | set up a vault: asks where, who you are, this machine's name, the sources, and inside a git repo whether the vault is a folder of it (the default) or a repo of its own (`--storage folder\|repo`); every answer is also a flag, and `--yes` takes the defaults; `--no-sources` starts with none, for `docket source new` to add; the summary names each check a flag overrode (`--allow-shared`, `--remote-is-private`, `--allow-dirty-parent`); `--no-redact-credentials` and `--redact-phone` set redaction, and the summary prints it |
-| `docket sync` | a repo of its own: fetch and rebase onto its remote; a folder: says your own git moves it, and does nothing else |
+| `docket sync` | alone, a repo of its own: fetch and rebase onto its remote; a folder: says your own git moves it, and does nothing else |
+| `docket sync start [source...]` | for `/docket:sync`: writes a sync folder in Docket's state folder, never in the vault, with `context.md` (each live source's window as `run_open` would open it, the recordings in it no note covers, every open and snoozed item a line, the meetings from the earliest window to the fifth working day after today with their points by id, the streams) and each agent's prompt, and prints the folder and a line per agent; a name that isn't a live source is refused before any file; removes sync folders over 7 days old; works with the service down |
+| `docket sync notes <sync>` | writes a prompt per recording note the sync's blocks name in their NOTES lines, one note for two lines with one doc id, and prints a line per note; a line whose recording doesn't open gets none, and is said |
 | `docket vault status` | which vault it found and how (`--vault`, `DOCKET_VAULT`, this folder or above, `./vault`, the default vault), where it lives and on which branch, records per source, runs, run files not committed yet, the last commit |
 | `docket vault check` | whether the vault is intact: every raw file parses, nothing written once was changed, no ignore rule hides a vault path, the vault's own attributes apply, no doc rev is claimed by two commits; and each stream's STATUS.md against the ledger, read and never written: a hand edit, a file that lags (`stale; docket render`) or isn't rendered yet, a stream the ledger lacks; it also says how many calendar records wait for their meetings, which `docket ledger calendar` makes |
 | `docket vault convert` | make a vault that is a repo of its own a folder of the repo around it, history included: a dry run first, then your yes; `--abort` undoes one that stopped before its commit |
@@ -315,8 +317,8 @@ sources:
 A source syncs from any Claude Code session with the plugin: ask Claude to sync it, and it calls `run_open`, follows
 the source's skill, and closes the run with `ingest` (DR-0240 to DR-0252). The plugin's capture hook hands Docket what
 each of the source's tools returned, so Claude never retypes a payload. `/docket:sync` runs every live source this way,
-each in an agent of its own, and writes what they found into the ledger in one batch (DR-0686, DR-0689); the plugin's
-README says how.
+each in an agent of its own from a sync folder (DR-0720), and writes what they found into the ledger in one batch
+(DR-0721, DR-0689); the plugin's README says how.
 
 | Part | What |
 |---|---|
@@ -460,7 +462,8 @@ forget: an older one reads what a merge brings back until a newer one's gate cal
   line's text, so it runs in Claude Code's shell too. `--now` runs in your own terminal only, shows the ids, and
   forgets on your OS prompt's yes, or a code typed back where the machine has none.
 - A forget writes `state/forgotten.jsonl`, hashes and op ids only, and commits it first. Every read, search and gate call obeys it
-  at once, on every clone after its pull; the next gate call there takes the lines, audio and keys out too.
+  at once, on every clone after its pull; the next gate call there takes the lines, audio and keys out too, and removes
+  that machine's sync folders, whose blocks can quote it.
 - A folder file is taken by its content: move it out of the folder too, since a forget never writes there.
 - A confirmed or rejected decision whose evidence was all forgotten keeps its title, and says so.
 - A ledger op the list names keeps its place, number and history, and reads `[forgotten]` where its words were, in

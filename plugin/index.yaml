@@ -5,7 +5,7 @@ reading:
   - { path: plugin/README.md, role: guide, note: "installing docket and the plugin, and what each part does" }
   - { path: plugin/.mcp.json, role: contract, note: "the MCP entry: its server key names every tool Claude Code shows, a one-way door" }
   - { path: plugin/hooks/hooks.json, role: contract, note: "the SessionStart hook and the PostToolUse capture hook, and the commands they run: a one-way door" }
-  - { path: plugin/skills/sync/fork.md, role: contract, note: "the sync's agent prompt and its return block: the labels and fields are a one-way door" }
+  - { path: plugin/skills/sync/fork.md, role: contract, note: "the sync's agent prompt and its return block: the labels and fields are a one-way door", removed: "2026-10-20", removed_why: "#258: its text became the package's docket/sync/agent.md and note.md" }
 decisions:
   - id: DR-0160
     title: The plugin registers the service as the MCP server docket

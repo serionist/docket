@@ -6,6 +6,7 @@ the next call. Until then every reader skips what the list takes.
 | Part | What goes |
 |---|---|
 | keys | every listed key this clone holds |
+| sync folders | every one this machine keeps, since a block or a prompt can quote what the list takes (DR-0720) |
 | staging | each staged version the list takes, with the media on it and the rids it sits under; a whole rid withheld |
 | raw | each listed line, out of the run files in the tree; a file left with no line stays, empty |
 | media | each stored file on a rid the list's `media` holds or forgotten whole, or whose key is listed, and its keys |
@@ -20,9 +21,10 @@ line an op file gained looks like one it masks, so a clone's own op from before 
 found, a doc an earlier forget's commit removed reading as removed (DR-0694). A stream whose ops it masked has its
 STATUS.md rendered again once the lock is let go (DR-0695).
 
-Keys and staging are this clone's own and go at once. The tree waits while git is in the middle of something the owner
-runs, a rebase, a merge, a detached HEAD or unmerged paths, since its commit would be refused and the owner's
-`git rebase --continue` would then refuse Docket's changes (DR-0597); every reader skips what the list takes meanwhile.
+Keys, the sync folders and staging are this clone's own and go at once. The tree waits while git is in the middle of
+something the owner runs, a rebase, a merge, a detached HEAD or unmerged paths, since its commit would be refused and
+the owner's `git rebase --continue` would then refuse Docket's changes (DR-0597); every reader skips what the list takes
+meanwhile.
 
 Each file is written whole through a temp file and a rename, and all of them go in one commit. The paths, and the docs'
 revs, are recorded before anything in the tree changes, so a crash or a failed commit leaves them for the next call to
@@ -52,6 +54,7 @@ from docket.ledger import store as ledger_store
 from docket.media import cutlog, layout
 from docket.media import staged as media_staged
 from docket.media.keystore import KeyStore
+from docket.sync import folder as sync_folder
 from docket.vault import cursors, decision_form, forgetdocs, forgotten
 from docket.vault.anchors import DocRef
 from docket.vault.docstore import DocStore
@@ -86,6 +89,7 @@ class Applied:
     keys: int = 0
     staged: int = 0
     staged_media: int = 0
+    sync_folders: int = 0
     records: int = 0
     media: int = 0
     docs: int = 0
@@ -676,6 +680,7 @@ def _apply(vault: Vault, keys: KeyStore, listed: Forgotten, key: str, *, first: 
         done.keys = drop_keys(listed, keys)
         _reached("keys")
         if moved:
+            done.sync_folders = sync_folder.clear(datetime.now(UTC), every=True)
             done.staged, done.staged_media = _staging(vault, keys, listed)
         _reached("staging")
         # Each stamp is taken before its file is read, HEAD's too, so what a pull changes meanwhile is read again on the

@@ -223,6 +223,9 @@ terms:
   - term: stream
     definition: A line of work items and meetings belong to, named by a slug, with a status, where it stands, what is next and a deadline; its STATUS.md is rendered from the ledger.
     see: [packages/docket/src/docket/ledger/meetings.py]
+  - term: sync folder
+    definition: "One /docket:sync's scratch in Docket's state folder, <state>/sync/<sync id>/, never in the vault: sync.json, context.md (the ledger as the agents read it, a line an item), each agent's prompt and its block, and the note prompts. Gone 7 days after its start, or at the machine's next forget."
+    see: [packages/docket/src/docket/sync/folder.py]
   - term: sync run
     definition: "One harvest of one source from a Claude Code session: opened by run_open, fed by the capture hook, closed by ingest. It lives in the service's memory, closes only whole, and is dropped otherwise, with nothing staged and the mark kept."
     see: [packages/docket/src/docket/service/runs.py]
