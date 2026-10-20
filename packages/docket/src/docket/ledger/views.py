@@ -142,11 +142,12 @@ MATCH_ITEMS = (
     "SELECT id, number, title, who, stream, kind, source, description, notes, outcome, materials, meeting FROM items"
 )
 MATCH_LOG = "SELECT item, group_concat(line, ' ') FROM item_log WHERE line IS NOT NULL GROUP BY item"
-# A write's lines in a log table; a stream's ref is its name, or its add's id once it is undone.
-BATCH_LINES = "SELECT id, version, item, kind, line FROM {table} WHERE batch = ? AND line IS NOT NULL"
+# A write's lines in a log table; a stream's ref is its name, or its add's id once it is undone. A batch is its first
+# op's id and the rest are minted after it (DR-0612), so the id's index bounds the read to the ops from it on.
+BATCH_LINES = "SELECT id, version, item, kind, line FROM {table} WHERE id >= ? AND batch = ? AND line IS NOT NULL"
 BATCH_STREAM_LINES = (
     "SELECT l.id, l.version, coalesce(s.name, l.item), l.kind, l.line FROM stream_log l "
-    "LEFT JOIN streams s ON s.id = l.stream WHERE l.batch = ? AND l.line IS NOT NULL"
+    "LEFT JOIN streams s ON s.id = l.stream WHERE l.id >= ? AND l.batch = ? AND l.line IS NOT NULL"
 )
 # An open item's trail: its source and materials, then the notes of its ops that stand, which only an op with a note
 # holds as a key.
@@ -442,13 +443,13 @@ def batch_lines(conn: sqlite3.Connection, batch: str) -> list[BatchLine]:
     and its log line; an op that shows no line, such as a renumber, is left out. The pages' notice after a write
     (DR-0710), off the tool."""
     reader = _Reader(conn, ZoneInfo("UTC"), now())
-    items = conn.execute(BATCH_LINES.format(table="item_log"), (batch,)).fetchall()
-    meetings = conn.execute(BATCH_LINES.format(table="meeting_log"), (batch,)).fetchall()
+    items = conn.execute(BATCH_LINES.format(table="item_log"), (batch, batch)).fetchall()
+    meetings = conn.execute(BATCH_LINES.format(table="meeting_log"), (batch, batch)).fetchall()
     item_refs = reader.item_refs(row[2] for row in items)
     meeting_refs = reader.meetings_of(row[2] for row in meetings)
     rows = [(i, v, item_refs[add], kind, line) for i, v, add, kind, line in items]
     rows += [(i, v, meeting_refs[add], kind, line) for i, v, add, kind, line in meetings]
-    rows += conn.execute(BATCH_STREAM_LINES, (batch,)).fetchall()
+    rows += conn.execute(BATCH_STREAM_LINES, (batch, batch)).fetchall()
     rows.sort(key=lambda row: (row[0], row[1]))
     return [BatchLine(ref=ref, kind=kind, line=line) for _, _, ref, kind, line in rows]
 

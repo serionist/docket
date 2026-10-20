@@ -1075,6 +1075,24 @@ def unnoted(vault: Vault, windows: dict[str, tuple[datetime, datetime]]) -> list
     return sorted(out, key=lambda r: (r.ts, r.rid))
 
 
+# The current summary covering a recording, as UNNOTED looks for one.
+NOTED = (
+    "SELECT d.id FROM records r JOIN doc_covers c ON (c.rid = r.rid OR (c.rid >= r.rid || '/' AND c.rid < r.rid || "
+    "'0') OR c.rid IN (SELECT rid FROM records WHERE thread = r.thread)) JOIN docs d ON d.id = c.doc WHERE r.rid = ? "
+    "AND d.superseded_by IS NULL AND d.type IN ('minutes', 'recording-note', 'thread-summary') ORDER BY d.id LIMIT 1"
+)
+
+
+def noted(vault: Vault, rids: Iterable[str]) -> dict[str, str]:
+    """The current summary covering each recording that has one, by its rid: what the sync's summary says of the
+    recordings it gave agents (#272). A read: the index as it stands."""
+    conn = open_index(vault)
+    try:
+        return {rid: str(row[0]) for rid in rids if (row := conn.execute(NOTED, (rid,)).fetchone()) is not None}
+    finally:
+        conn.close()
+
+
 def holds_kind(vault: Vault, source: str, kind: str) -> bool:
     """Whether raw holds a record of a source whose latest version is of this kind, from the index: one query, so a run
     asks it before any scan of raw."""
