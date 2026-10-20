@@ -928,8 +928,10 @@ def test_a_line_whose_shape_is_wrong_is_drafted_unsure_and_never_dropped_unseen(
 
 
 def test_a_sync_of_another_vault_or_none_is_refused_and_the_command_prints_the_report(
-    vault: Vault, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    vault: Vault, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # The command reads the clock: held at the fixtures' Tuesday, so the prep week stays theirs.
+    monkeypatch.setattr(views, "now", lambda: NOW)
     started = start.start(vault, [], NOW)
     other = empty_vault(tmp_path / "other", make_config())
     with pytest.raises(DocketError, match=re.escape(f"is a sync of {vault.root}, not of {other.root}")):

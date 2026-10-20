@@ -13,7 +13,7 @@ from test_sync_folder import NOTED, NOW, WEEKLY, build_pilot
 from docket.cli import main
 from docket.errors import DocketError
 from docket.index import build as index_build
-from docket.ledger import store
+from docket.ledger import store, views
 from docket.sync import folder, start, summary
 from docket.vault.vault import Vault
 
@@ -173,8 +173,10 @@ def test_the_summary_keeps_within_the_room_cutting_whenever_first(
 
 
 def test_the_command_prints_the_summary_and_refuses_another_vault_s_sync(
-    vault: Vault, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    vault: Vault, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # The command reads the clock: held at the fixtures' day.
+    monkeypatch.setattr(views, "now", lambda: AT)
     started = start.start(vault, [], NOW)
     assert main(["sync", "summary", started.info.sync, "--vault", str(vault.root)]) == 0
     assert capsys.readouterr().out.startswith(f"summary {started.info.sync}  ")

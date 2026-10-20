@@ -21,6 +21,7 @@ from test_sync_folder import NOW, POINT, WEEKLY, build_pilot
 from docket.cli import main
 from docket.errors import DocketError
 from docket.index import build as index_build
+from docket.ledger import views
 from docket.sync import folder, reconcile, recordings, start
 from docket.vault import cursors
 from docket.vault.cuts import CUT_MARKER
@@ -237,7 +238,11 @@ def test_a_recording_whose_agent_wrote_no_block_is_said_by_the_reconcile(vault: 
     assert done.said == [f"blocks/plaud/{given.key}.txt isn't there: no block from {WEEKLY}'s agent"]
 
 
-def test_the_command_prints_a_line_per_recording(vault: Vault, capsys: pytest.CaptureFixture[str]) -> None:
+def test_the_command_prints_a_line_per_recording(
+    vault: Vault, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The command reads the clock: held at the fixtures' day.
+    monkeypatch.setattr(views, "now", lambda: AT)
     started = start.start(vault, [], NOW)
     assert main(["sync", "--vault", str(vault.root), "recordings", started.info.sync, "plaud"]) == 0
     (line,) = capsys.readouterr().out.splitlines()

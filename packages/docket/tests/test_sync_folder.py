@@ -333,7 +333,11 @@ def test_a_short_form_field_holds_no_bar_inside_or_at_an_end() -> None:
 # -- the commands ------------------------------------------------------------------------------------------------------
 
 
-def test_the_command_prints_the_folder_and_the_agents(vault: Vault, capsys: pytest.CaptureFixture[str]) -> None:
+def test_the_command_prints_the_folder_and_the_agents(
+    vault: Vault, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The command reads the clock: held at the fixtures' day, as the cursors and the meetings are.
+    monkeypatch.setattr(views, "now", lambda: NOW)
     assert main(["sync", "start", "slack", "--vault", str(vault.root)]) == 0
     first = capsys.readouterr().out.splitlines()
     assert first[0].startswith("sync folder: ") and first[1].startswith("agent slack: ") and len(first) == 2
