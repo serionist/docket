@@ -1120,8 +1120,11 @@ def context_lines(found: LedgerRead) -> list[str]:
 
 
 def as_field(text: str) -> str:
-    """Text as one field of a short-form line: on one line, its own ` | ` read ` / `."""
-    return " ".join(text.split()).replace(" | ", " / ")
+    """Text as one field of a short-form line: on one line, its own ` | ` read ` / `, a run of them too."""
+    one = " ".join(text.split())
+    while " | " in one:
+        one = one.replace(" | ", " / ")
+    return one
 
 
 def short_item(item: ItemRow) -> str:

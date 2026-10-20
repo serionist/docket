@@ -21,6 +21,7 @@ from docket import recall
 from docket.cli import main
 from docket.errors import DocketError
 from docket.index import build as index_build
+from docket.ledger import views
 from docket.sync import block, folder, start
 from docket.vault import cursors
 from docket.vault.config import SourceConfig
@@ -394,6 +395,10 @@ def test_the_block_reads_each_label_s_fields_and_says_a_shape_it_doesn_t_take() 
 def test_a_prompt_is_filled_in_one_pass_so_a_path_holding_a_placeholder_s_name_stays() -> None:
     filled = start.fill("vault {VAULT}, block {BLOCK}, {OTHER}", {"VAULT": "/v/{BLOCK}", "BLOCK": "/b.txt"})
     assert filled == "vault /v/{BLOCK}, block /b.txt, {OTHER}"
+
+
+def test_a_short_form_field_never_holds_the_split_even_in_a_run_of_them() -> None:
+    assert views.as_field("the quote | | the\n sensors") == "the quote / / the sensors"
 
 
 # -- the commands ------------------------------------------------------------------------------------------------------
