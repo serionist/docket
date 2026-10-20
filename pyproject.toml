@@ -81,13 +81,14 @@ addopts = ["--import-mode=importlib", "-ra", "--strict-markers"]
 markers = [
   "perf: asserts an elapsed time; a lane without coverage runs it after the rest, alone (DR-0430)",
   "osprompt: calls the system's own prompt checks; skipped unless DOCKET_TEST_OSPROMPT is set, as only CI sets it",
+  "smoke: the smoke set, every surface once; Windows and macOS run it on every PR (DR-0754)",
 ]
 xfail_strict = true
 filterwarnings = ["error"]
 
 [tool.coverage.run]
 # Lines through sys.monitoring, which on Python 3.12 measures no branches: the floors are line coverage, and the C
-# tracer that branches need made CPU-bound tests 75% slower (DR-0698).
+# tracer that branches need made CPU-bound tests 75% slower (DR-0754).
 branch = false
 core = "sysmon"
 source_pkgs = ["docket", "devkit"]

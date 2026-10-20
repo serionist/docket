@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from devkit import commits, content, coverage, evalfloors, gate
+from devkit import commits, content, coverage, evalfloors, gate, systems
 from devkit.cli import cmd_commit_msg
 from devkit.repo import KitError
 
@@ -441,6 +441,151 @@ def _fake_pytest(
 
     monkeypatch.setattr(gate, "_run", fake_run)
     return calls
+
+
+def test_the_os_lane_runs_what_can_differ_by_system_and_all_of_it_with_all(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _fake_pytest(monkeypatch)
+    assert gate.step_tests(gate.Ctx(root=tmp_path, lane="os", ci=False, base=None, pr=None, shard="1/4")).status == "ok"
+    # Both runs of a share select the same files, before the share is taken.
+    assert len(calls) == 2 and all("--select=system" in run for run in calls)
+    calls.clear()
+    whole = gate.Ctx(root=tmp_path, lane="os", ci=False, base=None, pr=None, shard="1/8", whole=True)
+    assert gate.step_tests(whole).status == "ok"
+    assert len(calls) == 2 and not any("--select=system" in run for run in calls)
+    calls.clear()
+    # The full lane runs every file, as it always did.
+    _fake_pytest(monkeypatch, codes=(1, 0))
+    gate.step_tests(gate.Ctx(root=tmp_path, lane="full", ci=False, base=None, pr=None))
+    assert not any("--select=system" in run for run in calls)
+    with pytest.raises(KitError, match="--all widens the os lane's tests"):
+        gate.run("full", whole=True)
+    assert gate.main(["quick", "--all"]) == 2
+
+
+def systems_root(root: Path, files: dict[str, str], listed: dict[str, Any]) -> list[str]:
+    """A root with these files and this test-systems.json; the files' paths, as the gate lists them."""
+    for rel, text in files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text, encoding="utf-8")
+    (root / systems.SYSTEMS).parent.mkdir(parents=True, exist_ok=True)
+    (root / systems.SYSTEMS).write_text(json.dumps(listed), encoding="utf-8")
+    return sorted(files)
+
+
+WHY = {"kind": "git, files, paths", "why": "an invented reason"}
+PLAIN = "def test_it():\n    assert 1 + 1 == 2\n"
+
+
+def test_every_test_file_is_named_once_and_every_name_is_a_test_file(tmp_path: Path) -> None:
+    files = {
+        "packages/app/tests/test_git.py": PLAIN,
+        "packages/app/tests/test_pure.py": PLAIN,
+        "packages/app/tests/test_new.py": PLAIN,
+        "packages/app/tests/test_twice.py": PLAIN,
+        "tools/devkit/tests/test_kit.py": PLAIN,
+        "examples/sources/x/tests/test_mapper.py": PLAIN,
+        # Not a test file pytest collects: a kit, and a name outside the test folders.
+        "packages/app/tests/app_kit.py": "import os\nWINDOWS = os.name == 'nt'\n",
+        "docs/test_notes.py": PLAIN,
+    }
+    listed = {
+        "system": {
+            "packages/app/tests/test_git.py": WHY,
+            "packages/app/tests/test_twice.py": WHY,
+            "packages/app/tests/test_renamed.py": WHY,
+        },
+        "same": [
+            "packages/app/tests/test_pure.py",
+            "packages/app/tests/test_twice.py",
+            "tools/devkit/tests/test_kit.py",
+            "examples/sources/x/tests/test_mapper.py",
+            "examples/sources/x/tests/test_mapper.py",
+        ],
+    }
+    found = systems.problems(tmp_path, systems_root(tmp_path, files, listed))
+    named = systems.SYSTEMS
+    assert found == [
+        "examples/sources/x/tests/test_mapper.py: listed under same twice",
+        f"packages/app/tests/test_new.py: not in {named}; put it under system with its kind and why if it can differ "
+        "by system, else under same",
+        f"packages/app/tests/test_renamed.py: in {named}, but no such test file",
+        "packages/app/tests/test_twice.py: under system and under same; it is one or the other",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("code", "said"),
+    [
+        ("import sys\n\nWINDOWS = sys.platform == 'win32'\n", "line 3: names the system (sys.platform)"),
+        ("import os\nnt = os.name == 'nt'\n", "line 2: names the system (os.name)"),
+        ("import platform\nplatform.system()\n", "line 2: names the system (platform.system)"),
+        ("import pytest\nfcntl = pytest.importorskip('fcntl')\n", "line 2: skips by system (fcntl)"),
+        ("def test_a(tmp_path):\n    (tmp_path / 'a').symlink_to(tmp_path)\n", "line 2: makes links (symlink_to)"),
+        ("import os\nos.link('a', 'b')\n", "line 2: makes links (os.link)"),
+        ("def test_a(tmp_path):\n    tmp_path.chmod(0o700)\n", "line 2: makes file modes (chmod)"),
+        ("import stat\nMODE = stat.S_IWRITE\n", "line 2: makes file modes (S_IWRITE)"),
+        ("import os\nos.utime('a', ns=(1, 1))\n", "line 2: makes file times (utime)"),
+    ],
+)
+def test_a_file_listed_as_the_same_everywhere_fails_on_a_system_s_signal(tmp_path: Path, code: str, said: str) -> None:
+    files = {"packages/app/tests/test_a.py": code}
+    found = systems.problems(tmp_path, systems_root(tmp_path, files, {"same": list(files)}))
+    assert found == [
+        f"packages/app/tests/test_a.py: {said}: put it under system with why it can differ, or say under signals why "
+        "it runs the same everywhere"
+    ]
+    # Under system it may; under same with a reason, too.
+    assert systems.problems(tmp_path, systems_root(tmp_path, files, {"system": dict.fromkeys(files, WHY)})) == []
+    why = {"same": list(files), "signals": dict.fromkeys(files, "sets it back as it was, the same everywhere")}
+    assert systems.problems(tmp_path, systems_root(tmp_path, files, why)) == []
+
+
+def test_reading_a_file_s_time_or_mode_is_no_signal_and_a_reason_without_one_goes(tmp_path: Path) -> None:
+    reads = "def test_a(tmp_path):\n    stat = tmp_path.stat()\n    assert stat.st_mtime_ns and stat.st_mode\n"
+    files = {"packages/app/tests/test_a.py": reads, "packages/app/tests/test_b.py": PLAIN}
+    listed = {
+        "system": {"packages/app/tests/test_b.py": WHY},
+        "same": ["packages/app/tests/test_a.py"],
+        "signals": {"packages/app/tests/test_a.py": "a reason", "packages/app/tests/test_b.py": "a reason"},
+    }
+    assert systems.problems(tmp_path, systems_root(tmp_path, files, listed)) == [
+        "packages/app/tests/test_a.py: under signals, but its code shows no signal now: take it out of signals",
+        "packages/app/tests/test_b.py: under signals, which are for files under same",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("text", "said"),
+    [
+        ("{", "isn't valid JSON"),
+        ('{"same": ["a.py"], "same": []}', "names same twice"),
+        ("[]", "holds an object with system, same and signals"),
+        ('{"same": "a.py"}', "same a list of files"),
+        ('{"system": {"a.py": {"kind": "git"}}}', "a.py under system needs its kind and why it can differ"),
+        ('{"same": [1]}', "same lists files by their paths"),
+        ('{"signals": {"a.py": " "}}', "each file under signals says why it runs the same everywhere"),
+    ],
+)
+def test_the_list_s_shape_is_held(tmp_path: Path, text: str, said: str) -> None:
+    (tmp_path / systems.SYSTEMS).parent.mkdir(parents=True)
+    (tmp_path / systems.SYSTEMS).write_text(text, encoding="utf-8")
+    [found] = systems.problems(tmp_path, [])
+    assert said in found
+
+
+def test_the_systems_step_reads_the_repo_s_files(repo: Path) -> None:
+    ctx = gate.Ctx(root=repo, lane="quick", ci=False, base=None, pr=None)
+    [missing] = gate.step_systems(ctx).detail
+    assert missing.endswith("is missing: it names each test file, by whether it can differ by system")
+    files = {"packages/app/tests/test_git.py": PLAIN, "packages/app/tests/test_pure.py": PLAIN}
+    listed = {"system": {"packages/app/tests/test_git.py": WHY}, "same": ["packages/app/tests/test_pure.py"]}
+    systems_root(repo, files, listed)
+    out = gate.step_systems(ctx)
+    assert (out.status, out.detail) == ("ok", ["1 test files run on every system, 1 on Linux alone per PR"])
+    (repo / "packages" / "app" / "tests" / "test_new.py").write_text(PLAIN, encoding="utf-8")
+    assert gate.step_systems(ctx).status == "fail"
 
 
 def test_the_tests_step_runs_the_timed_tests_alone_after_the_rest(

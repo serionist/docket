@@ -1,11 +1,12 @@
-# The gate on every pull request and every push to main, in shares that each finish in a few minutes (DR-0698). Linux
-# runs `gate full`, which is the merge rule: its checks (lint, format, types, the docs, commit messages, private names,
-# secrets over the whole history, the harness and the plugin validated by Claude Code) in one job, its tests under
-# coverage in shares, and Gate (Linux) holds the coverage floors on every share's data together. Windows and macOS run
-# the types and the tests (`gate os`) in shares, so a change that only works on one system fails here. The shares split
-# the test files by tools/devkit/test-weights.json, which `gate weights` writes from a run's times artifacts. The web
-# app's sources run in Web (Linux), and its pages in the runner's Chrome in Browser (Linux) shares (DR-0712); Gate
-# (Linux) needs both, so the checks the merge rule names stay the same.
+# The gate on every pull request and every push to main, in shares that each finish in a few minutes (DR-0754). Linux
+# runs `gate full`, which is the merge rule: its checks (lint, format, types, the docs, the test files' systems, commit
+# messages, private names, secrets over the whole history, the harness and the plugin validated by Claude Code) in one
+# job, every test under coverage in shares, and Gate (Linux) holds the coverage floors on every share's data together.
+# Windows and macOS run the types and, in shares, the test files tools/devkit/test-systems.json lists under system with
+# the smoke set (`gate os`, DR-0758), so a change that only works on one system fails here; nightly.yml runs every test
+# file there. The shares split the test files by tools/devkit/test-weights.json, which `gate weights` writes from a
+# run's times artifacts. The web app's sources run in Web (Linux), and its pages in the runner's Chrome in Browser
+# (Linux) shares (DR-0712); Gate (Linux) needs both, so the checks the merge rule names stay the same.
 name: CI
 
 on:
@@ -138,17 +139,18 @@ jobs:
       - name: The coverage floors on every share's data
         run: uv run gate coverage
 
-  # Windows runs its tests in shares, each on a runner of its own: the runner's four vCPUs are busy for the whole
-  # parallel run, so more workers on one don't help, and each of its git calls costs about 40 ms. The first share runs
-  # the types too. A share keeps its test files whole, so its timed tests run alone after its own parallel run.
+  # Windows runs the test files that can differ by system and the smoke set in shares, each on a runner of its own: the
+  # runner's four vCPUs are busy for the whole parallel run, so more workers on one don't help, and each of its git
+  # calls costs about 40 ms. The first share runs the types too. A share keeps its test files whole, so its timed tests
+  # run alone after its own parallel run. The smoke set's pages load in the runner's own Chrome.
   windows-shares:
-    name: Tests (Windows, ${{ matrix.share }} of 12)
+    name: Tests (Windows, ${{ matrix.share }} of 4)
     runs-on: windows-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        share: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        share: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -173,7 +175,9 @@ jobs:
           Set-Service StorSvc -StartupType Disabled
           Stop-Service StorSvc -Force
       - name: Types and tests
-        run: uv run gate os ${{ matrix.share != 1 && '--only tests' || '' }} --shard ${{ matrix.share }}/12
+        env:
+          DOCKET_TEST_BROWSER: chrome
+        run: uv run gate os ${{ matrix.share != 1 && '--only tests' || '' }} --shard ${{ matrix.share }}/4
       - name: Keep the times
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -195,14 +199,15 @@ jobs:
           SHARES: ${{ needs.windows-shares.result }}
         run: test "$SHARES" = success
 
+  # macOS as Windows: the test files that can differ by system and the smoke set, in shares.
   macos-shares:
-    name: Tests (macOS, ${{ matrix.share }} of 6)
+    name: Tests (macOS, ${{ matrix.share }} of 2)
     runs-on: macos-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        share: [1, 2, 3, 4, 5, 6]
+        share: [1, 2]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -213,7 +218,9 @@ jobs:
       - name: Install
         run: uv sync --locked
       - name: Types and tests
-        run: uv run gate os ${{ matrix.share != 1 && '--only tests' || '' }} --shard ${{ matrix.share }}/6
+        env:
+          DOCKET_TEST_BROWSER: chrome
+        run: uv run gate os ${{ matrix.share != 1 && '--only tests' || '' }} --shard ${{ matrix.share }}/2
       - name: Keep the times
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

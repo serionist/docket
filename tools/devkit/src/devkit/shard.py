@@ -1,5 +1,5 @@
 """A pytest plugin the gate loads for `--shard K/N`: the run keeps one share of the test files, so the shares of one CI
-job's tests run on runners of their own (DR-0698).
+job's tests run on runners of their own (DR-0754).
 
 The files are split by what each cost on this system in a CI run, from `tools/devkit/test-weights.json`: the heaviest
 first, each to the share with the least so far. A file the weights don't know counts as their median, and with no
@@ -7,6 +7,10 @@ weights for the system every file counts the same, which deals them out in path 
 file stays whole in one share: its module fixtures, and a timed test's vault that an untimed test of the same file
 builds in the parallel run (DR-0492), never cross to another runner. The share is taken before any other filter, so the
 parallel run and the timed run of one share keep the same files.
+
+With `--select system` the run keeps only the test files tools/devkit/test-systems.json lists under system, and every
+test marked smoke wherever it lives: what Windows and macOS run on every PR (DR-0754). The selection comes before the
+share, so the shares split the selected files.
 
 With `--shard-times=<file>` the run writes what each of its files cost, its tests' time over the run's workers, and
 the tests that failed; `gate weights` folds a CI run's files into the weights. Each system's files have weights of
@@ -26,6 +30,7 @@ from typing import Any, cast
 
 import pytest
 
+from devkit import systems
 from devkit.repo import KitError
 
 _SPEC = re.compile(r"^([1-9]\d*)/([1-9]\d*)$")
@@ -105,7 +110,13 @@ class Times:
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
-    parser.addoption("--shard", default=None, metavar="K/N", help="run share K of N of the test files (DR-0698)")
+    parser.addoption("--shard", default=None, metavar="K/N", help="run share K of N of the test files (DR-0754)")
+    parser.addoption(
+        "--select",
+        default=None,
+        choices=["system"],
+        help="keep only the test files test-systems.json lists under system, and the tests marked smoke (DR-0754)",
+    )
     parser.addoption("--shard-weights", default=None, metavar="FILE", help="split the files by these weights")
     parser.addoption("--shard-times", default=None, metavar="FILE", help="write what each file cost this run")
     parser.addoption("--shard-key", default=None, metavar="KEY", help="the weights' key: the system's name by default")
@@ -128,21 +139,39 @@ def pytest_configure(config: pytest.Config) -> None:
         config.pluginmanager.register(Times(config, Path(out)), "devkit-shard-times")
 
 
+def selected(items: list[pytest.Item], root: Path, listed: systems.Systems) -> list[pytest.Item]:
+    """The tests in a file listed under system, and every test marked smoke."""
+    return [
+        item
+        for item in items
+        if item.path.relative_to(root).as_posix() in listed.system or item.get_closest_marker(systems.SMOKE)
+    ]
+
+
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     spec = config.getoption("--shard")
-    if spec is None:
+    select = config.getoption("--select")
+    if spec is None and select is None:
         return
-    k, n = parse(spec)
-    named = config.getoption("--shard-weights")
-    files = {item.path.relative_to(config.rootpath).as_posix() for item in items}
-    kept = share(files, k, n, load_weights(Path(named), key_of(config)) if named else None)
-    selected = [item for item in items if item.path.relative_to(config.rootpath).as_posix() in kept]
-    deselected = [item for item in items if item.path.relative_to(config.rootpath).as_posix() not in kept]
+    kept = items
+    if select is not None:
+        try:
+            listed = systems.load(config.rootpath)
+        except KitError as e:
+            raise pytest.UsageError(str(e)) from e
+        kept = selected(items, config.rootpath, listed)
+    if spec is not None:
+        k, n = parse(spec)
+        named = config.getoption("--shard-weights")
+        files = {item.path.relative_to(config.rootpath).as_posix() for item in kept}
+        mine = share(files, k, n, load_weights(Path(named), key_of(config)) if named else None)
+        kept = [item for item in kept if item.path.relative_to(config.rootpath).as_posix() in mine]
+    held = {id(item) for item in kept}
     # Always, even with nothing to leave out: `gate full`'s one share runs the same lines as each of CI's shares, so
     # both read the same coverage of this file.
-    config.hook.pytest_deselected(items=deselected)
-    items[:] = selected
+    config.hook.pytest_deselected(items=[item for item in items if id(item) not in held])
+    items[:] = kept
 
 
 def merge_times(folder: Path, weights_path: Path, root: Path) -> list[str]:

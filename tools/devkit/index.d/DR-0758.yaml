@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0758
+    title: tools/devkit/test-systems.json names every test file, under system with why it can differ or under same; the gate fails one named nowhere, and one under same that shows a system's signals
+    status: proposed
+    at: "2026-10-20"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#266", DR-0754]
+    description: "How DR-0754's list works. tools/devkit/test-systems.json has three parts: system, the test files that can differ by system, each with its kind (the system's own calls, hooks, git, files and paths, forget's system parts, media and LFS, the index's freshness and FTS5, the examples, the dev kit, the smoke set) and why; same, the files that run the same code on every system; and signals, the files under same whose code shows a system's signal, each with why it runs the same everywhere all the same. Every test file pytest collects under packages/, tools/devkit/tests/ and examples/ is named once, so a new file fails the gate until its author says which it is, and a renamed one can't drop off Windows and macOS unseen. The gate's systems step, in the quick and full lanes, fails a file named nowhere or twice, a name that isn't a test file, and a file under same whose code names the system (sys.platform, os.name, platform.system), skips by it (importorskip of winreg, msvcrt, fcntl and the like), or makes links, file modes or file times (symlink_to, os.link, chmod, umask, the S_I modes, utime), unless signals says why; reading a file's time or mode isn't a signal. gate os passes --select system to both pytest runs of the tests step, before the share is taken, so Windows and macOS run the files under system and every test marked smoke wherever it lives; gate os --all runs every file, as the nightly does. The list began as the plan's 107 files, the four the check then found (test_documents_search, test_spans and test_web_audio set a file's time against the index's or the audio cache's check, and test_speech_live names the system to pick its voice) and the two smoke files: 113. Four files under same set file times only to age the ledger's op files, and their budgets run nightly and their pages in the browser smoke: they are under signals."
+    binds:
+      - "Every test file is named once in tools/devkit/test-systems.json: under system with its kind and why, or under same."
+      - A file under same whose code names the system, skips by it, or makes links, file modes or file times fails the gate unless signals says why it runs the same everywhere.
+    not_chosen:
+      - "Only the OS-sensitive files listed: a new file that depends on the system would run on Linux alone per PR whenever it shows none of the signals, and nobody would be asked."
+      - "A mark on each test: thousands of marks, and a file's fixtures and helpers decide as much as its tests."
