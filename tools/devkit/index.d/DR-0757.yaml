@@ -1,11 +1,11 @@
 decisions:
-  - id: DR-0749
+  - id: DR-0757
     title: A few timed budgets run on every PR; the budgets on big vaults run nightly on all three systems
     status: proposed
     at: "2026-10-20"
     by: Claude (autonomy grant)
     cost: cheap
-    sources: ["#266", DR-0750]
+    sources: ["#266", DR-0753]
     description: "The timed tests that time small work keep running on every PR on all three systems, alone after the rest in gate os (DR-0430): a redaction's linear time, a worker killed at its timeout, a rerank's budget, a lock's wait, a hostile file's cap. Those that build a big vault to time it run in the nightly full matrix, on the full-matrix label and on a release tag, on all three systems, with the untimed tests that build their vaults (DR-0492): the index's 100,000 chunks, the ledger's 5,000 items, the curate miner, recall on 50 MB of raw, the scan of 5,000 files, the day pages, the service's search, and the ledger's import and calendar catch-up at size. A PR that changes the index, the ledger, search or the scan takes the label. On this PC the timed run took 3.7 of the suite's 9.8 minutes, and their vaults about 400 worker-seconds of the parallel run; under coverage, where the limits are off, they were pure cost. No line runs only in the tests that move, on Windows or on Linux, so the covered run keeps its coverage without them. DR-0430's marker, its run alone and its limits stand."
     binds:
       - A timed test that builds a big vault to time it runs nightly, on the full-matrix label and on a release tag; a PR that changes the index, the ledger, search or the scan takes the label.

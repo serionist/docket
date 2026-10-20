@@ -72,7 +72,7 @@ def load_weights(path: Path, system: str | None = None) -> dict[str, float]:
 class Times:
     """What each file's tests took in this run, and the tests that failed, written at its end. Under xdist the
     controller gets every worker's reports, so it alone writes, and divides by its workers: what the file cost the
-    run's wall time. A red nightly names its set of failing tests from these (DR-0746)."""
+    run's wall time. A red nightly names its set of failing tests from these (DR-0754)."""
 
     def __init__(self, config: pytest.Config, out: Path) -> None:
         self.config = config

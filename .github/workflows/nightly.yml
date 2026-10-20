@@ -1,4 +1,4 @@
-# The whole suite on all three systems, on top of ci.yml's run (DR-0746): nightly on main, on demand, on a pull request
+# The whole suite on all three systems, on top of ci.yml's run (DR-0754): nightly on main, on demand, on a pull request
 # labelled full-matrix (when the label goes on, and on each push while it is on) and on a v* tag, which a release will
 # need green. Linux runs it uncovered, so its timed tests hold their limits as gate os does on the other two; Windows and
 # macOS run every test file, and every page in the system's own Chrome. A red night opens an issue per distinct set of
