@@ -11,13 +11,12 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
 
 import pytest
 import ui_world
-from browser_kit import AXE, BROWSER, WATCH_CSP, axe, live, sign_in, watched
+from browser_kit import AXE, BROWSER, axe, clean, dark, live, opened, sign_in
 from docket_testkit import copied
-from playwright.sync_api import Browser, Page, expect, sync_playwright
+from playwright.sync_api import Browser, expect, sync_playwright
 
 pytestmark = pytest.mark.skipif(not BROWSER, reason="drives a real browser: DOCKET_TEST_BROWSER=chrome or msedge")
 
@@ -35,33 +34,6 @@ def browser() -> Iterator[Browser]:
         launched = p.chromium.launch(channel=None if BROWSER == "chromium" else BROWSER)
         yield launched
         launched.close()
-
-
-def opened(browser: Browser, port: int, token: str, after: str, **options: Any) -> tuple[Page, list[str]]:
-    # Motion reduced, so a dialog fading in is checked as it stands once open, not half transparent.
-    defaults: dict[str, Any] = {"viewport": {"width": 1440, "height": 900}, "reduced_motion": "reduce"}
-    context = browser.new_context(**(defaults | options))
-    context.add_init_script(WATCH_CSP)
-    context.add_init_script(path=str(AXE))
-    page = context.new_page()
-    errors = watched(page)
-    page.goto(sign_in(port, token, after))
-    page.wait_for_url(f"**{after.split('?', maxsplit=1)[0]}*")
-    page.wait_for_selector("#main")
-    page.evaluate("document.fonts.ready")
-    return page, errors
-
-
-def dark(page: Page) -> None:
-    """The page in the dark theme, as the system asks for it, once the browser has painted the change."""
-    page.emulate_media(color_scheme="dark")
-    page.evaluate("new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)))")
-
-
-def clean(page: Page, errors: list[str]) -> None:
-    assert errors == []
-    assert page.evaluate("window.__csp") == []
-    assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
 
 
 def test_the_shell_and_its_list_in_chrome(browser: Browser, week: tuple[int, str]) -> None:
@@ -142,6 +114,9 @@ def test_enter_and_space_press_the_focused_link_or_control(browser: Browser, wee
     page.get_by_role("button", name="Keys (?)").click()
     expect(page.get_by_role("dialog", name="Keys")).to_contain_text("The keys are off.")
     page.keyboard.press("Escape")
+    # The dialog gone and the focus back on its button, so the switch's focus isn't taken back by the dialog's.
+    expect(page.get_by_role("dialog", name="Keys")).to_have_count(0)
+    expect(page.get_by_role("button", name="Keys (?)")).to_be_focused()
     switch.focus()
     page.keyboard.press(" ")
     expect(switch).to_have_attribute("aria-checked", "true")
@@ -158,7 +133,8 @@ def test_the_keys_rows_and_the_index_line_show_whole(browser: Browser, week: tup
     # At 390 px a row's words wrap, and the row grows to hold them.
     narrow = {"width": 390, "height": 844}
     page, errors = opened(browser, port, token, "/design", viewport=narrow, has_touch=True, is_mobile=True)
-    page.keyboard.press("?")
+    # Through the header's button, as a finger opens it: a key pressed before the page took the focus can go astray.
+    page.get_by_role("button", name="Keys (?)").click()
     expect(page.get_by_role("dialog", name="Keys")).to_be_visible()
     spilled = page.evaluate(
         """() => [...document.querySelectorAll('[role=dialog] dd, [role=dialog] dt')].filter(cell => {

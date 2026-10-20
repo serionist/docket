@@ -747,9 +747,12 @@ How it is built (DR-0170 to DR-0175, DR-0546), and where it is going (#252, DR-0
   typed from the routes' models (DR-0709).
 - Its look is a ledger's, in light and dark: paper, white sheets, blue-black ink, ledger green, red ink, the four
   calls as stamps, in Atkinson Hyperlegible, 32 px rows (DR-0707). Its shell is a sidebar of the built pages with
-  their counts, the list and a 480 px panel, folding at 1024 and 768 px (DR-0708); until the Ledger moves it lives at
-  `/design`, with the tokens and every shared component on invented data, and each page goes through screenshot
-  rounds on an invented world with `uv run devkit ui <page>` (DR-0712).
+  their counts, the list and a 480 px panel, folding at 1024 and 768 px (DR-0708); `/design` shows the tokens and
+  every shared component on invented data, and each page goes through screenshot rounds on an invented world with
+  `uv run devkit ui <page>` (DR-0712).
+- The Ledger is the first page in it: `/ledger` reads `/api/web/ledger` with its URL's query string and writes back
+  the canonical URL the read answers; one key layer runs what each button runs; a write answers its notice, and the
+  page refetches in place (DR-0709 to DR-0711).
 - A page not moved yet is its Jinja page, as below.
 - Pages rendered by the service with Jinja2, parts of them swapped by htmx; every state is a URL that renders without
   JavaScript, and the navigation shows every page above with its phase.
@@ -796,13 +799,13 @@ How it is built (DR-0170 to DR-0175, DR-0546), and where it is going (#252, DR-0
   what it contradicts, then what is decided, superseded ones folded. Its buttons post to `/briefs/decision`,
   which writes a decision's status as `docket decision set` does, on the writer thread and checked against the rev
   the page showed (DR-0603, DR-0566).
-- The day pages, the Ledger first, read the ledger beside the writer through the `ledger` tool's reads and two of
-  their own, `matching` and `batch_lines`, and write only through the ledger's writer: each form post one batch, by
-  user, via page, answered with a 303 and a notice with Undo, a refusal answering the page as typed (DR-0661). The
-  old tasks app's keys act on the ticked rows or the one selection, which the open panel follows (DR-0662); text
-  fields save on change; the page polls a hash of the op files and reloads when another writer moved them, unless the
-  owner is mid-change (DR-0663). One item panel serves every page, its materials opened only when the item names them
-  and they pass the path checks (DR-0664).
+- The day pages, the Ledger first, are the React app's. They read the ledger beside the writer through the `ledger`
+  tool's reads and two of their own, `matching` and `batch_lines`, and write only through the ledger's writer: each
+  button one batch, by user, via page, answered with a notice with Undo, a bulk through a dry run, a refusal shown
+  with the writer's words and the text as typed (DR-0710). The old tasks app's keys act on the ticked rows or the one
+  selection, which the open panel follows; text fields save on change; the page polls a hash of the op files and
+  refetches in place when another writer moved them, unless the owner is mid-change (DR-0711). One item panel serves
+  every page, its materials opened only when the item names them and they pass the path checks (DR-0664).
 
 ## 11. Claude first
 

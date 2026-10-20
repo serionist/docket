@@ -1,27 +1,31 @@
-"""The day pages' parts (DR-0661 to DR-0666): the Ledger's list in its groups, a row's quick buttons, the item panel,
-a material's or a source's link, the notice after a write and the snooze choices.
+"""The day pages' parts (DR-0664 to DR-0666, DR-0710): the Ledger's list in its groups, a row's quick buttons, the item
+panel, a material's or a source's link, the notice after a write and the snooze choices, each a model the app's JSON
+reads answer as it is (DR-0709).
 
 Each builder takes what the ledger's views read (`views.read`, `views.matching`, `views.batch_lines`) and does no
 I/O, so every rule here is tested on an invented ledger. Nothing from a record shows here: only what the views give,
-an item's own text. A snoozed item whose day has come is open because the views mark it `woke`; nothing here has a rule
-of its own about it (DR-0666).
+an item's own text. Values come ready to show, times as text in the owner's zone, so the app formats none. A snoozed
+item whose day has come is open because the views mark it `woke`; nothing here has a rule of its own about it
+(DR-0666).
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass, field, replace
-from datetime import date, datetime, timedelta
-from itertools import pairwise
+from datetime import date, timedelta
 from typing import Any, Literal, cast
+from zoneinfo import ZoneInfo
+
+from pydantic import BaseModel
 
 from docket.ledger import ops
-from docket.ledger.views import BatchLine, Change, Detail, ItemRow, LedgerRead, MeetingRow, PointRow, cut
+from docket.ledger.views import BatchLine, Change, Detail, ItemRow, LedgerRead, MeetingRow, cut
 from docket.vault.anchors import AnchorError, parse_locator
 from docket.vault.processed import DOC_TYPES
 from docket.vault.records import RID
-from docket.web.day_state import DEFAULT_K, MORE, PANEL, TEXT, DayState
+from docket.web.day_state import MORE, DayState
+from docket.web.display import at
 from docket.web.recording_state import RecordingState, time_at
 from docket.web.state import SearchState
 
@@ -45,29 +49,42 @@ SOON = 7
 # A locator's scheme, as a source's name or a URL's starts it; a one-letter one is a Windows drive.
 SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*")
 EMPTY = {"open": "Nothing is open.", "snoozed": "Nothing is snoozed.", "closed": "Nothing is closed."}
+STATE_CHIPS = (("open", "Open"), ("snoozed", "Snoozed"), ("closed", "Closed"), ("all", "All"))
+
+# How a due or a group reads: late in red ink, today's and tomorrow's marked, the rest plain.
+Tone = Literal["", "late", "today", "soon"]
 
 
-@dataclass(frozen=True)
-class Button:
-    """A button that posts `op` with its one value, such as `triage:chase` (DR-0661), with the key that presses it."""
+class Button(BaseModel):
+    """A verdict's button, with the key that presses it. It carries what it writes, decided before the post by the old
+    tasks app's bulk rule: `writes` is its verdict, or None when every row it acts on holds it already, so pressing it
+    again clears it and no write toggles (DR-0710)."""
+
+    verdict: str
+    label: str
+    writes: str | None
+    key: str
+    title: str
+    pressed: bool
+
+
+class Snooze(BaseModel):
+    """A snooze choice: the day it snoozes to, and how its button reads."""
 
     label: str
-    value: str
-    key: str = ""
-    title: str = ""
-    pressed: bool | None = None
-    verdict: str = ""
+    until: date
+    title: str
 
 
-@dataclass(frozen=True)
-class Due:
+class Due(BaseModel):
     text: str = ""
     title: str = ""
-    cls: str = ""
+    tone: Tone = ""
 
 
-@dataclass
-class Row:
+class Row(BaseModel):
+    """A row of the list: an item as it reads at a glance, with its quick buttons when a call takes it."""
+
     ref: str
     id: str
     kind: str
@@ -81,117 +98,128 @@ class Row:
     archived: bool
     due: Due
     age: int
-    url: str
-    fragment: str
-    drop_url: str
-    drop_fragment: str
-    open: bool
     callable: bool
-    quick: list[Button] = field(default_factory=list[Button])
-    # The row after this one as the list shows it: where the selection goes after a call on this row.
-    next: str = ""
+    quick: list[Button]
 
 
-@dataclass
-class Group:
+class Group(BaseModel):
     key: str
     label: str
-    cls: str
+    tone: Tone
     rows: list[Row]
     total: int
     selectable: bool
 
 
-@dataclass(frozen=True)
-class Chip:
+class Chip(BaseModel):
+    """A state the list shows: open, snoozed, closed or all, with how many items it holds."""
+
+    key: str
     label: str
-    url: str
+    count: int
     on: bool
 
 
-@dataclass
-class LedgerList:
+class LedgerList(BaseModel):
     groups: list[Group]
     counts: str
     chips: list[Chip]
     shown: int
     total: int
-    more: str | None
+    # The k that shows the next 100 rows, when there are more.
+    more: int | None
     empty: str
     streams: list[str]
-    rows: dict[str, Row]
 
 
 Kind = Literal["url", "record", "recording", "query", "path", "text", "unsafe"]
 
 
-@dataclass(frozen=True)
-class Link:
+class Link(BaseModel):
     """A material or a source as the panel links it (DR-0664): a URL, a record's raw on the Search page, a recording
-    at its time, a text locator as a search, or a path from the host repo's top that opens through the service."""
+    at its time, a text locator as a search, or a path from the host repo's top that opens through the service, a text
+    file in the panel's viewer too."""
 
     ref: str
     label: str
     kind: Kind
     href: str = ""
-    fragment: str = ""
 
 
-@dataclass(frozen=True)
-class HistoryLine:
-    day: date
-    at: datetime | None
+class HistoryLine(BaseModel):
+    # When, as the page shows it: the time in the owner's zone, or the day alone for a line with no time.
+    when: str
+    # The same as an ISO date or time, for a time element.
+    stamp: str
     by: str
     via: str
     line: str
     undone_by: str | None
     # Undo, an undo by `of` of this line; Redo on an undo's own line; none on an add, a renumber or an undone line.
-    button: str | None
+    button: Literal["Undo", "Redo"] | None
     op: str
 
 
-@dataclass(frozen=True)
-class MeetingBox:
+class Point(BaseModel):
+    n: int
+    state: str
+    text: str
+    answer: str | None
+    item: str | None
+    proposed: bool
+
+
+class MeetingBox(BaseModel):
     ref: str
     subject: str
     when: str
-    points: list[PointRow]
+    points: list[Point]
 
 
-@dataclass
-class ItemPanel:
-    row: ItemRow
-    detail: Detail
+class ItemPanel(BaseModel):
+    """An item as its panel shows it (DR-0664): its call, its fields, the meeting it hangs on, its free text, its
+    materials, where it came from, its counts and its history."""
+
+    ref: str
+    id: str
+    kind: str
     title: str
-    state_line: str
+    who: str
+    stream: str
+    state: str
+    triage: str | None
+    woke: bool
+    archived: bool
+    # The due day as a date field holds it, or "" for none.
     due: str
+    state_line: str
+    # When it was opened and by whom, then its counts.
+    facts: str
+    description: str
+    notes: str
+    outcome: str
     source: Link
     meeting: MeetingBox | None
     materials: list[Link]
-    counts: str
     history: list[HistoryLine]
     verdicts: list[Button]
-    snooze: list[Button]
-    tomorrow: str
+    snooze: list[Snooze]
+    # The first day the snooze's own date may take.
+    tomorrow: date
     callable: bool
     closed: bool
-    archived: bool
-    drop: bool
-    next: str
-    url: str
-    close_url: str
-    close_fragment: str
 
 
-@dataclass(frozen=True)
-class Notice:
+class Notice(BaseModel):
+    """What the last write did (DR-0710): its words, the batch's lines, and Undo or Redo by its batch."""
+
     kind: Literal["info", "warn"]
     text: str
-    lines: list[str] = field(default_factory=list[str])
-    button: str | None = None
+    lines: list[str] = []
+    button: Literal["Undo", "Redo"] | None = None
     batch: str | None = None
-    # What the button's post says it did, `undo` or `redo`, so the next notice reads right.
-    then: str | None = None
+    # What the button's write says it did, `undo` or `redo`, so the next notice reads right.
+    then: Literal["undo", "redo"] | None = None
 
 
 # -- days -------------------------------------------------------------------------------------------------------------
@@ -211,7 +239,7 @@ def next_working_day(today: date) -> date:
     return day
 
 
-def snooze_choices(today: date) -> list[Button]:
+def snooze_choices(today: date) -> list[Snooze]:
     """The snooze buttons: the next working day, Monday, a week and two weeks on; a day of its own is a date field."""
     working = next_working_day(today)
     monday = today + timedelta(days=7 - today.weekday())
@@ -222,32 +250,32 @@ def snooze_choices(today: date) -> list[Button]:
         ("+2 weeks", today + timedelta(days=14), "two weeks"),
     ]
     seen: set[date] = set()
-    out: list[Button] = []
+    out: list[Snooze] = []
     for label, day, what in choices:
         if day not in seen:
             seen.add(day)
-            out.append(Button(label, f"snooze:{day.isoformat()}", title=f"Snooze to {what}, {day_text(day, today)}"))
+            out.append(Snooze(label=label, until=day, title=f"Snooze to {what}, {day_text(day, today)}"))
     return out
 
 
 def due_of(row: ItemRow, today: date) -> Due:
     if row.state in ("done", "dropped") and row.closed is not None:
-        return Due(f"{row.state} {row.closed.day} {row.closed:%b}", row.closed.isoformat())
+        return Due(text=f"{row.state} {row.closed.day} {row.closed:%b}", title=row.closed.isoformat())
     if row.woke:
-        return Due("snooze ended", f"back since {row.until}", "today")
+        return Due(text="snooze ended", title=f"back since {row.until}", tone="today")
     if row.state == "snoozed" and row.until is not None:
-        return Due(f"back {row.until.day} {row.until:%b}", row.until.isoformat())
+        return Due(text=f"back {row.until.day} {row.until:%b}", title=row.until.isoformat())
     if row.due is None:
         return Due()
     days = (row.due - today).days
     title = f"due {row.due.isoformat()}"
     if days < 0:
-        return Due(f"{-days}d late", title, "late")
+        return Due(text=f"{-days}d late", title=title, tone="late")
     if days == 0:
-        return Due("today", title, "today")
+        return Due(text="today", title=title, tone="today")
     if days == 1:
-        return Due("tomorrow", title, "soon")
-    return Due(f"{row.due:%a}" if days < SOON else f"{row.due.day} {row.due:%b}", title)
+        return Due(text="tomorrow", title=title, tone="soon")
+    return Due(text=f"{row.due:%a}" if days < SOON else f"{row.due.day} {row.due:%b}", title=title)
 
 
 # -- buttons ----------------------------------------------------------------------------------------------------------
@@ -255,13 +283,14 @@ def due_of(row: ItemRow, today: date) -> Due:
 
 def verdict_buttons(held: Sequence[str | None]) -> list[Button]:
     """The four verdicts as the rows they act on hold them: one clears its verdict when every row holds it, and sets it
-    on all of them otherwise, as the old tasks app's bulk did, so no write toggles (DR-0661)."""
+    on all of them otherwise, as the old tasks app's bulk did, so no write toggles (DR-0710)."""
     out: list[Button] = []
     for verdict, (label, hint, key) in VERDICTS.items():
         every = bool(held) and all(h == verdict for h in held)
-        value = "triage:" if every else f"triage:{verdict}"
         title = f"{label}: {hint} ({key}){'; again clears it' if every else ''}"
-        out.append(Button(label, value, key, title, pressed=every, verdict=verdict))
+        out.append(
+            Button(verdict=verdict, label=label, writes=None if every else verdict, key=key, title=title, pressed=every)
+        )
     return out
 
 
@@ -289,9 +318,12 @@ def _order(row: ItemRow) -> tuple[date, date, int, str]:
     return (row.due or FAR, row.opened, row.number or 0, row.id)
 
 
+Grouped = list[tuple[str, str, Tone, list[ItemRow]]]
+
+
 def _due_groups(rows: Sequence[ItemRow], today: date) -> Grouped:
     week = today + timedelta(days=SOON)
-    buckets: list[tuple[str, str, str, Callable[[ItemRow], bool]]] = [
+    buckets: list[tuple[str, str, Tone, Callable[[ItemRow], bool]]] = [
         ("woke", "Snooze ended", "today", lambda r: r.woke),
         ("overdue", "Overdue", "late", lambda r: r.due is not None and r.due < today),
         ("today", "Due today", "today", lambda r: r.due == today),
@@ -301,14 +333,11 @@ def _due_groups(rows: Sequence[ItemRow], today: date) -> Grouped:
     ]
     out: Grouped = []
     left = list(rows)
-    for key, label, cls, test in buckets:
+    for key, label, tone, test in buckets:
         taken = [r for r in left if test(r)]
         left = [r for r in left if not test(r)]
-        out.append((key, label, cls, sorted(taken, key=_order)))
+        out.append((key, label, tone, sorted(taken, key=_order)))
     return out
-
-
-Grouped = list[tuple[str, str, str, list[ItemRow]]]
 
 
 def _by(rows: Sequence[ItemRow], name: str, labels: Callable[[str], str], order: Callable[[str], Any]) -> Grouped:
@@ -373,35 +402,23 @@ def build_list(found: LedgerRead, state: DayState, matched: set[str] | None) -> 
     visible = [r for r in every if not r.archived or state.archived]
     chosen = [r for r in visible if _shown(r, state)]
     groups: list[Group] = []
-    order: list[Row] = []
-    for key, label, cls, members in _grouped(chosen, state, today):
-        shown = [row_of(r, state, today) for r in members[: state.k - len(order)]]
-        if shown:
-            order += shown
-            groups.append(Group(key, label, cls, shown, len(members), any(r.callable for r in shown)))
-    # After a call the selection goes to the next row, or to the one before when it was the last (DR-0662).
-    for here, after in pairwise(order):
-        here.next = after.ref
-    if len(order) > 1:
-        order[-1].next = order[-2].ref
-    rows = {r.ref: r for r in order}
+    shown = 0
+    for key, label, tone, members in _grouped(chosen, state, today):
+        rows = [row_of(r, today) for r in members[: state.k - shown]]
+        if rows:
+            shown += len(rows)
+            selectable = any(r.callable for r in rows)
+            groups.append(Group(key=key, label=label, tone=tone, rows=rows, total=len(members), selectable=selectable))
     awake = sum(1 for r in visible if r.state == "open" or r.woke)
     woke = sum(1 for r in visible if r.woke)
     asleep = sum(1 for r in visible if r.state == "snoozed" and not r.woke)
     closed = sum(1 for r in visible if r.state in ("done", "dropped"))
     late = sum(1 for r in visible if r.late is not None)
-    chips = [
-        Chip(f"{label} {n}", state.quiet().but(state=key, k=DEFAULT_K).url(), state.state == key)
-        for key, label, n in (
-            ("open", "Open", awake),
-            ("snoozed", "Snoozed", asleep),
-            ("closed", "Closed", closed),
-            ("all", "All", len(visible)),
-        )
-    ]
+    counted = {"open": awake, "snoozed": asleep, "closed": closed, "all": len(visible)}
+    chips = [Chip(key=key, label=label, count=counted[key], on=state.state == key) for key, label in STATE_CHIPS]
     said = f"{awake} open" + (f" ({woke} with their snooze ended)" if woke else "")
     counts = f"{said}, {asleep} snoozed, {closed} closed; {late} overdue"
-    more = state.quiet().but(k=state.k + MORE).url() if len(chosen) > state.k else None
+    more = state.k + MORE if len(chosen) > state.k else None
     narrowed = matched is not None or bool(state.who or state.stream or state.kind)
     empty = ""
     if not chosen:
@@ -411,13 +428,21 @@ def build_list(found: LedgerRead, state: DayState, matched: set[str] | None) -> 
         elif not found.items:
             empty = "The ledger is empty. Claude adds what you owe and await as it syncs, or add an item here."
     streams = sorted({r.stream for r in found.items})
-    return LedgerList(groups, counts, chips, len(order), len(chosen), more, empty, streams, rows)
+    return LedgerList(
+        groups=groups,
+        counts=counts,
+        chips=chips,
+        shown=shown,
+        total=len(chosen),
+        more=more,
+        empty=empty,
+        streams=streams,
+    )
 
 
-def row_of(row: ItemRow, state: DayState, today: date) -> Row:
-    opened = state.opened(row.ref)
+def row_of(row: ItemRow, today: date) -> Row:
     can = callable_row(row)
-    quick = verdict_buttons([row.triage if row.state == "open" else None]) if can else []
+    triage = row.triage if row.state == "open" else None
     return Row(
         ref=row.ref,
         id=row.id,
@@ -427,18 +452,13 @@ def row_of(row: ItemRow, state: DayState, today: date) -> Row:
         stream=row.stream,
         meeting=row.meeting,
         state=row.state,
-        triage=row.triage if row.state == "open" else None,
+        triage=triage,
         woke=row.woke,
         archived=row.archived,
         due=due_of(row, today),
         age=row.days,
-        url=opened.url(),
-        fragment=opened.url(PANEL),
-        drop_url=opened.but(drop=True).url(),
-        drop_fragment=opened.but(drop=True).url(PANEL),
-        open=state.open == row.ref,
         callable=can,
-        quick=quick,
+        quick=verdict_buttons([triage]) if can else [],
     )
 
 
@@ -454,13 +474,13 @@ def link_of(ref: str, label: str | None, sources: Iterable[str]) -> Link:
     shown = label or text
     low = text.lower()
     if low.startswith(("http://", "https://")):
-        return Link(ref, shown, "url", text)
+        return Link(ref=ref, label=shown, kind="url", href=text)
     head, colon, _ = text.partition(":")
     if text.startswith(("r:", "[")) or (colon and SCHEME.fullmatch(head) and len(head) > 1):
         return _locator(ref, shown, text, set(sources))
     if path_problem(text) is not None:
-        return Link(ref, shown, "unsafe")
-    return Link(ref, shown, "text" if low.endswith(TEXT_SUFFIXES) else "path")
+        return Link(ref=ref, label=shown, kind="unsafe")
+    return Link(ref=ref, label=shown, kind="text" if low.endswith(TEXT_SUFFIXES) else "path")
 
 
 def _locator(ref: str, shown: str, text: str, sources: set[str]) -> Link:
@@ -469,16 +489,17 @@ def _locator(ref: str, shown: str, text: str, sources: set[str]) -> Link:
     except AnchorError:
         found = None
     if found is not None and found.kind == "doc":
-        return Link(ref, shown, "record", SearchState(hit=text).url())
+        return Link(ref=ref, label=shown, kind="record", href=SearchState(hit=text).url())
     rid = found.value if found is not None and found.kind == "record" else ""
     m = RID.match(rid)
     if m is None or m.group(1) not in sources:
-        return Link(ref, shown, "query", SearchState(query=text).url())
+        return Link(ref=ref, label=shown, kind="query", href=SearchState(query=text).url())
     anchor = found.anchor if found is not None else None
     if anchor is not None and anchor.kind == "time":
-        return Link(ref, shown, "recording", RecordingState(rid=rid, at=time_at(anchor.start, anchor.end)).link())
+        href = RecordingState(rid=rid, at=time_at(anchor.start, anchor.end)).link()
+        return Link(ref=ref, label=shown, kind="recording", href=href)
     hit = text if text.startswith(("r:", "[")) else f"r:{rid}"
-    return Link(ref, shown, "record", SearchState(hit=hit).url())
+    return Link(ref=ref, label=shown, kind="record", href=SearchState(hit=hit).url())
 
 
 def path_problem(ref: str) -> str | None:
@@ -505,16 +526,28 @@ def path_problem(ref: str) -> str | None:
 # -- the item panel ---------------------------------------------------------------------------------------------------
 
 
-def _history(history: Sequence[Change]) -> list[HistoryLine]:
+def _history(history: Sequence[Change], tz: ZoneInfo) -> list[HistoryLine]:
     """Newest first; Undo only on a line no undo has left out, never on the add or a renumber; Redo on an undo's own
     line (DR-0664)."""
     out: list[HistoryLine] = []
     for change in reversed(history):
-        button = None
+        button: Literal["Undo", "Redo"] | None = None
         if change.undone_by is None and change.kind not in ("add", "renumber"):
             button = "Redo" if change.kind == "undo" else "Undo"
-        out.append(HistoryLine(change.day, change.at, change.by, change.via, change.line, change.undone_by, button,
-                               change.id))  # fmt: skip
+        when = at(change.at, tz) if change.at is not None else change.day.isoformat()
+        stamp = (change.at or change.day).isoformat()
+        out.append(
+            HistoryLine(
+                when=when,
+                stamp=stamp,
+                by=change.by,
+                via=change.via,
+                line=change.line,
+                undone_by=change.undone_by,
+                button=button,
+                op=change.id,
+            )
+        )
     return out
 
 
@@ -549,12 +582,15 @@ def _meeting_box(meeting: LedgerRead | None) -> MeetingBox | None:
     start, end = row.start, row.end
     until = f"{end:%H:%M}" if end.date() == start.date() else f"{end.day} {end:%b} {end:%H:%M}"
     when = f"{start:%a} {start.day} {start:%b} {start:%H:%M}-{until}"
-    return MeetingBox(row.ref, row.subject, when, [p for p in meeting.points if p.state != "rolled"])
+    points = [
+        Point(n=p.n, state=p.state, text=p.text, answer=p.answer, item=p.item, proposed=p.proposed)
+        for p in meeting.points
+        if p.state != "rolled"
+    ]
+    return MeetingBox(ref=row.ref, subject=row.subject, when=when, points=points)
 
 
-def build_panel(
-    shown: LedgerRead, meeting: LedgerRead | None, state: DayState, sources: Iterable[str], next_ref: str
-) -> ItemPanel:
+def build_panel(shown: LedgerRead, meeting: LedgerRead | None, sources: Iterable[str], tz: ZoneInfo) -> ItemPanel:
     """The item panel from `show` (DR-0664): the call, the fields, the meeting it hangs on with its points, the free
     text, the materials, where it came from, the counts and the history."""
     row = shown.items[0]
@@ -562,66 +598,60 @@ def build_panel(
     detail = cast(Detail, shown.detail)
     today = shown.today
     named = list(sources)
-    closed = row.state in ("done", "dropped")
     can = callable_row(row)
-    verdicts = verdict_buttons([row.triage if row.state == "open" else None]) if can else []
-    listing = state.opened(None)
+    triage = row.triage if row.state == "open" else None
     return ItemPanel(
-        row=row,
-        detail=detail,
+        ref=row.ref,
+        id=row.id,
+        kind=row.kind,
         title=row.title,
-        state_line=_state_line(row, today),
+        who=row.who,
+        stream=row.stream,
+        state=row.state,
+        triage=triage,
+        woke=row.woke,
+        archived=row.archived,
         due=row.due.isoformat() if row.due else "",
+        state_line=_state_line(row, today),
+        facts=f"opened {row.opened.isoformat()} by {detail.added_by}; {_counts(row, detail)}",
+        description=detail.description or "",
+        notes=detail.notes or "",
+        outcome=detail.outcome or "",
         source=link_of(row.source, None, named),
         meeting=_meeting_box(meeting),
-        materials=[viewable(link_of(m.ref, m.label, named), state.opened(row.ref)) for m in detail.materials],
-        counts=_counts(row, detail),
-        history=_history(detail.history),
-        verdicts=verdicts,
+        materials=[link_of(m.ref, m.label, named) for m in detail.materials],
+        history=_history(detail.history, tz),
+        verdicts=verdict_buttons([triage]) if can else [],
         snooze=snooze_choices(today) if can else [],
-        tomorrow=(today + timedelta(days=1)).isoformat(),
+        tomorrow=today + timedelta(days=1),
         callable=can,
-        closed=closed,
-        archived=row.archived,
-        drop=state.drop,
-        next=next_ref,
-        url=state.opened(row.ref).url(),
-        close_url=listing.but(at=row.ref).url(),
-        close_fragment=listing.url(PANEL),
+        closed=row.state in ("done", "dropped"),
     )
-
-
-def viewable(link: Link, state: DayState) -> Link:
-    """A text material with the page that shows it in the panel's viewer, and the viewer's own fragment (DR-0664)."""
-    if link.kind != "text":
-        return link
-    shown = state.quiet().but(text=link.ref)
-    return replace(link, href=shown.url(), fragment=shown.url(TEXT))
 
 
 # -- the notice -------------------------------------------------------------------------------------------------------
 
 
 def build_notice(state: DayState, lines: Sequence[BatchLine]) -> Notice | None:
-    """What the last post did (DR-0661): the batch's lines and its Undo, a Redo after an Undo; Nothing changed when a
-    post wrote nothing; the rows a bulk's op didn't take. Undone and Redone are what the post said it was, never read
+    """The notice for a URL that still names what a write did, or None when it names nothing."""
+    return None if state.done is None else notice_of(state.done, state.said, state.skipped, lines)
+
+
+def notice_of(done: str, said: str | None, skipped: Sequence[str], lines: Sequence[BatchLine]) -> Notice:
+    """What the last write did (DR-0710): the batch's lines and its Undo, a Redo after an Undo; Nothing changed when a
+    write wrote nothing; the rows a bulk's op didn't take. Undone and Redone are what the write said it was, never read
     from its lines: a batch of undos can be a change of its own, such as removing every proposed point."""
-    done = state.done
-    if done is None:
-        return None
-    skipped = (
-        f" Skipped {', '.join(state.skipped)}: the change doesn't take them as they stand." if state.skipped else ""
-    )
+    skips = f" Skipped {', '.join(skipped)}: the change doesn't take them as they stand." if skipped else ""
     if done == "nothing":
-        return Notice("info", "Nothing changed." + skipped)
+        return Notice(kind="info", text="Nothing changed." + skips)
     if done == "opened":
-        return Notice("info", "Opened it with its app.")
+        return Notice(kind="info", text="Opened it with its app.")
     if done == "shown":
-        return Notice("info", "Shown in its folder.")
+        return Notice(kind="info", text="Shown in its folder.")
     if not lines:
-        return Notice("info", "That change is no longer in the ledger's history." + skipped)
-    said = [f"{line.ref}: {cut(line.line)}" for line in lines]
-    if state.said == "undo":
-        return Notice("info", f"Undone.{skipped}", said, "Redo", done, then="redo")
-    head = "Redone." if state.said == "redo" else "Saved."
-    return Notice("info", f"{head}{skipped}", said, "Undo", done, then="undo")
+        return Notice(kind="info", text="That change is no longer in the ledger's history." + skips)
+    shown = [f"{line.ref}: {cut(line.line)}" for line in lines]
+    if said == "undo":
+        return Notice(kind="info", text=f"Undone.{skips}", lines=shown, button="Redo", batch=done, then="redo")
+    head = "Redone." if said == "redo" else "Saved."
+    return Notice(kind="info", text=f"{head}{skips}", lines=shown, button="Undo", batch=done, then="undo")

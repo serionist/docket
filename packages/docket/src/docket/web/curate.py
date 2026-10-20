@@ -29,7 +29,7 @@ from docket.vault import curatelog
 from docket.vault.curatelog import AliasFields, Change, EntityFields
 from docket.vault.entitystore import EntityStore, Planned, RefusedError
 from docket.vault.vault import Vault
-from docket.web import curate_view, templating
+from docket.web import curate_view, display, templating
 from docket.web.curate_view import PANEL, CurateState, CurateStateError, Facts
 from docket.web.shell import shell
 
@@ -118,7 +118,7 @@ def router(service: Service) -> APIRouter:
             headers = templating.history(request, state.url(), curate_view.canonical)
             return templating.page("curate/_panel.html", context, headers=headers, referrer=templating.POSTS_FORMS)
 
-        return await templating.safely(request, PANEL, answer, lambda: _panel_error(templating.FAILED, 500))
+        return await templating.safely(request, PANEL, answer, lambda: _panel_error(display.FAILED, 500))
 
     @web.post("/curate/round", include_in_schema=False)
     async def curate_round(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]

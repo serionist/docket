@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { KeyboardIcon, MonitorIcon, MoonIcon, SunIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -54,21 +55,34 @@ function Entry({ page, shell, current }: { page: NavPage; shell: Shell | undefin
   const Icon = page.icon;
   const mark = markOf(page, shell);
   const label = mark.words ? `${page.title}, ${mark.words}` : page.title;
+  const inner = (
+    <>
+      <Icon aria-hidden />
+      <SidebarLabel>{page.title}</SidebarLabel>
+      {mark.words && <span className="sr-only">, {mark.words}</span>}
+      {mark.shown && <SidebarMenuBadge aria-hidden>{mark.shown}</SidebarMenuBadge>}
+      {mark.due && (
+        <SidebarMenuBadge aria-hidden className="flex items-center gap-1.5">
+          <span className="size-1.5 rounded-full bg-green" />
+          due
+        </SidebarMenuBadge>
+      )}
+    </>
+  );
+  const here = current === page.key ? "page" : undefined;
   return (
     <SidebarMenuItem>
       <SidebarMenuButton asChild tooltip={label}>
-        <a href={page.href} aria-current={current === page.key ? "page" : undefined}>
-          <Icon aria-hidden />
-          <SidebarLabel>{page.title}</SidebarLabel>
-          {mark.words && <span className="sr-only">, {mark.words}</span>}
-          {mark.shown && <SidebarMenuBadge aria-hidden>{mark.shown}</SidebarMenuBadge>}
-          {mark.due && (
-            <SidebarMenuBadge aria-hidden className="flex items-center gap-1.5">
-              <span className="size-1.5 rounded-full bg-green" />
-              due
-            </SidebarMenuBadge>
-          )}
-        </a>
+        {/* A page moved into the app opens in it; the others load the server's own page. */}
+        {page.inApp ? (
+          <Link to={page.href} aria-current={here}>
+            {inner}
+          </Link>
+        ) : (
+          <a href={page.href} aria-current={here}>
+            {inner}
+          </a>
+        )}
       </SidebarMenuButton>
     </SidebarMenuItem>
   );

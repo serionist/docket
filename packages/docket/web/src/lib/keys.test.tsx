@@ -57,6 +57,30 @@ describe("the key layer", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
+  it("leaves a key some part of the page already took, as a popover's Esc that closed it and took it away", () => {
+    const run = vi.fn();
+    unregister.push(register({ id: "t", title: "Test", commands: [{ keys: ["Escape"], what: "close", run }] }));
+    // A layer that closes on Esc at the capture phase, its content gone from the page before the key reaches us.
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    const day = document.createElement("button");
+    dialog.append(day);
+    document.body.append(dialog);
+    const closes = (event: KeyboardEvent) => {
+      event.preventDefault();
+      day.remove();
+    };
+    document.addEventListener("keydown", closes, { capture: true });
+    try {
+      press("Escape", {}, day);
+    } finally {
+      document.removeEventListener("keydown", closes, { capture: true });
+    }
+    expect(run).not.toHaveBeenCalled();
+    press("Escape");
+    expect(run).toHaveBeenCalledOnce();
+  });
+
   it("does nothing while the keys switch is off", () => {
     const run = vi.fn();
     unregister.push(register({ id: "t", title: "Test", commands: [{ keys: ["j"], what: "next", run }] }));

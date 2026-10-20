@@ -1,0 +1,12 @@
+{
+  "$comment": "Days as the server's day_view.day_text writes them and the date picker's button shows them: [day, today, text]. tests/test_web_ledger.py holds the server to each and src/lib/dates.test.ts the app.",
+  "days": [
+    ["2026-10-26", "2026-10-20", "Mon 26 Oct"],
+    ["2026-10-20", "2026-10-20", "Tue 20 Oct"],
+    ["2026-11-01", "2026-10-20", "Sun 1 Nov"],
+    ["2026-02-28", "2026-10-20", "Sat 28 Feb"],
+    ["2027-01-04", "2026-10-20", "Mon 4 Jan 2027"],
+    ["2025-12-31", "2026-10-20", "Wed 31 Dec 2025"],
+    ["2028-02-29", "2028-03-01", "Tue 29 Feb"]
+  ]
+}

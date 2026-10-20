@@ -20,6 +20,27 @@ export const STAMP_PRESSED: Record<Verdict, string> = {
   chase: "relative z-[1] border-chase bg-chase-wash font-semibold text-chase hover:bg-chase-wash",
 };
 
+/** A call's small key button on a row, its digit in the call's own ink; pressed, in its wash too. */
+export const STAMP_KEY: Record<Verdict, string> = {
+  discuss: "border-discuss text-discuss hover:bg-discuss-wash aria-pressed:bg-discuss-wash",
+  claude: "border-claude text-claude hover:bg-claude-wash aria-pressed:bg-claude-wash",
+  me: "border-me text-me hover:bg-me-wash aria-pressed:bg-me-wash",
+  chase: "border-chase text-chase hover:bg-chase-wash aria-pressed:bg-chase-wash",
+};
+
+/** A call's key, beside its name on a button, in the call's own ink. */
+export const STAMP_INK: Record<Verdict, string> = {
+  discuss: "text-discuss",
+  claude: "text-claude",
+  me: "text-me",
+  chase: "text-chase",
+};
+
+/** Whether a string names one of the four calls. */
+export function isVerdict(value: string | null | undefined): value is Verdict {
+  return (VERDICTS as readonly string[]).includes(value ?? "");
+}
+
 /** What each call means, for a tooltip or a screen reader. */
 export const MEANING: Record<Verdict, string> = {
   discuss: "talk it through with Claude",

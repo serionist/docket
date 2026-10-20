@@ -79,3 +79,37 @@ def watched(page: Any) -> list[str]:
 
 def axe(page: Any) -> list[str]:
     return list(page.evaluate(AXE_RUN))
+
+
+def opened(browser: Any, port: int, token: str, after: str, **options: Any) -> tuple[Any, list[str]]:
+    """A page of the app in a context of its own, signed in, its fonts loaded and its reads answered; with what goes
+    wrong on it, as it comes."""
+    # Motion reduced, so a dialog fading in is checked as it stands once open, not half transparent.
+    defaults: dict[str, Any] = {"viewport": {"width": 1440, "height": 900}, "reduced_motion": "reduce"}
+    context = browser.new_context(**(defaults | options))
+    context.add_init_script(WATCH_CSP)
+    context.add_init_script(path=str(AXE))
+    page = context.new_page()
+    errors = watched(page)
+    page.goto(sign_in(port, token, after))
+    page.wait_for_url(f"**{after.split('?', maxsplit=1)[0]}**")
+    page.wait_for_selector("#main")
+    page.wait_for_load_state("networkidle")
+    page.evaluate("document.fonts.ready")
+    return page, errors
+
+
+def dark(page: Any) -> None:
+    """The page in the dark theme, as the system asks for it, once its ground has turned and the browser has painted
+    the change twice more: a colour that eases, even reduced, can still be on its way a frame after the switch."""
+    light = page.evaluate("getComputedStyle(document.body).backgroundColor")
+    page.emulate_media(color_scheme="dark")
+    page.wait_for_function("(light) => getComputedStyle(document.body).backgroundColor !== light", arg=light)
+    page.evaluate("new Promise(done => setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(done)), 50))")
+
+
+def clean(page: Any, errors: list[str]) -> None:
+    """No console error, no CSP violation, and nothing scrolls sideways."""
+    assert errors == []
+    assert page.evaluate("window.__csp") == []
+    assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")

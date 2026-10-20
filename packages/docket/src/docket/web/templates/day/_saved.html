@@ -1,7 +1,0 @@
-{# A save's answer, every part out of band (DR-0661): the item's row, its title in the panel's heading, its history and
-   the version after the write, so the page's own save brings no reload; the field typed in stays as it is. #}
-{% from "day/macros.html" import row as list_row, history, poll %}
-{{ list_row(row, state, oob=true) }}
-<span id="title-{{ panel.row.ref }}" class="panel-title-text" dir="auto" hx-swap-oob="true">{{ panel.row.title }}</span>
-{{ history(panel, state, tz, oob=true) }}
-{{ poll(state, version, oob=true) }}

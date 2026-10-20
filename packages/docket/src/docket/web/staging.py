@@ -29,7 +29,7 @@ from docket.vault.cuts import Cut
 from docket.vault.gate import Gate, Label, Listing, Shown
 from docket.vault.records import source_name_problem
 from docket.vault.redact import Redactor
-from docket.web import staging_view, templating
+from docket.web import display, staging_view, templating
 from docket.web.shell import shell
 from docket.web.staging_view import PANEL, StagingState, StagingStateError
 
@@ -153,7 +153,7 @@ def router(service: Service) -> APIRouter:
             headers = templating.history(request, state.url(), staging_view.canonical)
             return templating.page("staging/_panel.html", context, headers=headers, referrer=templating.POSTS_FORMS)
 
-        return await templating.safely(request, PANEL, answer, lambda: _panel_error(templating.FAILED, 500))
+        return await templating.safely(request, PANEL, answer, lambda: _panel_error(display.FAILED, 500))
 
     @web.post("/staging/classify", include_in_schema=False)
     async def staging_classify(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]

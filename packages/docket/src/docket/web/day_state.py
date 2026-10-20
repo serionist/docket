@@ -1,5 +1,5 @@
-"""The day pages' URL (DR-0662 to DR-0666): one state for the Ledger, the Queue, Meetings and Today, the shared
-parameters first, then each page's own, in one canonical form with the defaults left out.
+"""The day pages' URL (DR-0664 to DR-0666, DR-0704): one state for the Ledger, the Queue, Meetings and Today, the
+shared parameters first, then each page's own, in one canonical form with the defaults left out.
 
 | Parameter | What | Default |
 |---|---|---|
@@ -13,12 +13,14 @@ parameters first, then each page's own, in one canonical form with the defaults 
 | `archived` | the Ledger's: `1` lists archived items too (DR-0615) | none |
 | `drop` | `1` opens the open item's drop form, its why focused | none |
 | `text` | a material of the open item shown in the panel's viewer | none |
-| `done` | what the last post did: its batch, `nothing`, `opened` or `shown` | none |
+| `done` | what the last write did: its batch, `nothing`, `opened` or `shown` | none |
 | `said` | what that batch was when it undid or redid one, `undo` or `redo`, so its notice says so | none |
 | `skipped` | the rows a bulk's op didn't take | none |
 
-Unknown parameters are ignored, and the URLs only gain optional ones, since the tasks skill opens them (DR-0669). A
-form carries the state as hidden fields, with `page` naming its page, as the Staging page's forms do (DR-0661).
+Unknown parameters are ignored, and the URLs only gain optional ones, since the tasks skill opens them (DR-0669). The
+app sends a page's query string to its read as it is, and writes back the canonical URL the read answers (DR-0704);
+`done`, `said` and `skipped` show their notice once and leave the canonical URL, since the notice is the page's own
+after a write (DR-0710).
 """
 
 from __future__ import annotations
@@ -36,12 +38,6 @@ from docket.ledger.store import MEETING_NUMBER, SLUG
 from docket.web import urls
 
 PATHS = {"ledger": "/ledger"}
-PANEL = "/ledger/panel"
-WRITE = "/ledger/write"
-SAVE = "/ledger/save"
-CHANGED = "/ledger/changed"
-OPEN = "/ledger/open"
-TEXT = "/ledger/text"
 DEFAULT_K = 100
 MORE = 100
 MAX_K = 100_000
@@ -176,7 +172,7 @@ class DayState:
             skipped=self.skipped if self.done is not None else (),
         )
 
-    def pairs(self, *, notice: bool = False) -> list[tuple[str, str]]:
+    def pairs(self) -> list[tuple[str, str]]:
         out: list[tuple[str, str]] = []
         out += [("open", self.open)] if self.open else []
         out += [("at", self.at)] if self.at else []
@@ -190,41 +186,8 @@ class DayState:
         out += [("archived", "1")] if self.archived else []
         out += [("drop", "1")] if self.drop else []
         out += [("text", self.text)] if self.text else []
-        if notice and self.done:
-            out.append(("done", self.done))
-            out += [("said", self.said)] if self.said else []
-            out += [("skipped", s) for s in self.skipped]
         return out
 
-    def url(self, path: str | None = None, *, notice: bool = False) -> str:
-        """This state's canonical URL on its page, or on a fragment's path, which names the page unless it is the
-        Ledger."""
-        named = [("page", self.page)] if path is not None and self.page != "ledger" else []
-        return urls.link(path or PATHS[self.page], named + self.pairs(notice=notice))
-
-    def but(self, **changes: object) -> DayState:
-        return replace(self, **changes).canonical()  # pyright: ignore[reportArgumentType]
-
-    def quiet(self) -> DayState:
-        """This state without what a post said or what the panel holds open beyond its item: what a form carries."""
-        return self.but(drop=False, text=None, done=None, said=None, skipped=())
-
-    def opened(self, ref: str | None) -> DayState:
-        """The panel open on another item, or closed with None."""
-        return self.quiet().but(open=ref, at=None)
-
-    def hidden(self) -> list[tuple[str, str]]:
-        """A form's hidden fields: its page and the state it goes back to."""
-        return [("page", self.page), *self.quiet().pairs()]
-
-
-def canonical(url: str) -> str | None:
-    """A day page's URL in its canonical form, or None for one that isn't a day page's or doesn't read."""
-    path, _, query = url.partition("?")
-    page = next((name for name, where in PATHS.items() if path.endswith(where)), None)
-    if page is None and not path.endswith(PANEL):
-        return None
-    try:
-        return DayState.read(QueryParams(query), page or "ledger").url()
-    except DocketError:
-        return None
+    def url(self) -> str:
+        """This state's canonical URL on its page, which never holds what a write said."""
+        return urls.link(PATHS[self.page], self.pairs())

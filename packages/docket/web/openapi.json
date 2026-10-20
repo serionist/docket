@@ -1,6 +1,1183 @@
 {
   "components": {
     "schemas": {
+      "Body": {
+        "additionalProperties": false,
+        "description": "A write's or a save's JSON body: one op of a batch's (DR-0639), the items it acts on and that op's keys. `items`\nholds one ref, or the ticked rows of a bulk; `bulk` says the act bar sent it, so one ticked row runs as a bulk too.\n`at` names the row the selection goes to after a call, which the answer gives back.",
+        "properties": {
+          "at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At"
+          },
+          "batch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch"
+          },
+          "bulk": {
+            "default": false,
+            "title": "Bulk",
+            "type": "boolean"
+          },
+          "fields": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "title": "Fields",
+            "type": "object"
+          },
+          "force": {
+            "default": false,
+            "title": "Force",
+            "type": "boolean"
+          },
+          "items": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Of"
+          },
+          "op": {
+            "title": "Op",
+            "type": "string"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
+          "page": {
+            "default": "ledger",
+            "title": "Page",
+            "type": "string"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "remove": {
+            "default": false,
+            "title": "Remove",
+            "type": "boolean"
+          },
+          "said": {
+            "anyOf": [
+              {
+                "enum": [
+                  "undo",
+                  "redo"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Said"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
+          }
+        },
+        "required": [
+          "op"
+        ],
+        "title": "Body",
+        "type": "object"
+      },
+      "Button": {
+        "description": "A verdict's button, with the key that presses it. It carries what it writes, decided before the post by the old\ntasks app's bulk rule: `writes` is its verdict, or None when every row it acts on holds it already, so pressing it\nagain clears it and no write toggles (DR-0710).",
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "pressed": {
+            "title": "Pressed",
+            "type": "boolean"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "verdict": {
+            "title": "Verdict",
+            "type": "string"
+          },
+          "writes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Writes"
+          }
+        },
+        "required": [
+          "verdict",
+          "label",
+          "writes",
+          "key",
+          "title",
+          "pressed"
+        ],
+        "title": "Button",
+        "type": "object"
+      },
+      "Changed": {
+        "properties": {
+          "changed": {
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "changed",
+          "version"
+        ],
+        "title": "Changed",
+        "type": "object"
+      },
+      "Chip": {
+        "description": "A state the list shows: open, snoozed, closed or all, with how many items it holds.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "on": {
+            "title": "On",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "count",
+          "on"
+        ],
+        "title": "Chip",
+        "type": "object"
+      },
+      "Due": {
+        "properties": {
+          "text": {
+            "default": "",
+            "title": "Text",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "tone": {
+            "default": "",
+            "enum": [
+              "",
+              "late",
+              "today",
+              "soon"
+            ],
+            "title": "Tone",
+            "type": "string"
+          }
+        },
+        "title": "Due",
+        "type": "object"
+      },
+      "Filters": {
+        "description": "The list's own filters as the canonical URL holds them, for the page's filter bar.",
+        "properties": {
+          "archived": {
+            "title": "Archived",
+            "type": "boolean"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "k": {
+            "title": "K",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "q": {
+            "title": "Q",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "stream": {
+            "title": "Stream",
+            "type": "string"
+          },
+          "who": {
+            "title": "Who",
+            "type": "string"
+          }
+        },
+        "required": [
+          "q",
+          "stream",
+          "kind",
+          "who",
+          "k",
+          "state",
+          "group",
+          "archived"
+        ],
+        "title": "Filters",
+        "type": "object"
+      },
+      "Group": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/Row"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "selectable": {
+            "title": "Selectable",
+            "type": "boolean"
+          },
+          "tone": {
+            "enum": [
+              "",
+              "late",
+              "today",
+              "soon"
+            ],
+            "title": "Tone",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "tone",
+          "rows",
+          "total",
+          "selectable"
+        ],
+        "title": "Group",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HistoryLine": {
+        "properties": {
+          "button": {
+            "anyOf": [
+              {
+                "enum": [
+                  "Undo",
+                  "Redo"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Button"
+          },
+          "by": {
+            "title": "By",
+            "type": "string"
+          },
+          "line": {
+            "title": "Line",
+            "type": "string"
+          },
+          "op": {
+            "title": "Op",
+            "type": "string"
+          },
+          "stamp": {
+            "title": "Stamp",
+            "type": "string"
+          },
+          "undone_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Undone By"
+          },
+          "via": {
+            "title": "Via",
+            "type": "string"
+          },
+          "when": {
+            "title": "When",
+            "type": "string"
+          }
+        },
+        "required": [
+          "when",
+          "stamp",
+          "by",
+          "via",
+          "line",
+          "undone_by",
+          "button",
+          "op"
+        ],
+        "title": "HistoryLine",
+        "type": "object"
+      },
+      "ItemPanel": {
+        "description": "An item as its panel shows it (DR-0664): its call, its fields, the meeting it hangs on, its free text, its\nmaterials, where it came from, its counts and its history.",
+        "properties": {
+          "archived": {
+            "title": "Archived",
+            "type": "boolean"
+          },
+          "callable": {
+            "title": "Callable",
+            "type": "boolean"
+          },
+          "closed": {
+            "title": "Closed",
+            "type": "boolean"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "due": {
+            "title": "Due",
+            "type": "string"
+          },
+          "facts": {
+            "title": "Facts",
+            "type": "string"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryLine"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "materials": {
+            "items": {
+              "$ref": "#/components/schemas/Link"
+            },
+            "title": "Materials",
+            "type": "array"
+          },
+          "meeting": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeetingBox"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "notes": {
+            "title": "Notes",
+            "type": "string"
+          },
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "snooze": {
+            "items": {
+              "$ref": "#/components/schemas/Snooze"
+            },
+            "title": "Snooze",
+            "type": "array"
+          },
+          "source": {
+            "$ref": "#/components/schemas/Link"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "state_line": {
+            "title": "State Line",
+            "type": "string"
+          },
+          "stream": {
+            "title": "Stream",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "tomorrow": {
+            "format": "date",
+            "title": "Tomorrow",
+            "type": "string"
+          },
+          "triage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Triage"
+          },
+          "verdicts": {
+            "items": {
+              "$ref": "#/components/schemas/Button"
+            },
+            "title": "Verdicts",
+            "type": "array"
+          },
+          "who": {
+            "title": "Who",
+            "type": "string"
+          },
+          "woke": {
+            "title": "Woke",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ref",
+          "id",
+          "kind",
+          "title",
+          "who",
+          "stream",
+          "state",
+          "triage",
+          "woke",
+          "archived",
+          "due",
+          "state_line",
+          "facts",
+          "description",
+          "notes",
+          "outcome",
+          "source",
+          "meeting",
+          "materials",
+          "history",
+          "verdicts",
+          "snooze",
+          "tomorrow",
+          "callable",
+          "closed"
+        ],
+        "title": "ItemPanel",
+        "type": "object"
+      },
+      "Ledger": {
+        "description": "The Ledger's list (DR-0666), as the page shows it, with what its bars need.",
+        "properties": {
+          "canonical": {
+            "title": "Canonical",
+            "type": "string"
+          },
+          "filters": {
+            "$ref": "#/components/schemas/Filters"
+          },
+          "kinds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Kinds",
+            "type": "array"
+          },
+          "list": {
+            "$ref": "#/components/schemas/LedgerList"
+          },
+          "notice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Notice"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "snooze": {
+            "items": {
+              "$ref": "#/components/schemas/Snooze"
+            },
+            "title": "Snooze",
+            "type": "array"
+          },
+          "today": {
+            "title": "Today",
+            "type": "string"
+          },
+          "tomorrow": {
+            "title": "Tomorrow",
+            "type": "string"
+          },
+          "verdicts": {
+            "items": {
+              "$ref": "#/components/schemas/Button"
+            },
+            "title": "Verdicts",
+            "type": "array"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "canonical",
+          "version",
+          "today",
+          "list",
+          "filters",
+          "kinds",
+          "verdicts",
+          "snooze",
+          "tomorrow",
+          "notice"
+        ],
+        "title": "Ledger",
+        "type": "object"
+      },
+      "LedgerList": {
+        "properties": {
+          "chips": {
+            "items": {
+              "$ref": "#/components/schemas/Chip"
+            },
+            "title": "Chips",
+            "type": "array"
+          },
+          "counts": {
+            "title": "Counts",
+            "type": "string"
+          },
+          "empty": {
+            "title": "Empty",
+            "type": "string"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/Group"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "more": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "More"
+          },
+          "shown": {
+            "title": "Shown",
+            "type": "integer"
+          },
+          "streams": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Streams",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "groups",
+          "counts",
+          "chips",
+          "shown",
+          "total",
+          "more",
+          "empty",
+          "streams"
+        ],
+        "title": "LedgerList",
+        "type": "object"
+      },
+      "Link": {
+        "description": "A material or a source as the panel links it (DR-0664): a URL, a record's raw on the Search page, a recording\nat its time, a text locator as a search, or a path from the host repo's top that opens through the service, a text\nfile in the panel's viewer too.",
+        "properties": {
+          "href": {
+            "default": "",
+            "title": "Href",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "url",
+              "record",
+              "recording",
+              "query",
+              "path",
+              "text",
+              "unsafe"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "label",
+          "kind"
+        ],
+        "title": "Link",
+        "type": "object"
+      },
+      "MeetingBox": {
+        "properties": {
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "when": {
+            "title": "When",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "subject",
+          "when",
+          "points"
+        ],
+        "title": "MeetingBox",
+        "type": "object"
+      },
+      "Notice": {
+        "description": "What the last write did (DR-0710): its words, the batch's lines, and Undo or Redo by its batch.",
+        "properties": {
+          "batch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch"
+          },
+          "button": {
+            "anyOf": [
+              {
+                "enum": [
+                  "Undo",
+                  "Redo"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Button"
+          },
+          "kind": {
+            "enum": [
+              "info",
+              "warn"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "lines": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "then": {
+            "anyOf": [
+              {
+                "enum": [
+                  "undo",
+                  "redo"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Then"
+          }
+        },
+        "required": [
+          "kind",
+          "text"
+        ],
+        "title": "Notice",
+        "type": "object"
+      },
+      "Open": {
+        "properties": {
+          "item": {
+            "title": "Item",
+            "type": "string"
+          },
+          "page": {
+            "default": "ledger",
+            "title": "Page",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "reveal": {
+            "default": false,
+            "title": "Reveal",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "item",
+          "ref"
+        ],
+        "title": "Open",
+        "type": "object"
+      },
+      "Opened": {
+        "properties": {
+          "notice": {
+            "$ref": "#/components/schemas/Notice"
+          }
+        },
+        "required": [
+          "notice"
+        ],
+        "title": "Opened",
+        "type": "object"
+      },
+      "Panel": {
+        "properties": {
+          "canonical": {
+            "title": "Canonical",
+            "type": "string"
+          },
+          "missing": {
+            "title": "Missing",
+            "type": "string"
+          },
+          "panel": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemPanel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "canonical",
+          "panel",
+          "missing"
+        ],
+        "title": "Panel",
+        "type": "object"
+      },
+      "Point": {
+        "properties": {
+          "answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer"
+          },
+          "item": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "proposed": {
+            "title": "Proposed",
+            "type": "boolean"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "n",
+          "state",
+          "text",
+          "answer",
+          "item",
+          "proposed"
+        ],
+        "title": "Point",
+        "type": "object"
+      },
+      "Refused": {
+        "description": "Why a read or a write was refused, in the writer's or the reader's own words; an add refused as a look-alike\nnames the open items it looks like, so the page can offer Add anyway (DR-0710).",
+        "properties": {
+          "alikes": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Row"
+            },
+            "title": "Alikes",
+            "type": "array"
+          },
+          "error": {
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "Refused",
+        "type": "object"
+      },
+      "Row": {
+        "description": "A row of the list: an item as it reads at a glance, with its quick buttons when a call takes it.",
+        "properties": {
+          "age": {
+            "title": "Age",
+            "type": "integer"
+          },
+          "archived": {
+            "title": "Archived",
+            "type": "boolean"
+          },
+          "callable": {
+            "title": "Callable",
+            "type": "boolean"
+          },
+          "due": {
+            "$ref": "#/components/schemas/Due"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "meeting": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meeting"
+          },
+          "quick": {
+            "items": {
+              "$ref": "#/components/schemas/Button"
+            },
+            "title": "Quick",
+            "type": "array"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "stream": {
+            "title": "Stream",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "triage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Triage"
+          },
+          "who": {
+            "title": "Who",
+            "type": "string"
+          },
+          "woke": {
+            "title": "Woke",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ref",
+          "id",
+          "kind",
+          "title",
+          "who",
+          "stream",
+          "meeting",
+          "state",
+          "triage",
+          "woke",
+          "archived",
+          "due",
+          "age",
+          "callable",
+          "quick"
+        ],
+        "title": "Row",
+        "type": "object"
+      },
+      "Saved": {
+        "description": "A field saved: the item's row and panel after it, and the versions before and after its write (DR-0710). A\npage whose read had `before` refetches nothing else; one whose read is older missed a write from the CLI, Claude\nor a sync while the poll held for the field, and refetches its reads.",
+        "properties": {
+          "before": {
+            "title": "Before",
+            "type": "string"
+          },
+          "panel": {
+            "$ref": "#/components/schemas/ItemPanel"
+          },
+          "row": {
+            "$ref": "#/components/schemas/Row"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "row",
+          "panel",
+          "before",
+          "version"
+        ],
+        "title": "Saved",
+        "type": "object"
+      },
       "Shell": {
         "description": "What the sidebar shows beside its pages (DR-0708): the counts and marks, and the vault, machine and index line\nat its foot. A count is None when its part of the vault doesn't read; `problem` says why the vault doesn't open.",
         "properties": {
@@ -94,6 +1271,156 @@
         ],
         "title": "Shell",
         "type": "object"
+      },
+      "Snooze": {
+        "description": "A snooze choice: the day it snoozes to, and how its button reads.",
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "until": {
+            "format": "date",
+            "title": "Until",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "until",
+          "title"
+        ],
+        "title": "Snooze",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "Viewer": {
+        "properties": {
+          "cut": {
+            "title": "Cut",
+            "type": "boolean"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "text",
+          "cut"
+        ],
+        "title": "Viewer",
+        "type": "object"
+      },
+      "Wrote": {
+        "description": "What a write did: its notice, with Undo or Redo by its batch, the rows a bulk skipped, where the selection goes,\nan add's new item, and the version under the write's own lock, so the page's poll doesn't refetch for it.",
+        "properties": {
+          "added": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Added"
+          },
+          "at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At"
+          },
+          "done": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Done"
+          },
+          "notice": {
+            "$ref": "#/components/schemas/Notice"
+          },
+          "skipped": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Skipped",
+            "type": "array"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "notice",
+          "done",
+          "skipped",
+          "at",
+          "added",
+          "version"
+        ],
+        "title": "Wrote",
+        "type": "object"
       }
     }
   },
@@ -103,6 +1430,274 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/web/ledger": {
+      "get": {
+        "operationId": "ledger_api_web_ledger_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ledger"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "Ledger"
+      }
+    },
+    "/api/web/ledger/changed": {
+      "get": {
+        "operationId": "ledger_changed_api_web_ledger_changed_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "v",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "V",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changed"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ledger Changed"
+      }
+    },
+    "/api/web/ledger/open": {
+      "post": {
+        "operationId": "ledger_open_api_web_ledger_open_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Open"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Opened"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ledger Open"
+      }
+    },
+    "/api/web/ledger/panel": {
+      "get": {
+        "operationId": "ledger_panel_api_web_ledger_panel_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Panel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "Ledger Panel"
+      }
+    },
+    "/api/web/ledger/save": {
+      "post": {
+        "operationId": "ledger_save_api_web_ledger_save_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Body"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Saved"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ledger Save"
+      }
+    },
+    "/api/web/ledger/text": {
+      "get": {
+        "operationId": "ledger_text_api_web_ledger_text_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Viewer"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "Ledger Text"
+      }
+    },
+    "/api/web/ledger/write": {
+      "post": {
+        "operationId": "ledger_write_api_web_ledger_write_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Body"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Wrote"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ledger Write"
+      }
+    },
     "/api/web/shell": {
       "get": {
         "operationId": "shell_api_web_shell_get",

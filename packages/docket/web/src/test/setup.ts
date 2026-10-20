@@ -6,3 +6,6 @@ afterEach(() => {
   document.documentElement.removeAttribute("data-keys");
   document.documentElement.removeAttribute("data-theme");
 });
+
+// jsdom lays nothing out, so it has no scrolling into view; the pages ask for it as the selection moves.
+if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => undefined;

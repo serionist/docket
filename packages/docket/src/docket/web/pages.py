@@ -1,5 +1,6 @@
 """The navigation and the keys: every page of the design, by use, with the phase it arrives in, and the keys each
 built page answers to. The shell, the keys dialog and the footer read these, and `docket.js` handles the same keys.
+A page in the React app lists its keys in its own registry (DR-0711), so the Ledger has none here.
 
 Only built pages are links, first in their group; the others are slots that say when they come (DR-0546).
 """
@@ -146,24 +147,6 @@ RECORDING_KEYS: Keys = ((("?",), "these keys"),)
 # The Briefs page's briefs and lines are plain links too.
 BRIEFS_KEYS: Keys = ((("?",), "these keys"),)
 
-# The day pages' keys, the owner's old tasks app's (DR-0662): a key presses the button that carries it, on the ticked
-# rows or else the selected item; a held key repeats nothing, and u undoes.
-DAY_KEYS: Keys = (
-    (("j", "k"), "next, previous row; with the panel open, its item"),
-    (("Enter", "o"), "open the selected row beside the list"),
-    (("x", " "), "tick the selected row"),
-    (("1", "2", "3", "4"), "discuss, claude, me, chase; again clears it"),
-    (("0",), "no call"),
-    (("e",), "done"),
-    (("Delete", "Backspace"), "drop: say why"),
-    (("s",), "snooze"),
-    (("u",), "undo the last change, or redo it; Ctrl+Z too"),
-    (("n",), "a new item"),
-    (("/",), "to the search box"),
-    (("Escape",), "clear the ticks, or close the panel"),
-    (("?",), "these keys"),
-)
-
 PAGE_KEYS: dict[str, Keys] = {
     "search": KEYS,
     "sync": SYNC_KEYS,
@@ -172,7 +155,6 @@ PAGE_KEYS: dict[str, Keys] = {
     "settings": SETTINGS_KEYS,
     "recording": RECORDING_KEYS,
     "briefs": BRIEFS_KEYS,
-    "ledger": DAY_KEYS,
 }
 HINTS: dict[str, Keys] = {
     "search": ((("/",), "search"), (("j", "k"), "move"), (("Enter",), "open"), (("?",), "keys")),
@@ -182,11 +164,4 @@ HINTS: dict[str, Keys] = {
     "settings": ((("?",), "keys"),),
     "recording": ((("?",), "keys"),),
     "briefs": ((("?",), "keys"),),
-    "ledger": (
-        (("j", "k"), "move"),
-        (("x",), "tick"),
-        (("1", "2", "3", "4"), "call"),
-        (("u",), "undo"),
-        (("?",), "keys"),
-    ),
 }

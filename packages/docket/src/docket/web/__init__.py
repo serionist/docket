@@ -3,7 +3,8 @@ renders without JavaScript (DR-0170). Nothing loads from the network: htmx, the 
 package, served under `/static/` (DR-0171), and every page carries a CSP stricter than the service's floor (DR-0172).
 
 The pages move one by one into the React app (#252): its build is served under `/static/app/` and its document for
-each route it lists, `/design` first, beside its JSON routes under `/api/web` (`frontend`, `webapi`).
+each route it lists, `/design` and `/ledger` so far, beside its JSON routes under `/api/web` (`frontend`, `webapi`,
+`day_api`).
 
 `install` mounts it on the service's FastAPI app; `sign_in_page` and `used_link_page` are the pages the service shows
 a browser without a session, in the bare layout that names neither the vault nor the machine.
@@ -22,7 +23,6 @@ from docket.web import (
     assets,
     briefs,
     curate,
-    day,
     frontend,
     recording,
     search,
@@ -59,8 +59,8 @@ def install(app: FastAPI, service: Service) -> None:
     app.include_router(settings.router(service))
     app.include_router(recording.router(service))
     app.include_router(briefs.router(service))
-    app.include_router(day.router(service))
     app.include_router(webapi.router(service))
+    app.add_middleware(webapi.WriteBodies)
 
     @app.api_route("/static/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
     def static(request: Request, path: str) -> Response:  # pyright: ignore[reportUnusedFunction]

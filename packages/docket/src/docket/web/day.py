@@ -1,59 +1,35 @@
-"""The day pages' shared parts and the Ledger page (DR-0661 to DR-0668): `/ledger` is always a whole page,
-`/ledger/panel` the open item and `/ledger/text` a material in its viewer; `/ledger/write` is every button's post,
-`/ledger/save` a text field's save on change, `/ledger/changed` the poll, and `/ledger/open` a material opened on the
-owner's desktop.
+"""What the day pages' JSON routes share (DR-0664, DR-0710, DR-0711): the version the poll compares, the reads beside
+the writer, a material's checks and its launch, a write's changes from its body, and the write itself.
 
 Reads run beside the writer, as the `ledger` tool's do: `ledger_tables`, then `views.read` and its two siblings,
 `views.matching` and `views.batch_lines`, and nothing else of the ledger (DR-0616). Every write goes through
-`store.write`, one batch per post, by user, via page, on the service's writer thread (DR-0381); a post answers a 303
-back to its page, and a refusal answers the page with the writer's words, 400, the text as typed and no poll. No
-route reads `HX-Request` (DR-0170): a fragment route's answer is the same for htmx and for a link.
-
-A value the URL or a form can't hold, or a `DocketError`, is the page's own error state; anything else is logged as its
-type and frames and answered with the error page (DR-0170).
+`store.write`, one batch per call, by user, via page, on the service's writer thread (DR-0381). The routes are
+`day_api`'s.
 """
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import os
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Request
-from starlette.datastructures import QueryParams
-from starlette.responses import RedirectResponse, Response
+from pydantic import BaseModel, ConfigDict
 
 from docket.errors import DocketError
 from docket.index.build import ledger_tables
 from docket.ledger import ops, store, views
 from docket.ledger.store import RefusedError
 from docket.ledger.views import Ask, BatchLine, ItemRow, LedgerRead
-from docket.service.state import Service
 from docket.vault.vault import Vault
-from docket.web import day_view, templating
-from docket.web.day_state import (
-    CHANGED,
-    OPEN,
-    PANEL,
-    PATHS,
-    SAVE,
-    TEXT,
-    WRITE,
-    DayState,
-    DayStateError,
-    canonical,
-    is_meeting,
-    ref_of,
-)
-from docket.web.shell import shell
+from docket.web import day_view
+from docket.web.day_state import PATHS, DayState, DayStateError, is_meeting, ref_of
 
 # What a material may open with its own app (DR-0664): documents, images and media; none that runs or carries macros.
 OPENABLE = frozenset(
@@ -65,23 +41,12 @@ OPENABLE = frozenset(
 )  # fmt: skip
 # The most of a text material the viewer shows: the old tasks app's scope, capped (DR-0664).
 VIEW_BYTES = 256 * 1024
-# The calls: their buttons take ticked rows, and the selection moves on after one (DR-0662).
+# The calls: they take ticked rows, and the selection moves on after one (DR-0711).
 CALLS = ("triage", "snooze", "done", "drop", "reopen")
-# What a field form sets on an item, each saved on change (DR-0661), and what a new item takes. A form posts them as
-# `fields.<name>`, the batch's own key, so an item's who, stream or kind never reads as the page's filter of that name.
+OPS = (*CALLS, "set", "notes", "log", "material", "add", "undo")
+# What a field sets on an item, each saved on change (DR-0710), and what a new item takes.
 ITEM_FIELDS = ("title", "who", "due", "stream", "kind", "description", "outcome")
 NEW_FIELDS = ("kind", "title", "who", "stream", "due", "description", "source")
-# A page's text fields kept as typed on a refusal, by name.
-TYPED = (
-    "item",
-    "notes",
-    "note",
-    "outcome",
-    "label",
-    "ref",
-    "until",
-    *(f"fields.{k}" for k in (*ITEM_FIELDS, "source")),
-)
 NO_DISPLAY = "The service runs with no display here, so it can't open an app; open {path} yourself."
 
 
@@ -89,7 +54,7 @@ NO_DISPLAY = "The service runs with no display here, so it can't open an app; op
 
 
 def version(root: Path) -> str:
-    """The op files under a vault's root as they stand, by name, size and modification time (DR-0663): any write, a
+    """The op files under a vault's root as they stand, by name, size and modification time (DR-0711): any write, a
     pull and another clone's sync change it. No lock, and no file's content read."""
     digest = hashlib.sha256()
     try:
@@ -116,7 +81,7 @@ class Viewer:
 
 @dataclass
 class Facts:
-    """What a day page shows, read in one go beside the writer."""
+    """What a day page's read asks of the ledger, read in one go beside the writer."""
 
     tz: ZoneInfo
     sources: list[str]
@@ -132,9 +97,9 @@ class Facts:
 
 
 def gather(vault: Vault, state: DayState, *, whole: bool = True, alikes: tuple[str, ...] = ()) -> Facts:
-    """The page's reads: its list whole, `q`'s matches, the open item with the meeting it hangs on, the notice's
-    lines, the items an add looks like, and a material in the viewer. The version is taken first, so a write during
-    the read reloads the page once more rather than never."""
+    """A read's facts: the list whole with `q`'s matches, the open item with the meeting it hangs on, the lines of the
+    batch `done` names, the items an add looks like, and a material in the viewer. The version is taken first, so a
+    write during the read is seen by the next poll rather than never."""
     found = Facts(ZoneInfo(vault.config.owner.time_zone), sorted(vault.config.sources), version(vault.root))
     at = views.now()
     with ledger_tables(vault) as conn:
@@ -147,7 +112,7 @@ def gather(vault: Vault, state: DayState, *, whole: bool = True, alikes: tuple[s
             ask = Ask(view="list", state="all", stream=state.stream, kind=state.kind, who=state.who, k=None)
             found.listing = read(ask)
             found.matched = views.matching(conn, state.q) if state.q else None
-            found.alikes = [shown.items[0] for ref in alikes if (shown := _shown(read, ref)) is not None]
+        found.alikes = [shown.items[0] for ref in alikes if (shown := _shown(read, ref)) is not None]
         if state.done is not None and ops.ULID.fullmatch(state.done):
             found.lines = views.batch_lines(conn, state.done)
         if state.open is not None:
@@ -262,100 +227,138 @@ def _spawn(command: list[str]) -> object:
     )
 
 
-# -- the posts: a form as changes (DR-0661) ------------------------------------------------------------------------
+def open_material(vault: Vault, item: str, ref: str, reveal: bool) -> None:
+    """A material of an item that stands, checked, opened with its app or shown in its folder."""
+    found = gather(vault, DayState(open=item), whole=False)
+    if found.shown is None:
+        raise DayStateError(found.missing)
+    path = resolve(vault.home.top, material(found.shown, ref), OPENABLE)
+    try:
+        launch(path, reveal=reveal)
+    except OSError as e:
+        raise DayStateError(f"{ref} didn't open: {e.strerror or e}") from None
+
+
+# -- a write's body as changes (DR-0710) --------------------------------------------------------------------------
+
+
+class Body(BaseModel):
+    """A write's or a save's JSON body: one op of a batch's (DR-0639), the items it acts on and that op's keys. `items`
+    holds one ref, or the ticked rows of a bulk; `bulk` says the act bar sent it, so one ticked row runs as a bulk too.
+    `at` names the row the selection goes to after a call, which the answer gives back."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    page: str = "ledger"
+    op: str
+    items: list[str] = []
+    at: str | None = None
+    bulk: bool = False
+    verdict: str | None = None
+    until: str | None = None
+    note: str | None = None
+    outcome: str | None = None
+    fields: dict[str, str] = {}
+    notes: str | None = None
+    ref: str | None = None
+    label: str | None = None
+    remove: bool = False
+    force: bool = False
+    of: str | None = None
+    batch: str | None = None
+    said: Literal["undo", "redo"] | None = None
 
 
 @dataclass
 class Posted:
-    """A form post read: the page it goes back to, its op, the changes it makes and how the page says them."""
+    """A body read: its op, the changes it makes, where the selection goes and how the notice says it."""
 
-    state: DayState
     op: str
     changes: list[dict[str, Any]]
     at: str | None
-    # What an undo's post says it is, `undo` or `redo`, for the notice after it.
+    # What an undo says it is, `undo` or `redo`, for the notice after it.
     said: str | None
-    typed: dict[str, str]
     bulk: bool
 
 
-def page_of(params: QueryParams) -> str:
-    page = (params.get("page") or "ledger").strip()
-    if page not in PATHS:
+def page_of(page: str) -> str:
+    if page.strip() not in PATHS:
         raise DayStateError(f"page is one of {', '.join(PATHS)}, not {page!r}")
-    return page
+    return page.strip()
 
 
-def posted(form: QueryParams, now: datetime) -> Posted:
-    """The changes a form posts: its op (or a button's `op:value`) and that op's keys; `item` repeats for a bulk of
-    calls, each value one change. `now` is the owner's local time, which names an add's source."""
-    state = DayState.read(form, page_of(form)).quiet()
-    name, colon, value = (form.get("op") or "").partition(":")
-    items = [ref_of(v, "item") for v in form.getlist("item") if v.strip()]
-    typed = {k: form.get(k) or "" for k in TYPED if k in form}
-    at = (form.get("at") or "").strip()
+def _text(value: str | None) -> str | None:
+    return (value or "").strip() or None
+
+
+def posted(body: Body, now: datetime) -> Posted:
+    """The changes a body makes: its op and that op's keys, each item of a bulk of calls one change. `now` is the
+    owner's local time, which names an add's source."""
+    page_of(body.page)
+    name = body.op
+    items = [ref_of(v, "item") for v in body.items if v.strip()]
     one = items[0] if len(items) == 1 else None
     # A call on ticked rows, one or many, runs as a bulk: the act bar answers the same for one row as for many.
-    bulk = name in CALLS and (len(items) > 1 or form.get("form") == "act")
+    bulk = name in CALLS and (len(items) > 1 or body.bulk)
+    if name not in OPS:
+        raise DayStateError(f"op is one of {', '.join(OPS)}")
     if name in CALLS:
         if not items:
             raise DayStateError("tick a row, or open an item, first")
     elif name not in ("add", "undo") and one is None:
-        raise DayStateError(f"{name or 'a post'} takes one item")
-
-    def text(key: str) -> str | None:
-        return (form.get(key) or "").strip() or None
-
+        raise DayStateError(f"{name} takes one item")
     changes: list[dict[str, Any]]
     if name == "triage":
-        verdict = value if colon else form.get("verdict") or ""
-        changes = [{"op": "triage", "item": i, "verdict": verdict or None} for i in items]
+        changes = [{"op": "triage", "item": i, "verdict": body.verdict or None} for i in items]
     elif name == "snooze":
-        until = value if colon else text("until") or ""
-        changes = [{"op": "snooze", "item": i, "until": until} for i in items]
+        changes = [{"op": "snooze", "item": i, "until": _text(body.until) or ""} for i in items]
     elif name in ("done", "drop"):
-        keys = {"note": text("note"), "outcome": form.get("outcome") or None}
+        keys = {"note": _text(body.note), "outcome": body.outcome or None}
         changes = [{"op": name, "item": i, **{k: v for k, v in keys.items() if v}} for i in items]
     elif name == "reopen":
         changes = [{"op": "reopen", "item": i} for i in items]
     elif name == "set":
-        fields = {k: form.get(f"fields.{k}") or "" for k in ITEM_FIELDS if f"fields.{k}" in form}
+        fields = {k: body.fields[k] for k in ITEM_FIELDS if k in body.fields}
         if not fields:
             raise DayStateError("set takes a field: " + ", ".join(ITEM_FIELDS))
         changes = [{"op": "set", "item": one, "fields": fields}]
     elif name == "notes":
-        changes = [{"op": "notes", "item": one, "set": form.get("notes") or None}]
+        changes = [{"op": "notes", "item": one, "set": body.notes or None}]
     elif name == "log":
-        changes = [{"op": "log", "item": one, "note": text("note")}]
+        changes = [{"op": "log", "item": one, "note": _text(body.note)}]
     elif name == "material":
-        keys = {"ref": text("ref"), "label": text("label"), "remove": form.get("remove") == "1"}
+        keys = {"ref": _text(body.ref), "label": _text(body.label), "remove": body.remove}
         changes = [{"op": "material", "item": one, **keys}]
     elif name == "add":
-        fields = {k: v for k in NEW_FIELDS if (v := text(f"fields.{k}"))}
+        fields = {k: v for k in NEW_FIELDS if (v := _text(body.fields.get(k)))}
         fields.setdefault("source", f"page:{now:%Y-%m-%dT%H:%M}")
-        force = {"force": True} if form.get("force") == "true" else {}
+        force = {"force": True} if body.force else {}
         changes = [{"op": "add", "fields": fields, **force}]
-    elif name == "undo":
-        of, batch = value or text("of"), text("batch")
-        changes = [{"op": "undo", "of": of} if of else {"op": "undo", "batch": batch}]
     else:
-        raise DayStateError("op is one of triage, snooze, done, drop, reopen, set, notes, log, material, add, undo")
-    said = ((form.get("said") or "").strip() or None) if name == "undo" else None
-    return Posted(state, name, changes, ref_of(at, "at") if at else None, said, typed, bulk)
+        of, batch = _text(body.of), _text(body.batch)
+        changes = [{"op": "undo", "of": of} if of else {"op": "undo", "batch": batch}]
+    said = body.said if name == "undo" else None
+    at = _text(body.at)
+    return Posted(name, changes, ref_of(at, "at") if at else None, said, bulk)
 
 
 @dataclass(frozen=True)
 class Wrote:
     written: store.Written
     skipped: tuple[str, ...]
+    # The versions just before and just after the write, under its lock: a page whose read had `before` saw every
+    # write but this one.
+    before: str
     version: str
 
 
 def write(vault: Vault, changes: list[dict[str, Any]], *, bulk: bool) -> Wrote:
     """The changes as one batch, by user, via page. A bulk of calls gives each op only the rows it takes: a dry run
-    names those the writer refuses as they stand, and the rest are written, unless it refuses them all (DR-0661). The
-    version is taken under the same lock as the write, so a save's answer brings no reload of its own."""
+    names those the writer refuses as they stand, and the rest are written, unless it refuses them all (DR-0710). The
+    versions before and after are taken under the same lock as the write, so a page's own write brings no refetch from
+    its poll, and a write that landed since the page's read still does."""
     with vault.lock:
+        before = version(vault.root)
         skipped: tuple[str, ...] = ()
         if bulk:
             dry = store.write(vault, changes, by="user", via="page", dry_run=True)
@@ -366,313 +369,9 @@ def write(vault: Vault, changes: list[dict[str, Any]], *, bulk: bool) -> Wrote:
             skipped = tuple(str(changes[n - 1]["item"]) for n in sorted(refused))
             changes = [c for n, c in enumerate(changes, start=1) if n not in refused]
         written = store.write(vault, changes, by="user", via="page")
-        return Wrote(written, skipped, version(vault.root))
+        return Wrote(written, skipped, before, version(vault.root))
 
 
-def after(post: Posted, wrote: Wrote) -> DayState:
-    """Where a post goes back to: its page, the selection moved on after a call, an add's new item opened, with what
-    it wrote, nothing or the rows it skipped."""
-    back = post.state
-    if post.op in CALLS and post.at is not None:
-        back = back.but(open=post.at) if back.open is not None else back.but(at=post.at)
-    written = wrote.written
-    if post.op == "add" and written.ops:
-        added = written.ops[-1].item
-        back = back.opened(written.labels.get(added, added))
-    if not written.ops:
-        return back.but(done="nothing", skipped=wrote.skipped)
-    return back.but(done=written.ops[0].batch, said=post.said, skipped=wrote.skipped)
-
-
-# -- the routes -----------------------------------------------------------------------------------------------------
-
-
-def router(service: Service) -> APIRouter:
-    web = APIRouter()
-
-    async def facts(state: DayState, **keys: Any) -> Facts:
-        return await asyncio.to_thread(lambda: gather(service.vault(), state, **keys))
-
-    async def whole(
-        request: Request,
-        state: DayState,
-        *,
-        status: int = 200,
-        problem: str = "",
-        typed: Mapping[str, str] | None = None,
-        alikes: tuple[str, ...] = (),
-        form: str = "",
-    ) -> Response:
-        """The Ledger page for a state; a refusal's carries its words, the text as typed and no poll."""
-        context = shell(service, request, "Ledger", current="ledger")
-        try:
-            found = await facts(state, alikes=alikes)
-        except DocketError as e:
-            return templating.page(
-                "day/ledger.html", context | _empty(state, str(e)), status=400, referrer=templating.POSTS_FORMS
-            )
-        page = context | _context(found, state) | {"problem": problem, "typed": dict(typed or {}), "form": form}
-        if status != 200:
-            page["version"] = None
-        return templating.page("day/ledger.html", page, status=status, referrer=templating.POSTS_FORMS)
-
-    def failed_page(request: Request) -> Response:
-        return templating.page("error.html", shell(None, request, "Something failed", current="ledger"), status=500)
-
-    @web.get(PATHS["ledger"], include_in_schema=False)
-    async def ledger_page(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
-        async def answer() -> Response:
-            try:
-                state = DayState.read(request.query_params)
-            except DocketError as e:
-                context = shell(service, request, "Ledger", current="ledger") | _empty(DayState(), str(e))
-                return templating.page("day/ledger.html", context, status=400, referrer=templating.POSTS_FORMS)
-            return await whole(request, state)
-
-        return await templating.safely(request, PATHS["ledger"], answer, lambda: failed_page(request))
-
-    @web.get(PANEL, include_in_schema=False)
-    async def ledger_panel(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
-        async def answer() -> Response:
-            try:
-                params = request.query_params
-                state = DayState.read(params, page_of(params))
-                found = await facts(state, whole=False)
-            except DocketError as e:
-                return _panel_error(str(e), 400)
-            context = _panel(found, state, "")
-            headers = templating.history(request, state.url(), canonical)
-            return templating.page("day/_item.html", context, headers=headers, referrer=templating.POSTS_FORMS)
-
-        return await templating.safely(request, PANEL, answer, lambda: _panel_error(templating.FAILED, 500))
-
-    @web.get(TEXT, include_in_schema=False)
-    async def ledger_text(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
-        async def answer() -> Response:
-            try:
-                params = request.query_params
-                state = DayState.read(params, page_of(params))
-                if state.text is None:
-                    raise DayStateError("text names the material to show, with open naming its item")
-                found = await facts(state, whole=False)
-            except DocketError as e:
-                return _viewer(Viewer("", problem=str(e)), 400)
-            viewer = found.viewer or Viewer(state.text, problem=found.missing)
-            headers = templating.history(request, state.url(), canonical)
-            return _viewer(viewer, 400 if viewer.problem else 200, headers)
-
-        return await templating.safely(
-            request, TEXT, answer, lambda: _viewer(Viewer("", problem=templating.FAILED), 500)
-        )
-
-    @web.get(CHANGED, include_in_schema=False)
-    async def ledger_changed(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
-        quiet = Response(status_code=204, headers={"Cache-Control": "no-store"})
-
-        async def answer() -> Response:
-            given = (request.query_params.get("v") or "").strip()
-            root = service.settings.vault
-            now = await asyncio.to_thread(lambda: version(root)) if root is not None else given
-            if now == given:
-                return quiet
-            return Response(status_code=200, headers={"Cache-Control": "no-store", "HX-Refresh": "true"})
-
-        # A poll that fails says nothing changed: the next one asks again.
-        return await templating.safely(request, CHANGED, answer, lambda: quiet)
-
-    @web.post(WRITE, include_in_schema=False)
-    async def ledger_write(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
-        async def answer() -> Response:
-            form = await templating.read_form(request)
-            if isinstance(form, Response):
-                return form
-            try:
-                post = posted(form, _now(service))
-            except DocketError as e:
-                back = _back(form)
-                return await whole(request, back, status=400, problem=str(e), typed=_typed(form), form=_form(form))
-            try:
-                wrote = await service.writer.run(lambda: write(service.vault(), post.changes, bulk=post.bulk))
-            except RefusedError as e:
-                return await whole(
-                    request, post.state, status=400, problem=e.why, typed=post.typed, alikes=e.refs, form=_form(form)
-                )
-            except DocketError as e:
-                return await whole(request, post.state, status=400, problem=str(e), typed=post.typed, form=_form(form))
-            return RedirectResponse(after(post, wrote).url(notice=True), status_code=303)
-
-        return await templating.safely(request, WRITE, answer, lambda: failed_page(request))
-
-    @web.post(SAVE, include_in_schema=False)
-    async def ledger_save(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
-        async def answer() -> Response:
-            form = await templating.read_form(request)
-            if isinstance(form, Response):
-                return form
-            try:
-                post = posted(form, _now(service))
-                if post.op not in ("set", "notes"):
-                    raise DayStateError("a save sets a field of an item")
-                wrote = await service.writer.run(lambda: write(service.vault(), post.changes, bulk=False))
-            except RefusedError as e:
-                return _refused_field(form, e.why)
-            except DocketError as e:
-                return _refused_field(form, str(e))
-            item = str(post.changes[0]["item"])
-            found = await facts(post.state.opened(item), whole=False)
-            if found.shown is None:
-                return _refused_field(form, found.missing)
-            context: dict[str, Any] = {"state": post.state.opened(item), "version": wrote.version, "tz": found.tz}
-            context["row"] = _saved_row(found.shown, post.state)
-            context["panel"] = day_view.build_panel(found.shown, found.meeting, post.state, found.sources, "")
-            return templating.page("day/_saved.html", context, referrer=templating.POSTS_FORMS)
-
-        return await templating.safely(
-            request, SAVE, answer, lambda: _refused_field(QueryParams(""), templating.FAILED, 500)
-        )
-
-    @web.post(OPEN, include_in_schema=False)
-    async def ledger_open(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
-        async def answer() -> Response:
-            form = await templating.read_form(request)
-            if isinstance(form, Response):
-                return form
-            back = _back(form)
-            try:
-                item = ref_of(form.get("item") or "", "item")
-                ref = (form.get("ref") or "").strip()
-                reveal = form.get("reveal") == "1"
-                await asyncio.to_thread(lambda: _open_material(service.vault(), back, item, ref, reveal))
-            except DocketError as e:
-                return await whole(request, back, status=400, problem=str(e))
-            return RedirectResponse(back.but(done="shown" if reveal else "opened").url(notice=True), status_code=303)
-
-        return await templating.safely(request, OPEN, answer, lambda: failed_page(request))
-
-    return web
-
-
-def _now(service: Service) -> datetime:
+def local_now(vault: Vault) -> datetime:
     """The owner's local time now, in vault.yaml's zone."""
-    return datetime.now(UTC).astimezone(ZoneInfo(service.vault().config.owner.time_zone))
-
-
-def _open_material(vault: Vault, state: DayState, item: str, ref: str, reveal: bool) -> None:
-    found = gather(vault, state.opened(item), whole=False)
-    if found.shown is None:
-        raise DayStateError(found.missing)
-    path = resolve(vault.home.top, material(found.shown, ref), OPENABLE)
-    try:
-        launch(path, reveal=reveal)
-    except OSError as e:
-        raise DayStateError(f"{ref} didn't open: {e.strerror or e}") from None
-
-
-def _back(form: QueryParams) -> DayState:
-    """The page a form names, or the Ledger as it opens when the form's state doesn't read."""
-    try:
-        return DayState.read(form, page_of(form)).quiet()
-    except DocketError:
-        return DayState()
-
-
-def _typed(form: QueryParams) -> dict[str, str]:
-    return {k: form.get(k) or "" for k in TYPED if k in form}
-
-
-def _form(form: QueryParams) -> str:
-    return (form.get("form") or "").strip()
-
-
-# -- contexts -------------------------------------------------------------------------------------------------------
-
-
-def _empty(state: DayState, problem: str) -> dict[str, Any]:
-    return {
-        "state": state,
-        "view": None,
-        "panel": None,
-        "missing": "",
-        "notice": None,
-        "problem": problem,
-        "typed": {},
-        "form": "",
-        "alikes": [],
-        "version": None,
-        "tz": ZoneInfo("UTC"),
-        "today": None,
-        "act": day_view.verdict_buttons([]),
-        "act_snooze": [],
-        "tomorrow": "",
-        "kinds": ops.KINDS,
-        "viewer": None,
-    }
-
-
-def _context(found: Facts, state: DayState) -> dict[str, Any]:
-    # A whole page's read always lists.
-    listing = cast(LedgerRead, found.listing)
-    view = day_view.build_list(listing, state, found.matched)
-    next_ref = view.rows[state.open].next if state.open in view.rows else ""
-    return {
-        "state": state,
-        "view": view,
-        "notice": day_view.build_notice(state, found.lines),
-        "version": found.version,
-        "today": listing.today,
-        "act": day_view.verdict_buttons([]),
-        "act_snooze": day_view.snooze_choices(listing.today),
-        "tomorrow": (listing.today + timedelta(days=1)).isoformat(),
-        "kinds": ops.KINDS,
-        "alikes": [day_view.row_of(r, state, listing.today) for r in found.alikes],
-    } | _panel(found, state, next_ref)
-
-
-def _panel(found: Facts, state: DayState, next_ref: str) -> dict[str, Any]:
-    panel = None
-    if found.shown is not None:
-        panel = day_view.build_panel(found.shown, found.meeting, state, found.sources, next_ref)
-    return {
-        "state": state,
-        "panel": panel,
-        "missing": found.missing,
-        "tz": found.tz,
-        "viewer": found.viewer,
-        "form": "",
-        "typed": {},
-    }
-
-
-def _saved_row(shown: LedgerRead, state: DayState) -> day_view.Row:
-    row = shown.items[0]
-    return day_view.row_of(row.model_copy(update={"title": views.cut(row.title)}), state.opened(row.ref), shown.today)
-
-
-def _panel_error(message: str, status: int) -> Response:
-    context = {"state": DayState(), "panel": None, "missing": message, "tz": ZoneInfo("UTC"), "viewer": None}
-    context |= {"form": "", "typed": {}}
-    return templating.page("day/_item.html", context, status=status, referrer=templating.POSTS_FORMS)
-
-
-def _viewer(viewer: Viewer, status: int, headers: Mapping[str, str] | None = None) -> Response:
-    return templating.page("day/_viewer.html", {"viewer": viewer}, status=status, headers=headers)
-
-
-def _key(name: str) -> str:
-    """A field's name in a form: an item's fields under `fields.`, the notes on their own."""
-    return name if name == "notes" else f"fields.{name}"
-
-
-def _refused_field(form: QueryParams, problem: str, status: int = 400) -> Response:
-    """A save the writer refused: its field's form again, the text as typed, marked unsaved, with the writer's words;
-    no version, so nothing reloads it away (DR-0661)."""
-    state = _back(form)
-    name = next((k for k in (*ITEM_FIELDS, "notes") if _key(k) in form), "")
-    context = {
-        "state": state,
-        "item": (form.get("item") or "").strip(),
-        "name": name,
-        "value": form.get(_key(name)) or "",
-        "problem": problem,
-    }
-    return templating.page("day/_field.html", context, status=status, referrer=templating.POSTS_FORMS)
+    return datetime.now(UTC).astimezone(ZoneInfo(vault.config.owner.time_zone))

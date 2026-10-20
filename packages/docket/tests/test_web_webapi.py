@@ -3,15 +3,18 @@ serves, the session cookie only, and the OpenAPI document the app's types come f
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 import ui_world
 from docket_testkit import copied
 from docket_webkit import OURS, PORT, TOKEN
 from starlette.testclient import TestClient
+from starlette.types import Message, Scope
 
 from docket import paths
 from docket.errors import DocketError
@@ -54,9 +57,9 @@ def test_the_shell_counts_the_week_s_untriaged_items_waiting_records_and_due_syn
     assert answer.status_code == 200
     assert answer.headers["cache-control"] == "no-store"
     shell = answer.json()
-    # day_kit's seed: seven items, one done and one snoozed, so five open, one of them with a call; staging_kit's
-    # three records, read as the files stand.
-    assert shell["untriaged"] == 4
+    # day_kit's seed: seven items, one done and one snoozed, so five open, one of them with a call; then the week's
+    # fourteen more, twelve open, eight of them with a call; staging_kit's three records, read as the files stand.
+    assert shell["untriaged"] == 8
     assert shell["staging"] == 3
     assert shell["sync_due"] == ["chat"], "the live source, never synced"
     assert shell["vault"] == "vault" and shell["machine"] == "test-box", "the machine the tests name"
@@ -134,10 +137,90 @@ def test_the_routes_take_the_browser_s_session_only(tmp_path: Path) -> None:
         assert "session only" in token.json()["detail"]
 
 
+def through_the_cap(headers: dict[str, str], chunks: list[bytes]) -> tuple[int, int, bytes | None]:
+    """A write through WriteBodies alone: how many of its messages were read, the status sent, and the body the app
+    behind got, or None when it was never called."""
+    got: list[bytes] = []
+    pulled = 0
+    sent: list[Message] = []
+
+    async def app(scope: Scope, receive: Any, send: Any) -> None:
+        got.append((await receive())["body"])
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    async def receive() -> Message:
+        nonlocal pulled
+        pulled += 1
+        return {"type": "http.request", "body": chunks[pulled - 1], "more_body": pulled < len(chunks)}
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    raw = [(k.lower().encode(), v.encode()) for k, v in headers.items()]
+    scope: Scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/web/ledger/write",
+        "headers": raw,
+        "query_string": b"",
+    }
+    asyncio.run(webapi.WriteBodies(app)(scope, receive, send))
+    return pulled, sent[0]["status"], got[0] if got else None
+
+
+def test_a_write_s_body_is_checked_before_any_of_it_is_read() -> None:
+    """A Content-Length over the cap, or a body that isn't JSON, is refused with none of it read; a body with no
+    length is read only until it passes the cap; one under it reaches the route whole (DR-0709)."""
+    piece = b"x" * (64 * 1024)
+    jsonish = {"Content-Type": "application/json"}
+    over = str(webapi.MAX_BODY + 1)
+    assert through_the_cap({**jsonish, "Content-Length": over}, [piece] * 5) == (0, 413, None)
+    assert through_the_cap({"Content-Type": "text/plain"}, [piece]) == (0, 415, None)
+    assert through_the_cap(jsonish, [piece] * 10) == (5, 413, None)
+    assert through_the_cap({**jsonish, "Content-Length": "2"}, [piece] * 10) == (5, 413, None)
+    assert through_the_cap(jsonish, [b'{"op":', b'"done"}']) == (2, 200, b'{"op":"done"}')
+
+
+def test_a_write_whose_client_goes_is_left_and_the_route_hears_what_comes_after_its_body() -> None:
+    """A client gone before its body came gets no answer and reaches no route; a route that listens on after the
+    body it was handed hears what the connection says next, such as the client going (DR-0709)."""
+    heard: list[str] = []
+    sent: list[Message] = []
+    messages: list[Message] = []
+
+    async def app(scope: Scope, receive: Any, send: Any) -> None:
+        heard.append((await receive())["type"])
+        heard.append((await receive())["type"])
+
+    async def receive() -> Message:
+        return messages.pop(0)
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    scope: Scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/web/ledger/save",
+        "headers": [(b"content-type", b"application/json")],
+        "query_string": b"",
+    }
+    messages[:] = [{"type": "http.disconnect"}]
+    asyncio.run(webapi.WriteBodies(app)(scope, receive, send))
+    assert (heard, sent) == ([], [])
+    messages[:] = [{"type": "http.request", "body": b"{}", "more_body": False}, {"type": "http.disconnect"}]
+    asyncio.run(webapi.WriteBodies(app)(scope, receive, send))
+    assert heard == ["http.request", "http.disconnect"]
+
+
 def test_openapi_json_is_what_the_routes_say() -> None:
     assert SCHEMA.read_text(encoding="utf-8") == webapi.openapi_text()
     document = json.loads(webapi.openapi_text())
-    assert list(document["paths"]) == ["/api/web/shell"]
+    assert list(document["paths"]) == [
+        "/api/web/ledger", "/api/web/ledger/changed", "/api/web/ledger/open", "/api/web/ledger/panel",
+        "/api/web/ledger/save", "/api/web/ledger/text", "/api/web/ledger/write", "/api/web/shell",
+    ]  # fmt: skip
     assert set(document["components"]["schemas"]["Shell"]["required"]) == set(webapi.Shell.model_fields)
 
 

@@ -49,6 +49,13 @@ def test_the_shared_urls_hold_one_from_every_page() -> None:
     assert {url.partition("?")[0] for url in canonical_urls()} == set(READERS)
 
 
+def test_the_ledger_s_parameters_go_in_the_order_the_app_writes_them_in() -> None:
+    order = json.loads(CANONICAL.read_text(encoding="utf-8"))["order"]["/ledger"]
+    every = DayState(open="A-0002", at="A-0001", q="x", stream="ops", kind="task", who="Ada", k=200, state="all",
+                     group="who", archived=True, drop=True, text="a.md")  # fmt: skip
+    assert [name for name, _ in every.pairs()] == order
+
+
 def test_the_rule_keeps_ascii_letters_digits_and_url_safe_and_encodes_the_rest() -> None:
     assert urls.URL_SAFE == ":@/,"
     assert urls.query([("q", "AZaz09_.-~:@/,")]) == "q=AZaz09_.-~:@/,"

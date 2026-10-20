@@ -2,8 +2,10 @@
 
 It seeds an invented world into a folder of its own, starts a throwaway service on a free port with config, state and
 models folders of its own, a file token and the failing keyring, and drives the built app in Chrome: each of the
-page's states, light and dark, at 1440x900 and 390x844, with the clock, zone and motion fixed. The shots and the
-machine checks go to `.local/ui/<page>/r<n>/`, a new round each run.
+page's states, light and dark, at 1440x900 and 390x844, with the clock, zone and motion fixed. A state opens a URL,
+then presses keys, clicks or fills a field, and may undo its own write once shot, so the next shot finds the world as
+it was; one may ask for another world, such as the empty one. The shots and the machine checks go to
+`.local/ui/<page>/r<n>/`, a new round each run.
 
 | Check | Fails on |
 |---|---|
@@ -61,14 +63,26 @@ DROPPED_PREFIXES = ("DOCKET_", "GIT_")
 DROPPED = frozenset({"PYTHON_KEYRING_BACKEND", "PYTHONPATH"})
 
 
+# What a state's step does: press a key, click a selector, or fill a field, `selector|text`.
+VERBS = ("press", "click", "fill")
+# What Chrome logs for a refusal's 400, which a state that shows a refusal brings about on purpose.
+REFUSED = "the server responded with a status of 400"
+
+
 @dataclass(frozen=True)
 class State:
-    """One state of a page: where it opens, then what is pressed or clicked, in order; `only` limits it to a size."""
+    """One state of a page: where it opens, then what is pressed, clicked or filled, in order; `only` limits it to a
+    size, `world` serves it another world than the page's, and `after` runs once it is shot, such as an undo of the
+    write it shows. `expects` names console lines the state brings about on purpose, such as the 400 of the refusal
+    it shows, which the console check then leaves out."""
 
     name: str
     url: str
     steps: tuple[tuple[str, str], ...] = ()
     only: str | None = None
+    world: str | None = None
+    after: tuple[tuple[str, str], ...] = ()
+    expects: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -97,6 +111,44 @@ PAGES: dict[str, Page] = {
                 (("click", "[aria-label='Open the pages']"), ("click", "button:has-text('Theme')")),
                 only="narrow",
             ),
+        ),
+    ),
+    "ledger": Page(
+        world="week",
+        states=(
+            State("list", "/ledger"),
+            State("panel", "/ledger?open=A-0005"),
+            State("meeting", "/ledger?open=A-0002"),
+            State("ticked", "/ledger", (("press", "j"), ("press", "x"), ("press", "j"), ("press", "x"))),
+            State("notice", "/ledger", (("press", "j"), ("press", "2")), after=(("press", "u"),)),
+            State(
+                "refusal",
+                "/ledger?open=A-0003&drop=1",
+                (("click", '#close-A-0003 >> text="Drop"'),),
+                expects=(REFUSED,),
+            ),
+            State("viewer", "/ledger?open=A-0005&text=notes/plan.md"),
+            # The date picker over each of its fields: the panel's due, the snooze's own day, the new item's due.
+            State("due", "/ledger?open=A-0003", (("click", "#f-A-0003-due"),)),
+            State("snooze", "/ledger?open=A-0003", (("click", "#until-A-0003"),)),
+            State(
+                "new-due",
+                "/ledger",
+                (("press", "n"), ("fill", "#new-title|Book the train for the visit"), ("click", "#new-due")),
+            ),
+            State(
+                "alike",
+                "/ledger",
+                (
+                    ("press", "n"),
+                    ("fill", "#new-title|Send Ada the dates again"),
+                    ("fill", "#new-who|Ada Example"),
+                    ("fill", "#new-stream|pilot"),
+                    ("click", 'role=dialog >> text="Add"'),
+                ),
+                expects=(REFUSED,),
+            ),
+            State("empty", "/ledger", world="empty"),
         ),
     ),
 }
@@ -128,6 +180,8 @@ MEASURE = """(least) => {
   const seen = 'a[href], button, input:not([type=hidden]), select, textarea, [role=button], [role=checkbox], ' +
     '[role=switch], [role=tab], [role=menuitem], [role=menuitemradio], [role=option]';
   for (const el of document.querySelectorAll(seen)) {
+    // A control hidden from everyone, such as the native select a Select keeps for a form's autofill.
+    if (el.closest('[aria-hidden="true"]')) continue;
     const box = el.getBoundingClientRect();
     if (!box.width || !box.height) continue;
     const style = getComputedStyle(el);
@@ -272,13 +326,25 @@ def sign_in_link(port: int, token: str, after: str) -> str:
     return f"http://localhost:{port}/session?code={code}&next={urllib.parse.quote(after, safe='')}"
 
 
-def _shoot(page: Any, state: State, out: Path, shot: Shot) -> None:
-    for verb, arg in state.steps:
+def unexpected(lines: Sequence[str], expects: Sequence[str]) -> list[str]:
+    """A state's console lines, but for those it brings about on purpose."""
+    return [line for line in lines if not any(expected in line for expected in expects)]
+
+
+def _steps(page: Any, steps: Sequence[tuple[str, str]]) -> None:
+    for verb, arg in steps:
         if verb == "press":
             page.keyboard.press(arg)
+        elif verb == "fill":
+            selector, _, text = arg.partition("|")
+            page.fill(selector, text)
         else:
             page.click(arg)
         page.wait_for_timeout(150)
+
+
+def _shoot(page: Any, state: State, out: Path, shot: Shot) -> None:
+    _steps(page, state.steps)
     page.wait_for_timeout(250)
     page.screenshot(path=str(out / shot.file))
     measured = page.evaluate(MEASURE, TARGET)
@@ -286,6 +352,9 @@ def _shoot(page: Any, state: State, out: Path, shot: Shot) -> None:
     shot.problems["sideways"] = ["the document scrolls sideways"] if measured["sideways"] else []
     shot.problems["csp"] = list(page.evaluate("window.__csp"))
     shot.problems["axe"] = list(page.evaluate(AXE_RUN))
+    if state.after:
+        _steps(page, state.after)
+        page.wait_for_timeout(250)
 
 
 class Console:
@@ -302,13 +371,13 @@ class Console:
         self.lines.append(str(error))
 
 
-def shoot(browser: Any, page: Page, port: int, token: str, *, out: Path, axe: Path) -> list[Shot]:
-    """Every state of the page, at each size, in each theme, each in a browser context of its own: its own cookies,
-    so each signs in afresh through a one-time link."""
+def shoot(browser: Any, states: Sequence[State], port: int, token: str, *, out: Path, axe: Path) -> list[Shot]:
+    """Every state, at each size, in each theme, each in a browser context of its own: its own cookies, so each signs
+    in afresh through a one-time link."""
     shots: list[Shot] = []
     for size, (width, height) in SIZES.items():
         for theme in THEMES:
-            for state in page.states:
+            for state in states:
                 if state.only not in (None, size):
                     continue
                 shot = Shot(state.name, theme, size, shot_name(state.name, theme, size))
@@ -330,11 +399,14 @@ def shoot(browser: Any, page: Page, port: int, token: str, *, out: Path, axe: Pa
                 tab.on("pageerror", errors.error)
                 tab.clock.set_fixed_time(CLOCK)
                 tab.goto(sign_in_link(port, token, state.url))
-                tab.wait_for_url(f"**{state.url.split('?')[0]}*")
+                # A query may hold a slash, such as a material's path, which one star doesn't match.
+                tab.wait_for_url(f"**{state.url.split('?')[0]}**")
                 tab.wait_for_selector("#main")
+                # The page's reads answered, so a key pressed next finds its rows.
+                tab.wait_for_load_state("networkidle")
                 tab.evaluate("document.fonts.ready")
                 _shoot(tab, state, out, shot)
-                shot.problems["console"] = errors.lines
+                shot.problems["console"] = unexpected(errors.lines, state.expects)
                 shots.append(shot)
                 context.close()
     return shots
@@ -368,8 +440,13 @@ def run(
     if not axe.is_file():
         raise KitError(f"{AXE} is missing: run `npm ci` in packages/docket/web first")
     out = next_round(root, page_name)
-    with serve(root, page.world) as (port, token), browser() as driven:
-        shots = shoot(driven, page, port, token, out=out, axe=axe)
+    shots: list[Shot] = []
+    worlds = list(dict.fromkeys(state.world or page.world for state in page.states))
+    with browser() as driven:
+        for world in worlds:
+            states = [state for state in page.states if (state.world or page.world) == world]
+            with serve(root, world) as (port, token):
+                shots += shoot(driven, states, port, token, out=out, axe=axe)
     lines = summary(shots)
     (out / "checks.json").write_text(
         json.dumps([s.__dict__ | {"ok": s.ok} for s in shots], indent=2) + "\n", encoding="utf-8", newline="\n"

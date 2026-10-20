@@ -1,10 +1,10 @@
-"""The day pages on #201's perf ledger (DR-0668): 5,000 items with 50,000 ops and 2,000 meetings with 20,000 point
-ops, the index rebuilt. Each page is asked once before the clock, so SQLite's cache is warm as a running service's is,
-then timed as the best of three runs: the Ledger, the Ledger with q and an item's panel are each held to a quarter
-second, the poll to a hundredth, a button's write on one item to a tenth and a bulk of 50 to a quarter second, each on
-its own. A write is timed through
-its route with the commit left out, as the ledger's own timed write is dry: git's commit isn't the page's to time.
-Wall time is asserted only when no tracer runs."""
+"""The day pages' JSON routes on #201's perf ledger (DR-0668, DR-0712): 5,000 items with 50,000 ops and 2,000 meetings
+with 20,000 point ops, the index rebuilt. Each read is asked once before the clock, so SQLite's cache is warm as a
+running service's is, then timed as the best of three runs: the Ledger's list, the list with q and an item's panel are
+each held to a quarter second, the poll to a hundredth, a button's write on one item, its notice's lines with it, to a
+tenth and a bulk of 50 to a quarter second, each on its own. A write is timed through its route with the commit left
+out, as the ledger's own timed write is dry: git's commit isn't the page's to time. Wall time is asserted only when no
+tracer runs. The page in Chrome, from the sidebar to its rows with the keys live, is test_web_browser_ledger.py's."""
 
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ from typing import Any
 import pytest
 from day_kit import SAME, signed_in
 from docket_testkit import Best, best_of, empty_vault, make_config, traced
-from docket_webkit import parse
 from ledger_kit import ITEMS, build
 from starlette.testclient import TestClient
 
@@ -59,31 +58,35 @@ def timed(ask: Callable[[], Any]) -> Best[Any]:
     return best_of(3, ask)
 
 
+def refs(answer: Any) -> list[str]:
+    return [r["ref"] for g in answer.json()["list"]["groups"] for r in g["rows"]]
+
+
 @pytest.mark.perf
 def test_the_ledger_its_panel_the_poll_and_a_write_answer_within_their_budgets(client: TestClient) -> None:
-    listed = timed(lambda: client.get("/ledger"))
+    listed = timed(lambda: client.get("/api/web/ledger"))
     page, page_s = listed.result, listed.seconds
     assert page.status_code == 200
-    assert len(parse(page.text).find_all("li", class_="row")) == 100
+    assert len(refs(page)) == 100
     # Every word is a part of a title, a number or a log line: "4999" is in A-4999 and in round 4999's title.
-    asked = timed(lambda: client.get("/ledger?q=round+4999"))
+    asked = timed(lambda: client.get("/api/web/ledger?q=round+4999"))
     found, found_s = asked.result, asked.seconds
-    assert [r.attrs["data-ref"] for r in parse(found.text).find_all("li", class_="row")] == ["A-4999", f"A-{ITEMS:04d}"]
-    opened = timed(lambda: client.get("/ledger/panel?open=A-2500"))
+    assert refs(found) == ["A-4999", f"A-{ITEMS:04d}"]
+    opened = timed(lambda: client.get("/api/web/ledger/panel?open=A-2500"))
     panel, panel_s = opened.result, opened.seconds
-    assert parse(panel.text).find("section", class_="item-panel").attrs["data-item"] == "A-2500"
-    poll = parse(page.text).find("div", id="poll").attrs["hx-get"]
-    polled = timed(lambda: client.get(poll))
+    assert panel.json()["panel"]["ref"] == "A-2500"
+    version = page.json()["version"]
+    polled = timed(lambda: client.get(f"/api/web/ledger/changed?v={version}"))
     quiet, poll_s = polled.result, polled.seconds
-    assert quiet.status_code == 204
-    one = {"page": "ledger", "op": "triage:me", "item": "A-1200"}
-    written = timed(lambda: client.post("/ledger/write", data=one, headers=SAME))
+    assert quiet.json()["changed"] is False
+    one = {"op": "triage", "verdict": "me", "items": ["A-1200"]}
+    written = timed(lambda: client.post("/api/web/ledger/write", json=one, headers=SAME))
     wrote, write_s = written.result, written.seconds
-    assert wrote.status_code == 303
-    bulk = {"page": "ledger", "op": "triage:claude", "item": [f"A-{n:04d}" for n in range(100, 100 + BULK)]}
-    bulked = timed(lambda: client.post("/ledger/write", data=bulk, headers=SAME))
+    assert wrote.status_code == 200
+    bulk = {"op": "triage", "verdict": "claude", "items": [f"A-{n:04d}" for n in range(100, 100 + BULK)], "bulk": True}
+    bulked = timed(lambda: client.post("/api/web/ledger/write", json=bulk, headers=SAME))
     many, bulk_s = bulked.result, bulked.seconds
-    assert many.status_code == 303
+    assert many.status_code == 200
     print(
         f"day pages on {ITEMS:,} items: ledger {page_s * 1000:.0f} ms ({listed.runs('ms')}), with q "
         f"{found_s * 1000:.0f} ms ({asked.runs('ms')}), panel {panel_s * 1000:.0f} ms ({opened.runs('ms')}), poll "

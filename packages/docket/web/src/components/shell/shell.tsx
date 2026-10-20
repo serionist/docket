@@ -1,10 +1,11 @@
-import { Outlet } from "@tanstack/react-router";
+import { Outlet, useRouterState } from "@tanstack/react-router";
 import * as React from "react";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useKeys } from "@/lib/keys";
 import { AppSidebar } from "./app-sidebar";
 import { KeysDialog } from "./keys-dialog";
+import { DAY, REST, SETTINGS } from "./nav";
 import { SessionDialog } from "./session-dialog";
 
 /** The window's title for a page: its name, then Docket's, as the server's pages write it. */
@@ -23,8 +24,16 @@ export function useShowKeys(): () => void {
 
 /** Every page's frame: the skip link, the sidebar, the page, and the dialogs any page can raise. */
 export function Shell() {
+  const path = useRouterState({ select: (state) => state.location.pathname });
+  const current = [...DAY, ...REST, SETTINGS].find((page) => page.href === path)?.key;
   const [keysOpen, setKeysOpen] = React.useState(false);
-  const showKeys = React.useCallback(() => setKeysOpen(true), []);
+  // What had the focus when the dialog opened, which gets it back when the dialog closes: the dialog has no trigger
+  // of its own, as a key or a page's button opens it.
+  const opener = React.useRef<Element | null>(null);
+  const showKeys = React.useCallback(() => {
+    opener.current = document.activeElement;
+    setKeysOpen(true);
+  }, []);
   useKeys("shell", "Everywhere", [{ keys: ["?"], what: "these keys", run: showKeys }], "shell");
   return (
     <TooltipProvider>
@@ -36,11 +45,11 @@ export function Shell() {
       </a>
       <ShowKeys.Provider value={showKeys}>
         <SidebarProvider>
-          <AppSidebar />
+          <AppSidebar current={current} />
           <Outlet />
         </SidebarProvider>
       </ShowKeys.Provider>
-      <KeysDialog open={keysOpen} onOpenChange={setKeysOpen} />
+      <KeysDialog open={keysOpen} onOpenChange={setKeysOpen} returnTo={opener} />
       <SessionDialog />
     </TooltipProvider>
   );

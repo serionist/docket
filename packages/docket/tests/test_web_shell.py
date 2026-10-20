@@ -106,8 +106,6 @@ def test_the_navigation_has_a_slot_for_every_page_and_links_the_built_ones(clien
         "/recording",
         "/recording?rid=calls:rec-0100",
         "/briefs",
-        "/ledger",
-        "/ledger/panel",
     ],
 )
 def test_every_page_and_fragment_carries_the_page_csp_and_no_store(client: TestClient, path: str) -> None:

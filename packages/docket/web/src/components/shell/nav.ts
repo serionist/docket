@@ -27,7 +27,7 @@ export interface NavPage {
 }
 
 export const DAY: NavPage[] = [
-  { key: "ledger", title: "Ledger", href: "/ledger", icon: BookOpenTextIcon, inApp: false },
+  { key: "ledger", title: "Ledger", href: "/ledger", icon: BookOpenTextIcon, inApp: true },
 ];
 
 export const REST: NavPage[] = [
