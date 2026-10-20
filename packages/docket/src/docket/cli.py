@@ -59,6 +59,7 @@ from docket.sources.ingest import IngestReport, ingest_run
 from docket.sources.local import record as record_import_folder
 from docket.sources.runner import MapperFailedError
 from docket.vault import convert, curatelog, cuts, holds, inforce, redaction, releaselog, rendered
+from docket.vault.anchors import format_time
 from docket.vault.config import MAX_LOOKBACK_DAYS
 from docket.vault.docstore import DocStore
 from docket.vault.entitystore import EntityStore, RefusedError, Written, load_changes
@@ -793,7 +794,8 @@ def staging_list(
 
 @staging_app.command("show")
 def staging_show(ref: RefArgument, vault: VaultOption = None) -> None:
-    """One staged record, its state and its cuts, and the version in raw that was cut, when there is one."""
+    """One staged record, its state and its cuts, and the version in raw that was cut, when there is one; a transcript
+    a segment a line, with the times a cut takes."""
     shown = Gate(find_vault(vault)).show(ref)
     staged = shown.entry.staged
     typer.echo(f"key       {shown.entry.key}")
@@ -804,12 +806,19 @@ def staging_show(ref: RefArgument, vault: VaultOption = None) -> None:
         typer.echo("cuts      " + ", ".join(f"{c.start}-{c.end} {c.unit}" for c in staged.cuts))
     if staged.problem:
         typer.echo(f"problem   {staged.problem}")
-    typer.echo(staged.record.model_dump_json(indent=2, exclude={"text"}))
-    _echo_text("text, each line after the character it starts at; a cut is <start>-<end> in these", staged.record.text)
+    record = staged.record
+    if record.segments:
+        # A transcript once, a segment a line: its segments, their copy in native and the text rendered from them
+        # would show it three times over.
+        typer.echo(record.model_dump_json(indent=2, exclude={"text", "segments", "native"}))
+        _echo_segments("transcript, a segment a line; a cut is the times at its start, such as 12:30-14:05", record)
+    else:
+        typer.echo(record.model_dump_json(indent=2, exclude={"text"}))
+        _echo_text("text, each line after the character it starts at; a cut is <start>-<end> in these", record.text)
     if staged.cuts:
-        _echo_cut(staged.record, staged.cuts)
+        _echo_cut(record, staged.cuts)
     if shown.cut_before is not None:
-        _echo_text(f"cut before, in raw run {shown.cut_before.run}", shown.cut_before.text)
+        _echo_record(f"cut before, in raw run {shown.cut_before.run}", shown.cut_before)
 
 
 @staging_app.command("classify")
@@ -841,9 +850,26 @@ def _echo_text(heading: str, text: str) -> None:
         offset += len(line) + 1
 
 
+def _echo_segments(heading: str, record: RawRecord) -> None:
+    """A transcript's segments, a line each, `@mm:ss-mm:ss Speaker: text`: the times a time cut takes, whole seconds
+    down, so a cut read off a line takes that segment and no other."""
+    typer.echo(f"{heading}:")
+    for seg in record.segments or []:
+        said = " ".join(seg.text.split())
+        start, end = format_time(seg.start_ms // 1000), format_time(seg.end_ms // 1000)
+        typer.echo(f"@{start}-{end} {f'{seg.speaker}: {said}' if seg.speaker else said}")
+
+
+def _echo_record(heading: str, record: RawRecord) -> None:
+    if record.segments:
+        _echo_segments(heading, record)
+    else:
+        _echo_text(heading, record.text)
+
+
 def _echo_cut(record: RawRecord, chosen: list[cuts.Cut]) -> None:
     try:
-        _echo_text("after the cuts", cuts.apply(record, chosen).text)
+        _echo_record("after the cuts", cuts.apply(record, chosen))
     except DocketError as e:
         typer.echo(f"after the cuts: {e}")
 

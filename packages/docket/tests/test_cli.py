@@ -14,7 +14,8 @@ from docket.cli import main
 from docket.errors import DocketError
 from docket.vault.cuts import Cut
 from docket.vault.gate import Gate
-from docket.vault.records import RawRecord
+from docket.vault.records import RawRecord, Segment
+from docket.vault.segments import render
 from docket.vault.vault import Vault
 from docket.vault.wizard import Given, Visibility, Wizard
 
@@ -474,6 +475,56 @@ def test_a_cut_read_off_staging_show_lands_where_it_was_read(
     assert main(["staging", "promote", *v]) == 0
     [record] = [r for _, _, r in Vault.open(path).rawlog.iter_records()]
     assert record.text == "\n".join([*lines[:4], "[cut]", lines[5]])
+
+
+def test_show_prints_a_transcript_once_a_segment_a_line_and_a_time_read_off_a_line_cuts_that_segment(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path, gate = staging_vault(tmp_path)
+    said = [
+        Segment(start_ms=0, end_ms=4_000, speaker="Ben Sample", text="Morning, Cleo."),
+        Segment(start_ms=754_000, end_ms=761_500, speaker="Cleo Test", text="My hearing is on Friday,\nkeep it quiet."),
+        Segment(start_ms=761_500, end_ms=770_000, speaker="Ben Sample", text="The pilot starts on the 28th."),
+        Segment(start_ms=3_700_000, end_ms=3_705_000, text="Thanks, bye."),
+    ]
+    native = {"segments": [s.model_dump() for s in said]}
+    transcript = make_record(
+        1, rid="calls:rec-1/transcript", source="calls", kind="transcript", segments=said, text=render(said),
+        native=native,
+    )  # fmt: skip
+    gate.stage([transcript])
+    v = ["--vault", str(path)]
+    assert main(["staging", "show", "calls:rec-1/transcript", *v]) == 0
+    shown = capsys.readouterr().out
+    assert shown.count("Morning, Cleo.") == 1
+    assert '"segments"' not in shown
+    assert '"native"' not in shown
+    assert '"text"' not in shown
+    assert "@00:00-00:04 Ben Sample: Morning, Cleo." in shown
+    assert "@12:34-12:41 Cleo Test: My hearing is on Friday, keep it quiet." in shown
+    assert "@1:01:40-1:01:45 Thanks, bye." in shown
+    line = next(ln for ln in shown.splitlines() if "hearing" in ln)
+    cut = line.split()[0].removeprefix("@")
+    assert main(["staging", "classify", "calls:rec-1/transcript", "work", "--cut", cut, *v]) == 0
+    classified = capsys.readouterr().out
+    assert "after the cuts:" in classified
+    assert "hearing" not in classified
+    assert "@12:34-12:41 [cut]" in classified
+    assert "@12:41-12:50 Ben Sample: The pilot starts on the 28th." in classified
+    assert main(["staging", "promote", *v]) == 0
+    capsys.readouterr()
+    gate.stage(
+        [
+            transcript.model_copy(
+                update={"segments": [*said, Segment(start_ms=3_706_000, end_ms=3_707_000, text="Bye.")]}
+            )
+        ]
+    )
+    assert main(["staging", "show", "calls:rec-1/transcript", *v]) == 0
+    again = capsys.readouterr().out
+    assert "cut before, in raw run" in again
+    assert "@12:34-12:41 [cut]" in again
+    assert again.count("hearing") == 1
 
 
 def test_show_says_why_a_cut_can_t_be_made(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
