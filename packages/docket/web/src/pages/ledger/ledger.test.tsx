@@ -11,7 +11,7 @@ import { resetDrafts } from "@/lib/drafts";
 import { installKeys } from "@/lib/keys";
 import { createQueryClient } from "@/lib/query";
 import { createAppRouter } from "@/router";
-import type { Button, ItemPanel, Ledger, Row } from "./api";
+import type { Button, ItemPanel, Ledger, Row } from "@/pages/day/api";
 
 const VERDICTS = ["discuss", "claude", "me", "chase"] as const;
 
@@ -280,7 +280,14 @@ describe("a call by key", () => {
     key("j");
     key("2");
     await waitFor(() => expect(writes()).toHaveLength(1));
-    expect(writes()[0]).toEqual({ op: "triage", items: ["A-0001"], verdict: "claude", at: "A-0002", bulk: false });
+    expect(writes()[0]).toEqual({
+      op: "triage",
+      items: ["A-0001"],
+      verdict: "claude",
+      page: "ledger",
+      at: "A-0002",
+      bulk: false,
+    });
     const notice = await screen.findByRole("status");
     expect(notice.textContent).toContain("Saved.");
     await waitFor(() => expect(current()).toBe("A-0002"));
@@ -288,7 +295,7 @@ describe("a call by key", () => {
     answers["POST /api/web/ledger/write"] = () => wrote("01UNDO", null, "Undone.");
     key("u");
     await waitFor(() => expect(writes()).toHaveLength(2));
-    expect(writes()[1]).toEqual({ op: "undo", batch: "01BATCH", said: "undo", at: null, bulk: false });
+    expect(writes()[1]).toEqual({ op: "undo", batch: "01BATCH", said: "undo", page: "ledger", at: null, bulk: false });
     await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Undone."));
     key("z", { ctrlKey: true });
     await waitFor(() => expect(writes()).toHaveLength(3));
@@ -319,6 +326,7 @@ describe("a call by key", () => {
       op: "triage",
       items: ["A-0001", "A-0002"],
       verdict: "chase",
+      page: "ledger",
       at: "A-0003",
       bulk: true,
     });
@@ -375,7 +383,7 @@ describe("the open item", () => {
     fireEvent.blur(who);
     expect((await within(panel).findByRole("alert")).textContent).toBe("who can't be cleared");
     const save = sent.find((s) => s.path === "/api/web/ledger/save");
-    expect(save?.body).toEqual({ op: "set", items: ["A-0001"], fields: { who: "" } });
+    expect(save?.body).toEqual({ op: "set", items: ["A-0001"], fields: { who: "" }, page: "ledger" });
     expect(who.value).toBe("");
     expect(who.closest("[data-field]")?.hasAttribute("data-unsaved")).toBe(true);
   });

@@ -42,6 +42,9 @@ function plural(n: number, one: string, many: string): string {
 /** The count or mark an entry carries, and the words a folded sidebar's tooltip and a screen reader get. */
 function markOf(page: NavPage, shell: Shell | undefined): { shown?: string; words?: string; due?: boolean } {
   if (!shell || !page.mark) return {};
+  if (page.mark === "queue" && shell.untriaged) {
+    return { shown: String(shell.untriaged), words: `${shell.untriaged} untriaged` };
+  }
   if (page.mark === "staging" && shell.staging) {
     return { shown: String(shell.staging), words: `${plural(shell.staging, "record waits", "records wait")}` };
   }

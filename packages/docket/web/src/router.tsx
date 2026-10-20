@@ -8,6 +8,7 @@ import { NotFound, Shell } from "@/components/shell/shell";
 import { parseSearch, type Search, stringifySearch } from "@/lib/search";
 import { DesignPage } from "@/pages/design";
 import { LedgerPage } from "@/pages/ledger";
+import { QueuePage } from "@/pages/queue";
 
 const root = createRootRoute({ component: Shell, notFoundComponent: NotFound });
 
@@ -25,7 +26,14 @@ export const ledgerRoute = createRoute({
   validateSearch: (search: Record<string, unknown>): Search => search as Search,
 });
 
-export const routeTree = root.addChildren([designRoute, ledgerRoute]);
+export const queueRoute = createRoute({
+  getParentRoute: () => root,
+  path: "/queue",
+  component: QueuePage,
+  validateSearch: (search: Record<string, unknown>): Search => search as Search,
+});
+
+export const routeTree = root.addChildren([designRoute, queueRoute, ledgerRoute]);
 
 export function createAppRouter(history?: RouterHistory) {
   return createRouter({

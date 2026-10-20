@@ -65,9 +65,9 @@ writes what they found into the ledger in one `ledger_batch` by `sync`, and goes
 
 ## The tasks
 
-`/docket:tasks`, or "let's do tasks", opens the Ledger page with `docket open /ledger` (the Queue page once it
-comes), where you triage: discuss, claude, me or chase, or done, drop and snooze. Say "go" in chat, and Claude works
-the queue with you, one item at a time.
+`/docket:tasks`, or "let's do tasks", opens the Queue page with `docket open /queue`, where you triage: discuss,
+claude, me or chase, or done, drop and snooze. Say "go" in chat, and Claude works the queue with you, one item at a
+time.
 
 | Verdict | What Claude does |
 |---|---|
@@ -85,7 +85,7 @@ the queue with you, one item at a time.
   you triage in chat.
 - The skill pre-approves only reads: `ledger`, `search`, `read`, `verify`, `docket open`, and `docket ledger day`,
   `queue`, `show` and `suggest`. Each batch and each draft asks unless your permission rules allow it. In Git Bash on
-  Windows, which turns a lone `/ledger` into a folder, Claude runs `MSYS_NO_PATHCONV=1 docket open /ledger`.
+  Windows, which turns a lone `/queue` into a folder, Claude runs `MSYS_NO_PATHCONV=1 docket open /queue`.
 - Moving from a tasks skill of your own: as for a sync, keep its name and description, make its body "Run
   `/docket:tasks` (the Skill tool) with the same arguments", move its drafting rules into `CLAUDE.md`, and delete it
   after a working week.

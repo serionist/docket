@@ -1,5 +1,6 @@
 /** The tokens (DR-0707), each shown as it renders in the theme in use, its value read from the page itself. */
 import * as React from "react";
+import { KINDS, KindTab } from "@/components/kind";
 import { MEANING, Stamp, VERDICTS } from "@/components/stamp";
 import { cn } from "@/lib/utils";
 
@@ -57,6 +58,15 @@ function Swatch({ name, role }: { name: string; role: string }) {
 export const SWATCH_CLASSES =
   "bg-paper bg-sheet bg-ink bg-ink-muted bg-rule bg-control bg-hover bg-selection bg-green bg-red bg-red-wash";
 
+// What each kind holds, as the design names them.
+const KIND_MEANING: Record<(typeof KINDS)[number], string> = {
+  reply: "a message you owe an answer",
+  decision: "a call you have to make",
+  task: "something to do",
+  invite: "a meeting to answer",
+  waiting: "on someone else, to chase",
+};
+
 const SCALE: [string, string, string][] = [
   ["text-xl font-semibold", "21 / 28", "A page's title"],
   ["text-lg font-semibold", "18 / 24", "The panel's title"],
@@ -96,6 +106,18 @@ export function DesignTokens() {
                     <Stamp verdict={verdict} />
                   </span>
                   <span className="text-sm">{MEANING[verdict]}</span>
+                </li>
+              ))}
+            </ul>
+          </Section>
+          <Section title="The kinds" id="kinds">
+            <ul className="border-t border-rule">
+              {KINDS.map((kind) => (
+                <li key={kind} className="flex items-center gap-3 border-b border-rule py-2">
+                  <span className="w-20">
+                    <KindTab kind={kind} />
+                  </span>
+                  <span className="text-sm">{KIND_MEANING[kind]}</span>
                 </li>
               ))}
             </ul>

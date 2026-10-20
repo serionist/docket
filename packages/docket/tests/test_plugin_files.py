@@ -426,13 +426,14 @@ def test_tasks_names_commands_options_views_verdicts_ops_and_parameters_docket_h
 
 
 def test_tasks_opens_a_page_of_the_web_app_and_its_name_door_holds() -> None:
-    """Users invoke /docket:tasks by name (DR-0685). It opens the Ledger page until the Queue page comes, whose change
-    is the one path; Git Bash's form opens the same page."""
+    """Users invoke /docket:tasks by name (DR-0685). It opens the Queue page, and Git Bash's form opens the same
+    page."""
     assert frontmatter("tasks")["name"] == "tasks"
     text = tasks_text()
     paths = re.findall(r"`(?:MSYS_NO_PATHCONV=1 )?docket open (\S+)`", text)
     assert len(paths) >= 2 and "`MSYS_NO_PATHCONV=1 docket open " in text
     (path,) = set(paths)
+    assert path == "/queue"
     assert sessions.safe_next(path) == path
     assert path in {page.path for group in NAV for page in group.pages}
 

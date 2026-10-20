@@ -1,6 +1,6 @@
 {
   "name": "docket",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Docket for Claude Code: search and cite your vault, run your syncs and your task queue, prepare your meetings.",
   "author": {
     "name": "Soma Osvay",

@@ -1,7 +1,8 @@
 /**
- * The Ledger's URL (DR-0704, DR-0669): the server's day_state.py reads it and answers its canonical form, which the
- * page writes back. A change the page makes itself keeps the keys in the canonical order, so the address bar holds
- * the server's URL without waiting for a read; src/test/canonical.json holds this order to the server's.
+ * A day page's URL (DR-0704, DR-0669): the server's day_state.py reads it and answers its canonical form, which the
+ * page writes back; the Queue's leaves out the Ledger's own state, group and archived. A change the page makes itself
+ * keeps the keys in the canonical order, so the address bar holds the server's URL without waiting for a read;
+ * src/test/canonical.json holds this order to the server's.
  */
 import { one, type Search, stringifySearch } from "@/lib/search";
 

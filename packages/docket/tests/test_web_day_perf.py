@@ -1,10 +1,11 @@
 """The day pages' JSON routes on #201's perf ledger (DR-0668, DR-0712): 5,000 items with 50,000 ops and 2,000 meetings
 with 20,000 point ops, the index rebuilt. Each read is asked once before the clock, so SQLite's cache is warm as a
-running service's is, then timed as the best of three runs: the Ledger's list, the list with q and an item's panel are
-each held to a quarter second, the poll to a hundredth, a button's write on one item, its notice's lines with it, to a
-tenth and a bulk of 50 to a quarter second, each on its own. A write is timed through its route with the commit left
-out, as the ledger's own timed write is dry: git's commit isn't the page's to time. Wall time is asserted only when no
-tracer runs. The page in Chrome, from the sidebar to its rows with the keys live, is test_web_browser_ledger.py's."""
+running service's is, then timed as the best of three runs: the Ledger's list, the list with q, the Queue's list, an
+item's panel and the who fields' names are each held to a quarter second, the poll to a hundredth, a button's write
+on one item, its notice's lines with it, to a tenth and a bulk of 50 to a quarter second, each on its own. A write is
+timed through its route with the commit left out, as the ledger's own timed write is dry: git's commit isn't the
+page's to time. Wall time is asserted only when no tracer runs. The pages in Chrome, from the sidebar to their rows
+with the keys live, are test_web_browser_ledger.py's and test_web_browser_queue.py's."""
 
 from __future__ import annotations
 
@@ -100,6 +101,30 @@ def test_the_ledger_its_panel_the_poll_and_a_write_answer_within_their_budgets(c
         assert poll_s < POLL_SECONDS, f"the poll took {poll_s:.4f} s, over {POLL_SECONDS} s"
         assert write_s < WRITE_SECONDS, f"a write on one item took {write_s:.3f} s, over {WRITE_SECONDS} s"
         assert bulk_s < BULK_SECONDS, f"a bulk of {BULK} took {bulk_s:.3f} s, over {BULK_SECONDS} s"
+
+
+@pytest.mark.perf
+def test_the_queue_its_panel_and_the_who_field_s_names_answer_within_their_budgets(client: TestClient) -> None:
+    """The Queue reads the queue view, every open item, and cuts it at 100 rows as the Ledger does; its panel is the
+    Ledger's; the who fields' names read the list whole once. Each is held to a page's quarter second."""
+    queued = timed(lambda: client.get("/api/web/queue"))
+    page, page_s = queued.result, queued.seconds
+    assert page.status_code == 200
+    assert len(refs(page)) == 100
+    opened = timed(lambda: client.get("/api/web/queue/panel?open=A-2500"))
+    panel, panel_s = opened.result, opened.seconds
+    assert panel.json()["panel"]["ref"] == "A-2500"
+    named = timed(lambda: client.get("/api/web/ledger/who"))
+    who, who_s = named.result, named.seconds
+    assert who.status_code == 200 and who.json()["people"]
+    print(
+        f"the Queue on {ITEMS:,} items: list {page_s * 1000:.0f} ms ({queued.runs('ms')}), panel "
+        f"{panel_s * 1000:.0f} ms ({opened.runs('ms')}), the who names {who_s * 1000:.0f} ms ({named.runs('ms')})"
+    )
+    if not traced():
+        assert page_s < PAGE_SECONDS, f"the Queue took {page_s:.3f} s, over {PAGE_SECONDS} s"
+        assert panel_s < PAGE_SECONDS, f"the Queue's panel took {panel_s:.3f} s, over {PAGE_SECONDS} s"
+        assert who_s < PAGE_SECONDS, f"the who names took {who_s:.3f} s, over {PAGE_SECONDS} s"
 
 
 def test_the_perf_ledger_s_builder_writes_its_files_under_the_root(tmp_path: Path) -> None:

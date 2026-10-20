@@ -50,6 +50,9 @@ def test_the_shell_and_its_list_in_chrome(browser: Browser, week: tuple[int, str
     expect(staging).to_have_attribute("href", "/staging")
     expect(page.get_by_role("link", name=re.compile(r"^Sync ?, due: chat$"))).to_be_visible()
     expect(page.get_by_text("vault on test-box")).to_be_visible()
+    # The Queue joins the day pages in the app, with the week's untriaged count (DR-0708).
+    queue = page.get_by_role("link", name=re.compile(r"^Queue ?, 9 untriaged$"))
+    expect(queue).to_have_attribute("href", "/queue")
     # j moves the selection, Enter opens it beside the list with open= in the URL, Esc closes it.
     page.keyboard.press("j")
     expect(page.locator('li[aria-current="true"]')).to_have_attribute("data-ref", "A-0015")

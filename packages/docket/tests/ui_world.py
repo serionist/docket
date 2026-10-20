@@ -5,8 +5,8 @@ it (its own config and state folders, the failing keyring), which is where the f
 | World | What |
 |---|---|
 | `empty` | a new vault: no items, nothing staged, a live source never synced |
-| `week` | a working week: day_kit's ledger and more items beside it, the files its materials name, staging_kit's |
-| | three records waiting, a live source due a sync |
+| `week` | a working week: day_kit's ledger and more items beside it, one whose snooze ended yesterday, the files |
+| | its materials name, staging_kit's three records waiting, a live source due a sync |
 
 Invented people only: Ada Example, Ben Sample and Cleo Example.
 """
@@ -15,14 +15,16 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from day_kit import add, day, seed
+from day_kit import ZONE, add, day, seed
 from docket_testkit import make_config
+from ledger_kit import write_ops
 from staging_kit import mail, memo, transcript
 
-from docket.ledger import store
+from docket.ledger import ops, store
 from docket.service.token import Tokens
 from docket.vault.config import SourceConfig, VaultConfig
 from docket.vault.gate import Gate
@@ -81,6 +83,22 @@ def busier() -> list[dict[str, Any]]:
     return ops
 
 
+def woke(vault: Vault) -> None:
+    """An item snoozed to yesterday, so it is open again with its snooze ended: the writer snoozes only to a day after
+    today, so its snooze op is written as the writer would have written it yesterday."""
+    written = store.write(
+        vault, [add("permit", "task", "Renew the parking permit", "Cleo Example", "ops")], by="claude", via="cli"
+    )
+    added = written.ops[-1]
+    today = datetime.now(UTC).astimezone(ZONE).date()
+    (minted,) = ops.mint(added.id, datetime.now(UTC), 1)
+    snooze = ops.Op(
+        schema_version=1, id=minted, item=added.item, op="snooze", day=today, machine=MACHINE, by="claude",
+        via="cli", until=today - timedelta(days=1),
+    )  # fmt: skip
+    vault.commit(write_ops(vault.root, [snooze]), "A snooze that ended")
+
+
 def build(folder: Path, world: str) -> Vault:
     if world not in WORLDS:
         raise ValueError(f"no world {world!r}; the worlds are {', '.join(WORLDS)}")
@@ -89,6 +107,7 @@ def build(folder: Path, world: str) -> Vault:
         Gate(vault).stage([transcript(), mail(), memo()])
         store.write(vault, seed(), by="claude", via="cli")
         store.write(vault, busier(), by="claude", via="cli")
+        woke(vault)
         notes = vault.home.top / "notes"
         notes.mkdir(exist_ok=True)
         (notes / "plan.md").write_text(PLAN_TEXT, encoding="utf-8", newline="\n")

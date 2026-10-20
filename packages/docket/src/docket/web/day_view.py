@@ -109,6 +109,8 @@ class Group(BaseModel):
     rows: list[Row]
     total: int
     selectable: bool
+    # The call every row of the group holds, for the Queue's groups by verdict: its head shows the call's stamp.
+    verdict: str | None = None
 
 
 class Chip(BaseModel):
@@ -437,6 +439,69 @@ def build_list(found: LedgerRead, state: DayState, matched: set[str] | None) -> 
         more=more,
         empty=empty,
         streams=streams,
+    )
+
+
+# -- the Queue's list -------------------------------------------------------------------------------------------------
+
+
+def _narrowed(rows: Sequence[ItemRow], state: DayState, matched: set[str] | None) -> list[ItemRow]:
+    """The rows the Queue's filters keep, as the list view keeps them: `q`'s matches, the stream and kind as given,
+    who a part of it with case aside."""
+    who = (state.who or "").casefold()
+    return [
+        r
+        for r in rows
+        if (matched is None or r.id in matched)
+        and (state.stream is None or r.stream == state.stream)
+        and (state.kind is None or r.kind == state.kind)
+        and who in r.who.casefold()
+    ]
+
+
+def build_queue(found: LedgerRead, state: DayState, matched: set[str] | None) -> LedgerList:
+    """The Queue's list (DR-0666): the queue view's open items, the untriaged first, those whose snooze ended leading
+    them, then each verdict in the views' order and any other call after, each by due, none last; cut at `k` across
+    the groups, the counts over every row the filters keep."""
+    today = found.today
+    chosen = _narrowed(found.items, state, matched)
+    woke = [r for r in chosen if r.woke]
+    untriaged = [r for r in chosen if r.triage is None and not r.woke]
+    calls = list(dict.fromkeys([*ops.VERDICTS, *sorted({r.triage for r in chosen if r.triage is not None})]))
+    grouped: list[tuple[str, str, Tone, str | None, list[ItemRow]]] = [
+        ("woke", "Snooze ended", "today", None, woke),
+        ("untriaged", "Untriaged", "", None, untriaged),
+    ]
+    for call in calls:
+        label = VERDICTS[call][0] if call in VERDICTS else call
+        grouped.append((f"verdict-{call}", label, "", call, [r for r in chosen if r.triage == call and not r.woke]))
+    groups: list[Group] = []
+    shown = 0
+    for key, label, tone, verdict, members in grouped:
+        rows = [row_of(r, today) for r in sorted(members, key=_order)[: state.k - shown]]
+        if rows:
+            shown += len(rows)
+            groups.append(
+                Group(key=key, label=label, tone=tone, rows=rows, total=len(members), selectable=True, verdict=verdict)
+            )
+    waiting = len(woke) + len(untriaged)
+    said = f"{waiting} untriaged" + (f" ({len(woke)} with their snooze ended)" if woke else "")
+    held = [f"{n} {call}" for call in calls if (n := sum(1 for r in chosen if r.triage == call and not r.woke))]
+    late = sum(1 for r in chosen if r.late is not None)
+    counts = f"{len(chosen)} open: {', '.join([said, *held])}; {late} overdue"
+    narrowed = matched is not None or bool(state.who or state.stream or state.kind)
+    empty = ""
+    if not chosen:
+        empty = "Nothing here matches." if narrowed else "Nothing is open: the queue is empty."
+    return LedgerList(
+        groups=groups,
+        counts=counts,
+        chips=[],
+        shown=shown,
+        total=len(chosen),
+        more=state.k + MORE if len(chosen) > state.k else None,
+        empty=empty,
+        streams=sorted({r.stream for r in found.items}),
     )
 
 

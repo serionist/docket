@@ -1,14 +1,20 @@
 /**
- * The Ledger's calls to /api/web/ledger (DR-0709, DR-0710). A read sends the page's query string as it is, so the
- * server's own parser reads it, and answers the canonical URL with what it read. A write answers its notice; a
- * refusal throws an HttpError whose body is the Refused model.
+ * The day pages' calls to /api/web (DR-0709, DR-0710): each page's list and panel under its own path, and what they
+ * share under /api/web/ledger: the viewer's text, the poll, the names the who fields suggest and the writes. A read
+ * sends the page's query string as it is, so the server's own parser reads it, and answers the canonical URL with
+ * what it read. A write answers its notice; a refusal throws an HttpError whose body is the Refused model.
  */
 import type { components } from "@/api/schema";
 import { api } from "@/lib/api";
 import { HttpError } from "@/lib/query";
 
 type Schemas = components["schemas"];
+/** The day pages built so far, as a write's body and the routes name them. */
+export type DayPageName = "ledger" | "queue";
 export type Ledger = Schemas["Ledger"];
+export type Queue = Schemas["Queue"];
+/** A day page's list read: the Queue answers in the Ledger's shape. */
+export type DayList = Ledger | Queue;
 export type Row = Schemas["Row"];
 export type Group = Schemas["Group"];
 export type Button = Schemas["Button"];
@@ -19,6 +25,7 @@ export type ItemPanel = Schemas["ItemPanel"];
 export type Link = Schemas["Link"];
 export type HistoryLine = Schemas["HistoryLine"];
 export type Viewer = Schemas["Viewer"];
+export type Person = Schemas["Person"];
 /** A write's body: its op and the keys it needs; the server fills in the rest with their defaults. */
 export type Body = Partial<Schemas["Body"]> & { op: string };
 export type Wrote = Schemas["Wrote"];
@@ -32,19 +39,30 @@ function nothing(what: string): never {
   throw new HttpError(500, `the ${what} answered nothing`);
 }
 
-export async function readLedger(query: string): Promise<Read<Ledger>> {
-  const { data } = await api.GET("/api/web/ledger", { querySerializer: () => query });
-  return data ? { ...data, asked: query } : nothing("Ledger's read");
+export async function readList(page: DayPageName, query: string): Promise<Read<DayList>> {
+  const { data } =
+    page === "queue"
+      ? await api.GET("/api/web/queue", { querySerializer: () => query })
+      : await api.GET("/api/web/ledger", { querySerializer: () => query });
+  return data ? { ...data, asked: query } : nothing("list's read");
 }
 
-export async function readPanel(query: string): Promise<Read<PanelRead>> {
-  const { data } = await api.GET("/api/web/ledger/panel", { querySerializer: () => query });
+export async function readPanel(page: DayPageName, query: string): Promise<Read<PanelRead>> {
+  const { data } =
+    page === "queue"
+      ? await api.GET("/api/web/queue/panel", { querySerializer: () => query })
+      : await api.GET("/api/web/ledger/panel", { querySerializer: () => query });
   return data ? { ...data, asked: query } : nothing("panel's read");
 }
 
 export async function readText(query: string): Promise<Viewer> {
   const { data } = await api.GET("/api/web/ledger/text", { querySerializer: () => query });
   return data ?? nothing("viewer's read");
+}
+
+export async function readWho(): Promise<Person[]> {
+  const { data } = await api.GET("/api/web/ledger/who");
+  return data?.people ?? nothing("names' read");
 }
 
 export async function changed(version: string): Promise<{ changed: boolean; version: string }> {
@@ -62,8 +80,8 @@ export async function save(body: Body): Promise<Saved> {
   return data ?? nothing("save");
 }
 
-export async function openMaterial(item: string, ref: string, reveal: boolean): Promise<Notice> {
-  const { data } = await api.POST("/api/web/ledger/open", { body: { page: "ledger", item, ref, reveal } });
+export async function openMaterial(page: DayPageName, item: string, ref: string, reveal: boolean): Promise<Notice> {
+  const { data } = await api.POST("/api/web/ledger/open", { body: { page, item, ref, reveal } });
   return data?.notice ?? nothing("open");
 }
 
