@@ -61,6 +61,12 @@ export function WhoBox({
   const [moved, setMoved] = React.useState<string | null>(null);
   // The list once shown, which cmdk names, so the field can say it controls it.
   const [list, setList] = React.useState<HTMLDivElement | null>(null);
+  // The same list for a handler to scroll, which a value held in state isn't to be changed through.
+  const shownList = React.useRef<HTMLDivElement | null>(null);
+  const listed = React.useCallback((node: HTMLDivElement | null) => {
+    shownList.current = node;
+    setList(node);
+  }, []);
   const wrap = React.useRef<HTMLDivElement>(null);
   const input = React.useRef<HTMLInputElement>(null);
 
@@ -146,7 +152,7 @@ export function WhoBox({
                 setOpenState(true);
                 onOpenChange?.(true);
                 setMoved(null);
-                list?.scrollTo({ top: 0 });
+                if (shownList.current) shownList.current.scrollTop = 0;
               }}
               onClick={() => setOpen(true)}
               onBlur={onBlur}
@@ -196,7 +202,7 @@ export function WhoBox({
           }}
         >
           <CommandList
-            ref={setList}
+            ref={listed}
             label="Names"
             className="max-h-[min(16rem,var(--radix-popover-content-available-height))]"
             // A press in the list keeps the focus in the field, so leaving it never saves the text half typed.
