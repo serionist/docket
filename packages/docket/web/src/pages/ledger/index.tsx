@@ -271,6 +271,9 @@ export function LedgerPage() {
     } catch (error) {
       return refused(error);
     }
+    // A write from the CLI, Claude or a sync that landed while the poll held for the field moved the version before
+    // the save's own write; adopting the save's version alone would hide it from the poll for good.
+    const missed = saved.before !== now.current.version;
     now.current.version = saved.version;
     client.setQueriesData<calls.Read<calls.Ledger>>({ queryKey: [...LEDGER, "list"] }, (old) =>
       old
@@ -289,6 +292,7 @@ export function LedgerPage() {
     client.setQueriesData<calls.Read<calls.PanelRead>>({ queryKey: [...LEDGER, "panel"] }, (old) =>
       old?.panel && old.panel.id === saved.panel.id ? { ...old, panel: saved.panel } : old,
     );
+    if (missed) refetch();
     return { ok: true, answer: saved };
   };
 
@@ -308,6 +312,7 @@ export function LedgerPage() {
     pending,
     streams: data?.list.streams ?? [],
     kinds: data?.kinds ?? [],
+    today: data?.today ?? "",
   };
 
   const item = open !== undefined ? (panel.data?.panel ?? undefined) : undefined;
@@ -516,6 +521,7 @@ export function LedgerPage() {
           rows={tickedRows}
           verdicts={data.verdicts}
           snooze={data.snooze}
+          today={data.today}
           tomorrow={data.tomorrow}
           pending={pending}
           problem={actProblem}

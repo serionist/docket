@@ -5,6 +5,7 @@
  * page:<day>T<hh:mm> unless one is given.
  */
 import * as React from "react";
+import { DatePicker } from "@/components/date-picker";
 import { Refusal } from "@/components/shell/page";
 import { Button } from "@/components/ui/button";
 import {
@@ -63,7 +64,7 @@ export function NewItem({
   /** What gets the focus back once the form closes. */
   returnTo: React.RefObject<Element | null>;
 }) {
-  const { write, pending, kinds } = useActions();
+  const { write, pending, kinds, today } = useActions();
   const [problem, setProblem] = React.useState("");
   const [alikes, setAlikes] = React.useState<Row[]>([]);
   useUnsaved("new:item", typedIn(draft));
@@ -146,7 +147,15 @@ export function NewItem({
             <label htmlFor="new-due" className="text-xs font-semibold text-ink-muted">
               Due
             </label>
-            <Input id="new-due" type="date" value={draft.due} onChange={set("due")} />
+            <DatePicker
+              id="new-due"
+              value={draft.due}
+              today={today}
+              label="Due"
+              clear="No due date"
+              onPick={(day) => onDraft({ ...draft, due: day })}
+              className="w-full"
+            />
           </div>
           <div className="grid gap-1 sm:col-span-2">
             <label htmlFor="new-description" className="text-xs font-semibold text-ink-muted">

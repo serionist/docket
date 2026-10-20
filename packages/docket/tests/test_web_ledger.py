@@ -9,7 +9,7 @@ import json
 import subprocess
 import sys
 from collections.abc import Callable, Iterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +36,8 @@ from docket.web.day_state import DayState, DayStateError
 OPEN = ["A-0001", "A-0002", "A-0003", "A-0004", "A-0005"]
 DUE = ["Overdue", "Due today", "Due this week", "Due later", "No due date"]
 API = "/api/web/ledger"
+# The days the app's date picker shows, as [day, today, text], which src/lib/dates.test.ts holds the app to.
+DAYS = Path(__file__).parents[1] / "web" / "src" / "test" / "days.json"
 WRITE = f"{API}/write"
 SAVE = f"{API}/save"
 
@@ -628,12 +630,29 @@ def test_a_write_takes_a_json_body_the_session_and_the_guard_s_yes(client: TestC
         answer = client.post(path, content=b"op=done&items=A-0001", headers=form)
         assert answer.status_code == 415, path
         assert answer.json()["detail"] == "a write's body is application/json"
-    big = {"op": "log", "items": ["A-0001"], "note": "x" * (300 * 1024)}
-    assert post(client, big).status_code == 413
     # A write with the cookie and no Origin isn't the page's; one with the token is never the page's.
     assert client.post(WRITE, json={"op": "done", "items": ["A-0001"]}).status_code == 403
     token = {**SAME, "Authorization": f"Bearer {TOKEN}"}
     assert client.post(WRITE, json={"op": "done", "items": ["A-0001"]}, headers=token).status_code == 403
+
+
+def test_a_body_past_the_cap_is_refused_whatever_its_length_says(client: TestClient, vault: Vault) -> None:
+    """413 when the Content-Length is over the cap, when there is none and the body streams, and when it says less
+    than the body sends; nothing is written (DR-0709)."""
+    before = len(ops(vault))
+    big = json.dumps({"op": "log", "items": ["A-0001"], "note": "x" * (300 * 1024)}).encode()
+    headers = {**SAME, "Content-Type": "application/json"}
+    said = client.post(WRITE, content=big, headers=headers)
+    assert (said.status_code, said.json()) == (413, {"detail": "a write's body is at most 256 KB"})
+    chunks = (big[at : at + 8192] for at in range(0, len(big), 8192))
+    assert client.post(SAVE, content=chunks, headers=headers).status_code == 413
+    assert client.post(WRITE, content=big, headers={**headers, "Content-Length": "40"}).status_code == 413
+    assert len(ops(vault)) == before
+    # Under the cap, a streamed body is handed on whole.
+    small = json.dumps({"op": "log", "items": ["A-0001"], "note": "y" * (200 * 1024)}).encode()
+    pieces = (small[at : at + 8192] for at in range(0, len(small), 8192))
+    assert client.post(WRITE, content=pieces, headers=headers).status_code == 200
+    assert ops(vault)[-1]["note"] == "y" * (200 * 1024)
 
 
 # -- saves on change ---------------------------------------------------------------------------------------------------
@@ -647,6 +666,7 @@ def test_a_save_answers_the_row_the_panel_and_the_version(client: TestClient, va
     assert answer["panel"]["history"][0]["line"] == "title: Pick the venue for May"
     assert answer["version"] == day_routes.version(vault.root)
     notes = wrote(post(client, {"op": "notes", "items": ["A-0003"], "notes": "Two venues left"}, SAVE))
+    assert notes["before"] == answer["version"]
     assert notes["panel"]["notes"] == "Two venues left"
     assert ops(vault)[-1]["fields"] == {"notes": "Two venues left"}
     # The row's title is cut as the list cuts it; the panel's is whole.
@@ -654,6 +674,20 @@ def test_a_save_answers_the_row_the_panel_and_the_version(client: TestClient, va
     saved = wrote(post(client, {"op": "set", "items": ["A-0003"], "fields": {"title": long}}, SAVE))
     assert saved["row"]["title"] == views.cut(long) and saved["row"]["title"].endswith("…")
     assert saved["panel"]["title"] == long.strip()
+
+
+def test_a_save_answers_the_version_from_before_its_own_write(client: TestClient, vault: Vault) -> None:
+    """A write from the CLI while the owner types moves the version the save's write starts from, so the page, whose
+    read is older, knows it missed one; a save straight after its read starts from the read's version (DR-0710)."""
+    read_at = listed(client)["version"]
+    first = wrote(post(client, {"op": "set", "items": ["A-0003"], "fields": {"who": "Cleo Example"}}, SAVE))
+    assert first["before"] == read_at
+    assert first["version"] != read_at
+    write(vault, {"op": "set", "item": "A-0004", "fields": {"title": "Plan the spring visit, from the CLI"}})
+    moved = day_routes.version(vault.root)
+    second = wrote(post(client, {"op": "notes", "items": ["A-0003"], "notes": "typed while the CLI wrote"}, SAVE))
+    assert second["before"] == moved != first["version"]
+    assert second["version"] == day_routes.version(vault.root)
 
 
 def test_a_refused_save_says_why(client: TestClient) -> None:
@@ -909,6 +943,11 @@ def test_the_snooze_choices_and_the_next_working_day() -> None:
     assert [s.label for s in day_view.snooze_choices(tuesday)] == ["Wed", "Mon 26 Oct", "+1 week", "+2 weeks"]
     assert day_view.snooze_choices(tuesday)[0].title == "Snooze to the next working day, Wed 21 Oct"
     assert day_view.day_text(datetime(2027, 1, 4, tzinfo=UTC).date(), tuesday) == "Mon 4 Jan 2027"
+
+
+@pytest.mark.parametrize(("shown", "on", "text"), json.loads(DAYS.read_text(encoding="utf-8"))["days"])
+def test_the_date_picker_shows_a_day_as_the_server_writes_it(shown: str, on: str, text: str) -> None:
+    assert day_view.day_text(date.fromisoformat(shown), date.fromisoformat(on)) == text
 
 
 def test_a_notice_says_what_the_last_write_did() -> None:

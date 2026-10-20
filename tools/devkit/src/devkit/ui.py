@@ -128,6 +128,14 @@ PAGES: dict[str, Page] = {
                 expects=(REFUSED,),
             ),
             State("viewer", "/ledger?open=A-0005&text=notes/plan.md"),
+            # The date picker over each of its fields: the panel's due, the snooze's own day, the new item's due.
+            State("due", "/ledger?open=A-0003", (("click", "#f-A-0003-due"),)),
+            State("snooze", "/ledger?open=A-0003", (("click", "#until-A-0003"),)),
+            State(
+                "new-due",
+                "/ledger",
+                (("press", "n"), ("fill", "#new-title|Book the train for the visit"), ("click", "#new-due")),
+            ),
             State(
                 "alike",
                 "/ledger",

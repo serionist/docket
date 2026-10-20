@@ -14,7 +14,7 @@ out: a button's write, a field's save and a material opened on the owner's deskt
 
 A value the URL or the body can't hold, and the writer's refusal, answer 400 with their words as `error`, an add
 refused as a look-alike with the items it looks like; anything else is logged as its type and frames and answers 500
-with no detail.
+with no detail. A write's body is JSON of at most 256 KB, which `webapi.WriteBodies` checks before any of it is read.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from typing import cast
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.responses import Response
@@ -42,10 +42,6 @@ from docket.web.day_view import ItemPanel, LedgerList, Notice, Row
 from docket.web.display import FAILED
 
 log = logging.getLogger("docket.service.web")
-
-# A write's body: a few dozen keys at most, or the ticked rows of a long list. Anything bigger isn't a page's.
-MAX_BODY = 256 * 1024
-JSON = "application/json"
 
 
 class Refused(BaseModel):
@@ -120,10 +116,14 @@ class Wrote(BaseModel):
 
 
 class Saved(BaseModel):
-    """A field saved: the item's row and panel after it, and the version, so nothing else is refetched (DR-0710)."""
+    """A field saved: the item's row and panel after it, and the versions before and after its write (DR-0710). A
+    page whose read had `before` refetches nothing else; one whose read is older missed a write from the CLI, Claude
+    or a sync while the poll held for the field, and refetches its reads."""
 
     row: Row
     panel: ItemPanel
+    # The version just before the save's own write, under its lock.
+    before: str
     version: str
 
 
@@ -140,17 +140,6 @@ class Open(BaseModel):
 
 def refused(words: str, alikes: list[Row] | None = None) -> JSONResponse:
     return JSONResponse(Refused(error=words, alikes=alikes or []).model_dump(mode="json"), status_code=400)
-
-
-async def json_only(request: Request) -> None:
-    """A write takes a JSON body only, so no form from any page can post one, and a small one (DR-0709)."""
-    kind = request.headers.get("content-type", "").split(";")[0].strip().lower()
-    if kind != JSON:
-        raise HTTPException(status_code=415, detail="a write's body is application/json")
-    # A body that says it is too big is refused before it is read.
-    said = request.headers.get("content-length", "")
-    if (said.isascii() and said.isdigit() and int(said) > MAX_BODY) or len(await request.body()) > MAX_BODY:
-        raise HTTPException(status_code=413, detail="a write's body is at most 256 KB")
 
 
 async def safely(request: Request, answer: Callable[[], Awaitable[Response | BaseModel]]) -> Response | BaseModel:
@@ -252,7 +241,6 @@ def router(service: Service) -> APIRouter:
         "/ledger/write",
         response_model=Wrote,
         responses={400: {"model": Refused}},
-        dependencies=[Depends(json_only)],
     )
     async def ledger_write(request: Request, body: day.Body) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
         async def answer() -> Response | Wrote:
@@ -288,7 +276,6 @@ def router(service: Service) -> APIRouter:
         "/ledger/save",
         response_model=Saved,
         responses={400: {"model": Refused}},
-        dependencies=[Depends(json_only)],
     )
     async def ledger_save(request: Request, body: day.Body) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
         async def answer() -> Response | Saved:
@@ -306,6 +293,7 @@ def router(service: Service) -> APIRouter:
             return Saved(
                 row=day_view.row_of(shown, found.shown.today),
                 panel=day_view.build_panel(found.shown, found.meeting, found.sources, found.tz),
+                before=wrote.before,
                 version=wrote.version,
             )
 
@@ -315,7 +303,6 @@ def router(service: Service) -> APIRouter:
         "/ledger/open",
         response_model=Opened,
         responses={400: {"model": Refused}},
-        dependencies=[Depends(json_only)],
     )
     async def ledger_open(request: Request, body: Open) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
         async def answer() -> Opened:

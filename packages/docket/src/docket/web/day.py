@@ -346,14 +346,19 @@ def posted(body: Body, now: datetime) -> Posted:
 class Wrote:
     written: store.Written
     skipped: tuple[str, ...]
+    # The versions just before and just after the write, under its lock: a page whose read had `before` saw every
+    # write but this one.
+    before: str
     version: str
 
 
 def write(vault: Vault, changes: list[dict[str, Any]], *, bulk: bool) -> Wrote:
     """The changes as one batch, by user, via page. A bulk of calls gives each op only the rows it takes: a dry run
     names those the writer refuses as they stand, and the rest are written, unless it refuses them all (DR-0710). The
-    version is taken under the same lock as the write, so a page's own write brings no refetch from its poll."""
+    versions before and after are taken under the same lock as the write, so a page's own write brings no refetch from
+    its poll, and a write that landed since the page's read still does."""
     with vault.lock:
+        before = version(vault.root)
         skipped: tuple[str, ...] = ()
         if bulk:
             dry = store.write(vault, changes, by="user", via="page", dry_run=True)
@@ -364,7 +369,7 @@ def write(vault: Vault, changes: list[dict[str, Any]], *, bulk: bool) -> Wrote:
             skipped = tuple(str(changes[n - 1]["item"]) for n in sorted(refused))
             changes = [c for n, c in enumerate(changes, start=1) if n not in refused]
         written = store.write(vault, changes, by="user", via="page")
-        return Wrote(written, skipped, version(vault.root))
+        return Wrote(written, skipped, before, version(vault.root))
 
 
 def local_now(vault: Vault) -> datetime:

@@ -2,7 +2,8 @@
  * The app's one key layer (DR-0711): a single keydown listener reads a registry the shell and each page fill, so a
  * key runs the command its button runs and the ? dialog lists exactly what the keys do. It ignores a held key's
  * repeats, keys typed in a field or a combobox or with Alt or Meta, Enter and Space on a focused link or control,
- * keys aimed at an open dialog or menu, and every key while the keys switch is off (the docket_keys cookie, as
+ * keys aimed at an open dialog or menu, a key some part of the page already took (its default prevented, as a
+ * popover's or dialog's Esc that closed it), and every key while the keys switch is off (the docket_keys cookie, as
  * data-keys on the document). A page's keys come before the shell's, whichever registered first.
  */
 import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from "react";
@@ -101,7 +102,9 @@ function typing(target: EventTarget | null): boolean {
 
 /** The command a keydown runs, or none; a page's group comes before the shell's, then the newest group first. */
 export function commandFor(event: KeyboardEvent): KeyCommand | undefined {
-  if (event.repeat || event.altKey || event.metaKey || event.isComposing) return undefined;
+  // A layer that closes on Esc takes it at the capture phase and may be gone from the page by now, so the dialog
+  // around the key's target can no longer tell; the key it took is never the page's too.
+  if (event.defaultPrevented || event.repeat || event.altKey || event.metaKey || event.isComposing) return undefined;
   if (!keysOn() || typing(event.target)) return undefined;
   const target = event.target instanceof Element ? event.target : null;
   if (target?.closest(OWN_KEYS)) return undefined;

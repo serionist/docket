@@ -14,6 +14,7 @@ import os
 import re
 import time
 from collections.abc import Iterator
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -217,6 +218,30 @@ def test_ticked_rows_hold_the_poll_and_a_write_from_the_cli_shows_in_place_once_
     clean(page, errors)
 
 
+def test_a_write_from_the_cli_while_a_field_is_typed_in_shows_once_it_is_saved(
+    browser: Browser, day_service: tuple[int, str], day_root: Path
+) -> None:
+    """Typing in a field holds the poll; a write from the CLI to another row lands meanwhile; once the field is left,
+    its save tells the page its read missed a write, and the list shows it within one poll, in place (DR-0710,
+    DR-0711)."""
+    port, token = day_service
+    page, errors = opened(browser, port, token, "/ledger?open=A-0003")
+    page.evaluate("window.notReloaded = true")
+    notes = page.get_by_label("Working notes")
+    notes.click()
+    notes.press_sequentially("typing while the CLI writes")
+    change = {"op": "set", "item": "A-0004", "fields": {"title": "Plan the spring visit, from the CLI"}}
+    store.write(Vault.open(day_root), [change], by="user", via="cli")
+    page.wait_for_timeout(6_500)
+    expect(row(page, "A-0004")).not_to_contain_text("from the CLI")
+    page.locator("#panel-title").click()
+    expect(page.locator('[data-history="A-0003"]')).to_contain_text("notes edited")
+    expect(row(page, "A-0004")).to_contain_text("from the CLI", timeout=5_000)
+    expect(page.get_by_label("Working notes")).to_have_value("typing while the CLI writes")
+    assert page.evaluate("window.notReloaded === true"), "refetched in place, never reloaded"
+    clean(page, errors)
+
+
 def test_a_drop_s_why_and_a_snooze_s_day_take_the_focus(
     browser: Browser, day_service: tuple[int, str], day_root: Path
 ) -> None:
@@ -263,6 +288,79 @@ def test_a_drop_s_why_and_a_snooze_s_day_take_the_focus(
     page.keyboard.type("we met")
     expect(page.locator("#why-A-0004")).to_have_value("we met")
     assert day_routes.version(day_root) == before
+    clean(page, errors)
+
+
+def focused_day(page: Page) -> str:
+    return str(page.evaluate("document.activeElement.closest('[data-day]')?.dataset.day ?? ''"))
+
+
+def test_a_day_is_picked_from_a_month_or_typed_and_the_keys_in_it_stay_its_own(
+    browser: Browser, day_service: tuple[int, str], day_root: Path
+) -> None:
+    """A date field shows its day as the app writes it and opens a month whose weeks start on Monday, the day
+    focused; the page's keys do nothing in it and Esc closes it alone; a day picked saves at once, as does one typed
+    as ISO writes it; the snooze's own day snoozes to the day typed; the new item's due takes one too (DR-0710,
+    DR-0711)."""
+    port, token = day_service
+    page, errors = opened(browser, port, token, "/ledger?open=A-0003")
+    due = page.locator("#f-A-0003-due")
+    history = page.locator('[data-history="A-0003"]')
+    due.click()
+    month = page.get_by_role("dialog", name="Due")
+    expect(month.locator("thead th").first).to_have_attribute("aria-label", "Monday")
+    expect(month.locator("thead th").last).to_have_attribute("aria-label", "Sunday")
+    assert focused_day(page) != ""
+    assert axe(page) == []
+    before = day_routes.version(day_root)
+    for key in ("e", "j", "1", "x", "s", "Delete", "u", "n"):
+        page.keyboard.press(key)
+    expect(month).to_be_visible()
+    expect(page.get_by_role("dialog", name="New item")).to_have_count(0)
+    page.keyboard.press("Escape")
+    expect(month).to_have_count(0)
+    expect(due).to_be_focused()
+    assert page.url.endswith("/ledger?open=A-0003")
+    assert day_routes.version(day_root) == before
+
+    due.click()
+    page.keyboard.press("ArrowRight")
+    picked = focused_day(page)
+    page.keyboard.press("Enter")
+    expect(month).to_have_count(0)
+    expect(history).to_contain_text(f"due: {picked}")
+    shown = day_view.day_text(today().fromisoformat(picked), today())
+    expect(due).to_have_text(shown)
+
+    typed = (today() + timedelta(days=30)).isoformat()
+    due.click()
+    month.get_by_label("Or type the day").fill(typed)
+    month.get_by_label("Or type the day").press("Enter")
+    expect(history).to_contain_text(f"due: {typed}")
+    expect(due).to_have_accessible_name(f"Due, {day_view.day_text(today().fromisoformat(typed), today())}")
+
+    # The snooze's own day: a day typed there snoozes to it.
+    until = (today() + timedelta(days=10)).isoformat()
+    page.get_by_role("button", name="Snooze to a day, Another day").click()
+    snooze = page.get_by_role("dialog", name="Snooze to a day")
+    snooze.get_by_label("Or type the day").fill(until)
+    snooze.get_by_label("Or type the day").press("Enter")
+    expect(notice(page)).to_contain_text("A-0003: snooze")
+    expect(notice(page)).to_contain_text(until)
+
+    # The new item's due: Esc in its month closes the month, never the form.
+    page.keyboard.press("Escape")
+    page.keyboard.press("n")
+    form = page.get_by_role("dialog", name="New item")
+    form.get_by_role("button", name=re.compile("^Due")).click()
+    page.get_by_role("dialog", name="Due").get_by_label("Or type the day").fill(typed)
+    page.keyboard.press("Enter")
+    expect(form.get_by_role("button", name=re.compile("^Due"))).to_have_text(re.compile(r"\d+ \w{3}"))
+    form.get_by_role("button", name=re.compile("^Due")).click()
+    page.keyboard.press("Escape")
+    expect(page.get_by_role("dialog", name="Due")).to_have_count(0)
+    expect(form).to_be_visible()
+    assert axe(page) == []
     clean(page, errors)
 
 

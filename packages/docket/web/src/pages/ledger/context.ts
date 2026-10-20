@@ -18,7 +18,8 @@ export interface How {
 export interface LedgerActions {
   /** One write, by user via page; a call moves the selection to the row after the acted ones. */
   write: (body: Body, how?: How) => Promise<Outcome<Wrote>>;
-  /** A field saved on change: the row and the panel are put in place, nothing else refetched. */
+  /** A field saved on change: the row and the panel put in place, the rest refetched only when the save shows a
+   * write from elsewhere landed since the page's read. */
   save: (body: Body) => Promise<Outcome<Saved>>;
   /** A material opened with its app, or shown in its folder. */
   open: (item: string, ref: string, reveal: boolean) => Promise<Outcome<null>>;
@@ -26,6 +27,8 @@ export interface LedgerActions {
   pending: boolean;
   streams: string[];
   kinds: string[];
+  /** The owner's today as the list read it, for the date pickers. */
+  today: string;
 }
 
 export const Actions = createContext<LedgerActions | null>(null);

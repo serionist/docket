@@ -1152,8 +1152,12 @@
         "type": "object"
       },
       "Saved": {
-        "description": "A field saved: the item's row and panel after it, and the version, so nothing else is refetched (DR-0710).",
+        "description": "A field saved: the item's row and panel after it, and the versions before and after its write (DR-0710). A\npage whose read had `before` refetches nothing else; one whose read is older missed a write from the CLI, Claude\nor a sync while the poll held for the field, and refetches its reads.",
         "properties": {
+          "before": {
+            "title": "Before",
+            "type": "string"
+          },
           "panel": {
             "$ref": "#/components/schemas/ItemPanel"
           },
@@ -1168,6 +1172,7 @@
         "required": [
           "row",
           "panel",
+          "before",
           "version"
         ],
         "title": "Saved",

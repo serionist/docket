@@ -5,6 +5,7 @@
  */
 import { CheckIcon, CopyIcon, ExternalLinkIcon, FileTextIcon, FolderOpenIcon, XIcon } from "lucide-react";
 import * as React from "react";
+import { DatePicker } from "@/components/date-picker";
 import { Refusal } from "@/components/shell/page";
 import { isVerdict, STAMP_INK, STAMP_PRESSED } from "@/components/stamp";
 import { Button } from "@/components/ui/button";
@@ -126,8 +127,7 @@ function Call({
   onCall: PanelProps["onCall"];
   onDrop: PanelProps["onDrop"];
 }) {
-  const { pending } = useActions();
-  const [until, setUntil] = React.useState("");
+  const { pending, today } = useActions();
   if (!item.callable) {
     return (
       <Section label="Your call">
@@ -140,9 +140,7 @@ function Call({
       </Section>
     );
   }
-  const snoozeTo = async (day: string) => {
-    if (await onCall({ op: "snooze", until: day })) setUntil("");
-  };
+  const snoozeTo = (day: string) => void onCall({ op: "snooze", until: day });
   return (
     <Section label="Your call" className="gap-3">
       <div role="group" aria-label="Call" className="grid grid-cols-4">
@@ -211,31 +209,23 @@ function Call({
             size="sm"
             disabled={pending}
             title={choice.title}
-            onClick={() => void snoozeTo(choice.until)}
+            onClick={() => snoozeTo(choice.until)}
           >
             {choice.label}
           </Button>
         ))}
-        <label className="sr-only" htmlFor={`until-${item.ref}`}>
-          Snooze to a day
-        </label>
-        <Input
+        <DatePicker
           id={`until-${item.ref}`}
-          type="date"
+          value=""
+          empty="Another day"
+          label="Snooze to a day"
           min={item.tomorrow}
-          value={until}
-          onChange={(event) => setUntil(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              void snoozeTo(until);
-            } else leaveOnEscape(event);
-          }}
-          className="h-7 w-36"
+          today={today}
+          size="sm"
+          disabled={pending}
+          onPick={snoozeTo}
+          className="text-ink"
         />
-        <Button size="sm" disabled={pending} onClick={() => void snoozeTo(until)}>
-          Snooze
-        </Button>
       </div>
     </Section>
   );

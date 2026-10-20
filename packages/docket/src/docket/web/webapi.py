@@ -2,7 +2,8 @@
 and answer values ready to show, built by the same Python the pages use; their Pydantic models are the contract,
 whose OpenAPI document `uv run devkit web-schema` writes to packages/docket/web/openapi.json for the app's types.
 
-Each page adds its own as it moves: the shell's read, then the day pages' (`day_api`).
+Each page adds its own as it moves: the shell's read, then the day pages' (`day_api`). A write's body is checked by
+`WriteBodies` before any route reads it.
 """
 
 from __future__ import annotations
@@ -13,6 +14,9 @@ from typing import Any, cast
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel
+from starlette.datastructures import Headers
+from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from docket.errors import DocketError
 from docket.ledger import day as ledger_day
@@ -24,6 +28,10 @@ from docket.web import shell as shell_parts
 
 PREFIX = "/api/web"
 TITLE = "Docket's web app API"
+# A write's body: a few dozen keys at most, or the ticked rows of a long list. Anything bigger isn't a page's.
+MAX_BODY = 256 * 1024
+JSON = "application/json"
+READS = frozenset({"GET", "HEAD"})
 
 
 class Shell(BaseModel):
@@ -50,6 +58,58 @@ def session_only(request: Request) -> None:
     Guard has already refused one carrying neither it nor a session."""
     if request.headers.get("authorization") is not None:
         raise HTTPException(status_code=403, detail="the web app's routes take the browser's session only")
+
+
+class WriteBodies:
+    """The ASGI layer in front of /api/web's writes (DR-0709): a body of JSON only, so no form from any page can post
+    one, and of at most MAX_BODY. FastAPI reads and parses a route's body before the route's dependencies run, so the
+    check sits here, before any of it is read: a Content-Type that isn't JSON or a Content-Length over the cap is
+    refused unread, and a body that says no length, or a smaller one than it sends, is refused once it streams past
+    the cap. A body that passes is handed on whole."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope["method"] in READS or not scope["path"].startswith(f"{PREFIX}/"):
+            await self.app(scope, receive, send)
+            return
+        headers = Headers(scope=scope)
+        if headers.get("content-type", "").split(";")[0].strip().lower() != JSON:
+            await _refuse(415, "a write's body is application/json", scope, receive, send)
+            return
+        said = headers.get("content-length", "")
+        if said.isascii() and said.isdigit() and int(said) > MAX_BODY:
+            await _refuse(413, "a write's body is at most 256 KB", scope, receive, send)
+            return
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] != "http.request":
+                # The client went before its body came: nobody to answer.
+                return
+            body += message.get("body", b"")
+            if len(body) > MAX_BODY:
+                await _refuse(413, "a write's body is at most 256 KB", scope, receive, send)
+                return
+            if not message.get("more_body", False):
+                break
+        whole = bytes(body)
+        handed = False
+
+        async def replay() -> Message:
+            nonlocal handed
+            if handed:
+                return await receive()
+            handed = True
+            return {"type": "http.request", "body": whole, "more_body": False}
+
+        await self.app(scope, replay, send)
+
+
+async def _refuse(status: int, words: str, scope: Scope, receive: Receive, send: Send) -> None:
+    # The shape FastAPI gives an HTTPException, as the routes' other refusals of a request's form.
+    await JSONResponse({"detail": words}, status_code=status)(scope, receive, send)
 
 
 async def read_shell(service: Service) -> Shell:

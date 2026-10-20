@@ -1,10 +1,11 @@
 /**
  * A field of the open item, saved on change (DR-0710): a text field when it is left or Enter is pressed in it, a
- * select as it changes. It is unsaved from its first change until its save answers, and a refused one stays unsaved
+ * select or a day as it changes. It is unsaved from its first change until its save answers, and a refused one stays unsaved
  * with the writer's words beside it, its text as typed. A newer value read from the server replaces only text the
  * owner hasn't changed.
  */
 import * as React from "react";
+import { DatePicker } from "@/components/date-picker";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -61,7 +62,7 @@ export function Field({
   className?: string;
   rows?: number;
 }) {
-  const { save, kinds } = useActions();
+  const { save, kinds, today } = useActions();
   const shape = SHAPES[name];
   const id = `f-${item}-${name}`;
   const [draft, setDraft] = React.useState(value);
@@ -126,6 +127,22 @@ export function Field({
         </SelectContent>
       </Select>
     );
+  } else if (shape === "date") {
+    control = (
+      <DatePicker
+        id={id}
+        value={draft}
+        today={today}
+        label={label}
+        clear="No due date"
+        problem={problem ? `${id}-problem` : undefined}
+        onPick={(next) => {
+          setDraft(next);
+          void commit(next);
+        }}
+        className="w-full"
+      />
+    );
   } else if (shape === "area" || shape === "title") {
     control = (
       <Textarea
@@ -155,8 +172,7 @@ export function Field({
     control = (
       <Input
         {...common}
-        type={shape === "date" ? "date" : "text"}
-        dir={shape === "date" ? undefined : "auto"}
+        dir="auto"
         autoComplete="off"
         spellCheck={name === "stream" ? false : undefined}
         list={name === "stream" ? "ledger-streams" : undefined}

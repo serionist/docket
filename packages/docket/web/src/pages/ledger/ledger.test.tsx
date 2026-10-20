@@ -380,6 +380,33 @@ describe("the open item", () => {
     expect(who.closest("[data-field]")?.hasAttribute("data-unsaved")).toBe(true);
   });
 
+  it("refetches the page's reads after a save only when another write landed since the page read", async () => {
+    const source = ROWS[0] as Row;
+    const saved = (before: string, version: string) => () =>
+      json({ row: source, panel: { ...item(source), who: "Ben Sample" }, before, version });
+    const lists = () => sent.filter((s) => s.path === "/api/web/ledger").length;
+    await open("/ledger?open=A-0001");
+    const panel = await screen.findByRole("complementary", { name: "A-0001, Send Ada the dates" });
+    const who = within(panel).getByLabelText("Who") as HTMLInputElement;
+    const leave = async (value: string) => {
+      const saves = sent.filter((s) => s.path === "/api/web/ledger/save").length;
+      fireEvent.change(who, { target: { value } });
+      fireEvent.blur(who);
+      await waitFor(() => expect(sent.filter((s) => s.path === "/api/web/ledger/save")).toHaveLength(saves + 1));
+      await waitFor(() => expect(who.closest("[data-field]")?.hasAttribute("data-unsaved")).toBe(false));
+    };
+    const read = lists();
+    // The save's write started from the version the page read: its own write is all that changed.
+    answers["POST /api/web/ledger/save"] = saved("v1", "v2");
+    await leave("Ben Sample");
+    await act(async () => await new Promise((done) => setTimeout(done, 50)));
+    expect(lists()).toBe(read);
+    // A write from elsewhere landed while the field held the poll: the save's write started past the page's v2.
+    answers["POST /api/web/ledger/save"] = saved("v3", "v4");
+    await leave("Cleo Example");
+    await waitFor(() => expect(lists()).toBe(read + 1));
+  });
+
   it("opens the drop form with its why focused on Delete, and drops with Enter there", async () => {
     const router = await open("/ledger");
     key("j");

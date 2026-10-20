@@ -1,10 +1,11 @@
 /**
  * The act bar over the ticked rows (DR-0710): every call on all of them at once, through a dry run that skips and
  * names the rows its op doesn't take. A verdict writes by the old bulk rule: it clears when every ticked row holds it
- * and sets it on all of them otherwise. Enter in the why drops; Enter in the day snoozes to it.
+ * and sets it on all of them otherwise. Enter in the why drops; a day picked or typed in the date picker snoozes to it.
  */
 import { XIcon } from "lucide-react";
 import * as React from "react";
+import { DatePicker } from "@/components/date-picker";
 import { Refusal } from "@/components/shell/page";
 import { isVerdict, STAMP_INK, STAMP_PRESSED } from "@/components/stamp";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,7 @@ export function ActBar({
   rows,
   verdicts,
   snooze,
+  today,
   tomorrow,
   pending,
   problem,
@@ -32,6 +34,7 @@ export function ActBar({
   rows: Row[];
   verdicts: Verdict[];
   snooze: Snooze[];
+  today: string;
   tomorrow: string;
   pending: boolean;
   problem: string;
@@ -39,15 +42,12 @@ export function ActBar({
   onClear: () => void;
 }) {
   const [why, setWhy] = React.useState("");
-  const [until, setUntil] = React.useState("");
   useUnsaved("act:why", why.trim() !== "");
   const held = rows.map((r) => r.triage);
   const drop = async () => {
     if (await onCall({ op: "drop", note: why })) setWhy("");
   };
-  const snoozeTo = async (day: string) => {
-    if (await onCall({ op: "snooze", until: day })) setUntil("");
-  };
+  const snoozeTo = (day: string) => void onCall({ op: "snooze", until: day });
   return (
     <section
       aria-label="The ticked rows"
@@ -108,31 +108,23 @@ export function ActBar({
               size="sm"
               disabled={pending}
               title={choice.title}
-              onClick={() => void snoozeTo(choice.until)}
+              onClick={() => snoozeTo(choice.until)}
             >
               {choice.label}
             </Button>
           ))}
-          <label className="sr-only" htmlFor="act-until">
-            Snooze to a day
-          </label>
-          <Input
+          <DatePicker
             id="act-until"
-            type="date"
+            value=""
+            empty="Another day"
+            label="Snooze to a day"
             min={tomorrow}
-            value={until}
-            onChange={(event) => setUntil(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                void snoozeTo(until);
-              } else leaveOnEscape(event);
-            }}
-            className="h-7 w-36"
+            today={today}
+            size="sm"
+            disabled={pending}
+            onPick={snoozeTo}
+            className="text-ink"
           />
-          <Button size="sm" disabled={pending} onClick={() => void snoozeTo(until)}>
-            Snooze
-          </Button>
         </div>
         <div className="flex min-w-60 flex-1 items-center gap-1">
           <label htmlFor={ACT_WHY} className="mr-1 text-xs font-semibold text-ink-muted">

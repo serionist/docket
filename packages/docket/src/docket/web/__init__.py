@@ -60,6 +60,7 @@ def install(app: FastAPI, service: Service) -> None:
     app.include_router(recording.router(service))
     app.include_router(briefs.router(service))
     app.include_router(webapi.router(service))
+    app.add_middleware(webapi.WriteBodies)
 
     @app.api_route("/static/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
     def static(request: Request, path: str) -> Response:  # pyright: ignore[reportUnusedFunction]
