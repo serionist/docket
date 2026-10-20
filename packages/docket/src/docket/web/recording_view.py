@@ -28,10 +28,10 @@ from docket.vault.records import TRANSCRIBED_VIA, RawRecord
 from docket.vault.segments import Segment, segments
 from docket.vault.spans import problem
 from docket.web import urls
+from docket.web.display import at as local_time
 from docket.web.panel import Style, anchored_rid, frontmatter_end, line_parts
 from docket.web.recording_state import RecordingState, time_at
 from docket.web.state import SearchState
-from docket.web.templating import at as local_time
 
 Mode = Literal["start", "recording", "held", "missing", "other"]
 

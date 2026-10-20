@@ -5,14 +5,16 @@
  */
 import { QueryClient } from "@tanstack/react-query";
 
-/** An answer that wasn't 2xx: its status and, for a refusal, the writer's words. */
+/** An answer that wasn't 2xx: its status, for a refusal the writer's words, and the body as it came. */
 export class HttpError extends Error {
   readonly status: number;
+  readonly body: unknown;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, body?: unknown) {
     super(message);
     this.name = "HttpError";
     this.status = status;
+    this.body = body;
   }
 
   get refused(): boolean {

@@ -1,7 +1,8 @@
 /**
  * The calls to the service's own JSON routes, /api/web (DR-0709), typed from its OpenAPI document: `npm run types`
  * writes src/api/schema.d.ts from openapi.json, which `uv run devkit web-schema` writes from the routes' models.
- * The session cookie goes with each call; a 401 marks the session lapsed, and any other failure is an HttpError.
+ * The session cookie goes with each call; a 401 marks the session lapsed, and any other failure is an HttpError with
+ * the words the answer gave: a refusal's `error`, or FastAPI's own `detail`.
  */
 import createClient, { type Middleware } from "openapi-fetch";
 import type { components, paths } from "@/api/schema";
@@ -15,13 +16,17 @@ const failures: Middleware = {
     if (response.ok) return undefined;
     if (response.status === 401) markLapsed();
     let words = response.statusText;
+    let body: unknown;
     try {
-      const body: unknown = await response.clone().json();
-      if (body && typeof body === "object" && "error" in body && typeof body.error === "string") words = body.error;
+      body = await response.clone().json();
+      if (body && typeof body === "object") {
+        if ("error" in body && typeof body.error === "string") words = body.error;
+        else if ("detail" in body && typeof body.detail === "string") words = body.detail;
+      }
     } catch {
       // Not JSON: the status line says enough.
     }
-    throw new HttpError(response.status, words || `HTTP ${response.status}`);
+    throw new HttpError(response.status, words || `HTTP ${response.status}`, body);
   },
 };
 

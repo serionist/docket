@@ -49,7 +49,9 @@ export function Workspace({ list, panel }: { list: React.ReactNode; panel?: Reac
   const narrow = band === "narrow";
   return (
     <div className="relative flex min-h-0 flex-1">
-      <div className={cn("flex min-w-0 flex-1 flex-col", narrow && panel ? "hidden" : "")}>{list}</div>
+      <div className="flex min-w-0 flex-1 flex-col" hidden={narrow && Boolean(panel)}>
+        {list}
+      </div>
       {panel}
     </div>
   );
@@ -155,28 +157,39 @@ export function Refusal({ children, className }: { children: React.ReactNode; cl
   );
 }
 
-/** The notice at the list's foot after a write: its lines, with Undo, then Redo, which u presses (DR-0710). */
+/** The notice at the list's foot after a write: what it did and its lines, with Undo, then Redo, which u presses. */
 export function NoticeBar({
+  text,
   lines,
   action,
   onAction,
   onDismiss,
+  disabled,
 }: {
+  text?: string;
   lines: string[];
-  action: "Undo" | "Redo";
-  onAction: () => void;
+  action?: "Undo" | "Redo" | null;
+  onAction?: () => void;
   onDismiss: () => void;
+  disabled?: boolean;
 }) {
+  const said = lines.join("; ");
   return (
     <div
       role="status"
       className="flex min-h-10 shrink-0 items-center gap-3 border-t border-rule bg-paper px-3 text-sm sm:px-4"
     >
-      <p className="min-w-0 flex-1 truncate">{lines.join("; ")}</p>
-      <Button variant="outline" size="sm" onClick={onAction}>
-        {action}
-        <kbd className="font-sans text-xs text-ink-muted">u</kbd>
-      </Button>
+      <p className="min-w-0 flex-1 truncate" title={[text, said].filter(Boolean).join(" ")}>
+        {text && <span className="font-semibold">{text}</span>}
+        {text && said ? " " : ""}
+        {said}
+      </p>
+      {action && onAction && (
+        <Button variant="outline" size="sm" onClick={onAction} disabled={disabled}>
+          {action}
+          <kbd className="font-sans text-xs text-ink-muted pointer-coarse:hidden">u</kbd>
+        </Button>
+      )}
       <Button variant="ghost" size="icon-sm" onClick={onDismiss} aria-label="Dismiss the notice">
         <XIcon />
       </Button>

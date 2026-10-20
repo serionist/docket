@@ -54,9 +54,9 @@ def test_the_shell_counts_the_week_s_untriaged_items_waiting_records_and_due_syn
     assert answer.status_code == 200
     assert answer.headers["cache-control"] == "no-store"
     shell = answer.json()
-    # day_kit's seed: seven items, one done and one snoozed, so five open, one of them with a call; staging_kit's
-    # three records, read as the files stand.
-    assert shell["untriaged"] == 4
+    # day_kit's seed: seven items, one done and one snoozed, so five open, one of them with a call; then the week's
+    # fourteen more, twelve open, eight of them with a call; staging_kit's three records, read as the files stand.
+    assert shell["untriaged"] == 8
     assert shell["staging"] == 3
     assert shell["sync_due"] == ["chat"], "the live source, never synced"
     assert shell["vault"] == "vault" and shell["machine"] == "test-box", "the machine the tests name"
@@ -137,7 +137,10 @@ def test_the_routes_take_the_browser_s_session_only(tmp_path: Path) -> None:
 def test_openapi_json_is_what_the_routes_say() -> None:
     assert SCHEMA.read_text(encoding="utf-8") == webapi.openapi_text()
     document = json.loads(webapi.openapi_text())
-    assert list(document["paths"]) == ["/api/web/shell"]
+    assert list(document["paths"]) == [
+        "/api/web/ledger", "/api/web/ledger/changed", "/api/web/ledger/open", "/api/web/ledger/panel",
+        "/api/web/ledger/save", "/api/web/ledger/text", "/api/web/ledger/write", "/api/web/shell",
+    ]  # fmt: skip
     assert set(document["components"]["schemas"]["Shell"]["required"]) == set(webapi.Shell.model_fields)
 
 

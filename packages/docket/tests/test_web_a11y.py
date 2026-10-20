@@ -48,10 +48,6 @@ PAGES = [
     "/briefs?type=person",
     "/briefs?brief=brief:ben-sample",
     "/briefs?brief=nope",
-    "/ledger",
-    "/ledger?state=all&group=stream&archived=1",
-    "/ledger?open=A-0001",
-    "/ledger?k=0",
 ]
 FRAGMENTS = [
     "/search/results?query=pallet+labels",
@@ -65,10 +61,6 @@ FRAGMENTS = [
     "/curate/panel",
     "/curate/panel?open=abcdef",
     "/curate/panel?open=nope",
-    "/ledger/panel",
-    "/ledger/panel?open=A-0001",
-    "/ledger/panel?open=nope",
-    "/ledger/text?open=A-0001&text=notes/a.md",
 ]
 
 

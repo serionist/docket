@@ -70,7 +70,9 @@ def test_every_page_s_states_open_a_path_and_fit_a_size() -> None:
         for state in page.states:
             assert state.url.startswith(f"/{name}"), state.name
             assert state.only in (None, *ui.SIZES), state.name
-            assert all(verb in ("press", "click") for verb, _ in state.steps), state.name
+            assert state.world in (None, "empty", "week"), state.name
+            assert all(verb in ui.VERBS for verb, _ in (*state.steps, *state.after)), state.name
+            assert all("|" in arg for verb, arg in state.steps if verb == "fill"), state.name
 
 
 def test_signing_in_goes_to_localhost_never_127_0_0_1(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -126,6 +128,12 @@ class _Tab:
 
     def wait_for_selector(self, selector: str) -> None:
         self.log.append(f"wait {selector}")
+
+    def wait_for_load_state(self, state: str) -> None:
+        self.log.append(f"load {state}")
+
+    def fill(self, selector: str, text: str) -> None:
+        self.log.append(f"fill {selector} {text}")
 
     def wait_for_timeout(self, ms: int) -> None:
         pass
@@ -205,6 +213,44 @@ def test_a_round_shoots_each_state_at_each_size_and_theme_and_writes_its_checks(
     assert code == 1, "a page error fails the round"
     assert "with problems" in (out / "checks.txt").read_text(encoding="utf-8")
     assert "shots and checks in .local/ui/design/r1" in capsys.readouterr().out
+
+
+def test_a_state_fills_undoes_its_write_once_shot_and_may_ask_for_another_world(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / ui.AXE).parent.mkdir(parents=True)
+    (tmp_path / ui.AXE).write_text("window.axe = {};", encoding="utf-8")
+    browser = _Browser()
+    served: list[str] = []
+
+    @contextlib.contextmanager
+    def serve(root: Path, world: str) -> Generator[tuple[int, str]]:
+        served.append(world)
+        yield 61234, "t0ken"
+
+    @contextlib.contextmanager
+    def driven() -> Generator[Any]:
+        yield browser
+
+    monkeypatch.setattr(ui, "sign_in_link", lambda port, token, after: f"http://localhost:{port}/session?next={after}")
+    ui.run("ledger", root=tmp_path, browser=driven, serve=serve)
+    # One service a world: the empty world's one state after the week's.
+    assert served == ["week", "empty"]
+    assert "fill #new-title Send Ada the dates again" in browser.log
+    assert browser.log.count("load networkidle") == 2 * len(ui.SIZES) * len(ui.PAGES["ledger"].states)
+    # The notice's write is undone once it is shot: the undo's key comes after the shot's checks.
+    notice = browser.log.index("press 2")
+    assert browser.log[notice + 1] == "press u"
+    checks = json.loads((tmp_path / ui.ROUNDS / "ledger" / "r1" / "checks.json").read_text(encoding="utf-8"))
+    assert {c["state"] for c in checks} == {s.name for s in ui.PAGES["ledger"].states}
+
+
+def test_a_state_s_expected_console_lines_are_left_out_of_its_check() -> None:
+    refusal = next(s for s in ui.PAGES["ledger"].states if s.name == "refusal")
+    assert refusal.expects == (ui.REFUSED,)
+    line = f"Failed to load resource: {ui.REFUSED} (Bad Request)"
+    assert ui.unexpected([line, "TypeError: boom"], refusal.expects) == ["TypeError: boom"]
+    assert ui.unexpected([line], ()) == [line], "a state that expects nothing counts every line"
 
 
 def test_the_throwaway_service_runs_on_folders_of_its_own_and_leaves_nothing(

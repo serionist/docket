@@ -21,9 +21,9 @@ from docket.plaintext import words
 from docket.vault.anchors import parse_locator
 from docket.vault.processed import DOC_TYPES
 from docket.web import templating
+from docket.web.display import at, clock
 from docket.web.recording_state import RecordingState, time_at
 from docket.web.state import MORE, SearchState
-from docket.web.templating import at, clock
 
 RESULTS = "/search/results"
 PANEL = "/search/panel"

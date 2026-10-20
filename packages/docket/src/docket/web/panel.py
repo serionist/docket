@@ -26,9 +26,9 @@ from docket.service.state import Service
 from docket.vault.anchors import Anchor, AnchorError, format_anchor, paragraphs, parse_locator, trailing_anchors
 from docket.vault.processed import DOC_TYPES
 from docket.vault.spans import Span
+from docket.web.display import at, clock
 from docket.web.recording_state import RecordingState, time_at
 from docket.web.state import MAX_AROUND, SearchState
-from docket.web.templating import at, clock
 from docket.web.views import Link, panel_link
 
 Mode = Literal["raw", "verify", "error"]

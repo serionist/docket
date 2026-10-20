@@ -1,15 +1,26 @@
+import type * as React from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { returnFocus } from "@/lib/focus";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { keyName, useRegistered } from "@/lib/keys";
 import { useKeysOn } from "@/lib/prefs";
 
 /** The ? dialog: what each key does here, read from the same registry the keys run from (DR-0711). */
-export function KeysDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+export function KeysDialog({
+  open,
+  onOpenChange,
+  returnTo,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** What gets the focus back once the dialog closes. */
+  returnTo: React.RefObject<Element | null>;
+}) {
   const groups = useRegistered();
   const on = useKeysOn();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg" onCloseAutoFocus={(event) => returnFocus(event, returnTo.current)}>
         <DialogHeader>
           <DialogTitle>Keys</DialogTitle>
           <DialogDescription>

@@ -1,9 +1,0 @@
-{% from "macros.html" import notice, locator %}
-<div class="viewer-box">
-{% if viewer.problem %}
-{{ notice('warn', viewer.problem) }}
-{% else %}
-<p class="viewer-head">{{ locator(viewer.ref) }}{% if viewer.cut %} <span class="badge">its first 256 KB</span>{% endif %}</p>
-<pre class="viewer-text" dir="auto">{{ viewer.text }}</pre>
-{% endif %}
-</div>

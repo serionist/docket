@@ -45,8 +45,8 @@ def stranger(template: Path, tmp_path: Path) -> Iterator[TestClient]:
 
 
 def test_each_route_of_the_app_answers_its_document_with_a_nonce_and_the_csp_naming_it(client: TestClient) -> None:
-    assert frontend.BUILD.routes == ("/design",)
-    first, second = client.get("/design?part=tokens"), client.get("/design")
+    assert frontend.BUILD.routes == ("/design", "/ledger")
+    first, second = client.get("/design?part=tokens"), client.get("/ledger?open=A-0012&q=Ada%27s+offer")
     nonces = []
     for answer in (first, second):
         assert answer.status_code == 200

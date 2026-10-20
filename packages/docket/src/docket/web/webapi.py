@@ -2,7 +2,7 @@
 and answer values ready to show, built by the same Python the pages use; their Pydantic models are the contract,
 whose OpenAPI document `uv run devkit web-schema` writes to packages/docket/web/openapi.json for the app's types.
 
-PR 1 of #252 has the shell's one read; each page adds its own as it moves.
+Each page adds its own as it moves: the shell's read, then the day pages' (`day_api`).
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from docket.ledger import day as ledger_day
 from docket.ledger import views
 from docket.service.state import Service
 from docket.vault.staging import Staging
+from docket.web import day_api
 from docket.web import shell as shell_parts
 
 PREFIX = "/api/web"
@@ -104,6 +105,7 @@ def router(service: Service) -> APIRouter:
     async def shell() -> Shell:  # pyright: ignore[reportUnusedFunction]
         return await read_shell(service)
 
+    api.include_router(day_api.router(service))
     return api
 
 

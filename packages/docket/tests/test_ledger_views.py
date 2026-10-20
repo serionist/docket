@@ -794,7 +794,7 @@ def test_no_read_quotes_a_record(vault: Vault, capsys: pytest.CaptureFixture[str
     assert record.rid in outputs[0]
 
 
-# -- the pages' reads: matching and batch_lines (DR-0661, DR-0665) ---------------------------------------------------
+# -- the pages' reads: matching and batch_lines (DR-0710, DR-0665) ---------------------------------------------------
 
 
 @pytest.mark.parametrize(

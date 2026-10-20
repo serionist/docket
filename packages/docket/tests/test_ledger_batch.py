@@ -245,7 +245,7 @@ def test_an_add_that_looks_like_an_open_item_is_refused_unless_forced(vault: Vau
     first = write(vault, [ADD], now=NOW).ops[0].id
     same_who = {**ADD, "fields": {**ADD_FIELDS, "title": "send ADA the DATES, please", "source": "chat:C0TEST/9"}}
     refused(vault, [same_who], r"change 1 \(add\): looks like an open item already: A-0001 Send Ada the dates; log")
-    # The refusal names them by id too, so a page can show them beside Add anyway (DR-0661).
+    # The refusal names them by id too, so a page can show them beside Add anyway (DR-0710).
     with pytest.raises(RefusedError) as caught:
         write(vault, [same_who], now=NOW)
     assert caught.value.refs == (first,)

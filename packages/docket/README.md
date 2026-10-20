@@ -872,9 +872,9 @@ What the service refuses, and what it doesn't:
 Recording, Briefs, Sync, Staging, Curate and Settings; the navigation shows the pages still to come, with the phase each
 arrives in.
 
-The pages are moving, one by one, into a new app built in React. Its shell is at `/design` for now
-(`docket open /design`): the sidebar with what waits at the gate and whether a sync is due, the theme and keys switches
-at its foot, and the design the pages move to, on invented data. It comes built with Docket; nothing to install.
+The pages are moving, one by one, into a new app built in React; the Ledger is the first. Its shell is the sidebar with
+what waits at the gate and whether a sync is due, the theme and keys switches at its foot, the list and the open item
+beside it; `/design` shows its parts on invented data. It comes built with Docket; nothing to install.
 
 - Search runs the search Claude runs: the same words, names, time words and dates. Sources and a month narrow it;
   people and entities favour the hits that mention them, as Claude's boosts do. Facet counts are within the top 200.
@@ -938,8 +938,8 @@ when you ask Claude; the page's one write is your click on a decision (DR-0566).
 ### The Ledger page
 
 `/ledger` lists the ledger's items beside the one you open, and every button writes the change as one batch, by you,
-through the page, as `docket ledger batch` would (DR-0661 to DR-0666). It is the old tasks app's list, one click and
-one key at a time.
+through the page, as `docket ledger batch` would (DR-0664 to DR-0666, DR-0710, DR-0711). It is the old tasks app's
+list, one click and one key at a time, and the first page of the web app's React shell.
 
 | Part | Shows |
 |---|---|
@@ -955,8 +955,9 @@ one key at a time.
 - A material that is a path from your repo's top opens with its app or in its folder, on this machine, only for
   documents, images and media inside the repo; a text file opens in the panel. A URL opens as a link, a locator on
   the Search page.
-- The page reloads by itself when the ledger changes, from the CLI, Claude or a sync, unless you are typing, have
-  rows ticked or a save is on its way.
+- The page updates in place when the ledger changes, from the CLI, Claude or a sync, unless you are typing, have
+  rows ticked, a dialog open or a save on its way; what you selected, ticked and typed stays.
+- Leaving the item or the page with text typed and not saved asks first.
 - Keys: `j` and `k` move, the panel following once open; `x` or Space ticks; `1` to `4` discuss, claude, me, chase;
   `0` no call; `e` done; `Delete` or Backspace drop; `s` snooze; `u` or Ctrl+Z undo; `n` a new item; `/` the search
   box; `?` for the rest.

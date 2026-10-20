@@ -194,7 +194,7 @@ class LedgerError(DocketError):
 
 class RefusedError(LedgerError):
     """One change refused, by its place and its op, and why; `refs` names the open items an add looks like, by id, so
-    a page can show them beside Add anyway (DR-0661)."""
+    a page can show them beside Add anyway (DR-0710)."""
 
     def __init__(self, n: int, kind: str, why: str, refs: tuple[str, ...] = ()) -> None:
         super().__init__(f"change {n} ({kind}): {why}; nothing written")

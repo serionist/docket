@@ -287,6 +287,9 @@ Unreleased in the same PR.
 
 ### Changed
 
+- The Ledger page moves into the web app's new shell: the same list, keys and buttons, the open item beside it, and a
+  change from the CLI, Claude or a sync shows in place, keeping what you selected, ticked and typed. The page now
+  needs JavaScript.
 - Every page's address keeps `:`, `@`, `/` and `,` as they are, as Search's already did, so a cut, a locator or an
   audio link reads as you would type it; links and bookmarks from before still open.
 - The models' and the speech workers now run ONNX Runtime 1.31, tokenizers 0.23.3, numpy 2.5.4 and PyAV 19, and

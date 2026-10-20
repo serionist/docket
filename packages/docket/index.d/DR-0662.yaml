@@ -1,11 +1,12 @@
 decisions:
   - id: DR-0662
     title: "On the day pages one selection takes the keys: 1 to 4 the verdicts, 0 no call, e done, Delete drop, s snooze, u undo"
-    status: proposed
+    status: superseded
     at: "2026-10-19"
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#203", "#204"]
+    superseded_by: [DR-0711]
     description: "The owner's old tasks app's keys, kept: j and k move, x or Space ticks a row, 1 discuss, 2 claude, 3 me, 4 chase, 0 clears the call, e marks done at once, Delete or Backspace opens the drop form with its why focused (the writer needs one, DR-0611, where the old app dropped with none), as a click on a row's drop does, so a why typed there never presses an item key; s opens the snooze choices with the next working day focused, so Enter snoozes to it; u or Ctrl+Z presses the notice's Undo, Ctrl+Z staying a field's own undo in a field; n opens the new item form, / the search box, Enter opens the selected row, Esc closes the panel or clears the ticks; Space on a button, a tick or a summary presses it, as anywhere. A page has one selection, as the old app had: the focused row is the open one, and while a panel is open j and k carry it to the next row's item or meeting. A key presses the button that carries it (data-key), so it posts the form a click posts, and a verdict's button carries what it writes (DR-0661). The item keys act on the ticked rows, else the selected item; a meeting's row or panel takes none of them, so a key never lands on an item behind a meeting, as the old app guarded. A key held down repeats nothing: docket.js ignores event.repeat. A call, a verdict, done, drop, snooze or reopen, names the row after the acted ones as at, and the selection moves there, its panel with it when one was open, as the old app's Inbox did; the panel's other forms keep it on its item. Each open item's row carries the old app's quick buttons, the four verdicts, done and drop, the drop opening its form with the why focused; a group's Select all ticks its rows. The keys switch turns the keys off with the rest. Staging and Curate have no key that writes; these pages are for triage at speed, and u undoes."
     binds:
       - A key posts the same form its button posts; no key writes anything a click can't.

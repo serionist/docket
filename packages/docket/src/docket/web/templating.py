@@ -12,9 +12,7 @@ import json
 import logging
 import re
 from collections.abc import Awaitable, Callable, Iterable, Mapping
-from datetime import datetime
 from importlib.resources import files
-from zoneinfo import ZoneInfo
 
 from jinja2 import Environment, PackageLoader, StrictUndefined
 from markupsafe import Markup, escape
@@ -25,8 +23,8 @@ from starlette.responses import HTMLResponse, PlainTextResponse, Response
 from docket.index.query import SPLIT_FIRST, SPLIT_SECOND
 from docket.index.text import HYPHENS, has_letter
 from docket.plaintext import WORD, fold
-from docket.vault.anchors import format_time
 from docket.web import assets, pages
+from docket.web.display import at, clock
 
 log = logging.getLogger("docket.service.web")
 
@@ -48,7 +46,6 @@ STYLESHEETS = (
     "css/settings.css",
     "css/recording.css",
     "css/briefs.css",
-    "css/day.css",
 )
 # A page that posts a form says so: under the service's floor, no-referrer, a browser sends Origin: null on a
 # same-origin post (Fetch's rule for serializing a request's origin), and the Guard refuses that as cross-origin.
@@ -56,9 +53,6 @@ POSTS_FORMS = "same-origin"
 SCRIPTS = (assets.HTMX, "js/docket.js")
 # A word of a snippet is marked when it is a query word, or starts with one this long (an inflected form).
 MARK_PREFIX = 4
-FAILED = (
-    "Something failed in Docket. The service log says what, and never holds your words; docket service status names it."
-)
 # A form's body: a few hundred fields at most. Anything bigger isn't a page's.
 MAX_BODY = 64 * 1024
 FORM = "application/x-www-form-urlencoded"
@@ -71,20 +65,6 @@ def icon(name: str) -> Markup:
     return Markup(  # noqa: S704 - the paths are the package's own icons.json, never content
         f'<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">{ICONS[name]}</svg>'
     )
-
-
-def at(value: datetime | None, tz: ZoneInfo, with_time: bool = True) -> str:
-    """A time in the owner's zone, as `7 Oct 2026 10:00`."""
-    if value is None:
-        return ""
-    local = value.astimezone(tz)
-    day = f"{local.day} {local:%b %Y}"
-    return f"{day} {local:%H:%M}" if with_time else day
-
-
-def clock(seconds: int | None) -> str:
-    """Seconds into a recording, as its anchors write them: `02:30`, `1:02:30`."""
-    return "" if seconds is None else format_time(seconds)
 
 
 def _pair(text: str, a: re.Match[str], b: re.Match[str], wanted: set[str]) -> bool:

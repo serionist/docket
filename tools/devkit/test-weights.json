@@ -457,8 +457,9 @@
     "tools/devkit/tests/test_yamlio.py": 0.0
   },
   "Linux browser": {
-    "packages/docket/tests/test_web_browser.py": 120.0,
-    "packages/docket/tests/test_web_browser_design.py": 20.0
+    "packages/docket/tests/test_web_browser.py": 85.0,
+    "packages/docket/tests/test_web_browser_design.py": 20.0,
+    "packages/docket/tests/test_web_browser_ledger.py": 75.0
   },
   "Windows": {
     "examples/sources/calendar/tests/test_mapper.py": 0.0,

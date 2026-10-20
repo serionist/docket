@@ -411,7 +411,7 @@ def _folded(text: str) -> str:
 def batch_lines(conn: sqlite3.Connection, batch: str) -> list[BatchLine]:
     """A write's lines, by its batch (its first op's id), in the ops' order: the ref of what each op changed, its kind
     and its log line; an op that shows no line, such as a renumber, is left out. The pages' notice after a write
-    (DR-0661), off the tool."""
+    (DR-0710), off the tool."""
     reader = _Reader(conn, ZoneInfo("UTC"), now())
     items = conn.execute(BATCH_LINES.format(table="item_log"), (batch,)).fetchall()
     meetings = conn.execute(BATCH_LINES.format(table="meeting_log"), (batch,)).fetchall()

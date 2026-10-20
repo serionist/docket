@@ -1,3 +1,0 @@
-{% from "day/macros.html" import field %}
-{% set labels = {'title': 'Title', 'who': 'Who', 'due': 'Due', 'stream': 'Stream', 'kind': 'Kind', 'description': 'Description', 'notes': 'Working notes', 'outcome': 'Outcome'} %}
-{{ field(state.opened(item), item, name, labels.get(name, name), value, unsaved=true, problem=problem) }}
