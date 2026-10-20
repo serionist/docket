@@ -2206,13 +2206,14 @@ def ledger_meetings(
 
 @ledger_app.command("suggest")
 def ledger_suggest(
-    meeting: Annotated[str, typer.Argument(help="The meeting: its M- number, or its id.")],
+    meetings: Annotated[list[str], typer.Argument(help="The meetings: each one's M- number, or its id.")],
     as_json: LedgerJson = False,
     vault: VaultOption = None,
 ) -> None:
-    """The open items worth raising in a meeting, each with why: those linked to it, then replies, waits and decisions
-    on someone in it, then waits in its stream; 15 at most. Writes nothing."""
-    _ledger_read(vault, ledger_views.Ask(view="suggest", ref=meeting), as_json)
+    """The open items worth raising in each meeting, in the order given, each with why: those linked to it, then
+    replies, waits and decisions on someone in it, then waits in its stream; 15 at most a meeting, an item for two
+    meetings under each. Writes nothing."""
+    _ledger_read(vault, ledger_views.Ask(view="suggest", refs=tuple(meetings)), as_json)
 
 
 @ledger_app.command("day")

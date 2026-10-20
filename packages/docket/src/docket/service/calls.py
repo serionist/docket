@@ -7,7 +7,7 @@ Text from docs and records comes back as data; nothing here acts on what it says
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
@@ -34,6 +34,15 @@ from docket.sync import folder as sync_folder
 from docket.vault.docstore import PutResult
 
 View = Literal["summary", "raw", "both"]
+# The most characters a read of several locators or a suggest for several meetings answers with, its text and its
+# structured content's JSON counted together: under the 50,000 past which Claude Code saves a tool's result to a file
+# and hands Claude a note instead (capture.SAVED_TO_FILE, DR-0725).
+ROOM = 40_000
+
+
+def size(model: BaseModel, lines: Iterable[str]) -> int:
+    """A tool's result as the room counts it: its text, the lines as the tool gives them, and its model's JSON."""
+    return len(render.text(lines)) + len(model.model_dump_json())
 
 
 async def search(
@@ -68,11 +77,27 @@ async def search(
 
 
 async def read(
-    service: Service, locator: str, view: View = "summary", around: int = 0, rev: int | None = None
+    service: Service,
+    locator: str,
+    view: View = "summary",
+    around: int = 0,
+    rev: int | None = None,
+    *,
+    more: Sequence[str] = (),
 ) -> tuple[ReadResult, str]:
+    """A read, or with `more` a read of several in one call, as many as fit the room, the rest in `later` (DR-0725)."""
+    if more and rev is not None:
+        raise DocketError("rev is one doc's earlier revision: read it alone, without more")
+
     def run() -> tuple[ReadResult, str]:
-        result = recall.read(service.vault(), locator, view=view, around=around, rev=rev)
-        return result, render.text(render.read(result))
+        vault = service.vault()
+        if not more:
+            result = recall.read(vault, locator, view=view, around=around, rev=rev)
+            return result, render.text(render.read(result))
+        result = recall.read_many(
+            vault, locator, more, view=view, around=around, fits=lambda r: size(r, render.reads(r)) <= ROOM
+        )
+        return result, render.text(render.reads(result))
 
     return await asyncio.to_thread(run)
 
@@ -133,13 +158,14 @@ async def transcribe(service: Service, rid: str) -> tuple[SpeechJob, str]:
 async def ledger(service: Service, ask: views.Ask) -> tuple[views.LedgerRead, str]:
     """One read of the ledger's tables, brought up to date first, beside the writer: a read never waits in a write's
     queue, and the index's lock keeps an update from moving the tables while it asks them. With no index, or one it
-    can't have within a second, the op files are folded in memory (DR-0619, DR-0638)."""
+    can't have within a second, the op files are folded in memory (DR-0619, DR-0638). A suggest for several meetings
+    answers as many as fit the room, the rest in `later` (DR-0725)."""
 
     def run() -> tuple[views.LedgerRead, str]:
         vault = service.vault()
         tz = ZoneInfo(vault.config.owner.time_zone)
         with ledger_tables(vault) as conn:
-            found = views.read(conn, ask, tz, views.now())
+            found = views.read(conn, ask, tz, views.now(), fits=lambda r: size(r, views.lines(r, tz)) <= ROOM)
         return found, render.text(views.lines(found, tz))
 
     return await asyncio.to_thread(run)

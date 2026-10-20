@@ -105,8 +105,10 @@ that item in its line's continues field: the sync logs it there. A new piece of 
 
 ## 6. Check
 
-`read` every locator in your block. A line whose locator doesn't open, or opens a record that doesn't say it, is
-dropped.
+Every locator in your block, in one call: `read(locator="<the first>", more=["<the second>", "<the third>"],
+view="raw")`. Each comes back under its own `== <locator>` line, and one that doesn't open says why there while the
+rest still read. A line whose locator doesn't open, or opens a record that doesn't say it, is dropped. An answer that
+ends with locators past the room: read those the same way, in one more call.
 
 ## 7. Write the block, return its RUN line
 

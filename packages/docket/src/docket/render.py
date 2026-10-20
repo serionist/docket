@@ -17,7 +17,7 @@ from docket.decisions import DecisionsReport, DecisionState
 from docket.index import SearchResult
 from docket.plaintext import printable
 from docket.questions import EvalReport, Score
-from docket.recall import ReadResult, StaleReport, VerifyResult
+from docket.recall import LocatorRead, ReadResult, StaleReport, VerifyResult
 from docket.reconcile.spots import Listing, SpotsReport
 from docket.vault.anchors import format_time
 from docket.vault.curatelog import Line
@@ -100,7 +100,7 @@ def refused(problems: list[DocProblem]) -> list[str]:
     return [*(str(problem) for problem in problems), f"refused: {len(problems)} problem(s)"]
 
 
-def read(result: ReadResult) -> list[str]:
+def read(result: LocatorRead) -> list[str]:
     lines: list[str] = []
     if result.resolved is not None and result.resolved != result.locator.strip():
         lines.append(f"read as {result.resolved}")
@@ -121,6 +121,17 @@ def read(result: ReadResult) -> list[str]:
     lines += [f"{ref.id}, a legacy note, covers it: {', '.join(ref.old_paths)}" for ref in result.legacy]
     for s in result.spans:
         lines += span(s)
+    return lines
+
+
+def reads(result: ReadResult) -> list[str]:
+    """A read of several locators (DR-0725): each read under a `== <locator>` line, in order, and last the locators
+    left past the room, to ask for again."""
+    lines: list[str] = []
+    for one in (result, *result.more):
+        lines += [f"== {one.locator}", *read(one)]
+    if result.later:
+        lines.append(f"past the room, not read: ask again with more for {', '.join(result.later)}")
     return lines
 
 

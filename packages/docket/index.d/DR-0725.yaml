@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0725
+    title: read takes more and ledger's suggest takes refs, several answered in one call within a room of 40,000 characters, the rest in later
+    status: proposed
+    at: "2026-10-20"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#258"]
+    description: "read(locator, view, around, rev, more) gains more, a list of locators read like locator in the same call, each once, through one call's index (recall.read_many); rev is refused with it. A locator that doesn't open is a problem of its own read, in its problems, never the call's error, the first one too. ReadResult gains more, the further reads in order, and later; each further read is a LocatorRead, the fields ReadResult had, and ReadResult is a LocatorRead with more and later, so its schema stays an object at the top, as an MCP tool's output schema is. The text is each read under a \"== <locator>\" line. ledger gains refs, several meetings for suggest, in order, a meeting named twice answered once; ref or refs, not both, every other view refuses refs, and every ref is checked before any is answered. Each ItemRow says in suggested_for the meeting, by ref, it is suggested for, an item for two meetings listed under each, and LedgerRead gains later, the refs given. The room is 40,000 characters, the text and the structured content's JSON as the model writes it compactly, under the 50,000 past which Claude Code saves a result to a file and hands Claude a note (capture.SAVED_TO_FILE): the first locator or meeting is always answered, and each next one only while the whole, the rest listed in later, still fits; the first that doesn't fit, and every one after it, go to later in order, unread, and the text's last line asks for them again. A single read past the room is as before. docket ledger suggest takes several meetings and prints them all, with no room; docket doc read stays one locator. The sync's agents check their block's locators in one read with more, the sync's prep asks one suggest with refs, and the tasks skill reads an item's locators in one read."
+    binds:
+      - "DR-0150's and DR-0660's doors, gaining only: more and refs are optional, their defaults keeping today's read; ReadResult, LedgerRead and ItemRow gain fields and keep every one they had."
+      - A tool's answer of several stays within the room, the rest in later, the first always answered.
+    not_chosen:
+      - "locator as a list: a retyped parameter."
+      - "Several meetings in ref's text: a list hidden in a string."
+      - "ReadResult inside itself for more: its schema would be a reference at the top, not the object an MCP tool's output schema is."
+      - "Every locator read before the room is measured: a read past the room would cost its time for nothing."

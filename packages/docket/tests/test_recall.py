@@ -202,6 +202,53 @@ def test_a_read_that_can_t_be_answered_says_why(
         recall.read(vault, locator, **kwargs)  # type: ignore[arg-type]
 
 
+# -- several in one read (DR-0725) ----------------------------------------------------------------------------------
+
+
+def test_read_many_reads_each_as_read_does_in_order_a_locator_given_twice_once(vault: Vault) -> None:
+    point = "r:calls:rec-0042@12:08"
+    got = recall.read_many(vault, NOTE_ID, [point, NOTE_PATH, point, NOTE_ID], view="both")
+    assert [one.locator for one in (got, *got.more)] == [NOTE_ID, point, NOTE_PATH]
+    assert got.later == []
+    alone = [recall.read(vault, locator, view="both") for locator in (NOTE_ID, point, NOTE_PATH)]
+    assert got.model_dump(exclude={"more"}) == alone[0].model_dump(exclude={"more"})
+    assert [one.model_dump() for one in got.more] == [one.model_dump(exclude={"more", "later"}) for one in alone[1:]]
+
+
+def test_read_many_gives_a_locator_that_doesn_t_open_a_problem_of_its_own(vault: Vault) -> None:
+    got = recall.read_many(vault, "calls:nothing", ["nonsense", "r:calls:rec-0042@2:00:00", REC], view="raw")
+    assert (got.locator, got.doc, got.spans, got.problems) == (
+        "calls:nothing", None, [], ["no record calls:nothing in the raw log"],
+    )  # fmt: skip
+    nonsense, outside, whole = got.more
+    assert "neither a doc id, a doc's path, nor a rid" in nonsense.problems[0]
+    assert outside.problems == ["2:00:00 is outside calls:rec-0042, which runs from 00:00 to 1:02:10"]
+    assert (whole.problems, [s.rid for s in whole.spans]) == ([], [REC])
+
+
+def test_read_many_keeps_each_further_read_only_while_the_result_fits(vault: Vault) -> None:
+    """The first read always; then each while `fits` takes the result with it, the rest in later, unread and in
+    order, the first refused among them."""
+    asked = [REC, "r:calls:rec-0042@12:08", "calls:nothing", "nonsense"]
+    seen: list[list[str]] = []
+
+    def two_more(result: recall.ReadResult) -> bool:
+        seen.append(result.later)
+        return len(result.more) <= 2
+
+    got = recall.read_many(vault, NOTE_ID, asked, fits=two_more)
+    assert ([one.locator for one in got.more], got.later) == (asked[:2], asked[2:])
+    assert seen == [asked[1:], asked[2:], asked[3:]]
+    none = recall.read_many(vault, NOTE_ID, asked, fits=lambda _: False)
+    assert (none.locator, none.doc is not None, none.more, none.later) == (NOTE_ID, True, [], asked)
+
+
+@pytest.mark.parametrize(("kwargs", "says"), [({"view": "all"}, "view is one of"), ({"around": -2}, "negative")])
+def test_read_many_refuses_what_read_refuses_of_the_call(vault: Vault, kwargs: dict[str, object], says: str) -> None:
+    with pytest.raises(DocketError, match=says):
+        recall.read_many(vault, NOTE_ID, [REC], **kwargs)  # type: ignore[arg-type]
+
+
 # -- verify ---------------------------------------------------------------------------------------------------------
 
 

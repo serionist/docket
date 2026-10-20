@@ -47,9 +47,9 @@ sync folder, then writes what they found into the ledger in one `ledger_batch` b
 | Part | What |
 |---|---|
 | the sync folder | `docket sync start` writes it in Docket's state folder, never in the vault: `context.md`, the ledger as the agents read it, an item a line, and each agent's prompt; it goes 7 days after its start, or once a forget made after it is applied |
-| the agents | one per source, side by side, each from its prompt file: it opens a run, follows the source's `SKILL.md` and its `sync.md`, classifies the plainly work or plainly private records of a mixed source, promotes its own, reads its recordings whole, and writes a block of what you owe and await, what closed, invites, minutes and outcomes to the sync folder |
+| the agents | one per source, side by side, each from its prompt file: it opens a run, follows the source's `SKILL.md` and its `sync.md`, classifies the plainly work or plainly private records of a mixed source, promotes its own, reads its recordings whole, checks every locator it reports in one `read`, and writes a block of what you owe and await, what closed, invites, minutes and outcomes to the sync folder |
 | the notes | `docket sync notes` writes a prompt per recording note the blocks name; an agent each writes the note in the background, and the sync never waits for them |
-| the reconcile | `docket sync reconcile` drafts the batch into the sync folder by fixed rules: closes on a locator that shows it, asks logged on the item they continue or added (new ones untriaged), meetings set and linked, minutes, rollover, streams, archive; what the rules can't settle is marked unsure, with its line and its choices. Claude settles those, adds proposed points for the coming week's meetings, and writes the file with one `ledger_batch`, dry run first |
+| the reconcile | `docket sync reconcile` drafts the batch into the sync folder by fixed rules: closes on a locator that shows it, asks logged on the item they continue or added (new ones untriaged), meetings set and linked, minutes, rollover, streams, archive; what the rules can't settle is marked unsure, with its line and its choices. Claude settles those, adds proposed points for the coming week's meetings from one `suggest` for all of them, and writes the file with one `ledger_batch`, dry run first |
 | the list | in chat: meetings and prep, today, this week, whenever, invites, waiting on others; then what changed, the sources that didn't run, what waits on the Staging page, and the batch, to undo whole |
 
 - Nothing is drafted or sent before you have gone through the list, and then only drafts: a chat's draft tool, a mail
@@ -94,7 +94,8 @@ time.
 | chase | drafts the nudge where the ask is, and clears the verdict |
 
 - Each item's outcome is one `ledger_batch` before the next, each change saying whether you or Claude decided it, and
-  the page shows it within seconds. Claude reads the queue and the item again before it writes.
+  the page shows it within seconds. Claude reads the queue and the item again before it writes, and the item's
+  locators in one `read`.
 - A prep item's agenda goes onto its meeting as talking points, those the sync proposed kept or dropped.
 - Messages are drafts, by your project's `CLAUDE.md`: a chat's draft tool, one draft a channel and never over one
   already there; a mail left as a draft unless you say send for that mail.
