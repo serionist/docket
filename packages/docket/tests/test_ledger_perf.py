@@ -5,8 +5,9 @@ quarter of a second, matching nothing (DR-0694); all of it folded into the index
 op more, on an item or a meeting, as a write leaves it, read into them in a tenth of a second; a write touching one
 meeting planned in a tenth of a second, reading only its part (DR-0616, DR-0628, DR-0633, DR-0635); a snapshot of
 it, every item open, read from the tables with its lines in a fifth of a second (DR-0638); the day's route on a vault
-holding it in half a second (DR-0672); and all of it as `docket ledger show --all --json` gives it, stamped, with its
-JSON, in under two seconds (DR-0659).
+holding it in half a second (DR-0672); all of it as `docket ledger show --all --json` gives it, stamped, with its
+JSON, in under two seconds (DR-0659); and a sync folder written from it, every open item a line, in under a second
+(DR-0720).
 
 The ops are written as the writer writes them, a month file per machine, each item an add and nine changes, each
 meeting four points answered and a point rolled from the meeting before it in its weekly series of fifty. Wall time
@@ -44,8 +45,10 @@ from docket.ledger.ops import Op
 from docket.media.keystore import KeyStore
 from docket.service.app import create_app
 from docket.service.state import Settings
+from docket.sync import start as sync_start
 from docket.vault import forgotten
 from docket.vault.anchors import DocRef
+from docket.vault.config import SourceConfig
 from docket.vault.forgotten import Forget, Forgotten
 
 FOLD_SECONDS = 1.5
@@ -59,6 +62,7 @@ WRITE_SECONDS = 0.1
 SNAPSHOT_SECONDS = 0.2
 DAY_SECONDS = 0.5
 SHOW_ALL_SECONDS = 2.0
+SYNC_START_SECONDS = 1.0
 
 
 def one_more(root: Path, last: Op, kind: str, **keys: object) -> Op:
@@ -380,3 +384,23 @@ def test_the_whole_ledger_shows_with_its_stamp_as_json_in_under_two_seconds(tmp_
     assert len(found["stamp"]["files"]) == len(ops.listing(vault.root)[0])
     if not traced():
         assert run.seconds < SHOW_ALL_SECONDS, f"show --all took {run.seconds:.2f} s, over {SHOW_ALL_SECONDS} s"
+
+
+@pytest.mark.perf
+def test_a_sync_folder_from_that_ledger_is_written_in_under_a_second(tmp_path: Path) -> None:
+    """docket sync start on a vault holding it, its index built: the cursor files, the snapshot from the window's start
+    to the prep week, every open item a line of context.md, the recordings no note covers, and a live source's
+    prompt. Run once before the clock starts."""
+    config = make_config()
+    config.sources = {"chat": SourceConfig(tools=["read_chat"])}
+    vault = empty_vault(tmp_path, config)
+    build(vault.root)
+    index_build.rebuild(vault)
+    at = datetime(2026, 6, 1, 8, tzinfo=UTC)
+    sync_start.start(vault, [], at)
+    run = best_of(3, lambda: sync_start.start(vault, [], at))
+    context = (run.result.folder / "context.md").read_text(encoding="utf-8").splitlines()
+    print(f"docket sync start: {run.seconds * 1000:.0f} ms ({run.runs('ms')}), {len(context):,} lines of context")
+    assert f"open items ({ITEMS})" in context and len(context) > ITEMS
+    if not traced():
+        assert run.seconds < SYNC_START_SECONDS, f"a sync start took {run.seconds:.2f} s, over {SYNC_START_SECONDS} s"

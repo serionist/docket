@@ -86,6 +86,12 @@ class Forget(_Model):
             raise ValueError("a forget's time needs its time zone")
         return value.astimezone(UTC)
 
+    @property
+    def takes(self) -> bool:
+        """Whether the line takes more than keys: anything a text outside the vault can quote."""
+        return bool(self.rids or self.versions or self.files or self.media or self.old_paths or self.import_hashes
+                    or self.ops)  # fmt: skip
+
     def line(self) -> str:
         """The line, `ops` left out when it masked none: an older Docket still reads each forget that masks no op."""
         data = self.model_dump(mode="json")
@@ -129,6 +135,8 @@ class Forgotten:
     # The lines on disk HEAD lacks: in force already, and committed by the next gate call.
     pending: int = 0
     root: Path | None = field(default=None, compare=False)
+    # When the newest line that takes more than keys was written: a sync folder made before it can quote what it took.
+    last: datetime | None = field(default=None, compare=False)
 
     @property
     def acts(self) -> bool:
@@ -268,6 +276,7 @@ def fold(lines: Sequence[Forget], missing: int = 0, root: Path | None = None, pe
         missing=missing,
         pending=pending,
         root=root,
+        last=max((line.at for line in lines if line.takes), default=None),
     )
 
 

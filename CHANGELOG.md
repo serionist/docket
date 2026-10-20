@@ -293,6 +293,11 @@ Unreleased in the same PR.
 
 ### Changed
 
+- `/docket:sync` runs its agents from a sync folder: `docket sync start` writes the ledger as they read it, an item a
+  line, and each agent's prompt into Docket's state folder, outside the vault; each agent writes its block to a file
+  and answers with one line, and each recording note gets an agent of its own in the background, written from
+  `docket sync notes`, so the sync no longer waits for them. An ask that continues an open item's work is logged on
+  it. The plugin's README names the allow rules that spare you the prompts for the folder and the note agents.
 - The Ledger page moves into the web app's new shell: the same list, keys and buttons, the open item beside it, and a
   change from the CLI, Claude or a sync shows in place, keeping what you selected, ticked and typed. A day is picked
   from a month that starts on Monday, or typed as 2026-10-23, and shows as Mon 26 Oct whatever the browser's

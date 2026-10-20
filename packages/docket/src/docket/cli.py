@@ -79,6 +79,11 @@ app = typer.Typer(
 )
 vault_app = typer.Typer(help="The vault: its state and its integrity.", no_args_is_help=True)
 app.add_typer(vault_app, name="vault")
+sync_app = typer.Typer(
+    help="Alone, move the vault with its remote; start and notes write the sync folder /docket:sync's agents run from.",
+    invoke_without_command=True,
+)
+app.add_typer(sync_app, name="sync")
 staging_app = typer.Typer(help="Records waiting for the gate: list, show, classify, promote.", no_args_is_help=True)
 app.add_typer(staging_app, name="staging")
 doc_app = typer.Typer(help="Processed docs: put one with its anchors, read it, verify it.", no_args_is_help=True)
@@ -280,13 +285,49 @@ def init(
     Wizard(TyperPrompter(), given).run()
 
 
-@app.command()
-def sync(vault: VaultOption = None) -> None:
-    """Move the vault with its remote: in a repo of its own, fetch and rebase; in a folder, your own git does it."""
+@sync_app.callback()
+def sync(ctx: typer.Context, vault: VaultOption = None) -> None:
+    """Alone, move the vault with its remote: in a repo of its own, fetch and rebase; in a folder, your own git does
+    it. `docket sync start` and `docket sync notes` write the sync folder /docket:sync's agents run from instead."""
+    if ctx.invoked_subcommand is not None:
+        # `docket sync --vault <vault> start` names the vault for the subcommand.
+        ctx.obj = vault
+        return
     result = find_vault(vault).sync()
     typer.echo(result.message)
     if "resolve it by hand" in result.message:
         raise typer.Exit(1)
+
+
+@sync_app.command("start")
+def sync_start(
+    ctx: typer.Context,
+    sources: Annotated[
+        list[str] | None, typer.Argument(help="The sources to sync; default: every live one.", show_default=False)
+    ] = None,
+    vault: VaultOption = None,
+) -> None:
+    """Write a sync folder in Docket's state folder for /docket:sync: context.md, the ledger as the agents read it, and
+    each agent's prompt; print the folder and a line per agent with its prompt's path. Refused, writing nothing, for
+    a source that isn't live. Removes sync folders over 7 days old. Works with the service down."""
+    from docket.sync import start  # noqa: PLC0415
+
+    found = find_vault(vault if vault is not None else ctx.obj)
+    say_all(start.lines(start.start(found, sources or [], ledger_views.now())))
+
+
+@sync_app.command("notes")
+def sync_notes(
+    ctx: typer.Context,
+    sync: Annotated[str, typer.Argument(help="The sync: its id, or its folder, as docket sync start printed it.")],
+    vault: VaultOption = None,
+) -> None:
+    """Write a prompt per recording note the sync's blocks name, from their NOTES lines, one note for two lines with
+    one doc id; print a line per note with its prompt's path, and each line that gets none and why."""
+    from docket.sync import start  # noqa: PLC0415
+
+    found = find_vault(vault if vault is not None else ctx.obj)
+    say_all(start.note_lines(start.notes(found, sync)))
 
 
 @vault_app.command("status")
