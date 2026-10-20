@@ -163,6 +163,19 @@ def test_pin_is_a_label_only_as_a_word_of_its_own(redactor: Redactor, text: str)
     assert redacted(redactor, text) == (text, Counter())
 
 
+@pytest.mark.parametrize("text", ["pin: GPIO4", "  pin: true\n  mode: INPUT", "Pin: this one, please", "PIN: 4A"])
+def test_a_bare_pin_takes_only_a_value_of_digits_without_letters(redactor: Redactor, text: str) -> None:
+    assert redacted(redactor, text) == (text, Counter())
+    out, _ = redacted(redactor, "  pin: 17\n  mode: INPUT")
+    assert out == "  pin: [redacted:password]\n  mode: INPUT"
+
+
+def test_a_native_key_ending_in_pin_is_redacted_whole(redactor: Redactor) -> None:
+    record, counts = redactor.record(make_record(native={"sim_pin": "4812", "mPin": 7731, "pinned": "yes"}))
+    assert record.native == {"sim_pin": "[redacted:password]", "mPin": "[redacted:password]", "pinned": "yes"}
+    assert counts == Counter({"password": 2})
+
+
 @pytest.mark.parametrize(
     ("text", "expected"),
     [

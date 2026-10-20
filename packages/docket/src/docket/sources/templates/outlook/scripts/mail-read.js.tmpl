@@ -31,9 +31,12 @@ await (async (ID, SINCE, FROM) => {
   const pause = async (ms) => { const t = Date.now(); while (Date.now() - t < ms) await tick(); };
 
   // A password's value: its first word, then each further word on its line that holds a digit or a symbol (Kq7 x!Lm 22,
-  // a PIN read in groups). A word of prose, a label (Username:, room=B12), < or | ends it. PIN only as a word of its own.
-  const PROSE = String.raw`\(?\p{L}+(?:[-.'’]\p{L}+)*[.,;:!?)]*(?![^\s<|])`;
-  const PASSWORD = new RegExp(String.raw`(?<![\p{L}\p{N}_])(passcode|password|passwd|pwd|jelszó|jelszo|pin[- ]?k[oó]d|pin[- ]?code|pin)(\s*[:=][\s|*_]*)[^\s<|]+(?:[^\S\n]+(?![\p{L}\p{N}_]+[:=]|${PROSE})[^\s<|]+)*`, 'giu');
+  // a PIN read in groups). A word of prose, a label (Username:, room=B12), <, |, a comma or a semicolon ends it. A bare
+  // PIN is a whole word and takes only digits, so pin: GPIO4 stays.
+  const SEP = String.raw`\s*[:=][\s|]*`;
+  const WORD = String.raw`[^\s<|,;]+`;
+  const PROSE = String.raw`\(?\p{L}+(?:[-.'’]\p{L}+)*[.!?:)]*(?![^\s<|,;])`;
+  const PASSWORD = new RegExp(String.raw`(?<![\p{L}\p{N}_])(passcode|password|passwd|pwd|jelszó|jelszo|pin[- ]?k[oó]d|pin[- ]?code|pin(?=${SEP}[^\s<|,;\p{L}\d]*\d[^\s<|,;\p{L}]*(?![^\s<|,;])))(?![\p{L}\p{N}_])(${SEP})${WORD}(?:[^\S\n]+(?![\p{L}\p{N}_]+[:=]|${PROSE})${WORD})*`, 'giu');
   const scrub = (s) => String(s == null ? '' : s).replace(/\r\n?/g, '\n')
     .replace(PASSWORD, '$1: (removed)')
     .replace(/\b(client secret|secret value|secret key|api key|access key)(\s*[:=-]\s*)\S+/gi, '$1: (removed)');
