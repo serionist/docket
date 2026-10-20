@@ -1,9 +1,9 @@
 """`uv run gate`: the one gate. What passes here is the merge rule.
 
 Lanes:
-  quick  the static checks, in seconds: lock file, lint, format, types, docs, commit messages, private names, secrets,
-         the harness (AGENTS.md, skills, plugin manifests), the web app's build and API document. The pre-push hook
-         runs it.
+  quick  the static checks, in seconds: lock file, lint, format, types, docs, the test files' systems
+         (test-systems.json, DR-0758), commit messages, private names, secrets, the harness (AGENTS.md, skills, plugin
+         manifests), the web app's build and API document. The pre-push hook runs it.
   full   quick, then the tests with coverage and its floors, the secret scan over the whole history, and the plugin
          validated by Claude Code itself. finish-work runs it before a PR. CI runs it in parts (DR-0754): `--skip
          tests` once, and `--only tests --shard K/N` on each share, which saves its coverage data instead of holding

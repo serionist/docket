@@ -75,6 +75,8 @@ extraPaths = ["packages/docket/tests", "examples/sources/plaud/tests"]
 [tool.pytest.ini_options]
 # The reference sources' tests run in CI like the app's (DR-0101): an example nobody runs drifts from the contract.
 testpaths = ["packages", "tools/devkit/tests", "examples"]
+# The files tools/devkit/test-systems.json names, and only those: pytest's default takes *_test.py too (DR-0758).
+python_files = ["test_*.py"]
 # The app tests' shared builders (docket_testkit) import by name; test folders are not packages.
 pythonpath = ["packages/docket/tests"]
 addopts = ["--import-mode=importlib", "-ra", "--strict-markers"]
