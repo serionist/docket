@@ -147,7 +147,9 @@ async def json_only(request: Request) -> None:
     kind = request.headers.get("content-type", "").split(";")[0].strip().lower()
     if kind != JSON:
         raise HTTPException(status_code=415, detail="a write's body is application/json")
-    if len(await request.body()) > MAX_BODY:
+    # A body that says it is too big is refused before it is read.
+    said = request.headers.get("content-length", "")
+    if (said.isascii() and said.isdigit() and int(said) > MAX_BODY) or len(await request.body()) > MAX_BODY:
         raise HTTPException(status_code=413, detail="a write's body is at most 256 KB")
 
 
