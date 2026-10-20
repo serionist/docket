@@ -30,8 +30,12 @@ await (async (ID, SINCE, FROM) => {
   const tick = () => new Promise((r) => { const c = new MessageChannel(); c.port1.onmessage = () => r(); c.port2.postMessage(0); });
   const pause = async (ms) => { const t = Date.now(); while (Date.now() - t < ms) await tick(); };
 
+  // A password's value: its first word, then each further word on its line that holds a digit or a symbol (Kq7 x!Lm 22,
+  // a PIN read in groups). A word of prose, a label (Username:, room=B12), < or | ends it. PIN only as a word of its own.
+  const PROSE = String.raw`\(?\p{L}+(?:[-.'’]\p{L}+)*[.,;:!?)]*(?![^\s<|])`;
+  const PASSWORD = new RegExp(String.raw`(?<![\p{L}\p{N}_])(passcode|password|passwd|pwd|jelszó|jelszo|pin[- ]?k[oó]d|pin[- ]?code|pin)(\s*[:=][\s|*_]*)[^\s<|]+(?:[^\S\n]+(?![\p{L}\p{N}_]+[:=]|${PROSE})[^\s<|]+)*`, 'giu');
   const scrub = (s) => String(s == null ? '' : s).replace(/\r\n?/g, '\n')
-    .replace(/\b(passcode|password|passwd|pwd|jelszó|jelszo|pin code)(\s*[:=]\s*)\S+/gi, '$1: (removed)')
+    .replace(PASSWORD, '$1: (removed)')
     .replace(/\b(client secret|secret value|secret key|api key|access key)(\s*[:=-]\s*)\S+/gi, '$1: (removed)');
   const esc = (s) => scrub(s).replace(/¤/g, '¤¤').replace(/=/g, '¤e').replace(/\t/g, '¤t');
   const one = (s) => esc(String(s == null ? '' : s).replace(/\s+/g, ' ').trim());

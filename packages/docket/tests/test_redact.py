@@ -29,6 +29,7 @@ PEM_CUT_OFF = "-----" + "BEGIN " + KEY_BLOCK + "\nMIIEvQ" + "IBADANBgkq and the 
 HIDDEN = "hunter2-Example"
 NBSP = chr(0x00A0)
 NARROW_NBSP = chr(0x202F)
+APOSTROPHE = chr(0x2019)
 
 
 @pytest.fixture
@@ -126,6 +127,100 @@ def test_what_isn_t_a_labelled_secret_stays(redactor: Redactor, text: str) -> No
     assert redacted(redactor, text) == (text, Counter())
 
 
+# -- a password of several words, and a dial-in PIN (#256) ---------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Temporary password: Kq7 x!Lm 22", "Temporary password: [redacted:password]"),
+        ("PIN-kód: 123 456 789#", "PIN-kód: [redacted:password]"),
+        ("PIN-kod: 123 456 789#", "PIN-kod: [redacted:password]"),
+        ("Conference PIN: 4812 7731", "Conference PIN: [redacted:password]"),
+        ("PIN code: 4812 7731", "PIN code: [redacted:password]"),
+        ("pin=4812", "pin=[redacted:password]"),
+        ("conferencePin: 4812 7731", "conferencePin: [redacted:password]"),
+        # The words after the first go only while they hold a digit or a symbol: prose after them stays.
+        ("PIN: 4812 7731 then press # and wait", "PIN: [redacted:password] then press # and wait"),
+        ("PIN: 4812 7731, then press #", "PIN: [redacted:password], then press #"),
+        (
+            "Password: Kq7 x!Lm 22 (changed at first sign-in)",
+            "Password: [redacted:password] (changed at first sign-in)",
+        ),
+        (f"PIN: 4812 7731 don{APOSTROPHE}t share it", f"PIN: [redacted:password] don{APOSTROPHE}t share it"),
+    ],
+)
+def test_a_password_of_several_words_and_a_pin_go_whole(redactor: Redactor, text: str, expected: str) -> None:
+    out, counts = redacted(redactor, text)
+    assert out == expected
+    assert counts == Counter({"password": 1})
+
+
+@pytest.mark.parametrize(
+    "text", ["my opinion: 4812 7731", "spinning: 4812 7731", "pinned: 4812 7731", "Pinterest: 4812", "PINs: 4812"]
+)
+def test_pin_is_a_label_only_as_a_word_of_its_own(redactor: Redactor, text: str) -> None:
+    assert redacted(redactor, text) == (text, Counter())
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("| Password: | Kq7 x!Lm 22 | Valid: 24 h |", "| Password: | [redacted:password] | Valid: 24 h |"),
+        ("Password: Kq7 x!Lm 22|kept", "Password: [redacted:password]|kept"),
+        (
+            "<td>Password:</td><td>Kq7 x!Lm 22</td><td>kept</td>",
+            "<td>Password:</td><td>[redacted:password]</td><td>kept</td>",
+        ),
+        ("<b>PIN:</b> 4812 7731<br>kept 2", "<b>PIN:</b> [redacted:password]<br>kept 2"),
+        ("Password: Kq7 x!Lm 22\nkept 2", "Password: [redacted:password]\nkept 2"),
+    ],
+)
+def test_a_value_of_several_words_stops_at_a_tag_a_cell_or_the_line_s_end(
+    redactor: Redactor, text: str, expected: str
+) -> None:
+    out, counts = redacted(redactor, text)
+    assert out == expected
+    assert counts == Counter({"password": 1})
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Password: Kq7 x!Lm 22 Username: ada7", "Password: [redacted:password] Username: ada7"),
+        ("PIN: 4812 7731 room=B12", "PIN: [redacted:password] room=B12"),
+        ("PIN: 4812 7731 at 10:30", "PIN: [redacted:password] at 10:30"),
+        ("PIN: 4812 7731 ID2: 55 66", "PIN: [redacted:password] ID2: 55 66"),
+    ],
+)
+def test_a_value_of_several_words_stops_at_the_next_label(redactor: Redactor, text: str, expected: str) -> None:
+    out, counts = redacted(redactor, text)
+    assert out == expected
+    assert counts == Counter({"password": 1})
+
+
+def test_two_values_on_one_line_are_two_markers(redactor: Redactor) -> None:
+    out, counts = redacted(redactor, "Meeting ID: 811 2233 4455 Passcode: 7Hq2 x9 PIN: 4812 7731#")
+    assert out == "Meeting ID: 811 2233 4455 Passcode: [redacted:password] PIN: [redacted:password]"
+    assert counts == Counter({"password": 2})
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Password: Kq7x", "Password: [redacted:password]"),
+        (f"password: {HIDDEN} and more", "password: [redacted:password] and more"),
+        ("the password: is in the vault, ask Ben", "the password: [redacted:password] in the vault, ask Ben"),
+        ("PIN: 4812 for the door", "PIN: [redacted:password] for the door"),
+        ("token: abc123 def456", "token: [redacted:api-key] def456"),
+    ],
+)
+def test_a_one_word_value_and_an_api_key_go_as_before(redactor: Redactor, text: str, expected: str) -> None:
+    out, counts = redacted(redactor, text)
+    assert out == expected
+    assert counts.total() == 1
+
+
 @pytest.mark.perf
 def test_long_runs_of_filler_are_read_in_linear_time(redactor: Redactor) -> None:
     n = 50_000
@@ -141,6 +236,12 @@ def test_long_runs_of_filler_are_read_in_linear_time(redactor: Redactor) -> None
         "password" + NBSP * n,
         "tel" + NBSP * n,
         "+" + "1 " * n,
+        # A password of many words, words that read as prose only at their end, and labels one after another.
+        "PIN: " + "4812 " * n,
+        "password: x " + "a-b." * n + "1",
+        "password: x " + "a" * n + "1",
+        "password: x " + "a" * n + ":",
+        ("PIN: 1 " + "x!y " * 10) * (n // 10),
     ]
     # A pattern that finds a few more characters each pass, after a marker: the cap stops it (DR-0525).
     chain = Redactor.from_config(Redaction(patterns=[pattern("x", "X"), pattern("hash", r"\b[0-9a-f]{8}")]))

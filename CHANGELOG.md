@@ -293,6 +293,10 @@ Unreleased in the same PR.
 
 ### Changed
 
+- Credentials redaction takes a password of several words whole, `Temporary password: Kq7 x!Lm 22`, up to the first
+  word of prose or the next label on its line, and takes dial-in PINs: `PIN`, `PIN code` and `PIN-kód` are password
+  labels now. The Outlook example's `mail-read.js` strips both the same way. Docs already stored take it with
+  `docket doc redact`.
 - `/docket:sync` runs its agents from a sync folder: `docket sync start` writes the ledger as they read it, an item a
   line, and each agent's prompt into Docket's state folder, outside the vault; each agent writes its block to a file
   and answers with one line, and each recording note gets an agent of its own in the background, written from

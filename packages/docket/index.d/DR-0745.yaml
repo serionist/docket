@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0745
+    title: A password label's value goes on through the words of its line that hold a digit or a symbol, and pin, pin code and pin-kód are password labels
+    status: proposed
+    at: "2026-10-20"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#256"]
+    description: "The password rule's unquoted value is its first word, as before (DR-0190), then each further word on the same line that holds a digit or a symbol: Temporary password: Kq7 x!Lm 22 and Conference PIN: 4812 7731 go whole. A word of prose ends it: letters only, perhaps joined by hyphens, dots or apostrophes, after an opening bracket or before closing marks (and, follow-up, e.g., (see, more.). So does a label, a word then : or = (Username:, room=B12, 10:30), and whatever ends a word already: a line break, <, >, |, a quote, &, a comma or a semicolon. pin, pin code and pin-kód (pin-kod) join the password labels as a word of their own, so opinion, spinning and pinned stay, and a native key ending in one has its value redacted whole. The api-key labels keep a one-word value: keys and tokens hold no spaces. The value is read possessively, so a long line is read once."
+    binds:
+      - A one-word password followed by prose redacts as before; a word of letters only after a password's first word is never taken.
+    not_chosen:
+      - "The value to the line's end whenever a second word follows: password: hunter2 and more, or the password: is in the vault, would lose the rest of the sentence."
+      - "A cap on the words a value takes: a cap low enough to spare prose cuts a PIN read in four groups, and one high enough for it still takes prose."
+      - "pin as a bare substring: opinion, spinning and pinned would be labels."
+      - "Several words for the api-key labels too: a token holds no spaces, and the words after one are prose or another field."
