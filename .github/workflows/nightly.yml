@@ -170,11 +170,14 @@ jobs:
 
   # A red scheduled run only: the set is every red job's failing tests, each under its system, and a red job that
   # named none stands for itself. Its key, the first 12 hex of the sorted set's sha256, sits in the issue's body, so a
-  # night that fails the same set comments on the open issue instead of opening another.
+  # night that fails the same set comments on the open issue instead of opening another. A share past its timeout may
+  # end cancelled rather than failed, and a hung night is red too; a night cancelled by hand opens nothing.
   issue:
     name: Issue for a red night
     needs: [tests, browser]
-    if: failure() && github.event_name == 'schedule'
+    if: >-
+      !cancelled() && github.event_name == 'schedule' &&
+      (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
