@@ -27,10 +27,9 @@ whom, the `who` names. Read it before the first draft.
 `<vault>` is the folder the session start's `vault:` line names. Put `--vault <vault>` on every `docket` command but
 `docket open`, which takes none.
 
-1. **The page.** `docket open /ledger`, and give the user the link it prints. The Queue page comes later; until then
-   the Ledger page takes the same verdicts. Git Bash on Windows turns a lone `/ledger` into a folder, which the
-   command refuses: there, run `MSYS_NO_PATHCONV=1 docket open /ledger`. The service not answering: see Without the
-   service.
+1. **The page.** `docket open /queue`, and give the user the link it prints. Git Bash on Windows turns a lone
+   `/queue` into a folder, which the command refuses: there, run `MSYS_NO_PATHCONV=1 docket open /queue`. The
+   service not answering: see Without the service.
 2. **A sync due.** When the session start's `day` line names sources due, say it once ("chat and mail are due a
    sync: /docket:sync first?"). In a long session `docket ledger day --vault <vault>` says it as of now. Run nothing
    unless they say so.

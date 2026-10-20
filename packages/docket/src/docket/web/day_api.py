@@ -1,13 +1,15 @@
-"""The day pages' JSON routes under /api/web (DR-0709 to DR-0711), the Ledger's first: its list, the open item's panel,
-a text material in the viewer and the poll's version check; then the writes, each a JSON body in and a JSON answer
-out: a button's write, a field's save and a material opened on the owner's desktop.
+"""The day pages' JSON routes under /api/web (DR-0709 to DR-0711): each page's list and the open item's panel, then
+what the pages share under `/ledger`: a text material in the viewer, the poll's version check, the names the who
+fields suggest, and the writes, each a JSON body in and a JSON answer out: a button's write, a field's save and a
+material opened on the owner's desktop.
 
 | Route | What |
 |---|---|
-| `GET /ledger` | the list, read with the page's query string as it is, and the canonical URL to write back |
-| `GET /ledger/panel` | the item `open` names, or why no panel opens |
+| `GET /ledger`, `GET /queue` | the page's list, read with its query string as it is, and the canonical URL to write |
+| `GET /ledger/panel`, `GET /queue/panel` | the item `open` names, or why no panel opens |
 | `GET /ledger/text` | the text material `text` names, at most its first 256 KB |
 | `GET /ledger/changed` | whether the op files moved since the version `v` |
+| `GET /ledger/who` | the names the who fields suggest, the most used first (DR-0714) |
 | `POST /ledger/write` | one batch, by user, via page; a bulk through a dry run; the notice with its Undo |
 | `POST /ledger/save` | a field saved on change: the row, the panel and the version after it |
 | `POST /ledger/open` | a material opened with its app, or shown in its folder |
@@ -82,6 +84,23 @@ class Ledger(BaseModel):
     tomorrow: str
     # What the write `done` names did, for a URL that still carries it.
     notice: Notice | None
+
+
+class Queue(Ledger):
+    """The Queue's list (DR-0666), in the Ledger's shape: its groups by call, no state chips, and the Ledger's own
+    filters, state, group and archived, at their defaults."""
+
+
+class Person(BaseModel):
+    name: str
+    # How many items name it; 0 for a person of the vault's entities no item names yet.
+    uses: int
+    # Its other names and aliases, which a typed word finds it by too.
+    also: list[str]
+
+
+class People(BaseModel):
+    people: list[Person]
 
 
 class Panel(BaseModel):
@@ -163,47 +182,65 @@ def router(service: Service) -> APIRouter:
     async def gather(state: DayState, *, whole: bool = True, alikes: tuple[str, ...] = ()) -> day.Facts:
         return await asyncio.to_thread(lambda: day.gather(vault(), state, whole=whole, alikes=alikes))
 
+    async def listed(request: Request, page: str) -> Ledger:
+        state = DayState.read(request.query_params, page)
+        found = await gather(state)
+        # A whole read always lists.
+        listing = cast(LedgerRead, found.listing)
+        today = listing.today
+        build = day_view.build_queue if page == "queue" else day_view.build_list
+        model = Queue if page == "queue" else Ledger
+        return model(
+            canonical=state.url(),
+            version=found.version,
+            today=today.isoformat(),
+            list=build(listing, state, found.matched),
+            filters=Filters(
+                q=state.q or "",
+                stream=state.stream or "",
+                kind=state.kind or "",
+                who=state.who or "",
+                k=state.k,
+                state=state.state,
+                group=state.group,
+                archived=state.archived,
+            ),
+            kinds=list(ops.KINDS),
+            verdicts=day_view.verdict_buttons([]),
+            snooze=day_view.snooze_choices(today),
+            tomorrow=(today + timedelta(days=1)).isoformat(),
+            notice=day_view.build_notice(state, found.lines),
+        )
+
+    async def paneled(request: Request, page: str) -> Panel:
+        state = DayState.read(request.query_params, page)
+        found = await gather(state, whole=False)
+        panel = None
+        if found.shown is not None:
+            panel = day_view.build_panel(found.shown, found.meeting, found.sources, found.tz)
+        return Panel(canonical=state.url(), panel=panel, missing=found.missing)
+
     @api.get("/ledger", response_model=Ledger, responses={400: {"model": Refused}})
     async def ledger(request: Request) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
-        async def answer() -> Ledger:
-            state = DayState.read(request.query_params)
-            found = await gather(state)
-            # A whole read always lists.
-            listing = cast(LedgerRead, found.listing)
-            today = listing.today
-            return Ledger(
-                canonical=state.url(),
-                version=found.version,
-                today=today.isoformat(),
-                list=day_view.build_list(listing, state, found.matched),
-                filters=Filters(
-                    q=state.q or "",
-                    stream=state.stream or "",
-                    kind=state.kind or "",
-                    who=state.who or "",
-                    k=state.k,
-                    state=state.state,
-                    group=state.group,
-                    archived=state.archived,
-                ),
-                kinds=list(ops.KINDS),
-                verdicts=day_view.verdict_buttons([]),
-                snooze=day_view.snooze_choices(today),
-                tomorrow=(today + timedelta(days=1)).isoformat(),
-                notice=day_view.build_notice(state, found.lines),
-            )
+        return await safely(request, lambda: listed(request, "ledger"))
 
-        return await safely(request, answer)
+    @api.get("/queue", response_model=Queue, responses={400: {"model": Refused}})
+    async def queue(request: Request) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
+        return await safely(request, lambda: listed(request, "queue"))
 
     @api.get("/ledger/panel", response_model=Panel, responses={400: {"model": Refused}})
     async def ledger_panel(request: Request) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
-        async def answer() -> Panel:
-            state = DayState.read(request.query_params)
-            found = await gather(state, whole=False)
-            panel = None
-            if found.shown is not None:
-                panel = day_view.build_panel(found.shown, found.meeting, found.sources, found.tz)
-            return Panel(canonical=state.url(), panel=panel, missing=found.missing)
+        return await safely(request, lambda: paneled(request, "ledger"))
+
+    @api.get("/queue/panel", response_model=Panel, responses={400: {"model": Refused}})
+    async def queue_panel(request: Request) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
+        return await safely(request, lambda: paneled(request, "queue"))
+
+    @api.get("/ledger/who", response_model=People, responses={400: {"model": Refused}})
+    async def ledger_who(request: Request) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
+        async def answer() -> People:
+            found = await asyncio.to_thread(lambda: day.people(vault()))
+            return People(people=[Person(name=p.name, uses=p.uses, also=list(p.also)) for p in found])
 
         return await safely(request, answer)
 

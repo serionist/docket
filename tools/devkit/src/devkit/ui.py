@@ -149,6 +149,27 @@ PAGES: dict[str, Page] = {
                 expects=(REFUSED,),
             ),
             State("empty", "/ledger", world="empty"),
+            # The who field's names under the panel's field and the new item's, and the kinds' tabs on every row.
+            State("who", "/ledger?open=A-0003", (("fill", "#f-A-0003-who|e"),)),
+            State("new-who", "/ledger", (("press", "n"), ("fill", "#new-who|Cl"))),
+        ),
+    ),
+    "queue": Page(
+        world="week",
+        states=(
+            State("list", "/queue"),
+            State("panel", "/queue?open=A-0022"),
+            State("ticked", "/queue", (("press", "j"), ("press", "j"), ("press", "x"), ("press", "j"), ("press", "x"))),
+            State("notice", "/queue", (("press", "j"), ("press", "j"), ("press", "2")), after=(("press", "u"),)),
+            State(
+                "refusal",
+                "/queue?open=A-0003&drop=1",
+                (("click", '#close-A-0003 >> text="Drop"'),),
+                expects=(REFUSED,),
+            ),
+            State("who", "/queue?open=A-0003", (("fill", "#f-A-0003-who|Ada E"),)),
+            State("filtered", "/queue?stream=pilot"),
+            State("empty", "/queue", world="empty"),
         ),
     ),
 }

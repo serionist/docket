@@ -3,6 +3,7 @@
  * ticks, the verdict keys and the notice's undo. Nothing is written anywhere; the calls live in this page only.
  */
 import * as React from "react";
+import { KindTab } from "@/components/kind";
 import { Empty, ListGroup, NoticeBar, Panel, Workspace } from "@/components/shell/page";
 import { MEANING, STAMP_PRESSED, Stamp, VERDICTS, type Verdict } from "@/components/stamp";
 import { Button } from "@/components/ui/button";
@@ -59,13 +60,18 @@ function Row({
         className="flex min-w-0 flex-1 cursor-default items-center gap-3 self-stretch text-left outline-offset-[-2px]"
       >
         {!narrow && <span className="w-14 shrink-0 font-mono text-xs text-ink-muted">{item.ref}</span>}
-        {!narrow && <span className="w-16 shrink-0 text-xs text-ink-muted">{item.kind}</span>}
+        {!narrow && (
+          <span className="flex w-[4.5rem] shrink-0">
+            <KindTab kind={item.kind} />
+          </span>
+        )}
         <span className="min-w-0 flex-1">
           <span className="block truncate">{item.title}</span>
           {narrow && (
-            <span className="block truncate text-xs text-ink-muted">
-              <span className="font-mono">{item.ref}</span> {item.kind}
-              {item.who ? `, ${item.who}` : ""}
+            <span className="flex min-w-0 items-center gap-1.5 text-xs text-ink-muted">
+              <span className="font-mono">{item.ref}</span>
+              <KindTab kind={item.kind} className="h-4" />
+              <span className="truncate">{item.who}</span>
             </span>
           )}
         </span>
@@ -297,7 +303,7 @@ export function DesignList({ open, onOpen }: { open: string | undefined; onOpen:
             header={
               <>
                 <span className="font-mono text-xs text-ink-muted">{openItem.ref}</span>
-                <span className="text-xs text-ink-muted">{openItem.kind}</span>
+                <KindTab kind={openItem.kind} />
                 {verdicts[openItem.ref] && <Stamp verdict={verdicts[openItem.ref] as Verdict} />}
               </>
             }

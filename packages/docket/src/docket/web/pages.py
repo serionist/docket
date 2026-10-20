@@ -1,6 +1,6 @@
 """The navigation and the keys: every page of the design, by use, with the phase it arrives in, and the keys each
 built page answers to. The shell, the keys dialog and the footer read these, and `docket.js` handles the same keys.
-A page in the React app lists its keys in its own registry (DR-0711), so the Ledger has none here.
+A page in the React app lists its keys in its own registry (DR-0711), so the Ledger and the Queue have none here.
 
 Only built pages are links, first in their group; the others are slots that say when they come (DR-0546).
 """
@@ -31,9 +31,9 @@ NAV: tuple[Group, ...] = (
         "The day",
         (
             # Built pages come first in their group (DR-0546); each day page's PR marks it built (DR-0669).
+            Page("queue", "Queue", "/queue", 3, "triage, then the items one at a time", built=True),
             Page("ledger", "Ledger", "/ledger", 3, "items with their raw source one click away", built=True),
             Page("today", "Today", "/today", 3, "the day: meetings with their briefs and points"),
-            Page("queue", "Queue", "/queue", 3, "triage, then the items one at a time"),
             Page("meetings", "Meetings", "/meetings", 3, "meetings with their briefs, points and minutes"),
             Page("outbox", "Outbox", "/outbox", 3, "drafts waiting for a click"),
         ),

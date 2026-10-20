@@ -868,11 +868,11 @@ What the service refuses, and what it doesn't:
 
 ## The web app
 
-`docket open` signs your browser in to the service's own pages. In this version that is the Ledger, Search,
-Recording, Briefs, Sync, Staging, Curate and Settings; the navigation shows the pages still to come, with the phase each
-arrives in.
+`docket open` signs your browser in to the service's own pages. In this version that is the Queue, the Ledger,
+Search, Recording, Briefs, Sync, Staging, Curate and Settings; the navigation shows the pages still to come, with the
+phase each arrives in.
 
-The pages are moving, one by one, into a new app built in React; the Ledger is the first. Its shell is the sidebar with
+The pages are moving, one by one, into a new app built in React; the Queue and the Ledger are its first. Its shell is the sidebar with
 what waits at the gate and whether a sync is due, the theme and keys switches at its foot, the list and the open item
 beside it; `/design` shows its parts on invented data. It comes built with Docket; nothing to install.
 
@@ -935,6 +935,19 @@ when you ask Claude; the page's one write is your click on a decision (DR-0566).
   line a list now names shows only that it is hidden, and opens nothing.
 - Keys: `?`.
 
+### The Queue page
+
+`/queue` lists the open items to work through, as `docket ledger queue` does, beside the one you open: the untriaged
+first, those whose snooze ended leading them, then the items by their call, discuss, claude, me and chase, each by
+due (DR-0666). It is the Ledger page's list, keys, act bar, item panel and new item over the queue's read, and what
+`/docket:tasks` opens.
+
+- Each call's group carries its stamp and what it means; `1` to `4` make the call on the selected row, which moves on
+  to the next one, so a run of keys triages the untriaged in turn.
+- Its URL holds `open`, `q`, `stream`, `kind`, `who` and `k`, as the Ledger's does; the Ledger's own `state`,
+  `group` and `archived` are left out.
+- The sidebar shows how many are untriaged; the page updates in place when the ledger changes, as the Ledger does.
+
 ### The Ledger page
 
 `/ledger` lists the ledger's items beside the one you open, and every button writes the change as one batch, by you,
@@ -944,7 +957,7 @@ list, one click and one key at a time, and the first page of the web app's React
 | Part | Shows |
 |---|---|
 | The list | open items by due: snooze ended, overdue, today, this week, later, none; or by stream, kind, who or meeting. Snoozed by the day each comes back, closed by its day, or all; 100 rows, Show more for the next 100 |
-| A row | its call, number, kind, title, meeting, who, stream, due and age; on hover or focus the verdicts, done and drop |
+| A row | its call, number, kind as a tab in the kind's own colour, title, meeting, who, stream, due and age; on hover or focus the verdicts, done and drop |
 | Ticked rows | the act bar: a verdict, no call, done, drop with its why, snooze, reopen; each row the change doesn't take is skipped and named |
 | The item | its call, its fields, saved as you leave each one, the meeting it hangs on with its points, notes, materials, where it came from, its counts and its history, newest first, Undo on each line that has one |
 
@@ -958,6 +971,9 @@ list, one click and one key at a time, and the first page of the web app's React
 - The page updates in place when the ledger changes, from the CLI, Claude or a sync, unless you are typing, have
   rows ticked, a dialog open or a save on its way; what you selected, ticked and typed stays.
 - Leaving the item or the page with text typed and not saved asks first.
+- Who, in the item, the new item and the filter, offers the names the ledger uses, the most used first, and your
+  vault's people with their aliases once the index holds them (DR-0714): type to narrow them, the arrows and Enter to
+  take one, Esc to close the list; a new name is always taken as typed.
 - Keys: `j` and `k` move, the panel following once open; `x` or Space ticks; `1` to `4` discuss, claude, me, chase;
   `0` no call; `e` done; `Delete` or Backspace drop; `s` snooze; `u` or Ctrl+Z undo; `n` a new item; `/` the search
   box; `?` for the rest.

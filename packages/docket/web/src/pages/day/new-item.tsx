@@ -1,8 +1,8 @@
 /**
  * The new item form, which n opens (DR-0710). What is typed stays in the page while it is closed, as the old form's
  * did, and through a refusal. An add the writer refuses as a look-alike names the open items it looks like, each a
- * link to its panel, beside Add anyway, which adds it again with force. An item added here gets the source
- * page:<day>T<hh:mm> unless one is given.
+ * link to its panel, beside Add anyway, which adds it again with force. Who suggests the names already in use
+ * (DR-0714). An item added here gets the source page:<day>T<hh:mm> unless one is given.
  */
 import * as React from "react";
 import { DatePicker } from "@/components/date-picker";
@@ -23,6 +23,7 @@ import { useUnsaved } from "@/lib/drafts";
 import { returnFocus } from "@/lib/focus";
 import type { Row } from "./api";
 import { useActions } from "./context";
+import { WhoField } from "./who-field";
 
 export interface NewDraft {
   title: string;
@@ -128,7 +129,12 @@ export function NewItem({
             <label htmlFor="new-who" className="text-xs font-semibold text-ink-muted">
               Who
             </label>
-            <Input id="new-who" value={draft.who} onChange={set("who")} autoComplete="off" dir="auto" />
+            <WhoField
+              id="new-who"
+              value={draft.who}
+              onChange={(who) => onDraft({ ...draft, who })}
+              onPick={(who) => onDraft({ ...draft, who })}
+            />
           </div>
           <div className="grid gap-1">
             <label htmlFor="new-stream" className="text-xs font-semibold text-ink-muted">

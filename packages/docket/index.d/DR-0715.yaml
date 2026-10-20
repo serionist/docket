@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0715
+    title: Each kind of item is a tab in a hue of its own, kept apart from the verdicts' inks, red ink and ledger green, its name always written
+    status: proposed
+    at: "2026-10-20"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#252"]
+    description: "A row, the panel's head and the design page show an item's kind as a ledger's margin tab: a 3 px bar of the kind's ink at its left, a wash of the same hue behind, the kind's name written in its ink at 12 px, normal weight. Quieter than a verdict's stamp, whose double rule all round and bold name stay the page's one bold thing (DR-0707). The five are token pairs in tokens.css, light and dark: reply cerulean (#007089, #49A7C0), decision rose (#994F63, #D18698), task olive (#666A1A, #9CA159), invite periwinkle (#5D5FA6, #9196DE) and waiting clay (#855D4B, #BC9380), each with its wash. Their hues sit in the gaps the verdicts (discuss blue, claude violet, me ochre, chase magenta), red ink and ledger green leave. A Vitest holds each kind's ink at 4.5:1 on paper, the sheet, the selection, hover and its own wash, and at least 0.06 apart in OKLab from every verdict's ink, red, green and the other kinds, in both themes. A kind the app doesn't know reads as plain meta text."
+    binds:
+      - "A kind is never shown by colour alone: its name is written on its tab."
+      - Each kind's ink holds text contrast in both themes and stands apart from the verdicts' inks, red and green, held by a test.
+    not_chosen:
+      - "A stamp per kind, as the verdicts have: two kinds of stamp on one row read as two calls."
+      - "A coloured dot alone: a hue the reader must learn, with the name gone."
+      - "The kinds in neutral greys: the maintainer asked for a hue each."

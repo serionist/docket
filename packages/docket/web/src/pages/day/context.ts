@@ -1,5 +1,5 @@
 /**
- * What the Ledger's parts call to write: the page owns the writes, so it can guard unsaved text, move the selection,
+ * What a day page's parts call to write: the page owns the writes, so it can guard unsaved text, move the selection,
  * set the notice and refetch, and each part shows a refusal beside itself.
  */
 import { createContext, useContext } from "react";
@@ -15,7 +15,7 @@ export interface How {
   except?: string[];
 }
 
-export interface LedgerActions {
+export interface DayActions {
   /** One write, by user via page; a call moves the selection to the row after the acted ones. */
   write: (body: Body, how?: How) => Promise<Outcome<Wrote>>;
   /** A field saved on change: the row and the panel put in place, the rest refetched only when the save shows a
@@ -31,11 +31,11 @@ export interface LedgerActions {
   today: string;
 }
 
-export const Actions = createContext<LedgerActions | null>(null);
+export const Actions = createContext<DayActions | null>(null);
 
-export function useActions(): LedgerActions {
+export function useActions(): DayActions {
   const found = useContext(Actions);
-  if (!found) throw new Error("the Ledger's parts sit inside its page");
+  if (!found) throw new Error("a day page's parts sit inside its page");
   return found;
 }
 

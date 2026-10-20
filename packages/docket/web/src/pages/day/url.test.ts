@@ -3,9 +3,10 @@ import { parseSearch, stringifySearch } from "@/lib/search";
 import canonical from "@/test/canonical.json";
 import { listKey, ORDER, quiet, withSearch } from "./url";
 
-describe("the Ledger's URL as the page changes it", () => {
-  it("keeps the parameters in the order the server writes them", () => {
+describe("a day page's URL as the page changes it", () => {
+  it("keeps the parameters in the order the server writes them, the Queue's without the Ledger's own", () => {
     expect([...ORDER]).toEqual(canonical.order["/ledger"]);
+    expect(ORDER.filter((key) => canonical.order["/queue"].includes(key))).toEqual(canonical.order["/queue"]);
   });
 
   it("sets and takes out parameters, keeping the server's canonical form", () => {

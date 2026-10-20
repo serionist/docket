@@ -1,17 +1,20 @@
 /**
- * The Ledger's list (DR-0666, DR-0710): its groups under sticky heads with their counts and Select all, and its
- * rows, ruled, never carded. A row reads at a glance: its number and kind, its title, the call it holds as an ink
- * stamp, who, the stream, and how near its due is, late in red ink. The selected row holds the focus and shows its
- * quick buttons, the four calls by their keys in their own inks, done and drop; a row shows them on hover too.
+ * A day page's list (DR-0666, DR-0710): its groups under sticky heads with their counts and Select all, and its
+ * rows, ruled, never carded. A row reads at a glance: its number, its kind as a tab in the kind's hue (DR-0715), its
+ * title, the call it holds as an ink stamp, who, the stream, and how near its due is, late in red ink. The selected
+ * row holds the focus and shows its quick buttons, the four calls by their keys in their own inks, done and drop; a
+ * row shows them on hover too. The Queue's groups by call carry the call's stamp in their head.
  */
 import { CheckIcon, CircleSlashIcon, XIcon } from "lucide-react";
+import { KindTab } from "@/components/kind";
 import { Empty } from "@/components/shell/page";
-import { isVerdict, Stamp, STAMP_KEY } from "@/components/stamp";
+import { isVerdict, MEANING, Stamp, STAMP_KEY } from "@/components/stamp";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Kbd } from "@/components/ui/kbd";
 import { type Search, stringifySearch } from "@/lib/search";
 import { cn } from "@/lib/utils";
-import type { Body, Group, Ledger, Row } from "./api";
+import type { Body, DayList, Group, Row } from "./api";
 import { quiet, withSearch } from "./url";
 
 const TONE: Record<string, string> = {
@@ -22,7 +25,9 @@ const TONE: Record<string, string> = {
 };
 
 export interface ListProps {
-  data: Ledger;
+  /** The page's own path, which a row's link opens its panel on. */
+  path: string;
+  data: DayList;
   search: Search;
   selected: string | undefined;
   open: string | undefined;
@@ -39,9 +44,9 @@ export interface ListProps {
   onNew: () => void;
 }
 
-/** A row's own URL: the Ledger with its panel open, for a link to open in a tab of its own. */
-function rowHref(search: Search, ref: string): string {
-  return `/ledger${stringifySearch(withSearch(quiet(search), { open: ref, at: undefined, drop: undefined, text: undefined }))}`;
+/** A row's own URL: its page with its panel open, for a link to open in a tab of its own. */
+function rowHref(path: string, search: Search, ref: string): string {
+  return `${path}${stringifySearch(withSearch(quiet(search), { open: ref, at: undefined, drop: undefined, text: undefined }))}`;
 }
 
 function Quick({
@@ -130,7 +135,6 @@ function RowLine({
   const selected = row.ref === props.selected;
   const ticked = props.ticked.has(row.ref);
   const opened = row.ref === props.open;
-  const meta = [row.ref, row.kind, row.who].filter(Boolean).join(", ");
   const quickShown = selected && row.quick.length > 0;
   return (
     <li
@@ -157,7 +161,7 @@ function RowLine({
           <span aria-hidden className="size-6 shrink-0 pointer-coarse:size-11" />
         )}
         <a
-          href={rowHref(props.search, row.ref)}
+          href={rowHref(props.path, props.search, row.ref)}
           tabIndex={-1}
           onClick={(event) => {
             if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -168,7 +172,9 @@ function RowLine({
           className="flex min-w-0 flex-1 cursor-default items-center gap-3 self-stretch py-1.5 text-ink outline-none"
         >
           <span className="hidden w-14 shrink-0 font-mono text-xs text-ink-muted @lg:block">{row.ref}</span>
-          <span className="hidden w-16 shrink-0 text-xs text-ink-muted @lg:block">{row.kind}</span>
+          <span className="hidden w-[4.5rem] shrink-0 @lg:flex">
+            <KindTab kind={row.kind} />
+          </span>
           <span className="min-w-0 flex-1">
             <span className="flex min-w-0 items-center gap-2">
               <span className={cn("truncate", row.state !== "open" && !row.woke && "text-ink-muted")} dir="auto">
@@ -183,8 +189,12 @@ function RowLine({
                 <span className="shrink-0 rounded-sm border border-rule px-1 text-xs text-ink-muted">archived</span>
               )}
             </span>
-            <span className="block truncate text-xs text-ink-muted @lg:hidden" dir="auto">
-              {meta}
+            <span className="flex min-w-0 items-center gap-1.5 text-xs text-ink-muted @lg:hidden">
+              <span className="shrink-0 whitespace-nowrap">{row.ref}</span>
+              <KindTab kind={row.kind} className="h-4" />
+              <span className="truncate" dir="auto">
+                {row.who}
+              </span>
             </span>
           </span>
           {/* The calls stand in a column of their own, so they read down the list. */}
@@ -195,7 +205,7 @@ function RowLine({
           <span className="hidden w-20 shrink-0 truncate text-xs text-ink-muted @4xl:block">{row.stream}</span>
           <span
             title={row.due.title}
-            className={cn("w-[4.5rem] shrink-0 text-right text-xs tabular-nums", TONE[row.due.tone] ?? "")}
+            className={cn("w-20 shrink-0 text-right text-xs whitespace-nowrap tabular-nums", TONE[row.due.tone] ?? "")}
           >
             {row.due.text}
           </span>
@@ -240,13 +250,29 @@ function GroupBlock({ group, props, tab }: { group: Group; props: ListProps; tab
         id={id}
         className="sticky top-0 z-10 flex min-h-8 items-center gap-2 border-b border-rule bg-paper px-3 text-xs font-semibold text-ink-muted sm:px-4"
       >
-        <span className={cn(group.tone === "late" && "text-red")}>{group.label}</span>
+        {isVerdict(group.verdict) ? (
+          <>
+            <Stamp verdict={group.verdict} />
+            <span className="truncate font-normal">{MEANING[group.verdict]}</span>
+          </>
+        ) : (
+          <span className={cn(group.tone === "late" && "text-red")}>{group.label}</span>
+        )}
         <span className="font-normal tabular-nums">{group.total}</span>
+        {group.key === "untriaged" && (
+          <span className="ml-auto flex items-center gap-1 font-normal pointer-coarse:hidden">
+            <Kbd className="h-4 min-w-4 shadow-none">1</Kbd> to <Kbd className="h-4 min-w-4 shadow-none">4</Kbd> make
+            the call
+          </span>
+        )}
         {group.selectable && (
           <Button
             variant="ghost"
             size="sm"
-            className="ml-auto h-6 px-1.5 text-xs font-normal text-ink-muted"
+            className={cn(
+              "h-6 px-1.5 text-xs font-normal text-ink-muted",
+              group.key === "untriaged" ? "ml-2 pointer-coarse:ml-auto" : "ml-auto",
+            )}
             onClick={() => props.onTick(callable, true)}
           >
             Select all<span className="sr-only"> in {group.label}</span>
@@ -262,15 +288,23 @@ function GroupBlock({ group, props, tab }: { group: Group; props: ListProps; tab
   );
 }
 
-export function LedgerRows(props: ListProps) {
+export function DayRows(props: ListProps) {
   const { list } = props.data;
   const listed = list.groups.flatMap((g) => g.rows.map((r) => r.ref));
   const tab = props.selected !== undefined && listed.includes(props.selected) ? props.selected : listed[0];
   if (!list.groups.length) {
     const blank = list.empty.startsWith("The ledger is empty");
+    const done = list.empty.startsWith("Nothing is open: the queue is empty");
     return (
-      <Empty title={blank ? "Nothing in the ledger yet" : list.empty}>
-        {blank ? (
+      <Empty title={blank ? "Nothing in the ledger yet" : done ? "Nothing to work through" : list.empty}>
+        {done ? (
+          <div className="grid justify-items-start gap-3">
+            <p>The queue holds the open items. Claude adds what you owe and await as it syncs.</p>
+            <Button variant="default" onClick={props.onNew}>
+              New item
+            </Button>
+          </div>
+        ) : blank ? (
           <div className="grid justify-items-start gap-3">
             <p>Claude adds what you owe and await as it syncs. You can add an item here too.</p>
             <Button variant="default" onClick={props.onNew}>

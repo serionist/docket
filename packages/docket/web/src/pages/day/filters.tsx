@@ -1,6 +1,8 @@
 /**
- * The Ledger's filter bar (DR-0665, DR-0666): the states with their counts, then the words to find and the list
- * view's own filters. The words and who apply with Enter, a choice as it is made; the URL holds each.
+ * A day page's filter bar (DR-0665, DR-0666): the Ledger's states with their counts, or the Queue's counts alone,
+ * then the words to find and the list view's own filters, the Ledger's grouping and archived among them. The words
+ * apply with Enter, who with Enter or a name taken from its list (DR-0714), a choice as it is made; the URL holds
+ * each.
  */
 import { ListFilterIcon, SearchIcon } from "lucide-react";
 import * as React from "react";
@@ -9,9 +11,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import type { Ledger } from "./api";
+import type { DayList, DayPageName } from "./api";
 import { leaveOnEscape } from "./field";
 import type { Param } from "./url";
+import { WhoField } from "./who-field";
 
 export const FIND = "ledger-find";
 const ANY = "any";
@@ -37,12 +40,14 @@ function useDraft(value: string): [string, (next: string) => void] {
 }
 
 export function Filters({
+  page,
   data,
   narrow,
   hrefOf,
   onChange,
 }: {
-  data: Ledger;
+  page: DayPageName;
+  data: DayList;
   /** At phone width the list view's filters fold behind a button, the words to find always shown. */
   narrow: boolean;
   hrefOf: (change: Change) => string;
@@ -50,6 +55,7 @@ export function Filters({
 }) {
   const { filters, list } = data;
   const [unfolded, setUnfolded] = React.useState(false);
+  const ledger = page === "ledger";
   const set = [filters.stream, filters.kind, filters.who, filters.group !== "due", filters.archived].filter(Boolean);
   const rest = !narrow || unfolded;
   const [q, setQ] = useDraft(filters.q);
@@ -63,31 +69,33 @@ export function Filters({
   return (
     <div className="grid shrink-0 gap-2 border-b border-rule px-3 py-2 sm:px-4">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <nav aria-label="States" className="-ml-1 flex flex-wrap gap-0.5">
-          {list.chips.map((chip) => {
-            const change: Change = { state: chip.key === "open" ? undefined : chip.key, k: undefined };
-            return (
-              <a
-                key={chip.key}
-                href={hrefOf(change)}
-                aria-current={chip.on ? "page" : undefined}
-                onClick={(event) => {
-                  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey) return;
-                  event.preventDefault();
-                  onChange(change);
-                }}
-                className={cn(
-                  "tap flex h-7 items-center gap-1.5 rounded-sm px-2 text-sm text-ink-muted hover:bg-hover hover:text-ink",
-                  chip.on && "bg-hover font-semibold text-ink",
-                )}
-              >
-                {chip.label}
-                <span className="text-xs font-normal tabular-nums">{chip.count}</span>
-              </a>
-            );
-          })}
-        </nav>
-        <p className="hidden text-xs text-ink-muted sm:block">{list.counts}</p>
+        {list.chips.length > 0 && (
+          <nav aria-label="States" className="-ml-1 flex flex-wrap gap-0.5">
+            {list.chips.map((chip) => {
+              const change: Change = { state: chip.key === "open" ? undefined : chip.key, k: undefined };
+              return (
+                <a
+                  key={chip.key}
+                  href={hrefOf(change)}
+                  aria-current={chip.on ? "page" : undefined}
+                  onClick={(event) => {
+                    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey) return;
+                    event.preventDefault();
+                    onChange(change);
+                  }}
+                  className={cn(
+                    "tap flex h-7 items-center gap-1.5 rounded-sm px-2 text-sm text-ink-muted hover:bg-hover hover:text-ink",
+                    chip.on && "bg-hover font-semibold text-ink",
+                  )}
+                >
+                  {chip.label}
+                  <span className="text-xs font-normal tabular-nums">{chip.count}</span>
+                </a>
+              );
+            })}
+          </nav>
+        )}
+        <p className={cn("text-xs text-ink-muted", ledger && "hidden sm:block")}>{list.counts}</p>
       </div>
       <div role="search" className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-48 flex-1 basis-56">
@@ -151,17 +159,20 @@ export function Filters({
                 ))}
               </SelectContent>
             </Select>
-            <Input
-              aria-label="Who"
-              placeholder="Who"
-              autoComplete="off"
-              dir="auto"
-              value={who}
-              onChange={(event) => setWho(event.target.value)}
-              onKeyDown={enter(() => onChange({ who: who.trim() || undefined, k: undefined }))}
-              className="w-32"
-            />
-            {(filters.state === "open" || filters.state === "all") && (
+            <div className="w-36">
+              <WhoField
+                aria-label="Who"
+                placeholder="Who"
+                value={who}
+                onChange={setWho}
+                onPick={(name) => {
+                  setWho(name);
+                  onChange({ who: name.trim() || undefined, k: undefined });
+                }}
+                onKeyDown={enter(() => onChange({ who: who.trim() || undefined, k: undefined }))}
+              />
+            </div>
+            {ledger && (filters.state === "open" || filters.state === "all") && (
               <Select
                 value={filters.group}
                 onValueChange={(value) => onChange({ group: value === "due" ? undefined : value })}
@@ -179,13 +190,15 @@ export function Filters({
                 </SelectContent>
               </Select>
             )}
-            <label className="tap flex h-8 cursor-default items-center gap-1.5 rounded-sm pr-1 text-sm">
-              <Checkbox
-                checked={filters.archived}
-                onCheckedChange={(on) => onChange({ archived: on === true ? "1" : undefined })}
-              />
-              archived too
-            </label>
+            {ledger && (
+              <label className="tap flex h-8 cursor-default items-center gap-1.5 rounded-sm pr-1 text-sm">
+                <Checkbox
+                  checked={filters.archived}
+                  onCheckedChange={(on) => onChange({ archived: on === true ? "1" : undefined })}
+                />
+                archived too
+              </label>
+            )}
           </div>
         )}
       </div>

@@ -6,6 +6,7 @@
 import { CheckIcon, CopyIcon, ExternalLinkIcon, FileTextIcon, FolderOpenIcon, XIcon } from "lucide-react";
 import * as React from "react";
 import { DatePicker } from "@/components/date-picker";
+import { KindTab } from "@/components/kind";
 import { Refusal } from "@/components/shell/page";
 import { isVerdict, STAMP_INK, STAMP_PRESSED } from "@/components/stamp";
 import { Button } from "@/components/ui/button";
@@ -573,7 +574,7 @@ export function PanelHead({ item }: { item: ItemPanel }) {
         <span className="font-mono text-xs text-ink-muted">{item.ref}</span>
         <span className="sr-only">{item.title}</span>
       </h2>
-      <span className="text-xs text-ink-muted">{item.kind}</span>
+      <KindTab kind={item.kind} />
       {isVerdict(item.triage) && <StampSmall verdict={item.triage} />}
       {item.archived && <span className="rounded-sm border border-rule px-1 text-xs text-ink-muted">archived</span>}
     </>

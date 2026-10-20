@@ -15,7 +15,7 @@ import subprocess
 import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
@@ -97,9 +97,9 @@ class Facts:
 
 
 def gather(vault: Vault, state: DayState, *, whole: bool = True, alikes: tuple[str, ...] = ()) -> Facts:
-    """A read's facts: the list whole with `q`'s matches, the open item with the meeting it hangs on, the lines of the
-    batch `done` names, the items an add looks like, and a material in the viewer. The version is taken first, so a
-    write during the read is seen by the next poll rather than never."""
+    """A read's facts: the list whole with `q`'s matches, the Queue's the queue view, the open item with the meeting
+    it hangs on, the lines of the batch `done` names, the items an add looks like, and a material in the viewer. The
+    version is taken first, so a write during the read is seen by the next poll rather than never."""
     found = Facts(ZoneInfo(vault.config.owner.time_zone), sorted(vault.config.sources), version(vault.root))
     at = views.now()
     with ledger_tables(vault) as conn:
@@ -108,7 +108,11 @@ def gather(vault: Vault, state: DayState, *, whole: bool = True, alikes: tuple[s
             # The pages show no chase counts, the most of a whole list's time (DR-0668).
             return views.read(conn, ask, found.tz, at, chased=False)
 
-        if whole:
+        if whole and state.page == "queue":
+            # The queue view takes no filter: the Queue narrows its rows itself (DR-0666).
+            found.listing = read(Ask(view="queue"))
+            found.matched = views.matching(conn, state.q) if state.q else None
+        elif whole:
             ask = Ask(view="list", state="all", stream=state.stream, kind=state.kind, who=state.who, k=None)
             found.listing = read(ask)
             found.matched = views.matching(conn, state.q) if state.q else None
@@ -120,6 +124,57 @@ def gather(vault: Vault, state: DayState, *, whole: bool = True, alikes: tuple[s
     if found.shown is not None and state.text is not None:
         found.viewer = view_text(vault, found.shown, state.text)
     return found
+
+
+@dataclass(frozen=True)
+class Person:
+    """A name a who field suggests: how many items name it, and its other names, which a typed word finds it by."""
+
+    name: str
+    uses: int
+    also: tuple[str, ...] = ()
+
+
+# The vault's people as the index holds their entity files: each name and plain alias, never speech recognition's.
+PEOPLE = """SELECT a.entity, a.text, a.kind, a.lang FROM aliases a JOIN entities e ON e.id = a.entity
+WHERE e.type = 'person' AND e.status != 'archived' AND a.kind IN ('name', 'plain') ORDER BY a.entity, a.ordinal"""
+
+
+def people(vault: Vault) -> list[Person]:
+    """Who the who fields suggest (DR-0714): every who the ledger's items name, the most items first, then the most
+    recent; then the vault's people from the index's entity tables that no item names yet, by name. A person an item
+    names takes their entity's other names too. The ledger folded in memory, with no index, has no entities."""
+    tz = ZoneInfo(vault.config.owner.time_zone)
+    with ledger_tables(vault) as conn:
+        found = views.read(conn, Ask(view="list", state="all", k=None), tz, views.now(), chased=False)
+        has = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'entities'").fetchone()
+        rows: list[tuple[str, str, str, str | None]] = conn.execute(PEOPLE).fetchall() if has else []
+    uses: dict[str, int] = {}
+    latest: dict[str, date] = {}
+    for item in found.items:
+        if item.who:
+            uses[item.who] = uses.get(item.who, 0) + 1
+            latest[item.who] = max(latest.get(item.who, item.opened), item.opened)
+    named = sorted(uses, key=lambda who: (-uses[who], -latest[who].toordinal(), who.casefold()))
+    languages = vault.config.owner.languages
+    spelt: dict[str, list[tuple[str, str, str | None]]] = {}
+    for entity, text, kind, lang in rows:
+        spelt.setdefault(entity, []).append((text, kind, lang))
+    folded = {who.casefold(): who for who in named}
+    also: dict[str, list[str]] = {who: [] for who in named}
+    new: list[Person] = []
+    for spellings in spelt.values():
+        names = {lang: text for text, kind, lang in spellings if kind == "name" and lang}
+        first = next((names[lang] for lang in languages if lang in names), None)
+        name = first or (names[min(names)] if names else spellings[0][0])
+        others = list(dict.fromkeys(text for text, _, _ in spellings if text != name))
+        # An entity any of whose names an item already uses joins that who, so a name is suggested once.
+        who = next((folded[t.casefold()] for t in (name, *others) if t.casefold() in folded), None)
+        if who is not None:
+            also[who] += [t for t in (name, *others) if t != who and t not in also[who]]
+        elif name.casefold() not in {p.name.casefold() for p in new}:
+            new.append(Person(name, 0, tuple(others)))
+    return [Person(who, uses[who], tuple(also[who])) for who in named] + sorted(new, key=lambda p: p.name.casefold())
 
 
 def _shown(read: Callable[[Ask], LedgerRead], ref: str) -> LedgerRead | None:

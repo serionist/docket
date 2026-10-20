@@ -380,6 +380,17 @@
           "total": {
             "title": "Total",
             "type": "integer"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
           }
         },
         "required": [
@@ -977,6 +988,48 @@
         "title": "Panel",
         "type": "object"
       },
+      "People": {
+        "properties": {
+          "people": {
+            "items": {
+              "$ref": "#/components/schemas/Person"
+            },
+            "title": "People",
+            "type": "array"
+          }
+        },
+        "required": [
+          "people"
+        ],
+        "title": "People",
+        "type": "object"
+      },
+      "Person": {
+        "properties": {
+          "also": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Also",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "uses": {
+            "title": "Uses",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "uses",
+          "also"
+        ],
+        "title": "Person",
+        "type": "object"
+      },
       "Point": {
         "properties": {
           "answer": {
@@ -1027,6 +1080,78 @@
           "proposed"
         ],
         "title": "Point",
+        "type": "object"
+      },
+      "Queue": {
+        "description": "The Queue's list (DR-0666), in the Ledger's shape: its groups by call, no state chips, and the Ledger's own\nfilters, state, group and archived, at their defaults.",
+        "properties": {
+          "canonical": {
+            "title": "Canonical",
+            "type": "string"
+          },
+          "filters": {
+            "$ref": "#/components/schemas/Filters"
+          },
+          "kinds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Kinds",
+            "type": "array"
+          },
+          "list": {
+            "$ref": "#/components/schemas/LedgerList"
+          },
+          "notice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Notice"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "snooze": {
+            "items": {
+              "$ref": "#/components/schemas/Snooze"
+            },
+            "title": "Snooze",
+            "type": "array"
+          },
+          "today": {
+            "title": "Today",
+            "type": "string"
+          },
+          "tomorrow": {
+            "title": "Tomorrow",
+            "type": "string"
+          },
+          "verdicts": {
+            "items": {
+              "$ref": "#/components/schemas/Button"
+            },
+            "title": "Verdicts",
+            "type": "array"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "canonical",
+          "version",
+          "today",
+          "list",
+          "filters",
+          "kinds",
+          "verdicts",
+          "snooze",
+          "tomorrow",
+          "notice"
+        ],
+        "title": "Queue",
         "type": "object"
       },
       "Refused": {
@@ -1650,6 +1775,34 @@
         "summary": "Ledger Text"
       }
     },
+    "/api/web/ledger/who": {
+      "get": {
+        "operationId": "ledger_who_api_web_ledger_who_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/People"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "Ledger Who"
+      }
+    },
     "/api/web/ledger/write": {
       "post": {
         "operationId": "ledger_write_api_web_ledger_write_post",
@@ -1696,6 +1849,62 @@
           }
         },
         "summary": "Ledger Write"
+      }
+    },
+    "/api/web/queue": {
+      "get": {
+        "operationId": "queue_api_web_queue_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Queue"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "Queue"
+      }
+    },
+    "/api/web/queue/panel": {
+      "get": {
+        "operationId": "queue_panel_api_web_queue_panel_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Panel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "Queue Panel"
       }
     },
     "/api/web/shell": {

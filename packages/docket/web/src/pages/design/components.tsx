@@ -3,6 +3,7 @@ import { CalendarClockIcon, CopyIcon, EllipsisIcon, ListFilterIcon } from "lucid
 import * as React from "react";
 import { Empty, NoticeBar, Refusal } from "@/components/shell/page";
 import { Stamp } from "@/components/stamp";
+import { WhoBox } from "@/components/who-box";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -70,10 +71,19 @@ function Specimen({ name, children }: { name: string; children: React.ReactNode 
 
 const SNOOZE = ["Tomorrow, Wed 21 Oct", "Next working day, Wed 21 Oct", "Next week, Mon 26 Oct", "In a month, 20 Nov"];
 
+// The names a who field suggests, as the server orders them: the most used first, a vault's person with none.
+const PEOPLE = [
+  { name: "Ada Example", uses: 12, also: ["Ada E."] },
+  { name: "Ben Sample", uses: 7, also: [] },
+  { name: "Cleo Example", uses: 3, also: [] },
+  { name: "Dóra Minta", uses: 0, also: ["Dora"] },
+];
+
 export function DesignComponents() {
   const [group, setGroup] = React.useState("due");
   const [keys, setKeys] = React.useState(true);
   const [ticked, setTicked] = React.useState<boolean | "indeterminate">("indeterminate");
+  const [who, setWho] = React.useState("Ada Example");
   return (
     <div className="min-h-0 flex-1 overflow-y-auto" role="region" aria-label="Components" tabIndex={-1}>
       <div className="grid max-w-5xl gap-10 px-4 py-6 sm:px-6 lg:grid-cols-2">
@@ -109,7 +119,7 @@ export function DesignComponents() {
           <div className="grid gap-3 border-t border-rule pt-3 sm:grid-cols-2">
             <div className="grid gap-1.5">
               <Label htmlFor="who">Who</Label>
-              <Input id="who" defaultValue="Ada Example" />
+              <WhoBox id="who" value={who} onChange={setWho} onPick={setWho} people={PEOPLE} />
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="stream">Stream</Label>

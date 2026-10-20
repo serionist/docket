@@ -1,8 +1,8 @@
 /**
  * A field of the open item, saved on change (DR-0710): a text field when it is left or Enter is pressed in it, a
- * select or a day as it changes. It is unsaved from its first change until its save answers, and a refused one stays unsaved
- * with the writer's words beside it, its text as typed. A newer value read from the server replaces only text the
- * owner hasn't changed.
+ * select or a day as it changes, and who as a text field that also saves a name taken from its list (DR-0714). It is
+ * unsaved from its first change until its save answers, and a refused one stays unsaved with the writer's words
+ * beside it, its text as typed. A newer value read from the server replaces only text the owner hasn't changed.
  */
 import * as React from "react";
 import { DatePicker } from "@/components/date-picker";
@@ -13,13 +13,14 @@ import { setUnsaved, startSave, useUnsaved } from "@/lib/drafts";
 import { cn } from "@/lib/utils";
 import type { Body, ItemPanel } from "./api";
 import { refusal, useActions } from "./context";
+import { WhoField } from "./who-field";
 
 export type FieldName = "title" | "who" | "due" | "stream" | "kind" | "description" | "notes" | "outcome";
-type Shape = "line" | "date" | "area" | "select" | "title";
+type Shape = "line" | "person" | "date" | "area" | "select" | "title";
 
 const SHAPES: Record<FieldName, Shape> = {
   title: "title",
-  who: "line",
+  who: "person",
   due: "date",
   stream: "line",
   kind: "select",
@@ -80,14 +81,19 @@ export function Field({
   React.useLayoutEffect(() => {
     typed.current = draft;
   });
+  // The value a save in flight sends, so leaving the field just after a name was taken doesn't send it twice.
+  const sending = React.useRef<string | null>(null);
 
   const commit = async (next: string) => {
     if (next === value) {
       setProblem("");
       return;
     }
+    if (next === sending.current) return;
+    sending.current = next;
     const done = startSave();
     const outcome = await save(bodyOf(item, name, next));
+    sending.current = null;
     setProblem(refusal(outcome));
     if (outcome.ok && typed.current === next) {
       // What the writer kept, which may differ from what was typed, such as a title's spaces. The drafts hear of it
@@ -166,6 +172,27 @@ export function Field({
             "min-h-0 border-transparent bg-transparent px-1 py-0.5 text-lg font-semibold text-pretty hover:border-control focus-visible:bg-sheet pointer-coarse:min-h-11",
           shape === "area" && "min-h-9 text-base pointer-coarse:min-h-11",
         )}
+      />
+    );
+  } else if (shape === "person") {
+    control = (
+      <WhoField
+        {...common}
+        value={draft}
+        onChange={setDraft}
+        onPick={(next) => {
+          setDraft(next);
+          void commit(next);
+        }}
+        onBlur={() => void commit(draft)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            event.currentTarget.blur();
+            return;
+          }
+          leaveOnEscape(event);
+        }}
       />
     );
   } else {

@@ -74,6 +74,16 @@
   --color-me-wash: var(--me-wash);
   --color-chase: var(--chase);
   --color-chase-wash: var(--chase-wash);
+  --color-reply: var(--reply);
+  --color-reply-wash: var(--reply-wash);
+  --color-decision: var(--decision);
+  --color-decision-wash: var(--decision-wash);
+  --color-task: var(--task);
+  --color-task-wash: var(--task-wash);
+  --color-invite: var(--invite);
+  --color-invite-wash: var(--invite-wash);
+  --color-waiting: var(--waiting);
+  --color-waiting-wash: var(--waiting-wash);
   --color-scrim: var(--scrim);
   --shadow-float: var(--float-shadow);
 

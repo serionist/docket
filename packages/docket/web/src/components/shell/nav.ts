@@ -1,12 +1,13 @@
 /**
  * The sidebar's pages in the maintainer's order (DR-0708): the day pages, then the rest, Settings at the foot. It
  * lists built pages only, each joining in the PR that builds or moves it; a page still on the server's own templates
- * is a plain link that loads it. Today, Queue and Meetings join with their pages, Queue with the untriaged count.
+ * is a plain link that loads it. Today and Meetings join with their pages; Queue carries the untriaged count.
  */
 import {
   BookOpenTextIcon,
   InboxIcon,
   ListChecksIcon,
+  ListTodoIcon,
   type LucideIcon,
   NotebookTextIcon,
   RefreshCwIcon,
@@ -14,7 +15,7 @@ import {
   Settings2Icon,
 } from "lucide-react";
 
-export type Mark = "staging" | "sync";
+export type Mark = "queue" | "staging" | "sync";
 
 export interface NavPage {
   key: string;
@@ -27,6 +28,7 @@ export interface NavPage {
 }
 
 export const DAY: NavPage[] = [
+  { key: "queue", title: "Queue", href: "/queue", icon: ListTodoIcon, inApp: true, mark: "queue" },
   { key: "ledger", title: "Ledger", href: "/ledger", icon: BookOpenTextIcon, inApp: true },
 ];
 

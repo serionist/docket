@@ -730,7 +730,8 @@ change lands on whoever uses that vendor, while the core still checks every rid 
 | Recording | the summary next to the transcript, click a line to read and play it; the two transcripts side by side | 2 |
 | Briefs | per person, project and topic, each beside the raw its lines cite; the decision log per stream later | 2 |
 | Ledger | items by due or by stream, kind, who or meeting, the open one beside them with its source and materials one click away; every button one batch, with Undo | 3 |
-| Today, Queue, Meetings | the day: meetings with briefs and points, triage | 3 |
+| Queue | the open items to work through: the untriaged first, then by call, each by due; the Ledger's keys, act bar and panel | 3 |
+| Today, Meetings | the day: meetings with briefs and points | 3 |
 | Outbox | drafts waiting for a click | 3 |
 
 Every page has the actions that belong on it. An action runs in the service, runs Claude headless, or hands the job
@@ -752,7 +753,8 @@ How it is built (DR-0170 to DR-0175, DR-0546), and where it is going (#252, DR-0
   `uv run devkit ui <page>` (DR-0712).
 - The Ledger is the first page in it: `/ledger` reads `/api/web/ledger` with its URL's query string and writes back
   the canonical URL the read answers; one key layer runs what each button runs; a write answers its notice, and the
-  page refetches in place (DR-0709 to DR-0711).
+  page refetches in place (DR-0709 to DR-0711). The Queue is the same day page over `/api/web/queue`; each kind of
+  item is a tab in a hue of its own (DR-0715), and who suggests the names the ledger uses (DR-0714).
 - A page not moved yet is its Jinja page, as below.
 - Pages rendered by the service with Jinja2, parts of them swapped by htmx; every state is a URL that renders without
   JavaScript, and the navigation shows every page above with its phase.
@@ -799,7 +801,7 @@ How it is built (DR-0170 to DR-0175, DR-0546), and where it is going (#252, DR-0
   what it contradicts, then what is decided, superseded ones folded. Its buttons post to `/briefs/decision`,
   which writes a decision's status as `docket decision set` does, on the writer thread and checked against the rev
   the page showed (DR-0603, DR-0566).
-- The day pages, the Ledger first, are the React app's. They read the ledger beside the writer through the `ledger`
+- The day pages, the Ledger and the Queue first, are the React app's. They read the ledger beside the writer through the `ledger`
   tool's reads and two of their own, `matching` and `batch_lines`, and write only through the ledger's writer: each
   button one batch, by user, via page, answered with a notice with Undo, a bulk through a dry run, a refusal shown
   with the writer's words and the text as typed (DR-0710). The old tasks app's keys act on the ticked rows or the one
@@ -847,7 +849,7 @@ Phase 0's plugin, by piece:
 | `cuts` | the owner's words for a held recording's left-out stretches placed as time ranges, in a proposals file, shown to the owner, and the release run on their yes; only `docket hold list` and `show` pre-approved (DR-0605) |
 | the capture hook | PostToolUse for `mcp__.*` runs `docket hook post-tool-use`: binds a run, posts the captures an open run of this session wants, one line to Claude each (DR-0242) |
 | `sync` | each live source in an agent of its own through `run_open`, the source's `SKILL.md` and its `sync.md`: it classifies a mixed source's plain records, promotes its own, writes recording notes and returns one block, every locator read; then one `ledger_batch` by `sync`, dry run first, in a fixed order, and the list in chat; only reads pre-approved (DR-0685 to DR-0689) |
-| `tasks` | `docket open` on the Ledger page until the Queue page comes, the owner's triage there or in chat, then on "go" the queue in chat: the `me` items in one line, then discuss, claude and chase, each item read again, its sources read as far as the facts need, and its outcome one `ledger_batch` before the next; messages only drafts; `docket ledger queue`, `show`, `suggest` and `batch` without the service; only reads pre-approved (DR-0685, DR-0691) |
+| `tasks` | `docket open` on the Queue page, the owner's triage there or in chat, then on "go" the queue in chat: the `me` items in one line, then discuss, claude and chase, each item read again, its sources read as far as the facts need, and its outcome one `ledger_batch` before the next; messages only drafts; `docket ledger queue`, `show`, `suggest` and `batch` without the service; only reads pre-approved (DR-0685, DR-0691) |
 
 - The plugin holds no scripts: its hook and token helper run the `docket` command, which must be on PATH (DR-0162).
 - A plugin can't ship a `CLAUDE.md`, so the rules live in the MCP server's instructions and the recall skill.

@@ -1,5 +1,6 @@
 """The day pages' URL (DR-0664 to DR-0666, DR-0704): one state for the Ledger, the Queue, Meetings and Today, the
-shared parameters first, then each page's own, in one canonical form with the defaults left out.
+shared parameters first, then each page's own, in one canonical form with the defaults left out. The Queue takes the
+shared ones; `state`, `group` and `archived` are the Ledger's alone, and its canonical URL leaves them out.
 
 | Parameter | What | Default |
 |---|---|---|
@@ -37,7 +38,7 @@ from docket.ledger.meetings import meeting_text
 from docket.ledger.store import MEETING_NUMBER, SLUG
 from docket.web import urls
 
-PATHS = {"ledger": "/ledger"}
+PATHS = {"ledger": "/ledger", "queue": "/queue"}
 DEFAULT_K = 100
 MORE = 100
 MAX_K = 100_000
@@ -123,7 +124,9 @@ class DayState:
         # isdigit alone takes a superscript two, which int() refuses.
         if given and (not (given.isascii() and given.isdigit()) or not 1 <= int(given) <= MAX_K):
             raise DayStateError(f"k is a whole number from 1 to {MAX_K}, not {given!r}")
-        state, group = first("state") or "open", first("group") or "due"
+        # The Ledger's own: another day page ignores them, as any parameter it doesn't take.
+        ledger = page == "ledger"
+        state, group = (first("state") or "open", first("group") or "due") if ledger else ("open", "due")
         if state not in STATES:
             raise DayStateError(f"state is one of {', '.join(STATES)}, not {state!r}")
         if group not in GROUPS:
@@ -151,7 +154,7 @@ class DayState:
             k=int(given) if given else DEFAULT_K,
             state=state,
             group=group,
-            archived=flag("archived"),
+            archived=flag("archived") if ledger else False,
             drop=flag("drop"),
             text=text,
             done=done,
@@ -161,10 +164,14 @@ class DayState:
 
     def canonical(self) -> DayState:
         """`at` only without an open panel; `drop` and `text` only with an open item; `said` and `skipped` only with
-        `done`."""
+        `done`; the Ledger's own parameters only on the Ledger."""
         item = self.open is not None and not is_meeting(self.open)
+        ledger = self.page == "ledger"
         return replace(
             self,
+            state=self.state if ledger else "open",
+            group=self.group if ledger else "due",
+            archived=self.archived and ledger,
             at=None if self.open is not None else self.at,
             drop=self.drop and item,
             text=self.text if item else None,

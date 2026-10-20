@@ -37,6 +37,19 @@
   --chase: light-dark(#a3286e, #f08dc4);
   --chase-wash: light-dark(#f7e7f0, #38202f);
 
+  /* The kinds of item, each a tab in a hue of its own (DR-0715): clear of the verdicts' inks, red ink and ledger green,
+   * and quieter than a stamp, with the kind's name always written on it. */
+  --reply: light-dark(#007089, #49a7c0);
+  --reply-wash: light-dark(#e1f4fa, #103039);
+  --decision: light-dark(#994f63, #d18698);
+  --decision-wash: light-dark(#feeaee, #3c2329);
+  --task: light-dark(#666a1a, #9ca159);
+  --task-wash: light-dark(#f0f2e1, #2c2d15);
+  --invite: light-dark(#5d5fa6, #9196de);
+  --invite-wash: light-dark(#edefff, #27293f);
+  --waiting: light-dark(#855d4b, #bc9380);
+  --waiting-wash: light-dark(#feece4, #3c251a);
+
   /* What lies under a dialog or a sheet, and the one shadow, for what floats: menus, popovers, dialogs. */
   --scrim: light-dark(rgb(27 35 48 / 0.28), rgb(0 0 0 / 0.56));
   --shade: light-dark(rgb(27 35 48 / 0.14), rgb(0 0 0 / 0.5));
