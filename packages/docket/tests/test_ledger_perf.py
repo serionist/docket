@@ -30,7 +30,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
-from docket_testkit import Best, best_of, empty_vault, git, make_config, make_record, traced
+from docket_testkit import Best, best_of, copied, empty_vault, git, make_config, make_record, traced
 from ledger_kit import CHANGES, ITEMS, MEETINGS, SERIES, build
 from starlette.testclient import TestClient
 
@@ -51,6 +51,7 @@ from docket.vault import forgotten
 from docket.vault.anchors import DocRef
 from docket.vault.config import SourceConfig
 from docket.vault.forgotten import Forget, Forgotten
+from docket.vault.vault import Vault
 
 FOLD_SECONDS = 1.5
 MATCH_SECONDS = 2.5
@@ -388,16 +389,43 @@ def test_the_whole_ledger_shows_with_its_stamp_as_json_in_under_two_seconds(tmp_
         assert run.seconds < SHOW_ALL_SECONDS, f"show --all took {run.seconds:.2f} s, over {SHOW_ALL_SECONDS} s"
 
 
+# The sync's vault: the ledger, one live chat source, 200 of its records from this day on, the index built.
+SYNC_VAULT = "sync-perf-ledger"
+SYNC_RECORDS = datetime(2026, 5, 25, 7, tzinfo=UTC)
+
+
+def build_sync_vault(root: Path) -> Path:
+    config = make_config()
+    config.sources = {"chat": SourceConfig(tools=["read_chat"])}
+    vault = Vault.init(root / "vault", config, "test-box")
+    build(vault.root)
+    vault.write_run("chat", [
+        make_record(rid=f"chat:C0PERF/{1791000000 + n}.000100", source="chat", container="chat:C0PERF",
+                    thread=f"chat:C0PERF/{1791000000 + n - n % 10}.000100",
+                    ts=SYNC_RECORDS + timedelta(minutes=n * 20))
+        for n in range(200)
+    ])  # fmt: skip
+    index_build.rebuild(vault)
+    return vault.root
+
+
+@pytest.fixture
+def sync_vault(tmp_path: Path) -> Vault:
+    """A copy of the sync's vault, a shared template: a sync's reads bring the index's ledger tables up to date."""
+    return Vault.open(copied(tmp_path, build_sync_vault, SYNC_VAULT))
+
+
+def test_the_sync_s_timed_vault_is_built_by_the_parallel_run(sync_vault: Vault) -> None:
+    """Untimed, so the parallel run builds the template the sync's timed tests copy, and they only time (DR-0492)."""
+    assert (sync_vault.root / "raw" / "chat").is_dir() and index_build.db_path(sync_vault).is_file()
+
+
 @pytest.mark.perf
-def test_a_sync_folder_from_that_ledger_is_written_in_under_a_second(tmp_path: Path) -> None:
+def test_a_sync_folder_from_that_ledger_is_written_in_under_a_second(sync_vault: Vault) -> None:
     """docket sync start on a vault holding it, its index built: the cursor files, the snapshot from the window's start
     to the prep week, every open item a line of context.md, the recordings no note covers, and a live source's
     prompt. Run once before the clock starts."""
-    config = make_config()
-    config.sources = {"chat": SourceConfig(tools=["read_chat"])}
-    vault = empty_vault(tmp_path, config)
-    build(vault.root)
-    index_build.rebuild(vault)
+    vault = sync_vault
     at = datetime(2026, 6, 1, 8, tzinfo=UTC)
     sync_start.start(vault, [], at)
     run = best_of(3, lambda: sync_start.start(vault, [], at))
@@ -434,24 +462,14 @@ def perf_block(start: datetime) -> list[str]:
 
 
 @pytest.mark.perf
-def test_a_sync_reconcile_over_that_ledger_drafts_200_block_lines_in_under_three_seconds(tmp_path: Path) -> None:
+def test_a_sync_reconcile_over_that_ledger_drafts_200_block_lines_in_under_three_seconds(sync_vault: Vault) -> None:
     """docket sync reconcile on a vault holding it, its index built, with a block of 200 lines over 200 records in raw:
     every locator resolved through the index, the ledger read with the open items' trails and threads, each ask matched
     against the 5,000 open items, the draft written. Run once before the clock starts (DR-0723)."""
-    config = make_config()
-    config.sources = {"chat": SourceConfig(tools=["read_chat"])}
-    vault = empty_vault(tmp_path, config)
-    build(vault.root)
-    start = datetime(2026, 5, 25, 7, tzinfo=UTC)
-    vault.write_run("chat", [
-        make_record(rid=f"chat:C0PERF/{1791000000 + n}.000100", source="chat", container="chat:C0PERF",
-                    thread=f"chat:C0PERF/{1791000000 + n - n % 10}.000100", ts=start + timedelta(minutes=n * 20))
-        for n in range(200)
-    ])  # fmt: skip
-    index_build.rebuild(vault)
+    vault = sync_vault
     at = datetime(2026, 6, 1, 8, tzinfo=UTC)
     started = sync_start.start(vault, [], at)
-    block = "\n".join(perf_block(start)) + "\n"
+    block = "\n".join(perf_block(SYNC_RECORDS)) + "\n"
     (started.folder / "blocks" / "chat.txt").write_text(block, encoding="utf-8")
     sync_reconcile.reconcile(vault, started.info.sync, at)
     run = best_of(3, lambda: sync_reconcile.reconcile(vault, started.info.sync, at))
