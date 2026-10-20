@@ -1,9 +1,10 @@
 /**
  * A who field with its names (DR-0714): shadcn's combobox, a Popover with a Command list, under a text field that
- * stays a text field. Typing narrows the names and opens the list, the first name ready; the arrows move through it,
- * Enter takes the name marked, and the text as typed is always the list's last choice, so a new name is never
- * refused. Esc closes the list alone, its default taken, so neither the field's Esc nor the page's acts on it. With
- * the list closed the field's own keys are its: Enter saves or submits as it did, Esc leaves it.
+ * stays a text field. Typing narrows the names and opens the list, the first name ready, the name typed first when
+ * there is one; the arrows move through it, Enter takes the name marked, and the text as typed is always the list's
+ * last choice, so a new name is never refused. With no text nothing is marked, so Enter is the field's own and
+ * clears it as it did. Esc closes the list alone, its default taken, so neither the field's Esc nor the page's acts
+ * on it. With the list closed the field's own keys are its: Enter saves or submits as it did, Esc leaves it.
  */
 import { ChevronsUpDownIcon } from "lucide-react";
 import * as React from "react";
@@ -14,6 +15,10 @@ import { cn } from "@/lib/utils";
 import { type Named, named, suggest } from "@/lib/who";
 
 const TYPED = "typed";
+// The mark when none is wanted: a value no choice has, which cmdk keeps rather than marking its first.
+const NONE = "none";
+// A name's choice goes by the name, so a refetch that reorders the names keeps the mark on the same one.
+const choiceOf = (name: string) => `name:${name}`;
 // Keys the list takes while it is open; Home and End stay the field's, to move in the text.
 const LIST_KEYS = new Set(["ArrowDown", "ArrowUp", "Enter"]);
 
@@ -57,7 +62,8 @@ export function WhoBox({
   const fallback = React.useId();
   const id = given ?? fallback;
   const [open, setOpenState] = React.useState(false);
-  // The choice the arrows or the pointer marked since the text last changed; until then the first is marked.
+  // The choice the arrows or the pointer marked since the text last changed; until then the first is marked, or
+  // none while there is no text.
   const [moved, setMoved] = React.useState<string | null>(null);
   // The list once shown, which cmdk names, so the field can say it controls it.
   const [list, setList] = React.useState<HTMLDivElement | null>(null);
@@ -75,7 +81,7 @@ export function WhoBox({
   const asTyped = typed !== "" && !named(shown, typed);
   const choices = shown.length + (asTyped ? 1 : 0);
   const showing = open && (choices > 0 || loading);
-  const first = shown.length ? "name-0" : asTyped ? TYPED : "";
+  const first = typed === "" ? NONE : shown[0] ? choiceOf(shown[0].name) : asTyped ? TYPED : NONE;
   const active = moved ?? first;
 
   const setOpen = (next: boolean) => {
@@ -157,7 +163,9 @@ export function WhoBox({
               onClick={() => setOpen(true)}
               onBlur={onBlur}
               onKeyDown={(event) => {
-                if (showing && LIST_KEYS.has(event.key)) return;
+                // Enter with nothing marked is the field's, as with the list closed: it clears or saves the text.
+                const unmarked = event.key === "Enter" && active === NONE;
+                if (showing && LIST_KEYS.has(event.key) && !unmarked) return;
                 if (showing && (event.key === "Home" || event.key === "End")) {
                   event.stopPropagation();
                   return;
@@ -171,7 +179,7 @@ export function WhoBox({
                 // The list is closed, or the key isn't its: the field's own, and never cmdk's, which takes Enter's
                 // default away even with no list, and so a form's submit.
                 event.stopPropagation();
-                if (event.key === "Tab") setOpen(false);
+                if (event.key === "Tab" || unmarked) setOpen(false);
                 onKeyDown?.(event);
               }}
               {...aria}
@@ -209,8 +217,8 @@ export function WhoBox({
             onMouseDown={(event) => event.preventDefault()}
           >
             {loading && !shown.length && <p className="px-2 py-1.5 text-sm text-ink-muted">Reading the names.</p>}
-            {shown.map((person, at) => (
-              <CommandItem key={person.name} value={`name-${at}`} onSelect={() => pick(person.name)}>
+            {shown.map((person) => (
+              <CommandItem key={person.name} value={choiceOf(person.name)} onSelect={() => pick(person.name)}>
                 <span className="min-w-0 flex-1 truncate" dir="auto">
                   {person.name}
                   {person.via && <span className="ml-1.5 text-xs text-ink-muted">{person.via}</span>}

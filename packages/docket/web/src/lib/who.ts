@@ -1,8 +1,9 @@
 /**
  * What a who field suggests for the text typed in it (DR-0714): the names in the order the server gives them, the
- * most used first, narrowed to those the text finds. A name whose start, or a word's start, is the text comes first,
- * then one an other name or alias finds so, then any that holds the text; each tier keeps the server's order. Case and
- * accents aside, so "dora" finds Dóra.
+ * most used first, narrowed to those the text finds. The name the text is comes first, so Enter takes the name typed
+ * and never a longer one; then a name whose start, or a word's start, is the text, then one an other name or alias
+ * finds so, then any that holds the text; each tier keeps the server's order. Case and accents aside, so "dora" finds
+ * Dóra.
  */
 
 export interface Named {
@@ -36,9 +37,9 @@ export function suggest(people: readonly Named[], typed: string, max = 50): Sugg
   if (!text) return people.slice(0, max).map(({ name, uses }) => ({ name, uses }));
   const found: { rank: number; at: number; suggestion: Suggestion }[] = [];
   people.forEach((person, at) => {
-    const own = tierOf(person.name, text);
+    const own = folded(person.name) === text ? -1 : tierOf(person.name, text);
     if (own !== undefined) {
-      found.push({ rank: own === 0 ? 0 : 2, at, suggestion: { name: person.name, uses: person.uses } });
+      found.push({ rank: own === 1 ? 2 : own, at, suggestion: { name: person.name, uses: person.uses } });
       return;
     }
     for (const other of person.also) {

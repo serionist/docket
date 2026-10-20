@@ -29,6 +29,7 @@ import { DayRows } from "./list";
 import { blankDraft, type NewDraft, NewItem } from "./new-item";
 import { type Ask, ItemPanelBody, PanelHead, type ViewerState } from "./panel";
 import { listKey, type Param, quiet, withSearch } from "./url";
+import { WHO_KEY } from "./who-field";
 
 const CALLS = ["triage", "snooze", "done", "drop", "reopen"];
 /** What every day page's reads are cached under, so a write or the poll refetches them all at once. */
@@ -296,6 +297,9 @@ export function DayPage({ page, title }: { page: DayPageName; title: string }) {
       old?.panel && old.panel.id === saved.panel.id ? { ...old, panel: saved.panel } : old,
     );
     if (missed) refetch();
+    // A who saved may be a name no item held before, which the next who list then offers (DR-0714); a write's
+    // refetch covers the names already, and a save refetches only what it missed.
+    else if (body.fields && "who" in body.fields) void client.invalidateQueries({ queryKey: WHO_KEY });
     return { ok: true, answer: saved };
   };
 

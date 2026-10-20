@@ -139,6 +139,11 @@ interface Sent {
 
 let sent: Sent[] = [];
 let answers: Record<string, () => Response> = {};
+// The names the who fields suggest, as /api/web/ledger/who answers them now.
+let names = [
+  { name: "Ben Sample", uses: 7, also: [] as string[] },
+  { name: "Ada Example", uses: 5, also: [] as string[] },
+];
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -177,6 +182,7 @@ async function serve(request: Request): Promise<Response> {
     return json({ canonical: `/ledger${url.search}`, panel: found ? item(found) : null, missing: "" });
   }
   if (url.pathname === "/api/web/ledger/changed") return json({ changed: false, version: "v1" });
+  if (url.pathname === "/api/web/ledger/who") return json({ people: names });
   if (url.pathname === "/api/web/ledger/write") return wrote("01BATCH", (body?.at as string | null) ?? null);
   return json({ error: "not here" }, 404);
 }
@@ -235,6 +241,10 @@ beforeAll(() => installKeys());
 beforeEach(() => {
   sent = [];
   answers = {};
+  names = [
+    { name: "Ben Sample", uses: 7, also: [] },
+    { name: "Ada Example", uses: 5, also: [] },
+  ];
 });
 
 afterEach(() => {
@@ -449,5 +459,62 @@ describe("the keys dialog", () => {
     fireEvent.keyDown(dialog, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(document.activeElement?.getAttribute("data-row")).toBe("A-0001"));
+  });
+});
+
+describe("the who fields", () => {
+  const options = () => screen.queryAllByRole("option").map((o) => o.textContent);
+
+  it("clears the who filter with the text deleted and Enter, never taking the top name", async () => {
+    answers["GET /api/web/ledger"] = () => json({ ...LEDGER, filters: { ...LEDGER.filters, who: "Ada" } });
+    const router = await open("/ledger?who=Ada");
+    const who = within(screen.getByRole("search")).getByRole("combobox", { name: "Who" }) as HTMLInputElement;
+    expect(who.value).toBe("Ada");
+    fireEvent.change(who, { target: { value: "" } });
+    await waitFor(() => expect(options()).toEqual(["Ben Sample7 items", "Ada Example5 items"]));
+    fireEvent.keyDown(who, { key: "Enter" });
+    await waitFor(() => expect(router.state.location.search).toEqual({}));
+  });
+
+  it("sends the cleared who of the open item as it is, Enter taking no name", async () => {
+    answers["POST /api/web/ledger/save"] = () => json({ error: "who can't be cleared", alikes: [] }, 400);
+    await open("/ledger?open=A-0001");
+    const panel = await screen.findByRole("complementary", { name: "A-0001, Send Ada the dates" });
+    const who = within(panel).getByRole("combobox", { name: "Who" });
+    act(() => who.focus());
+    fireEvent.change(who, { target: { value: "" } });
+    await waitFor(() => expect(options()).toEqual(["Ben Sample7 items", "Ada Example5 items"]));
+    fireEvent.keyDown(who, { key: "Enter" });
+    expect((await within(panel).findByRole("alert")).textContent).toBe("who can't be cleared");
+    const saves = sent.filter((s) => s.path === "/api/web/ledger/save");
+    expect(saves.map((s) => s.body?.fields)).toEqual([{ who: "" }]);
+  });
+
+  it("offers a name saved on one item the next time a who list opens", async () => {
+    const source = ROWS[0] as Row;
+    answers["POST /api/web/ledger/save"] = () =>
+      json({
+        row: { ...source, who: "Dora New" },
+        panel: { ...item(source), who: "Dora New" },
+        before: "v1",
+        version: "v2",
+      });
+    await open("/ledger?open=A-0001");
+    const panel = await screen.findByRole("complementary", { name: "A-0001, Send Ada the dates" });
+    const who = within(panel).getByRole("combobox", { name: "Who" });
+    fireEvent.change(who, { target: { value: "Dora New" } });
+    await waitFor(() => expect(options()).toEqual(["Use “Dora New”as typed"]));
+    // The server names her once the save lands.
+    names = [...names, { name: "Dora New", uses: 1, also: [] }];
+    fireEvent.keyDown(who, { key: "Enter" });
+    await waitFor(() => expect(sent.filter((s) => s.path === "/api/web/ledger/save")).toHaveLength(1));
+    const reads = () => sent.filter((s) => s.path === "/api/web/ledger/who").length;
+    await waitFor(() => expect(who.closest("[data-field]")?.hasAttribute("data-unsaved")).toBe(false));
+    expect(reads()).toBe(1);
+    // The filter's who list, opened next, reads the names again and offers her.
+    const filter = within(screen.getByRole("search")).getByRole("combobox", { name: "Who" });
+    fireEvent.change(filter, { target: { value: "Do" } });
+    await waitFor(() => expect(options()).toContain("Dora New1 item"));
+    expect(reads()).toBe(2);
   });
 });
