@@ -1,14 +1,17 @@
 decisions:
   - id: DR-0750
-    title: The suite tests behaviour, not every line, for a cut of 80% or more in its time, and keeps showing that Docket works on all three systems
+    title: The suite tests behaviour, not every line, cuts a PR's test time by about 62%, and keeps every OS-sensitive test on Windows and macOS on every PR
     status: decided
     at: "2026-10-20"
     by: Soma Osvay
     cost: medium
     sources: ["#266", "20 Oct, in chat"]
-    description: "The owner's direction for the test suite, 20 Oct, in his words: \"the goal is to also reduce other tests by a lot\"; \"im happy to reduce the floor as well if we can reduce the test times by 80% or more. i think it doesnt make sense to test every line\"; and, after the first draft, \"i still want to make sure it works across OSes\". So the suite tests behaviour at the edges (the CLI, the MCP tools, the pages, the ledger's data rules, forget, redaction, the never-store lists, the one-way doors), not every line; the coverage floor may come down from 100% for a cut of 80% or more in the suite's time; the full suite runs on Linux, while Windows and macOS run what can differ by system, and every PR still shows that Docket works on all three. Fewer git calls in the core (the PR #234 left for later) and fewer docket processes in tests, where an in-process call proves the same, are part of it. How each part works is proposed in DR-0746 to DR-0749 for his review."
+    description: "The owner's direction for the test suite, 20 Oct, in his words: \"the goal is to also reduce other tests by a lot\"; \"im happy to reduce the floor as well if we can reduce the test times by 80% or more. i think it doesnt make sense to test every line\"; and, after the first draft, \"i still want to make sure it works across OSes\". So the suite tests behaviour at the edges (the CLI, the MCP tools, the pages, the ledger's data rules, forget, redaction, the never-store lists, the one-way doors), not every line; the coverage floor may come down from 100% for a cut of 80% or more in the suite's time; the full suite runs on Linux, while Windows and macOS run what can differ by system, and every PR still shows that Docket works on all three. Fewer git calls in the core (the PR #234 left for later) and fewer docket processes in tests, where an in-process call proves the same, are part of it. How each part works is proposed in DR-0746 to DR-0749 for his review. His choice on 20 Oct, between the plan's -62% per PR, about -67% with Windows and macOS running only the OS-sensitive tests a PR's changed code reaches, and about -83% with fewer OS-sensitive files per PR and the full matrix after the merge: -62%, as planned. So every PR keeps all the OS-sensitive files on Windows and macOS, the nightly runs the full matrix, and the target is the plan's honest cut of about 62% in a PR's test runner-minutes, in place of the 80% #266 first asked for. The floors stay as they are, since the cut keeps every line."
     binds:
       - A PR still runs on Windows and macOS what can differ by system.
       - The floor comes down only with a cut of 80% or more in the suite's time.
+      - Every PR keeps all the OS-sensitive files on Windows and macOS, and the nightly runs the full matrix; the target is a cut of about 62% in a PR's test runner-minutes.
     not_chosen:
       - "Every line tested on every system, as before: 9.8 minutes on the maintainer's desktop and 77 runner-minutes of tests a CI run."
+      - "About -67%: Windows and macOS running only the OS-sensitive tests a PR's changed code reaches."
+      - "About -83%: fewer OS-sensitive files on Windows and macOS per PR, the rest there after the merge."
