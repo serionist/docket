@@ -1,4 +1,4 @@
-"""`docket sync reconcile <sync>` (DR-0759): the sync's batch drafted from its blocks into `draft.jsonl` in the sync
+"""`docket sync reconcile <sync>` (DR-0760): the sync's batch drafted from its blocks into `draft.jsonl` in the sync
 folder by fixed rules, and a report. It writes the draft and nothing else: the batch stays Claude's.
 
 Every locator is resolved first, as `read` resolves it, through one index for the whole run, and a line whose locator

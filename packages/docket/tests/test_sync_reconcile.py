@@ -1,4 +1,4 @@
-"""`docket sync reconcile` (DR-0759): the sync's batch drafted from its blocks by fixed rules, each row of the plan's
+"""`docket sync reconcile` (DR-0760): the sync's batch drafted from its blocks by fixed rules, each row of the plan's
 table sure and unsure, a thread match held to the same who and side, merges only of look-alike asks, every merge
 reported, and the draft, settled, written by `docket ledger batch` (DR-0724's tool is in test_service_mcp.py).
 Invented people and data only: the pilot's ledger, its channel, Cleo's mail, a team chat, three recordings and the

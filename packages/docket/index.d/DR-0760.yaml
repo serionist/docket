@@ -1,16 +1,19 @@
 decisions:
   - id: DR-0760
-    title: docket sync summary prints the sync's summary groups from the ledger, read only, within 30,000 characters
+    title: The sync's draft quotes what settling an unsure line needs, and docket sync settle settles its lines in one call
     status: proposed
     at: "2026-10-20"
     by: Claude (autonomy grant)
-    cost: cheap
+    cost: medium
     sources: ["#272"]
-    description: "docket sync summary <sync> reads the ledger after the sync's batch and prints its summary, a line per item in the short form: its ref, kind, who and title, its days, due and lateness, its meeting and its triage, no source. The groups: the sync's batches, each written by sync with its first op's id minted after the sync's start (DR-0612), the newest three named with their undo and the rest counted; what they closed and added, the logs and the other kinds counted, and the outcomes written; the meetings from now to the fifth working day, not cancelled or declined, with an open point or an open item, each point marked proposed where it is; what the owner owes due by today, in the next 7 days, and the rest; the open invites; the waits; the past meetings still holding an open point; each source whose RUN line's mark didn't move or whose run didn't open, whose block has no RUN line, or that has no block; each recording given an agent in this sync, with the note the index says covers it; the records waiting in staging. An item is listed once among the item groups; a meeting may list it again. Past 30,000 characters, what Claude Code keeps of a Bash result, rows go from whenever first, then left over, added, waiting, this week, invites, closed, the outcomes, today and the meetings, each group keeping its count and saying how many more. The sync skill pre-approves it and reads it once."
+    supersedes: [DR-0749]
+    description: "DR-0749 as it stands, but: an unsure op's # ? lines also carry what settling it needs, so Claude asks the ledger's show for none of them. Each candidate item's context.md line gains its due and its latest log line with its day, cut at 120 characters. A MINUTES line on an answered or dropped point quotes the point whole; one whose point isn't standing on its meeting quotes the meeting's standing points, and when the line gave the point's number, as 1 or #1, the op on that point by its id is the alternative. An OUTCOME line on a meeting with an outcome, or one an earlier line set, quotes that outcome whole, and the two joined are the alternative. A STREAMS line quotes the stream's line whole; an add, an invite or a STREAMS line naming a stream the ledger doesn't hold quotes the streams it holds. Under the # prep line, each prep meeting's line and its open points. Quoted text is cut at 1,000 characters. docket sync settle <sync> <line>=<choice>... settles the draft's unsure lines by the numbers the reconcile printed and the Read tool shows: keep takes the unsure key out, alt, alt2 and so on put that alternative in its place, keep+alt2 and alt+alt2 give those ops in order, and drop deletes the line; the lines that go with an op follow a keep and go with anything else, unless named themselves; a settled op's # ? lines and alternatives go with it. Every choice is checked first, and one that doesn't apply changes nothing. It rewrites only draft.jsonl in a sync folder of this vault, and prints the unsure lines left and the # prep line by their new numbers; the sync skill pre-approves it, since it writes only scratch (DR-0605). The skill settles in one pass: the draft read once, one suggest with refs for the prep meetings, one settle, an Edit only for a line that needs new words and one for the prep points, then the dry run and the write."
     binds:
-      - "The summary is the ledger's, read after the write: never a snapshot or a block taken apart by shell."
-      - It changes nothing in the vault, the ledger or the sync folder; the index's ledger tables are brought up to date as any ledger read brings them.
+      - "DR-0689's binds: nothing closes without a locator that shows it, no proposal queue, rollover before the proposed points, no message sent without the owner's word."
+      - "Nothing in the draft is written without Claude's batch: the reconcile and the settle write only the sync folder."
+      - An op the rules can't settle is drafted unsure, with its block line, what settling it needs and its alternatives, never sure.
+      - "The draft's quotes are comment lines, which the writer skips: nothing in them is written."
     not_chosen:
-      - "The summary from the skill's own reads: about 3 minutes of shell over a snapshot and a 6.8k-token turn in the third rehearsal."
-      - "The batch's id written into the sync folder by ledger_batch: the tool would write a file where it only reads one today, and the ids already say when a batch was made."
-      - "A page or an MCP tool: a door for what one command does."
+      - "An Edit per unsure line: 25 Edits are 25 calls, each quoting its line to be unique, and the third rehearsal wrote the whole draft out instead, an 11k-token turn."
+      - "The choices given to ledger_batch: a door that only gains, for what a scratch command does."
+      - "Each candidate's whole log in the draft: its latest line tells whether an ask continues its work, and the draft stays one Read."

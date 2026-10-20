@@ -321,8 +321,8 @@ A source syncs from any Claude Code session with the plugin: ask Claude to sync 
 the source's skill, and closes the run with `ingest` (DR-0240 to DR-0252). The plugin's capture hook hands Docket what
 each of the source's tools returned, so Claude never retypes a payload. `/docket:sync` runs every live source this way,
 each in an agent of its own from a sync folder (DR-0746), and writes what they found into the ledger in one batch,
-which `docket sync reconcile` drafts, `docket sync settle` settles and `ledger_batch` writes from its file (DR-0758,
-DR-0759, DR-0724); `docket sync summary` prints the list after it (DR-0760). Its agents check their locators in one
+which `docket sync reconcile` drafts, `docket sync settle` settles and `ledger_batch` writes from its file (DR-0759,
+DR-0760, DR-0724); `docket sync summary` prints the list after it (DR-0761). Its agents check their locators in one
 `read` with `more`, and its prep asks one `suggest` with `refs` (DR-0725); the plugin's README says how.
 
 | Part | What |

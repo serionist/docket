@@ -246,7 +246,7 @@ def golden_tools() -> dict[str, Any]:
 
 def test_sync_pre_approves_only_reads_and_the_sync_folder_s_commands() -> None:
     """The sync's own writes, the ledger batch and the agents' runs, classifies and promotions, ask (DR-0605); the
-    sync folder's commands write only scratch outside the vault (DR-0746, DR-0759)."""
+    sync folder's commands write only scratch outside the vault (DR-0746, DR-0760)."""
     tools = golden_tools()
     allowed = frontmatter("sync")["allowed-tools"]
     prefix = "mcp__plugin_docket_docket__"
@@ -489,7 +489,7 @@ def test_the_worked_draft_is_refused_unsettled_and_runs_clean_settled(
 ) -> None:
     """The skill's draft as the reconcile writes it, its unsure line refused; settled as the skill says, its line 7
     taking its alternative by `docket sync settle` and the prep point added at the `# prep` line it names, it dry-runs
-    clean (DR-0759)."""
+    clean (DR-0760)."""
     worked = sync_texts()["SKILL.md"].split("### A worked draft", 1)[1]
     draft = worked.split("```jsonl\n", 1)[1].split("```", 1)[0].splitlines()
     prep = worked.split("```json\n", 1)[1].split("```", 1)[0].strip()

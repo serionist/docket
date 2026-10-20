@@ -212,6 +212,8 @@
     "packages/docket/tests/test_speech_prompt.py",
     "packages/docket/tests/test_sync_reconcile.py",
     "packages/docket/tests/test_sync_recordings.py",
+    "packages/docket/tests/test_sync_settle.py",
+    "packages/docket/tests/test_sync_summary.py",
     "packages/docket/tests/test_timewords.py",
     "packages/docket/tests/test_vault_check_ledger.py",
     "packages/docket/tests/test_vault_settings.py",

@@ -1,5 +1,5 @@
 """The sync folder: what `/docket:sync`'s agents read and write, one folder per sync in Docket's state folder, never in
-the vault and never committed (#258, #267, #272, DR-0722, DR-0746, DR-0748, DR-0758 to DR-0760).
+the vault and never committed (#258, #267, #272, DR-0722, DR-0746, DR-0748, DR-0759 to DR-0761).
 
 | Module | What |
 |---|---|
