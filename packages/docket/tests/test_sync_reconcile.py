@@ -12,6 +12,7 @@ import re
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 from docket_testkit import copy_vault, empty_vault, make_config, make_record, template_with
@@ -244,8 +245,15 @@ def unsure(op: dict[str, Any]) -> list[str]:
     return str(op.get("unsure", "")).split("; ") if "unsure" in op else []
 
 
+def bare(op: dict[str, Any]) -> dict[str, Any]:
+    """An op as the reconcile made it, before the draft marked it unsure: what its alternatives are built from."""
+    return {k: v for k, v in op.items() if k != "unsure"}
+
+
 A1 = f"A-0001 | reply | Ben Sample | Send Ben the pilot dates | {BEN_ASK}"
-A2 = f"A-0002 | waiting | Cleo Test | Cleo's quote for the sensors | {QUOTE}"
+# A candidate's line is its context.md line, then its due and its latest log line (#272).
+A2_ROW = f"A-0002 | waiting | Cleo Test | Cleo's quote for the sensors | {QUOTE}"
+A2 = f"{A2_ROW} | due 10-21"
 A3 = f"A-0003 | task | Dan Example | Book the room for the pilot | {ROOM} @M-0002"
 M1 = "M-0001 | 10-19 10:00-10:30 | Pilot weekly | Ben Sample"
 M3 = "M-0003 | 10-19 10:15-11:00 | Design review | Gail Example"
@@ -402,7 +410,10 @@ def test_a_kind_or_a_stream_missing_or_not_held_and_a_day_that_doesn_t_read_are_
         "the day asked, 'Monday', isn't YYYY-MM-DD: add opened",
         "the due, 'Friday', isn't YYYY-MM-DD: fix it",
     ]
-    assert done.unsure == [4, 6]
+    # Each quotes the streams the ledger holds, so a stream is named with no read of the ledger.
+    held = "streams the ledger holds: pilot"
+    assert around(lines, old)[0][1:] == around(lines, odd)[0][1:] == [held]
+    assert done.unsure == [5, 8]
 
 
 # -- asks: the thread, the look-alike, the source an item has --------------------------------------------------------
@@ -495,7 +506,7 @@ def test_an_ask_whose_rid_is_an_items_source_closed_or_open_is_unsure_the_item_q
     a5 = f"A-0005 | reply | Finn Example | Send Finn the crane report | {OLD} | done 2026-10-18"
     assert around(lines, finn) == ([quoted("slack", 2, given[0]), a5], [])
     # Cleo's is also in the thread of her open wait, and its rid is that wait's source.
-    assert around(lines, cleo)[0] == [quoted("slack", 3, given[1]), A2, A2 + " | open"]
+    assert around(lines, cleo)[0] == [quoted("slack", 3, given[1]), A2, f"{A2_ROW} | open | due 10-21"]
     assert len(unsure(cleo)) == 2
 
 
@@ -680,8 +691,15 @@ def test_meetings_and_streams_get_their_fields_set_and_what_they_don_t_take_is_u
         f"MEETINGS: M-0002 | colour=blue; where | {QUOTE_AGAIN}",
         f"STREAMS:  pilot | where=The pilot starts on the 28th; next=Book the room | the date is set | {QUOTE_AGAIN}",
         f"STREAMS:  ops | status=waiting | the room waits | {QUOTE_AGAIN}",
+        f"STREAMS:  pilot | risk=the room is late | the room may slip | {QUOTE_AGAIN}",
     ])  # fmt: skip
-    accepted, nothing, odd, pilot, other = ops(lines)
+    accepted, nothing, odd, pilot, other, risk = ops(lines)
+    # An unsure stream line quotes the stream as it stands, whole, or the streams the ledger holds (#272).
+    assert around(lines, other)[0][1:] == ["streams the ledger holds: pilot"]
+    assert unsure(risk) == [
+        "'risk=the room is late' isn't field=value with a field of name, status, where, next, deadline"
+    ]
+    assert around(lines, risk)[0][1:] == ["pilot | active | - | -"]
     assert accepted == {"op": "set", "item": "M-0001", "note": QUOTE_AGAIN,
                         "fields": {"response": "accepted", "attendees": ["Ben Sample", "Dan Example"]}}  # fmt: skip
     assert unsure(nothing) == ["M-0099 names no meeting: fix the ref, or delete the line"]
@@ -725,6 +743,9 @@ def test_a_recording_is_a_material_on_the_meeting_at_its_start_and_its_ref_settl
 
 
 def test_minutes_are_sure_only_on_an_open_point_and_an_outcome_only_on_a_meeting_with_none(vault: Vault) -> None:
+    """Each unsure line quotes what the ledger holds that it would change, whole: the point, the meeting's points, the
+    outcome there or the earlier line's, the two outcomes joined as the alternative, and the op on the point a number
+    names (#272)."""
     moment = f"r:{WEEKLY}/transcript@12:08"
     given = [
         f"MINUTES:  M-0001 | {POINT} | answered | the 28th, with Ben's team on site | {moment}",
@@ -733,30 +754,55 @@ def test_minutes_are_sure_only_on_an_open_point_and_an_outcome_only_on_a_meeting
         f"MINUTES:  M-0002 | {POINT} | answered | - | {moment}",
         f"MINUTES:  M-0099 | {POINT} | dropped | - | {moment}",
         f"MINUTES:  M-0001 | {ulid(99)} | closed | - | {moment}",
+        f"MINUTES:  M-0001 | #2 | answered | the 28th | {moment}",
         f"OUTCOME:  M-0001 | The pilot starts on the 28th / Dan books the room | {moment}",
         f"OUTCOME:  M-0001 | Dan books the room | {moment}",
         f"OUTCOME:  M-0003 | Gail draws it | {moment}",
         f"OUTCOME:  M-0099 | Nobody | {moment}",
     ]
     _, lines = run(vault, plaud=given)
-    first, again, answered, elsewhere, nowhere, closed, outcome, twice, had, gone = ops(lines)
+    first, again, answered, elsewhere, nowhere, closed, numbered, outcome, twice, had, gone = ops(lines)
     assert first == {"op": "point_set", "item": "M-0001", "point": POINT, "note": moment,
                      "fields": {"state": "answered", "answer": "the 28th, with Ben's team on site"}}  # fmt: skip
+    budget = f"M-0001#1 answered | The budget | answer: 40k, agreed | {ANSWERED}"
+    dates = f"M-0001#2 open | Ben: the pilot's dates | {POINT}"
     assert unsure(again) == ["M-0001#2 is answered by an earlier line: keep one, or join them"]
+    assert around(lines, again) == ([quoted("plaud", 3, given[1]), dates], [])
     assert unsure(answered) == [
-        "M-0001#1 is answered, 40k, agreed: keep the change only if this answer is newer, else delete it"
+        "M-0001#1 is answered already: keep the change only if this answer is newer, else delete it"
     ]
+    assert around(lines, answered) == ([quoted("plaud", 4, given[2]), budget], [])
     assert elsewhere["fields"] == {"state": "answered"}
     assert unsure(elsewhere) == [f"{POINT} isn't a point standing on M-0002: fix it, or delete the line"]
+    assert around(lines, elsewhere) == ([quoted("plaud", 5, given[3])], [])
     assert unsure(nowhere) == ["M-0099 names no meeting: fix the ref, or delete the line"]
     assert unsure(closed) == [
         "closed isn't answered, dropped or open",
         f"{ulid(99)} isn't a point standing on M-0001: fix it, or delete the line",
     ]
+    assert around(lines, closed) == ([quoted("plaud", 7, given[5]), budget, dates], [])
+    # A point by its number: the op on that point, by its id, is the alternative.
+    assert unsure(numbered) == [
+        "#2 isn't a point standing on M-0001: take the alternative, M-0001#2 by its id, or fix it, or delete the line"
+    ]
+    by_id = bare(numbered) | {"point": POINT}
+    assert around(lines, numbered) == ([quoted("plaud", 8, given[6]), budget, dates], [by_id])
     assert outcome == {"op": "set", "item": "M-0001", "note": moment,
                        "fields": {"outcome": "The pilot starts on the 28th\nDan books the room"}}  # fmt: skip
-    assert unsure(twice) == ["M-0001 has an outcome from an earlier line: keep one, or join them"]
-    assert unsure(had) == ["M-0003 has an outcome already, Gail owns the design.: keep one, or join them"]
+    assert unsure(twice) == [
+        "M-0001 has an outcome from blocks/plaud.txt:9: keep one, or take the alternative, the two joined"
+    ]
+    joined = "The pilot starts on the 28th\nDan books the room\nDan books the room"
+    assert around(lines, twice) == (
+        [quoted("plaud", 10, given[8]),
+         "M-0001 outcome from blocks/plaud.txt:9: The pilot starts on the 28th / Dan books the room"],
+        [bare(twice) | {"fields": {"outcome": joined}}],
+    )  # fmt: skip
+    assert unsure(had) == ["M-0003 has an outcome already: keep one, or take the alternative, the two joined"]
+    assert around(lines, had) == (
+        [quoted("plaud", 11, given[9]), "M-0003 outcome: Gail owns the design."],
+        [bare(had) | {"fields": {"outcome": "Gail owns the design.\nGail draws it"}}],
+    )  # fmt: skip
     assert unsure(gone) == ["M-0099 names no meeting: fix the ref, or delete the line"]
 
 
@@ -797,6 +843,7 @@ def test_the_draft_keeps_its_order_and_the_report_says_each_part(vault: Vault) -
         '{"op": "set", "item": "M-0001", "fields": {"outcome"',
         '{"op": "rollover"}',
         "# prep: the next five working days: M-0002",
+        "#   M-0002 | 10-26 10:00-10:30 | Pilot weekly | Ben Sample",
         "# streams",
         '{"op": "set", "item": "pilot", "fields": {"next": "Book the room"}',
         '{"op": "archive"}',
@@ -815,6 +862,43 @@ def test_the_draft_keeps_its_order_and_the_report_says_each_part(vault: Vault) -
         "prep, the next five working days (1)",
         "  M-0002 | 10-26 10:00-10:30 | Pilot weekly | Ben Sample",
     ]
+
+
+def test_the_prep_line_lists_each_prep_meeting_with_its_open_points(vault: Vault) -> None:
+    """The prep is chosen and worded from the draft: under `# prep`, each meeting of the prep week and its open points,
+    a proposed one marked; a point answered or dropped isn't listed (#272)."""
+    store.write(vault, [
+        {"op": "point", "item": "M-0002", "fields": {"text": "Dan: is the room booked?", "item": "A-0003",
+                                                     "proposed": True}},
+        {"op": "point", "item": "M-0002", "fields": {"text": "The agenda"}, "as": "agenda"},
+        {"op": "point", "item": "M-0002", "fields": {"text": "The badges"}},
+        {"op": "point_set", "item": "M-0002", "point": "$agenda", "fields": {"state": "dropped"}},
+    ], by="claude", now=NOW)  # fmt: skip
+    _, lines = run(vault)
+    at = lines.index("# prep: the next five working days: M-0002")
+    with index_build.ledger_tables(vault) as conn:
+        found = views.read(conn, views.Ask(view="show", ref="M-0002"), ZoneInfo("Europe/Budapest"), NOW)
+    room, _, badges = (p.id for p in found.points)
+    assert lines[at + 1 : at + 5] == [
+        "#   M-0002 | 10-26 10:00-10:30 | Pilot weekly | Ben Sample",
+        f"#     M-0002#1 open | Dan: is the room booked? -> A-0003 (proposed) | {room}",
+        f"#     M-0002#3 open | The badges | {badges}",
+        '{"op": "archive"}',
+    ]
+
+
+def test_a_candidate_s_line_says_its_due_and_what_was_last_said_on_it(vault: Vault) -> None:
+    """A log on an item whose title doesn't look like the ask's is settled from its candidate's line, with no `show`:
+    its due, and its latest log line with its day, cut (#272)."""
+    long = "Cleo: the quote comes on Thursday, " + "with the floor plan and the sensors' list " * 4
+    store.write(vault, [{"op": "log", "item": "A-0002", "note": "Cleo: next week"},
+                        {"op": "log", "item": "A-0002", "note": long}], by="sync", now=NOW)  # fmt: skip
+    given = [waiting("Cleo Test", PLAN_MAIL, "2026-10-19 10:00", "the floor plan she promised", continues="A-0002")]
+    _, lines = run(vault, outlook=given)
+    (log,) = ops(lines)
+    last = views.cut(long, reconcile.LAST)
+    assert len(last) == reconcile.LAST and last.endswith("…")
+    assert around(lines, log)[0] == [quoted("outlook", 2, given[0]), f"{A2} | last 10-20: {last}"]
 
 
 def test_a_line_whose_shape_is_wrong_is_drafted_unsure_and_never_dropped_unseen(vault: Vault) -> None:
@@ -855,9 +939,10 @@ def test_a_sync_of_another_vault_or_none_is_refused_and_the_command_prints_the_r
     assert main(["sync", "--vault", str(vault.root), "reconcile", str(started.folder)]) == 0
     out = capsys.readouterr().out.splitlines()
     assert out[0] == f"draft: {started.folder / 'draft.jsonl'}: 2 ops, 0 unsure"
-    assert (started.folder / "draft.jsonl").read_text(encoding="utf-8").splitlines()[-3:] == [
+    assert (started.folder / "draft.jsonl").read_text(encoding="utf-8").splitlines()[-4:] == [
         '{"op": "rollover"}',
         "# prep: the next five working days: M-0002",
+        "#   M-0002 | 10-26 10:00-10:30 | Pilot weekly | Ben Sample",
         '{"op": "archive"}',
     ]
     assert main(["sync", "reconcile", "sync-1", "--vault", str(vault.root)]) == 2

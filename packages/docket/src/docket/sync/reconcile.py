@@ -4,19 +4,23 @@ folder by fixed rules, and a report. It writes the draft and nothing else: the b
 Every locator is resolved first, as `read` resolves it, through one index for the whole run, and a line whose locator
 doesn't open is dropped and listed; the ledger is read fresh. The ops come in the sync's order. One the rules can't
 settle carries `unsure`, a key the writer refuses, so it can't be written unsettled: above it, `# ?` lines quote its
-block line and each candidate's `context.md` line; below it, a `#` line per alternative. Claude settles each by taking
-the key out, swapping in an alternative, or deleting the line.
+block line and what settling it needs, so Claude never asks `show` for it (#272): each candidate's `context.md` line
+with its due and its latest log line, a point or an outcome the op would change, whole, the meeting's points, the
+stream's line; below it, a `#` line per alternative. Claude settles each with `docket sync settle`, keeping the op,
+taking an alternative or dropping it, or edits it.
 
     # docket sync reconcile sync-20261020T071500-1a2b3c4d: 4 ops, 1 unsure
     # closes
     {"op": "done", "item": "A-0001", "note": "slack:C0PILOT/1791100500.000200", "outcome": "Sent Ben the dates"}
     # asks
     # ? blocks/slack.txt:4 OWED: Dan Example | slack:C0PILOT/1791101200.000100 | 2026-10-19 11:05 | ...
-    # ? A-0003 | task | Dan Example | Book the room for the pilot | slack:C0PILOT/1791100800.000300 @M-0002
+    # ? A-0003 | task | Dan Example | Book the room for the pilot | slack:... @M-0002 | last 10-13: Dan: by Friday
     {"op": "add", "fields": {...}, "unsure": "a look-alike of A-0003 by who and title: ..."}
     # {"op": "log", "item": "A-0003", "note": "Dan: Book the room for the pilot's first day: slack:..."}
     {"op": "rollover"}
     # prep: the next five working days: M-0002
+    #   M-0002 | 10-26 10:00-10:30 | Pilot weekly | Ben Sample
+    #     M-0002#1 open | Dan: is the room booked? -> A-0003 (proposed) | 01M4QJ9FZ000X93GNMW1YNY5N9
     {"op": "archive"}
 
 A thread counts only for the same who and side, and never where a record's thread is its container (a Teams chat, a
@@ -28,6 +32,7 @@ they continue.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -64,6 +69,12 @@ LOCATOR = {"OWED": 1, "WAITING": 1, "INVITES": 1, "CLOSES": 2, "MEETINGS": 2, "S
            "OUTCOME": 2}  # fmt: skip
 GOES_WITH = "goes with the op above: keep it with that op, else delete it"
 NONE = "-"
+# What a quote of the ledger's text keeps: a log line on a candidate's line, and an answer or an outcome whole up to
+# the 2,000 characters at which the Read tool cuts a line.
+LAST = 120
+QUOTE = 1_000
+# A MINUTES line's point given by its number, as `1` or `#1`, instead of its id.
+POINT_NUMBER = re.compile(r"^#?(\d{1,3})$")
 
 
 @dataclass(frozen=True)
@@ -159,6 +170,10 @@ class Draft:
 
     def unsure(self, why: str, *quoted: str) -> None:
         self.why.append(why)
+        self.quote(*quoted)
+
+    def quote(self, *quoted: str) -> None:
+        """More `# ?` lines, its block line always the first."""
         self.quoted += [q for q in dict.fromkeys((self.found.quoted, *quoted)) if q not in self.quoted]
 
 
@@ -215,6 +230,11 @@ def _who(text: str) -> str:
 
 def _json(op: dict[str, Any]) -> str:
     return json.dumps(op, ensure_ascii=False)
+
+
+def _one_line(text: str) -> str:
+    """An outcome's lines as one quoted line, joined by ` / ` as an OUTCOME line writes them, cut."""
+    return views.as_field(views.cut(" / ".join(part.strip() for part in text.splitlines() if part.strip()), QUOTE))
 
 
 def _moment(text: str, tz: ZoneInfo) -> tuple[date | None, datetime | None]:
@@ -306,7 +326,8 @@ class _Drafting:
         self.points: dict[str, views.PointRow] = {}
         self.streams: set[str] = set()
         self.closing: dict[str, tuple[Found, datetime | None]] = {}
-        self.outcomes: set[str] = set()
+        # Each meeting's outcome as the draft's lines set it so far, and the line that set it last.
+        self.outcomes: dict[str, tuple[str, str]] = {}
         self.answered: set[str] = set()
         self.sections: dict[str, list[Draft]] = {"closes": [], "asks": [], "meetings": [], "streams": []}
         self.prep: list[views.MeetingFacts] = []
@@ -420,13 +441,34 @@ class _Drafting:
         return None if ref is None else self.by_ref.get(ref.strip())
 
     def candidate(self, row: views.ItemRow, *, state: bool = False) -> str:
-        """An item's `context.md` line, its title cut as there; with its state, as the ledger holds it now."""
+        """An item's `context.md` line, its title cut as there; with its state, as the ledger holds it now; then its
+        due and its latest log line with its day, cut, so a line can be settled without a `show`."""
         text = views.short_item(row.model_copy(update={"title": views.cut(row.title)}))
         if state:
-            return text + f" | {row.state}" + (f" {row.closed}" if row.closed is not None else "")
-        if row.state == "snoozed" and row.until is not None:
-            text += f" | until {row.until:%m-%d}" if row.until.year == self.today.year else f" | until {row.until}"
+            text += f" | {row.state}" + (f" {row.closed}" if row.closed is not None else "")
+        elif row.state == "snoozed" and row.until is not None:
+            text += f" | until {views.short_day(row.until, self.today)}"
+        if row.due is not None:
+            text += f" | due {views.short_day(row.due, self.today)}"
+        last = self.ledger.logs.get(row.id)
+        if last is not None:
+            text += f" | last {views.short_day(last[0], self.today)}: {views.as_field(views.cut(last[1], LAST))}"
         return text
+
+    def point_line(self, point: views.PointRow) -> str:
+        """A point whole, as a quote gives it: `M-0001#2 answered | The budget -> A-0006 | answer: 40k | <id>`."""
+        text = f"{point.ref} {point.state} | {views.as_field(point.text)}"
+        text += f" -> {point.item}" if point.item else ""
+        text += " (proposed)" if point.proposed else ""
+        text += f" | answer: {views.as_field(views.cut(point.answer, QUOTE))}" if point.answer else ""
+        return f"{text} | {point.id}"
+
+    def stream_line(self, name: str) -> str:
+        """A stream's line whole, as it stands; one the ledger doesn't hold, the names of those it does."""
+        stream = next((s for s in self.ledger.streams if s.name == name), None)
+        if stream is None:
+            return f"streams the ledger holds: {', '.join(sorted(self.streams)) or 'none'}"
+        return views.short_stream(stream, self.today)
 
     def meeting_line(self, m: views.MeetingFacts) -> str:
         return views.short_meeting(m.row, self.today)
@@ -650,9 +692,10 @@ class _Drafting:
         if head.kind not in (OWES if head.side == "OWED" else ("waiting",)):
             d.unsure(f"its kind is {head.kind or 'missing'}: reply, decision or task")
         if head.stream is None:
-            d.unsure("it names no stream: add one the ledger holds")
+            d.unsure("it names no stream: add one the ledger holds", self.stream_line(""))
         elif head.stream not in self.streams:
-            d.unsure(f"the stream {head.stream} isn't one the ledger holds: name one it holds")
+            d.unsure(f"the stream {head.stream} isn't one the ledger holds: name one it holds",
+                     self.stream_line(head.stream))  # fmt: skip
         if head.day is None:
             d.unsure(f"the day asked, {head.found.field(2)!r}, isn't YYYY-MM-DD: add opened")
         if due is not None and not _is_day(due):
@@ -754,9 +797,9 @@ class _Drafting:
         if not title:
             d.unsure("no title: neither a meeting nor the record gives one, so write one")
         if stream is None:
-            d.unsure("it names no stream: add one the ledger holds")
+            d.unsure("it names no stream: add one the ledger holds", self.stream_line(""))
         elif stream not in self.streams:
-            d.unsure(f"the stream {stream} isn't one the ledger holds: name one it holds")
+            d.unsure(f"the stream {stream} isn't one the ledger holds: name one it holds", self.stream_line(stream))
         sourced = self.sourced(f.locator)
         if sourced:
             d.unsure(
@@ -795,12 +838,15 @@ class _Drafting:
         return d
 
     def stream_set(self, f: Found) -> Draft:
-        """A set of the line's fields on its stream, by name, sure when the stream stands."""
+        """A set of the line's fields on its stream, by name, sure when the stream stands; unsure, the stream's line
+        quoted whole, or the streams the ledger holds."""
         name = f.field(0)
         d = Draft({"op": "set", "item": name}, f)
         d.op |= {"fields": self.pairs(f.field(1), STREAM_FIELDS, d), "note": f"{f.field(2)}: {f.locator}"}
         if name not in self.streams:
             d.unsure(f"{name or 'its stream'} isn't a stream the ledger holds: fix the name, or delete the line")
+        if d.why:
+            d.quote(self.stream_line(name))
         return d
 
     def note(self, f: Found) -> Draft | None:
@@ -838,8 +884,9 @@ class _Drafting:
         return d
 
     def minutes(self, f: Found) -> Draft:
-        """A point_set by point id, sure only on a point open on that meeting; else unsure, its state and answer
-        quoted."""
+        """A point_set by point id, sure only on a point open on that meeting; else unsure, the point quoted whole, or
+        the meeting's standing points where the line's point isn't one, and the op on the point its number names as
+        the alternative when the line gave a number."""
         ref, point_id, state, answer = f.field(0), f.field(1), f.field(2), f.value(3)
         fields = {"state": state} | ({"answer": answer} if answer is not None else {})
         d = Draft({"op": "point_set", "item": ref, "point": point_id, "fields": fields, "note": f.locator}, f)
@@ -850,36 +897,68 @@ class _Drafting:
         if meeting is None:
             d.unsure(f"{ref or 'its ref'} names no meeting: fix the ref, or delete the line")
         elif point is None or point.meeting != meeting.row.ref:
+            standing = [p for p in self.points.values() if p.meeting == meeting.row.ref]
+            number = POINT_NUMBER.match(point_id)
+            numbered = next((p for p in standing if number and p.n == int(number.group(1))), None)
+            fix = f"take the alternative, {numbered.ref} by its id, or " if numbered is not None else ""
             d.unsure(
-                f"{point_id or 'its point'} isn't a point standing on {meeting.row.ref}: fix it, or delete the line"
-            )
+                f"{point_id or 'its point'} isn't a point standing on {meeting.row.ref}: {fix}fix it, or delete the "
+                "line",
+                *(self.point_line(p) for p in standing),
+            )  # fmt: skip
+            if numbered is not None:
+                d.alternatives.append(d.op | {"point": numbered.id})
+                point = numbered
         elif point.id in self.answered:
-            d.unsure(f"{point.ref} is answered by an earlier line: keep one, or join them")
+            d.unsure(f"{point.ref} is answered by an earlier line: keep one, or join them", self.point_line(point))
         elif point.state != "open":
-            had = f", {views.cut(point.answer)}" if point.answer else ""
-            d.unsure(f"{point.ref} is {point.state}{had}: keep the change only if this answer is newer, else delete it")
+            d.unsure(
+                f"{point.ref} is {point.state} already: keep the change only if this answer is newer, else delete it",
+                self.point_line(point),
+            )  # fmt: skip
         if point is not None:
             self.answered.add(point.id)
         return d
 
     def outcome(self, f: Found) -> Draft:
         """A set of the meeting's outcome, its ` / ` made line breaks, sure only on a meeting with none yet; else
-        unsure, the outcome there quoted."""
+        unsure, the outcome there quoted whole, or the earlier line's, and the two joined as the alternative."""
         ref = f.field(0)
         text = "\n".join(part.strip() for part in f.field(1).split(" / ") if part.strip())
         d = Draft({"op": "set", "item": ref, "fields": {"outcome": text}, "note": f.locator}, f)
         meeting = self.meeting(ref)
+        had: str | None = None
         if meeting is None:
             d.unsure(f"{ref or 'its ref'} names no meeting: fix the ref, or delete the line")
         elif meeting.row.id in self.outcomes:
-            d.unsure(f"{meeting.row.ref} has an outcome from an earlier line: keep one, or join them")
+            had, where = self.outcomes[meeting.row.id]
+            d.unsure(
+                f"{meeting.row.ref} has an outcome from {where}: keep one, or take the alternative, the two joined",
+                f"{meeting.row.ref} outcome from {where}: {_one_line(had)}",
+            )  # fmt: skip
         elif meeting.outcome:
-            d.unsure(f"{meeting.row.ref} has an outcome already, {views.cut(meeting.outcome)}: keep one, or join them")
+            had = meeting.outcome
+            d.unsure(
+                f"{meeting.row.ref} has an outcome already: keep one, or take the alternative, the two joined",
+                f"{meeting.row.ref} outcome: {_one_line(had)}",
+            )  # fmt: skip
+        if had is not None:
+            d.alternatives.append(d.op | {"fields": {"outcome": f"{had}\n{text}"}})
         if meeting is not None:
-            self.outcomes.add(meeting.row.id)
+            self.outcomes[meeting.row.id] = (had + "\n" + text if had else text, f.where)
         return d
 
     # -- the file and the report ---------------------------------------------------------------------------------------
+
+    def prep_lines(self) -> list[str]:
+        """Under the `# prep` line, each prep meeting's line and its open points, so the prep is chosen and worded
+        without a `show`."""
+        out: list[str] = []
+        for m in self.prep:
+            out.append(f"#   {self.meeting_line(m)}")
+            out += [f"#     {self.point_line(p)}" for p in self.points.values()
+                    if p.meeting == m.row.ref and p.state == "open"]  # fmt: skip
+        return out
 
     def write(self, path: Path) -> Reconciled:
         """The draft, replacing one there, and what the report says."""
@@ -892,6 +971,7 @@ class _Drafting:
         unsure += _section(out, "meetings, links, minutes", self.sections["meetings"])
         out.append(_json({"op": "rollover"}))
         out.append(f"# prep: the next five working days: {', '.join(m.row.ref for m in self.prep) or 'none'}")
+        out += self.prep_lines()
         unsure += _section(out, "streams", self.sections["streams"])
         out.append(_json({"op": "archive"}))
         path.write_text("\n".join(out) + "\n", encoding="utf-8", newline="\n")
