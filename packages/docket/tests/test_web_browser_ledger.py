@@ -364,6 +364,60 @@ def test_a_day_is_picked_from_a_month_or_typed_and_the_keys_in_it_stay_its_own(
     clean(page, errors)
 
 
+def inside(box: Any, height: int) -> bool:
+    return box is not None and box["y"] >= 0 and box["y"] + box["height"] <= height + 0.5
+
+
+def test_the_date_picker_stays_on_screen_a_sheet_on_a_phone_and_a_capped_popover_above(
+    browser: Browser, day_service: tuple[int, str], day_root: Path
+) -> None:
+    """Below 768 px the month opens as a sheet from the screen's foot, its caption and arrows in sight; the page's
+    keys stay out of it and Esc closes it alone, the item still open; a day picked there saves. Above, on a short
+    window, the popover is no taller than the room it has, and scrolls (DR-0710, DR-0711)."""
+    port, token = day_service
+    narrow: dict[str, Any] = {"viewport": {"width": 390, "height": 844}, "has_touch": True, "is_mobile": True}
+    page, errors = opened(browser, port, token, "/ledger?open=A-0003", **narrow)
+    due = page.locator("#f-A-0003-due")
+    due.click()
+    sheet = page.get_by_role("dialog", name="Due")
+    expect(sheet).to_have_attribute("data-side", "bottom")
+    expect(sheet.get_by_role("button", name=re.compile("previous month", re.IGNORECASE))).to_be_in_viewport()
+    expect(sheet.get_by_role("grid")).to_be_in_viewport()
+    assert inside(sheet.bounding_box(), 844)
+    assert focused_day(page) != ""
+    assert axe(page) == []
+    before = day_routes.version(day_root)
+    for key in ("e", "j", "1", "x", "s", "Delete", "n"):
+        page.keyboard.press(key)
+    expect(sheet).to_be_visible()
+    page.keyboard.press("Escape")
+    expect(sheet).to_have_count(0)
+    expect(page.get_by_label("Title")).to_have_value("Pick the venue")
+    assert page.url.endswith("/ledger?open=A-0003")
+    assert day_routes.version(day_root) == before
+    due.click()
+    page.keyboard.press("ArrowRight")
+    picked = focused_day(page)
+    page.keyboard.press("Enter")
+    expect(sheet).to_have_count(0)
+    expect(page.locator('[data-history="A-0003"]')).to_contain_text(f"due: {picked}")
+    dark(page)
+    due.click()
+    assert axe(page) == []
+    page.keyboard.press("Escape")
+    clean(page, errors)
+
+    short, errors = opened(browser, port, token, "/ledger?open=A-0003", viewport={"width": 1440, "height": 380})
+    short.locator("#f-A-0003-due").click()
+    month = short.get_by_role("dialog", name="Due")
+    expect(month).to_have_attribute("data-slot", "popover-content")
+    assert inside(month.bounding_box(), 380)
+    # The month is taller than the room it has here, so it scrolls within the window rather than past it.
+    scrolls = "(el => el.scrollHeight > el.clientHeight && getComputedStyle(el).overflowY === 'auto')"
+    assert short.evaluate(f"{scrolls}(document.querySelector('[data-slot=popover-content]'))")
+    clean(short, errors)
+
+
 def test_space_ticks_and_ctrl_z_undoes(browser: Browser, day_service: tuple[int, str]) -> None:
     """The old tasks app's other keys: Space ticks the selected row, and Ctrl+Z undoes as u does (DR-0711)."""
     port, token = day_service

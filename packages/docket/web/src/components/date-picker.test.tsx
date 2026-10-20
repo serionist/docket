@@ -1,5 +1,5 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { installKeys, register } from "@/lib/keys";
 import { DatePicker, type DatePickerProps } from "./date-picker";
 
@@ -30,10 +30,26 @@ function key(name: string, target: Element) {
   });
 }
 
+/** The window at a width, as the shell's bands read it. */
+function at(width: number) {
+  Object.defineProperty(window, "innerWidth", { value: width, configurable: true });
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: width >= Number(/min-width: (\d+)px/.exec(query)?.[1] ?? 0),
+    media: query,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  }));
+}
+
 beforeAll(() => installKeys());
 
+beforeEach(() => at(1440));
+
 let unregister: (() => void) | undefined;
-afterEach(() => unregister?.());
+afterEach(() => {
+  unregister?.();
+  vi.unstubAllGlobals();
+});
 
 describe("the date picker", () => {
   it("shows its day as the app writes it, whatever the browser's language, and says it in its name", () => {
@@ -90,7 +106,30 @@ describe("the date picker", () => {
     expect(onPick).toHaveBeenCalledWith("");
   });
 
-  it("keeps every key pressed in it from the page's keys", async () => {
+  it("opens its month in a popover beside it, and below 768 px in a sheet from the screen's foot", async () => {
+    picker();
+    const popover = await opened();
+    expect(popover.getAttribute("data-slot")).toBe("popover-content");
+    expect(popover.className).toContain("max-h-(--radix-popover-content-available-height)");
+    fireEvent.keyDown(popover, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    cleanup();
+    at(390);
+    const onPick = picker();
+    const sheet = await opened();
+    expect(sheet.getAttribute("data-slot")).toBe("sheet-content");
+    expect(sheet.getAttribute("data-side")).toBe("bottom");
+    expect(within(sheet).getByRole("heading", { name: "Due" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Due" })).toBe(sheet);
+    await waitFor(() =>
+      expect(document.activeElement?.closest("[data-day]")?.getAttribute("data-day")).toBe("2026-10-26"),
+    );
+    fireEvent.click(within(sheet).getByRole("button", { name: "Friday 23 October 2026" }));
+    expect(onPick).toHaveBeenCalledWith("2026-10-23");
+  });
+
+  it.each([1440, 390])("keeps every key pressed in it from the page's keys, at %i px", async (width) => {
+    at(width);
     const ran = vi.fn();
     unregister = register({
       id: "page",
