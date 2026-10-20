@@ -259,6 +259,8 @@ class _Drafting:
         self.answered: set[str] = set()
         self.sections: dict[str, list[Draft]] = {"closes": [], "asks": [], "meetings": [], "streams": []}
         self.prep: list[views.MeetingFacts] = []
+        # The adds drafted so far, by who, with their titles' long words and their block line.
+        self.added: dict[str, list[tuple[set[str], str]]] = {}
 
     # -- what the lines name -------------------------------------------------------------------------------------------
 
@@ -442,6 +444,22 @@ class _Drafting:
         d = self.decided(group)
         if len(group) > 1:
             self.merges.append(Merge([a.found.quoted for a in group], sure=d.op["op"] == "log"))
+        return self.doubled(d, group[0].who, group[0].title)
+
+    def doubled(self, d: Draft, who: str, title: str) -> Draft:
+        """An add that looks like one drafted above it, by DR-0642's rule on any side: unsure, since the writer refuses
+        it unless forced, its forced copy the alternative."""
+        if d.op["op"] != "add":
+            return d
+        words = title_words(title)
+        above = [where for theirs, where in self.added.get(_who(who), []) if alike(words, theirs)]
+        if above:
+            d.unsure(
+                f"it looks like the add for {', '.join(above)}, which the writer refuses: force it if it is another "
+                "ask, else delete the line"
+            )
+            d.alternatives.append(d.op | {"force": True})
+        self.added.setdefault(_who(who), []).append((words, d.found.where))
         return d
 
     def decided(self, group: list[_Ask]) -> Draft:
@@ -527,7 +545,7 @@ class _Drafting:
         note = "; ".join([*([head.why] if head.why else []), *([f"also {', '.join(others)}"] if others else [])])
         op = {"op": "add", "fields": {k: v for k, v in fields.items() if v is not None}}
         d = Draft(op | ({"note": note} if note else {}), head.found)
-        if head.kind not in (*OWES, "waiting"):
+        if head.kind not in (OWES if head.side == "OWED" else ("waiting",)):
             d.unsure(f"its kind is {head.kind or 'missing'}: reply, decision or task")
         if head.stream is None:
             d.unsure("it names no stream: add one the ledger holds")
@@ -655,7 +673,7 @@ class _Drafting:
             d.unsure("it names no stream: add one the ledger holds")
         elif stream not in self.streams:
             d.unsure(f"the stream {stream} isn't one the ledger holds: name one it holds")
-        return d
+        return self.doubled(d, f.field(0), title or "")
 
     # -- meetings, links, minutes, streams -----------------------------------------------------------------------------
 

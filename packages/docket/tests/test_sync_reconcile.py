@@ -380,7 +380,7 @@ def test_a_thread_counts_only_for_the_same_who_and_side_and_never_in_a_chat_or_a
                                                  "stream": "pilot", "source": WEEKLY}}], by="claude")  # fmt: skip
     done, lines = run(vault, slack=[
         owed("Hal Example", BEN_AGAIN, "2026-10-19 11:00", "Share the venue address"),
-        waiting("Ben Sample", BEN_LATER, "2026-10-19 16:00", "his venue address"),
+        waiting("Ben Sample", BEN_LATER, "2026-10-19 16:00", "his badge list"),
     ], teams=[
         owed("Ben Sample", CHAT_AGAIN, "2026-10-19 09:00", "Share the venue address"),
     ], plaud=[
@@ -389,7 +389,7 @@ def test_a_thread_counts_only_for_the_same_who_and_side_and_never_in_a_chat_or_a
     found = ops(lines)
     assert [(o["fields"]["who"], o["fields"]["title"], "unsure" in o) for o in found] == [
         ("Ben Sample", "Book the shuttle bus", False), ("Hal Example", "Share the venue address", False),
-        ("Ben Sample", "his venue address", False), ("Ben Sample", "Share the venue address", False),
+        ("Ben Sample", "his badge list", False), ("Ben Sample", "Share the venue address", False),
     ]  # fmt: skip
     assert done.unsure == [] and done.merges == []
 
@@ -453,7 +453,7 @@ def test_an_ask_whose_rid_is_an_items_source_closed_or_open_is_unsure_the_item_q
 def test_a_continues_ref_that_isn_t_open_or_names_nothing_is_unsure_the_add_first(vault: Vault) -> None:
     given = [
         owed("Finn Example", TWO_ASKS, "2026-10-19", "Send Finn the boiler report", continues="A-0005"),
-        owed("Finn Example", DAN_ASK, "2026-10-19", "Send Finn the parking map", continues="A-0042"),
+        owed("Finn Example", DAN_ASK, "2026-10-19", "Book a taxi for him", continues="A-0042"),
     ]
     _, lines = run(vault, slack=given)
     closed, nothing = ops(lines)
@@ -516,12 +516,21 @@ def test_asks_that_differ_in_who_side_or_title_stay_apart_in_one_mail_and_at_one
         owed("Ben Sample", moment, "2026-10-19 10:10", "Send the floor plan around"),
         owed("Dan Example", moment, "2026-10-19 10:10", "Send the floor plan around", kind="task"),
     ])  # fmt: skip
-    assert [(o["fields"]["who"], o["fields"]["kind"], o["fields"]["title"]) for o in ops(lines)] == [
+    found = ops(lines)
+    assert [(o["fields"]["who"], o["fields"]["kind"], o["fields"]["title"]) for o in found] == [
         ("Cleo Test", "reply", "Send Cleo the floor plan"), ("Cleo Test", "decision", "Approve the sensor mounts"),
         ("Cleo Test", "waiting", "Send Cleo the floor plan"), ("Ben Sample", "reply", "Send the floor plan around"),
         ("Dan Example", "task", "Send the floor plan around"),
     ]  # fmt: skip
     assert done.merges == []
+    # Cleo's wait and her ask share a title on two sides: the writer refuses the second add unless it is forced.
+    wait = found[2]
+    assert unsure(wait) == [
+        "it looks like the add for blocks/outlook.txt:2, which the writer refuses: force it if it is another ask, else "
+        "delete the line"
+    ]
+    assert around(lines, wait)[1] == [{k: v for k, v in wait.items() if k != "unsure"} | {"force": True}]
+    assert done.unsure == [lines.index(json.dumps(wait)) + 1]
 
 
 # -- asks on an item a CLOSES line closes ------------------------------------------------------------------------------
@@ -601,7 +610,9 @@ def test_an_invite_is_titled_from_its_meeting_or_its_record_and_logged_on_an_ope
     assert unsure(untitled) == ["no title: neither a meeting nor the record gives one, so write one"]
     assert "title" not in untitled["fields"]
     assert unsure(unheld) == ["the stream ops isn't one the ledger holds: name one it holds"]
-    assert unsure(old) == ["it names no stream: add one the ledger holds"]
+    # The same series twice: the writer would refuse the second add as a look-alike of the first.
+    assert unsure(old)[0] == "it names no stream: add one the ledger holds"
+    assert unsure(old)[1].startswith("it looks like the add for blocks/calendar.txt:6")
     assert around(lines, untitled)[0] == [quoted("calendar", 5, given[3])]
 
 
