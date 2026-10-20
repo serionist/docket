@@ -204,7 +204,8 @@ jobs:
           shopt -s nullglob
           lists=(failing/*.txt)
           if [ ${#lists[@]} -gt 0 ]; then
-            sort -u "${lists[@]}" > set.txt
+            # Windows' jq ends its lines with CRLF.
+            cat "${lists[@]}" | tr -d '\r' | sort -u > set.txt
           else
             echo "the run went red, and no job named a test" > set.txt
           fi
