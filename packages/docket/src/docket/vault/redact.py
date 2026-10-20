@@ -102,11 +102,29 @@ _LABEL_START = r"(?:(?<![A-Za-z0-9])|(?<=[a-z0-9])(?=[A-Z]))"
 # backtracked into.
 _SPACE = r"[^\S\r\n]"
 _FILLER = rf"(?:{_SPACE}|[*_`~|]|\r?\n|<[^<>]{{0,2000}}>|&[A-Za-z0-9#]{{2,10}};)*+"
+# A word of an unquoted value: a quote, `&`, `<`, `>`, `|`, `,` and `;` end it, the marks of HTML, tables and lists.
+_WORD = r"[^\s;,<>\"'&|]"
 # An unquoted value has a letter or a digit, so a mark that closes the label is never taken for the secret.
-_VALUE = (
-    r"(?:\"(?P<secret>[^\"\n]+)\"|'(?P<secret2>[^'\n]+)'"
-    r"|(?P<secret3>(?=[^\s;,<>\"'&|]*?[A-Za-z0-9])[^\s;,<>\"'&|]+))"
-)
+_FIRST = rf"(?={_WORD}*?[A-Za-z0-9]){_WORD}++"
+# A word of prose: letters, perhaps joined by hyphens, dots or apostrophes, after an opening bracket and before
+# closing marks (`and`, `follow-up`, `e.g.`, `(see`, `more.`).
+_PROSE = rf"\(?[^\W\d_]++(?:[-.\u2019][^\W\d_]++)*+[.!?:)]*+(?!{_WORD})"
+# A password's value goes on along its line through each further word that holds a digit or a symbol: `Kq7 x!Lm 22`,
+# a PIN read out in groups. A word of prose ends it, so a sentence after a one-word password stays, and so does a
+# label (`Username:`, `user=`); a line break or a mark that ends a word ends it too. Possessive: a line is read once.
+_MORE = rf"(?:{_SPACE}++(?!\w++[:=]|{_PROSE}){_WORD}++)*+"
+
+
+def _value(unquoted: str) -> str:
+    return rf"(?:\"(?P<secret>[^\"\n]+)\"|'(?P<secret2>[^'\n]+)'|(?P<secret3>{unquoted}))"
+
+
+_VALUE = _value(_FIRST)
+_PASSWORD_VALUE = _value(_FIRST + _MORE)
+# A bare PIN label takes a value only when its first word holds a digit and no letter, as a PIN does: in code and
+# config `pin` is as often a wire (`pin: GPIO4`, `pin: true`), and the word starts sentences too (`Pin: this one`).
+_NO_LETTER = rf"(?:(?![^\W\d_]){_WORD})"
+_PIN_VALUE = _value(rf"(?={_NO_LETTER}*?\d){_NO_LETTER}++(?!{_WORD})" + _MORE)
 
 _SEP = rf"(?:[_.\-]|{_SPACE})?"
 API_KEY_LABELS = [
@@ -131,11 +149,15 @@ PASSWORD_LABELS = [
     r"parola",
     r"l[oö]senord",
     r"salasana",
+    rf"pin{_SEP}k[oó]d",
+    rf"pin{_SEP}code",
 ]
+# A dial-in PIN; a whole word, so opinion, spinning and pinned stay.
+PIN_LABEL = r"pin"
 PHONE_LABELS = [r"phone", r"telephone", r"tel", r"mobile", r"mobil", r"mob", r"cell", r"telefon", r"fax"]
 
 
-def _labelled(labels: list[str]) -> re.Pattern[str]:
+def _labelled(labels: list[str], value: str = _VALUE) -> re.Pattern[str]:
     """A label that ends its key (an optional closing quote), then `:`, `=`, `:=` or `=>`, then the value."""
     return re.compile(
         _LABEL_START
@@ -144,7 +166,7 @@ def _labelled(labels: list[str]) -> re.Pattern[str]:
         + _FILLER
         + r"(?::=|=>|[:=])"
         + _FILLER
-        + _VALUE
+        + value
     )
 
 
@@ -183,7 +205,8 @@ PASSWORD = Rule(
     "password",
     (
         re.compile(r"(?<=://)[^\s:/@]+:(?P<secret>[^\s@/]+)@"),
-        _labelled(PASSWORD_LABELS),
+        _labelled(PASSWORD_LABELS, _PASSWORD_VALUE),
+        _labelled([PIN_LABEL], _PIN_VALUE),
     ),
 )
 # A phone number needs a + or a label: a bare run of digits is as likely an amount, a ticket or a timestamp, the
@@ -206,7 +229,7 @@ PHONE = Rule(
 BUILTIN: tuple[Rule, ...] = (PRIVATE_KEY, API_KEY, PASSWORD, PHONE)
 KEY_LABELS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("api-key", _key_label(API_KEY_LABELS)),
-    ("password", _key_label(PASSWORD_LABELS)),
+    ("password", _key_label([*PASSWORD_LABELS, PIN_LABEL])),
     ("phone", _key_label(PHONE_LABELS)),
 )
 # The marker names of the built-in rules: Docket's own words, whatever the settings.
