@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0747
+    title: One line-coverage floor for the whole repo, between 85 and 90%, replaces the floors per module
+    status: decided
+    at: "2026-10-20"
+    by: Soma Osvay
+    cost: cheap
+    sources: ["#266", "20 Oct, in chat"]
+    supersedes: [DR-0011]
+    description: "The tests are held to one line-coverage floor over docket and devkit together, in tools/devkit/coverage-floors.json, set between 85 and 90% by the PR that lands it from what the cut suite measures. It replaces the floors per module (docket 100%, devkit 88%), which only rose and so asked a test of every line. The floor doesn't follow the measure up: a change that adds coverage leaves it where it is, a change that falls below it adds tests, and only the owner moves it. gate full holds it on its one run and gate coverage on CI's shares combined, as before, and a failure names the files with the most lines no test ran. The rest of DR-0011 stands: ruff lints and formats at 120 columns, pyright checks every package and runs strict on each src/ folder, pytest runs the tests, and packages build with uv_build."
+    binds:
+      - The floor is one number for docket and devkit together; a change below it adds tests, and only the owner moves it.
+    not_chosen:
+      - "The floors per module, 100% and 88% and only rising: every line asked a test, and the suite took 9.8 minutes on the maintainer's desktop."
+      - "A floor per file: the same ask of every line, file by file."

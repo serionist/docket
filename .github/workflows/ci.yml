@@ -1,4 +1,4 @@
-# The gate on every pull request and every push to main, in shares that each finish in a few minutes (DR-0698). Linux
+# The gate on every pull request and every push to main, in shares that each finish in a few minutes (DR-0746). Linux
 # runs `gate full`, which is the merge rule: its checks (lint, format, types, the docs, commit messages, private names,
 # secrets over the whole history, the harness and the plugin validated by Claude Code) in one job, its tests under
 # coverage in shares, and Gate (Linux) holds the coverage floors on every share's data together. Windows and macOS run

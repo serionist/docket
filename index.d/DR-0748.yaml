@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0748
+    title: Tests prove behaviour at the edges, not every line
+    status: decided
+    at: "2026-10-20"
+    by: Soma Osvay
+    cost: medium
+    sources: ["#266", "20 Oct, in chat"]
+    description: "A test stays when it proves behaviour at an edge or a rule that guards data: the CLI's, the MCP tools' and the pages' contracts, the ledger's data rules, forget, redaction, the never-store lists, the one-way doors (AGENTS.md), the security guards, recovery from a crash or a conflict, and the gate's own checks. Every CLI command group, MCP tool and page route keeps at least one test. A test whose lines other tests run, and which proves another case of a rule a kept test proves, is dropped or merged into that test; a refusal keeps at least one case. A test starts a docket process only where the process is what it tests: its arguments, its streams or its exit. Each PR that drops tests names them with the test that keeps their lines. The owner's words, 20 Oct: it doesn't make sense to test every line."
+    binds:
+      - Every CLI command, MCP tool and page route keeps at least one test.
+      - A test that pins a one-way door, forget, redaction, a never-store list, a security guard or a recovery from a crash or a conflict stays.
+      - A PR that drops tests names each beside the kept test that runs its lines.
+    not_chosen:
+      - "Keeping every test and only making them faster: the levers that drop nothing take 60% off CI's test runner-minutes and 28% off this PC's worker-seconds."

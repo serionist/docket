@@ -1,5 +1,5 @@
 """A pytest plugin the gate loads for `--shard K/N`: the run keeps one share of the test files, so the shares of one CI
-job's tests run on runners of their own (DR-0698).
+job's tests run on runners of their own (DR-0746).
 
 The files are split by what each cost on this system in a CI run, from `tools/devkit/test-weights.json`: the heaviest
 first, each to the share with the least so far. A file the weights don't know counts as their median, and with no
@@ -95,7 +95,7 @@ class Times:
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
-    parser.addoption("--shard", default=None, metavar="K/N", help="run share K of N of the test files (DR-0698)")
+    parser.addoption("--shard", default=None, metavar="K/N", help="run share K of N of the test files (DR-0746)")
     parser.addoption("--shard-weights", default=None, metavar="FILE", help="split the files by these weights")
     parser.addoption("--shard-times", default=None, metavar="FILE", help="write what each file cost this run")
     parser.addoption("--shard-key", default=None, metavar="KEY", help="the weights' key: the system's name by default")

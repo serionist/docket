@@ -119,11 +119,12 @@ decisions:
     description: "The app and the kit run on Python 3.12 or later, managed with uv: one lock file for the workspace, uv sync to install, uv run for every command."
   - id: DR-0011
     title: ruff, pyright strict on src, pytest, uv_build, and coverage floors per module
-    status: proposed
+    status: superseded
     at: "2026-10-14"
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#1"]
+    superseded_by: [DR-0747]
     description: ruff lints and formats at 120 columns; pyright checks every package and runs strict on each src/ folder; pytest runs the tests with coverage, and each top-level module keeps a floor that only rises. Packages build with uv_build, uv's own backend, so the toolchain is one vendor's.
     not_chosen:
       - "mypy: slower, and pyright is what the editor's language server already runs."
@@ -420,10 +421,10 @@ conventions:
     area: python
     enforced_by: .gitattributes (LF); review for the explicit encoding
   - id: CV-0009
-    rule: Each module's line coverage stays at or above its floor in tools/devkit/coverage-floors.json, and a floor only rises
+    rule: The line coverage of docket and devkit together stays at or above the one floor in tools/devkit/coverage-floors.json, which only the owner moves
     area: tests
     enforced_by: "gate: tests (full lane)"
-    decision: DR-0011
+    decision: DR-0747
   - id: CV-0010
     rule: AGENTS.md is a router and stays under 150 lines
     area: docs

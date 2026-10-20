@@ -87,7 +87,7 @@ filterwarnings = ["error"]
 
 [tool.coverage.run]
 # Lines through sys.monitoring, which on Python 3.12 measures no branches: the floors are line coverage, and the C
-# tracer that branches need made CPU-bound tests 75% slower (DR-0698).
+# tracer that branches need made CPU-bound tests 75% slower (DR-0746).
 branch = false
 core = "sysmon"
 source_pkgs = ["docket", "devkit"]

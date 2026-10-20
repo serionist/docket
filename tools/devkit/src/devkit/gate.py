@@ -5,7 +5,7 @@ Lanes:
          the harness (AGENTS.md, skills, plugin manifests), the web app's build and API document. The pre-push hook
          runs it.
   full   quick, then the tests with coverage and its floors, the secret scan over the whole history, and the plugin
-         validated by Claude Code itself. finish-work runs it before a PR. CI runs it in parts (DR-0698): `--skip
+         validated by Claude Code itself. finish-work runs it before a PR. CI runs it in parts (DR-0746): `--skip
          tests` once, and `--only tests --shard K/N` on each share, which saves its coverage data instead of holding
          the floors.
   os     types and tests, for the other operating systems CI runs; `--shard K/N` runs share K of N of the test files,
@@ -82,7 +82,7 @@ class Ctx:
     pr: commits.PullRequest | None
     # Set once the lane's other steps are done; the timed tests wait for it. Set from the start for a step run alone.
     alone: threading.Event = field(default_factory=lambda: _set(threading.Event()))
-    # K/N: the tests step runs share K of N of the test files (DR-0698); None runs them all.
+    # K/N: the tests step runs share K of N of the test files (DR-0746); None runs them all.
     shard: str | None = None
 
 
@@ -301,7 +301,7 @@ def slowest(lines: list[str]) -> list[str]:
 
 
 # A CI job spends half a minute or so around its tests step, so a share's job passes 5 minutes about when the step
-# passes this (DR-0698). At 4 it warned on green runs: macOS's shares' steps took up to 4.3 minutes.
+# passes this (DR-0746). At 4 it warned on green runs: macOS's shares' steps took up to 4.3 minutes.
 TESTS_WARN_MINUTES = 4.5
 
 
@@ -344,7 +344,7 @@ def _summary(lines: list[str]) -> str:
     return next((ln for ln in reversed(lines) if " passed" in ln or " failed" in ln), "").strip("= ")
 
 
-# Where a covered share saves its coverage data, `share-K-of-N`, for the coverage lane to combine (DR-0698).
+# Where a covered share saves its coverage data, `share-K-of-N`, for the coverage lane to combine (DR-0746).
 COVERAGE_DATA = ".local/coverage"
 _SHARE_DATA = re.compile(r"^share-([1-9]\d*)-of-([1-9]\d*)$")
 # Where a share writes what each of its files cost, for `gate weights`.
@@ -369,7 +369,7 @@ def step_tests(ctx: Ctx) -> Outcome:
     pytest = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
     covered = ctx.lane == "full"
     # The full lane always runs as a share, its one share 1/1 when it isn't split: `gate full` then runs the shard
-    # plugin's lines as each of CI's covered shares does, and both read the same coverage (DR-0698). The repo's root
+    # plugin's lines as each of CI's covered shares does, and both read the same coverage (DR-0746). The repo's root
     # conftest.py loads the plugin.
     spec = ctx.shard or ("1/1" if covered else None)
     if spec is not None:
@@ -437,7 +437,7 @@ def _covered_share(ctx: Ctx, spec: str, cmd: list[str], env: dict[str, str]) -> 
 
 def step_floors(ctx: Ctx) -> Outcome:
     """The coverage lane: every share's coverage data combined, then held to the floors as the full lane holds its
-    own run's, with the question set's numbers the share that ran it saved (DR-0698)."""
+    own run's, with the question set's numbers the share that ran it saved (DR-0746)."""
     folder = ctx.root / COVERAGE_DATA
     found: dict[tuple[int, int], Path] = {}
     for path in sorted(folder.iterdir()) if folder.is_dir() else []:
@@ -647,7 +647,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("file", nargs="?", help="check-text: the text file to check; weights: the folder of a run's times")
     p.add_argument("--only", help="comma-separated steps of the lane to run")
     p.add_argument("--skip", help="comma-separated steps of the lane to leave out")
-    p.add_argument("--shard", metavar="K/N", help="os and full lanes: run share K of N of the test files (DR-0698)")
+    p.add_argument("--shard", metavar="K/N", help="os and full lanes: run share K of N of the test files (DR-0746)")
     args = p.parse_args(argv)
     try:
         if args.lane == "list":
