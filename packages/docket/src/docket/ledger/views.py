@@ -65,7 +65,7 @@ TAKES: dict[str, tuple[str, ...]] = {
     "queue": (),
     "list": ("who", "stream", "kind", "state", "since", "until", "k"),
     "meetings": ("since", "until"),
-    "suggest": ("ref",),
+    "suggest": ("ref", "refs"),
 }
 # Where a snapshot's meetings start, from today, and how many days they span; the same for the meetings view.
 SNAPSHOT_WINDOW = (-1, 8)
@@ -165,7 +165,8 @@ class ItemRow(BaseModel):
     title is cut at 72 characters but in show; its meeting is the M- number of the meeting it hangs on; `days` is how
     long it has been open, or was until it closed, `late` how many days today is past its due while it is open; `woke`
     marks a snoozed item whose day has come, its state still `snoozed` as the ledger holds it, open to every read and
-    untriaged in the queue (DR-0660); `why` is suggest's."""
+    untriaged in the queue (DR-0660); `why` is suggest's, and `suggested_for` the meeting, by ref, it is suggested for
+    (DR-0725)."""
 
     ref: str
     id: str
@@ -187,6 +188,7 @@ class ItemRow(BaseModel):
     late: int | None
     why: str | None = None
     woke: bool = False
+    suggested_for: str | None = None
 
 
 class PointRow(BaseModel):
@@ -320,7 +322,8 @@ class BatchLine(BaseModel):
 
 class LedgerRead(BaseModel):
     """What the `ledger` tool read (DR-0638, DR-0660): its view, today as the owner's day the counts and lines are
-    made from, the window its meetings or items were read in, its counts, and its rows; show's object in `detail`."""
+    made from, the window its meetings or items were read in, its counts, and its rows; show's object in `detail`;
+    a suggest's meetings past the room, by the refs given, in `later` (DR-0725)."""
 
     view: View
     today: date
@@ -332,12 +335,14 @@ class LedgerRead(BaseModel):
     points: list[PointRow] = []
     streams: list[StreamRow] = []
     detail: Detail | None = None
+    later: list[str] = []
 
 
 @dataclass(frozen=True)
 class Ask:
     """What a read asks: a view and the `ledger` tool's parameters, with its defaults. `k` None gives list every row,
-    as the command's --json and the pages read it (DR-0645); the tool's own k stops at 500."""
+    as the command's --json and the pages read it (DR-0645); the tool's own k stops at 500. `refs` gives suggest
+    several meetings instead of `ref` (DR-0725)."""
 
     view: str = "snapshot"
     ref: str | None = None
@@ -348,6 +353,7 @@ class Ask:
     kind: str | None = None
     state: str = "open"
     k: int | None = K
+    refs: tuple[str, ...] = ()
 
     def check(self) -> None:
         """Refused: a view, state or kind this Docket doesn't have, a k out of bounds, a ref missing where one is
@@ -365,8 +371,17 @@ class Ask:
             raise DocketError(f"kind is one of {', '.join(KINDS)}, not {self.kind!r}")
         if self.k is not None and not 1 <= self.k <= MAX_K:
             raise DocketError(f"k is 1 to {MAX_K}, not {self.k}")
-        if "ref" in takes and not (self.ref or "").strip():
-            what = "a meeting's M- number or id" if self.view == "suggest" else "an A- or M- number, an id or a stream"
+        if self.refs:
+            if self.ref is not None:
+                raise DocketError("suggest takes ref or refs, not both")
+            if not all(ref.strip() for ref in self.refs):
+                raise DocketError("suggest's refs are meetings, each its M- number or its id")
+        elif "ref" in takes and not (self.ref or "").strip():
+            what = (
+                "a meeting's M- number or id, or refs"
+                if self.view == "suggest"
+                else "an A- or M- number, an id or a stream"
+            )
             raise DocketError(f"{self.view} needs ref, {what}")
 
 
@@ -375,15 +390,18 @@ def now() -> datetime:
     return datetime.now(UTC)
 
 
-def read(conn: sqlite3.Connection, ask: Ask, tz: ZoneInfo, at: datetime, *, chased: bool = True) -> LedgerRead:
+def read(
+    conn: sqlite3.Connection, ask: Ask, tz: ZoneInfo, at: datetime, *, chased: bool = True,
+    fits: Callable[[LedgerRead], bool] | None = None,
+) -> LedgerRead:  # fmt: skip
     """One read of the ledger's tables as `ask` says, today the owner's day at `at`. It writes nothing. `chased` False
     leaves list's chase counts at 0: the day pages show none, and reading them is most of a whole list's time
-    (DR-0668); the tool always reads them."""
+    (DR-0668); the tool always reads them. `fits` is the room a suggest for several meetings answers in (DR-0725)."""
     ask.check()
     reader = _Reader(conn, tz, at, chased=chased)
     views: dict[str, Callable[[Ask], LedgerRead]] = {
         "snapshot": reader.snapshot, "show": reader.show, "queue": reader.queue, "list": reader.listing,
-        "meetings": reader.meetings, "suggest": reader.suggest,
+        "meetings": reader.meetings, "suggest": lambda asked: reader.suggest(asked, fits),
     }  # fmt: skip
     return views[ask.view](ask)
 
@@ -836,16 +854,37 @@ class _Reader:
         counts = Counts(meetings=len(meetings), points_open=sum(m.points_open for m in meetings))
         return LedgerRead(view="meetings", today=self.today, since=since, until=until, counts=counts, meetings=meetings)
 
-    def suggest(self, ask: Ask) -> LedgerRead:
-        """The meeting, and the open items worth raising in it, each with why (DR-0629, DR-0634)."""
-        meeting_id = self.meeting_named(str(ask.ref), "suggest")[0]
+    def suggest(self, ask: Ask, fits: Callable[[LedgerRead], bool] | None = None) -> LedgerRead:
+        """The meeting, or each of the meetings `refs` names in order, a meeting named twice once, and the open items
+        worth raising in it, each with why and the meeting it is for, so an item for two comes under each (DR-0629,
+        DR-0634, DR-0725). Every ref is checked first. `fits` says whether a read still fits its room: the first
+        meeting is always answered, and each next one only while the read with it, the refs after it in `later`,
+        fits; the first it doesn't fit, and every one after it, stay in `later`."""
+        named: dict[str, str] = {}
+        for ref in ask.refs or (str(ask.ref),):
+            named.setdefault(self.meeting_named(ref, "suggest")[0], ref.strip())
+        ids = list(named)
+        found = LedgerRead(view="suggest", today=self.today, counts=Counts(), later=list(named.values()))
+        for k, meeting_id in enumerate(ids):
+            grown = self.suggested(found, meeting_id, [named[i] for i in ids[k + 1 :]])
+            if k and fits is not None and not fits(grown):
+                break
+            found = grown
+        return found
+
+    def suggested(self, found: LedgerRead, meeting_id: str, later: list[str]) -> LedgerRead:
+        """A suggest's read with one meeting more and its items, `later` the refs still to answer."""
         suggested = index_ledger.suggest(self.conn, meeting_id)
         rows = {r.id: r for r in self.items(f" WHERE id IN ({', '.join('?' * len(suggested))})",
                                             [s.item for s in suggested])} if suggested else {}  # fmt: skip
-        items = [rows[s.item].model_copy(update={"why": s.why}) for s in suggested]
-        meetings = self.meeting_rows(self.conn.execute(f"{MEETINGS} WHERE id = ?", (meeting_id,)).fetchall())
-        counts = Counts(items=len(items), meetings=1, points_open=meetings[0].points_open)
-        return LedgerRead(view="suggest", today=self.today, counts=counts, items=items, meetings=meetings)
+        (meeting,) = self.meeting_rows(self.conn.execute(f"{MEETINGS} WHERE id = ?", (meeting_id,)).fetchall())
+        items = [rows[s.item].model_copy(update={"why": s.why, "suggested_for": meeting.ref}) for s in suggested]
+        counts = Counts(items=found.counts.items + len(items), meetings=found.counts.meetings + 1,
+                        points_open=found.counts.points_open + meeting.points_open)  # fmt: skip
+        return found.model_copy(
+            update={"items": [*found.items, *items], "meetings": [*found.meetings, meeting], "counts": counts,
+                    "later": later}
+        )  # fmt: skip
 
     # -- show ---------------------------------------------------------------------------------------------------------
 
@@ -1084,9 +1123,11 @@ def lines(found: LedgerRead, tz: ZoneInfo) -> list[str]:
         out.append(f"{_n(c.meetings, 'meeting')}, {_n(c.points_open, 'point')} open; {_window(found)}")
         out += [meeting_line(m, today) for m in found.meetings]
     else:
-        out += [meeting_line(m, today) for m in found.meetings]
-        out.append(f"{c.items} to raise")
-        out += [item_line(i, today) for i in found.items]
+        for meeting in found.meetings:
+            raised = [i for i in found.items if i.suggested_for == meeting.ref]
+            out += [meeting_line(meeting, today), f"{len(raised)} to raise", *(item_line(i, today) for i in raised)]
+        if found.later:
+            out.append(f"past the room, not suggested: ask again with refs for {', '.join(found.later)}")
     return out
 
 

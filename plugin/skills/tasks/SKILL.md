@@ -57,9 +57,11 @@ For each item:
 1. **Read it.** `queue` once more, since the page may have closed, snoozed or triaged items meanwhile, and take the
    next as it reads now. Then `ledger` view `show` with its `ref`: its fields, notes, materials and log.
 2. **The facts.** Read its `source` and its log's locators only as far as the facts need:
-   - `read` each one. A recording: its note, then the vendor's summary and the transcript around the moment
-     (`read(locator="r:<rid>@<mm:ss>", view="raw", around=2)`), the whole exchange: a note is a compression and
-     loses detail.
+   - `read` them in one call, its source first: `read(locator="<its source>", more=["<a log's locator>"])`, each
+     under its own `== <locator>` line. While `later` lists locators past the room, read again, its first as
+     `locator` and the rest in `more`, until `later` is empty. A recording: its note, then
+     the vendor's summary and the transcript around the moment (`read(locator="r:<rid>@<mm:ss>", view="raw",
+     around=2)`), the whole exchange: a note is a compression and loses detail.
    - A locator `read` can't open, such as an old path or a record that moved: `search` its words around its day
      (`search(query="<its words>", since="<a few days before>", until="<a few days after>")`).
    - Anything you will draft in the user's name: `search` the topic for the other notes and recordings, and read
@@ -156,7 +158,7 @@ triages in chat. The reads come from the vault:
 |---|---|
 | the queue | `docket ledger queue --vault <vault>` |
 | an item, a meeting | `docket ledger show <ref> --vault <vault>` |
-| a meeting's suggestions | `docket ledger suggest <meeting> --vault <vault>` |
+| the suggestions for meetings | `docket ledger suggest <meeting>... --vault <vault>`, several at once |
 
 Each item's batch is the same ops, a JSON array on stdin to `docket ledger batch --vault <vault>`; a refused change
 exits 1 and writes nothing. `read` and `search` go as `/docket:recall` says with the service down.

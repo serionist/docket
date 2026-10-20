@@ -293,6 +293,11 @@ Unreleased in the same PR.
 
 ### Changed
 
+- The `read` tool takes `more`, further locators read in the same call, and the `ledger` tool's suggest takes `refs`,
+  several meetings, each item saying which meeting it is for. As many as fit 40,000 characters come back, the rest
+  listed in `later` to ask for again, and a locator that doesn't open says why without failing the others. A sync's
+  agents check their locators in one read and its prep asks one suggest; `docket ledger suggest` takes several
+  meetings too.
 - `/docket:sync` drafts its batch with `docket sync reconcile`: the closes, asks, invites, meetings, links, minutes and
   streams its agents found go into one file by fixed rules, an ask that continues an open item logged there, and only
   what the rules can't settle (a look-alike, a thread another item shares, a recording reported again, two meetings at

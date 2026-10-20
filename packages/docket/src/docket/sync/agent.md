@@ -105,8 +105,12 @@ that item in its line's continues field: the sync logs it there. A new piece of 
 
 ## 6. Check
 
-`read` every locator in your block. A line whose locator doesn't open, or opens a record that doesn't say it, is
-dropped.
+Every locator in your block, in one call: `read(locator="<the first>", more=["<the second>", "<the third>"],
+view="raw")`. A recording's line is checked at its moment (`r:<rid>@mm:ss`), since step 4 read it whole; a doc id is
+checked in a read of its own, with the default summary view. Each comes back under its own `== <locator>` line, and
+one that doesn't open says why there while the rest still read. A line whose locator doesn't open, or opens a record
+that doesn't say it, is dropped. While the answer lists locators in `later`, past the room, read again, its first as
+`locator` and the rest in `more`, until `later` is empty.
 
 ## 7. Write the block, return its RUN line
 

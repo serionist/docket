@@ -7,16 +7,20 @@ from collections.abc import Awaitable, Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
-from docket_testkit import configure, index_template
+from docket_testkit import FLEET, configure, index_template
 from mcp import Client
 from mcp.types import CallToolResult, TextContent
 from media_kit import CALL, audio, media_vault
 from starlette.testclient import TestClient
 
-from docket.ledger import ops
+from docket import render
+from docket.ledger import ops, views
 from docket.media.put import drop_folder
+from docket.recall import ReadResult
+from docket.service import calls
 from docket.service.app import create_app
 from docket.service.state import Service, Settings
 from docket.service.tools import create_mcp
@@ -166,6 +170,96 @@ def test_a_docket_error_is_a_tool_error_claude_reads(service: Service) -> None:
     result = call(service, "read", {"locator": "minutes:2026-01-01-nothing"})
     assert result.is_error
     assert "no doc minutes:2026-01-01-nothing" in text_of(result)
+
+
+# -- several in one call (DR-0725) -----------------------------------------------------------------------------------
+
+
+def as_claude_gets_it(result: CallToolResult) -> int:
+    """A result's text and its structured content as JSON with the default spacing: more than the room counts."""
+    return len(text_of(result)) + len(json.dumps(result.structured_content))
+
+
+def test_read_with_more_reads_each_under_its_own_line_and_a_problem_stays_its_own(service: Service) -> None:
+    review, nothing = "minutes:2026-10-13-fleet-review", "minutes:2026-01-01-nothing"
+    asked = {"locator": review, "more": [nothing, FLEET]}
+    found = call(service, "read", asked)
+    assert not found.is_error and found.structured_content is not None, text_of(found)
+    data = found.structured_content
+    assert [one["locator"] for one in [data, *data["more"]]] == [review, nothing, FLEET]
+    assert (data["doc"]["id"], data["more"][0]["problems"], data["later"]) == (review, [f"no doc {nothing}"], [])
+    lines = text_of(found).splitlines()
+    assert [line for line in lines if line.startswith("== ")] == [f"== {review}", f"== {nothing}", f"== {FLEET}"]
+    assert lines[lines.index(f"== {nothing}") + 1] == f"! no doc {nothing}"
+    refused = call(service, "read", {**asked, "rev": 1})
+    assert refused.is_error and text_of(refused).endswith(
+        "rev is one doc's earlier revision: read it alone, without more"
+    )
+
+
+def test_read_with_more_answers_up_to_the_room_and_leaves_the_rest_in_later(service: Service) -> None:
+    """One long note read by its id and by ways of writing its path, each read whole: as many as fit 40,000
+    characters, text and JSON together, then the rest in later, in order, which the text's last line names."""
+    said = "\n".join(
+        f"- The charging queue comes before the pilot, point {n:03d} of the memo. @00:40" for n in range(40)
+    )
+    long_note = FLEET_NOTE.replace("fleet-check", "fleet-long").split("\n- ", 1)[0] + f"\n{said}\n"
+    assert not call(service, "doc_put", {"text": long_note}).is_error
+    path = "processed/recording-note/2026/10/2026-10-15-fleet-long.md"
+    folders = path.split("/")
+    asked = [
+        "recording-note:2026-10-15-fleet-long", f"./{path}", path.replace("/", "\\"),
+        *("/".join([*folders[:k], ".", *folders[k:]]) for k in range(1, len(folders))),
+    ]  # fmt: skip
+    found = call(service, "read", {"locator": path, "more": asked})
+    assert not found.is_error and found.structured_content is not None, text_of(found)
+    model = ReadResult.model_validate(found.structured_content)
+    kept = [one.locator for one in model.more]
+    assert kept and model.later and [*kept, *model.later] == asked
+    assert {one.doc.id for one in (model, *model.more) if one.doc} == {"recording-note:2026-10-15-fleet-long"}
+    size = calls.size(model, render.reads(model))
+    assert size <= calls.ROOM < size + size // (1 + len(kept)), size
+    assert as_claude_gets_it(found) < 50_000
+    last = text_of(found).splitlines()[-1]
+    assert last == render.reads(model)[-1] and last.startswith(
+        f"past the room, not read: ask again with locator {model.later[0]}"
+    )
+
+
+def test_ledger_suggest_with_refs_answers_up_to_the_room_and_only_suggest_takes_refs(service: Service) -> None:
+    """Twenty asks on Ada and eight meetings she runs: each meeting raises fifteen of them, every row saying its
+    meeting, as many meetings as fit the room, then the rest in later by the refs given."""
+    adds = [
+        {"op": "add", "fields": {
+            **LEDGER_ADD["fields"], "source": f"chat:C0TEST/17910001{n:02d}.000100",
+            "title": f"Book hall{n:03d} for crew{n:03d} with plan{n:03d}, menu{n:03d} and pass{n:03d}",
+        }}
+        for n in range(20)
+    ]  # fmt: skip
+    meetings = [
+        {"op": "meeting", "fields": {
+            "subject": f"Ada's review {n}", "organiser": "Ada Example", "start": f"2026-11-{n + 2:02d}T10:00+01:00",
+            "end": f"2026-11-{n + 2:02d}T10:30+01:00",
+        }}
+        for n in range(8)
+    ]  # fmt: skip
+    written = call(service, "ledger_batch", {"ops": [*adds, *meetings]})
+    assert not written.is_error, text_of(written)
+    refs = [f"M-{n:04d}" for n in range(1, 9)]
+    found = call(service, "ledger", {"view": "suggest", "refs": refs})
+    assert not found.is_error and found.structured_content is not None, text_of(found)
+    model = views.LedgerRead.model_validate(found.structured_content)
+    kept = [m.ref for m in model.meetings]
+    assert kept and model.later and [*kept, *model.later] == refs
+    assert [i.suggested_for for i in model.items] == [ref for ref in kept for _ in range(15)]
+    size = calls.size(model, views.lines(model, ZoneInfo("Europe/Budapest")))
+    assert size <= calls.ROOM < size + size // len(kept), size
+    assert as_claude_gets_it(found) < 50_000
+    last = text_of(found).splitlines()[-1]
+    assert last == f"past the room, not suggested: ask again with refs for {', '.join(model.later)}"
+    refused = call(service, "ledger", {"view": "list", "refs": refs})
+    assert refused.is_error
+    assert text_of(refused).endswith("list takes who, stream, kind, state, since, until, k, not refs")
 
 
 def test_a_refused_doc_lists_every_problem_with_its_line(service: Service) -> None:

@@ -37,7 +37,7 @@ The Docket app: the vault, the service (web app, MCP endpoint, scheduler) and th
 | `docket ledger queue` | the open items to work through: the untriaged first, a snooze whose day has come among them, then by triage (discuss, claude, me, chase), each by due |
 | `docket ledger list` | the items by `--who` (a part of the name), `--stream`, `--kind`, `--state open\|snoozed\|done\|dropped\|all` (open takes a snooze whose day has come, snoozed only those still asleep) and the day they opened (`--since`, `--until`), with counts over all of them: by state, overdue, chased and the median days to done; `-k` rows of text, 50 by default |
 | `docket ledger meetings` | the meetings overlapping a window, today to six days on by default; minutes around a time find the meeting a recording was made in |
-| `docket ledger suggest <M->` | the open items worth raising in a meeting, each with why; it writes nothing |
+| `docket ledger suggest <M->...` | the open items worth raising in each meeting given, in order, each with why, an item for two meetings under each; it writes nothing |
 | `docket ledger day` | your day, as the session start says it: each live source's last sync and the ones due, a status file a hand edit holds, the queue's counts with the discuss and claude rows, today's meetings still to come and the next working day's with their open points and items, then what is overdue or due today, replies owed, decisions and tasks due this week, invites, waits over three days and the streams not closed; an item listed once among those; at most 45 lines, each cut section keeping its count; `--json` gives every row |
 | `docket ledger batch [file or -]` | the ledger's changes in one write, every one or none, as the `ledger_batch` tool makes them: a JSON array or JSON lines with `#` comments, such as a sync's draft; `--by user\|claude\|sync` unless an op says, `as` on an add, a meeting, a point or a point's item naming it for a later op's `$name`; `--dry-run` first, which lists every change it would refuse and exits 1 if any |
 | `docket ledger calendar [--since DAY]` | the meetings caught up with the calendar's event records in raw, by sync: what a stopped step left pending first, sets included, then each record from DAY (14 days back by default), adding a meeting or joining the old one with its start and subject, never setting one, in writes of about 200 records, whole days each; `--dry-run` first names the joins and the near misses |
@@ -319,7 +319,8 @@ A source syncs from any Claude Code session with the plugin: ask Claude to sync 
 the source's skill, and closes the run with `ingest` (DR-0240 to DR-0252). The plugin's capture hook hands Docket what
 each of the source's tools returned, so Claude never retypes a payload. `/docket:sync` runs every live source this way,
 each in an agent of its own from a sync folder (DR-0720), and writes what they found into the ledger in one batch,
-which `docket sync reconcile` drafts and `ledger_batch` writes from its file (DR-0721, DR-0723, DR-0724); the plugin's
+which `docket sync reconcile` drafts and `ledger_batch` writes from its file (DR-0721, DR-0723, DR-0724). Its agents
+check their locators in one `read` with `more`, and its prep asks one `suggest` with `refs` (DR-0725); the plugin's
 README says how.
 
 | Part | What |

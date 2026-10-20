@@ -45,8 +45,9 @@ follow <the prompt's path>`, the path as the line gives it. Never write a prompt
 filled each from Docket's own.
 
 - Each agent reads the ledger from the sync folder's `context.md`, runs its source through `run_open`, the source's
-  skill and its `sync.md`, classifies and promotes its own records, reads its recordings whole, writes its block to
-  `blocks/<source>.txt` in the sync folder, and returns its RUN line alone.
+  skill and its `sync.md`, classifies and promotes its own records, reads its recordings whole, checks every locator
+  it reports in one `read` with `more`, writes its block to `blocks/<source>.txt` in the sync folder, and returns its
+  RUN line alone.
 - The agents may share one browser, a tab each. A run that stops short leaves its mark and the others go on: its RUN
   line says why, and the summary names it.
 - The blocks are read by Docket, not by you: the reconcile prints their RUN and LEARNED lines and quotes each line it
@@ -105,10 +106,11 @@ Then, in this thread:
    delete it. Decide by the continuing-work rule, and by `CLAUDE.md` for names, streams and slots. The writer refuses
    a line left unsure, so none slips through.
 2. Prep, at the `# prep` line: for its meetings the user presents in or owns a part of, customer meetings and new
-   series, `ledger` view `suggest` for each, and the items the user would raise, each a `point` with `proposed` and
-   its `item`, worded as a question for that call; none the dry run shows rolled in, none for dailies, standups or
-   routine syncs. A prep `add`, a task due the working day before, only for real work before the call: a deck, a
-   document, a demo.
+   series, one `ledger` view `suggest` for all of them, `ledger(view="suggest", refs=["M-0002", "M-0003"])`, each
+   item row naming in `suggested_for` the meeting it is for. While `later` lists meetings past the room, ask again
+   with those as `refs`, until `later` is empty. Then the items the user would raise, each a `point` with `proposed`
+   and its `item`, worded as a question for that call; none the dry run shows rolled in, none for dailies, standups or routine syncs. A prep `add`, a task due
+   the working day before, only for real work before the call: a deck, a document, a demo.
 3. `ledger_batch(ops=[], file="<the draft's path>", by="sync", dry_run=true)`. It lists every refusal: fix each in
    the file and dry run again. A look-alike becomes a `log` on the item it names, unless it really is another ask
    (`force: true`).

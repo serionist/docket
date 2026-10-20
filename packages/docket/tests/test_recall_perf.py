@@ -1,5 +1,5 @@
 """A read, a verify and a put's anchor checks on a big source: by their places in the index they don't grow with the
-source's raw (#76, #111, DR-0446, DR-0522).
+source's raw (#76, #111, DR-0446, DR-0522); and a read of forty locators in one call, in under a second (DR-0725).
 
 The vault holds about 50 MB of invented Plaud raw in one source, 5 MB under coverage, where nothing is timed, and a
 summary of its middle recording's transcript. Each call is timed by place, best of five, and once with the source
@@ -20,8 +20,9 @@ from pathlib import Path
 import pytest
 from docket_testkit import BIG_NOTE, BIG_OLD, best_of, big_raw, note, shared, traced
 
-from docket import index, recall
+from docket import index, recall, render
 from docket.index.lookup import ReadIndex, open_read
+from docket.service import calls as service_calls
 from docket.vault.docstore import DocStore
 from docket.vault.processed import DocRefusedError
 from docket.vault.spans import RawLookup
@@ -31,6 +32,8 @@ MEGABYTES = 50
 TRACED_MEGABYTES = 5
 # What a read by place needs alone, about ten times what it takes on a desktop; loading 50 MB takes about 800 ms.
 SECONDS = 0.1
+# A read of forty locators with more, by place, measured against the room after each (DR-0725).
+MANY_SECONDS = 1.0
 TIMES = 5
 BIG_SUMMARY = "recording-note:2026-05-10-big-call"
 
@@ -136,6 +139,30 @@ def test_verify_and_a_put_s_checks_by_place_don_t_grow_with_their_source(
     }
     for name, call in calls.items():
         both_routes(name, call, monkeypatch)
+
+
+@pytest.mark.perf
+def test_a_read_of_40_locators_by_place_answers_in_under_a_second(big: tuple[Vault, str]) -> None:
+    """An agent's check: forty moments, two on each of twenty transcripts, which the traced vault's 5 MB holds too, in
+    one read with more, each read by place and the result measured against the room as the tool measures it, every
+    read kept (DR-0725). Run once before the clock starts."""
+    vault, _ = big
+    asked = [f"r:plaud:of_{n:032x}/transaction@{at}" for n in range(20) for at in ("00:10", "01:00")]
+
+    def fits(result: recall.ReadResult) -> bool:
+        return service_calls.size(result, render.reads(result)) <= service_calls.ROOM
+
+    def check() -> recall.ReadResult:
+        return recall.read_many(vault, asked[0], asked[1:], fits=fits)
+
+    check()
+    run = best_of(3, check)
+    found = run.result
+    print(f"\nread of {len(asked)} locators: {run.seconds * 1000:.0f} ms ({run.runs('ms')})")
+    assert ([one.locator for one in (found, *found.more)], found.later) == (asked, [])
+    assert not any(one.problems for one in (found, *found.more))
+    if not traced():
+        assert run.seconds < MANY_SECONDS, f"a read of 40 locators took {run.seconds:.2f} s, over {MANY_SECONDS} s"
 
 
 def test_the_fixture_is_the_size_asked_for(big: tuple[Vault, str]) -> None:

@@ -472,7 +472,7 @@ def copy_vault(template: Path, tmp_path: Path) -> Vault:
 
 READ_ROUTES = ["parse", "index"]
 # The calls a route takes: each asks the raw log through the index when it is current (DR-0446, DR-0522).
-ROUTED = ("read", "verify", "doc_put", "resolves")
+ROUTED = ("read", "read_many", "verify", "doc_put", "resolves")
 # And a notes import, which checks every note's covers through one lookup (DR-0522); it parses every legacy doc itself.
 IMPORTS = ("import_notes",)
 

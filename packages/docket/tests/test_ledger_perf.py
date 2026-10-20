@@ -4,10 +4,11 @@ it, 500 of its items shells, in under two and a half, and a write's next gate ca
 quarter of a second, matching nothing (DR-0694); all of it folded into the index's tables in under two seconds; one
 op more, on an item or a meeting, as a write leaves it, read into them in a tenth of a second; a write touching one
 meeting planned in a tenth of a second, reading only its part (DR-0616, DR-0628, DR-0633, DR-0635); a snapshot of
-it, every item open, read from the tables with its lines in a fifth of a second (DR-0638); the day's route on a vault
-holding it in half a second (DR-0672); all of it as `docket ledger show --all --json` gives it, stamped, with its
-JSON, in under two seconds (DR-0659); a sync folder written from it, every open item a line, in under a second
-(DR-0720); and a sync's batch drafted against it from 200 block lines in under three (DR-0723).
+it, every item open, read from the tables with its lines in a fifth of a second (DR-0638), and a suggest for ten
+of its meetings in half a second (DR-0725); the day's route on a vault holding it in half a second (DR-0672); all of
+it as `docket ledger show --all --json` gives it, stamped, with its JSON, in under two seconds (DR-0659); a sync
+folder written from it, every open item a line, in under a second (DR-0720); and a sync's batch drafted against it
+from 200 block lines in under three (DR-0723).
 
 The ops are written as the writer writes them, a month file per machine, each item an add and nine changes, each
 meeting four points answered and a point rolled from the meeting before it in its weekly series of fifty. Wall time
@@ -43,6 +44,7 @@ from docket.index.schema import LEDGER_TABLES
 from docket.ledger import load, ops, store, views, whole
 from docket.ledger.ops import Op
 from docket.media.keystore import KeyStore
+from docket.service import calls as service_calls
 from docket.service.app import create_app
 from docket.service.state import Settings
 from docket.sync import reconcile as sync_reconcile
@@ -62,6 +64,7 @@ REBUILD_SECONDS = 2.0
 CATCH_UP_SECONDS = 0.1
 WRITE_SECONDS = 0.1
 SNAPSHOT_SECONDS = 0.2
+SUGGEST_SECONDS = 0.5
 DAY_SECONDS = 0.5
 SHOW_ALL_SECONDS = 2.0
 SYNC_START_SECONDS = 1.0
@@ -338,6 +341,42 @@ def test_a_snapshot_of_a_ledger_that_size_reads_from_the_index_in_a_fifth_of_a_s
     if not traced():
         elapsed = timed["snapshot"].seconds
         assert elapsed < SNAPSHOT_SECONDS, f"a snapshot took {elapsed:.2f} s, over {SNAPSHOT_SECONDS} s"
+
+
+@pytest.mark.perf
+def test_a_suggest_for_ten_meetings_of_that_ledger_reads_in_half_a_second(tmp_path: Path) -> None:
+    """One suggest with refs for ten meetings, each asking every open item of the 5,000, with its lines and the room
+    measured after each meeting as the tool measures it (DR-0725); read once before the clock starts."""
+    root = tmp_path / "vault"
+    build(root)
+    conn = sqlite3.connect(tmp_path / "index.sqlite", isolation_level=None)
+    tz = ZoneInfo("Europe/Budapest")
+    at = datetime(2026, 6, 1, 8, tzinfo=UTC)
+    ask = views.Ask(view="suggest", refs=tuple(f"M-{n:04d}" for n in range(1, 11)))
+
+    def fits(found: views.LedgerRead) -> bool:
+        return service_calls.size(found, views.lines(found, tz)) <= service_calls.ROOM
+
+    def suggest() -> tuple[views.LedgerRead, list[str]]:
+        found = views.read(conn, ask, tz, at, fits=fits)
+        return found, views.lines(found, tz)
+
+    try:
+        conn.executescript(LEDGER_TABLES)
+        conn.execute("BEGIN")
+        ledger_index.rebuild(conn, root)
+        conn.execute("COMMIT")
+        suggest()
+        run = best_of(3, suggest)
+    finally:
+        conn.close()
+    found, _ = run.result
+    print(f"suggest for 10 meetings: {run.seconds * 1000:.0f} ms ({run.runs('ms')})")
+    assert ([m.ref for m in found.meetings], found.later) == (list(ask.refs), [])
+    if not traced():
+        assert run.seconds < SUGGEST_SECONDS, (
+            f"a suggest for 10 meetings took {run.seconds:.2f} s, over {SUGGEST_SECONDS}"
+        )
 
 
 @pytest.mark.perf

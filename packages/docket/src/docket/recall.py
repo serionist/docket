@@ -21,7 +21,7 @@ DR-0522). A put holds the index only while it checks, never under the vault's lo
 from __future__ import annotations
 
 import os
-from collections.abc import Generator, Iterable
+from collections.abc import Callable, Generator, Iterable, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
@@ -106,10 +106,10 @@ class LegacyRef(BaseModel):
     old_paths: list[str]
 
 
-class ReadResult(BaseModel):
-    """What `read` found. `resolved` is the canonical locator a path or a recording's time led to (a doc id, or
-    `r:<rid>@<time>` on the transcript the time was placed on), so an answer cites that; `problems` says what couldn't
-    be placed."""
+class LocatorRead(BaseModel):
+    """What `read` found at one locator. `resolved` is the canonical locator a path or a recording's time led to (a doc
+    id, or `r:<rid>@<time>` on the transcript the time was placed on), so an answer cites that; `problems` says what
+    couldn't be placed, and, in a read of several, why a locator didn't open."""
 
     locator: str
     view: View
@@ -119,6 +119,15 @@ class ReadResult(BaseModel):
     legacy: list[LegacyRef] = Field(default_factory=list[LegacyRef])
     resolved: str | None = None
     problems: list[str] = Field(default_factory=list[str])
+
+
+class ReadResult(LocatorRead):
+    """What `read` found: the first locator's read, then, in a read of several (DR-0725), each further locator's in
+    `more`, in order, and in `later` those past the room, left unread. Not a model inside itself, so its schema stays
+    an object at the top, as an MCP tool's output schema is."""
+
+    more: list[LocatorRead] = Field(default_factory=list[LocatorRead])
+    later: list[str] = Field(default_factory=list[str])
 
 
 class VerifiedRef(BaseModel):
@@ -197,16 +206,59 @@ def read(vault: Vault, locator: str, view: str = "summary", around: int = 0, rev
     """A doc or a record by locator. `summary` is the doc, or the doc lines that point at the record; `raw` is the
     covered records, or the raw the locator points at; `both` is both. `around` widens a record's raw: minutes either
     side of a time, paragraphs either side of a paragraph, messages either side in a thread."""
+    the_view = _checked(view, around)
+    call = _Call(vault)
+    try:
+        return ReadResult(**dict(_read(call, locator, the_view, around, rev)))
+    finally:
+        call.close()
+
+
+def read_many(
+    vault: Vault,
+    locator: str,
+    more: Sequence[str],
+    *,
+    view: str = "summary",
+    around: int = 0,
+    fits: Callable[[ReadResult], bool] | None = None,
+) -> ReadResult:
+    """Several locators read as `read` reads each, through one `_Call`, its index opened once (DR-0725): the first in
+    the result, each further one in `more`, in order, a locator given twice read once. One that doesn't open is a
+    problem of its own read, never the call's error. `fits` says whether a result still fits its room: each further
+    read is kept only while the result with it, the locators after it in `later`, fits, and the first it doesn't fit,
+    with every one after it, is left in `later` unread. The first is always read."""
+    the_view = _checked(view, around)
+    rest = [given for given in dict.fromkeys(more) if given != locator]
+    call = _Call(vault)
+    try:
+        found = ReadResult(**dict(_opened(call, locator, the_view, around)), later=rest)
+        for k, given in enumerate(rest):
+            grown = found.model_copy(
+                update={"more": [*found.more, _opened(call, given, the_view, around)], "later": rest[k + 1 :]}
+            )
+            if fits is not None and not fits(grown):
+                break
+            found = grown
+        return found
+    finally:
+        call.close()
+
+
+def _checked(view: str, around: int) -> View:
     if view not in VIEWS:
         raise DocketError(f"view is one of {', '.join(VIEWS)}, not {view!r}")
     if around < 0:
         raise DocketError("around counts minutes, paragraphs or messages either side; it can't be negative")
-    the_view: View = "summary" if view == "summary" else "raw" if view == "raw" else "both"
-    call = _Call(vault)
+    return "summary" if view == "summary" else "raw" if view == "raw" else "both"
+
+
+def _opened(call: _Call, locator: str, view: View, around: int) -> LocatorRead:
+    """A locator's read in a read of several: one that doesn't open says why in its problems."""
     try:
-        return _read(call, locator, the_view, around, rev)
-    finally:
-        call.close()
+        return _read(call, locator, view, around, None)
+    except DocketError as e:
+        return LocatorRead(locator=locator, view=view, problems=[str(e)])
 
 
 class _Index:
@@ -366,7 +418,7 @@ def _resolves(call: _Call, locator: str) -> bool:
         return False
 
 
-def _read(call: _Call, locator: str, view: View, around: int, rev: int | None) -> ReadResult:
+def _read(call: _Call, locator: str, view: View, around: int, rev: int | None) -> LocatorRead:
     value = locator.strip()
     try:
         path = None if value.startswith(("[", "r:")) else split_path_locator(value)
@@ -387,7 +439,7 @@ def _read(call: _Call, locator: str, view: View, around: int, rev: int | None) -
         raise DocketError(f"no record {loc.value} in the raw log{hint}")
     asked = versions[-1].rid
     anchor = loc.anchor or Anchor(asked, "record")
-    result = ReadResult(locator=locator, view=view)
+    result = LocatorRead(locator=locator, view=view)
     if anchor.kind == "time":
         timed = call.raw.timed([asked])
         if len(timed) > 1:
@@ -419,7 +471,7 @@ def _read(call: _Call, locator: str, view: View, around: int, rev: int | None) -
 
 def _read_path(
     call: _Call, locator: str, *, found: tuple[str, Anchor | None], view: View, around: int, rev: int | None
-) -> ReadResult:
+) -> LocatorRead:
     """A doc by a path: one in the vault's processed/ folder, else a legacy note by its old path; with a time, the
     raw at that time in the one transcript it covers, or that is under a recording it covers (DR-0370), and the lines
     on that transcript and its recording (DR-0440)."""
@@ -663,10 +715,10 @@ def _load(store: DocStore, kind: str, value: str, rev: int | None) -> ProcessedD
     return found
 
 
-def _read_doc(call: _Call, doc: ProcessedDoc, locator: str, view: View) -> ReadResult:
+def _read_doc(call: _Call, doc: ProcessedDoc, locator: str, view: View) -> LocatorRead:
     meta = doc.meta
     store = call.store
-    result = ReadResult(locator=locator, view=view)
+    result = LocatorRead(locator=locator, view=view)
     if view != "raw":
         superseded_by = call.superseded_by(meta.id)
         marks = _marks(call, doc)

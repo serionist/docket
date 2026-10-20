@@ -574,6 +574,13 @@
         "locator": {
           "type": "string"
         },
+        "more": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "rev": {
           "anyOf": [
             {
@@ -783,6 +790,72 @@
           ],
           "type": "object"
         },
+        "LocatorRead": {
+          "properties": {
+            "doc": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/DocView"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "legacy": {
+              "items": {
+                "$ref": "#/$defs/LegacyRef"
+              },
+              "type": "array"
+            },
+            "lines": {
+              "items": {
+                "$ref": "#/$defs/CitingLine"
+              },
+              "type": "array"
+            },
+            "locator": {
+              "type": "string"
+            },
+            "problems": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "resolved": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "spans": {
+              "items": {
+                "$ref": "#/$defs/Span"
+              },
+              "type": "array"
+            },
+            "view": {
+              "enum": [
+                "summary",
+                "raw",
+                "both"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "locator",
+            "view"
+          ],
+          "type": "object"
+        },
         "Segment": {
           "additionalProperties": false,
           "properties": {
@@ -961,6 +1034,12 @@
           ],
           "default": null
         },
+        "later": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "legacy": {
           "items": {
             "$ref": "#/$defs/LegacyRef"
@@ -975,6 +1054,12 @@
         },
         "locator": {
           "type": "string"
+        },
+        "more": {
+          "items": {
+            "$ref": "#/$defs/LocatorRead"
+          },
+          "type": "array"
         },
         "problems": {
           "items": {
@@ -2325,6 +2410,13 @@
           ],
           "default": null
         },
+        "refs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "since": {
           "anyOf": [
             {
@@ -2750,6 +2842,17 @@
             "stream": {
               "type": "string"
             },
+            "suggested_for": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "title": {
               "type": "string"
             },
@@ -3086,6 +3189,13 @@
           "default": [],
           "items": {
             "$ref": "#/$defs/ItemRow"
+          },
+          "type": "array"
+        },
+        "later": {
+          "default": [],
+          "items": {
+            "type": "string"
           },
           "type": "array"
         },

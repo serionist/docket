@@ -126,7 +126,7 @@ agrees in the issue or, under an autonomy grant, with its decision recorded as p
 - the media key export's file, `schema_version` 1, which users keep as their backup (DR-0550);
 - the MCP tools' names and parameters: `search`, `read`, `verify` and `doc_put` (DR-0150), `run_open` and `ingest`
   (DR-0241), `media_put` (DR-0547), `briefs` (DR-0556), `decisions` (DR-0565), `transcribe` (DR-0571), `ledger` and
-  `ledger_batch`: views, ops, keys, `$name`, results (DR-0637 to DR-0640, DR-0660), its `file` (DR-0724); the server key `docket` (DR-0160);
+  `ledger_batch`: views, ops, keys, `$name`, results (DR-0637 to DR-0640, DR-0660), its `file` (DR-0724), `read`'s `more` and `ledger`'s `refs` (DR-0725); the server key `docket` (DR-0160);
 - the plugin's skill and hook names: `recall`, `setup`, `cuts` (DR-0605), `curate` (DR-0472), `brief` (DR-0555), `decision` (DR-0563), `sync` and `tasks` (DR-0685), the SessionStart
   hook running `docket hook session-start` (DR-0161), and the PostToolUse hook running `docket hook post-tool-use`
   for `mcp__.*`, with its line prefixes (DR-0242); the sync's block (DR-0722); a source's `sync.md` (DR-0688);

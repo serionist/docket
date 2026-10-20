@@ -41,7 +41,8 @@ as they came) and processed (notes, minutes and digests whose every line points 
 
 - Find with `search`; each hit has a locator.
 - Read a summary first with `read`, then check every fact you use against its raw: `verify` puts a doc's lines next \
-to their raw spans, and `read` with view=raw shows the raw a locator points at.
+to their raw spans, and `read` with view=raw shows the raw a locator points at. `more` reads several locators in one \
+call.
 - Answer with locators. When a summary and its raw disagree, say so.
 - Write a processed doc with `doc_put`: every content line ends with anchors to the raw it came from, or with \
 `[d:<doc id>@<rev>#<n>]` for a line of another doc it was built from (`verify` gives each line's as its `cite`). \
@@ -59,8 +60,8 @@ the transcript waits at the gate like any record.
 - To sync a source, call `run_open` with its name, alone, and follow the skill and the steps it gives; a source's \
 name is a key under sources in vault.yaml. Close the run with `ingest`.
 - Read the ledger, its items, meetings, talking points and streams, with `ledger`: a snapshot by default, show for \
-one whole, queue, list with filters, meetings in a window, suggest for a meeting. A source in it is a locator that \
-`read` opens.
+one whole, queue, list with filters, meetings in a window, suggest for a meeting, or with refs for several. A source \
+in it is a locator that `read` opens.
 - Change the ledger with `ledger_batch`: every change in one batch, all or none, a dry run first. `by` says who \
 decided each change: `user` for what the user said, `claude` for what you did, `sync` in a sync. Nothing is closed \
 without evidence.
@@ -124,7 +125,9 @@ def create_mcp(service: Service) -> MCPServer:
         annotations=READ_ONLY,
         description=(
             "Read a doc, or a record and the doc lines that point at it: the summary first, the raw for accuracy. A "
-            "locator is a doc's id or path, a rid, or r:<rid>@mm:ss (a time) or r:<rid>#n (a paragraph)."
+            "locator is a doc's id or path, a rid, or r:<rid>@mm:ss (a time) or r:<rid>#n (a paragraph). With more, "
+            "several in one call, each under a == <locator> line: one that doesn't open says why there, and those "
+            "past the room of 40,000 characters come back unread in later, to ask for again."
         ),
     )
     async def read(  # pyright: ignore[reportUnusedFunction]
@@ -132,8 +135,11 @@ def create_mcp(service: Service) -> MCPServer:
         view: Annotated[View, Field(description="summary, raw, or both.")] = "summary",
         around: Annotated[int, Field(ge=0, description="Minutes, paragraphs or messages either side.")] = 0,
         rev: Annotated[int | None, Field(ge=1, description="An earlier revision of a doc.")] = None,
+        more: Annotated[
+            Sequence[str], Field(description="Further locators, read like locator in the same call; not with rev.")
+        ] = (),
     ) -> Annotated[CallToolResult, ReadResult]:
-        found, text = await _guarded(calls.read(service, locator, view=view, around=around, rev=rev))
+        found, text = await _guarded(calls.read(service, locator, view=view, around=around, rev=rev, more=more))
         return result(found, text)
 
     @server.tool(
@@ -295,8 +301,8 @@ def create_mcp(service: Service) -> MCPServer:
             "with their points, the streams), show (one item, meeting or stream whole by ref: notes, materials, "
             "points, linked items, history, counts), queue (the open items, untriaged first, then by triage), list "
             "(items by who, stream, kind, state and opened in the window: counts over all, then the first k), meetings "
-            "(those overlapping the window), suggest (what to raise in the meeting ref names). A view refuses a "
-            "parameter it doesn't take."
+            "(those overlapping the window), suggest (what to raise in the meeting ref names, or in each of refs, "
+            "those past the room in later). A view refuses a parameter it doesn't take."
         ),
     )
     async def ledger(  # pyright: ignore[reportUnusedFunction]
@@ -337,8 +343,12 @@ def create_mcp(service: Service) -> MCPServer:
         k: Annotated[
             int, Field(ge=1, le=views.MAX_K, description="list: how many rows; the counts cover every match.")
         ] = views.K,
+        refs: Annotated[
+            Sequence[str],
+            Field(description="suggest: several meetings instead of ref, in order, each item saying its meeting."),
+        ] = (),
     ) -> Annotated[CallToolResult, views.LedgerRead]:
-        ask = views.Ask(view, ref, since, until, who, stream, kind, state, k)
+        ask = views.Ask(view, ref, since, until, who, stream, kind, state, k, refs=tuple(refs))
         found, text = await _guarded(calls.ledger(service, ask))
         return result(found, text)
 

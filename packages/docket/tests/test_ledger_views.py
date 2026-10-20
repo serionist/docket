@@ -475,6 +475,55 @@ def test_suggest_gives_the_meeting_and_what_to_raise_in_it(conn: sqlite3.Connect
     assert said(conn, "suggest", ref="M-4")[1:] == ["0 to raise"]
 
 
+# Ada's own review, two days after the weekly: what is on her is raised there too.
+REVIEW = meeting(36, number=6, subject="Ada's review", organiser="Ada Example", start="2026-10-23T10:00+02:00",
+                 end="2026-10-23T10:30+02:00")  # fmt: skip
+
+
+def test_suggest_over_refs_says_each_item_s_meeting_and_lists_a_shared_item_under_each(tmp_path: Path) -> None:
+    """Several meetings in one read, in the order given, a meeting named twice once (DR-0725): A-0006 is on Ada in
+    both, so it comes under each; A-0001 and A-0002, each on a point of the weekly, only under the review."""
+    conn = tables_of(tmp_path, [*seed(), REVIEW])
+    found = views.read(conn, Ask(view="suggest", refs=("M-6", "M-0001", ulid(36))), TZ, AT)
+    assert [m.ref for m in found.meetings] == ["M-0006", "M-0001"]
+    assert [(i.ref, i.suggested_for) for i in found.items] == [
+        ("A-0001", "M-0006"), ("A-0002", "M-0006"), ("A-0006", "M-0006"), ("A-0006", "M-0001"),
+    ]  # fmt: skip
+    assert (found.counts.items, found.counts.meetings, found.counts.points_open, found.later) == (4, 2, 2, [])
+    assert views.lines(found, TZ) == [
+        "M-0006 10-23 10:00-10:30 Ada's review, Ada Example",
+        "3 to raise",
+        "A-0001 [reply] Ada Example: Send Ada the dates (10d, due 10-18, 2d late) [pilot] @M-0001 <chase>; on Ada "
+        "Example, in the meeting",
+        "A-0002 [waiting] Ben Example: Ben's numbers (2d, snoozed to 10-25) [pilot]; on Ada Example, in the meeting",
+        "A-0006 [reply] Ada Example: Confirm the venue (2d, due 10-23) [pilot]; on Ada Example, in the meeting",
+        "M-0001 10-21 09:00-09:30 Weekly pilot sync, Ada Example [pilot]; 2 open; items A-0001",
+        "1 to raise",
+        "A-0006 [reply] Ada Example: Confirm the venue (2d, due 10-23) [pilot]; on Ada Example, in the meeting",
+    ]
+    # One meeting by ref is the same read as by refs.
+    assert views.read(conn, Ask(view="suggest", ref="M-1"), TZ, AT) == views.read(
+        conn, Ask(view="suggest", refs=("M-1",)), TZ, AT
+    )
+
+
+def test_suggest_answers_as_many_meetings_as_fit_the_room_the_first_always(tmp_path: Path) -> None:
+    """A room that takes one meeting leaves the rest in later, by the refs given, the text's last line asking for
+    them again; one that takes none still answers the first. Every ref is checked first, those past the room too."""
+    conn = tables_of(tmp_path, [*seed(), REVIEW])
+    asked = Ask(view="suggest", refs=("M-6", "M-1", " M-5 "))
+    one = views.read(conn, asked, TZ, AT, fits=lambda r: len(r.meetings) < 2)
+    assert ([m.ref for m in one.meetings], one.later) == (["M-0006"], ["M-1", "M-5"])
+    assert {i.suggested_for for i in one.items} == {"M-0006"} and one.counts.meetings == 1
+    assert views.lines(one, TZ)[-1] == "past the room, not suggested: ask again with refs for M-1, M-5"
+    none = views.read(conn, asked, TZ, AT, fits=lambda _: False)
+    assert (none.meetings, none.later) == (one.meetings, one.later)
+    every = views.read(conn, asked, TZ, AT, fits=lambda _: True)
+    assert ([m.ref for m in every.meetings], every.later) == (["M-0006", "M-0001", "M-0005"], [])
+    with pytest.raises(DocketError, match="suggest takes a meeting: its M- number or its id, not 'A-1'"):
+        views.read(conn, Ask(view="suggest", refs=("M-6", "A-1")), TZ, AT, fits=lambda _: False)
+
+
 # -- show -------------------------------------------------------------------------------------------------------
 
 
@@ -649,7 +698,11 @@ def test_show_and_suggest_refuse_what_names_nothing(tmp_path: Path, view: str, r
         ({"view": "list", "k": 0}, "k is 1 to 500, not 0"),
         ({"view": "list", "k": 501}, "k is 1 to 500, not 501"),
         ({"view": "show"}, "show needs ref, an A- or M- number, an id or a stream"),
-        ({"view": "suggest", "ref": "  "}, "suggest needs ref, a meeting's M- number or id"),
+        ({"view": "suggest", "ref": "  "}, "suggest needs ref, a meeting's M- number or id, or refs"),
+        ({"view": "suggest", "ref": "M-1", "refs": ("M-5",)}, "suggest takes ref or refs, not both"),
+        ({"view": "suggest", "refs": ("M-1", " ")}, "suggest's refs are meetings, each its M- number or its id"),
+        ({"view": "show", "refs": ("M-1",)}, "show takes ref, not refs"),
+        ({"view": "snapshot", "refs": ("M-1",)}, "snapshot takes since, until, not refs"),
     ],
 )
 def test_a_view_refuses_a_parameter_it_doesn_t_take_and_a_value_it_doesn_t_know(
@@ -745,6 +798,18 @@ def test_list_s_text_takes_k_and_its_json_gives_every_row(vault: Vault, capsys: 
                        "--since", "2026-09-01", "--until", "2026-10-31")  # fmt: skip
     assert (code, out.splitlines()[1:]) == (0, ["A-0004 [decision] Ada Example: Pick the vendor (17d, done 10-18, "
                                                 "archived) [pilot]"])  # fmt: skip
+
+
+def test_suggest_takes_several_meetings_and_prints_them_all(vault: Vault, capsys: pytest.CaptureFixture[str]) -> None:
+    """The command has no room: every meeting given is answered, in order (DR-0725)."""
+    write_ops(vault.root, [*seed(), REVIEW])
+    conn = tables_of(vault.root / "tables", [*seed(), REVIEW])
+    several = Ask(view="suggest", refs=("M-6", "M-1"))
+    code, out, _ = run(capsys, "suggest", "M-6", "M-1")
+    assert (code, out.splitlines()) == (0, views.lines(views.read(conn, several, TZ, AT), TZ))
+    code, out, _ = run(capsys, "suggest", "M-6", "M-1", "--json")
+    assert (code, json.loads(out)) == (0, views.read(conn, several, TZ, AT).model_dump(mode="json"))
+    assert run(capsys, "suggest")[0] == 2
 
 
 def test_a_command_s_refusal_is_one_line_and_exit_2(vault: Vault, capsys: pytest.CaptureFixture[str]) -> None:

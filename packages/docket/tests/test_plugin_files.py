@@ -292,9 +292,9 @@ def test_sync_names_commands_options_ops_views_and_tools_docket_has() -> None:
             assert view in VIEWS, (name, view)
         # Any other view named is read's.
         assert set(re.findall(r"view `([a-z]+)`", text)) <= {*VIEWS, *recall.VIEWS}, name
-        for tool, params in re.findall(r"\b(run_open|ingest|ledger_batch)\(([^)]*)\)", text):
+        for tool, params in re.findall(rf"\b({'|'.join(sorted(tools, key=len, reverse=True))})\(([^)]*)\)", text):
             given = {p.split("=")[0].strip() for p in params.split(",") if "=" in p}
-            assert given <= set(tools[tool]["input_schema"]["properties"]), (name, tool)
+            assert given <= set(tools[tool]["input_schema"]["properties"]), (name, tool, given)
     assert seen == {("ledger", "day"), ("staging", "list"), ("staging", "show"), ("staging", "classify"),
                     ("staging", "promote"), ("sync", "start"), ("sync", "notes"), ("sync", "reconcile"),
                     ("ledger", "batch")}  # fmt: skip
@@ -313,6 +313,26 @@ def test_sync_names_commands_options_ops_views_and_tools_docket_has() -> None:
     calls = re.findall(r"\bledger_batch\(([^)]*)\)", skill)
     assert [c.split(", ")[:2] for c in calls] == [["ops=[]", 'file="<the draft\'s path>"']] * 2
     assert calls[0].endswith("dry_run=true") and "dry_run" not in calls[1]
+
+
+def test_the_agents_check_in_one_read_and_the_prep_asks_one_suggest() -> None:
+    """An agent checks every locator of its block in one read with more, a recording at its moment and a doc by its
+    summary, and the prep asks suggest once for all its meetings with refs; each asks again from what `later` lists
+    until it is empty, never from the locator it already read (DR-0725)."""
+    texts = {name: " ".join(text.split()) for name, text in sync_texts().items()}
+    check = texts["agent.md"].split("## 6. Check", 1)[1].split("## 7.", 1)[0]
+    assert re.findall(r"\bread\(([^)]*)\)", check) == [
+        'locator="<the first>", more=["<the second>", "<the third>"], view="raw"'
+    ]
+    assert "in one call" in check and "past the room" in check
+    assert "A recording's line is checked at its moment (`r:<rid>@mm:ss`)" in check
+    assert "a doc id is checked in a read of its own, with the default summary view" in check
+    again = "its first as `locator` and the rest in `more`, until `later` is empty"
+    assert again in check and again in " ".join(tasks_text().split())
+    prep = texts["SKILL.md"].split("2. Prep, at the `# prep` line", 1)[1].split("3. `ledger_batch", 1)[0]
+    assert re.findall(r"\bledger\(([^)]*)\)", prep) == ['view="suggest", refs=["M-0002", "M-0003"]']
+    assert "one `ledger` view `suggest` for all of them" in prep and "`suggested_for`" in prep
+    assert "While `later` lists meetings past the room, ask again with those as `refs`, until `later` is empty" in prep
 
 
 def test_the_sync_s_block_keeps_its_labels_and_each_line_its_fields() -> None:
@@ -481,6 +501,8 @@ def test_tasks_names_commands_options_views_verdicts_ops_and_parameters_docket_h
         assert given <= set(tools[tool]["input_schema"]["properties"]), (tool, given)
     for tool, param in (("ledger", "ref"), ("ledger_batch", "by")):
         assert f"`{param}`" in text and param in tools[tool]["input_schema"]["properties"], (tool, param)
+    # An item's locators in one read, its source first (DR-0725).
+    assert 'read(locator="<its source>", more=["<a log\'s locator>"])' in text
 
 
 def test_tasks_opens_a_page_of_the_web_app_and_its_name_door_holds() -> None:

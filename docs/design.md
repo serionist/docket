@@ -819,7 +819,7 @@ MCP tools:
 | Tool | Does |
 |---|---|
 | `search` | query, boosts and filters (sources, people, entities, since and until as a date or a time, k); hits with locators |
-| `read` | a locator or doc: the summary, the raw, or both, with `around` (minutes, paragraphs or messages) and a doc's `rev` |
+| `read` | a locator or doc: the summary, the raw, or both, with `around` (minutes, paragraphs or messages) and a doc's `rev`; with `more`, several in one call, as many as fit a room of 40,000 characters, the rest in `later` (DR-0725) |
 | `verify` | a doc's lines next to their raw spans |
 | `briefs` | which briefs are stale and why (DR-0556) |
 | `decisions` | each decision and where it stands, with its links both ways and the cite a brief takes (DR-0565) |
@@ -831,7 +831,7 @@ MCP tools:
 | `ingest` | closes a run: the captures the hook kept and the manifest; the source's mapper makes normalized records, the core checks their rids and computes their versions, and they go to staging (DR-0241) |
 | `media_put` | audio or an attachment by path or URL, within the limits in Sources (named folders, https to the hosts `vault.yaml` lists for the source, no private addresses, few redirects, a size cap); the service fetches, encrypts and stores it (phase 2, #42) |
 | `transcribe` | queue a stored recording for Whisper in the service, one job at a time; answers with the job's place (phase 2, DR-0571) |
-| `ledger` | read-only: snapshot, show, queue, list, meetings and suggest, as counts, short lines and locators (DR-0638, DR-0660) |
+| `ledger` | read-only: snapshot, show, queue, list, meetings and suggest, as counts, short lines and locators; suggest for several meetings with `refs`, within the same room (DR-0638, DR-0660, DR-0725) |
 | `ledger_batch` | the ledger's changes in one write, every one or none, `by` on any, `as` and `$name`, a dry run listing every refusal (DR-0639, DR-0640) |
 | `secret` | a named secret, with a confirmation |
 
@@ -851,7 +851,7 @@ Phase 0's plugin, by piece:
 | `curate` | a round in chat over `docket curate`: the cards in one table with Claude's call and why, each decided only on the user's answer for it; seeding from a people directory or glossary in `seeding.md`; only `status`, `show` and `log` pre-approved (DR-0472) |
 | `cuts` | the owner's words for a held recording's left-out stretches placed as time ranges, in a proposals file, shown to the owner, and the release run on their yes; only `docket hold list` and `show` pre-approved (DR-0605) |
 | the capture hook | PostToolUse for `mcp__.*` runs `docket hook post-tool-use`: binds a run, posts the captures an open run of this session wants, one line to Claude each (DR-0242) |
-| `sync` | `docket sync start` writes a sync folder outside the vault, `context.md` (the ledger, an item a line) and each agent's prompt; each live source in an agent of its own through `run_open`, the source's `SKILL.md` and its `sync.md`: it classifies a mixed source's plain records, promotes its own, reads its recordings and writes one block to a file, every locator read; each recording note an agent of its own in the background; then `docket sync reconcile` drafts the batch into the sync folder, Claude settles its unsure lines and adds the prep points, and one `ledger_batch` by `sync` writes the file, dry run first, and the list in chat; only reads and the sync folder's commands pre-approved (DR-0685, DR-0688, DR-0720 to DR-0724) |
+| `sync` | `docket sync start` writes a sync folder outside the vault, `context.md` (the ledger, an item a line) and each agent's prompt; each live source in an agent of its own through `run_open`, the source's `SKILL.md` and its `sync.md`: it classifies a mixed source's plain records, promotes its own, reads its recordings and writes one block to a file, every locator read in one `read`; each recording note an agent of its own in the background; then `docket sync reconcile` drafts the batch into the sync folder, Claude settles its unsure lines and adds the prep points from one `suggest`, and one `ledger_batch` by `sync` writes the file, dry run first, and the list in chat; only reads and the sync folder's commands pre-approved (DR-0685, DR-0688, DR-0720 to DR-0725) |
 | `tasks` | `docket open` on the Queue page, the owner's triage there or in chat, then on "go" the queue in chat: the `me` items in one line, then discuss, claude and chase, each item read again, its sources read as far as the facts need, and its outcome one `ledger_batch` before the next; messages only drafts; `docket ledger queue`, `show`, `suggest` and `batch` without the service; only reads pre-approved (DR-0685, DR-0691) |
 
 - The plugin holds no scripts: its hook and token helper run the `docket` command, which must be on PATH (DR-0162).
