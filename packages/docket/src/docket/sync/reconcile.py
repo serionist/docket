@@ -9,7 +9,7 @@ with its due and its latest log line, a point or an outcome the op would change,
 stream's line; below it, a `#` line per alternative. Claude settles each with `docket sync settle`, keeping the op,
 taking an alternative or dropping it, or edits it.
 
-    # docket sync reconcile sync-20261020T071500-1a2b3c4d: 4 ops, 1 unsure
+    # docket sync reconcile sync-20261020T071500-1a2b3c4d: 4 ops, 1 unsure, rev 1
     # closes
     {"op": "done", "item": "A-0001", "note": "slack:C0PILOT/1791100500.000200", "outcome": "Sent Ben the dates"}
     # asks
@@ -53,6 +53,8 @@ from docket.vault.records import RawRecord
 from docket.vault.vault import Vault
 
 DRAFT = "draft.jsonl"
+# The draft's revision on its head line: each `docket sync settle` raises it, and refuses line numbers read at another.
+FIRST_REV = 1
 OWES = ("reply", "decision", "task")
 OPEN = ("open", "snoozed")
 MINUTES = ("answered", "dropped", "open")
@@ -965,7 +967,7 @@ class _Drafting:
         drafts = [d for section in self.sections.values() for d in section]
         count = sum(1 + len(d.then) for d in drafts) + 2
         unsure_count = sum(1 + len(d.then) for d in drafts if d.why)
-        out = [f"# docket sync reconcile {self.info.sync}: {count} ops, {unsure_count} unsure"]
+        out = [f"# docket sync reconcile {self.info.sync}: {count} ops, {unsure_count} unsure, rev {FIRST_REV}"]
         unsure = _section(out, "closes", self.sections["closes"])
         unsure += _section(out, "asks", self.sections["asks"])
         unsure += _section(out, "meetings, links, minutes", self.sections["meetings"])
@@ -1005,7 +1007,7 @@ def lines(done: Reconciled) -> list[str]:
     dropped and the closes skipped, what else was said, the LEARNED lines whole, and the meetings of the prep week."""
     out = list(done.runs)
     at = f", lines {', '.join(map(str, done.unsure))}" if done.unsure else ""
-    out.append(f"draft: {done.path}: {done.ops} ops, {len(done.unsure)} unsure{at}")
+    out.append(f"draft: {done.path} rev {FIRST_REV}: {done.ops} ops, {len(done.unsure)} unsure{at}")
     for merge in done.merges:
         out.append(f"merged{'' if merge.sure else ', unsure'}: {merge.lines[0]}")
         out += [f"  with {line}" for line in merge.lines[1:]]

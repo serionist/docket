@@ -273,7 +273,7 @@ def test_a_close_on_an_open_or_snoozed_item_is_sure_and_a_moot_one_a_drop(vault:
         {"op": "drop", "item": "A-0004", "note": f"the plan went to Eve's lead: {SENT}"},
     ]
     sync = done.path.parent.name
-    assert lines[:2] == [f"# docket sync reconcile {sync}: 4 ops, 0 unsure", "# closes"]
+    assert lines[:2] == [f"# docket sync reconcile {sync}: 4 ops, 0 unsure, rev 1", "# closes"]
     assert done.unsure == []
 
 
@@ -853,7 +853,7 @@ def test_the_draft_keeps_its_order_and_the_report_says_each_part(vault: Vault) -
     assert reconcile.lines(done) == [
         RUN.format("plaud").replace("RUN:      ", "RUN: "),
         RUN.format("slack").replace("RUN:      ", "RUN: "),
-        f"draft: {done.path}: 9 ops, 1 unsure, lines 7",
+        f"draft: {done.path} rev 1: 9 ops, 1 unsure, lines 7",
         f"dropped {quoted('slack', 4, slack[2])}: slack:C0PILOT/1 doesn't open",
         "blocks/calendar.txt isn't there: no block from calendar",
         "blocks/outlook.txt isn't there: no block from outlook",
@@ -940,7 +940,7 @@ def test_a_sync_of_another_vault_or_none_is_refused_and_the_command_prints_the_r
     (started.folder / "draft.jsonl").write_text("an older draft\n", encoding="utf-8")
     assert main(["sync", "--vault", str(vault.root), "reconcile", str(started.folder)]) == 0
     out = capsys.readouterr().out.splitlines()
-    assert out[0] == f"draft: {started.folder / 'draft.jsonl'}: 2 ops, 0 unsure"
+    assert out[0] == f"draft: {started.folder / 'draft.jsonl'} rev 1: 2 ops, 0 unsure"
     assert (started.folder / "draft.jsonl").read_text(encoding="utf-8").splitlines()[-4:] == [
         '{"op": "rollover"}',
         "# prep: the next five working days: M-0002",
@@ -1016,7 +1016,17 @@ def test_the_draft_settled_dry_runs_clean_and_unsettled_is_refused_naming_unsure
     assert text.splitlines()[-1] == f"dry run: {len(refused)} change(s) refused; nothing written"
     # Settled as the skill settles it: one docket sync settle for every unsure line (#272).
     untitled, dan, hal = done.unsure
-    sync = ["sync", "settle", draft.parent.name, f"{untitled}=drop", f"{dan}=alt", f"{hal}=keep", *vault_arg]
+    sync = [
+        "sync",
+        "settle",
+        draft.parent.name,
+        f"{untitled}=drop",
+        f"{dan}=alt",
+        f"{hal}=keep",
+        "--rev",
+        "1",
+        *vault_arg,
+    ]
     assert main(sync) == 0
     assert capsys.readouterr().out.splitlines()[0] == "settled 3 line(s): 1 kept, 1 alternative(s) taken, 1 dropped"
     assert not any('"unsure"' in line for line in draft.read_text(encoding="utf-8").splitlines())

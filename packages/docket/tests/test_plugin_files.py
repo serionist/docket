@@ -493,9 +493,9 @@ def test_the_worked_draft_is_refused_unsettled_and_runs_clean_settled(
     worked = sync_texts()["SKILL.md"].split("### A worked draft", 1)[1]
     draft = worked.split("```jsonl\n", 1)[1].split("```", 1)[0].splitlines()
     prep = worked.split("```json\n", 1)[1].split("```", 1)[0].strip()
-    assert "`docket sync settle <sync> 7=alt --vault <vault>`" in " ".join(worked.split())
+    assert "`docket sync settle <sync> 7=alt --rev 1 --vault <vault>`" in " ".join(worked.split())
     assert '"unsure": ' in draft[6] and draft[7].startswith("# {")
-    assert draft[0].endswith(f": {sum(not line.startswith('#') for line in draft)} ops, 1 unsure")
+    assert draft[0].endswith(f": {sum(not line.startswith('#') for line in draft)} ops, 1 unsure, rev 1")
     vault = pilot_vault(tmp_path / "v")
     made = datetime(2026, 10, 20, 7, 15, tzinfo=UTC)
     sync = sync_folder.new_id(made)
@@ -510,10 +510,15 @@ def test_the_worked_draft_is_refused_unsettled_and_runs_clean_settled(
     assert main(command) == 1
     refused = "2. add: refused, add takes only fields, note, as, force, by, not unsure"
     assert refused in capsys.readouterr().out.splitlines()
-    assert main(["sync", "settle", sync, "7=alt", "--vault", str(vault.root)]) == 0
+    assert main(["sync", "settle", sync, "7=alt", "--rev", "1", "--vault", str(vault.root)]) == 0
     said = capsys.readouterr().out.splitlines()
     settled = batch.read_text(encoding="utf-8").splitlines()
-    assert settled == [draft[0].replace(", 1 unsure", ", 0 unsure"), *draft[1:4], draft[7][2:], *draft[8:]]
+    assert settled == [
+        draft[0].replace(", 1 unsure, rev 1", ", 0 unsure, rev 2"),
+        *draft[1:4],
+        draft[7][2:],
+        *draft[8:],
+    ]
     at = int(said[-1].removeprefix("prep: line "))
     assert settled[at - 1] == "# prep: the next five working days: M-0002"
     batch.write_text("\n".join([*settled[:at], prep, *settled[at:]]) + "\n", encoding="utf-8")

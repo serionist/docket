@@ -361,15 +361,22 @@ def sync_settle(
             show_default=False,
         ),
     ],
+    rev: Annotated[
+        int,
+        typer.Option(
+            "--rev", help="The draft's rev, on its head line, that the line numbers were read at.", show_default=False
+        ),
+    ],
     vault: VaultOption = None,
 ) -> None:
-    """Settle the draft's unsure lines in one call and rewrite draft.jsonl: each named line kept with its unsure taken
-    out, swapped for an alternative, or dropped, and what goes with it after it. Every choice is checked first; one
-    that doesn't apply changes nothing. Prints the unsure lines left and the # prep line, by their new numbers."""
+    """Settle the draft's unsure lines in one call and rewrite draft.jsonl at its next rev: each named line kept with
+    its unsure taken out, swapped for an alternative, or dropped, and what goes with it after it. Every choice is
+    checked first, and the rev: a draft at another rev, or a choice that doesn't apply, changes nothing. Prints the new
+    rev, the unsure lines left and the # prep line, by their new numbers."""
     from docket.sync import settle  # noqa: PLC0415
 
     found = find_vault(vault if vault is not None else ctx.obj)
-    say_all(settle.lines(settle.settle(found, sync, choices)))
+    say_all(settle.lines(settle.settle(found, sync, choices, rev=rev)))
 
 
 @sync_app.command("summary")

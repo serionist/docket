@@ -1,6 +1,9 @@
-"""`docket sync settle <sync> <line>=<choice>...` (#272): the draft's unsure lines settled in one call, by the line
-numbers `docket sync reconcile` printed and the Read tool shows, so Claude never writes the draft out again. It
+"""`docket sync settle <sync> <line>=<choice>... --rev <n>` (#272): the draft's unsure lines settled in one call, by the
+line numbers `docket sync reconcile` printed and the Read tool shows, so Claude never writes the draft out again. It
 rewrites `draft.jsonl` and nothing else: the batch stays Claude's, by `ledger_batch` with `file`, dry run first.
+
+The draft's head line carries its revision, `rev 1` as the reconcile writes it. A settle names the revision its line
+numbers were read at and refuses any other, since a settle before it moved the lines; it raises the revision by one.
 
 | Choice | The line becomes |
 |---|---|
@@ -30,7 +33,7 @@ from docket.vault.vault import Vault
 
 CHOICE = re.compile(r"^(?P<n>\d{1,6})=(?P<choice>[a-z0-9+]+)$")
 PART = re.compile(r"^(?:keep|alt(?P<k>[1-9]\d{0,2})?)$")
-HEAD = re.compile(r"^# docket sync reconcile (?P<sync>\S+): \d+ ops, \d+ unsure")
+HEAD = re.compile(r"^# docket sync reconcile (?P<sync>\S+): \d+ ops, \d+ unsure, rev (?P<rev>\d{1,6})$")
 PREP = "# prep:"
 
 
@@ -49,10 +52,11 @@ class Block:
 
 @dataclass(frozen=True)
 class Settled:
-    """What a settle did: the draft's path, how many lines it settled and how, the ops and the unsure lines left by
-    their new numbers, and the `# prep` line's."""
+    """What a settle did: the draft's path and its new revision, how many lines it settled and how, the ops and the
+    unsure lines left by their new numbers, and the `# prep` line's."""
 
     path: Path
+    rev: int
     kept: int
     swapped: int
     dropped: int
@@ -123,14 +127,26 @@ def _parts(choice: str, alternatives: int) -> tuple[list[str], str | None]:
     return out, None
 
 
-def settle(vault: Vault, sync: str, choices: list[str]) -> Settled:
-    """Settle the draft's unsure lines as `choices` say, `<line>=<choice>` each, and rewrite it; refused, writing
-    nothing, when a choice doesn't apply, a line is named twice, or the sync is another vault's."""
+def settle(vault: Vault, sync: str, choices: list[str], *, rev: int) -> Settled:
+    """Settle the draft's unsure lines as `choices` say, `<line>=<choice>` each, numbered as the draft read at `rev`,
+    and rewrite it at the next revision; refused, writing nothing, when the draft is at another revision or has no head
+    line, a choice doesn't apply, a line is named twice, or the sync is another vault's."""
     path, _ = folder.find(sync, vault.root)
     draft = path / DRAFT
     if not draft.is_file():
         raise DocketError(f"no draft in {path.name}: docket sync reconcile writes it")
     lines = draft.read_bytes().decode("utf-8").splitlines()
+    head = HEAD.match(lines[0]) if lines else None
+    if head is None:
+        raise DocketError(
+            "nothing settled: the draft's head line, with its rev, isn't its first line; run the reconcile again"
+        )
+    now = int(head["rev"])
+    if now != rev:
+        raise DocketError(
+            f"nothing settled: the draft is at rev {now}, not {rev}, so its lines moved since they were read: read it "
+            f"again and give the numbers it shows now, with --rev {now}"
+        )
     blocks = _blocks(lines)
     owner = {line: block for block in blocks.values() for line in block.then}
     problems: list[str] = []
@@ -192,14 +208,12 @@ def settle(vault: Vault, sync: str, choices: list[str]) -> Settled:
         k = block.end
     ops = [n for n, line in enumerate(out, start=1) if _op(line) is not None]
     unsure = [n for n in ops if "unsure" in (_op(out[n - 1]) or {})]
-    head = HEAD.match(out[0]) if out else None
-    if head is not None:
-        out[0] = f"# docket sync reconcile {head['sync']}: {len(ops)} ops, {len(unsure)} unsure"
+    out[0] = f"# docket sync reconcile {head['sync']}: {len(ops)} ops, {len(unsure)} unsure, rev {now + 1}"
     prep = next((n for n, line in enumerate(out, start=1) if line.startswith(PREP)), None)
     temporary = draft.with_name(f".{DRAFT}.settling")
     temporary.write_text("\n".join(out) + "\n", encoding="utf-8", newline="\n")
     temporary.replace(draft)
-    return Settled(draft, kept, swapped, dropped, len(ops), unsure, prep)
+    return Settled(draft, now + 1, kept, swapped, dropped, len(ops), unsure, prep)
 
 
 def lines(done: Settled) -> list[str]:
@@ -208,7 +222,7 @@ def lines(done: Settled) -> list[str]:
     settled = done.kept + done.swapped + done.dropped
     out = [f"settled {settled} line(s): {done.kept} kept, {done.swapped} alternative(s) taken, {done.dropped} dropped"]
     left = f", lines {', '.join(map(str, done.unsure))}" if done.unsure else ""
-    out.append(f"draft: {done.path}: {done.ops} ops, {len(done.unsure)} unsure{left}")
+    out.append(f"draft: {done.path} rev {done.rev}: {done.ops} ops, {len(done.unsure)} unsure{left}")
     if done.prep is not None:
         out.append(f"prep: line {done.prep}")
     return out

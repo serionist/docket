@@ -120,10 +120,12 @@ Then, in this thread, in one pass:
    meeting's open point holds already and none the dry run shows rolled in. A prep `add`, a task due the working day
    before, only for real work before the call: a deck, a document, a demo.
 3. Settle every unsure line a choice settles in one call, by the numbers the draft shows: `docket sync settle <sync>
-   <line>=<choice> ... --vault <vault>`, such as `7=alt 12=keep 15=drop`. `keep` takes the `unsure` out, `alt`
-   (`alt2`, ...) puts that alternative in its place, `keep+alt2` keeps the op and adds the alternative too, as two asks
-   drafted as one need, and `drop` deletes the line; what goes with an op follows a keep. It prints the unsure lines
-   left and the `# prep` line by their new numbers. Never write the draft out again.
+   <line>=<choice> ... --rev <n> --vault <vault>`, such as `7=alt 12=keep 15=drop --rev 1`, `<n>` the rev on the
+   draft's head line as you read it. `keep` takes the `unsure` out, `alt` (`alt2`, ...) puts that alternative in its
+   place, `keep+alt2` keeps the op and adds the alternative too, as two asks drafted as one need, and `drop` deletes
+   the line; what goes with an op follows a keep. It prints the draft's new rev and the unsure lines left and the
+   `# prep` line by their new numbers. A settle at a rev the draft has left changes nothing: a settle since moved the
+   lines, so read them again. Never write the draft out again.
 4. An Edit only for a line that needs new words, a field fixed or a stream's pairs reworded, and one Edit at the
    `# prep` line for the prep points: Read those lines again first, as `settle` numbered them, since it rewrote the
    file.
@@ -145,7 +147,7 @@ Ben's ask closed in the pilot channel, Cleo wrote again in the thread of the quo
 something new after the weekly, whose recording answered its point, and the stream moved. The reconcile wrote:
 
 ```jsonl
-# docket sync reconcile sync-20261020T071500-1a2b3c4d: 10 ops, 1 unsure
+# docket sync reconcile sync-20261020T071500-1a2b3c4d: 10 ops, 1 unsure, rev 1
 # closes
 {"op": "done", "item": "A-0001", "note": "slack:C0PILOT/1791100500.000200", "outcome": "Sent Ben the dates in the pilot channel"}
 # asks
@@ -168,8 +170,8 @@ something new after the weekly, whose recording answered its point, and the stre
 ```
 
 Cleo's mail is about the quote the user already waits for, so line 7 takes its alternative, the `log`: `docket sync
-settle <sync> 7=alt --vault <vault>`. M-0002 is next week's weekly, where Dan's room comes up, so one Edit at `# prep`
-adds:
+settle <sync> 7=alt --rev 1 --vault <vault>`. M-0002 is next week's weekly, where Dan's room comes up, so one Edit at
+`# prep` adds:
 
 ```json
 {"op": "point", "item": "M-0002", "fields": {"text": "Dan: is the room booked for the 28th?", "proposed": true}}

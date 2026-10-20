@@ -51,7 +51,7 @@ def draft(sync: str) -> list[str]:
     """A draft as the reconcile writes it: a sure close, then four unsure ops, the first with a set of its due that
     goes with it, the merge of Hal's two asks, an untitled invite, an outcome on a meeting that has one."""
     return [
-        f"# docket sync reconcile {sync}: 8 ops, 5 unsure",
+        f"# docket sync reconcile {sync}: 8 ops, 5 unsure, rev 1",
         "# closes",
         j({"op": "done", "item": "A-0001", "note": SENT, "outcome": "Sent Ben the dates"}),
         "# asks",
@@ -98,10 +98,10 @@ def test_each_choice_settles_its_line_and_what_goes_with_it_follows_a_keep(vault
     """The log kept with the set of its due, the merge kept and its other ask added too, the invite dropped, the
     outcomes joined: each op's quotes and alternatives go, the head counts what is left, and the file is the ops."""
     sync, file = started(vault)
-    done = settle.settle(vault, sync, ["7=keep", "12=keep+alt", "15=drop", "19=alt"])
+    done = settle.settle(vault, sync, ["7=keep", "12=keep+alt", "15=drop", "19=alt"], rev=1)
     assert (done.kept, done.swapped, done.dropped, done.unsure) == (1, 2, 1, [])
     assert file.read_text(encoding="utf-8").splitlines() == [
-        f"# docket sync reconcile {sync}: 8 ops, 0 unsure",
+        f"# docket sync reconcile {sync}: 8 ops, 0 unsure, rev 2",
         "# closes",
         j({"op": "done", "item": "A-0001", "note": SENT, "outcome": "Sent Ben the dates"}),
         "# asks",
@@ -122,23 +122,23 @@ def test_each_choice_settles_its_line_and_what_goes_with_it_follows_a_keep(vault
 def test_an_alternative_in_its_place_takes_the_lines_that_go_with_the_op_away(vault: Vault) -> None:
     """The add in place of the log carries its own due, so the set of the log's item goes with the log."""
     sync, file = started(vault)
-    done = settle.settle(vault, sync, ["7=alt"])
+    done = settle.settle(vault, sync, ["7=alt"], rev=1)
     lines = file.read_text(encoding="utf-8").splitlines()
     assert lines[4] == j(ADD) and j(DUE) not in lines and j(DUE | {"unsure": GOES_WITH}) not in lines
     # The rest stays as it was, by its new numbers: the merge, the invite, the outcome.
-    assert done.unsure == [8, 11, 15] and lines[0] == f"# docket sync reconcile {sync}: 7 ops, 3 unsure"
+    assert done.unsure == [8, 11, 15] and lines[0] == f"# docket sync reconcile {sync}: 7 ops, 3 unsure, rev 2"
     assert [json.loads(lines[n - 1])["op"] for n in done.unsure] == ["add", "add", "set"]
     assert lines[5].startswith("# ? blocks/slack.txt:3") and done.prep == 18
 
 
 def test_a_line_that_goes_with_an_op_is_kept_or_dropped_alone_when_named(vault: Vault) -> None:
     sync, file = started(vault)
-    settle.settle(vault, sync, ["9=keep"])
+    settle.settle(vault, sync, ["9=keep"], rev=1)
     lines = file.read_text(encoding="utf-8").splitlines()
     # Its op still waits, with its quotes and its alternative; the set is no longer unsure.
     assert lines[4:9] == [*draft(sync)[4:8], j(DUE)]
     sync, file = started(vault)
-    settle.settle(vault, sync, ["7=keep", "9=drop"])
+    settle.settle(vault, sync, ["7=keep", "9=drop"], rev=1)
     lines = file.read_text(encoding="utf-8").splitlines()
     assert lines[4] == j(LOG) and lines[5].startswith("# ? blocks/slack.txt:3")
 
@@ -164,7 +164,7 @@ def test_a_choice_that_doesn_t_apply_refuses_the_call_and_changes_nothing(
     sync, file = started(vault)
     before = file.read_bytes()
     with pytest.raises(DocketError, match=r"^nothing settled: ") as refused:
-        settle.settle(vault, sync, choices)
+        settle.settle(vault, sync, choices, rev=1)
     assert said in str(refused.value)
     assert file.read_bytes() == before
 
@@ -173,18 +173,18 @@ def test_the_command_prints_what_it_settled_and_refuses_another_vault_s_sync(
     vault: Vault, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     sync, file = started(vault)
-    assert main(["sync", "settle", sync, "12=keep", "15=drop", "--vault", str(vault.root)]) == 0
+    assert main(["sync", "settle", sync, "12=keep", "15=drop", "--rev", "1", "--vault", str(vault.root)]) == 0
     assert capsys.readouterr().out.splitlines() == [
         "settled 2 line(s): 1 kept, 0 alternative(s) taken, 1 dropped",
-        f"draft: {file}: 7 ops, 3 unsure, lines 7, 9, 14",
+        f"draft: {file} rev 2: 7 ops, 3 unsure, lines 7, 9, 14",
         "prep: line 17",
     ]
     other = empty_vault(tmp_path / "other", make_config())
-    assert main(["sync", "settle", sync, "7=keep", "--vault", str(other.root)]) == 2
+    assert main(["sync", "settle", sync, "7=keep", "--rev", "1", "--vault", str(other.root)]) == 2
     assert f"is a sync of {vault.root}" in capsys.readouterr().err
     file.unlink()
     with pytest.raises(DocketError, match="no draft in"):
-        settle.settle(vault, sync, ["7=keep"])
+        settle.settle(vault, sync, ["7=keep"], rev=1)
 
 
 def test_a_line_an_edit_left_unread_stays_as_it_is_and_can_t_be_named(vault: Vault) -> None:
@@ -194,6 +194,31 @@ def test_a_line_an_edit_left_unread_stays_as_it_is_and_can_t_be_named(vault: Vau
     lines[14] = '{"op": "add", "fields": {"kind": "invite"'
     file.write_text("\n".join(lines) + "\n", encoding="utf-8")
     with pytest.raises(DocketError, match="line 15 isn't an unsure op"):
-        settle.settle(vault, sync, ["15=drop"])
-    settle.settle(vault, sync, ["12=keep"])
+        settle.settle(vault, sync, ["15=drop"], rev=1)
+    settle.settle(vault, sync, ["12=keep"], rev=1)
     assert '{"op": "add", "fields": {"kind": "invite"' in file.read_text(encoding="utf-8").splitlines()
+
+
+def test_a_settle_at_a_rev_the_draft_has_left_changes_nothing(vault: Vault) -> None:
+    """A second settle with the numbers read before the first would act on lines that moved: the invite meant by 15 is
+    line 11 now, and 15 the outcome. It names the rev it read at, and the draft at another refuses it whole."""
+    sync, file = started(vault)
+    first = settle.settle(vault, sync, ["7=alt"], rev=1)
+    assert first.rev == 2 and settle.lines(first)[1].startswith(f"draft: {file} rev 2: ")
+    before = file.read_bytes()
+    with pytest.raises(DocketError, match="the draft is at rev 2, not 1, so its lines moved since they were read"):
+        settle.settle(vault, sync, ["15=drop"], rev=1)
+    assert file.read_bytes() == before
+    # Read again at rev 2, the invite is line 11.
+    lines = file.read_text(encoding="utf-8").splitlines()
+    assert json.loads(lines[10])["fields"]["kind"] == "invite"
+    assert settle.settle(vault, sync, ["11=drop"], rev=2).rev == 3
+    after = file.read_text(encoding="utf-8")
+    assert '"kind": "invite"' not in after and '"item": "M-0003"' in after
+
+
+def test_a_draft_with_no_head_line_is_refused(vault: Vault) -> None:
+    sync, file = started(vault)
+    file.write_text("\n".join(draft(sync)[1:]) + "\n", encoding="utf-8")
+    with pytest.raises(DocketError, match="the draft's head line, with its rev, isn't its first line"):
+        settle.settle(vault, sync, ["6=keep"], rev=1)
