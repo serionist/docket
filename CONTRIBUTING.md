@@ -71,5 +71,6 @@ npm run build
    "Generated with" lines.
 4. Open the PR with the template filled in, ending `Closes #<issue>`. Its title becomes the commit on `main`.
 
-CI runs the gate on Linux and the tests on Windows and macOS. The maintainer reviews a PR from outside by reading it,
-never by running it on their machine, and squash-merges it once CI is green.
+CI runs the gate on Linux and the tests on Windows and macOS, and each night the whole suite on all three, which the
+`full-matrix` label runs on a PR too. The maintainer reviews a PR from outside by reading it, never by running it on
+their machine, and squash-merges it once CI is green.

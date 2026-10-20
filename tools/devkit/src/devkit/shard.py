@@ -9,9 +9,9 @@ builds in the parallel run (DR-0492), never cross to another runner. The share i
 parallel run and the timed run of one share keep the same files.
 
 With `--shard-times=<file>` the run writes what each of its files cost, its tests' time over the run's workers, and
-`gate weights` folds a CI run's files into the weights. Each system's files have weights of their own, under its name;
-`--shard-key` names another key, as the browser shares' "Linux browser" (DR-0712), whose files cost what a browser
-costs, not what they cost skipped.
+the tests that failed; `gate weights` folds a CI run's files into the weights. Each system's files have weights of
+their own, under its name; `--shard-key` names another key, as the browser shares' "Linux browser" (DR-0712), whose
+files cost what a browser costs, not what they cost skipped.
 """
 
 from __future__ import annotations
@@ -70,16 +70,25 @@ def load_weights(path: Path, system: str | None = None) -> dict[str, float]:
 
 
 class Times:
-    """What each file's tests took in this run, written at its end. Under xdist the controller gets every worker's
-    reports, so it alone writes, and divides by its workers: what the file cost the run's wall time."""
+    """What each file's tests took in this run, and the tests that failed, written at its end. Under xdist the
+    controller gets every worker's reports, so it alone writes, and divides by its workers: what the file cost the
+    run's wall time. A red nightly names its set of failing tests from these (DR-0754)."""
 
     def __init__(self, config: pytest.Config, out: Path) -> None:
         self.config = config
         self.out = out
         self.seconds: dict[str, float] = defaultdict(float)
+        self.failed: set[str] = set()
 
     def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
         self.seconds[report.nodeid.split("::")[0]] += report.duration
+        if report.failed:
+            self.failed.add(report.nodeid)
+
+    def pytest_collectreport(self, report: pytest.CollectReport) -> None:
+        # A file that doesn't import fails here, before it has a test to fail; its id is the file's path.
+        if report.failed:
+            self.failed.add(report.nodeid)
 
     def pytest_sessionfinish(self) -> None:
         workers = int(self.config.getoption("numprocesses", None) or 1)
@@ -89,6 +98,7 @@ class Times:
             "marks": self.config.option.markexpr,
             "workers": workers,
             "files": {f: round(s / workers, 2) for f, s in sorted(self.seconds.items())},
+            "failed": sorted(self.failed),
         }
         self.out.parent.mkdir(parents=True, exist_ok=True)
         self.out.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8", newline="\n")

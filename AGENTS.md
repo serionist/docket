@@ -51,7 +51,7 @@ The schema is `docs/docs-regime.yaml`, explained in `docs/docs-regime.md`.
 | `tools/devkit/` | the development kit, never published: `gate`, `docs`, `devkit` |
 | `docs/` | the design, the regime, the glossary, plans and reviews |
 | `.claude/skills/` | the work loop: `start-work`, `review-plan`, `review-code`, `finish-work` |
-| `.github/` | CI, the PR text check, CodeQL, Dependabot, issue forms, the PR template |
+| `.github/` | CI, the nightly full matrix, the PR text check, CodeQL, Dependabot, issue forms, the PR template |
 | `.githooks/` | `commit-msg` strips tool attribution, `pre-push` runs `gate quick` |
 | `index.yaml` | the root's reading list, and its decisions and conventions from before `index.d/` |
 | `index.d/` | the root's newer decisions and conventions, a file each |

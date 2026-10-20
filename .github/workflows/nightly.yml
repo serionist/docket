@@ -1,0 +1,233 @@
+# The whole suite on all three systems, on top of ci.yml's run (DR-0754): nightly on main, on demand, on a pull request
+# labelled full-matrix (when the label goes on, and on each push while it is on) and on a v* tag, which a release will
+# need green. Linux runs it uncovered, so its timed tests hold their limits as gate os does on the other two; Windows and
+# macOS run every test file, and every page in the system's own Chrome. A red night opens an issue per distinct set of
+# failing tests, labelled nightly, or comments on the open issue for the same set; a run on demand, on a label or on a
+# tag shows its result where it was asked for.
+name: Nightly
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize]
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  # A group of its own, so the nightly never cancels a run of ci.yml's. A push to a labelled PR cancels the full matrix
+  # it supersedes; a run for another label, which runs nothing, gets a group of its own so it cancels none.
+  group: nightly-${{ github.ref }}-${{ github.event.label && github.event.label.name != 'full-matrix' && github.run_id || 'matrix' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # The tests in shares split by tools/devkit/test-weights.json, as ci.yml's are, fewer of them, since a night has
+  # no one waiting. A share's times file names its failed tests, which a red share keeps for the issue.
+  tests:
+    name: Tests (${{ matrix.name }}, ${{ matrix.share }} of ${{ matrix.of }})
+    # On a pull request, only when the full-matrix label goes on, or on a push while it is on.
+    if: >-
+      github.event_name != 'pull_request' || github.event.label.name == 'full-matrix' ||
+      (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'full-matrix'))
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, name: Linux, share: 1, of: 2 }
+          - { os: ubuntu-latest, name: Linux, share: 2, of: 2 }
+          - { os: windows-latest, name: Windows, share: 1, of: 8 }
+          - { os: windows-latest, name: Windows, share: 2, of: 8 }
+          - { os: windows-latest, name: Windows, share: 3, of: 8 }
+          - { os: windows-latest, name: Windows, share: 4, of: 8 }
+          - { os: windows-latest, name: Windows, share: 5, of: 8 }
+          - { os: windows-latest, name: Windows, share: 6, of: 8 }
+          - { os: windows-latest, name: Windows, share: 7, of: 8 }
+          - { os: windows-latest, name: Windows, share: 8, of: 8 }
+          - { os: macos-latest, name: macOS, share: 1, of: 5 }
+          - { os: macos-latest, name: macOS, share: 2, of: 5 }
+          - { os: macos-latest, name: macOS, share: 3, of: 5 }
+          - { os: macos-latest, name: macOS, share: 4, of: 5 }
+          - { os: macos-latest, name: macOS, share: 5, of: 5 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync --locked
+      # As in ci.yml: the tests' temp folders on the Windows runner's local disk (DR-0493), and its Storage Service off
+      # beside the timed tests (DR-0494).
+      - name: Temp on the local disk
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+      - name: No Storage Service beside the timed tests
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Set-Service StorSvc -StartupType Disabled
+          Stop-Service StorSvc -Force
+      # The types run on every PR on all three systems, so a night runs only the tests.
+      - name: Tests
+        run: uv run gate os --only tests --shard ${{ matrix.share }}/${{ matrix.of }}
+      - name: The failing tests
+        if: failure() || cancelled()
+        shell: bash
+        env:
+          SYSTEM: ${{ matrix.name }}
+          JOB: Tests (${{ matrix.name }}, ${{ matrix.share }} of ${{ matrix.of }})
+          LIST: .local/failing/${{ matrix.name }}-${{ matrix.share }}.txt
+        run: |
+          mkdir -p .local/failing
+          jq -r --arg system "$SYSTEM" '.failed[]? | "\($system): \(.)"' .local/times/*.json \
+            | sort -u > "$LIST" || true
+          [ -s "$LIST" ] || echo "$JOB: red, no test named" > "$LIST"
+      - name: Keep the failing tests
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nightly-failing-${{ matrix.name }}-${{ matrix.share }}
+          path: .local/failing/
+          include-hidden-files: true
+          retention-days: 7
+
+  # Every page in the system's own Chrome, as Browser (Linux) runs them on every PR (DR-0712), one job a system.
+  browser:
+    name: Browser (${{ matrix.name }})
+    if: >-
+      github.event_name != 'pull_request' || github.event.label.name == 'full-matrix' ||
+      (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'full-matrix'))
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, name: Windows }
+          - { os: macos-latest, name: macOS }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: packages/docket/web/.nvmrc
+          cache: npm
+          cache-dependency-path: packages/docket/web/package-lock.json
+      - name: Install
+        run: uv sync --locked
+      - name: axe-core
+        working-directory: packages/docket/web
+        run: npm ci
+      # bash on every system, so the file pattern expands on Windows too.
+      - name: Each page in Chrome
+        shell: bash
+        env:
+          DOCKET_TEST_BROWSER: chrome
+          DOCKET_TEST_SCREENSHOTS: ${{ runner.temp }}/screenshots
+        run: >-
+          uv run pytest packages/docket/tests/test_web_browser*.py -v -rsP -p no:cacheprovider
+          --shard 1/1 --shard-key "${{ matrix.name }} browser" --shard-times .local/times/browser.json
+      - name: Keep the screenshots
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nightly-screenshots-${{ matrix.name }}
+          path: ${{ runner.temp }}/screenshots
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: The failing tests
+        if: failure() || cancelled()
+        shell: bash
+        env:
+          SYSTEM: ${{ matrix.name }}
+          JOB: Browser (${{ matrix.name }})
+          LIST: .local/failing/${{ matrix.name }}-browser.txt
+        run: |
+          mkdir -p .local/failing
+          jq -r --arg system "$SYSTEM" '.failed[]? | "\($system): \(.)"' .local/times/*.json \
+            | sort -u > "$LIST" || true
+          [ -s "$LIST" ] || echo "$JOB: red, no test named" > "$LIST"
+      - name: Keep the failing tests
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nightly-failing-${{ matrix.name }}-browser
+          path: .local/failing/
+          include-hidden-files: true
+          retention-days: 7
+
+  # A red scheduled run only: the set is every red job's failing tests, each under its system, and a red job that
+  # named none stands for itself. Its key, the first 12 hex of the sorted set's sha256, sits in the issue's body, so a
+  # night that fails the same set comments on the open issue instead of opening another. A share past its timeout may
+  # end cancelled rather than failed, and a hung night is red too; a night cancelled by hand opens nothing.
+  issue:
+    name: Issue for a red night
+    needs: [tests, browser]
+    if: >-
+      !cancelled() && github.event_name == 'schedule' &&
+      (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      # Every list into one folder: without merge-multiple, a lone artifact lands in the folder itself and several in a
+      # folder each. A red job that never reached its upload leaves nothing here; the set then says so.
+      - name: Each red job's failing tests
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        with:
+          pattern: nightly-failing-*
+          path: failing
+          merge-multiple: true
+      - name: Open an issue, or comment on the one for the same set
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: |
+          shopt -s nullglob
+          lists=(failing/*.txt)
+          if [ ${#lists[@]} -gt 0 ]; then
+            # Windows' jq ends its lines with CRLF.
+            cat "${lists[@]}" | tr -d '\r' | sort -u > set.txt
+          else
+            echo "the run went red, and no job named a test" > set.txt
+          fi
+          key=$(sha256sum set.txt | cut -c1-12)
+          count=$(wc -l < set.txt)
+          day=$(date -u +%F)
+          open=$(gh issue list --label nightly --state open --limit 100 --json number,body \
+            --jq "map(select(.body | contains(\"nightly-set: $key\"))) | .[0].number // empty")
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --body "Red again on $day, on main at ${SHA:0:12}: $RUN"
+            exit 0
+          fi
+          {
+            echo "The nightly full matrix went red on $day, on main at ${SHA:0:12}: $RUN"
+            echo
+            echo "What failed ($count):"
+            echo
+            head -n 300 set.txt | sed 's/.*/- `&`/'
+            if [ "$count" -gt 300 ]; then echo "- and $((count - 300)) more, in the run's log"; fi
+            echo
+            echo "A night that fails the same set comments here; another set opens an issue of its own."
+            echo
+            echo "<!-- nightly-set: $key -->"
+          } > body.md
+          gh issue create --title "Nightly: $count failing, set $key" --label nightly --body-file body.md

@@ -5,6 +5,8 @@ import platform
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -104,6 +106,58 @@ def test_a_share_splits_by_its_system_s_weights_and_writes_what_its_files_cost(t
         "share": "1/2",
         "marks": "",
         "workers": 1,
+    }
+
+
+def test_a_share_s_times_name_its_failed_tests_and_a_file_that_doesn_t_import(tmp_path: Path) -> None:
+    body = (
+        "import pytest\n\n"
+        "@pytest.fixture\ndef broken():\n    raise RuntimeError('setup')\n\n"
+        "def test_passes():\n    pass\n\n"
+        "def test_fails():\n    assert 1 == 2\n\n"
+        "def test_errors_in_setup(broken):\n    pass\n\n"
+        "@pytest.mark.parametrize('n', [1, 2])\ndef test_one_case_fails(n):\n    assert n == 1\n"
+    )
+    (tmp_path / "test_a.py").write_text(body, encoding="utf-8")
+    times = tmp_path / "out" / "times.json"
+    # Two workers, as a CI share runs: the controller gets each worker's reports.
+    run = [sys.executable, "-m", "pytest", "-p", "devkit.shard", "-p", "no:cacheprovider", "-q", "-n", "2",
+           "--shard=1/1", f"--shard-times={times}"]  # fmt: skip
+    proc = subprocess.run(run, cwd=tmp_path, capture_output=True, text=True, encoding="utf-8", check=False)
+    assert proc.returncode == 1, proc.stdout
+    failed = ["test_a.py::test_errors_in_setup", "test_a.py::test_fails", "test_a.py::test_one_case_fails[2]"]
+    assert json.loads(times.read_text(encoding="utf-8"))["failed"] == failed
+    # A file that doesn't import has no test to fail: its path names it, once though both workers collected it.
+    (tmp_path / "test_b.py").write_text("import not_a_module_anywhere\n", encoding="utf-8")
+    proc = subprocess.run(run, cwd=tmp_path, capture_output=True, text=True, encoding="utf-8", check=False)
+    assert proc.returncode != 0, proc.stdout
+    assert json.loads(times.read_text(encoding="utf-8"))["failed"] == [*failed, "test_b.py"]
+
+
+def test_the_times_name_a_failed_test_once_whichever_phase_failed(tmp_path: Path) -> None:
+    options = {"numprocesses": 4, "--shard": "2/3", "--shard-key": "Windows"}
+    config = SimpleNamespace(option=SimpleNamespace(markexpr="not perf"), getoption=lambda n, d=None: options.get(n, d))
+    times = shard.Times(cast(pytest.Config, config), tmp_path / "times.json")
+
+    def ran(nodeid: str, outcome: Any, when: Any = "call") -> None:
+        where = (nodeid.split("::", maxsplit=1)[0], 0, nodeid)
+        times.pytest_runtest_logreport(pytest.TestReport(nodeid, where, {}, outcome, None, when, duration=2.0))
+
+    ran("a.py::passes", "passed")
+    ran("a.py::fails_twice", "failed")
+    ran("a.py::fails_twice", "failed", "teardown")
+    ran("b.py::skipped", "skipped", "setup")
+    times.pytest_collectreport(pytest.CollectReport("c.py", "failed", None, []))
+    times.pytest_collectreport(pytest.CollectReport("d.py", "passed", None, []))
+    times.pytest_sessionfinish()
+    record = json.loads((tmp_path / "times.json").read_text(encoding="utf-8"))
+    assert record["failed"] == ["a.py::fails_twice", "c.py"]
+    assert record["files"] == {"a.py": 1.5, "b.py": 0.5}
+    assert {k: record[k] for k in ("system", "share", "marks", "workers")} == {
+        "system": "Windows",
+        "share": "2/3",
+        "marks": "not perf",
+        "workers": 4,
     }
 
 
