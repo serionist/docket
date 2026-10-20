@@ -12,6 +12,7 @@ the sync's other recordings and sources at the same time, and only the sync's ma
 
 | | |
 |---|---|
+| the owner | {OWNER}: whose asks and waits you find |
 | vault | {VAULT}: put `--vault {VAULT}` on every `docket` command |
 | today | {TODAY}; the owner's times are local in {ZONE} |
 | owed since | {OWED_SINCE} |

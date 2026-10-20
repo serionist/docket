@@ -454,7 +454,7 @@ def batch_lines(conn: sqlite3.Connection, batch: str) -> list[BatchLine]:
     return [BatchLine(ref=ref, kind=kind, line=line) for _, _, ref, kind, line in rows]
 
 
-# -- the sync's reconcile (DR-0749) ------------------------------------------------------------------------------------
+# -- the sync's reconcile (DR-0759) ------------------------------------------------------------------------------------
 
 
 def trails(conn: sqlite3.Connection) -> dict[str, list[str]]:

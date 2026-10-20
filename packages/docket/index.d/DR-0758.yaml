@@ -1,0 +1,20 @@
+decisions:
+  - id: DR-0758
+    title: The sync's source agents start fresh, general-purpose on the session's model, their prompt naming the owner
+    status: proposed
+    at: "2026-10-20"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#272"]
+    supersedes: [DR-0747]
+    description: "DR-0747 as it stands, but: the sync skill launches each source's agent with subagent_type general-purpose and no model, never a fork, so it starts with none of the main session's context and keeps the session's model for its judgment, the classify and the asks it finds; its prompt is its file. agent.md says that prompt and the files it names are all the agent needs, and that another agent may share its browser, a tab each. agent.md and recording.md gain {OWNER}, the owner's name and addresses from vault.yaml, which docket sync start and docket sync recordings fill, so a fresh agent knows whose asks to find. The recording agents stay general-purpose with model sonnet (DR-0751)."
+    binds:
+      - An agent reads its source only inside a run, so what it reports is what Docket keeps.
+      - "A line rests only on records in raw after the source agent's promotion, or docs in the vault: never a pending, private, dropped or held record, and never a stretch a cut took."
+      - "Every locator an agent reports is one it read: a source agent's in one read with more, a recording agent's in its files, read whole."
+      - A run that can't open or stops short leaves its mark, the other sources go on, and the summary says so.
+      - "No ledger op names a note: a meeting's link is its recording's rid (DR-0651)."
+      - "An agent's prompt names all it needs: it reads nothing of the session that started it."
+    not_chosen:
+      - "A fork: each source agent of the third rehearsal started at 71.7k tokens of the main session's context and carried them every turn."
+      - "Sonnet for the source agents too: their classify and the asks they find are the judgment the sync is for, and the recording agents' trial decides Sonnet alone (DR-0751)."

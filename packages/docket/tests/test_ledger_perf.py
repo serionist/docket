@@ -8,7 +8,7 @@ it, every item open, read from the tables with its lines in a fifth of a second 
 of its meetings in half a second (DR-0725); the day's route on a vault holding it in half a second (DR-0672); all of
 it as `docket ledger show --all --json` gives it, stamped, with its JSON, in under two seconds (DR-0659); a sync
 folder written from it, every open item a line, in under a second (DR-0746); a sync's batch drafted against it
-from 200 block lines in under three (DR-0749); and a sync's summary of it in under a second (#272).
+from 200 block lines in under three (DR-0759); and a sync's summary of it in under a second (#272).
 
 The ops are written as the writer writes them, a month file per machine, each item an add and nine changes, each
 meeting four points answered and a point rolled from the meeting before it in its weekly series of fifty. Wall time
@@ -506,7 +506,7 @@ def perf_block(start: datetime) -> list[str]:
 def test_a_sync_reconcile_over_that_ledger_drafts_200_block_lines_in_under_three_seconds(sync_vault: Vault) -> None:
     """docket sync reconcile on a vault holding it, its index built, with a block of 200 lines over 200 records in raw:
     every locator resolved through the index, the ledger read with the open items' trails and threads, each ask matched
-    against the 5,000 open items, the draft written. Run once before the clock starts (DR-0749)."""
+    against the 5,000 open items, the draft written. Run once before the clock starts (DR-0759)."""
     vault = sync_vault
     at = datetime(2026, 6, 1, 8, tzinfo=UTC)
     started = sync_start.start(vault, [], at)

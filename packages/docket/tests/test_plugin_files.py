@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import re
 import shlex
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -24,6 +25,7 @@ from docket.service import client, sessions, state, writer
 from docket.service.token import Tokens
 from docket.sources import scaffold
 from docket.sync import block as sync_block
+from docket.sync import folder as sync_folder
 from docket.vault.vault import Vault
 from docket.vault.wizard import KNOWN_SOURCES
 from docket.web.pages import NAV
@@ -244,7 +246,7 @@ def golden_tools() -> dict[str, Any]:
 
 def test_sync_pre_approves_only_reads_and_the_sync_folder_s_commands() -> None:
     """The sync's own writes, the ledger batch and the agents' runs, classifies and promotions, ask (DR-0605); the
-    sync folder's commands write only scratch outside the vault (DR-0746, DR-0749)."""
+    sync folder's commands write only scratch outside the vault (DR-0746, DR-0759)."""
     tools = golden_tools()
     allowed = frontmatter("sync")["allowed-tools"]
     prefix = "mcp__plugin_docket_docket__"
@@ -255,7 +257,7 @@ def test_sync_pre_approves_only_reads_and_the_sync_folder_s_commands() -> None:
     assert commands == [
         "docket ledger day", "docket ledger day *", "docket staging list", "docket staging list *",
         "docket staging show *", "docket sync start", "docket sync start *", "docket sync recordings *",
-        "docket sync reconcile *",
+        "docket sync reconcile *", "docket sync settle *", "docket sync summary *",
     ]  # fmt: skip
     assert re.sub(rf"{prefix}\w+|Bash\([^)]*\)", "", allowed).split() == []
 
@@ -297,7 +299,7 @@ def test_sync_names_commands_options_ops_views_and_tools_docket_has() -> None:
             assert given <= set(tools[tool]["input_schema"]["properties"]), (name, tool, given)
     assert seen == {("ledger", "day"), ("staging", "list"), ("staging", "show"), ("staging", "classify"),
                     ("staging", "promote"), ("sync", "start"), ("sync", "recordings"), ("sync", "reconcile"),
-                    ("ledger", "batch")}  # fmt: skip
+                    ("sync", "settle"), ("sync", "summary"), ("ledger", "batch")}  # fmt: skip
     skill = sync_texts()["SKILL.md"]
     table = skill[skill.index("| Order | Ops | Drafted from |") : skill.index("### A worked draft")]
     for row in table.splitlines()[2:]:
@@ -328,10 +330,31 @@ def test_the_agents_check_in_one_read_and_the_prep_asks_one_suggest() -> None:
     assert "A doc id is checked in a read of its own, with the default summary view" in check
     again = "its first as `locator` and the rest in `more`, until `later` is empty"
     assert again in check and again in " ".join(tasks_text().split())
-    prep = texts["SKILL.md"].split("2. Prep, at the `# prep` line", 1)[1].split("3. `ledger_batch", 1)[0]
+    prep = texts["SKILL.md"].split("2. Prep, at the `# prep` line", 1)[1].split("3. Settle", 1)[0]
     assert re.findall(r"\bledger\(([^)]*)\)", prep) == ['view="suggest", refs=["M-0002", "M-0003"]']
     assert "one `ledger` view `suggest` for all of them" in prep and "`suggested_for`" in prep
     assert "While `later` lists meetings past the room, ask again with those as `refs`, until `later` is empty" in prep
+
+
+def test_the_settle_is_one_pass_and_the_summary_one_command() -> None:
+    """The draft quotes what settling needs, so `show` only where a quoted line can't answer; one `docket sync settle`
+    settles every line a choice settles, an Edit only for new words, the draft never written out again; the summary is
+    one command read once, never pulled from a snapshot by shell (#272)."""
+    skill = " ".join(sync_texts()["SKILL.md"].split())
+    steps = skill.split("Then, in this thread, in one pass:", 1)[1].split("### A worked draft", 1)[0]
+    assert "`ledger` view `show` only when a candidate's quoted line can't answer the question" in steps
+    assert (
+        "Settle every unsure line a choice settles in one call" in steps and "Never write the draft out again" in steps
+    )
+    assert "An Edit only for a line that needs new words" in steps and steps.count("`docket sync settle <sync>") == 1
+    assert "one `ledger` view `suggest` for all of them" in steps
+    summary = skill.split("## The summary", 1)[1].split("## Rules", 1)[0]
+    assert "`docket sync summary <sync> --vault <vault>` prints the list from the ledger" in summary
+    assert (
+        "Read it once" in summary
+        and "never pull the list out of a snapshot, a block or the draft with the shell" in summary
+    )
+    assert "docket staging list" not in summary
 
 
 def block_of(prompt: str) -> dict[str, list[str]]:
@@ -365,16 +388,20 @@ def test_the_sync_s_block_keeps_its_labels_and_each_line_its_fields() -> None:
 def test_the_prompts_placeholders_are_the_ones_docket_fills_and_the_skill_launches_by_path() -> None:
     texts = sync_texts()
     assert set(re.findall(r"\{([A-Z_]+)\}", texts["agent.md"])) == {
-        "SOURCE", "VAULT", "TODAY", "ZONE", "OWED_SINCE", "CONTEXT", "BLOCK",
+        "SOURCE", "VAULT", "TODAY", "ZONE", "OWED_SINCE", "CONTEXT", "BLOCK", "OWNER",
     }  # fmt: skip
     assert set(re.findall(r"\{([A-Z_]+)\}", texts["recording.md"])) == {
         "SOURCE", "VAULT", "TODAY", "ZONE", "OWED_SINCE", "CONTEXT", "BLOCK", "RECORDING", "TITLE", "START", "DAY",
-        "FILES", "MEETINGS", "LAYOUT", "SYNC_AT",
+        "FILES", "MEETINGS", "LAYOUT", "SYNC_AT", "OWNER",
     }  # fmt: skip
     # The skill writes no prompt out: each Agent call's prompt is the one line naming its file.
     skill = " ".join(texts["SKILL.md"].split())
     assert skill.count("`Read and follow <the prompt's path>`") == 2
-    assert "`subagent_type: fork`" in skill and "`subagent_type: general-purpose`" in skill
+    # Every agent starts fresh: no fork carries this session's context into it, and a source agent keeps the
+    # session's model (#272).
+    assert "`subagent_type: fork`" not in skill and skill.count("`subagent_type: general-purpose`") == 2
+    assert "`subagent_type: general-purpose` and no `model`" in skill
+    assert "This prompt and the files it names are all you need" in " ".join(texts["agent.md"].split())
     assert "{SOURCE}" not in skill and "fork.md" not in skill
     # The agent writes its block to its file and answers with the RUN line alone.
     agent = " ".join(texts["agent.md"].split())
@@ -461,23 +488,35 @@ def test_the_worked_draft_is_refused_unsettled_and_runs_clean_settled(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The skill's draft as the reconcile writes it, its unsure line refused; settled as the skill says, its line 7
-    taking its alternative and the prep point added at `# prep`, it dry-runs clean (DR-0749)."""
+    taking its alternative by `docket sync settle` and the prep point added at the `# prep` line it names, it dry-runs
+    clean (DR-0759)."""
     worked = sync_texts()["SKILL.md"].split("### A worked draft", 1)[1]
     draft = worked.split("```jsonl\n", 1)[1].split("```", 1)[0].splitlines()
     prep = worked.split("```json\n", 1)[1].split("```", 1)[0].strip()
-    assert "line 7 becomes its alternative" in worked and '"unsure": ' in draft[6] and draft[7].startswith("# {")
+    assert "`docket sync settle <sync> 7=alt --vault <vault>`" in " ".join(worked.split())
+    assert '"unsure": ' in draft[6] and draft[7].startswith("# {")
     assert draft[0].endswith(f": {sum(not line.startswith('#') for line in draft)} ops, 1 unsure")
     vault = pilot_vault(tmp_path / "v")
-    batch = tmp_path / "draft.jsonl"
+    made = datetime(2026, 10, 20, 7, 15, tzinfo=UTC)
+    sync = sync_folder.new_id(made)
+    folder = sync_folder.make(sync)
+    info = sync_folder.Info(sync=sync, vault=str(vault.root), made=made, today=made.date(), zone="Europe/Budapest",
+                            owed_since="the run's window", sources=[], docket="test")  # fmt: skip
+    (folder / sync_folder.INFO).write_text(info.model_dump_json(), encoding="utf-8")
+    batch = folder / "draft.jsonl"
     command = ["ledger", "batch", str(batch), "--by", "sync", "--dry-run", "--vault", str(vault.root)]
     batch.write_text("\n".join(draft) + "\n", encoding="utf-8")
     capsys.readouterr()
     assert main(command) == 1
     refused = "2. add: refused, add takes only fields, note, as, force, by, not unsure"
     assert refused in capsys.readouterr().out.splitlines()
-    settled = [*draft[:6], draft[7][2:], *draft[8:]]
-    at = settled.index("# prep: the next five working days: M-0002")
-    batch.write_text("\n".join([*settled[: at + 1], prep, *settled[at + 1 :]]) + "\n", encoding="utf-8")
+    assert main(["sync", "settle", sync, "7=alt", "--vault", str(vault.root)]) == 0
+    said = capsys.readouterr().out.splitlines()
+    settled = batch.read_text(encoding="utf-8").splitlines()
+    assert settled == [draft[0].replace(", 1 unsure", ", 0 unsure"), *draft[1:4], draft[7][2:], *draft[8:]]
+    at = int(said[-1].removeprefix("prep: line "))
+    assert settled[at - 1] == "# prep: the next five working days: M-0002"
+    batch.write_text("\n".join([*settled[:at], prep, *settled[at:]]) + "\n", encoding="utf-8")
     code = main(command)
     out = capsys.readouterr().out.splitlines()
     assert code == 0, out

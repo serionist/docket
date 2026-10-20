@@ -84,6 +84,7 @@ def test_a_recording_with_no_note_gets_its_files_its_prompt_and_its_line_in_the_
     assert "id `recording-note:2026-10-19-<slug>`" in prompt and "`by: claude, sync 2026-10-20T09:15`" in prompt
     assert f"--vault {vault.root}" in prompt and "| owed since | the run's window |" in prompt
     assert f"| the note's layout | {recordings.LAYOUT} |" in prompt
+    assert "| the owner | Ada Example (ada@example.invalid): whose asks and waits you find |" in prompt
     listed = json.loads(read(sync / "recordings" / "plaud.json"))
     assert listed["source"] == "plaud" and [r["rid"] for r in listed["recordings"]] == [WEEKLY]
     # sync.json stays as the start wrote it; a source with no recording writes no list.

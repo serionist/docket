@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0760
+    title: docket sync summary prints the sync's summary groups from the ledger, read only, within 30,000 characters
+    status: proposed
+    at: "2026-10-20"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#272"]
+    description: "docket sync summary <sync> reads the ledger after the sync's batch and prints its summary, a line per item in the short form: its ref, kind, who and title, its days, due and lateness, its meeting and its triage, no source. The groups: the sync's batches, each written by sync with its first op's id minted after the sync's start (DR-0612), the newest three named with their undo and the rest counted; what they closed and added, the logs and the other kinds counted, and the outcomes written; the meetings from now to the fifth working day, not cancelled or declined, with an open point or an open item, each point marked proposed where it is; what the owner owes due by today, in the next 7 days, and the rest; the open invites; the waits; the past meetings still holding an open point; each source whose RUN line's mark didn't move or whose run didn't open, whose block has no RUN line, or that has no block; each recording given an agent in this sync, with the note the index says covers it; the records waiting in staging. An item is listed once among the item groups; a meeting may list it again. Past 30,000 characters, what Claude Code keeps of a Bash result, rows go from whenever first, then left over, added, waiting, this week, invites, closed, the outcomes, today and the meetings, each group keeping its count and saying how many more. The sync skill pre-approves it and reads it once."
+    binds:
+      - "The summary is the ledger's, read after the write: never a snapshot or a block taken apart by shell."
+      - It changes nothing in the vault, the ledger or the sync folder; the index's ledger tables are brought up to date as any ledger read brings them.
+    not_chosen:
+      - "The summary from the skill's own reads: about 3 minutes of shell over a snapshot and a 6.8k-token turn in the third rehearsal."
+      - "The batch's id written into the sync folder by ledger_batch: the tool would write a file where it only reads one today, and the ids already say when a batch was made."
+      - "A page or an MCP tool: a door for what one command does."

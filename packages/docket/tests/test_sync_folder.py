@@ -1,4 +1,4 @@
-"""The sync folder (DR-0746, DR-0747): `docket sync start` writes `context.md` and an agent prompt per live source into
+"""The sync folder (DR-0746, DR-0758): `docket sync start` writes `context.md` and an agent prompt per live source into
 Docket's state folder, refusing before any file; old folders go at a start. `test_sync_recordings.py` holds `docket
 sync recordings`. Invented people and data only: the pilot's ledger, two recorded weeklies and a third with its
 note."""
@@ -136,6 +136,8 @@ def test_start_writes_the_context_and_a_prompt_per_live_source_and_nothing_else(
         assert f"| your block | {path / 'blocks' / f'{source}.txt'} |" in prompt
         assert f'`run_open(source="{source}")`' in prompt and f"--vault {vault.root}" in prompt
         assert "| owed since | the run's window |" in prompt and "local in Europe/Budapest" in prompt
+        # A fresh agent has none of the session's context: the prompt names whose asks it finds (#272).
+        assert "| the owner | Ada Example (ada@example.invalid): whose asks and waits you find |" in prompt
 
 
 def test_the_context_lists_the_windows_items_meetings_and_streams(vault: Vault) -> None:
@@ -339,3 +341,7 @@ def test_the_command_prints_the_folder_and_the_agents(vault: Vault, capsys: pyte
     assert main(["sync", "--vault", str(vault.root), "start", "plaud"]) == 0
     second = capsys.readouterr().out.splitlines()
     assert second[1].startswith("agent plaud: ")
+
+
+def test_an_owner_with_no_address_is_named_alone(tmp_path: Path) -> None:
+    assert start.owner(empty_vault(tmp_path, make_config(emails=[]))) == "Ada Example"
