@@ -1,7 +1,7 @@
 # The speech worker on the CPU (DR-0567): faster-whisper on CTranslate2, with Silero VAD through ONNX Runtime and PyAV
 # as faster-whisper asks. Compiled with hashes by `uv run devkit models-lock`, never by hand.
 faster-whisper==1.2.1
-ctranslate2==4.8.2
+ctranslate2==4.8.3
 av==19.0.1
 onnxruntime==1.31.0
 tokenizers==0.23.3
