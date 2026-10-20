@@ -6,7 +6,6 @@ decisions:
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#266", DR-0750]
-    supersedes: [DR-0011]
     description: "The coverage floors stay per module in tools/devkit/coverage-floors.json, docket at 100% and devkit at 88%, rising with the measure as DR-0011 had them: the cut in #266 keeps every test that is the only runner of a line on Windows or on Linux, so the kept suite measures what today's does (99.34% of the statements on Windows, 99.32% on Linux), and DR-0750 lets a floor come down only for a cut of 80% or more, which this one isn't. What changes is who can lower one: the gate fails a change that sets a floor below its merge base's unless its PR cites a decided decision that sets the new number, so only the owner lowers it. gate full holds the floors on its one run and gate coverage on CI's shares combined, as before. The rest of DR-0011 stands: ruff lints and formats at 120 columns, pyright checks every package and runs strict on each src/ folder, pytest runs the tests, and packages build with uv_build."
     binds:
       - A change that sets a floor below its merge base's fails the gate unless its PR cites a decided decision that sets it.
