@@ -1,9 +1,10 @@
 # The whole suite on all three systems, on top of ci.yml's run (DR-0754): nightly on main, on demand, on a pull request
 # labelled full-matrix (when the label goes on, and on each push while it is on) and on a v* tag, which a release will
 # need green. Linux runs it uncovered, so its timed tests hold their limits as gate os does on the other two; Windows and
-# macOS run every test file, and every page in the system's own Chrome. A red night opens an issue per distinct set of
-# failing tests, labelled nightly, or comments on the open issue for the same set; a run on demand, on a label or on a
-# tag shows its result where it was asked for.
+# macOS run every test file (`gate os --all`), where a PR runs only those that can differ by system and the smoke set,
+# and every page in the system's own Chrome. A red night opens an issue per distinct set of failing tests, labelled
+# nightly, or comments on the open issue for the same set; a run on demand, on a label or on a tag shows its result
+# where it was asked for.
 name: Nightly
 
 on:
@@ -77,9 +78,9 @@ jobs:
         run: |
           Set-Service StorSvc -StartupType Disabled
           Stop-Service StorSvc -Force
-      # The types run on every PR on all three systems, so a night runs only the tests.
+      # The types run on every PR on all three systems, so a night runs only the tests: every test file.
       - name: Tests
-        run: uv run gate os --only tests --shard ${{ matrix.share }}/${{ matrix.of }}
+        run: uv run gate os --only tests --all --shard ${{ matrix.share }}/${{ matrix.of }}
       - name: The failing tests
         if: failure() || cancelled()
         shell: bash

@@ -86,6 +86,82 @@ def test_each_run_of_a_share_keeps_the_same_files_whatever_else_filters(tmp_path
     assert code != 0
 
 
+def systems_file(root: Path, system: list[str], same: list[str]) -> None:
+    """A test-systems.json under the root: these files can differ by system, those run the same everywhere."""
+    path = root / "tools" / "devkit" / "test-systems.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    listed = {f: {"kind": "the system's own calls", "why": "an invented reason"} for f in system}
+    path.write_text(json.dumps({"system": listed, "same": same}), encoding="utf-8")
+
+
+def test_select_system_keeps_the_listed_files_and_every_smoke_test_and_the_shares_split_those(tmp_path: Path) -> None:
+    (tmp_path / "pytest.ini").write_text("[pytest]\nmarkers =\n    perf: timed\n    smoke: smoke\n", encoding="utf-8")
+    for name in ("a", "b", "c", "d"):
+        body = f"import pytest\n\ndef test_{name}_one():\n    pass\n\n"
+        body += f"@pytest.mark.perf\ndef test_{name}_timed():\n    pass\n"
+        (tmp_path / f"test_{name}.py").write_text(body, encoding="utf-8")
+    smoke = "import pytest\n\n@pytest.mark.smoke\ndef test_e_smoke():\n    pass\n\ndef test_e_other():\n    pass\n"
+    (tmp_path / "test_e.py").write_text(smoke, encoding="utf-8")
+    systems_file(tmp_path, ["test_a.py", "test_b.py", "test_c.py"], ["test_d.py", "test_e.py"])
+    code, picked = collected(tmp_path, "--select=system")
+    assert code == 0
+    assert picked == [
+        "test_a.py::test_a_one",
+        "test_a.py::test_a_timed",
+        "test_b.py::test_b_one",
+        "test_b.py::test_b_timed",
+        "test_c.py::test_c_one",
+        "test_c.py::test_c_timed",
+        "test_e.py::test_e_smoke",
+    ]
+    # The shares split the selected files, whole, and the timed run of a share keeps its files.
+    _, first = collected(tmp_path, "--select=system", "--shard=1/2")
+    _, second = collected(tmp_path, "--select=system", "--shard=2/2")
+    assert sorted(first + second) == picked
+    assert first == ["test_a.py::test_a_one", "test_a.py::test_a_timed", "test_c.py::test_c_one",
+                     "test_c.py::test_c_timed"]  # fmt: skip
+    _, timed = collected(tmp_path, "--select=system", "--shard=1/2", "-m", "perf")
+    assert timed == ["test_a.py::test_a_timed", "test_c.py::test_c_timed"]
+    (tmp_path / "tools" / "devkit" / "test-systems.json").unlink()
+    code, _ = collected(tmp_path, "--select=system")
+    assert code != 0
+
+
+def test_the_selection_comes_before_the_share_and_leaves_the_rest_deselected(tmp_path: Path) -> None:
+    systems_file(tmp_path, ["a/test_x.py", "a/test_y.py"], ["b/test_z.py"])
+
+    def item(rel: str, smoke: bool = False) -> Any:
+        marker = object() if smoke else None
+        return SimpleNamespace(path=tmp_path / rel, get_closest_marker=lambda name: marker if name == "smoke" else None)
+
+    items = [item("a/test_x.py"), item("a/test_y.py"), item("b/test_z.py"), item("b/test_z.py", smoke=True)]
+    left: list[Any] = []
+
+    def deselected(*, items: list[Any]) -> None:
+        left.extend(items)
+
+    options: dict[str, str] = {"--select": "system", "--shard": "1/2"}
+    config = SimpleNamespace(
+        rootpath=tmp_path,
+        getoption=lambda name, default=None: options.get(name, default),
+        hook=SimpleNamespace(pytest_deselected=deselected),
+    )
+    found = list(items)
+    shard.pytest_collection_modifyitems(cast(pytest.Config, config), cast(list[pytest.Item], found))
+    # Of the selected files, a/test_x and b/test_z (for its smoke test) go to the first share in path order.
+    assert found == [items[0], items[3]]
+    assert left == [items[1], items[2]]
+    # Neither option leaves every test as it is.
+    options.clear()
+    found = list(items)
+    shard.pytest_collection_modifyitems(cast(pytest.Config, config), cast(list[pytest.Item], found))
+    assert found == items
+    options["--select"] = "system"
+    (tmp_path / "tools" / "devkit" / "test-systems.json").unlink()
+    with pytest.raises(pytest.UsageError, match="is missing: it names each test file"):
+        shard.pytest_collection_modifyitems(cast(pytest.Config, config), cast(list[pytest.Item], found))
+
+
 def test_a_share_splits_by_its_system_s_weights_and_writes_what_its_files_cost(tmp_path: Path) -> None:
     for name in ("a", "b", "c"):
         (tmp_path / f"test_{name}.py").write_text(f"def test_{name}():\n    pass\n", encoding="utf-8")

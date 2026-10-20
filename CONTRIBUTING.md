@@ -37,6 +37,13 @@ time limit. `gate full` keeps them in its one run, since under coverage the inde
 a timed test needs is a shared template that an untimed test asks for too: the two runs of `gate os` share one
 templates folder, so the parallel run builds it and the timed run only times (DR-0492).
 
+A new test file goes in `tools/devkit/test-systems.json`: under `system`, with its kind and why, when what it tests can
+differ by system (paths, git, processes, the keychain, file times, modes and links, the console), else under `same`.
+Windows and macOS run the files under `system` and the smoke set on every PR (`gate os`), and every file each night
+(`gate os --all`). The gate fails a file named nowhere, and a file under `same` that names the system, skips by it, or
+makes links, file modes or file times, unless `signals` says why it runs the same everywhere (DR-0758). A new command
+group or MCP tool fails `test_smoke.py` until it has its case there; `test_web_browser_smoke.py` loads a new page as is.
+
 Tests never touch the real Docket folders or the keychain, not even to read them: `conftest.py` points the config,
 state and models folders at a temp folder of the session's before any fixture runs, and each test at its own.
 
@@ -71,6 +78,6 @@ npm run build
    "Generated with" lines.
 4. Open the PR with the template filled in, ending `Closes #<issue>`. Its title becomes the commit on `main`.
 
-CI runs the gate on Linux and the tests on Windows and macOS, and each night the whole suite on all three, which the
-`full-matrix` label runs on a PR too. The maintainer reviews a PR from outside by reading it, never by running it on
+CI runs the gate on Linux, and on Windows and macOS the test files that can differ by system with the smoke set; each
+night it runs the whole suite on all three, which the `full-matrix` label runs on a PR too. The maintainer reviews a PR from outside by reading it, never by running it on
 their machine, and squash-merges it once CI is green.
