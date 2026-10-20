@@ -376,8 +376,8 @@ def resolves(vault: Vault, locators: Iterable[str]) -> set[str]:
 
 class Lookup:
     """Many locators asked through one index, as the sync's reconcile asks them: whether each opens as `read` opens it
-    (`resolves`), a record at its latest version, and many rids' threads and containers at once. The index is opened at
-    the first question and held until the lookup closes."""
+    (`resolves`), a record at its latest version, the records under one, and many rids' threads and containers at once.
+    The index is opened at the first question and held until the lookup closes."""
 
     def __init__(self, vault: Vault) -> None:
         self._call = _Call(vault)
@@ -393,6 +393,11 @@ class Lookup:
 
     def record(self, rid: str) -> RawRecord | None:
         return self._call.raw.latest(rid)
+
+    def under(self, rid: str) -> list[RawRecord]:
+        """The records whose thread or container is rid, at their latest versions: a recording's transcripts and
+        notes, as `docket sync recordings` writes them out."""
+        return self._call.raw.under(rid)
 
     def threads(self, rids: Iterable[str]) -> dict[str, tuple[str | None, str | None]]:
         return self._call.raw.threads(rids)

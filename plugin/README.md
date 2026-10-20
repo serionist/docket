@@ -47,8 +47,8 @@ sync folder, then writes what they found into the ledger in one `ledger_batch` b
 | Part | What |
 |---|---|
 | the sync folder | `docket sync start` writes it in Docket's state folder, never in the vault: `context.md`, the ledger as the agents read it, an item a line, and each agent's prompt; it goes 7 days after its start, or once a forget made after it is applied |
-| the agents | one per source, side by side, each from its prompt file: it opens a run, follows the source's `SKILL.md` and its `sync.md`, classifies the plainly work or plainly private records of a mixed source, promotes its own, reads its recordings whole, checks every locator it reports in one `read`, and writes a block of what you owe and await, what closed, invites, minutes and outcomes to the sync folder |
-| the notes | `docket sync notes` writes a prompt per recording note the blocks name; an agent each writes the note in the background, and the sync never waits for them |
+| the agents | one per source, side by side, each from its prompt file: it opens a run, follows the source's `SKILL.md` and its `sync.md`, classifies the plainly work or plainly private records of a mixed source from what it fetched, promotes its own, checks every locator it reports in one `read`, and writes a block of what you owe and await, what closed, invites and meetings to the sync folder |
+| the recordings | as each agent is back, `docket sync recordings` writes each of its source's recordings with no note from raw into the sync folder; an agent each, on Sonnet as a trial, reads it once, writes its block of asks, closes, minutes and outcome, and puts its note. The reconcile waits for them |
 | the reconcile | `docket sync reconcile` drafts the batch into the sync folder by fixed rules: closes on a locator that shows it, asks logged on the item they continue or added (new ones untriaged), meetings set and linked, minutes, rollover, streams, archive; what the rules can't settle is marked unsure, with its line and its choices. Claude settles those, adds proposed points for the coming week's meetings from one `suggest` for all of them, and writes the file with one `ledger_batch`, dry run first |
 | the list | in chat: meetings and prep, today, this week, whenever, invites, waiting on others; then what changed, the sources that didn't run, what waits on the Staging page, and the batch, to undo whole |
 
@@ -56,15 +56,16 @@ sync folder, then writes what they found into the ledger in one `ledger_batch` b
   left as a draft unless you say send for that mail.
 - A source's `sync.md`, beside its `SKILL.md` in your project, holds what you know about finding things there: what
   counts as an ask and as evidence, the names its transcripts mishear, your note layout. The sync adds what it learns
-  there; copying a newer `SKILL.md` over yours leaves it alone. `docket source new` writes none.
+  there, a copied example's route lessons too, under `Route`; copying a newer `SKILL.md` over yours leaves it alone.
+  `docket source new` writes none.
 - Your project's `CLAUDE.md` holds the rest: how you draft and in which language, the names the ledger uses for
   people, which stream a topic goes to, how to tell apart meetings that share a slot.
 - The agents' runs, classifies, promotions and notes and the batch ask unless your permission rules allow them. The
   skill pre-approves only reads, `ledger`, `search`, `read`, `verify`, `briefs`, `decisions`, `docket ledger day`,
-  `docket staging list` and `show`, and `docket sync start`, `notes` and `reconcile`, which write only the sync folder.
+  `docket staging list` and `show`, and `docket sync start`, `recordings` and `reconcile`, which write only the sync folder.
   The batch's permission prompt shows the draft's path, not its ops: its dry run lists every change in chat first.
 - The sync folder is outside your project, so each agent's read and write there, and Claude's edits of the draft,
-  ask unless you allow them, and the note agents run in the background, where a prompt waits for nobody. Claude Code checks a file's write against
+  ask unless you allow them, and the recording agents run in the background, where a prompt waits for nobody. Claude Code checks a file's write against
   `Edit` rules, never `Write`. Allow these, with your system's folder:
 
   | System | The rules |
@@ -74,7 +75,7 @@ sync folder, then writes what they found into the ledger in one `ledger_batch` b
   | Windows | `Read(~/AppData/Local/docket/sync/**)`, `Edit(~/AppData/Local/docket/sync/**)` |
 
   and `mcp__plugin_docket_docket__doc_put`, `mcp__plugin_docket_docket__read`, `mcp__plugin_docket_docket__search`,
-  `mcp__plugin_docket_docket__ledger` and `mcp__plugin_docket_docket__verify` for the note agents. A `DOCKET_STATE_DIR`
+  `mcp__plugin_docket_docket__ledger` and `mcp__plugin_docket_docket__verify` for the recording agents. A `DOCKET_STATE_DIR`
   moves the folder to its `sync` folder.
 - Moving from a sync of your own: keep its name and description, so your words still reach it, and make its body one
   line, "Run `/docket:sync` (the Skill tool) with the same arguments". Move its lore into `CLAUDE.md` and each

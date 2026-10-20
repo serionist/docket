@@ -1,0 +1,22 @@
+decisions:
+  - id: DR-0747
+    title: Each recording is fetched once by its source's run and read once by an agent of its own, which writes its block lines and its note; the reconcile waits for every agent
+    status: proposed
+    at: "2026-10-20"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#267"]
+    supersedes: [DR-0721]
+    description: "DR-0721 as it stands, but: a recording source's agent classifies each record its run fetched from what it fetched, its pages' times the cuts' times, docket staging show only for a record the run didn't fetch, a new version of one classified before, or a cut by characters; it reads no recording and writes no line from one. As each source's agent is back, the sync skill runs docket sync recordings <sync> <source>, which brings the index up to date, lists the source's recordings in raw in its window that no current note covers, and gives each an agent of its own; a recording with a record still in staging, pending, ready or held, is skipped and said, since its note would cover it with what raw holds alone, and one given an agent in this sync gets no second. The skill launches one general-purpose agent per recording line, all in one message, at once, while the other agents run. A recording agent reads context.md and its files whole, a Read each, and never its transcript again with read; writes OWED, WAITING, CLOSES, STREAMS, NOTES, MINUTES, OUTCOME and LEARNED lines, the last for sync.md only, to its block file, a who-does-what in OUTCOME that falls on the owner or that the owner waits on getting its own OWED or WAITING line too; then puts its note by #211's method, at most three searches, the open items and points from context.md, the summary view read just before doc_put, a new doc refused on a taken id put again with -2; and answers one line. docket sync notes, note.md and the background note agents go, and the reconcile waits for every agent, the recordings' too."
+    binds:
+      - An agent reads its source only inside a run, so what it reports is what Docket keeps.
+      - "A line rests only on records in raw after the source agent's promotion, or docs in the vault: never a pending, private, dropped or held record, and never a stretch a cut took."
+      - "Every locator an agent reports is one it read: a source agent's in one read with more, a recording agent's in its files, read whole."
+      - A run that can't open or stops short leaves its mark, the other sources go on, and the summary says so.
+      - "No ledger op names a note: a meeting's link is its recording's rid (DR-0651)."
+    not_chosen:
+      - "The recording agents in the first launch: a run's new recordings reach raw only when its agent promotes them, and a recording's files come from raw."
+      - "The source agent writing the recordings' files: it would carry them in its context."
+      - "The note agents kept apart: the second rehearsal read every recording twice, 800k characters in the source agent and 250k to 390k in each note agent."
+      - "One agent for a meeting's two recordings: rare, and the reconcile marks a second OUTCOME unsure, to join them."
+      - "The source agent launching the recording agents: not every Claude Code gives a subagent the Agent tool."

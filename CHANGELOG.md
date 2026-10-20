@@ -293,6 +293,15 @@ Unreleased in the same PR.
 
 ### Changed
 
+- `/docket:sync` reads each recording once. The recorder's agent classifies from the pages it fetched, fetching
+  them side by side, and reads no recording; as each source's agent is back, `docket sync recordings` writes each
+  recording with no note from raw into the sync folder, and an agent each, on Sonnet as a trial, reads it whole in a
+  few reads, writes its asks, closes, minutes and outcome, and puts its note. The summary waits for them, and
+  `docket sync notes` is gone. A who-does-what in an outcome that falls on you, or that you wait on, also becomes its
+  own item, and an ask the agent logs on a running item whose title and thread don't match is left to Claude. A
+  copied example source's route lessons go into its `sync.md`, which an upgrade leaves alone.
+- `docket staging show` prints a transcript once, a segment a line with the times a cut takes, instead of its
+  segments as JSON twice and its text again.
 - The `read` tool takes `more`, further locators read in the same call, and the `ledger` tool's suggest takes `refs`,
   several meetings, each item saying which meeting it is for. As many as fit 40,000 characters come back, the rest
   listed in `later` to ask for again, and a locator that doesn't open says why without failing the others. A sync's

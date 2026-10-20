@@ -1,4 +1,4 @@
-"""`docket sync reconcile` (DR-0723): the sync's batch drafted from its blocks by fixed rules, each row of the plan's
+"""`docket sync reconcile` (DR-0749): the sync's batch drafted from its blocks by fixed rules, each row of the plan's
 table sure and unsure, a thread match held to the same who and side, merges only of look-alike asks, every merge
 reported, and the draft, settled, written by `docket ledger batch` (DR-0724's tool is in test_service_mcp.py).
 Invented people and data only: the pilot's ledger, its channel, Cleo's mail, a team chat, three recordings and the
@@ -297,15 +297,57 @@ def test_an_ask_continuing_an_open_item_is_a_log_and_a_due_it_moves_a_set(vault:
     done, lines = run(vault, outlook=[
         waiting("Cleo Test", QUOTE_AGAIN, "2026-10-19 09:00", "the quote by Thursday", continues="A-0002",
                 due="2026-10-22"),
-        waiting("Cleo Test", PLAN_MAIL, "2026-10-19 10:00", "the floor plan she promised", continues="A-0002",
-                due="2026-10-21"),
+        waiting("Cleo Test", PLAN_MAIL, "2026-10-19 10:00", "Cleo's quote for the sensors, with the floor plan",
+                continues="A-0002", due="2026-10-21"),
     ])  # fmt: skip
     assert ops(lines) == [
         {"op": "log", "item": "A-0002", "note": f"Cleo: the quote by Thursday: {QUOTE_AGAIN}"},
         {"op": "set", "item": "A-0002", "fields": {"due": "2026-10-22"}},
-        {"op": "log", "item": "A-0002", "note": f"Cleo: the floor plan she promised: {PLAN_MAIL}"},
+        {
+            "op": "log",
+            "item": "A-0002",
+            "note": f"Cleo: Cleo's quote for the sensors, with the floor plan: {PLAN_MAIL}",
+        },
     ]
     assert done.unsure == [] and done.merges == []
+
+
+def test_a_continues_ref_unlike_its_item_with_nothing_of_its_thread_in_its_trail_is_unsure_its_add_beside_it(
+    vault: Vault,
+) -> None:
+    """The rehearsal's miss: an ask to the same people for other work, logged as sure on their running item. In the
+    item's own thread a reworded ask stays sure; a chat, which everyone in it shares, never backs one, and the log
+    before a close's evidence is held to the same rule."""
+    mail = [
+        waiting("Cleo Test", PLAN_MAIL, "2026-10-19 10:00", "the floor plan she promised", continues="A-0002"),
+        waiting("Cleo Test", QUOTE_AGAIN, "2026-10-19 09:00", "the signed order form", continues="A-0002"),
+    ]
+    chat = [owed("Ben Sample", CHAT_AGAIN, "2026-10-19 09:00", "Put the pilot calls in the team's calendars",
+                 continues="A-0006")]  # fmt: skip
+    slack = [
+        f"CLOSES:   A-0001 | done | {SENT} | Sent Ben the dates",
+        owed("Ben Sample", TWO_ASKS, "2026-10-18", "Share the venue address", continues="A-0001"),
+    ]
+    done, lines = run(vault, outlook=mail, slack=slack, teams=chat)
+    _, plan, order, venue, calendars = ops(lines)
+    why = "but its title doesn't look like that item's and nothing of its thread is in that item's trail: keep the log"
+    assert unsure(plan) == [f"it continues A-0002, {why} if it continues that work, else take the add"]
+    assert plan == {"op": "log", "item": "A-0002", "note": f"Cleo: the floor plan she promised: {PLAN_MAIL}",
+                    "unsure": unsure(plan)[0]}  # fmt: skip
+    assert around(lines, plan) == (
+        [quoted("outlook", 2, mail[0]), A2],
+        [{"op": "add", "fields": {"kind": "waiting", "title": "the floor plan she promised", "who": "Cleo Test",
+                                  "stream": "pilot", "source": PLAN_MAIL, "opened": "2026-10-19"}}],
+    )  # fmt: skip
+    assert order == {"op": "log", "item": "A-0002", "note": f"Cleo: the signed order form: {QUOTE_AGAIN}"}
+    assert unsure(venue) == [f"it continues A-0001, {why} if it continues that work, else take the add"]
+    assert unsure(calendars) == [f"it continues A-0006, {why} if it continues that work, else take the add"]
+    assert around(lines, calendars)[1] == [
+        {"op": "add", "fields": {"kind": "reply", "title": "Put the pilot calls in the team's calendars",
+                                 "who": "Ben Sample", "stream": "pilot", "source": CHAT_AGAIN, "opened": "2026-10-19"},
+         "note": "not yet"},
+    ]  # fmt: skip
+    assert len(done.unsure) == 3
 
 
 def test_a_new_ask_is_a_sure_add_with_its_fields_and_the_meeting_it_was_asked_in(vault: Vault) -> None:
@@ -546,7 +588,8 @@ def test_asks_that_differ_in_who_side_or_title_stay_apart_in_one_mail_and_at_one
 
 def test_pings_either_side_of_a_close_are_a_log_before_and_an_add_after_and_never_merged(vault: Vault) -> None:
     """Ben's dates went out at 14:00 his time: his ping at 11:00 is answered by it, his ping at 16:00 is new work. By
-    day, an ask the day before is answered, one two days after is new."""
+    day, an ask the day before is answered, one two days after is new. The one the day before is a log on another
+    topic, outside the item's thread, so it is unsure too, the add beside it."""
     given = [
         f"CLOSES:   A-0001 | done | {SENT} | Sent Ben the dates",
         owed("Ben Sample", BEN_AGAIN, "2026-10-19 11:00", "Send Ben the pilot dates", continues="A-0001"),
@@ -558,9 +601,12 @@ def test_pings_either_side_of_a_close_are_a_log_before_and_an_add_after_and_neve
     close, before, after, day_before, day_after = ops(lines)
     assert close["op"] == "done" and done.merges == []
     assert before == {"op": "log", "item": "A-0001", "note": f"Ben: Send Ben the pilot dates: {BEN_AGAIN}"}
-    assert day_before == {"op": "log", "item": "A-0001", "note": f"Ben: Share the venue address: {TWO_ASKS}"}
+    assert {k: v for k, v in day_before.items() if k != "unsure"} == {
+        "op": "log", "item": "A-0001", "note": f"Ben: Share the venue address: {TWO_ASKS}"
+    }  # fmt: skip
+    assert unsure(day_before)[0].startswith("it continues A-0001, but its title doesn't look like that item's")
     assert (after["op"], after["fields"]["source"], day_after["op"]) == ("add", BEN_LATER, "add")
-    assert done.unsure == []
+    assert len(done.unsure) == 1
 
 
 def test_two_pings_after_a_close_are_one_add_unsure_that_they_are_one_ask(vault: Vault) -> None:

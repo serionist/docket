@@ -1,7 +1,7 @@
-"""The sync folder (DR-0720, DR-0721): `docket sync start` writes `context.md` and an agent prompt per live source into
-Docket's state folder, refusing before any file; `docket sync notes` a prompt per note the blocks' NOTES lines name;
-old folders go at a start. Invented people and data only: the pilot's ledger, two recorded weeklies and a third with
-its note."""
+"""The sync folder (DR-0746, DR-0747): `docket sync start` writes `context.md` and an agent prompt per live source into
+Docket's state folder, refusing before any file; old folders go at a start. `test_sync_recordings.py` holds `docket
+sync recordings`. Invented people and data only: the pilot's ledger, two recorded weeklies and a third with its
+note."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from docket_testkit import copy_vault, empty_vault, git, make_config, make_record, template_with
+from docket_testkit import copy_vault, empty_vault, git, make_config, template_with
 from ledger_kit import meeting, op, ulid, write_ops
 from recording_kit import call, doc
 from sync_kit import Session, app_of, service_client, sync_template, sync_vault
@@ -117,7 +117,7 @@ def test_start_writes_the_context_and_a_prompt_per_live_source_and_nothing_else(
     path = started.folder
     assert path.parent == folder.root() and folder.ID.match(path.name)
     assert sorted(p.relative_to(path).as_posix() for p in path.rglob("*")) == [
-        "agents", "agents/plaud.md", "agents/slack.md", "blocks", "context.md", "notes", "sync.json",
+        "agents", "agents/plaud.md", "agents/slack.md", "blocks", "context.md", "recordings", "sync.json",
     ]  # fmt: skip
     info = json.loads((path / "sync.json").read_text(encoding="utf-8"))
     assert info["vault"] == str(vault.root) and info["today"] == "2026-10-20" and info["zone"] == "Europe/Budapest"
@@ -138,7 +138,7 @@ def test_start_writes_the_context_and_a_prompt_per_live_source_and_nothing_else(
         assert "| owed since | the run's window |" in prompt and "local in Europe/Budapest" in prompt
 
 
-def test_the_context_lists_the_items_meetings_streams_windows_and_the_recordings_with_no_note(vault: Vault) -> None:
+def test_the_context_lists_the_windows_items_meetings_and_streams(vault: Vault) -> None:
     started = start.start(vault, [], NOW)
     context = (started.folder / "context.md").read_text(encoding="utf-8").splitlines()
     assert context == [
@@ -146,8 +146,6 @@ def test_the_context_lists_the_items_meetings_streams_windows_and_the_recordings
         "sources",
         "plaud | from 2026-10-13 09:15 | agents/plaud.md | blocks/plaud.txt",
         "slack | from 2026-10-18 08:02 | agents/slack.md | blocks/slack.txt",
-        "recordings with no note (1)",
-        f"{WEEKLY} | 10-19 10:30 | Pilot weekly",
         "open items (3)",
         "A-0001 | reply | Ben Sample | Send Ben the pilot dates | slack:C0PILOT/1791100000.000100",
         "A-0002 | waiting | Cleo Test | Cleo's quote / the sensors | outlook:AAMkADquote1",
@@ -183,7 +181,6 @@ def test_only_the_sources_named_get_an_agent_and_a_name_given_twice_once(vault: 
     context = (started.folder / "context.md").read_text(encoding="utf-8")
     # The meetings start on the day slack's window does.
     assert "meetings 10-18 to 10-27, or with an open point (3)" in context
-    assert "recordings with no note (0)" in context
 
 
 @pytest.mark.parametrize(
@@ -223,9 +220,7 @@ def test_owed_since_goes_40_working_days_back_while_the_ledger_holds_no_item(tmp
     assert "| owed since | 2026-08-25 |" in prompt
     context = (started.folder / "context.md").read_text(encoding="utf-8").splitlines()
     assert context[0].endswith("owed since: 2026-08-25")
-    # No index yet: the agent checks each recording itself.
-    assert context[3].startswith("recordings with no note: the index can't say (there is no index yet")
-    assert context[4:] == ["open items (0)", "snoozed (0)", "meetings 10-13 to 10-27, or with an open point (0)",
+    assert context[3:] == ["open items (0)", "snoozed (0)", "meetings 10-13 to 10-27, or with an open point (0)",
                            "streams (0)"]  # fmt: skip
 
 
@@ -287,89 +282,6 @@ def test_a_sync_is_found_by_its_id_or_its_folder_and_refused_otherwise(vault: Va
         folder.find(sync, vault.root)
 
 
-# -- notes -------------------------------------------------------------------------------------------------------------
-
-
-def blocks(started: start.Started, **texts: str) -> None:
-    for source, text in texts.items():
-        (started.folder / "blocks" / f"{source}.txt").write_text(text, encoding="utf-8")
-
-
-def test_notes_writes_a_prompt_per_doc_id_and_one_over_two_recordings(vault: Vault) -> None:
-    started = start.start(vault, [], NOW)
-    blocks(
-        started,
-        plaud=(
-            "RUN:      plaud | run-1 | captures 2 | ready 1, pending 0 | skipped 0 | mark moved yes | -\n"
-            "NOTES:    recording-note:2026-10-19-pilot-weekly | plaud:rec-0101 | 10:30 | 10:50 | M-0001\n"
-            "NOTES:    recording-note:2026-10-19-pilot-weekly | plaud:rec-0090 | 10:52 | 11:10 | -\n"
-            "NOTES:    recording-note:2026-10-18-pilot-kickoff | plaud:rec-0102 | 10:30 | 10:50\n"
-        ),
-        slack="RUN:      slack | run-2 | captures 3 | ready 3, pending 0 | skipped 0 | mark moved yes | -\n",
-    )
-    noted = start.notes(vault, started.info.sync)
-    assert [n.doc for n in noted.notes] == ["recording-note:2026-10-19-pilot-weekly",
-                                            "recording-note:2026-10-18-pilot-kickoff"]  # fmt: skip
-    assert noted.said == []
-    weekly, kickoff = (n.prompt.read_text(encoding="utf-8") for n in noted.notes)
-    assert noted.notes[0].prompt == started.folder / "notes" / "2026-10-19-pilot-weekly.md"
-    assert not PLACEHOLDER.search(weekly) and not PLACEHOLDER.search(kickoff)
-    assert "| its recordings | plaud:rec-0101, 10:30 to 10:50; plaud:rec-0090, 10:52 to 11:10 |" in weekly
-    assert "| its meeting | M-0001, which its content names |" in weekly
-    assert "| its meeting | none named: the one 10 minutes either side of its start" in kickoff
-    assert "`by: claude, sync 2026-10-20T09:15`" in weekly and f"--vault {vault.root}" in weekly
-    # A vault of its own repo has no project, so no sync.md: Docket's layout.
-    assert f"| the layout | {start.LAYOUT} |" in weekly
-    assert "One line and nothing else: `put recording-note:2026-10-19-pilot-weekly rev <n>`" in weekly
-    assert start.note_lines(noted) == [f"note {n.doc}: {n.prompt}" for n in noted.notes]
-
-
-def test_notes_says_each_line_that_gets_no_prompt_and_why(vault: Vault) -> None:
-    started = start.start(vault, [], NOW)
-    blocks(
-        started,
-        plaud=(
-            "NOTES:    recording-note:2026-10-19-pilot-weekly | plaud:rec-9999 | 10:30 | 10:50\n"
-            "NOTES:    minutes:2026-10-19-pilot-weekly | plaud:rec-0101 | 10:30 | 10:50\n"
-            "NOTES:    recording-note:Pilot Weekly | plaud:rec-0101 | 10:30 | 10:50\n"
-            "NOTES:    recording-note:2026-10-19-pilot | plaud:rec-0101\n"
-            "Some words the agent wrote.\n"
-        ),
-    )
-    noted = start.notes(vault, started.info.sync)
-    assert noted.notes == []
-    assert noted.said == [
-        "blocks/plaud.txt:2: minutes:2026-10-19-pilot-weekly isn't a recording-note",
-        "blocks/plaud.txt:3: the slug 'Pilot Weekly' is lowercase letters, digits and inner hyphens",
-        "blocks/plaud.txt:4: NOTES takes 4 to 5 fields, not 2",
-        "blocks/slack.txt isn't there: no block from slack",
-        "blocks/plaud.txt:1: plaud:rec-9999 doesn't open, so it gets no note",
-    ]
-    assert start.note_lines(noted) == noted.said
-
-
-def test_notes_with_no_notes_line_says_so(vault: Vault) -> None:
-    started = start.start(vault, ["slack"], NOW)
-    blocks(started, slack="RUN:      slack | none | the service didn't answer\n")
-    noted = start.notes(vault, started.info.sync)
-    assert start.note_lines(noted) == ["no note to write: the blocks name none"]
-
-
-def test_a_note_s_layout_is_the_one_its_source_s_sync_md_gives(
-    tmp_path_factory: pytest.TempPathFactory, tmp_path: Path
-) -> None:
-    vault = sync_vault(sync_template(tmp_path_factory), tmp_path)
-    vault.write_run("memo", [make_record(rid="memo:m-1", source="memo", kind="memo", container="memo:m-1")])
-    started = start.start(vault, [], NOW)
-    blocks(started, memo="NOTES:    recording-note:2026-10-19-a-memo | memo:m-1 | 10:30 | 10:50\n")
-    sync_md = vault.root.parent / ".claude" / "skills" / "sources" / "memo" / "sync.md"
-    sync_md.write_text("# memo\n\nA note's layout: the decisions first.\n", encoding="utf-8")
-    (note,) = start.notes(vault, started.info.sync).notes
-    assert f"| the layout | the one {sync_md.resolve()} gives for a recording note, else " in note.prompt.read_text(
-        encoding="utf-8"
-    )
-
-
 # -- the block ---------------------------------------------------------------------------------------------------------
 
 
@@ -419,9 +331,7 @@ def test_a_short_form_field_holds_no_bar_inside_or_at_an_end() -> None:
 # -- the commands ------------------------------------------------------------------------------------------------------
 
 
-def test_the_commands_print_the_folder_the_agents_and_the_notes(
-    vault: Vault, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_the_command_prints_the_folder_and_the_agents(vault: Vault, capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["sync", "start", "slack", "--vault", str(vault.root)]) == 0
     first = capsys.readouterr().out.splitlines()
     assert first[0].startswith("sync folder: ") and first[1].startswith("agent slack: ") and len(first) == 2
@@ -429,13 +339,3 @@ def test_the_commands_print_the_folder_the_agents_and_the_notes(
     assert main(["sync", "--vault", str(vault.root), "start", "plaud"]) == 0
     second = capsys.readouterr().out.splitlines()
     assert second[1].startswith("agent plaud: ")
-    sync = Path(second[0].removeprefix("sync folder: "))
-    (sync / "blocks" / "plaud.txt").write_text(
-        "NOTES:    recording-note:2026-10-19-pilot-weekly | plaud:rec-0101 | 10:30 | 10:50\n", encoding="utf-8"
-    )
-    assert main(["sync", "--vault", str(vault.root), "notes", str(sync)]) == 0
-    assert capsys.readouterr().out.splitlines() == [
-        f"note recording-note:2026-10-19-pilot-weekly: {sync / 'notes' / '2026-10-19-pilot-weekly.md'}"
-    ]
-    assert main(["sync", "notes", "sync-1", "--vault", str(vault.root)]) == 2
-    assert "isn't a sync" in capsys.readouterr().err

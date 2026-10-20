@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0750
+    title: A source may keep a sync.md beside its SKILL.md; a route lesson for a SKILL.md copied from Docket's examples goes there too, under Route
+    status: proposed
+    at: "2026-10-20"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#267"]
+    supersedes: [DR-0688]
+    description: DR-0688 as it stands, but a LEARNED line about the route of a source whose SKILL.md is a copy of one of Docket's examples, its title saying Docket's reference source or a Docket example source, goes into its sync.md, under a part Route, since an upgrade copies the example's SKILL.md over the project's and would take the line with it. A route line for a SKILL.md of the owner's own still goes into it. Plaud's SKILL.md says so beside its upgrade line.
+    binds:
+      - The file name sync.md beside a source's SKILL.md is a one-way door (AGENTS.md).
+      - sync.md never restates the run's steps or the return block's shape.
+    not_chosen:
+      - "A section of SKILL.md the copy keeps: the copy is the owner copying files by hand, as the reference's SKILL.md says, so nothing could keep one."

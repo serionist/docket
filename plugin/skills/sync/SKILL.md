@@ -1,15 +1,15 @@
 ---
 name: sync
-description: Sync the user's live sources into the vault and reconcile the ledger. docket sync start writes a sync folder with each agent's prompt and the ledger it reads; each source runs in an agent of its own through run_open and writes a block of what the user owes and awaits, what closed, invites, minutes and outcomes; recording notes go to background agents; docket sync reconcile drafts the batch, Claude settles the lines it marks unsure, and one ledger_batch by sync writes it from the file; then the list is gone through with the user. Use when the user says sync or /sync, asks what they haven't answered or what they owe people, asks to catch up on mail, chats or recordings, or when the session start says a sync is due.
-allowed-tools: mcp__plugin_docket_docket__ledger mcp__plugin_docket_docket__search mcp__plugin_docket_docket__read mcp__plugin_docket_docket__verify mcp__plugin_docket_docket__briefs mcp__plugin_docket_docket__decisions Bash(docket ledger day) Bash(docket ledger day *) Bash(docket staging list) Bash(docket staging list *) Bash(docket staging show *) Bash(docket sync start) Bash(docket sync start *) Bash(docket sync notes *) Bash(docket sync reconcile *)
+description: Sync the user's live sources into the vault and reconcile the ledger. docket sync start writes a sync folder with each agent's prompt and the ledger it reads; each source runs in an agent of its own through run_open and writes a block of what the user owes and awaits, what closed, invites and meetings; each recording then gets an agent of its own, from docket sync recordings, that reads it once and writes its lines and its note; docket sync reconcile drafts the batch, Claude settles the lines it marks unsure, and one ledger_batch by sync writes it from the file; then the list is gone through with the user. Use when the user says sync or /sync, asks what they haven't answered or what they owe people, asks to catch up on mail, chats or recordings, or when the session start says a sync is due.
+allowed-tools: mcp__plugin_docket_docket__ledger mcp__plugin_docket_docket__search mcp__plugin_docket_docket__read mcp__plugin_docket_docket__verify mcp__plugin_docket_docket__briefs mcp__plugin_docket_docket__decisions Bash(docket ledger day) Bash(docket ledger day *) Bash(docket staging list) Bash(docket staging list *) Bash(docket staging show *) Bash(docket sync start) Bash(docket sync start *) Bash(docket sync recordings *) Bash(docket sync reconcile *)
 ---
 
 # Sync
 
 A sync runs each live source in an agent of its own, each from a prompt file Docket writes, then writes what they
 found into the ledger in one `ledger_batch` by `sync`, from the draft Docket makes of their blocks, and goes through
-the list with the user. The agents keep what they read in the vault and write their blocks to files; only this thread
-writes the ledger.
+the list with the user. Each recording gets an agent of its own, which reads it once. The agents keep what they
+read in the vault and write their blocks to files; only this thread writes the ledger.
 
 ## Two rules
 
@@ -30,8 +30,8 @@ Without them, `who` is the name the ledger already uses for the person (`ledger`
 | Start | `docket sync start --vault <vault>`, the sources after it when the user named some: it takes `docket ledger day --json`'s `syncs` as the live sources, refuses a name not among them, listing the live ones, and says a `sync_problem`; then writes the sync folder and prints it and a line per agent, `agent <source>: <prompt>`. A refusal stops the sync: say it |
 | Service | `ledger` view `meetings` for today. The tool missing, or the service not running: say so and stop, since a run needs the service |
 | Agents | one per `agent` line, all launched in one message (below) |
-| Notes | once every agent is back, `docket sync notes <sync> --vault <vault>`, then an agent per note, never waited for (below) |
-| Reconcile | `docket sync reconcile <sync> --vault <vault>`, the draft settled, then one `ledger_batch` by `sync` from its file, dry run first (below) |
+| Recordings | as each agent is back, `docket sync recordings <sync> <source> --vault <vault>`, then an agent per recording it names (below) |
+| Reconcile | once every agent is back, the recordings' too: `docket sync reconcile <sync> --vault <vault>`, the draft settled, then one `ledger_batch` by `sync` from its file, dry run first (below) |
 | Summary | the list in chat, then the user's answer (below) |
 
 `<vault>` is the folder the session start's `vault:` line names. Put `--vault <vault>` on every `docket` command.
@@ -45,31 +45,36 @@ follow <the prompt's path>`, the path as the line gives it. Never write a prompt
 filled each from Docket's own.
 
 - Each agent reads the ledger from the sync folder's `context.md`, runs its source through `run_open`, the source's
-  skill and its `sync.md`, classifies and promotes its own records, reads its recordings whole, checks every locator
-  it reports in one `read` with `more`, writes its block to `blocks/<source>.txt` in the sync folder, and returns its
-  RUN line alone.
+  skill and its `sync.md`, classifies its own records from what its run fetched and promotes them, checks every
+  locator it reports in one `read` with `more`, writes its block to `blocks/<source>.txt` in the sync folder, and
+  returns its RUN line alone. A recording source's agent reads no recording and writes no line from one.
 - The agents may share one browser, a tab each. A run that stops short leaves its mark and the others go on: its RUN
   line says why, and the summary names it.
 - The blocks are read by Docket, not by you: the reconcile prints their RUN and LEARNED lines and quotes each line it
   leaves to you. Read a block file only for a question the draft can't answer. An agent with no block file has its
   answer as its RUN line, and the summary names it.
 - A LEARNED line goes where it says: one about the route into the source's `SKILL.md`, any other into its `sync.md`
-  (made when it isn't there), a dated line in the part it concerns. Never the run's steps or the block's shape.
+  (made when it isn't there), a dated line in the part it concerns. A `SKILL.md` that is a copy of one of
+  Docket's examples, its title saying Docket's reference source or a Docket example source, is copied over at an
+  upgrade: its route lines go into `sync.md` too, under a part `Route`. Never the run's steps or the block's shape.
 
-## The notes
+## The recordings
 
-`docket sync notes <sync> --vault <vault>` writes a prompt per note the NOTES lines name, two lines with one doc id
-making one note over both recordings, and prints `note <doc id>: <prompt>` for each; a line whose recording doesn't
-open gets none and is said.
+As each agent is back, run `docket sync recordings <sync> <source> --vault <vault>` for its source. It gives each of
+the source's recordings in raw with no note an agent of its own: it writes the recording from raw into the sync folder
+as files the Read tool takes whole, and its prompt, and prints `recording <source>/<key>: <prompt>` for each. A
+recording given an agent before in this sync gets no second; one with a record still in staging is skipped and said,
+and a source with none says so in a line.
 
-- One `Agent` call per `note` line, all in one message: `subagent_type: general-purpose`, `description` `note <doc
-  id>`, the prompt `Read and follow <the prompt's path>`.
-- Launch them before the reconcile wherever an Agent call doesn't hold up this thread, as Claude Code runs subagents
-  in the background; only where a call waits for its agent, after the summary.
-- Never wait for them: no op names a note, since the meeting's link is the recording's rid, and the minutes come from
-  the recording agent's own reading. Each answers one line, `put <doc id> rev <n>` or why not: say how many are still
-  being written in the summary, and each outcome as it comes. A note that fails leaves its recording with none, which
-  the next sync's recording agent reports again.
+- One `Agent` call per `recording` line, all in one message, at once, while the other agents still run:
+  `subagent_type: general-purpose`, `model: sonnet`, `description` `recording <key>`, the prompt `Read and follow <the
+  prompt's path>`. Where Claude Code returns a message's agents together, this comes after all of them.
+- Each reads `context.md` and its recording's files once, writes its block to `blocks/<source>/<key>.txt`, puts its
+  note by #211's method, and answers one line: `put <doc id> rev <n>, <k> lines`, or `not put <doc id>: <why>, <k>
+  lines`. The reconcile waits for every one; the summary says each note not put.
+- Sonnet is a trial. The next rehearsal changes the design and the model at once, so for each ask the old sync found
+  from a recording that the rehearsal misses, that recording's prompt runs again on the default model on a fresh copy
+  of the vault: when the default finds the ask, the recording agents go back to the default.
 
 ## The continuing-work rule
 
@@ -172,8 +177,7 @@ Read the ledger again after the write, then say it in chat, a line each, as the 
 
 After the list, a few lines: what changed, and what the sync closed by itself; the sources that didn't run and why;
 how many records wait on the Staging page (`docket staging list --state pending --vault <vault>`); the meetings
-rollover left over with open points and nowhere to go; the LEARNED lines written and where; the notes still being
-written; the batch, to undo whole with `{"op": "undo", "batch": "<its id>"}`; and once, the stale briefs (`briefs`)
+rollover left over with open points and nowhere to go; the LEARNED lines written and where; the notes not put and why; the batch, to undo whole with `{"op": "undo", "batch": "<its id>"}`; and once, the stale briefs (`briefs`)
 and the decisions waiting (`decisions`, status `proposed`).
 
 Then the user goes through it. They answer in free text ("12 done, 14 drop, draft 3"), which is one batch by `user`,

@@ -1,4 +1,4 @@
-"""`docket sync reconcile <sync>` (DR-0723): the sync's batch drafted from its blocks into `draft.jsonl` in the sync
+"""`docket sync reconcile <sync>` (DR-0749): the sync's batch drafted from its blocks into `draft.jsonl` in the sync
 folder by fixed rules, and a report. It writes the draft and nothing else: the batch stays Claude's.
 
 Every locator is resolved first, as `read` resolves it, through one index for the whole run, and a line whose locator
@@ -67,20 +67,61 @@ NONE = "-"
 
 
 @dataclass(frozen=True)
-class Found:
-    """A block line and the file it came from."""
+class Owner:
+    """The owner as a meeting's people name them: their name's words and their addresses."""
 
-    source: str
+    tokens: set[str]
+    emails: list[str]
+
+    @classmethod
+    def of(cls, vault: Vault) -> Owner:
+        owner = vault.config.owner
+        return cls(name_tokens(owner.name), [e.lower() for e in owner.emails])
+
+    def is_owner(self, person: str) -> bool:
+        text = person.lower()
+        return any(email in text for email in self.emails) or (bool(self.tokens) and self.tokens <= name_tokens(person))
+
+    def own(self, m: views.MeetingFacts) -> bool:
+        """The owner's own block: no one but the owner in it, and the owner organising it."""
+        people = [p for p in [m.row.organiser, *m.attendees] if p]
+        if any(not self.is_owner(p) for p in people):
+            return False
+        return bool(people) or m.row.response == "organiser"
+
+
+def overlapping(
+    meetings: Sequence[views.MeetingFacts], since: datetime, until: datetime, owner: Owner
+) -> list[views.MeetingFacts]:
+    """The meetings overlapping a window that a link may take: not cancelled, and not the owner's own block."""
+    return [
+        m for m in meetings
+        if m.row.start < until and m.row.end > since and m.row.response != "cancelled" and not owner.own(m)
+    ]  # fmt: skip
+
+
+def recorded_in(meetings: Sequence[views.MeetingFacts], start: datetime, owner: Owner) -> list[views.MeetingFacts]:
+    """The meetings a recording is of by time: those 10 minutes either side of its start (DR-0651), as a NOTES line's
+    link and a recording agent's prompt both take them."""
+    return overlapping(meetings, start - RECORDED, start + RECORDED, owner)
+
+
+@dataclass(frozen=True)
+class Found:
+    """A block line and the file it came from, by its path in the sync folder: `blocks/slack.txt`, or a recording's
+    `blocks/plaud/rec-0101.txt`."""
+
+    file: str
     line: block.Line
 
     @property
     def quoted(self) -> str:
         """`blocks/slack.txt:4 OWED: Ben Sample | ...`, as the draft and the report quote it."""
-        return f"{folder.BLOCKS}/{self.source}.txt:{self.line.n} {self.text}"
+        return f"{self.where} {self.text}"
 
     @property
     def where(self) -> str:
-        return f"{folder.BLOCKS}/{self.source}.txt:{self.line.n}"
+        return f"{self.file}:{self.line.n}"
 
     @property
     def text(self) -> str:
@@ -200,16 +241,22 @@ def _is_day(text: str) -> bool:
 
 
 def read_blocks(path: Path, info: folder.Info) -> tuple[list[Found], list[str]]:
-    """Every block's lines in the sources' order, and each source with no block file, said."""
+    """Every block's lines, each source's and then its recordings', in the sources' order, and each block file that
+    isn't there, said."""
     out: list[Found] = []
     said: list[str] = []
     for source in info.sources:
-        rel = f"{folder.BLOCKS}/{source.source}.txt"
-        file = path / rel
-        if not file.is_file():
-            said.append(f"{rel} isn't there: no block from {source.source}")
-            continue
-        out += [Found(source.source, line) for line in block.parse(file.read_bytes().decode("utf-8", "replace"))]
+        files = [(f"{folder.BLOCKS}/{source.source}.txt", source.source)]
+        files += [
+            (f"{folder.BLOCKS}/{source.source}/{r.key}.txt", f"{r.rid}'s agent")
+            for r in folder.recordings(path, source.source)
+        ]
+        for rel, whose in files:
+            file = path / rel
+            if not file.is_file():
+                said.append(f"{rel} isn't there: no block from {whose}")
+                continue
+            out += [Found(rel, line) for line in block.parse(file.read_bytes().decode("utf-8", "replace"))]
     return out, said
 
 
@@ -239,9 +286,7 @@ class _Drafting:
         for _ in range(PREP_DAYS):
             until = ledger_day.next_working_day(until)
         self.prep_until = datetime(until.year, until.month, until.day, tzinfo=self.tz) + timedelta(days=1)
-        owner = vault.config.owner
-        self.owner_tokens = name_tokens(owner.name)
-        self.owner_emails = [e.lower() for e in owner.emails]
+        self.owner = Owner.of(vault)
         self.said = said
         self.lines: list[Found] = []
         self.records: dict[str, RawRecord] = {}
@@ -511,7 +556,7 @@ class _Drafting:
         head = group[0]
         side = self.relation(head, row.id)
         if side == "before":
-            return Draft(self.log(group, row), head.found)
+            return self.unlike(Draft(self.log(group, row), head.found), group, row)
         d = self.add(group, beside=row.id)
         if side is None:
             d.unsure(
@@ -526,7 +571,7 @@ class _Drafting:
         """A log on the open item the line continues, and a set of the due it moves; sure unless the thread holds
         another of the person's items."""
         head = group[0]
-        d = Draft(self.log(group, row), head.found)
+        d = self.unlike(Draft(self.log(group, row), head.found), group, row)
         due = self.due(group)
         if due is not None and not _is_day(due):
             d.unsure(f"the due, {due!r}, isn't YYYY-MM-DD: fix it")
@@ -542,15 +587,43 @@ class _Drafting:
             d.alternatives += [self.log(group, o) for o in others]
         return d
 
+    def unlike(self, d: Draft, group: list[_Ask], row: views.ItemRow) -> Draft:
+        """A log on the item an ask's continues ref names is unsure when the ask's title isn't a look-alike of the
+        item's by DR-0642's rule and nothing of its thread is in the item's trail: the agent may have named an item of
+        the same people for a different ask. The add is its alternative."""
+        head = group[0]
+        if alike(title_words(head.title), title_words(row.title)) or row.id in self.backed(head):
+            return d
+        d.unsure(
+            f"it continues {row.ref}, but its title doesn't look like that item's and nothing of its thread is in that "
+            "item's trail: keep the log if it continues that work, else take the add",
+            self.candidate(row),
+        )
+        d.alternatives.append(self.add(group, beside=row.id).op)
+        return d
+
+    def backed(self, ask: _Ask) -> set[str]:
+        """The open items whose trail holds the ask's thread, or its locator's rid where the record has no thread;
+        none where the record's thread is its container, which everyone in it shares."""
+        thread = self.thread(ask)
+        return set() if thread is None else set(self.by_thread.get(thread, []))
+
+    def thread(self, ask: _Ask) -> str | None:
+        """The thread an ask's locator is in, as the trails are read: the record's thread, else its rid; None where
+        the record's thread is its container (a chat, a recording)."""
+        record = self.records.get(ask.found.locator)
+        if record is None:
+            return locator_rid(ask.found.locator)
+        if record.container is not None and record.thread == record.container:
+            return None
+        return record.thread or locator_rid(ask.found.locator)
+
     def threaded(self, ask: _Ask) -> list[views.ItemRow]:
         """The open items of the ask's who and on its side whose trail holds its thread; none where the record's
         thread is its container, which everyone in it shares."""
-        record = self.records.get(ask.found.locator)
-        thread = locator_rid(ask.found.locator)
-        if record is not None:
-            if record.container is not None and record.thread == record.container:
-                return []
-            thread = record.thread or thread
+        thread = self.thread(ask)
+        if thread is None:
+            return []
         kinds = OWES if ask.side == "OWED" else ("waiting",)
         rows = (self.by_ref[item] for item in self.by_thread.get(thread, []))
         return [row for row in rows if row.kind in kinds and _who(row.who) == ask.key]
@@ -661,24 +734,7 @@ class _Drafting:
         ]  # fmt: skip
 
     def slots(self, since: datetime, until: datetime) -> list[views.MeetingFacts]:
-        """The meetings overlapping a window that a link may take: not cancelled, and not the owner's own block."""
-        return [
-            m for m in self.ledger.meetings
-            if m.row.start < until and m.row.end > since and m.row.response != "cancelled" and not self.own(m)
-        ]  # fmt: skip
-
-    def own(self, m: views.MeetingFacts) -> bool:
-        """The owner's own block: no one but the owner in it, and the owner organising it."""
-        people = [p for p in [m.row.organiser, *m.attendees] if p]
-        if any(not self.is_owner(p) for p in people):
-            return False
-        return bool(people) or m.row.response == "organiser"
-
-    def is_owner(self, person: str) -> bool:
-        text = person.lower()
-        return any(email in text for email in self.owner_emails) or (
-            bool(self.owner_tokens) and self.owner_tokens <= name_tokens(person)
-        )
+        return overlapping(self.ledger.meetings, since, until, self.owner)
 
     # -- invites -------------------------------------------------------------------------------------------------------
 
@@ -754,7 +810,7 @@ class _Drafting:
         record = self.records.get(f.locator)
         ref = f.value(4)
         named = self.meeting(ref)
-        found = [] if record is None else self.slots(record.ts - RECORDED, record.ts + RECORDED)
+        found = [] if record is None else recorded_in(self.ledger.meetings, record.ts, self.owner)
         if named is not None and any(m.row.id == named.row.id for m in found):
             found = [named]
         if named is None and not found:

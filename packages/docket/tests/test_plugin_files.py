@@ -201,7 +201,7 @@ def test_setup_adds_each_source_on_the_user_s_yes_and_leaves_the_key_to_them() -
     assert "Then commit `vault.yaml`" in plaud
 
 
-# -- the sync skill (DR-0685, DR-0688 to DR-0690, DR-0720 to DR-0722) -----------------------------------------------
+# -- the sync skill (DR-0685, DR-0690, DR-0722, DR-0746 to DR-0751) ----------------------------------------------------
 
 SYNC = PLUGIN / "skills" / "sync"
 PROMPTS = REPO / "packages" / "docket" / "src" / "docket" / "sync"
@@ -234,7 +234,7 @@ GAINED = {
 def sync_texts() -> dict[str, str]:
     """The skill, and the prompts Docket ships beside the block's parser."""
     texts = {"SKILL.md": (SYNC / "SKILL.md").read_text(encoding="utf-8")}
-    return texts | {name: (PROMPTS / name).read_text(encoding="utf-8") for name in ("agent.md", "note.md")}
+    return texts | {name: (PROMPTS / name).read_text(encoding="utf-8") for name in ("agent.md", "recording.md")}
 
 
 def golden_tools() -> dict[str, Any]:
@@ -244,7 +244,7 @@ def golden_tools() -> dict[str, Any]:
 
 def test_sync_pre_approves_only_reads_and_the_sync_folder_s_commands() -> None:
     """The sync's own writes, the ledger batch and the agents' runs, classifies and promotions, ask (DR-0605); the
-    sync folder's commands write only scratch outside the vault (DR-0720, DR-0723)."""
+    sync folder's commands write only scratch outside the vault (DR-0746, DR-0749)."""
     tools = golden_tools()
     allowed = frontmatter("sync")["allowed-tools"]
     prefix = "mcp__plugin_docket_docket__"
@@ -254,7 +254,7 @@ def test_sync_pre_approves_only_reads_and_the_sync_folder_s_commands() -> None:
     commands = re.findall(r"Bash\(([^)]*)\)", allowed)
     assert commands == [
         "docket ledger day", "docket ledger day *", "docket staging list", "docket staging list *",
-        "docket staging show *", "docket sync start", "docket sync start *", "docket sync notes *",
+        "docket staging show *", "docket sync start", "docket sync start *", "docket sync recordings *",
         "docket sync reconcile *",
     ]  # fmt: skip
     assert re.sub(rf"{prefix}\w+|Bash\([^)]*\)", "", allowed).split() == []
@@ -296,7 +296,7 @@ def test_sync_names_commands_options_ops_views_and_tools_docket_has() -> None:
             given = {p.split("=")[0].strip() for p in params.split(",") if "=" in p}
             assert given <= set(tools[tool]["input_schema"]["properties"]), (name, tool, given)
     assert seen == {("ledger", "day"), ("staging", "list"), ("staging", "show"), ("staging", "classify"),
-                    ("staging", "promote"), ("sync", "start"), ("sync", "notes"), ("sync", "reconcile"),
+                    ("staging", "promote"), ("sync", "start"), ("sync", "recordings"), ("sync", "reconcile"),
                     ("ledger", "batch")}  # fmt: skip
     skill = sync_texts()["SKILL.md"]
     table = skill[skill.index("| Order | Ops | Drafted from |") : skill.index("### A worked draft")]
@@ -305,7 +305,7 @@ def test_sync_names_commands_options_ops_views_and_tools_docket_has() -> None:
         if len(cells) > 3:
             assert set(re.findall(r"`([a-z_]+)`", cells[2])) <= set(BATCH), row
     assert set(re.findall(r'"op": "([a-z_]+)"', skill)) <= set(BATCH)
-    for name in ("agent.md", "note.md"):
+    for name in ("agent.md", "recording.md"):
         named = re.search(r"ToolSearch for Docket's tools you will use[ :(]+([^)\n]*)", sync_texts()[name])
         assert named is not None, name
         assert set(re.findall(r"`([a-z_]+)`", named.group(1))) <= set(tools), name
@@ -325,8 +325,7 @@ def test_the_agents_check_in_one_read_and_the_prep_asks_one_suggest() -> None:
         'locator="<the first>", more=["<the second>", "<the third>"], view="raw"'
     ]
     assert "in one call" in check and "past the room" in check
-    assert "A recording's line is checked at its moment (`r:<rid>@mm:ss`)" in check
-    assert "a doc id is checked in a read of its own, with the default summary view" in check
+    assert "A doc id is checked in a read of its own, with the default summary view" in check
     again = "its first as `locator` and the rest in `more`, until `later` is empty"
     assert again in check and again in " ".join(tasks_text().split())
     prep = texts["SKILL.md"].split("2. Prep, at the `# prep` line", 1)[1].split("3. `ledger_batch", 1)[0]
@@ -335,15 +334,27 @@ def test_the_agents_check_in_one_read_and_the_prep_asks_one_suggest() -> None:
     assert "While `later` lists meetings past the room, ask again with those as `refs`, until `later` is empty" in prep
 
 
-def test_the_sync_s_block_keeps_its_labels_and_each_line_its_fields() -> None:
-    """agent.md's block is the old one with fields gained only at the ends, and the parser takes both shapes."""
-    agent = sync_texts()["agent.md"]
-    block = agent.split("```\nRUN:", 1)[1].split("```", 1)[0]
+def block_of(prompt: str) -> dict[str, list[str]]:
+    """A prompt's block: its fenced lines that start with a label, each label's fields."""
     found: dict[str, list[str]] = {}
-    for line in filter(None, f"RUN:{block}".splitlines()):
-        label, _, rest = line.partition(":")
-        found[label] = [field.strip() for field in rest.split(" | ")]
-    assert list(found) == list(BLOCK) == list(sync_block.FIELDS)
+    for fenced in prompt.split("```\n")[1::2]:
+        for line in fenced.splitlines():
+            label, colon, rest = line.partition(":")
+            if colon and label in sync_block.FIELDS:
+                found[label] = [field.strip() for field in rest.split(" | ")]
+    return found
+
+
+def test_the_sync_s_block_keeps_its_labels_and_each_line_its_fields() -> None:
+    """The block is the old one with fields gained only at the ends, its labels split between the source agent's
+    prompt and the recording agent's, a label both write the same in each, and the parser takes both shapes."""
+    texts = sync_texts()
+    agent, recording = block_of(texts["agent.md"]), block_of(texts["recording.md"])
+    assert list(agent) == ["RUN", "OWED", "INVITES", "WAITING", "CLOSES", "MEETINGS", "STREAMS", "LEARNED"]
+    assert list(recording) == ["OWED", "WAITING", "CLOSES", "STREAMS", "NOTES", "MINUTES", "OUTCOME", "LEARNED"]
+    assert all(agent[label] == recording[label] for label in agent.keys() & recording.keys())
+    found = agent | recording
+    assert sorted(found, key=list(BLOCK).index) == list(BLOCK) == list(sync_block.FIELDS)
     for label, fields in BLOCK.items():
         assert found[label] == fields + GAINED.get(label, []), label
         # RUN's fewest is its `none` form; NOTES' M- ref comes only when its content names one.
@@ -356,8 +367,9 @@ def test_the_prompts_placeholders_are_the_ones_docket_fills_and_the_skill_launch
     assert set(re.findall(r"\{([A-Z_]+)\}", texts["agent.md"])) == {
         "SOURCE", "VAULT", "TODAY", "ZONE", "OWED_SINCE", "CONTEXT", "BLOCK",
     }  # fmt: skip
-    assert set(re.findall(r"\{([A-Z_]+)\}", texts["note.md"])) == {
-        "VAULT", "DOC", "RECORDINGS", "MEETING", "TODAY", "ZONE", "LAYOUT", "SYNC_AT",
+    assert set(re.findall(r"\{([A-Z_]+)\}", texts["recording.md"])) == {
+        "SOURCE", "VAULT", "TODAY", "ZONE", "OWED_SINCE", "CONTEXT", "BLOCK", "RECORDING", "TITLE", "START", "DAY",
+        "FILES", "MEETINGS", "LAYOUT", "SYNC_AT",
     }  # fmt: skip
     # The skill writes no prompt out: each Agent call's prompt is the one line naming its file.
     skill = " ".join(texts["SKILL.md"].split())
@@ -370,22 +382,49 @@ def test_the_prompts_placeholders_are_the_ones_docket_fills_and_the_skill_launch
     assert "answer with the RUN line alone" in agent
 
 
+def test_each_recording_is_fetched_once_and_read_once_by_an_agent_of_its_own() -> None:
+    """The source's agent classifies from its fetch and writes no line from a recording; each recording's agent, on
+    Sonnet as a trial the skill says how to decide, reads its files once, gives an outcome's who-does-what on the owner
+    its own line, and puts its note (#267)."""
+    texts = {name: " ".join(text.split()) for name, text in sync_texts().items()}
+    agent, recording, skill = texts["agent.md"], texts["recording.md"], texts["SKILL.md"]
+    assert "Judge each record your run fetched from what it fetched, already in your context" in agent
+    assert "`docket staging show <rid> --vault {VAULT}` only for a record your run didn't fetch" in agent
+    assert "A recording source writes no line from a recording; its recordings' agents do." in agent
+    assert "never read its transcript again with `read`" in recording
+    assert (
+        "A who-does-what in OUTCOME that falls on the owner, or that the owner waits on, also gets its own OWED or "
+        "WAITING line" in recording
+    )
+    assert "By #211's method" in recording and "add `-2` to it, in the block's NOTES line too" in recording
+    launch = skill.split("## The recordings", 1)[1].split("## The continuing-work rule", 1)[0]
+    assert "`subagent_type: general-purpose`, `model: sonnet`, `description` `recording <key>`" in launch
+    assert "that recording's prompt runs again on the default model on a fresh copy of the vault" in launch
+    assert "The reconcile waits for every one" in launch
+    assert "its route lines go into `sync.md` too, under a part `Route`" in skill
+    plaud = " ".join(
+        (PLUGIN.parent / "examples" / "sources" / "plaud" / "SKILL.md").read_text(encoding="utf-8").split()
+    )
+    assert "one message holds the next page of each, at most four at once" in plaud
+    assert "under `Route`, which the copy leaves alone" in plaud
+
+
 def test_agents_md_names_the_sync_and_tasks_skills_and_their_doors() -> None:
     agents = (REPO / "AGENTS.md").read_text(encoding="utf-8")
-    for words in ("`sync` and `tasks` (DR-0685)", "(DR-0722)", "`sync.md` (DR-0688)"):
+    for words in ("`sync` and `tasks` (DR-0685)", "(DR-0722)", "(DR-0748)", "`sync.md` (DR-0750)"):
         assert words in agents, words
 
 
 def test_the_two_name_doors_hold_the_skill_s_name_and_sync_md_beside_skill_md() -> None:
     """Users invoke /docket:sync by name (DR-0685), and an owner's lore lives in sync.md beside the source's SKILL.md,
-    where the agent looks for it (DR-0688)."""
+    where the agent looks for it (DR-0750)."""
     assert frontmatter("sync")["name"] == "sync"
     assert "names the source's `SKILL.md`: read it, then `sync.md` beside it" in sync_texts()["agent.md"]
 
 
 def test_the_readme_allows_the_sync_folder_by_read_and_edit_rules() -> None:
     """Claude Code checks a file's write against Edit rules and never Write ones, so a Write rule would leave every
-    block's write asking (DR-0720): a Read and an Edit rule per system, each on the folder of sync folders."""
+    block's write asking (DR-0746): a Read and an Edit rule per system, each on the folder of sync folders."""
     readme = (PLUGIN / "README.md").read_text(encoding="utf-8")
     section = readme[readme.index("## The sync") : readme.index("## The tasks")]
     assert "Write(" not in section
@@ -422,7 +461,7 @@ def test_the_worked_draft_is_refused_unsettled_and_runs_clean_settled(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The skill's draft as the reconcile writes it, its unsure line refused; settled as the skill says, its line 7
-    taking its alternative and the prep point added at `# prep`, it dry-runs clean (DR-0723)."""
+    taking its alternative and the prep point added at `# prep`, it dry-runs clean (DR-0749)."""
     worked = sync_texts()["SKILL.md"].split("### A worked draft", 1)[1]
     draft = worked.split("```jsonl\n", 1)[1].split("```", 1)[0].splitlines()
     prep = worked.split("```json\n", 1)[1].split("```", 1)[0].strip()

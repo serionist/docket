@@ -1,0 +1,18 @@
+decisions:
+  - id: DR-0746
+    title: The sync folder also holds each recording's files and its agent's prompt, written by docket sync recordings; context.md lists no recordings
+    status: proposed
+    at: "2026-10-20"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#267"]
+    supersedes: [DR-0720]
+    description: "DR-0720 as it stands, but: context.md no longer lists the recordings with no note, and docket sync recordings <sync> <source> adds to the folder, for each recording of the source that needs reading, recordings/<source>/<key>.<n>.txt, the recording as raw keeps it; agents/<source>/<key>.md, its agent's prompt, the package's recording.md filled; and its block's path, blocks/<source>/<key>.txt. It lists them in recordings/<source>.json, a file per source, never in sync.json. A recording's files are rendered from raw through the lookup read uses, under the forgotten list in force: a head line, then each record under the recording at its latest version, notes a paragraph a line as #n text, a transcript a segment a line as @mm:ss Speaker: text. A part is at most 40,000 bytes of UTF-8, split between lines, and a line at most 1,000 characters, its rest wrapped and indented, so Claude Code's Read takes a part whole. The sync's commands are start, recordings and reconcile, which the sync skill pre-approves since they write only this scratch; DR-0605 stands."
+    binds:
+      - "The agent prompts and the block's parser ship together in the package: docket/sync/agent.md, recording.md and block.py."
+      - "A sync folder is scratch: never in the vault, never committed, and gone 7 days after its start or once a forget made after it is applied on its machine, a recording's files with it."
+      - "A recording's files hold only what raw keeps: promoted records, their cuts made, nothing held, private or forgotten."
+    not_chosen:
+      - "The recordings in sync.json: two sources' calls at once could each write it and lose the other's."
+      - "read in 15-minute stretches: twenty or thirty calls, each re-reading a context that keeps growing."
+      - "One file per recording whatever its size: past 25,000 tokens the Read tool refuses it, and it cuts a line at 2,000 characters."

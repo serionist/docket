@@ -6,7 +6,7 @@ the next call. Until then every reader skips what the list takes.
 | Part | What goes |
 |---|---|
 | keys | every listed key this clone holds |
-| sync folders | each one this machine started before the newest line, which its blocks can quote (DR-0720) |
+| sync folders | each one this machine started before the newest line, which its blocks can quote (DR-0746) |
 | staging | each staged version the list takes, with the media on it and the rids it sits under; a whole rid withheld |
 | raw | each listed line, out of the run files in the tree; a file left with no line stays, empty |
 | media | each stored file on a rid the list's `media` holds or forgotten whole, or whose key is listed, and its keys |

@@ -1,12 +1,13 @@
 decisions:
   - id: DR-0721
     title: "The sync's agents run from a sync folder: each reads context.md, writes its block to a file and returns its RUN line; each recording note gets an agent of its own, never waited for"
-    status: proposed
+    status: superseded
     at: "2026-10-20"
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#258"]
     supersedes: [DR-0686]
+    superseded_by: [DR-0747]
     description: "DR-0686 as it stands, but: an agent's prompt is its file in the sync folder (DR-0720), launched by one line naming it, subagent_type fork where Claude Code offers it, else general-purpose. The agent reads the open items, the meetings with their points and the streams from context.md instead of the ledger tool, show only for an item its line can't settle; writes its block to blocks/<source>.txt with the Write tool (DR-0722) and returns its RUN line alone; and the main thread reads every block file in one message. A recording agent reads whole, and reports from, only the work recordings its run brought and those context.md lists with no note, as DR-0686 scoped them, writing MINUTES and OUTCOME from its own reading and a NOTES line for each: the doc id by the id rule, the rid, start, end, and the M- ref when its content names one of two meetings. It writes no note. docket sync notes <sync> writes a prompt per doc id the NOTES lines name, two lines with one id making one note over both recordings, from the package's note.md: #211's method, both views read whole, context searched, every line anchored, the layout from the source's sync.md, a read of the summary view just before doc_put, and verify of every number, date and commitment. A line whose recording doesn't open gets no prompt and is said. The skill launches one general-purpose agent per prompt, all in one message, before the reconcile wherever an Agent call doesn't hold up the main thread, else after the summary, and never waits for them: each answers one line, the doc put and its rev or why not, and a note that fails leaves its recording for the next sync's agent."
     binds:
       - An agent reads its source only inside a run, so what it reports is what Docket keeps.

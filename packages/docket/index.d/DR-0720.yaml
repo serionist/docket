@@ -1,11 +1,12 @@
 decisions:
   - id: DR-0720
     title: "docket sync start writes a sync folder in Docket's state folder: sync.json, context.md and an agent prompt per source, never in the vault"
-    status: proposed
+    status: superseded
     at: "2026-10-20"
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#258"]
+    superseded_by: [DR-0746]
     description: "docket sync start [SOURCE...] --vault <vault> writes <state>/sync/<sync id>/ in Docket's state folder, beside the service's pid file: the id is sync-<yyyymmddThhmmss>-<8 hex>, its time in UTC. sync.json holds the id, the vault's root, when it was made, today, the owner's zone, the owed-since day or the run's window, each source with its window and its prompt's and block's paths, and Docket's version. context.md holds the sync's head line; each source's window, as run_open would open it with this machine's clock; the kept recordings in it that no current minutes, recording note or thread summary covers, by the index; each open item a line, A-0012 | kind | who | title | source @M-0003; the snoozed with their day; the meetings from the earliest window's day to the fifth working day after today, or with an open point, each with its points by id; and the streams. A field's own \"|\" is written \"/\", so no bar moves into the next field. agents/<source>.md is the package's agent.md filled. The sources are docket ledger day's syncs, or those named: an unknown name, or a cursor file that doesn't read, is refused before any file is written. It works with the service down and writes nothing else. An agent's prompt is the one line naming its file. docket sync becomes a group: alone it still fetches and rebases; start and notes are its commands, which the sync skill pre-approves since they write only this scratch, as the tasks skill pre-approves docket open; DR-0605 stands. A start removes the sync folders over 7 days old by their id's time. The forget's apply, on every gate call while there is a list, removes the folders started before the newest line that takes more than keys, or in its second, since a block or a prompt can quote what it forgets: one listing, so a removal a file in use stopped is tried again at the next call, and a sync started after the forget stays, even while the apply waits for the owner's git. Only a folder named by a sync id is removed, never through a link. The plugin's README names the rules that let the agents read and write the folder, Read and Edit, since Claude Code checks a file's write against Edit rules and never Write ones."
     binds:
       - "The agent prompt, the note prompt and the block's parser ship together in the package: docket/sync/agent.md, note.md and block.py."

@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0748
+    title: A recording agent writes its block to blocks/<source>/<key>.txt, the key the recording's own id when a file name can hold it
+    status: proposed
+    at: "2026-10-20"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#267"]
+    description: "A recording's agent writes DR-0722's block, its labels as they are and fields gained only at a line's end, to blocks/<source>/<key>.txt in the sync folder; docket.sync.block reads it, and the reconcile reads each one that recordings/<source>.json names. <key> is the rid's part after <source>: when it is 1 to 64 lowercase letters, digits, _ or -, and not x and 16 hex, the hashed shape; else x and the first 16 hex of the rid's sha256. A folder per source keeps a recording's block apart from blocks/<source>.txt, since a source's name holds dots and hyphens. Its prompt is agents/<source>/<key>.md and its files recordings/<source>/<key>.<n>.txt, by the same key."
+    binds:
+      - The path blocks/<source>/<key>.txt and its key's rule are a one-way door (AGENTS.md).
+      - The block's labels and fields are DR-0722's.
+    not_chosen:
+      - "blocks/<source>-<rid>.txt: a source named plaud-abc and Plaud's recording abc would share a file."
+      - "The rid as the file name: an id holds what a file name can't, and two ids that differ by case share a file on Windows and macOS."
