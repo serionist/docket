@@ -182,6 +182,38 @@ def test_a_write_s_body_is_checked_before_any_of_it_is_read() -> None:
     assert through_the_cap(jsonish, [b'{"op":', b'"done"}']) == (2, 200, b'{"op":"done"}')
 
 
+def test_a_write_whose_client_goes_is_left_and_the_route_hears_what_comes_after_its_body() -> None:
+    """A client gone before its body came gets no answer and reaches no route; a route that listens on after the
+    body it was handed hears what the connection says next, such as the client going (DR-0709)."""
+    heard: list[str] = []
+    sent: list[Message] = []
+    messages: list[Message] = []
+
+    async def app(scope: Scope, receive: Any, send: Any) -> None:
+        heard.append((await receive())["type"])
+        heard.append((await receive())["type"])
+
+    async def receive() -> Message:
+        return messages.pop(0)
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    scope: Scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/web/ledger/save",
+        "headers": [(b"content-type", b"application/json")],
+        "query_string": b"",
+    }
+    messages[:] = [{"type": "http.disconnect"}]
+    asyncio.run(webapi.WriteBodies(app)(scope, receive, send))
+    assert (heard, sent) == ([], [])
+    messages[:] = [{"type": "http.request", "body": b"{}", "more_body": False}, {"type": "http.disconnect"}]
+    asyncio.run(webapi.WriteBodies(app)(scope, receive, send))
+    assert heard == ["http.request", "http.disconnect"]
+
+
 def test_openapi_json_is_what_the_routes_say() -> None:
     assert SCHEMA.read_text(encoding="utf-8") == webapi.openapi_text()
     document = json.loads(webapi.openapi_text())
