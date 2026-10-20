@@ -241,3 +241,4 @@ departed from the plan, and why:
 | the summary | says the notes not put and why, in place of the notes still being written | the summary now waits for every recording agent |
 | the rehearsal case | in `test_sync_recordings.py`, its draft settled and dry-run through `docket ledger batch` | the files and both blocks come from the recordings step there |
 | the perf test | a recording of 1,500 segments, 0.05 s here, the budget 1 s | a recorder's long day |
+| the index | `docket sync recordings` brings the index up to date before it lists, as a search does | a promotion just made is in raw before the index has it; the index is derived, so the pre-approval stands |
