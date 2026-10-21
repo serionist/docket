@@ -108,10 +108,7 @@ function Facts({ meeting }: { meeting: MeetingPanel }) {
       {meeting.recordings.map((r) => (
         <Fact key={r.ref} term="Recording">
           <span className="flex min-w-0 flex-wrap items-center gap-x-2">
-            <a
-              href={r.href}
-              className="tap inline-flex h-6 items-center text-green underline-offset-4 hover:underline"
-            >
+            <a href={r.href} className="tap inline-flex h-6 items-center text-green underline-offset-4 hover:underline">
               Open the recording
             </a>
             <code className="min-w-0 font-mono text-xs break-all text-ink-muted">{r.ref}</code>

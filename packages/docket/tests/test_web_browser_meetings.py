@@ -175,6 +175,8 @@ OPEN_FROM_SIDEBAR = """async () => {
 }"""
 
 
+# On the perf ledger: out of gate os's selection, while the browser jobs run it by file, as the Queue's (DR-0757).
+@pytest.mark.nightly
 @pytest.mark.perf
 def test_meetings_open_from_the_sidebar_within_their_budget(browser: Browser, perf_service: tuple[int, str]) -> None:
     """On 2,000 meetings with 20,000 point ops, Meetings opened from the sidebar shows the four weeks' rows with its
