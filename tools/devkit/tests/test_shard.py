@@ -94,7 +94,9 @@ def systems_file(root: Path, system: list[str], same: list[str]) -> None:
     path.write_text(json.dumps({"system": listed, "same": same}), encoding="utf-8")
 
 
-def test_select_system_keeps_the_listed_files_and_every_smoke_test_and_the_shares_split_those(tmp_path: Path) -> None:
+def test_select_system_keeps_the_listed_files_every_smoke_and_timed_test_and_the_shares_split_those(
+    tmp_path: Path,
+) -> None:
     (tmp_path / "pytest.ini").write_text("[pytest]\nmarkers =\n    perf: timed\n    smoke: smoke\n", encoding="utf-8")
     for name in ("a", "b", "c", "d"):
         body = f"import pytest\n\ndef test_{name}_one():\n    pass\n\n"
@@ -112,6 +114,8 @@ def test_select_system_keeps_the_listed_files_and_every_smoke_test_and_the_share
         "test_b.py::test_b_timed",
         "test_c.py::test_c_one",
         "test_c.py::test_c_timed",
+        # A timed test runs on every system, whatever file holds it (DR-0757).
+        "test_d.py::test_d_timed",
         "test_e.py::test_e_smoke",
     ]
     # The shares split the selected files, whole, and the timed run of a share keeps its files.
@@ -119,7 +123,7 @@ def test_select_system_keeps_the_listed_files_and_every_smoke_test_and_the_share
     _, second = collected(tmp_path, "--select=system", "--shard=2/2")
     assert sorted(first + second) == picked
     assert first == ["test_a.py::test_a_one", "test_a.py::test_a_timed", "test_c.py::test_c_one",
-                     "test_c.py::test_c_timed"]  # fmt: skip
+                     "test_c.py::test_c_timed", "test_e.py::test_e_smoke"]  # fmt: skip
     _, timed = collected(tmp_path, "--select=system", "--shard=1/2", "-m", "perf")
     assert timed == ["test_a.py::test_a_timed", "test_c.py::test_c_timed"]
     (tmp_path / "tools" / "devkit" / "test-systems.json").unlink()

@@ -38,6 +38,10 @@ TIMES = 5
 BIG_SUMMARY = "recording-note:2026-05-10-big-call"
 
 
+# A timed test on a big vault and the tests that build it run nightly, and with gate os or gate full --all (DR-0757).
+pytestmark = pytest.mark.nightly
+
+
 def summary(recording: str) -> str:
     """Two lines on the recording's transcript, the doc's one record."""
     said = f"{recording}/transaction"

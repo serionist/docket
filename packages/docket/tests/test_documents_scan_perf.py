@@ -26,6 +26,10 @@ TRACED_FILES = 500
 SECONDS = 3.0
 
 
+# A timed test on a big vault and the tests that build it run nightly, and with gate os or gate full --all (DR-0757).
+pytestmark = pytest.mark.nightly
+
+
 def files() -> int:
     return TRACED_FILES if traced() else FILES
 

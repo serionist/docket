@@ -32,6 +32,10 @@ BULK_SECONDS = 0.25
 BULK = 50
 
 
+# A timed test on a big vault and the tests that build it run nightly, and with gate os or gate full --all (DR-0757).
+pytestmark = pytest.mark.nightly
+
+
 @pytest.fixture(scope="module")
 def perf_vault(tmp_path_factory: pytest.TempPathFactory) -> Vault:
     """The perf ledger in a vault, its files' times an hour back, as files a write didn't just write are, and the

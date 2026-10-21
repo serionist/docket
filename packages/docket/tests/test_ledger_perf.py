@@ -73,6 +73,10 @@ SYNC_RECONCILE_SECONDS = 3.0
 SYNC_SUMMARY_SECONDS = 1.0
 
 
+# A timed test on a big vault and the tests that build it run nightly, and with gate os or gate full --all (DR-0757).
+pytestmark = pytest.mark.nightly
+
+
 def one_more(root: Path, last: Op, kind: str, **keys: object) -> Op:
     """One op more after `last`, as a write leaves it: appended to its month file."""
     (op_id,) = ops.mint(last.id, datetime(2026, 12, 1, tzinfo=UTC), 1)

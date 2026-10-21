@@ -20,8 +20,12 @@ from typing import Any, cast
 from devkit.repo import KitError
 
 SYSTEMS = "tools/devkit/test-systems.json"
-# The marker of the smoke set: every surface once, which Windows and macOS run on every PR wherever the test lives.
+# The markers whose tests Windows and macOS run on every PR wherever the test lives: the smoke set, every surface once
+# (DR-0754), and the timed tests, since a time limit holds on each system's own speed; those marked nightly, on big
+# vaults, wait for the nightly (DR-0757).
 SMOKE = "smoke"
+PERF = "perf"
+EVERY_SYSTEM = (SMOKE, PERF)
 # pytest's testpaths, and the files it collects there.
 TEST_ROOTS = ("packages/", "tools/devkit/tests/", "examples/")
 TEST_FILE = re.compile(r"(^|/)test_[^/]*\.py$")

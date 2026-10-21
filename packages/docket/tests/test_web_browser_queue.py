@@ -223,6 +223,8 @@ OPEN_FROM_SIDEBAR = """async () => {
 }"""
 
 
+# On the perf ledger: out of gate os's selection, while the browser jobs run it by file, as before (DR-0757).
+@pytest.mark.nightly
 @pytest.mark.perf
 def test_the_queue_opens_from_the_sidebar_within_its_budget(browser: Browser, perf_service: tuple[int, str]) -> None:
     """On 5,000 items, the Queue opened from the sidebar shows its 100 rows with its keys live within a quarter second:

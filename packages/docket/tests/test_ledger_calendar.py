@@ -582,6 +582,7 @@ def said_line(capsys: pytest.CaptureFixture[str]) -> list[str]:
     return capsys.readouterr().out.splitlines()
 
 
+@pytest.mark.nightly
 @pytest.mark.perf
 def test_a_catch_up_of_1000_records_joining_imported_meetings_takes_under_ten_seconds(vault: Vault) -> None:
     # Ten meetings a day from 5 January, each with the old meeting the import brought for its slot.

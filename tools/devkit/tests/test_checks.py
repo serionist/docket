@@ -522,6 +522,11 @@ def test_timed_lines_are_read_from_pytest_s_passes_section() -> None:
     assert gate.timed(["1 passed in 0.50s"]) == []
 
 
+def marks(run: list[str]) -> str:
+    """The marker expression pytest's own options give, past `python -m pytest`."""
+    return run[run.index("-m", 3) + 1]
+
+
 def _fake_pytest(
     monkeypatch: pytest.MonkeyPatch, codes: tuple[int, int] = (0, 0), envs: list[dict[str, str]] | None = None
 ) -> list[list[str]]:
@@ -545,19 +550,27 @@ def test_the_os_lane_runs_what_can_differ_by_system_and_all_of_it_with_all(
 ) -> None:
     calls = _fake_pytest(monkeypatch)
     assert gate.step_tests(gate.Ctx(root=tmp_path, lane="os", ci=False, base=None, pr=None, shard="1/4")).status == "ok"
-    # Both runs of a share select the same files, before the share is taken.
-    assert len(calls) == 2 and all("--select=system" in run for run in calls)
+    # Both runs of a share select the same files, before the share is taken, and leave the nightly's tests out.
+    rest, alone = calls
+    assert all("--select=system" in run for run in calls)
+    assert (marks(rest), marks(alone)) == ("not perf and not nightly", "perf and not nightly")
     calls.clear()
     whole = gate.Ctx(root=tmp_path, lane="os", ci=False, base=None, pr=None, shard="1/8", whole=True)
     assert gate.step_tests(whole).status == "ok"
-    assert len(calls) == 2 and not any("--select=system" in run for run in calls)
-    calls.clear()
-    # The full lane runs every file, as it always did.
-    _fake_pytest(monkeypatch, codes=(1, 0))
-    gate.step_tests(gate.Ctx(root=tmp_path, lane="full", ci=False, base=None, pr=None))
+    rest, alone = calls
     assert not any("--select=system" in run for run in calls)
-    with pytest.raises(KitError, match="--all widens the os lane's tests"):
-        gate.run("full", whole=True)
+    assert (marks(rest), marks(alone)) == ("not perf", "perf")
+    # The full lane runs every file, and the nightly's tests with --all (DR-0757).
+    calls = _fake_pytest(monkeypatch, codes=(1, 0))
+    gate.step_tests(gate.Ctx(root=tmp_path, lane="full", ci=False, base=None, pr=None))
+    [run] = calls
+    assert "--select=system" not in run and marks(run) == "not nightly"
+    calls.clear()
+    gate.step_tests(gate.Ctx(root=tmp_path, lane="full", ci=False, base=None, pr=None, whole=True))
+    [run] = calls
+    assert "--select=system" not in run and "-m" not in run[3:]
+    with pytest.raises(KitError, match="--all widens the tests of the os and full lanes"):
+        gate.run("quick", whole=True)
     assert gate.main(["quick", "--all"]) == 2
 
 
@@ -691,8 +704,8 @@ def test_the_tests_step_runs_the_timed_tests_alone_after_the_rest(
     calls = _fake_pytest(monkeypatch)
     out = gate.step_tests(gate.Ctx(root=tmp_path, lane="os", ci=False, base=None, pr=None))
     rest, alone = calls
-    assert rest[rest.index("not perf") - 1] == "-m" and rest[rest.index("-n") + 1] == "auto"
-    assert alone[alone.index("perf") - 1] == "-m" and "-n" not in alone and "-raP" in alone
+    assert marks(rest) == "not perf and not nightly" and rest[rest.index("-n") + 1] == "auto"
+    assert marks(alone) == "perf and not nightly" and "-n" not in alone and "-raP" in alone
     assert not any(a.startswith("--cov") for a in [*rest, *alone])
     assert out.status == "ok"
     assert out.detail == [
@@ -748,8 +761,8 @@ def test_a_covered_share_saves_its_coverage_data_and_holds_no_floor(
     out = gate.step_tests(ctx)
     [(cmd, env)] = seen
     assert "--cov" in cmd and "--cov-report=" in cmd and not any(a.startswith("--cov-report=json") for a in cmd)
-    # Under coverage the timed tests stay in the one run, as in the whole lane.
-    assert "-m" not in cmd[3:] and "--shard=2/4" in cmd
+    # Under coverage the timed tests stay in the one run, as in the whole lane, and the nightly's wait for --all.
+    assert marks(cmd) == "not nightly" and "--shard=2/4" in cmd
     assert Path(env["COVERAGE_FILE"]) == tmp_path / ".local" / "coverage" / "share-2-of-4"
     assert Path(env[evalfloors.REPORT_ENV]) == tmp_path / evalfloors.REPORT
     assert out.status == "ok"
@@ -975,7 +988,7 @@ def test_under_coverage_the_timed_tests_stay_in_the_one_run(tmp_path: Path, monk
     [run] = calls
     # One run builds its own templates, as on main.
     assert gate.TEMPLATES_ENV not in envs[0]
-    assert "-m" not in run[3:] and run[run.index("-n") + 1] == "auto"
+    assert marks(run) == "not nightly" and run[run.index("-n") + 1] == "auto"
     assert "--cov" in run and any(a.startswith("--cov-report=json:") for a in run) and "--cov-append" not in run
     # Its one run is the lane's one share, so the shard plugin runs as it does in each of CI's covered shares.
     assert "--shard=1/1" in run and any(a.endswith("-1-of-1-tests.json") for a in run)

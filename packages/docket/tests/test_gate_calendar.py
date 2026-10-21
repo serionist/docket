@@ -157,6 +157,7 @@ def test_the_rids_are_pending_before_the_run_file_is_written(vault: Vault, monke
     assert (said(result.meetings), calendar.pending(vault)) == ([("added", "M-0001"), ("added", "M-0002")], [])
 
 
+@pytest.mark.nightly
 @pytest.mark.perf
 def test_a_promotion_of_a_week_s_hundred_events_with_their_meetings_stays_quick(
     vault: Vault, monkeypatch: pytest.MonkeyPatch

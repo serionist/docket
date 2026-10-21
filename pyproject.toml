@@ -84,6 +84,7 @@ markers = [
   "perf: asserts an elapsed time; a lane without coverage runs it after the rest, alone (DR-0430)",
   "osprompt: calls the system's own prompt checks; skipped unless DOCKET_TEST_OSPROMPT is set, as only CI sets it",
   "smoke: the smoke set, every surface once; Windows and macOS run it on every PR (DR-0754)",
+  "nightly: a timed test on a big vault, or a test that builds one for it; the nightly runs it, gate os and gate full only with --all (DR-0757)",
 ]
 xfail_strict = true
 filterwarnings = ["error"]

@@ -522,6 +522,7 @@ def test_among_hundreds_of_entities_the_meeting_is_still_its_own(crowded: Vault)
     assert found.left_out.cap == {"name": 680, "number": 720, "word": 0}
 
 
+@pytest.mark.nightly
 @pytest.mark.perf
 def test_a_report_among_hundreds_of_entities_takes_well_under_two_seconds(crowded: Vault) -> None:
     run = best_of(3, lambda: spots.report(crowded, HOUR))
