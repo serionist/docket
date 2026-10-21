@@ -82,6 +82,8 @@ CRANE_NOTE = "recording-note:2026-10-12-harbour-crane-check"
 # decisions_kit's fleet management, which has decisions and no brief, and its plain candidate at its first rev.
 FLEET = "/briefs?brief=brief:fleet-management"
 WEEKLY_PICK = '[data-decision="decision:2026-10-14-weekly-review"] >> role=button[name="{}"]'
+# The page read again after a pick: one decision left waiting.
+ONE_WAITING = '[aria-labelledby="decisions-waiting"][data-count="1"]'
 WEEKLY_BY_ANOTHER_TAB = (
     "/api/web/briefs/decision|"
     '{"brief": "brief:fleet-management", "decision": "decision:2026-10-14-weekly-review", "rev": 1, "pick": "confirm"}'
@@ -311,20 +313,33 @@ PAGES: dict[str, Page] = {
             State(
                 "confirm",
                 FLEET,
-                (("click", WEEKLY_PICK.format("Confirm")), ("wait", "role=status >> text=Confirmed")),
+                (
+                    ("click", WEEKLY_PICK.format("Confirm")),
+                    ("wait", "role=status >> text=Confirmed"),
+                    ("wait", ONE_WAITING),
+                ),
                 fresh=True,
             ),
             State(
                 "reject",
                 FLEET,
-                (("click", WEEKLY_PICK.format("Reject")), ("wait", "role=status >> text=Rejected")),
+                (
+                    ("click", WEEKLY_PICK.format("Reject")),
+                    ("wait", "role=status >> text=Rejected"),
+                    ("wait", ONE_WAITING),
+                ),
                 fresh=True,
             ),
             # Another tab confirms it first: this page's pick, at the rev it showed, is refused, and the page reads it.
             State(
                 "conflict",
                 FLEET,
-                (("post", WEEKLY_BY_ANOTHER_TAB), ("click", WEEKLY_PICK.format("Confirm")), ("wait", "role=alert")),
+                (
+                    ("post", WEEKLY_BY_ANOTHER_TAB),
+                    ("click", WEEKLY_PICK.format("Confirm")),
+                    ("wait", "role=alert"),
+                    ("wait", ONE_WAITING),
+                ),
                 expects=(MOVED,),
                 fresh=True,
             ),

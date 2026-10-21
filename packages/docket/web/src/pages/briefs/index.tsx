@@ -100,7 +100,7 @@ export function BriefsPage() {
     if (want === null) return;
     wanted.current = null;
     if (want === "panel") document.getElementById("panel-title")?.focus({ preventScroll: true });
-    else if (want === "decisions") document.getElementById(DECISIONS_TITLE)?.focus({ preventScroll: true });
+    else if (want === "decisions") document.getElementById(DECISIONS_TITLE)?.focus();
     else focusRow(want);
   });
 
@@ -206,7 +206,7 @@ export function BriefsPage() {
       <div
         className="min-h-0 flex-1 overflow-y-auto"
         role="region"
-        aria-label={view.mode === "brief" ? "The brief" : title}
+        aria-label={title}
         aria-busy={read.isFetching || undefined}
         tabIndex={-1}
       >

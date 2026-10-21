@@ -36,7 +36,7 @@ export function StandingBadge({ standing }: { standing: Card["standing"] }) {
 }
 
 const CITE =
-  "inline-flex min-h-6 items-center font-mono text-xs break-all text-green underline-offset-4 hover:underline pointer-coarse:min-h-11";
+  "inline-flex min-h-6 items-center font-mono text-xs wrap-anywhere text-green underline-offset-4 hover:underline pointer-coarse:min-h-11";
 
 /** A line's anchors, then its refs, each a link where it names a record or a doc line. */
 export function Cites({

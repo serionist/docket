@@ -165,7 +165,7 @@ function Group({
   className?: string;
 }) {
   return (
-    <section aria-labelledby={id} className={className}>
+    <section aria-labelledby={id} data-count={count} className={className}>
       <h3
         id={id}
         className="flex h-8 items-center gap-2 border-y border-rule bg-paper px-3 text-xs font-semibold sm:px-4"
