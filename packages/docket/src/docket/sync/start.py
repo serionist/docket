@@ -41,7 +41,7 @@ from docket.vault import cursors
 from docket.vault.vault import Vault
 
 THE_WINDOW = "the run's window"
-# While the ledger holds no item, what is owed is looked for this many working days back (DR-0759).
+# While the ledger holds no item, what is owed is looked for this many working days back (DR-0772).
 FIRST_DAYS = 40
 # The meetings run to this many working days after today: the prep week.
 PREP_DAYS = 5

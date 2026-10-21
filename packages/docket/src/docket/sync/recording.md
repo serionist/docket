@@ -51,11 +51,11 @@ Its meetings by time: {MEETINGS}.
 |---|---|
 | OWED | each ask of the owner since {OWED_SINCE} where the ball is in their court: a question, a review, a decision, a file, an intro, a promise they made; left out when they answered it in the call. A promise whose speaker is a guess says so |
 | WAITING | what the owner asked others for and still waits on |
-| CLOSES | for each open or snoozed item in {CONTEXT}, evidence here that it was answered or done, or became moot |
+| CLOSES | the open or snoozed items the closes pass finds done or moot |
 | STREAMS | where a stream stands, its next step or its deadline, when the call changed that |
 | MINUTES | its meeting's open points the call answers, each by its point id |
 | OUTCOME | its meeting's outcome: what was decided, who does what |
-| NOTES | always one: the note you put in step 4 |
+| NOTES | always one: the note you put in step 5 |
 | LEARNED | `sync.md` only: what the source's `sync.md` should hold for next time, such as a name its transcripts mishear |
 
 - Its meetings: one takes the MINUTES and the OUTCOME. Two: the one its content names, its M- ref on the NOTES line.
@@ -66,7 +66,20 @@ Its meetings by time: {MEETINGS}.
 - An ask that continues an open item's work, from the same person and in the same thread or on the same topic, names
   that item in its line's continues field: the sync logs it there. A new piece of work is `-`.
 
-## 3. Write the block
+## 3. Closes
+
+Before the block, go through the open and snoozed items in {CONTEXT} whose people are in the call, and only those: the
+item's who among its speakers or named in it, or for an item on a meeting (`@M-0003`), this call's meeting by time, or
+that meeting's organiser or attendees in the call. An item whose people aren't in it is left alone.
+
+For each, look in the files for evidence it was done: a message sent, a call held, a file or a link shared, an answer
+given. This call is itself the evidence for an item asking for it to be held. What someone says in it that they sent
+or did counts, as the moment they say it; a plan or a promise to do it isn't evidence.
+
+Evidence found: a CLOSES line, `done`, or `moot` when the item no longer needs doing, with the locator of the moment
+that shows it. None found: nothing for that item.
+
+## 4. Write the block
 
 Write the block to {BLOCK} with the Write tool: the block and nothing else, a line per finding, no line for a label with
 nothing, and the NOTES line always.
@@ -94,11 +107,11 @@ LEARNED:  SKILL.md / sync.md | <what differs from it, for next time>
   without a day is `-`.
 - `who` is the name the ledger already uses for the person, as {CONTEXT} writes it, else the name the call gives.
 - NOTES: the note's id first, then {RECORDING}, its local start and end as `HH:MM`, and the M- ref of the meeting
-  its content names when it has two. Choose the id now, by step 4's rule, `recording-note:{DAY}-<slug>`, and put the
+  its content names when it has two. Choose the id now, by step 5's rule, `recording-note:{DAY}-<slug>`, and put the
   note under it: a line such as `NOTES:    recording-note:{DAY}-pilot-weekly | {RECORDING} | 10:01 | 10:58`. Five
   fields when its content names one of two meetings, four otherwise; never the rid first.
 
-## 4. Put the note
+## 5. Put the note
 
 By #211's method:
 

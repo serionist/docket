@@ -203,7 +203,7 @@ def test_setup_adds_each_source_on_the_user_s_yes_and_leaves_the_key_to_them() -
     assert "Then commit `vault.yaml`" in plaud
 
 
-# -- the sync skill (DR-0685, DR-0690, DR-0722, DR-0746 to DR-0751) ----------------------------------------------------
+# -- the sync skill (DR-0685, DR-0690, DR-0722, DR-0746 to DR-0750, DR-0771, DR-0772) ----------------------------------
 
 SYNC = PLUGIN / "skills" / "sync"
 PROMPTS = REPO / "packages" / "docket" / "src" / "docket" / "sync"
@@ -322,7 +322,7 @@ def test_the_agents_check_in_one_read_and_the_prep_asks_one_suggest() -> None:
     summary, and the prep asks suggest once for all its meetings with refs; each asks again from what `later` lists
     until it is empty, never from the locator it already read (DR-0725)."""
     texts = {name: " ".join(text.split()) for name, text in sync_texts().items()}
-    check = texts["agent.md"].split("## 6. Check", 1)[1].split("## 7.", 1)[0]
+    check = texts["agent.md"].split("## 7. Check", 1)[1].split("## 8.", 1)[0]
     assert re.findall(r"\bread\(([^)]*)\)", check) == [
         'locator="<the first>", more=["<the second>", "<the third>"], view="raw"'
     ]
@@ -397,10 +397,11 @@ def test_the_prompts_placeholders_are_the_ones_docket_fills_and_the_skill_launch
     # The skill writes no prompt out: each Agent call's prompt is the one line naming its file.
     skill = " ".join(texts["SKILL.md"].split())
     assert skill.count("`Read and follow <the prompt's path>`") == 2
-    # Every agent starts fresh: no fork carries this session's context into it, and a source agent keeps the
-    # session's model (#272).
+    # Every agent starts fresh: no fork carries this session's context into it (#272), and every agent, a recording's
+    # too, keeps the session's model (DR-0771).
     assert "`subagent_type: fork`" not in skill and skill.count("`subagent_type: general-purpose`") == 2
-    assert "`subagent_type: general-purpose` and no `model`" in skill
+    assert skill.count("`subagent_type: general-purpose` and no `model`") == 2
+    assert "`model:" not in skill and "sonnet" not in skill.lower()
     assert "This prompt and the files it names are all you need" in " ".join(texts["agent.md"].split())
     assert "{SOURCE}" not in skill and "fork.md" not in skill
     # The agent writes its block to its file and answers with the RUN line alone.
@@ -411,8 +412,8 @@ def test_the_prompts_placeholders_are_the_ones_docket_fills_and_the_skill_launch
 
 def test_each_recording_is_fetched_once_and_read_once_by_an_agent_of_its_own() -> None:
     """The source's agent classifies from its fetch and writes no line from a recording; each recording's agent, on
-    Sonnet as a trial the skill says how to decide, reads its files once, gives an outcome's who-does-what on the owner
-    its own line, and puts its note (#267)."""
+    the session's model, reads its files once, gives an outcome's who-does-what on the owner its own line, and puts its
+    note (#267, DR-0771)."""
     texts = {name: " ".join(text.split()) for name, text in sync_texts().items()}
     agent, recording, skill = texts["agent.md"], texts["recording.md"], texts["SKILL.md"]
     assert "Judge each record your run fetched from what it fetched, already in your context" in agent
@@ -425,8 +426,9 @@ def test_each_recording_is_fetched_once_and_read_once_by_an_agent_of_its_own() -
     )
     assert "By #211's method" in recording and "add `-2` to it, in the block's NOTES line too" in recording
     launch = skill.split("## The recordings", 1)[1].split("## The continuing-work rule", 1)[0]
-    assert "`subagent_type: general-purpose`, `model: sonnet`, `description` `recording <key>`" in launch
-    assert "that recording's prompt runs again on the default model on a fresh copy of the vault" in launch
+    assert "`subagent_type: general-purpose` and no `model`, `description` `recording <key>`" in launch
+    assert "Every agent runs on this session's model, the recording agents too, so no `model` is ever set" in launch
+    assert "a legacy note covers it" in launch
     assert "The reconcile waits for every one" in launch
     assert "its route lines go into `sync.md` too, under a part `Route`" in skill
     plaud = " ".join(
@@ -434,6 +436,31 @@ def test_each_recording_is_fetched_once_and_read_once_by_an_agent_of_its_own() -
     )
     assert "one message holds the next page of each, at most four at once" in plaud
     assert "under `Route`, which the copy leaves alone" in plaud
+
+
+def test_every_agent_goes_through_the_open_items_its_people_are_in_for_evidence_before_its_block() -> None:
+    """The fourth rehearsal's agents wrote no CLOSES line where the old sync closed five items on evidence: each agent,
+    a source's and a recording's, now goes through the open items whose people are in what it read, and only those,
+    for evidence they were done, before it writes its block; the reconcile says a sync with no close (#286)."""
+    texts = {name: " ".join(text.split()) for name, text in sync_texts().items()}
+    for name, closes, block, people in (
+        ("agent.md", "## 6. Closes", "## 8. Write the block", "whose people are in what your run read, and only those"),
+        ("recording.md", "## 3. Closes", "## 4. Write the block", "whose people are in the call, and only those"),
+    ):
+        prompt = texts[name]
+        assert prompt.index("## 2.") < prompt.index(closes) < prompt.index(block), name
+        step = prompt.split(closes, 1)[1].split("## ", 1)[0]
+        assert f"Before the block, go through the open and snoozed items in {{CONTEXT}} {people}" in step, name
+        assert "for an item on a meeting (`@M-0003`)" in step and "is left alone" in step, name
+        assert "a message sent, a call held, a file or a link shared, an answer given" in step, name
+        assert "plan or a promise to do it isn't evidence" in step, name
+        assert "Evidence found: a CLOSES line, `done`, or `moot`" in step and "None found: nothing" in step, name
+        assert "| CLOSES | the open or snoozed items the closes pass finds done or moot |" in prompt, name
+    assert "This call is itself the evidence for an item asking for it to be held" in texts["recording.md"]
+    skill = texts["SKILL.md"]
+    assert skill.count("for evidence they were done") == 2
+    assert "`no source reported a close` when no block holds a CLOSES line" in skill
+    assert "or that no source reported a close" in skill
 
 
 def test_agents_md_names_the_sync_and_tasks_skills_and_their_doors() -> None:

@@ -46,9 +46,10 @@ context into every turn of the agent, and the prompt file names all it needs. Ne
 `docket sync start` filled each from Docket's own.
 
 - Each agent reads the ledger from the sync folder's `context.md`, runs its source through `run_open`, the source's
-  skill and its `sync.md`, classifies its own records from what its run fetched and promotes them, checks every
-  locator it reports in one `read` with `more`, writes its block to `blocks/<source>.txt` in the sync folder, and
-  returns its RUN line alone. A recording source's agent reads no recording and writes no line from one.
+  skill and its `sync.md`, classifies its own records from what its run fetched and promotes them, goes through the
+  open items whose people its run read for evidence they were done, checks every locator it reports in one `read`
+  with `more`, writes its block to `blocks/<source>.txt` in the sync folder, and returns its RUN line alone. A
+  recording source's agent reads no recording and writes no line from one.
 - The agents may share one browser, a tab each. A run that stops short leaves its mark and the others go on: its RUN
   line says why, and the summary names it.
 - The blocks are read by Docket, not by you: the reconcile prints their RUN and LEARNED lines and quotes each line it
@@ -68,14 +69,16 @@ recording given an agent before in this sync gets no second; one with a record s
 and a source with none says so in a line.
 
 - One `Agent` call per `recording` line, all in one message, at once, while the other agents still run:
-  `subagent_type: general-purpose`, `model: sonnet`, `description` `recording <key>`, the prompt `Read and follow <the
+  `subagent_type: general-purpose` and no `model`, `description` `recording <key>`, the prompt `Read and follow <the
   prompt's path>`. Where Claude Code returns a message's agents together, this comes after all of them.
-- Each reads `context.md` and its recording's files once, writes its block to `blocks/<source>/<key>.txt`, puts its
-  note by #211's method, and answers one line: `put <doc id> rev <n>, <k> lines`, or `not put <doc id>: <why>, <k>
-  lines`. The reconcile waits for every one; the summary says each note not put.
-- Sonnet is a trial. The next rehearsal changes the design and the model at once, so for each ask the old sync found
-  from a recording that the rehearsal misses, that recording's prompt runs again on the default model on a fresh copy
-  of the vault: when the default finds the ask, the recording agents go back to the default.
+- Each reads `context.md` and its recording's files once, goes through the open items whose people are in the call
+  for evidence they were done, writes its block to `blocks/<source>/<key>.txt`, puts its note by #211's method, and
+  answers one line: `put <doc id> rev <n>, <k> lines`, or `not put <doc id>: <why>, <k> lines`. The reconcile waits
+  for every one; the summary says each note not put.
+- Every agent runs on this session's model, the recording agents too, so no `model` is ever set: a trial on a
+  smaller one closed nothing the evidence showed done, and split asks.
+- A recording counts as noted, and gets no agent, when its minutes, a recording note, a thread summary or a legacy
+  note covers it.
 
 ## The continuing-work rule
 
@@ -90,7 +93,8 @@ like an open item's work is settled the same way, by its person and its thread o
 `docket sync reconcile <sync> --vault <vault>` drafts the batch from the blocks into `draft.jsonl` in the sync folder,
 reading the ledger fresh and dropping a line whose locator doesn't open, and prints a report: the RUN lines, the
 draft's path and its unsure lines by number, every merge of two lines into one ask, the lines dropped, the closes
-skipped, the LEARNED lines, and the meetings of the next five working days. The draft runs in this order:
+skipped, `no source reported a close` when no block holds a CLOSES line, the LEARNED lines, and the meetings of the
+next five working days. The draft runs in this order:
 
 | Order | Ops | Drafted from |
 |---|---|---|
@@ -191,9 +195,9 @@ once and say it in chat; never pull the list out of a snapshot, a block or the d
 | left over | past meetings with open points that rollover had nowhere to take |
 | runs short, notes, staging | the sources that stopped short and why, each recording's note put or not, what waits on the Staging page |
 
-After the list, a few lines: what changed, and what the sync closed by itself; the LEARNED lines written and where;
-why each note not put wasn't, from its agent's answer; and once, the stale briefs (`briefs`) and the decisions waiting
-(`decisions`, status `proposed`).
+After the list, a few lines: what changed, and what the sync closed by itself, or that no source reported a close;
+the LEARNED lines written and where; why each note not put wasn't, from its agent's answer; and once, the stale briefs
+(`briefs`) and the decisions waiting (`decisions`, status `proposed`).
 
 Then the user goes through it. They answer in free text ("12 done, 14 drop, draft 3"), which is one batch by `user`,
 or hand over to `/docket:tasks`. Ask about one item only when it is unclear. Draft only what they pick, by their

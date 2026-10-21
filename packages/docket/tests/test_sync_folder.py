@@ -1,4 +1,4 @@
-"""The sync folder (DR-0746, DR-0759): `docket sync start` writes `context.md` and an agent prompt per live source into
+"""The sync folder (DR-0746, DR-0772): `docket sync start` writes `context.md` and an agent prompt per live source into
 Docket's state folder, refusing before any file; old folders go at a start. `test_sync_recordings.py` holds `docket
 sync recordings`. Invented people and data only: the pilot's ledger, two recorded weeklies and a third with its
 note."""
