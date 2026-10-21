@@ -211,6 +211,8 @@ export function RecordingPage() {
     queryKey: ["recording", searchStr],
     queryFn: () => readRecording(searchStr),
     placeholderData: keepPreviousData,
+    // A page opened again asks once, so a recording kept from before isn't stale.
+    refetchOnMount: "always",
     refetchInterval: (q) => (q.state.data?.waiting ? WAIT_MS : false),
   });
   const data = read.data;
@@ -224,17 +226,15 @@ export function RecordingPage() {
     }
   }, [data, searchStr, router]);
 
-  // The line `at` marks, scrolled to once its read answers; a line played in place is already in sight.
-  const played = React.useRef(false);
-  const at = one(search, "at");
+  // The line `at` marks, scrolled to once for each URL, when its read answers; a line played in place is in sight.
+  const scrolled = React.useRef<string | null>(null);
+  const playedTo = React.useRef<string | null>(null);
   React.useEffect(() => {
-    if (!data || data.asked !== searchStr || read.isPlaceholderData) return;
-    if (played.current) {
-      played.current = false;
-      return;
-    }
+    if (!data || data.asked !== searchStr || read.isPlaceholderData || scrolled.current === searchStr) return;
+    scrolled.current = searchStr;
+    if (playedTo.current === searchStr) return;
     document.getElementById("at")?.scrollIntoView({ block: "center" });
-  }, [data, searchStr, read.isPlaceholderData, at]);
+  }, [data, searchStr, read.isPlaceholderData]);
 
   const audio = React.useRef<HTMLAudioElement | null>(null);
   const [playingLine, setPlayingLine] = React.useState<string | null>(null);
@@ -251,7 +251,7 @@ export function RecordingPage() {
         () => setProblem("The audio didn't start: press play on the player."),
       );
       setPlayingLine(line.url);
-      played.current = true;
+      playedTo.current = new URL(line.url, window.location.origin).search;
       void router.navigate({ href: line.url, replace: true });
     },
   };

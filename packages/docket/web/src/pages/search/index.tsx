@@ -9,13 +9,15 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useRouter, useRouterState, useSearch } from "@tanstack/react-router";
 import { KeyboardIcon, SearchIcon } from "lucide-react";
 import * as React from "react";
+import { AppLink } from "@/components/app-link";
 import { Empty, NoticeBar, Page, PageHeader, Panel, Refusal, Workspace } from "@/components/shell/page";
 import { useShowKeys, useTitle } from "@/components/shell/shell";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useBand } from "@/hooks/use-width";
 import { type KeyCommand, useKeys } from "@/lib/keys";
 import { one, parseSearch, type Search, writeBack } from "@/lib/search";
+import { cn } from "@/lib/utils";
 import { leaveOnEscape } from "@/pages/day/field";
 import { wordsOf } from "@/pages/day/api";
 import { readHit, readResults } from "./api";
@@ -79,6 +81,8 @@ export function SearchPage() {
     queryKey: [...SEARCH, "results", listQuery],
     queryFn: () => readResults(listQuery),
     placeholderData: keepPreviousData,
+    // A page opened again asks once, as a day page's poll does on mount, so a search kept from before isn't stale.
+    refetchOnMount: "always",
     // The index still being built: ask again until it answers.
     refetchInterval: (q) => (q.state.data?.waiting ? WAIT_MS : false),
   });
@@ -90,6 +94,7 @@ export function SearchPage() {
     queryKey: [...SEARCH, "panel", searchStr],
     queryFn: () => readHit(searchStr),
     enabled: panelOpen,
+    refetchOnMount: "always",
     // The same hit read again, wider or verified, stays as it was until the read answers; another hit's never shows.
     placeholderData: (previous) => (previous && hitOf(parseSearch(previous.asked)) === open ? previous : undefined),
   });
@@ -293,9 +298,9 @@ export function SearchPage() {
                 <ul className="mt-2 flex flex-wrap gap-1.5">
                   {results.drops.map((drop) => (
                     <li key={drop.url}>
-                      <Button size="sm" onClick={() => go(drop.url)}>
+                      <AppLink href={drop.url} className={cn(buttonVariants({ size: "sm" }))}>
                         {drop.label}
-                      </Button>
+                      </AppLink>
                     </li>
                   ))}
                 </ul>
