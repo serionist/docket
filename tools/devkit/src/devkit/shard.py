@@ -8,7 +8,7 @@ which deals them out in path order, one share after the next. A file stays whole
 a timed test's vault that an untimed test of the same file builds in the parallel run (DR-0492), never cross to another
 runner. The split is worked out from the list before anything is collected, so the parallel run and the timed run of
 one share keep the same files, and a share imports only its own: the others are never collected. A test file the run
-collects that the list names nowhere fails its collection, in every share, since no share would hold it (DR-0780).
+collects that the list names nowhere fails its collection, in every share, since no share would hold it (DR-0783).
 
 With `--leave-out nightly` the tests marked nightly leave the run, and a file whose every test is, by its module's own
 `pytestmark = pytest.mark.nightly`, leaves it before the split, so the shares balance on what a PR runs (DR-0757).

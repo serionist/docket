@@ -1,0 +1,21 @@
+decisions:
+  - id: DR-0783
+    title: A share imports only its own test files and leaves out the nightly's whole files before the split; a file no share holds fails, a share with no timed test starts no timed run, and the types run alone
+    status: proposed
+    at: "2026-10-21"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#266", DR-0753, DR-0754, DR-0757]
+    description: "How a CI share runs its test files, the last step of #266 (DR-0753). The shard plugin works out a run's files before pytest collects anything: those tools/devkit/test-systems.json names under the run's arguments, less a file whose every test is marked nightly when the run leaves the nightly's tests out (--leave-out nightly, which gate os and gate full pass unless --all), and less a file under same whose text shows no pytest.mark.smoke or pytest.mark.perf when the run selects by system (--select system). The split by weight is taken over those, so a PR's shares balance on what they run, and pytest_ignore_collect leaves every other file uncollected: a share imports only its own files, its parallel run on each worker and its timed run alike, where each worker imported all 245 before. A file is the nightly's whole only by its one top-level pytestmark naming pytest.mark.nightly, which pytest gives every test the module holds. Nothing goes unrun unseen: a test file the run collects that the list doesn't name fails its collection in every share, found in a folder or given by name; so does a file under same holding a test marked smoke or perf that its text doesn't show, in every run that collects the file, Linux's shares on every PR among them, since Windows and macOS find those files by their text. Both fail as the file's collection error, which a run on several workers shows with its reason, where an error raised after collection reaches the controller only as a worker's crash. The parallel run of a share lists the tests marked perf in its files (--shard-timed), and gate os starts the timed run only when that list holds one; with no list it starts it, as before. A share's times file names every file of the share, 0 for one that ran nothing, so gate weights keeps no weight from a run that ran more of it. Linux runs in two shares. The types run on Windows and macOS in a job of their own, Types (Windows) and Types (macOS), which Tests (Windows) and Tests (macOS) need, so the merge rule holds them as before: in the first share, pyright and the parallel run slowed each other, macOS's first share taking 371 s on average over six runs against 256 s for the second on even weights, pyright 46 to 213 s, and the slowed times went into the weights."
+    binds:
+      - A share imports only its own test files, and both pytest runs of a share the same ones.
+      - A test file a run collects that tools/devkit/test-systems.json doesn't name fails its collection in every share.
+      - A file whose every test is marked nightly, by its module's one pytestmark, leaves a PR's split, so the shares balance on what a PR runs.
+      - A test marked smoke or perf in a file under same carries the mark in that file's own text; a run that collects one that doesn't fails.
+      - A share whose parallel run lists no timed test in its files starts no timed run.
+      - Windows and macOS run the types in a job of their own, which the system's Tests check needs.
+    not_chosen:
+      - "Splitting after collection, as before: each worker of every share imported all 245 test files, and the timed run imported them again."
+      - "Each file's marks written to a list from a run: a mark added since the last write would leave its file out on Windows and macOS until the next."
+      - "Asking pytest for the timed tests before the timed run, with --collect-only: a third pytest start in every share, the cost the skip saves."
+      - "The types in the first share with a head start in the split: pyright's cost there moved from 46 to 213 s from run to run, and it slowed the times the weights are written from."

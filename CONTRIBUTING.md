@@ -60,7 +60,7 @@ run gate weights <folder>` writes from a run's times artifacts), and a share imp
 taken from `test-systems.json` before pytest collects anything, so a test file named nowhere fails every share's run
 rather than going unrun. Windows and macOS find the files under `same` that hold a smoke or timed test by their text,
 so such a test carries `pytest.mark.smoke` or `pytest.mark.perf` in its own file; a run that finds one marked another
-way fails. A share whose files hold no timed test starts no timed run (DR-0780).
+way fails. A share whose files hold no timed test starts no timed run (DR-0783).
 
 Tests never touch the real Docket folders or the keychain, not even to read them: `conftest.py` points the config,
 state and models folders at a temp folder of the session's before any fixture runs, and each test at its own.

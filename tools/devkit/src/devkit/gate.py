@@ -19,7 +19,7 @@ In a lane with tests, the tests start first and the other steps run beside them;
 lane without coverage (os) the timed tests (marked `perf`) run after the rest, alone and one at a time, once the other
 steps are done, and the run prints what they printed: their times. The two runs share one templates folder, so the
 timed run reuses the vaults the parallel run built, and the timed run has a temp folder of its own; a parallel run
-that finds no timed test in its files lists none, and no timed run starts (DR-0780). Under coverage the index's time
+that finds no timed test in its files lists none, and no timed run starts (DR-0783). Under coverage the index's time
 limits are off, so the full lane keeps them in its one run. The tests marked `nightly`, the timed tests on big vaults
 and the tests that build those vaults, run only with `--all`, in the os lane or the full lane: the nightly passes it
 (DR-0757). A share imports only its own test files, and writes what each cost to `.local/times/`; `gate weights
@@ -424,7 +424,7 @@ def step_tests(ctx: Ctx) -> Outcome:
         # pytest's and never ends by deleting the parallel run's, as pytest does with a session three back (DR-0492).
         with tempfile.TemporaryDirectory(prefix="docket-tests-", ignore_cleanup_errors=True) as at:
             env[TEMPLATES_ENV] = str(Path(at, "templates"))
-            # The parallel run lists its files' timed tests, so a share with none starts no second pytest (DR-0780).
+            # The parallel run lists its files' timed tests, so a share with none starts no second pytest (DR-0783).
             listed = Path(at, "timed.json")
             code, lines = _run(ctx, [*cmd, f"--shard-timed={listed}"], env=env)
             alone = [*pytest, "-m", PERF, "-raP", f"--basetemp={Path(at, 'timed')}"]

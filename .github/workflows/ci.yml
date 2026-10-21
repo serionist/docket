@@ -7,7 +7,7 @@
 # system fails here; nightly.yml runs every test file there. The timed tests on big vaults, marked nightly, run there
 # alone, on all three (DR-0757); no line runs only in them. The shares split the test files by
 # tools/devkit/test-weights.json, which `gate weights` writes from a run's times artifacts, and each share imports only
-# its own files (DR-0780). The web app's sources run in Web (Linux), and its pages in the runner's Chrome in Browser
+# its own files (DR-0783). The web app's sources run in Web (Linux), and its pages in the runner's Chrome in Browser
 # (Linux) shares (DR-0712); Gate (Linux) needs both, so the checks the merge rule names stay the same.
 name: CI
 
@@ -69,7 +69,7 @@ jobs:
   # The full gate's tests under coverage, a share of the test files each, all but those marked nightly (DR-0757). A
   # share saves its coverage data, and the one that runs the question set its numbers, for Gate (Linux); every share
   # saves what its files cost, for the weights. Two shares: each starts in about half a minute, and two finish before
-  # the macOS shares do (DR-0780).
+  # the macOS shares do (DR-0783).
   linux-shares:
     name: Tests (Linux, ${{ matrix.share }} of 2)
     runs-on: ubuntu-latest
@@ -148,7 +148,7 @@ jobs:
   # on big vaults left to the nightly (DR-0757), each share on a runner of its own: the runner's four vCPUs are busy for
   # the whole parallel run, so more workers on one don't help, and each of its git calls costs about 40 ms. A share
   # keeps its test files whole and imports only those, so its timed tests run alone after its own parallel run, and a
-  # share with none starts no second pytest (DR-0780). The types run in a job of their own, below. The smoke set's
+  # share with none starts no second pytest (DR-0783). The types run in a job of their own, below. The smoke set's
   # pages load in the runner's own Chrome.
   windows-shares:
     name: Tests (Windows, ${{ matrix.share }} of 3)
@@ -194,7 +194,7 @@ jobs:
           retention-days: 14
 
   # The types on Windows, in a job of their own: in the first share, beside its parallel run, pyright and the tests
-  # slowed each other, and the share's times taken that way skewed the weights (DR-0780).
+  # slowed each other, and the share's times taken that way skewed the weights (DR-0783).
   windows-types:
     name: Types (Windows)
     runs-on: windows-latest
