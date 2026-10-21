@@ -231,6 +231,7 @@
     "packages/docket/tests/test_web_decisions.py",
     "packages/docket/tests/test_web_design.py",
     "packages/docket/tests/test_web_frontend.py",
+    "packages/docket/tests/test_web_meetings.py",
     "packages/docket/tests/test_web_panel.py",
     "packages/docket/tests/test_web_queue.py",
     "packages/docket/tests/test_web_recording.py",

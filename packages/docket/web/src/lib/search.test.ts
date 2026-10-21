@@ -40,7 +40,7 @@ describe("parseSearch and stringifySearch", () => {
   it("hold one URL from each page", () => {
     const pages = new Set(canonical.urls.map((url) => url.split("?")[0]));
     expect([...pages].sort()).toEqual(
-      ["/briefs", "/curate", "/ledger", "/queue", "/recording", "/search", "/staging", "/sync"].sort(),
+      ["/briefs", "/curate", "/ledger", "/meetings", "/queue", "/recording", "/search", "/staging", "/sync"].sort(),
     );
   });
 

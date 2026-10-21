@@ -1,9 +1,27 @@
 {
   "components": {
     "schemas": {
+      "Attendee": {
+        "properties": {
+          "href": {
+            "title": "Href",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "href"
+        ],
+        "title": "Attendee",
+        "type": "object"
+      },
       "Body": {
         "additionalProperties": false,
-        "description": "A write's or a save's JSON body: one op of a batch's (DR-0639), the items it acts on and that op's keys. `items`\nholds one ref, or the ticked rows of a bulk; `bulk` says the act bar sent it, so one ticked row runs as a bulk too.\n`at` names the row the selection goes to after a call, which the answer gives back.",
+        "description": "A write's or a save's JSON body: one op of a batch's (DR-0639), the items it acts on and that op's keys. `items`\nholds one ref, or the ticked rows of a bulk; `bulk` says the act bar sent it, so one ticked row runs as a bulk too.\n`at` names the row the selection goes to after a call, which the answer gives back. A point op names its meeting\nin `items`, its point by id in `point`, and a removal its points in `points` (DR-0667, DR-0766).",
         "properties": {
           "at": {
             "anyOf": [
@@ -116,6 +134,25 @@
             "default": "ledger",
             "title": "Page",
             "type": "string"
+          },
+          "point": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Point"
+          },
+          "points": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Points",
+            "type": "array"
           },
           "ref": {
             "anyOf": [
@@ -268,6 +305,37 @@
           "on"
         ],
         "title": "Chip",
+        "type": "object"
+      },
+      "Day": {
+        "properties": {
+          "ahead": {
+            "title": "Ahead",
+            "type": "boolean"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "meetings": {
+            "items": {
+              "$ref": "#/components/schemas/MeetingLine"
+            },
+            "title": "Meetings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "ahead",
+          "meetings"
+        ],
+        "title": "Day",
         "type": "object"
       },
       "Due": {
@@ -816,6 +884,29 @@
         "title": "Link",
         "type": "object"
       },
+      "Linked": {
+        "description": "An item on the meeting, or one worth raising there with why, and its panel on the Ledger.",
+        "properties": {
+          "href": {
+            "title": "Href",
+            "type": "string"
+          },
+          "row": {
+            "$ref": "#/components/schemas/Row"
+          },
+          "why": {
+            "default": "",
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "row",
+          "href"
+        ],
+        "title": "Linked",
+        "type": "object"
+      },
       "MeetingBox": {
         "properties": {
           "points": {
@@ -845,6 +936,424 @@
           "points"
         ],
         "title": "MeetingBox",
+        "type": "object"
+      },
+      "MeetingLine": {
+        "description": "A meeting as the list reads at a glance: its time, subject and badge, its points and its open items.",
+        "properties": {
+          "dim": {
+            "title": "Dim",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "items": {
+            "title": "Items",
+            "type": "integer"
+          },
+          "now": {
+            "title": "Now",
+            "type": "boolean"
+          },
+          "organiser": {
+            "title": "Organiser",
+            "type": "string"
+          },
+          "over": {
+            "title": "Over",
+            "type": "boolean"
+          },
+          "points": {
+            "title": "Points",
+            "type": "integer"
+          },
+          "points_open": {
+            "title": "Points Open",
+            "type": "integer"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "response": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response"
+          },
+          "start": {
+            "title": "Start",
+            "type": "string"
+          },
+          "stream": {
+            "title": "Stream",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "time": {
+            "title": "Time",
+            "type": "string"
+          },
+          "when": {
+            "title": "When",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "id",
+          "subject",
+          "time",
+          "when",
+          "start",
+          "organiser",
+          "stream",
+          "response",
+          "dim",
+          "over",
+          "now",
+          "points",
+          "points_open",
+          "items"
+        ],
+        "title": "MeetingLine",
+        "type": "object"
+      },
+      "MeetingLink": {
+        "properties": {
+          "href": {
+            "title": "Href",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "href"
+        ],
+        "title": "MeetingLink",
+        "type": "object"
+      },
+      "MeetingPanel": {
+        "description": "A meeting as its panel shows it (DR-0667): when and where, who, the recording, the talking points, the outcome\nand notes, its items, the suggestions when asked, its materials and its history.",
+        "properties": {
+          "agenda": {
+            "title": "Agenda",
+            "type": "string"
+          },
+          "archived": {
+            "title": "Archived",
+            "type": "boolean"
+          },
+          "attendees": {
+            "items": {
+              "$ref": "#/components/schemas/Attendee"
+            },
+            "title": "Attendees",
+            "type": "array"
+          },
+          "end": {
+            "title": "End",
+            "type": "string"
+          },
+          "facts": {
+            "title": "Facts",
+            "type": "string"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryLine"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Linked"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "keyless": {
+            "title": "Keyless",
+            "type": "boolean"
+          },
+          "materials": {
+            "items": {
+              "$ref": "#/components/schemas/Link"
+            },
+            "title": "Materials",
+            "type": "array"
+          },
+          "notes": {
+            "title": "Notes",
+            "type": "string"
+          },
+          "open_points": {
+            "title": "Open Points",
+            "type": "integer"
+          },
+          "organiser": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Attendee"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          },
+          "over": {
+            "title": "Over",
+            "type": "boolean"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/PointLine"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "proposed": {
+            "title": "Proposed",
+            "type": "integer"
+          },
+          "recordings": {
+            "items": {
+              "$ref": "#/components/schemas/Link"
+            },
+            "title": "Recordings",
+            "type": "array"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "response": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response"
+          },
+          "response_words": {
+            "title": "Response Words",
+            "type": "string"
+          },
+          "rolls": {
+            "title": "Rolls",
+            "type": "string"
+          },
+          "start": {
+            "title": "Start",
+            "type": "string"
+          },
+          "stream": {
+            "title": "Stream",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "suggestions": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/Linked"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggestions"
+          },
+          "when": {
+            "title": "When",
+            "type": "string"
+          },
+          "where": {
+            "title": "Where",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "id",
+          "subject",
+          "when",
+          "start",
+          "end",
+          "organiser",
+          "where",
+          "response",
+          "response_words",
+          "stream",
+          "keyless",
+          "archived",
+          "over",
+          "rolls",
+          "attendees",
+          "recordings",
+          "points",
+          "open_points",
+          "proposed",
+          "agenda",
+          "outcome",
+          "notes",
+          "items",
+          "suggestions",
+          "materials",
+          "history",
+          "facts"
+        ],
+        "title": "MeetingPanel",
+        "type": "object"
+      },
+      "MeetingRead": {
+        "properties": {
+          "canonical": {
+            "title": "Canonical",
+            "type": "string"
+          },
+          "missing": {
+            "title": "Missing",
+            "type": "string"
+          },
+          "panel": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeetingPanel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "canonical",
+          "panel",
+          "missing"
+        ],
+        "title": "MeetingRead",
+        "type": "object"
+      },
+      "Meetings": {
+        "description": "Meetings' list (DR-0666, DR-0764): the meetings by day, with what its bars need.",
+        "properties": {
+          "canonical": {
+            "title": "Canonical",
+            "type": "string"
+          },
+          "filters": {
+            "$ref": "#/components/schemas/Filters"
+          },
+          "kinds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Kinds",
+            "type": "array"
+          },
+          "list": {
+            "$ref": "#/components/schemas/MeetingsList"
+          },
+          "notice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Notice"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "today": {
+            "title": "Today",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "canonical",
+          "version",
+          "today",
+          "list",
+          "filters",
+          "kinds",
+          "notice"
+        ],
+        "title": "Meetings",
+        "type": "object"
+      },
+      "MeetingsList": {
+        "properties": {
+          "counts": {
+            "title": "Counts",
+            "type": "string"
+          },
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/Day"
+            },
+            "title": "Days",
+            "type": "array"
+          },
+          "empty": {
+            "title": "Empty",
+            "type": "string"
+          },
+          "shown": {
+            "title": "Shown",
+            "type": "integer"
+          },
+          "streams": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Streams",
+            "type": "array"
+          }
+        },
+        "required": [
+          "days",
+          "counts",
+          "shown",
+          "empty",
+          "streams"
+        ],
+        "title": "MeetingsList",
         "type": "object"
       },
       "Notice": {
@@ -1082,6 +1591,83 @@
         "title": "Point",
         "type": "object"
       },
+      "PointLine": {
+        "description": "A talking point as the panel shows it, named by its id, never its n (DR-0667).",
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "came_from": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeetingLink"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "item": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeetingLink"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "proposed": {
+            "title": "Proposed",
+            "type": "boolean"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "went_to": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeetingLink"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "n",
+          "ref",
+          "state",
+          "text",
+          "answer",
+          "proposed",
+          "item",
+          "came_from",
+          "went_to"
+        ],
+        "title": "PointLine",
+        "type": "object"
+      },
       "Queue": {
         "description": "The Queue's list (DR-0666), in the Ledger's shape: its groups by call, no state chips, and the Ledger's own\nfilters, state, group and archived, at their defaults.",
         "properties": {
@@ -1301,6 +1887,33 @@
           "version"
         ],
         "title": "Saved",
+        "type": "object"
+      },
+      "SavedMeeting": {
+        "description": "A meeting's outcome or notes saved: its line and panel after it, and the versions before and after its write,\nas `Saved` answers them for an item (DR-0710, DR-0766).",
+        "properties": {
+          "before": {
+            "title": "Before",
+            "type": "string"
+          },
+          "line": {
+            "$ref": "#/components/schemas/MeetingLine"
+          },
+          "panel": {
+            "$ref": "#/components/schemas/MeetingPanel"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "line",
+          "panel",
+          "before",
+          "version"
+        ],
+        "title": "SavedMeeting",
         "type": "object"
       },
       "Shell": {
@@ -1717,7 +2330,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Saved"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Saved"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SavedMeeting"
+                    }
+                  ],
+                  "title": "Response Ledger Save Api Web Ledger Save Post"
                 }
               }
             },
@@ -1849,6 +2470,62 @@
           }
         },
         "summary": "Ledger Write"
+      }
+    },
+    "/api/web/meetings": {
+      "get": {
+        "operationId": "meetings_api_web_meetings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Meetings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "Meetings"
+      }
+    },
+    "/api/web/meetings/panel": {
+      "get": {
+        "operationId": "meetings_panel_api_web_meetings_panel_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "Meetings Panel"
       }
     },
     "/api/web/queue": {

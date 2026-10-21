@@ -591,13 +591,13 @@ def path_problem(ref: str) -> str | None:
 # -- the item panel ---------------------------------------------------------------------------------------------------
 
 
-def _history(history: Sequence[Change], tz: ZoneInfo) -> list[HistoryLine]:
-    """Newest first; Undo only on a line no undo has left out, never on the add or a renumber; Redo on an undo's own
-    line (DR-0664)."""
+def history_lines(history: Sequence[Change], tz: ZoneInfo) -> list[HistoryLine]:
+    """Newest first; Undo only on a line no undo has left out, never on the add of an item, a meeting or a stream, nor
+    on a renumber; Redo on an undo's own line (DR-0664)."""
     out: list[HistoryLine] = []
     for change in reversed(history):
         button: Literal["Undo", "Redo"] | None = None
-        if change.undone_by is None and change.kind not in ("add", "renumber"):
+        if change.undone_by is None and change.kind not in (*ops.MAKES, "renumber"):
             button = "Redo" if change.kind == "undo" else "Undo"
         when = at(change.at, tz) if change.at is not None else change.day.isoformat()
         stamp = (change.at or change.day).isoformat()
@@ -685,7 +685,7 @@ def build_panel(shown: LedgerRead, meeting: LedgerRead | None, sources: Iterable
         source=link_of(row.source, None, named),
         meeting=_meeting_box(meeting),
         materials=[link_of(m.ref, m.label, named) for m in detail.materials],
-        history=_history(detail.history, tz),
+        history=history_lines(detail.history, tz),
         verdicts=verdict_buttons([triage]) if can else [],
         snooze=snooze_choices(today) if can else [],
         tomorrow=today + timedelta(days=1),

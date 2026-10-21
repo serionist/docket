@@ -27,6 +27,7 @@ READERS: dict[str, Callable[[QueryParams], Any]] = {
     "/search": SearchState.read,
     "/ledger": DayState.read,
     "/queue": lambda params: DayState.read(params, "queue"),
+    "/meetings": lambda params: DayState.read(params, "meetings"),
     "/staging": StagingState.read,
     "/curate": CurateState.read,
     "/sync": SyncState.read,
@@ -63,6 +64,16 @@ def test_the_queue_s_parameters_are_the_ledger_s_without_its_own() -> None:
                      drop=True, text="a.md")  # fmt: skip
     assert [name for name, _ in every.pairs()] == order
     assert DayState(page="queue", state="all", group="who", archived=True).canonical().pairs() == []
+
+
+def test_meetings_takes_the_shared_q_and_stream_and_its_own_suggest_and_leaves_the_items_filters_out() -> None:
+    order = json.loads(CANONICAL.read_text(encoding="utf-8"))["order"]["/meetings"]
+    every = DayState(page="meetings", open="M-0002", at="M-0001", q="x", stream="ops", text="a.md", suggest=True)
+    assert [name for name, _ in every.pairs()] == order
+    # The items' filters are never refused there, and suggest goes only with an open meeting and only on Meetings.
+    asked = QueryParams("kind=bogus&who=Ada&k=0&suggest=1&state=nope")
+    assert DayState.read(asked, "meetings").url() == "/meetings"
+    assert DayState.read(QueryParams("open=M-0002&suggest=1"), "ledger").url() == "/ledger?open=M-0002"
 
 
 def test_the_rule_keeps_ascii_letters_digits_and_url_safe_and_encodes_the_rest() -> None:

@@ -4,9 +4,10 @@ import canonical from "@/test/canonical.json";
 import { listKey, ORDER, quiet, withSearch } from "./url";
 
 describe("a day page's URL as the page changes it", () => {
-  it("keeps the parameters in the order the server writes them, the Queue's without the Ledger's own", () => {
-    expect([...ORDER]).toEqual(canonical.order["/ledger"]);
-    expect(ORDER.filter((key) => canonical.order["/queue"].includes(key))).toEqual(canonical.order["/queue"]);
+  it("keeps each page's parameters in the order the server writes them, and only the day pages' own", () => {
+    const orders: Record<string, string[]> = canonical.order;
+    for (const order of Object.values(orders)) expect(ORDER.filter((key) => order.includes(key))).toEqual(order);
+    expect(new Set(ORDER)).toEqual(new Set(Object.values(orders).flat()));
   });
 
   it("sets and takes out parameters, keeping the server's canonical form", () => {

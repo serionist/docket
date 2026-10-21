@@ -8,6 +8,7 @@ import { NotFound, Shell } from "@/components/shell/shell";
 import { parseSearch, type Search, stringifySearch } from "@/lib/search";
 import { DesignPage } from "@/pages/design";
 import { LedgerPage } from "@/pages/ledger";
+import { MeetingsPage } from "@/pages/meetings";
 import { QueuePage } from "@/pages/queue";
 
 const root = createRootRoute({ component: Shell, notFoundComponent: NotFound });
@@ -33,7 +34,14 @@ export const queueRoute = createRoute({
   validateSearch: (search: Record<string, unknown>): Search => search as Search,
 });
 
-export const routeTree = root.addChildren([designRoute, queueRoute, ledgerRoute]);
+export const meetingsRoute = createRoute({
+  getParentRoute: () => root,
+  path: "/meetings",
+  component: MeetingsPage,
+  validateSearch: (search: Record<string, unknown>): Search => search as Search,
+});
+
+export const routeTree = root.addChildren([designRoute, queueRoute, ledgerRoute, meetingsRoute]);
 
 export function createAppRouter(history?: RouterHistory) {
   return createRouter({

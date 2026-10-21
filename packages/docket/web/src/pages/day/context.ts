@@ -3,7 +3,7 @@
  * set the notice and refetch, and each part shows a refusal beside itself.
  */
 import { createContext, useContext } from "react";
-import type { Body, Row, Saved, Wrote } from "./api";
+import type { Body, Row, SaveAnswer, Wrote } from "./api";
 
 /** What a write came to: its answer, or its refusal's words and look-alikes; "" when the owner called it off. */
 export type Outcome<T> = { ok: true; answer: T } | { ok: false; error: string; alikes: Row[] };
@@ -19,8 +19,8 @@ export interface DayActions {
   /** One write, by user via page; a call moves the selection to the row after the acted ones. */
   write: (body: Body, how?: How) => Promise<Outcome<Wrote>>;
   /** A field saved on change: the row and the panel put in place, the rest refetched only when the save shows a
-   * write from elsewhere landed since the page's read. */
-  save: (body: Body) => Promise<Outcome<Saved>>;
+   * write from elsewhere landed since the page's read. An item's answers its row, a meeting's its line. */
+  save: (body: Body) => Promise<Outcome<SaveAnswer>>;
   /** A material opened with its app, or shown in its folder. */
   open: (item: string, ref: string, reveal: boolean) => Promise<Outcome<null>>;
   /** Whether a write is in flight: every button that writes waits for it. */
