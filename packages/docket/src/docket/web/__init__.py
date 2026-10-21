@@ -3,8 +3,8 @@ renders without JavaScript (DR-0170). Nothing loads from the network: htmx, the 
 package, served under `/static/` (DR-0171), and every page carries a CSP stricter than the service's floor (DR-0172).
 
 The pages move one by one into the React app (#252): its build is served under `/static/app/` and its document for
-each route it lists, `/design` and `/ledger` so far, beside its JSON routes under `/api/web` (`frontend`, `webapi`,
-`day_api`).
+each route its `routes.json` lists, the day pages and `/design` so far, beside its JSON routes under `/api/web`
+(`frontend`, `webapi`, `day_api`).
 
 `install` mounts it on the service's FastAPI app; `sign_in_page` and `used_link_page` are the pages the service shows
 a browser without a session, in the bare layout that names neither the vault nor the machine.
