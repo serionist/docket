@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import platform
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -123,7 +122,7 @@ def test_a_test_file_the_list_doesn_t_name_fails_every_share(tmp_path: Path) -> 
     systems_file(tmp_path, ["test_a.py"], ["test_b.py"])
     unnamed = "test_new.py: tools/devkit/test-systems.json doesn't name it, so no share holds it: name it there"
     # In whichever share, found in a folder or given by name: no share would run it, so the run fails.
-    for args in (["--shard=1/2"], ["--shard=2/2"], ["--select=system"], ["test_new.py", "--shard=1/1"]):
+    for args in (["--shard=1/2"], ["-n", "2", "--shard=2/2"], ["--select=system"], ["test_new.py", "--shard=1/1"]):
         proc = pytest_in(tmp_path, "-q", *args)
         assert proc.returncode != 0, args
         assert unnamed in proc.stdout + proc.stderr, args
@@ -219,10 +218,11 @@ def test_a_run_fails_on_a_timed_test_its_same_file_doesn_t_show(tmp_path: Path) 
     hidden = "from marks import timed\n\n@timed\ndef test_hidden():\n    pass\n"
     (tmp_path / "test_g.py").write_text(hidden, encoding="utf-8")
     systems_file(tmp_path, [], ["test_g.py"])
-    # Linux's shares run every file, so a PR's run there fails, though Windows' and macOS's never see the file.
-    proc = pytest_in(tmp_path, "-q", "--shard=1/1")
+    # Linux's shares run every file, so a PR's run there fails, though Windows' and macOS's never see the file: as
+    # the file's collection error, which a run on two workers, as a CI share's, shows.
+    proc = pytest_in(tmp_path, "-q", "-n", "2", "--shard=1/1")
     assert proc.returncode != 0
-    assert "test_g.py::test_hidden is marked perf, but its file's text shows no pytest.mark.perf" in proc.stderr
+    assert "test_g.py::test_hidden is marked perf, but its file's text shows no pytest.mark.perf" in proc.stdout
     systems_file(tmp_path, ["test_g.py"], [])
     assert pytest_in(tmp_path, "-q", "--shard=1/1").returncode == 0
 
@@ -379,20 +379,26 @@ def test_the_hooks_keep_a_share_s_files_and_refuse_a_file_no_share_holds(tmp_pat
     def ignored(rel: str, cfg: Any = config) -> bool | None:
         return shard.pytest_ignore_collect(tmp_path / rel, cast(pytest.Config, cfg))
 
-    assert [ignored(rel) for rel in ("a/test_x.py", "a/test_y.py", "b/test_q.py", "b/test_n.py", "a/kit.py")] == [
-        None,
-        True,
-        True,
-        True,
-        None,
+    # Another share's file and the two left out whole are never collected; a kit isn't a test file, and a test file
+    # the list doesn't name is collected, for its collection to fail.
+    rels = ("a/test_x.py", "a/test_y.py", "b/test_q.py", "b/test_n.py", "a/kit.py", "a/test_new.py")
+    assert [ignored(rel) for rel in rels] == [None, True, True, True, None, None]
+    assert ignored("a/test_y.py", fake_config(tmp_path, {})) is None
+
+    def problems(rel: str, *nodes: Any) -> list[str]:
+        return shard.collect_problems(tmp_path / rel, cast(pytest.Config, config), list(nodes), found)
+
+    unnamed = "a/test_new.py: tools/devkit/test-systems.json doesn't name it, so no share holds it: name it there"
+    assert problems("a/test_new.py") == [unnamed]
+    # Under same, a test marked smoke or perf that the file's text doesn't show fails it; one it shows doesn't.
+    hidden = fake_item(tmp_path, "b/test_q.py", "perf")
+    assert problems("b/test_q.py", hidden, fake_item(tmp_path, "b/test_q.py")) == [
+        f"{hidden.nodeid} is marked perf, but its file's text shows no pytest.mark.perf, which is how Windows and "
+        "macOS find the files under same that hold one: mark it in the file itself"
     ]
-    with pytest.raises(
-        pytest.Collector.CollectError, match=re.escape("a/test_new.py: tools/devkit/test-systems.json doesn't")
-    ):
-        ignored("a/test_new.py")
-    # A file outside the run's arguments is pytest's to leave, and a run without the plugin's options its own.
-    assert ignored("b/test_new.py", fake_config(tmp_path, options, [str(tmp_path / "a")])) is None
-    assert ignored("a/test_new.py", fake_config(tmp_path, {})) is None
+    assert problems("b/test_z.py", fake_item(tmp_path, "b/test_z.py", "smoke")) == []
+    assert problems("a/test_x.py", fake_item(tmp_path, "a/test_x.py", "perf")) == []
+    assert problems("a") == []
 
     x, x_timed = fake_item(tmp_path, "a/test_x.py"), fake_item(tmp_path, "a/test_x.py", "perf")
     x_nightly, y = fake_item(tmp_path, "a/test_x.py", "perf", "nightly"), fake_item(tmp_path, "a/test_y.py", "perf")
@@ -404,13 +410,6 @@ def test_the_hooks_keep_a_share_s_files_and_refuse_a_file_no_share_holds(tmp_pat
     assert config.left == [x_nightly, y, z_other]
     # The share's timed tests, for the gate: the nightly's left out with the rest.
     assert shard.timed_tests(tmp_path / "t") == [x_timed.nodeid]
-    # A file pytest was given by name that no share holds, and a mark the selection can't see, fail the run.
-    for bad, match in (
-        (fake_item(tmp_path, "a/test_new.py"), "a/test_new.py: tools/devkit/test-systems.json doesn't name it"),
-        (fake_item(tmp_path, "b/test_q.py", "perf"), "is marked perf, but its file's text shows no pytest.mark.perf"),
-    ):
-        with pytest.raises(pytest.UsageError, match=re.escape(match)):
-            shard.pytest_collection_modifyitems(cast(pytest.Config, config), cast(list[pytest.Item], [x, bad]))
     # Without the plugin's options every test stays, and with the selection the list is needed.
     plain = list(items)
     shard.pytest_collection_modifyitems(cast(pytest.Config, fake_config(tmp_path, {})), cast(list[pytest.Item], plain))

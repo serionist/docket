@@ -18,12 +18,13 @@ Lanes:
 In a lane with tests, the tests start first and the other steps run beside them; each run prints its slowest tests. In a
 lane without coverage (os) the timed tests (marked `perf`) run after the rest, alone and one at a time, once the other
 steps are done, and the run prints what they printed: their times. The two runs share one templates folder, so the
-timed run reuses the vaults the parallel run built, and the timed run has a temp folder of its own. Under coverage the
-index's time limits are off, so the full lane keeps them in its one run. The tests marked `nightly`, the timed tests on
-big vaults and the tests that build those vaults, run only with `--all`, in the os lane or the full lane: the nightly
-passes it (DR-0757). A share writes what each of its files cost to
-`.local/times/`, and `gate weights <folder>` folds a CI run's into the weights the shares split by. On GitHub Actions a
-tests step past 4.5 minutes prints a warning the PR shows.
+timed run reuses the vaults the parallel run built, and the timed run has a temp folder of its own; a parallel run
+that finds no timed test in its files lists none, and no timed run starts (DR-0780). Under coverage the index's time
+limits are off, so the full lane keeps them in its one run. The tests marked `nightly`, the timed tests on big vaults
+and the tests that build those vaults, run only with `--all`, in the os lane or the full lane: the nightly passes it
+(DR-0757). A share imports only its own test files, and writes what each cost to `.local/times/`; `gate weights
+<folder>` folds a CI run's into the weights the shares split by. On GitHub Actions a tests step past 4.5 minutes prints
+a warning the PR shows.
 
 `gate check-text <file>` checks a text that is about to be posted (an issue or PR body) for private names and tool
 attribution.

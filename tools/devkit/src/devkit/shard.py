@@ -7,8 +7,8 @@ A file the weights don't know counts as their median, and with no weights for th
 which deals them out in path order, one share after the next. A file stays whole in one share: its module fixtures, and
 a timed test's vault that an untimed test of the same file builds in the parallel run (DR-0492), never cross to another
 runner. The split is worked out from the list before anything is collected, so the parallel run and the timed run of
-one share keep the same files, and a share imports only its own: the others are never collected. A test file under the
-run's arguments that the list names nowhere fails the run, since no share would hold it (DR-0780).
+one share keep the same files, and a share imports only its own: the others are never collected. A test file the run
+collects that the list names nowhere fails its collection, in every share, since no share would hold it (DR-0780).
 
 With `--leave-out nightly` the tests marked nightly leave the run, and a file whose every test is, by its module's own
 `pytestmark = pytest.mark.nightly`, leaves it before the split, so the shares balance on what a PR runs (DR-0757).
@@ -16,9 +16,9 @@ With `--leave-out nightly` the tests marked nightly leave the run, and a file wh
 With `--select system` the run keeps only the test files tools/devkit/test-systems.json lists under system, and every
 test marked smoke or perf wherever it lives: what Windows and macOS run on every PR (DR-0754), the small timed tests
 among them. A file under same is collected for those only when its text shows `pytest.mark.smoke` or
-`pytest.mark.perf`, so the others are never imported; every run that collects a file under same fails on a test marked
-either way that the file's text doesn't show, and Linux collects every file on every PR. The selection comes before
-the share, so the shares split the selected files.
+`pytest.mark.perf`, so the others are never imported; a file under same holding a test marked either way that its text
+doesn't show fails its collection in every run that collects it, and Linux collects every file on every PR. The
+selection comes before the share, so the shares split the selected files.
 
 With `--shard-timed=<file>` the run writes the tests of its files that its timed run takes, those marked perf, so the
 gate skips a timed run with none. With `--shard-times=<file>` the run writes what each of its files cost, its tests'
@@ -37,7 +37,8 @@ import platform
 import re
 import statistics
 from collections import defaultdict
-from dataclasses import dataclass
+from collections.abc import Generator
+from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any, cast
@@ -131,8 +132,8 @@ class Plan:
     run: frozenset[str]
     # Those of its share: all of run when it isn't split.
     mine: frozenset[str]
-    # The run's arguments, as absolute paths.
-    at: frozenset[Path]
+    # Whether a file's text shows pytest.mark.smoke or pytest.mark.perf, as the run reads them.
+    shown: dict[str, bool] = field(default_factory=dict[str, bool])
 
 
 _PLAN = pytest.StashKey[Plan | None]()
@@ -179,7 +180,7 @@ def _plan(config: pytest.Config) -> Plan | None:
         k, n = parse(spec)
         weights = config.getoption("--shard-weights")
         mine = share(files, k, n, load_weights(Path(weights), key_of(config)) if weights else None)
-    return Plan(listed, named, frozenset(files), frozenset(mine), at)
+    return Plan(listed, named, frozenset(files), frozenset(mine))
 
 
 class Times:
@@ -275,18 +276,59 @@ def _unnamed(rel: str) -> str:
 @pytest.hookimpl(trylast=True)
 def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool | None:
     """Another share's test files, and those the run leaves out whole, are never collected, so a share imports only
-    its own. pytest asks this of every file it finds in a folder it collects, never of a file it was given by name."""
+    its own. pytest asks this of every file it finds in a folder it collects, never of a file it was given by name. A
+    file the list doesn't name is collected, for its collection to fail (pytest_make_collect_report)."""
     found = plan(config)
-    if found is None or not any(fnmatch(collection_path.name, p) for p in config.getini("python_files")):
+    if found is None or not _test_file(collection_path, config):
         return None
     rel = _relative(collection_path, config.rootpath)
-    if rel in found.mine:
-        return None
-    if rel in found.named:
-        return True
-    if _under(collection_path, found.at):
-        raise pytest.Collector.CollectError(_unnamed(rel))
-    return None
+    return True if rel in found.named and rel not in found.mine else None
+
+
+def _test_file(path: Path, config: pytest.Config) -> bool:
+    return any(fnmatch(path.name, p) for p in config.getini("python_files"))
+
+
+def collect_problems(path: Path, config: pytest.Config, nodes: list[Any], found: Plan) -> list[str]:
+    """Why the collection of a test file, or of a class in one, fails: the list doesn't name the file, so no share
+    would hold it; or the file is under same and holds a test marked smoke or perf that its text doesn't show, so
+    --select would never collect it on Windows and macOS. Every Linux share collects every file under same that isn't
+    the nightly's whole."""
+    rel = _relative(path, config.rootpath)
+    if _test_file(path, config) and rel not in found.named:
+        return [_unnamed(rel)]
+    if rel not in found.listed.same:
+        return []
+    out: list[str] = []
+    for node in nodes:
+        marked = [m for m in systems.EVERY_SYSTEM if node.get_closest_marker(m)]
+        if not marked:
+            continue
+        if rel not in found.shown:
+            found.shown[rel] = _EVERY_SYSTEM_MARK.search(_text(path)) is not None
+        if not found.shown[rel]:
+            out.append(
+                f"{node.nodeid} is marked {marked[0]}, but its file's text shows no pytest.mark.{marked[0]}, which is "
+                "how Windows and macOS find the files under same that hold one: mark it in the file itself"
+            )
+    return out
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_make_collect_report(
+    collector: pytest.Collector,
+) -> Generator[None, pytest.CollectReport, pytest.CollectReport]:
+    """A file's collection fails on collect_problems: as a collection error a run on several workers shows it, where
+    an error raised once collection is done shows only as a worker's crash."""
+    report = yield
+    found = plan(collector.config)
+    if found is not None and report.passed:
+        problems = collect_problems(collector.path, collector.config, list(report.result), found)
+        if problems:
+            report.outcome = "failed"
+            report.longrepr = "\n".join(problems)
+            report.result = []
+    return report
 
 
 def selected(items: list[pytest.Item], root: Path, listed: systems.Systems) -> list[pytest.Item]:
@@ -300,46 +342,18 @@ def selected(items: list[pytest.Item], root: Path, listed: systems.Systems) -> l
     ]
 
 
-def unseen_marks(items: list[pytest.Item], root: Path, listed: systems.Systems) -> list[str]:
-    """The tests marked smoke or perf in a file under same whose text doesn't show the mark: --select never collects
-    such a file, so Windows and macOS would never run the test."""
-    same = set(listed.same)
-    shown: dict[str, bool] = {}
-    out: list[str] = []
-    for item in items:
-        rel = _relative(item.path, root)
-        marked = [m for m in systems.EVERY_SYSTEM if item.get_closest_marker(m)]
-        if not marked or rel not in same:
-            continue
-        if rel not in shown:
-            shown[rel] = _EVERY_SYSTEM_MARK.search(_text(item.path)) is not None
-        if not shown[rel]:
-            out.append(
-                f"{item.nodeid} is marked {marked[0]}, but its file's text shows no pytest.mark.{marked[0]}, which is "
-                "how Windows and macOS find the files under same that hold one: mark it in the file itself"
-            )
-    return out
-
-
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     found = plan(config)
     if found is not None:
         root = config.rootpath
-        # A file given by name is collected whatever the list says, since pytest asks nothing of it first.
-        stray = sorted({_relative(item.path, root) for item in items} - found.named)
-        if stray:
-            raise pytest.UsageError("\n".join(_unnamed(rel) for rel in stray))
-        unseen = unseen_marks(items, root, found.listed)
-        if unseen:
-            raise pytest.UsageError("\n".join(unseen))
         kept = items
         leave = config.getoption("--leave-out")
         if leave is not None:
             kept = [item for item in kept if item.get_closest_marker(leave) is None]
         if config.getoption("--select") is not None:
             kept = selected(kept, root, found.listed)
-        # Its share's tests, of a file given by name too; one left out whole has none left by now.
+        # Its share's tests, of a file given by name too, which pytest collects without asking.
         kept = [item for item in kept if _relative(item.path, root) in found.mine]
         held = {id(item) for item in kept}
         # Always, even with nothing to leave out: `gate full`'s one share runs the same lines as each of CI's shares,
