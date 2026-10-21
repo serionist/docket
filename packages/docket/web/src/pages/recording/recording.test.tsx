@@ -34,7 +34,11 @@ function line(at: string, seconds: number, text: string, extra: Partial<Transcri
 
 function viewOf(at: string | null, player: string | null): RecordingView {
   const lines = [
-    line("00:00", 0, "Welcome to the yard tour.", { speaker: "Ada Example" }),
+    line("00:00", 0, "Welcome to the yard tour.", {
+      speaker: "Ada Example",
+      mark: at === "00:00",
+      target: at === "00:00",
+    }),
     line("00:20", 20, "The new gate opens on Friday.", { mark: at === "00:20", target: at === "00:20" }),
     line("00:40", 40, "[cut]", { speaker: "", start: null, cut: true }),
   ];
@@ -193,6 +197,39 @@ describe("a recording", () => {
     await waitFor(() => expect(document.querySelector("[data-cited]")).toBeTruthy());
     expect(document.querySelector("audio")).toBe(player);
     expect(player.getAttribute("src")).toBe(AUDIO);
+  });
+
+  it("scrolls to a played line when Back comes to it again", async () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const scrolled = vi.spyOn(Element.prototype, "scrollIntoView");
+    const router = await open(`/recording?rid=${RID}`);
+    fireEvent.click(screen.getByRole("link", { name: "00:00" }));
+    await waitFor(() => expect(document.getElementById("at")?.textContent).toContain("00:00"));
+    // The play's own read scrolls nothing: the line is in sight where it was clicked.
+    expect(scrolled.mock.contexts.filter((el) => (el as Element).id === "at")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("link", { name: "@00:20" }));
+    await waitFor(() => expect(document.getElementById("at")?.textContent).toContain("00:20"));
+    await act(async () => {
+      router.history.back();
+    });
+    await waitFor(() => expect(document.getElementById("at")?.textContent).toContain("00:00"));
+    await waitFor(() => {
+      const last = scrolled.mock.contexts.at(-1) as Element | undefined;
+      expect(last?.id).toBe("at");
+      expect(last?.textContent).toContain("00:00");
+    });
+  });
+
+  it("brings the marked line into view when its own anchor is clicked, on the URL the page is on", async () => {
+    const scrolled = vi.spyOn(Element.prototype, "scrollIntoView");
+    const router = await open(`/recording?rid=${RID}&at=00:20#at`, "#at");
+    await waitFor(() => expect(scrolled).toHaveBeenCalled());
+    scrolled.mockClear();
+    const before = router.history.length;
+    fireEvent.click(screen.getByRole("link", { name: "@00:20" }));
+    expect(scrolled).toHaveBeenCalledTimes(1);
+    expect((scrolled.mock.contexts[0] as Element).id).toBe("at");
+    expect(router.history.length).toBe(before);
   });
 
   it("links a line's time to the line when no audio plays, and a cut stretch never plays", async () => {

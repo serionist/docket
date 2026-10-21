@@ -232,7 +232,11 @@ export function RecordingPage() {
   React.useEffect(() => {
     if (!data || data.asked !== searchStr || read.isPlaceholderData || scrolled.current === searchStr) return;
     scrolled.current = searchStr;
-    if (playedTo.current === searchStr) return;
+    // Only the play's own read is skipped: coming back to that URL later, by Back, scrolls to its line as any URL does.
+    if (playedTo.current === searchStr) {
+      playedTo.current = null;
+      return;
+    }
     document.getElementById("at")?.scrollIntoView({ block: "center" });
   }, [data, searchStr, read.isPlaceholderData]);
 
