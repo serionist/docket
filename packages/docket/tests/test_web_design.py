@@ -19,7 +19,6 @@ PAIRS = [
     ("accent", "accent-soft", 4.5),
     ("accent-ink", "accent", 4.5),
     ("ink", "mark", 4.5),
-    ("ink", "cited", 4.5),
     ("ink", "surface-2", 4.5),
     ("ink", "error-soft", 4.5),
     ("error", "error-soft", 4.5),

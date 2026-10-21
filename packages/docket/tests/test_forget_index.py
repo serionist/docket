@@ -33,7 +33,7 @@ from docket.index import build, lookup
 from docket.index.languages import resolve
 from docket.index.schema import FORGOTTEN as META_KEY
 from docket.index.schema import stale
-from docket.vault import forgetdocs, forgotten
+from docket.vault import docstore, forgetdocs, forgotten
 from docket.vault.anchors import Anchor
 from docket.vault.docstore import DocStore
 from docket.vault.processed import ProcessedDoc, parse_doc
@@ -335,8 +335,10 @@ def test_an_update_reads_only_the_docs_it_indexes_and_what_they_cite(
     build.rebuild(vault)
     rel = "processed/recording-note/2026/10/2026-10-14-supplier-sync.md"
     digest = vault.root / "processed/digest/2026/10/2026-10-14-day.md"
-    # Another process: the rebuild's earlier revs aren't kept in this one, nor its batch reader (DR-0766).
+    # Another process: the rebuild's earlier revs and the docs' histories aren't kept in this one, nor its batch reader
+    # (DR-0766).
     build._EARLIER.clear()  # pyright: ignore[reportPrivateUsage]
+    docstore._HISTORIES.clear()  # pyright: ignore[reportPrivateUsage]
     vault.close()
     for said, wanted in (
         ("- By hand.", [f"log --no-show-signature --format=%H%x1f%B%x1e -- {rel}", "cat-file --batch"]),
