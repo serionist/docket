@@ -82,6 +82,9 @@ NOTE_TIME = re.compile(r"^\d{1,2}:\d{2}$")
 MEETING_REF = re.compile(r"^M-\d{4,}$")
 # A doc's id: its type, lowercase words joined by hyphens, a colon, its name.
 DOC_ID = re.compile(r"^(?P<kind>[a-z][a-z-]*):\S+$")
+# Said when no block holds a CLOSES line: every agent goes through the open items its people are in, so a sync that
+# closes nothing is worth a look (#286).
+NO_CLOSES = "no source reported a close: no block holds a CLOSES line"
 
 
 @dataclass(frozen=True)
@@ -317,6 +320,8 @@ def reconcile(vault: Vault, sync: str, at: datetime) -> Reconciled:
     locators are asked of the index, as any ledger read holds them."""
     path, info = folder.find(sync, vault.root)
     found, said = read_blocks(path, info)
+    if not any(f.line.label == "CLOSES" for f in found):
+        said.append(NO_CLOSES)
     drafting = _Drafting(vault, info, said, at)
     with index_build.ledger_tables(vault) as conn, recall.Lookup(vault) as lookup:
         drafting.resolve(found, lookup)

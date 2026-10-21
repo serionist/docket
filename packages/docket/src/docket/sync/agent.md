@@ -90,7 +90,7 @@ recording; its recordings' agents do.
 | OWED | each ask of the owner since {OWED_SINCE} where the ball is in their court: a question, a review, a decision, a file, an intro, a promise they made; left out when they answered it, here or anywhere else you can see. A promise whose speaker is a guess says so |
 | INVITES | an invite still waiting for the owner's answer, only when it matters: a new series since the window's start, a customer's meeting, or a clash with a meeting the owner accepted, never with focus time or the owner's own blocks, whose organiser is the owner. A calendar reports such an event with no response; mail adds the invite mails that matter. No response alone is the normal state for an owner who rarely answers, and gets no line |
 | WAITING | what the owner asked others for and still waits on |
-| CLOSES | for each open or snoozed item in {CONTEXT}, evidence here that it was answered or done, or became moot |
+| CLOSES | the open or snoozed items the closes pass, step 6, finds done or moot |
 | MEETINGS | a meeting's `response` and `attendees`, and `start` and `end` for a move seen only in mail; a calendar's records make and move meetings themselves |
 | STREAMS | where a stream stands, its next step or its deadline, when that changed |
 | LEARNED | what differs from the source's `SKILL.md` (the route) or `sync.md` (the rest), for next time |
@@ -98,7 +98,21 @@ recording; its recordings' agents do.
 An ask that continues an open item's work, from the same person and in the same thread or on the same topic, names
 that item in its line's continues field: the sync logs it there. A new piece of work is `-`.
 
-## 6. Check
+## 6. Closes
+
+Before the block, go through the open and snoozed items in {CONTEXT} whose people are in what your run read, and only
+those: the item's who, by name or address, or for an item on a meeting (`@M-0003`), that meeting's organiser or its
+attendees as your records list them. An item whose people you didn't read is left alone.
+
+For each, look in what you read for evidence it was done: a message sent, a call held, a file or a link shared, an
+answer given, an invite sent, a release made. The owner's own messages count: their answer closes a reply, the file
+they sent closes the task to send it; for a waiting item, what the other side delivered closes it. A plan or a promise
+to do it isn't evidence.
+
+Evidence found: a CLOSES line, `done`, or `moot` when the item no longer needs doing, with the locator of the record
+that shows it. None found: nothing for that item.
+
+## 7. Check
 
 Every locator in your block, in one call: `read(locator="<the first>", more=["<the second>", "<the third>"],
 view="raw")`. A doc id is checked in a read of its own, with the default summary view. Each comes back under its own
@@ -106,7 +120,7 @@ view="raw")`. A doc id is checked in a read of its own, with the default summary
 open, or opens a record that doesn't say it, is dropped. While the answer lists locators in `later`, past the room,
 read again, its first as `locator` and the rest in `more`, until `later` is empty.
 
-## 7. Write the block, return its RUN line
+## 8. Write the block, return its RUN line
 
 Write the block to {BLOCK} with the Write tool: the block and nothing else, a line per finding, no line for a label
 with nothing, RUN always. Then answer with the RUN line alone, nothing more.

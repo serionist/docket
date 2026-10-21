@@ -298,6 +298,20 @@ def test_a_close_naming_nothing_is_unsure_and_one_closed_already_is_skipped_and_
     assert done.unsure == [4, 7]
 
 
+def test_a_sync_whose_blocks_hold_no_close_says_no_source_reported_one(vault: Vault) -> None:
+    """Every agent goes through the open items its people are in, so a sync that closes nothing is worth a look: the
+    fourth rehearsal's blocks held no CLOSES line where the old sync closed five items (#286). A close whose locator
+    doesn't open is dropped, but was reported."""
+    asks = [owed("Dan Example", DAN_ASK, "2026-10-19 09:05", "Book the room for the pilot's first day", kind="task")]
+    done, _ = run(vault, slack=asks)
+    assert reconcile.NO_CLOSES == "no source reported a close: no block holds a CLOSES line"
+    assert reconcile.NO_CLOSES in done.said and reconcile.NO_CLOSES in reconcile.lines(done)
+    close = "CLOSES:   A-0001 | done | slack:C0PILOT/1 | sent"
+    reported, lines = run(vault, slack=[*asks, close])
+    assert reconcile.NO_CLOSES not in reported.said and "# closes" not in lines
+    assert reported.dropped == [f"{quoted('slack', 3, close)}: slack:C0PILOT/1 doesn't open"]
+
+
 # -- asks: a log, a set of the due, an add -----------------------------------------------------------------------------
 
 

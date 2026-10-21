@@ -293,6 +293,12 @@ Unreleased in the same PR.
 
 ### Changed
 
+- `/docket:sync` finds what closed again, and reads a noted recording no more. Every agent, a recording's too, runs
+  on your session's model: on Sonnet a rehearsal closed nothing the evidence showed done and split asks. Before its
+  block, each agent goes through the open items whose people it read, by who or by a meeting's attendees, and closes
+  those it finds evidence for: a message sent, a call held, a file shared, an answer given. The reconcile says when
+  no source reported a close. A recording with a legacy note that `docket import notes` tied to it counts as noted,
+  so a sync no longer gives it an agent each time.
 - On Windows, the service keeps serving after a client drops its connection while it is being accepted, as one can
   at logon. Before, its port stopped answering until it was restarted by hand, though its process and its task still
   ran. On every system the service also checks its own port every 30 seconds and exits when nothing answers there, so

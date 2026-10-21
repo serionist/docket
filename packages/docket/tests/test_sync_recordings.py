@@ -267,7 +267,9 @@ def test_a_recording_whose_agent_wrote_no_block_is_said_by_the_reconcile(vault: 
         (started.folder / "blocks" / f"{source}.txt").write_text(f"RUN:      {source} | none | -\n", encoding="utf-8")
     (given,) = recordings.recordings(vault, started.info.sync, "plaud", AT).given
     done = reconcile.reconcile(vault, started.info.sync, NOW)
-    assert done.said == [f"blocks/plaud/{given.key}.txt isn't there: no block from {WEEKLY}'s agent"]
+    assert done.said == [
+        f"blocks/plaud/{given.key}.txt isn't there: no block from {WEEKLY}'s agent", reconcile.NO_CLOSES,
+    ]  # fmt: skip
 
 
 @pytest.mark.parametrize("written", [f"{WEEKLY} | 10:30 | 11:53 | M-0001", f"{WEEKLY} | 10:30 | 11:53", "- | 10:30"])
@@ -288,7 +290,8 @@ def test_a_recording_s_notes_line_with_no_note_id_still_links_the_recording_to_i
     assert done.dropped == [] and done.unsure == []
     assert done.said == [
         f"blocks/plaud/{given.key}.txt:1 NOTES: {written}: no note id, so the link is drafted from {WEEKLY}, the "
-        "block's recording; the note's id is missing from the line"
+        "block's recording; the note's id is missing from the line",
+        reconcile.NO_CLOSES,
     ]
 
 
