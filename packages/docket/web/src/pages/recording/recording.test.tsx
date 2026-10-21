@@ -70,7 +70,9 @@ function viewOf(at: string | null, player: string | null): RecordingView {
     no_summary: "",
     note: "",
     docs: [],
-    transcripts: [{ rid: `${RID}/transaction_polish`, meta: `${RID}/transaction_polish, 3 lines`, lines, problem: null }],
+    transcripts: [
+      { rid: `${RID}/transaction_polish`, meta: `${RID}/transaction_polish, 3 lines`, lines, problem: null },
+    ],
     others: [],
     no_transcript: "",
     problems: [],

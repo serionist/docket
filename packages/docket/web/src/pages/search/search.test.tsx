@@ -25,7 +25,11 @@ function hit(locator: string, words: string, extra: Partial<HitLine> = {}): HitL
     stretch: "01:50-03:20",
     when: "7 Oct 2026 10:01",
     who: "Cleo Test",
-    snippet: [{ text: "Can we ask ", mark: false }, { text: "Nortwin", mark: true }, { text: words, mark: false }],
+    snippet: [
+      { text: "Can we ask ", mark: false },
+      { text: "Nortwin", mark: true },
+      { text: words, mark: false },
+    ],
     entities: ["Northwind"],
     found: "some words",
     also: [],
