@@ -278,6 +278,40 @@ def test_the_self_check_leaves_a_port_that_answers_and_forgives_one_miss() -> No
     assert (check.failed, stopped, ended) == (False, [], [])
 
 
+def test_a_service_on_its_way_out_is_left_to_stop_however_long_it_takes() -> None:
+    """A stop it was asked for closes the port first, then waits on its requests and the app's shutdown: no misses
+    counted, no stop, no end."""
+    stopped: list[str] = []
+    ended: list[int] = []
+    asked: list[int] = []
+
+    def reach(port: int, _timeout: float) -> bool:
+        asked.append(port)
+        return False
+
+    with closed_port() as port:
+        check = a_check(port, stopped, ended, stopping=lambda: True, reach=reach)
+        check.start()
+        check.thread.join(30)
+    assert not check.thread.is_alive()
+    assert (check.failed, stopped, ended, asked) == (False, [], [], [])
+
+
+def test_a_stop_asked_for_during_a_miss_counts_it_no_more() -> None:
+    asked: list[int] = []
+
+    def reach(port: int, _timeout: float) -> bool:
+        asked.append(port)
+        return False
+
+    stopped: list[str] = []
+    ended: list[int] = []
+    check = a_check(4321, stopped, ended, misses=1, stopping=lambda: len(asked) >= 1, reach=reach)
+    check.start()
+    check.thread.join(30)
+    assert (check.failed, stopped, ended, asked) == (False, [], [], [4321])
+
+
 def test_a_miss_after_serve_ended_stops_nothing() -> None:
     def reach(_port: int, _timeout: float) -> bool:
         check.close()

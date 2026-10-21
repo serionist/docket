@@ -166,7 +166,8 @@ def reachable(port: int, timeout: float) -> bool:
 class SelfCheck:
     """A thread that connects to the service's own port every `every` seconds. After `misses` in a row it logs, has the
     server stop, and ends the process if the server hasn't stopped in `stop_seconds`: a service that lives but takes no
-    connection is restarted by nothing, one that exits is started again by its registration."""
+    connection is restarted by nothing, one that exits is started again by its registration. Once `stopping` says the
+    server is on its way out it checks no more: a stop closes the port first, then waits on requests and the app."""
 
     def __init__(
         self,
@@ -177,6 +178,7 @@ class SelfCheck:
         timeout: float,
         misses: int,
         stop_seconds: float,
+        stopping: Callable[[], bool] = lambda: False,
         reach: Callable[[int, float], bool] = reachable,
         end: Callable[[int], object] = os._exit,
     ) -> None:
@@ -186,6 +188,7 @@ class SelfCheck:
         self.timeout = timeout
         self.misses = misses
         self.stop_seconds = stop_seconds
+        self.stopping = stopping
         self.reach = reach
         self.end = end
         self.failed = False
@@ -201,11 +204,13 @@ class SelfCheck:
     def _run(self) -> None:
         missed = 0
         while not self.done.wait(self.every):
+            if self.stopping():
+                return
             if self.reach(self.port, self.timeout):
                 missed = 0
                 continue
             missed += 1
-            if self.done.is_set():
+            if self.done.is_set() or self.stopping():
                 return
             if missed < self.misses:
                 log.warning("the service couldn't reach its own port %d; it tries again in %d s", self.port, self.every)
@@ -260,6 +265,7 @@ def serve(
             timeout=CHECK_TIMEOUT,
             misses=CHECK_MISSES,
             stop_seconds=STOP_SECONDS,
+            stopping=lambda: server.should_exit,
         )
         running(server)
         check.start()
