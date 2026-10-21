@@ -14,10 +14,11 @@ import pytest
 from docket_testkit import copy_vault, make_record, template_with
 from forget_kit import forget
 from ledger_kit import meeting, write_ops
-from recording_kit import call
+from recording_kit import call, doc
 from sync_kit import sync_template, sync_vault
-from test_sync_folder import NOW, POINT, WEEKLY, build_pilot
+from test_sync_folder import NOTED, NOW, POINT, WEEKLY, build_pilot
 
+from docket import recall
 from docket.cli import main
 from docket.errors import DocketError
 from docket.index import build as index_build
@@ -26,6 +27,7 @@ from docket.sync import folder, reconcile, recordings, start
 from docket.vault import cursors
 from docket.vault.cuts import CUT_MARKER
 from docket.vault.gate import Gate
+from docket.vault.processed import DocMeta, ProcessedDoc
 from docket.vault.records import Segment
 from docket.vault.vault import Vault
 
@@ -108,6 +110,36 @@ def test_a_second_call_gives_only_what_is_new_and_each_source_keeps_its_own_list
     assert recordings.lines(recordings.recordings(vault, started.info.sync, "slack", AT)) == [
         "no recording of slack to read now"
     ]
+
+
+def legacy(slug: str, covers: list[str]) -> str:
+    """A legacy note as `docket import notes` writes one, tied to the records its head names."""
+    head = DocMeta(
+        id=f"legacy-note:{slug}", type="legacy-note", covers=covers, by="docket import", old_paths=[f"notes/{slug}.md"]
+    )
+    return ProcessedDoc(head, "# The weekly\n\nThe 28th.\n", 0).render()
+
+
+def test_a_legacy_note_counts_as_a_recording_s_note_and_the_summary_names_a_sync_s_note_first(vault: Vault) -> None:
+    """A note from before Docket, tied to the recording by its import, is its note: the fourth rehearsal read two such
+    recordings again (#286). Where an agent's note covers it too, that note is the one the summary names."""
+    recall.doc_put(vault, legacy("pilot-weekly", [WEEKLY]))
+    recall.doc_put(vault, legacy("pilot-kickoff", [f"{NOTED}/transaction_polish"]))
+    started = start.start(vault, [], NOW)
+    wave = recordings.recordings(vault, started.info.sync, "plaud", AT)
+    assert (wave.given, recordings.lines(wave)) == ([], ["no recording of plaud to read now"])
+    assert index_build.noted(vault, [WEEKLY, NOTED]) == {
+        WEEKLY: "legacy-note:pilot-weekly", NOTED: "recording-note:2026-10-18-pilot-kickoff",
+    }  # fmt: skip
+
+
+def test_a_digest_covering_a_recording_isn_t_its_note(vault: Vault) -> None:
+    """A digest, a brief or a correction covers records too, and would hide a recording no note covers."""
+    recall.doc_put(vault, doc("digest:pilot-week", [f"{WEEKLY}/transaction_polish"], ["- The 28th. @00:00"]))
+    index_build.update(vault)
+    assert index_build.noted(vault, [WEEKLY]) == {}
+    started = start.start(vault, [], NOW)
+    assert [r.rid for r in recordings.recordings(vault, started.info.sync, "plaud", AT).given] == [WEEKLY]
 
 
 def test_a_recording_with_a_record_still_in_staging_is_skipped_and_said(vault: Vault) -> None:

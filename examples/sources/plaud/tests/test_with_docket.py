@@ -35,6 +35,7 @@ from docket.imports.notes import import_notes
 from docket.service.app import ServiceApp, create_app
 from docket.service.state import Settings
 from docket.sources.contract import check_output
+from docket.sync import recordings, start
 from docket.vault.config import Owner, SourceConfig, VaultConfig
 from docket.vault.gate import Gate
 from docket.vault.processed import DocMeta, ProcessedDoc
@@ -124,6 +125,52 @@ def test_a_note_named_by_its_title_and_day_covers_the_recording(mapper: ModuleTy
     assert import_notes(vault, folder).covered == 1
     found = recall.read(vault, "notes/plaud/2026-10-14-supplier-call.md@12:08", view="raw")
     assert found.resolved == f"r:plaud:{CALL}/transaction_polish@12:08"
+
+
+# -- the sync reads a recording once, across syncs (#286) ------------------------------------------------------------
+
+KICKOFF = "of_00face0000face0000face0000face00"
+IDEA = "of_00f00d0000f00d0000f00d0000f00d00"
+
+
+def three_calls(mapper: ModuleType) -> list[RawRecord]:
+    """The supplier call, a kickoff with a note from before Docket, and an idea with no note at all, each as a live run
+    fetches it: listed, its transcript and its notes."""
+    run = live_call(Run())
+    for file_id, name, hour in ((KICKOFF, "Pilot kickoff", 13), (IDEA, "Pilot idea", 15)):
+        listed = meta(file_id, name, start_at=f"2026-10-14T{hour}:00:00")
+        run = run.listing(listed).transcript(file_id, CALL_PAGE_1).note(file_id)
+    return list(checked(mapper, run).values())
+
+
+def given(vault: Vault, at: datetime) -> list[str]:
+    """The recordings a sync started at `at` gives an agent each, as the skill asks once Plaud's agent is back."""
+    started = start.start(vault, [], at)
+    return [r.rid for r in recordings.recordings(vault, started.info.sync, "plaud", at).given]
+
+
+def test_a_recording_a_legacy_note_or_an_earlier_sync_s_note_covers_is_not_read_again(
+    mapper: ModuleType, tmp_path: Path
+) -> None:
+    """The fourth rehearsal read three recordings of a week before again, two with legacy notes and one with the note
+    an earlier sync's agent put, and re-added asks the ledger held. A legacy note the import tied to its recording
+    counts as its note, as a recording note does; a recording with no note is still read."""
+    vault = project_with_the_example(tmp_path)
+    vault.write_run("plaud", three_calls(mapper))
+    notes = tmp_path / "work" / "notes"
+    (notes / "plaud").mkdir(parents=True)
+    (notes / "plaud" / "2026-10-14-pilot-kickoff.md").write_text("# Pilot kickoff\n\nWe start.\n", encoding="utf-8")
+    assert import_notes(vault, notes).covered == 1
+    first = datetime(2026, 10, 15, 8, 0, tzinfo=UTC)
+    assert given(vault, first) == [f"plaud:{CALL}", f"plaud:{IDEA}"]
+    # The supplier call's agent puts its note as recording.md says, covering the transcript its files hold.
+    head = DocMeta(
+        id="recording-note:2026-10-14-supplier-call", type="recording-note", by="claude, sync 2026-10-15T10:00",
+        covers=[f"plaud:{CALL}/transaction_polish"],
+    )  # fmt: skip
+    recall.doc_put(vault, ProcessedDoc(head, "# Supplier call\n\n- Ten million for the quarter. @12:08\n", 0).render())
+    # The next day's sync gives the idea, still with no note, an agent again, and no other.
+    assert given(vault, first + timedelta(days=1)) == [f"plaud:{IDEA}"]
 
 
 # -- docket ingest, end to end ---------------------------------------------------------------------------------------

@@ -1042,15 +1042,23 @@ def kept(vault: Vault, source: str, since: datetime, until: datetime) -> list[st
     return [str(row[0]) for row in rows]
 
 
-# A recording no current summary covers: no minutes, recording note or thread summary, not superseded, covering it, a
-# record under it (`<rid>/...`, between `<rid>/` and `<rid>0` byte by byte) or a record of its thread, as the Recording
-# page and search find a recording's summary.
+# The docs that count as a recording's note, when current: minutes, a recording note, a thread summary, as the Recording
+# page and search find a recording's summary, and a legacy note, a note from before Docket that its import tied to the
+# recording (#286). A digest, a brief or a correction covers records too, and would hide a recording with no note.
+NOTE_TYPES = ("minutes", "recording-note", "thread-summary", "legacy-note")
+# A doc `d` by its `doc_covers` row `c` is the note of the recording `r` when it is current, of one of those types, and
+# covers the recording, a record under it (`<rid>/...`, between `<rid>/` and `<rid>0` byte by byte) or a record of its
+# thread.
+_TYPES = ", ".join(f"'{t}'" for t in NOTE_TYPES)
+_NOTE_OF = (
+    f"d.superseded_by IS NULL AND d.type IN ({_TYPES}) AND (c.rid = r.rid "  # noqa: S608 - fixed text
+    "OR (c.rid >= r.rid || '/' AND c.rid < r.rid || '0') OR c.rid IN (SELECT rid FROM records WHERE thread = r.thread))"
+)
+# A recording with no note.
 UNNOTED = (
-    "SELECT r.rid, r.ts, r.title FROM records r WHERE r.source = ? AND r.kind = 'recording' "
+    "SELECT r.rid, r.ts, r.title FROM records r WHERE r.source = ? AND r.kind = 'recording' "  # noqa: S608 - fixed text
     "AND r.ts >= ? AND r.ts <= ? AND NOT EXISTS (SELECT 1 FROM doc_covers c JOIN docs d ON d.id = c.doc "
-    "WHERE d.superseded_by IS NULL AND d.type IN ('minutes', 'recording-note', 'thread-summary') AND (c.rid = r.rid "
-    "OR (c.rid >= r.rid || '/' AND c.rid < r.rid || '0') "
-    "OR c.rid IN (SELECT rid FROM records WHERE thread = r.thread))) ORDER BY r.ts, r.rid"
+    f"WHERE {_NOTE_OF}) ORDER BY r.ts, r.rid"
 )
 
 
@@ -1061,8 +1069,8 @@ class Unnoted(NamedTuple):
 
 
 def unnoted(vault: Vault, windows: dict[str, tuple[datetime, datetime]]) -> list[Unnoted]:
-    """Each source's recordings in raw whose time falls in its window and that no current summary covers, oldest
-    first: the recordings `docket sync recordings` gives an agent each (DR-0759)."""
+    """Each source's recordings in raw whose time falls in its window and that no note covers, oldest first: the
+    recordings `docket sync recordings` gives an agent each (DR-0772)."""
     conn = open_index(vault)
     try:
         out = [
@@ -1075,17 +1083,17 @@ def unnoted(vault: Vault, windows: dict[str, tuple[datetime, datetime]]) -> list
     return sorted(out, key=lambda r: (r.ts, r.rid))
 
 
-# The current summary covering a recording, as UNNOTED looks for one.
+# A recording's note, as UNNOTED looks for one: a legacy note only when no other covers it, so the note a sync's agent
+# put is the one the summary names.
 NOTED = (
-    "SELECT d.id FROM records r JOIN doc_covers c ON (c.rid = r.rid OR (c.rid >= r.rid || '/' AND c.rid < r.rid || "
-    "'0') OR c.rid IN (SELECT rid FROM records WHERE thread = r.thread)) JOIN docs d ON d.id = c.doc WHERE r.rid = ? "
-    "AND d.superseded_by IS NULL AND d.type IN ('minutes', 'recording-note', 'thread-summary') ORDER BY d.id LIMIT 1"
+    "SELECT d.id FROM records r JOIN doc_covers c JOIN docs d ON d.id = c.doc "  # noqa: S608 - fixed text
+    f"WHERE r.rid = ? AND {_NOTE_OF} ORDER BY d.type = 'legacy-note', d.id LIMIT 1"
 )
 
 
 def noted(vault: Vault, rids: Iterable[str]) -> dict[str, str]:
-    """The current summary covering each recording that has one, by its rid: what the sync's summary says of the
-    recordings it gave agents (#272). A read: the index as it stands."""
+    """The note covering each recording that has one, by its rid: what the sync's summary says of the recordings it
+    gave agents (#272). A read: the index as it stands."""
     conn = open_index(vault)
     try:
         return {rid: str(row[0]) for rid in rids if (row := conn.execute(NOTED, (rid,)).fetchone()) is not None}
