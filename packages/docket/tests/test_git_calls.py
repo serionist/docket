@@ -42,7 +42,7 @@ from docket.vault import git as git_module
 from docket.vault import gitfiles, host
 from docket.vault.docstore import DocStore
 from docket.vault.gate import Gate
-from docket.vault.git import Git, config_stamp, toplevel
+from docket.vault.git import Git, config_stamp, git_home, toplevel
 from docket.vault.home import repo_at
 from docket.vault.vault import Vault, remove_tree
 
@@ -437,10 +437,9 @@ def test_a_batch_reader_that_broke_answers_through_git_and_starts_again(
     vault = fixture_vault(tmp_path)
     reader = vault.git
     text = reader.blob_text("HEAD:./vault.yaml")
-    process = reader._batch  # pyright: ignore[reportPrivateUsage]
-    assert process is not None
-    process.kill()
-    process.wait()
+    reader.close()
+    # A reader that died. Not a killed git: on Windows the git on PATH can be a launcher whose child outlives a kill.
+    fake_batch(reader, "pass")
     with git_calls(monkeypatch) as calls:
         assert reader.blob_text("HEAD:./vault.yaml") == text
         assert reader.blob_text("HEAD:./vault.yaml") == text
@@ -452,14 +451,15 @@ def test_no_batch_reader_outlives_its_command_or_its_service_call(tmp_path: Path
     vault.git.show_at_head("vault.yaml")
     process = vault.git._batch  # pyright: ignore[reportPrivateUsage]
     assert process is not None
-    assert open_batches() == [vault.git]
+    # Others a test before this one left open are closed with it.
+    assert vault.git in open_batches()
     run(vault, "staging", "list")
     assert open_batches() == []
     assert process.poll() is not None
     # The vault reads on, through a reader of its own again; a service call's end closes it, as it would one of the
     # call's own.
     vault.git.show_at_head(".gitattributes")
-    assert open_batches() == [vault.git]
+    assert vault.git in open_batches()
     with signed_in(vault) as client:
         assert client.get("/staging").status_code == 200
     assert open_batches() == []
@@ -479,7 +479,7 @@ def test_a_command_s_reads_share_its_one_batch_reader(tmp_path: Path, monkeypatc
 def test_a_sync_closes_the_batch_readers_first(tmp_path: Path) -> None:
     vault = fixture_vault(tmp_path)
     vault.git.show_at_head("vault.yaml")
-    assert open_batches() == [vault.git]
+    assert vault.git in open_batches()
     vault.sync()
     assert open_batches() == []
 
@@ -522,11 +522,31 @@ def test_the_repo_a_folder_is_in_is_asked_once_while_the_files_stand(
     with git_calls(monkeypatch) as calls_init:
         assert toplevel(outside) == (tmp_path / "outside").resolve()
     assert calls == calls_init == [TOP]
-    # A variable telling git where to look: git every time.
+    # A linked worktree, whose .git is a file the files can't vouch for, and a variable telling git where to look:
+    # git every time.
+    git(top, "worktree", "add", "-q", "--detach", str(tmp_path / "linked"))
+    linked = (tmp_path / "linked").resolve()
+    with git_calls(monkeypatch) as calls:
+        assert toplevel(linked) == toplevel(linked) == linked
+    assert calls == [TOP, TOP]
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
     with git_calls(monkeypatch) as calls:
         assert toplevel(inner) == toplevel(inner) == top
     assert calls == [TOP, TOP]
+
+
+def test_git_s_home_is_found_as_git_finds_it(tmp_path: Path) -> None:
+    """HOME first; on Windows HOMEDRIVE and HOMEPATH where they name a folder, a domain's redirected home, before
+    USERPROFILE; else Python's own home."""
+    (tmp_path / "redirected").mkdir()
+    # Git for Windows joins the two as they are; a temp folder stands in for the drive on every system.
+    drive, path = str(tmp_path), "/redirected"
+    profile = str(tmp_path / "profile")
+    assert git_home({"HOME": str(tmp_path / "home"), "USERPROFILE": profile}, windows=True) == tmp_path / "home"
+    windows = {"HOMEDRIVE": drive, "HOMEPATH": path, "USERPROFILE": profile}
+    assert git_home(windows, windows=True) == Path(drive + path)
+    assert git_home({**windows, "HOMEPATH": path + "-gone"}, windows=True) == Path(profile)
+    assert git_home({}, windows=True) == git_home({}, windows=False) == Path.home()
 
 
 def test_a_repo_s_answers_from_its_config_stand_while_its_config_files_do(

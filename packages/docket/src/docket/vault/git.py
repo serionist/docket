@@ -21,7 +21,7 @@ import subprocess
 import threading
 import time
 import weakref
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, cast
@@ -548,8 +548,7 @@ def config_stamp(top: Path) -> Stamp | None:
     process restarts."""
     if not is_git_dir(top / ".git"):
         return None
-    # git's own home: HOME where it is set, Git for Windows' too.
-    home = Path(os.environ.get("HOME") or Path.home())
+    home = git_home()
     xdg = os.environ.get("XDG_CONFIG_HOME") or str(home / ".config")
     named = os.environ.get("GIT_CONFIG_GLOBAL")
     files = [
@@ -567,6 +566,21 @@ def config_stamp(top: Path) -> Stamp | None:
             continue
         stamp.append((found.st_size, found.st_mtime_ns))
     return tuple(stamp)
+
+
+def git_home(env: Mapping[str, str] = os.environ, *, windows: bool = os.name == "nt") -> Path:
+    """The folder git reads ~/.gitconfig from: HOME where it is set; on Windows otherwise HOMEDRIVE and HOMEPATH where
+    they name a folder, else USERPROFILE, as Git for Windows has it, where a domain's redirected home differs from the
+    profile Python's own home names."""
+    if env.get("HOME"):
+        return Path(env["HOME"])
+    if windows:
+        drive, path = env.get("HOMEDRIVE", ""), env.get("HOMEPATH", "")
+        if drive and path and Path(drive + path).is_dir():
+            return Path(drive + path)
+        if env.get("USERPROFILE"):
+            return Path(env["USERPROFILE"])
+    return Path.home()
 
 
 def close_all() -> None:
