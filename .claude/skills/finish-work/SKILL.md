@@ -15,7 +15,8 @@ complete. `main` takes PRs only, squash-merged.
    when the work departed from it (say where and why). Write them the way `AGENTS.md` asks: short, plain, no walls of
    text.
 2. Run `uv run gate full`. Fix every failure; never weaken a test or a check to pass. Raise a coverage floor the change
-   earned.
+   earned. Never lower one: the gate fails a floor below the merge base's unless the floors file's `$lowered` names a
+   decided decision that sets it (DR-0755), and only the maintainer decides one.
 3. Commit: the subject says what changed, the body says why, `Refs #<n>`. No tool attribution.
 4. Open the draft PR. Write the body to `.local/pr-body.md` from `.github/pull_request_template.md`, check it with `uv
    run gate check-text .local/pr-body.md`, push, and run `gh pr create --draft --title "<plain sentence>" --body-file
