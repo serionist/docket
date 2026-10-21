@@ -8,6 +8,11 @@ A universal compile pins by metadata, not by the files a release has: nvidia-cub
 its marker named Windows too, and the CUDA install failed there (#109). `devkit models-lock` writes each pin's files by
 sha256 to `tools/devkit/models-wheels.json`, from the same resolution as the compiled files; the gate holds the
 compiled hashes to that list and each pin to a wheel for every system its marker names, with no network.
+
+A release waits a week before a lock takes it, so a broken or compromised one is pulled first (DR-0157): models-lock
+compiles from versions a week old, and the gate holds what uv.lock gains over the merge base to a week by its files'
+upload times. Only a pin `tools/devkit/pins.json` exempts by a published security advisory's id comes in sooner
+(DR-0763).
 """
 
 from __future__ import annotations
@@ -17,6 +22,7 @@ import re
 import tomllib
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -24,8 +30,16 @@ from packaging.markers import Marker
 from packaging.tags import Tag
 from packaging.utils import InvalidWheelFilename, canonicalize_name, parse_wheel_filename
 
+from devkit.repo import git
+
 MODELS = "packages/docket/src/docket/models"
 WHEELS = "tools/devkit/models-wheels.json"
+EXEMPT = "tools/devkit/pins.json"
+LOCK = "uv.lock"
+# As long as Dependabot's cooldown waits (.github/dependabot.yml).
+COOLDOWN = timedelta(days=7)
+# A GitHub security advisory's id, as Dependabot's alerts name it: three groups from GitHub's own alphabet.
+ADVISORY = re.compile(r"^GHSA(-[23456789cfghjmpqrvwx]{4}){3}$")
 SHARED = ("onnxruntime", "tokenizers", "numpy")
 PIN = re.compile(r"^\s*([A-Za-z0-9_.-]+)(?:\[[^\]]*\])?\s*==\s*([^\s;\\#]+)")
 # The environments are built on Docket's own Python, and compiled for 3.12 (`devkit models-lock`).
@@ -188,7 +202,82 @@ def wheel_problems(root: Path, sources: list[Path]) -> list[str]:
     return out
 
 
-def problems(root: Path) -> list[str]:
+def exemptions(root: Path) -> tuple[dict[str, str], list[str]]:
+    """The pins taken before their week, each with the advisory it fixes, and a problem for each entry that names no
+    advisory: only a published security advisory lets a pin in sooner (DR-0763)."""
+    path = root / EXEMPT
+    data: Any = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    entries: Any = cast(dict[str, Any], data).get("security", {}) if isinstance(data, dict) else None
+    if not isinstance(entries, dict):
+        return {}, [f"{EXEMPT}: security maps each name==version to its advisory's id"]
+    found: dict[str, str] = {}
+    out: list[str] = []
+    for pin, advisory in cast(dict[str, Any], entries).items():
+        name, _, version = pin.partition("==")
+        if not name.strip() or not version.strip():
+            out.append(f"{EXEMPT} exempts {pin!r}, which isn't a name==version pin")
+        elif not isinstance(advisory, str) or not ADVISORY.match(advisory):
+            out.append(
+                f"{EXEMPT} exempts {pin} without a security advisory's id, as GHSA-xxxx-xxxx-xxxx: only a published "
+                "advisory lets a pin in before its week"
+            )
+        else:
+            found[f"{canonicalize_name(name.strip())}=={version.strip()}"] = advisory
+    return found, out
+
+
+def lock_releases(text: str) -> dict[str, datetime]:
+    """Each registry release a uv.lock takes, as name==version, with when its first file was uploaded."""
+    data: Any = tomllib.loads(text)
+    out: dict[str, datetime] = {}
+    for package in cast(list[dict[str, Any]], data.get("package", [])):
+        files = cast(list[dict[str, Any]], [package["sdist"]] if "sdist" in package else [])
+        files += cast(list[dict[str, Any]], package.get("wheels", []))
+        times = [datetime.fromisoformat(str(f["upload-time"])) for f in files if "upload-time" in f]
+        if times:
+            out[f"{canonicalize_name(str(package['name']))}=={package['version']}"] = min(times)
+    return out
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+def young(root: Path, base: str | None, exempt: Mapping[str, str]) -> list[str]:
+    """Each release uv.lock gains over the merge base that was published less than a week ago and isn't exempt. What
+    the base takes already was held when it came in; without a base, as on main itself, nothing is gained."""
+    if base is None:
+        return []
+    if not git(root, "rev-parse", "--verify", "--quiet", f"{base}^{{commit}}", check=False).strip():
+        return [f"can't read the merge base {base}, whose {LOCK} the new pins are held against: fetch its history"]
+    before = lock_releases(git(root, "show", f"{base}:{LOCK}", check=False))
+    since = _now() - COOLDOWN
+    out: list[str] = []
+    for key, published in lock_releases((root / LOCK).read_text(encoding="utf-8")).items():
+        if key in before or key in exempt or published <= since:
+            continue
+        name, _, version = key.partition("==")
+        out.append(
+            f"{LOCK} takes {name} {version}, published {published:%Y-%m-%d %H:%M} UTC, less than a week ago: wait "
+            f"out the week, or exempt it in {EXEMPT} by the security advisory it fixes"
+        )
+    return out
+
+
+def unpinned(root: Path, exempt: Mapping[str, str], sources: list[Path]) -> list[str]:
+    """Each exemption no lock takes any more, which would hold models-lock to its version."""
+    if not exempt:
+        return []
+    lock = root / LOCK
+    pinned = set(lock_releases(lock.read_text(encoding="utf-8"))) if lock.is_file() else set[str]()
+    for source in sources:
+        target = source.with_suffix(".txt")
+        if target.is_file():
+            pinned |= {p.key for p in compiled(target.read_text(encoding="utf-8"))}
+    return [f"{EXEMPT} exempts {pin}, which nothing pins now: remove it" for pin in sorted(exempt) if pin not in pinned]
+
+
+def problems(root: Path, base: str | None = None) -> list[str]:
     data: Any = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
     dev = pins(str(d) for d in data.get("dependency-groups", {}).get("dev", []))
     out: list[str] = []
@@ -209,4 +298,5 @@ def problems(root: Path) -> list[str]:
                     f"{target.name} has {name} {built.get(name) or 'nowhere'}, not {wanted[name]}: "
                     "run uv run devkit models-lock"
                 )
-    return out + wheel_problems(root, sources)
+    exempt, wrong = exemptions(root)
+    return out + wheel_problems(root, sources) + wrong + unpinned(root, exempt, sources) + young(root, base, exempt)

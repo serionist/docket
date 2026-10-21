@@ -130,7 +130,7 @@ def step_lock(ctx: Ctx) -> Outcome:
     uv = shutil.which("uv")
     if uv is None:
         return Outcome.fail("uv isn't on PATH")
-    found = pins.problems(ctx.root)
+    found = pins.problems(ctx.root, ctx.base)
     if found:
         return Outcome.fail(*found)
     return _tool(ctx, [uv, "lock", "--check"])
@@ -544,7 +544,8 @@ STEPS = [
     Step(
         "lock",
         ("quick", "full"),
-        "uv.lock matches the pyproject files; the models' pins the dev group's, each with a wheel for its systems",
+        "uv.lock matches the pyproject files and gains nothing under a week old but for an advisory; the models' pins "
+        "the dev group's, each with a wheel for its systems",
         step_lock,
     ),
     Step("ruff", ("quick", "full"), "lint", step_ruff),

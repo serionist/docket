@@ -1,0 +1,18 @@
+decisions:
+  - id: DR-0763
+    title: A pin under a week old comes in only for a published security advisory, by its id in tools/devkit/pins.json
+    status: proposed
+    at: "2026-10-21"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#271", DR-0157]
+    description: "A release waits a week before a lock takes it (DR-0157), but a fix for a published security advisory shouldn't wait out that week. tools/devkit/pins.json lists each pin let in sooner under security, as {\"name==version\": \"GHSA-xxxx-xxxx-xxxx\"}, and nothing else comes in early: devkit models-lock lifts its cutoff for that package alone and takes that version exactly, and the gate's lock step, which now holds each release uv.lock gains over the merge base to a week by its files' upload times, lets that pin through. An entry without a GitHub advisory id fails both, and one nothing pins any more fails the gate, so it goes when the pin moves on; one whose pin is a week old can go too. Dependabot's cooldown stays at seven days on its uv and pip entries; it holds only version updates, so a security update still comes at once and lands with its entry. The first is certifi 2026.10.19 for GHSA-6q48-6c7w-9gw2 (#271), in uv.lock and the four models requirements files."
+    binds:
+      - A pin under a week old comes in only by an entry in tools/devkit/pins.json that names the published security advisory it fixes, by its GHSA id; devkit models-lock and the gate's lock step refuse an entry without one.
+    not_chosen:
+      - "Waiting out the week: a critical advisory on the TLS roots stays open for seven days."
+      - "Skipping the check for the one PR: nothing in the repo would say why the pin came early, and the next models-lock would drop it."
+      - "Exempting the package, not the version: its next release would come in early too."
+      - "Any reason in free text: only a published advisory is one, and its id lets a reviewer check it."
+      - "Failing an entry once its pin is a week old: main would go red on its own a week after the merge."
+      - "Holding all of uv.lock to a week against today: filelock 4.1.2 came in three hours after its release on 14 Oct, so main would have failed until 21 Oct; DR-0157 asks it of what the lock gains."

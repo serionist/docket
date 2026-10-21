@@ -5,8 +5,8 @@ import json
 import re
 import shutil
 import subprocess
-from collections.abc import Sequence
-from datetime import date
+from collections.abc import Callable, Mapping, Sequence
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -200,19 +200,39 @@ CUBLAS_NEW = release("nvidia-cublas", "13.8.1.7", *EVERYWHERE[1:3], marker=CUDA_
 CUBLAS_OLD = release("nvidia-cublas", "13.8.0.4", *EVERYWHERE[:3], marker=CUDA_MARKER, python="py3-none")
 
 
-def fake_uv(resolve: dict[str, list[Release]], calls: list[list[str]], disagree: bool = False) -> object:
-    """A `uv pip compile` that resolves each source to its releases, leaving out a release a constraint excludes."""
+def fake_uv(
+    resolve: dict[str, list[Release]],
+    calls: list[list[str]],
+    disagree: bool = False,
+    published: Mapping[str, str] | None = None,
+) -> object:
+    """A `uv pip compile` that resolves each source to its releases, leaving out a release a constraint excludes, and
+    one published on or after its package's cutoff: --exclude-newer's, or its own --exclude-newer-package's."""
 
     def run(cmd: list[str], **_: object) -> subprocess.CompletedProcess[str]:
         calls.append(cmd)
-        excluded = set()
+        held: set[str] = set()
         for i, arg in enumerate(cmd):
             if arg == "-c" and cmd[i + 1].endswith("constraints.txt"):
-                excluded = set(Path(cmd[i + 1]).read_text(encoding="utf-8").split())
+                held = set(Path(cmd[i + 1]).read_text(encoding="utf-8").split())
+        exact = {name: version for name, _, version in (c.partition("==") for c in held) if version}
+        cutoff = cmd[cmd.index("--exclude-newer") + 1]
+        sooner = {
+            name: day
+            for i, a in enumerate(cmd)
+            if a == "--exclude-newer-package"
+            for name, _, day in [cmd[i + 1].partition("=")]
+        }
         options = resolve[Path(cmd[3]).name]
         chosen: list[Release] = []
         for rel in options:
-            if f"{rel[0]}!={rel[1]}" in excluded or any(c[0] == rel[0] for c in chosen):
+            name, version = rel[0], rel[1]
+            if (
+                f"{name}!={version}" in held
+                or exact.get(name, version) != version
+                or (published or {}).get(f"{name}=={version}", "2026-01-01") >= sooner.get(name, cutoff)
+                or any(c[0] == name for c in chosen)
+            ):
                 continue
             chosen.append(rel)
         out = Path(cmd[-1])
@@ -287,3 +307,147 @@ def test_models_lock_stops_when_its_two_compiles_differ_or_no_release_has_every_
 
 def test_this_repos_pins_agree() -> None:
     assert pins.problems(Path(__file__).resolve().parents[3]) == []
+
+
+ADVISORY = "GHSA-6q48-6c7w-9gw2"
+CERTIFI_OLD = release("certifi", "2026.7.22", "any", python="py3-none")
+CERTIFI_NEW = release("certifi", "2026.10.19", "any", python="py3-none")
+NUMPY_NEW = release("numpy", "2.5.4", "any", python="py3-none")
+# The lock runs on 15 Oct, so its cutoff is 8 Oct: both new releases are under a week old.
+PUBLISHED = {"certifi==2026.7.22": "2026-07-22", "certifi==2026.10.19": "2026-10-14", "numpy==2.5.4": "2026-10-13"}
+
+
+def exempt(root: Path, entries: object) -> None:
+    (root / pins.EXEMPT).write_text(json.dumps({"$comment": "why", "security": entries}), encoding="utf-8")
+
+
+def test_models_lock_takes_an_exempt_pin_before_its_week_and_no_other_young_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = lock_repo(tmp_path, monkeypatch)
+    young = [CERTIFI_NEW, CERTIFI_OLD, NUMPY_NEW, NUMPY]
+    calls: list[list[str]] = []
+    resolve = {"requirements-cpu.in": young, "requirements-cuda.in": young}
+    monkeypatch.setattr(subprocess, "run", fake_uv(resolve, calls, published=PUBLISHED))
+    cpu = root / cli.MODELS / "requirements-cpu.txt"
+    assert cli.main(["models-lock"]) == 0
+    assert "certifi==2026.7.22" in cpu.read_text(encoding="utf-8")
+    assert all("--exclude-newer-package" not in c for c in calls)
+    exempt(root, {"certifi==2026.10.19": ADVISORY})
+    calls.clear()
+    assert cli.main(["models-lock"]) == 0
+    text = cpu.read_text(encoding="utf-8")
+    assert "certifi==2026.10.19" in text and "numpy==2.5.3" in text and "numpy==2.5.4" not in text
+    assert all(c[c.index("--exclude-newer-package") + 1] == "certifi=2026-10-16" for c in calls)
+    assert f"certifi==2026.10.19: taken before its week for {ADVISORY}" in capsys.readouterr().out
+    assert set(json.loads((root / pins.WHEELS).read_text(encoding="utf-8"))["cuda"]) == {
+        "certifi==2026.10.19",
+        "numpy==2.5.3",
+    }
+
+
+@pytest.mark.parametrize(
+    ("entries", "said"),
+    [
+        ({"certifi==2026.10.19": ""}, "exempts certifi==2026.10.19 without a security advisory's id"),
+        ({"certifi==2026.10.19": "CVE-2026-0001"}, "exempts certifi==2026.10.19 without a security advisory's id"),
+        ({"certifi==2026.10.19": None}, "exempts certifi==2026.10.19 without a security advisory's id"),
+        ({"certifi": ADVISORY}, "exempts 'certifi', which isn't a name==version pin"),
+        (["certifi==2026.10.19"], "security maps each name==version to its advisory's id"),
+    ],
+    ids=["an empty id", "another kind of id", "no id", "no version", "a list"],
+)
+def test_an_exemption_without_an_advisory_s_id_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], entries: object, said: str
+) -> None:
+    root = lock_repo(tmp_path / "lock", monkeypatch)
+    exempt(root, entries)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(subprocess, "run", fake_uv({}, calls))
+    assert cli.main(["models-lock"]) == 2
+    assert said in capsys.readouterr().err and calls == []
+    checked = models_repo(tmp_path / "gate", CUDA_IN + "tokenizers==0.23.2\nnumpy==2.5.3\n", CUDA)
+    exempt(checked, entries)
+    [found] = pins.problems(checked)
+    assert said in found
+
+
+def test_an_exemption_nothing_pins_any_more_fails_the_lock_step(tmp_path: Path) -> None:
+    root = models_repo(tmp_path, CUDA_IN + "tokenizers==0.23.2\nnumpy==2.5.3\n", CUDA)
+    exempt(root, {"numpy==2.5.3": ADVISORY, "certifi==2026.10.19": ADVISORY})
+    assert pins.problems(root) == [
+        "tools/devkit/pins.json exempts certifi==2026.10.19, which nothing pins now: remove it"
+    ]
+
+
+NOW = datetime(2026, 10, 21, 6, 0, tzinfo=UTC)
+# name, version, and when its sdist and its wheel were uploaded
+Locked = tuple[str, str, str, str]
+CERTIFI_LOCKED = ("certifi", "2026.10.19", "2026-10-20T02:24:16.604Z", "2026-10-20T02:24:15.072Z")
+YOUNG_GAINED = ("exampletls", "3.0", "2026-10-19T12:00:00Z", "2026-10-19T12:00:00Z")
+
+
+def uv_lock(*releases: Locked) -> str:
+    """A uv.lock with the workspace's own package, which has no upload time, and each release from the registry."""
+    out = [
+        'version = 1\n\n[[package]]\nname = "docket"\nversion = "0.1.0"\nsource = { editable = "packages/docket" }\n'
+    ]
+    for name, version, sdist, wheel in releases:
+        url = f"https://h.example/{name}-{version}"
+        out.append(
+            f'\n[[package]]\nname = "{name}"\nversion = "{version}"\n'
+            'source = { registry = "https://pypi.org/simple" }\n'
+            f'sdist = {{ url = "{url}.tar.gz", upload-time = "{sdist}" }}\n'
+            f'wheels = [{{ url = "{url}-py3-none-any.whl", upload-time = "{wheel}" }}]\n'
+        )
+    return "".join(out)
+
+
+def gained(root: Path, git: Callable[..., str], before: Sequence[Locked], after: Sequence[Locked]) -> str:
+    """The merge base's commit with a uv.lock of `before`, and `after` in the working tree."""
+    (root / pins.LOCK).write_text(uv_lock(*before), encoding="utf-8")
+    git(root, "add", pins.LOCK)
+    git(root, "commit", "-q", "-m", "Lock")
+    (root / pins.LOCK).write_text(uv_lock(*after), encoding="utf-8")
+    return git(root, "rev-parse", "HEAD").strip()
+
+
+def said_young(name: str, version: str, published: str) -> str:
+    return (
+        f"uv.lock takes {name} {version}, published {published} UTC, less than a week ago: wait out the week, or "
+        "exempt it in tools/devkit/pins.json by the security advisory it fixes"
+    )
+
+
+def test_uv_lock_gains_a_release_under_a_week_old_only_by_its_advisory(
+    repo: Path, git: Callable[..., str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pins, "_now", lambda: NOW)
+    old = ("certifi", "2026.7.22", "2026-07-22T03:35:12.644Z", "2026-07-22T03:35:11.276Z")
+    # Under a week old too, but the base took it already: what came in before was held then.
+    held = ("filelock", "4.1.2", "2026-10-14T14:47:33Z", "2026-10-14T14:47:33Z")
+    # A week old by its sdist; a wheel added since doesn't make it new.
+    aged = ("examplecsv", "1.2", "2026-10-14T05:00:00Z", "2026-10-20T00:00:00Z")
+    base = gained(repo, git, [old, held], [held, CERTIFI_LOCKED, YOUNG_GAINED, aged])
+    certifi = said_young("certifi", "2026.10.19", "2026-10-20 02:24")
+    other = said_young("exampletls", "3.0", "2026-10-19 12:00")
+    assert pins.young(repo, base, {}) == [certifi, other]
+    assert pins.young(repo, base, {"certifi==2026.10.19": ADVISORY}) == [other]
+    assert pins.young(repo, None, {}) == []
+    missing = "0" * 40
+    assert pins.young(repo, missing, {}) == [
+        f"can't read the merge base {missing}, whose uv.lock the new pins are held against: fetch its history"
+    ]
+
+
+def test_the_lock_step_holds_what_uv_lock_gains_to_its_week(
+    repo: Path, git: Callable[..., str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pins, "_now", lambda: NOW)
+    root = models_repo(repo, CUDA_IN + "tokenizers==0.23.2\nnumpy==2.5.3\n", CUDA)
+    base = gained(root, git, [], [CERTIFI_LOCKED])
+    monkeypatch.setattr(shutil, "which", lambda name: name)
+    out = gate.step_lock(gate.Ctx(root=root, lane="quick", ci=False, base=base, pr=None))
+    assert out.status == "fail" and out.detail == [said_young("certifi", "2026.10.19", "2026-10-20 02:24")]
+    exempt(root, {"certifi==2026.10.19": ADVISORY})
+    assert pins.problems(root, base) == []

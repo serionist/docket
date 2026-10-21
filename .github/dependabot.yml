@@ -1,7 +1,8 @@
 # Dependabot version updates, weekly: the Python packages, in uv.lock and in the models' worker requirements, the web
 # app's npm packages, and the actions the workflows pin by SHA. Each group is a PR like any other: CI must pass and the
 # maintainer merges it. A group's long title doesn't matter, since the squash takes the maintainer's own subject.
-# Security updates come as soon as an advisory is published, whatever the schedule.
+# Security updates come as soon as an advisory is published, whatever the schedule, and the cooldowns below hold
+# version updates only. A pin under a week old lands with its advisory's entry in tools/devkit/pins.json (DR-0763).
 version: 2
 
 # A week's Python updates in one PR, both entries below together: the gate's lock step fails while onnxruntime,
