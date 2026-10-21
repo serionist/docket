@@ -3,8 +3,9 @@
 It seeds an invented world into a folder of its own, starts a throwaway service on a free port with config, state and
 models folders of its own, a file token and the failing keyring, and drives the built app in Chrome: each of the
 page's states, light and dark, at 1440x900 and 390x844, with the clock, zone and motion fixed. A state opens a URL,
-then presses keys, clicks, fills a field or waits for a part to show, and may undo its own write once shot, so the
-next shot finds the world as it was; one may ask for another world, such as the empty one. The shots and the machine
+then presses keys, clicks, fills a field, waits for a part to show or writes from the page as another tab would, and
+may undo its own write once shot, so the next shot finds the world as it was; one may ask for another world, such as
+the empty one, or a world of its own for each shot, for a write no undo takes back. The shots and the machine
 checks go to `.local/ui/<page>/r<n>/`, a new round each run.
 
 | Check | Fails on |
@@ -63,21 +64,36 @@ DROPPED_PREFIXES = ("DOCKET_", "GIT_")
 DROPPED = frozenset({"PYTHON_KEYRING_BACKEND", "PYTHONPATH"})
 
 
-# What a state's step does: press a key, click a selector, fill a field, `selector|text`, or wait for a selector to
-# show, such as a write's notice.
-VERBS = ("press", "click", "fill", "wait")
-# What Chrome logs for a refusal's 400, which a state that shows a refusal brings about on purpose.
+# What a state's step does: press a key, click a selector, fill a field, `selector|text`, wait for a selector to
+# show, such as a write's notice, or post JSON from the page, `path|body`, as another tab of the owner's would.
+VERBS = ("press", "click", "fill", "wait", "post")
+# A post from the page: its session's cookie, and the Origin and Fetch Metadata the browser adds, as the app's own.
+POST = """async ([path, body]) => {
+  const answer = await fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body});
+  return answer.status;
+}"""
+# What Chrome logs for a refusal's 400, which a state that shows a refusal brings about on purpose, and for a write
+# refused as the decision moved since the page showed it.
 REFUSED = "the server responded with a status of 400"
+MOVED = "the server responded with a status of 409"
 # The supplier call's hit in the index fixture, and the harbour crane check's recording note in recording_kit's.
 CALL_HIT = "r:calls:rec-0100@01:50-03:20"
 CRANE_NOTE = "recording-note:2026-10-12-harbour-crane-check"
+# decisions_kit's fleet management, which has decisions and no brief, and its plain candidate at its first rev.
+FLEET = "/briefs?brief=brief:fleet-management"
+WEEKLY_PICK = '[data-decision="decision:2026-10-14-weekly-review"] >> role=button[name="{}"]'
+WEEKLY_BY_ANOTHER_TAB = (
+    "/api/web/briefs/decision|"
+    '{"brief": "brief:fleet-management", "decision": "decision:2026-10-14-weekly-review", "rev": 1, "pick": "confirm"}'
+)
 
 
 @dataclass(frozen=True)
 class State:
     """One state of a page: where it opens, then what is pressed, clicked or filled, in order; `only` limits it to a
     size, `world` serves it another world than the page's, and `after` runs once it is shot, such as an undo of the
-    write it shows. `expects` names console lines the state brings about on purpose, such as the 400 of the refusal
+    write it shows; `fresh` serves each of its shots a world of its own, for a write nothing undoes, such as a
+    decision's pick. `expects` names console lines the state brings about on purpose, such as the 400 of the refusal
     it shows, which the console check then leaves out."""
 
     name: str
@@ -87,6 +103,7 @@ class State:
     world: str | None = None
     after: tuple[tuple[str, str], ...] = ()
     expects: tuple[str, ...] = ()
+    fresh: bool = False
 
 
 @dataclass(frozen=True)
@@ -271,6 +288,48 @@ PAGES: dict[str, Page] = {
             State("legacy", "/recording?rid=plaud:rec-old"),
             State("missing", "/recording?rid=plaud:rec-nothing"),
             State("refused", "/recording?rid=not+a+rid", expects=(REFUSED,)),
+        ),
+    ),
+    # ui_world's briefs: Northwind stale with a flagged line, Ben stale with a new record, the harbour site current,
+    # Dóra orphaned; fleet management's decisions with no brief, two waiting, one of them contradicting the current.
+    "briefs": Page(
+        world="briefs",
+        states=(
+            State("list", "/briefs"),
+            State("stale", "/briefs?brief=brief:northwind"),
+            State(
+                "line",
+                "/briefs?brief=brief:northwind",
+                (("click", 'a[data-row]:has-text("supplier call")'), ("wait", "#raw")),
+            ),
+            State(
+                "cited",
+                "/briefs?brief=brief:ben-sample",
+                (("click", 'a[data-row]:has-text("Ben wants the deadline")'), ("wait", "[data-cited-line]")),
+            ),
+            State("waiting", FLEET),
+            State(
+                "confirm",
+                FLEET,
+                (("click", WEEKLY_PICK.format("Confirm")), ("wait", "role=status >> text=Confirmed")),
+                fresh=True,
+            ),
+            State(
+                "reject",
+                FLEET,
+                (("click", WEEKLY_PICK.format("Reject")), ("wait", "role=status >> text=Rejected")),
+                fresh=True,
+            ),
+            # Another tab confirms it first: this page's pick, at the rev it showed, is refused, and the page reads it.
+            State(
+                "conflict",
+                FLEET,
+                (("post", WEEKLY_BY_ANOTHER_TAB), ("click", WEEKLY_PICK.format("Confirm")), ("wait", "role=alert")),
+                expects=(MOVED,),
+                fresh=True,
+            ),
+            State("missing", "/briefs?brief=brief:harbour-pilot"),
+            State("empty", "/briefs", world="empty"),
         ),
     ),
 }
@@ -462,6 +521,11 @@ def _steps(page: Any, steps: Sequence[tuple[str, str]]) -> None:
             page.fill(selector, text)
         elif verb == "wait":
             page.wait_for_selector(arg)
+        elif verb == "post":
+            path, _, body = arg.partition("|")
+            status = page.evaluate(POST, [path, body])
+            if status != 200:
+                raise KitError(f"the state's post to {path} answered {status}")
         else:
             page.click(arg)
         page.wait_for_timeout(150)
@@ -495,12 +559,23 @@ class Console:
         self.lines.append(str(error))
 
 
-def shoot(browser: Any, states: Sequence[State], port: int, token: str, *, out: Path, axe: Path) -> list[Shot]:
+def shoot(
+    browser: Any,
+    states: Sequence[State],
+    port: int,
+    token: str,
+    *,
+    out: Path,
+    axe: Path,
+    sizes: Sequence[str] = tuple(SIZES),
+    themes: Sequence[Literal["light", "dark"]] = THEMES,
+) -> list[Shot]:
     """Every state, at each size, in each theme, each in a browser context of its own: its own cookies, so each signs
     in afresh through a one-time link."""
     shots: list[Shot] = []
-    for size, (width, height) in SIZES.items():
-        for theme in THEMES:
+    for size in sizes:
+        width, height = SIZES[size]
+        for theme in themes:
             for state in states:
                 if state.only not in (None, size):
                     continue
@@ -569,8 +644,17 @@ def run(
     with browser() as driven:
         for world in worlds:
             states = [state for state in page.states if (state.world or page.world) == world]
-            with serve(root, world) as (port, token):
-                shots += shoot(driven, states, port, token, out=out, axe=axe)
+            shared = [state for state in states if not state.fresh]
+            if shared:
+                with serve(root, world) as (port, token):
+                    shots += shoot(driven, shared, port, token, out=out, axe=axe)
+            for state in (state for state in states if state.fresh):
+                for size in SIZES:
+                    for theme in THEMES if state.only in (None, size) else ():
+                        with serve(root, world) as (port, token):
+                            shots += shoot(
+                                driven, [state], port, token, out=out, axe=axe, sizes=(size,), themes=(theme,)
+                            )
     lines = summary(shots)
     (out / "checks.json").write_text(
         json.dumps([s.__dict__ | {"ok": s.ok} for s in shots], indent=2) + "\n", encoding="utf-8", newline="\n"

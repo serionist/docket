@@ -73,6 +73,13 @@ def click(vault: Vault, doc_id: str, pick: str) -> None:
 
 def build_decisions_vault(root: Path) -> Vault:
     vault = build_briefs_vault(root)
+    fill_decisions(vault)
+    return vault
+
+
+def fill_decisions(vault: Vault) -> None:
+    """The five decisions on fleet management, each confirm and reject the page's own click, into a vault the briefs
+    kit filled."""
     propose(vault, PILOT, "the pilot comes first", cite(vault, FLEET, MAP))
     click(vault, PILOT, "confirm")
     propose(
@@ -89,7 +96,6 @@ def build_decisions_vault(root: Path) -> Vault:
         [f"contradicts: [{DASHBOARD}]"],
     )
     propose(vault, WEEKLY, "a review every week", cite(vault, SUPPLIER, FRIDAY))
-    return vault
 
 
 def decisions_template(factory: pytest.TempPathFactory) -> Path:

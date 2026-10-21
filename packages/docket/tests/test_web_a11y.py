@@ -25,10 +25,6 @@ PAGES = [
     "/settings",
     "/settings?show=lists",
     "/settings?show=nope",
-    "/briefs",
-    "/briefs?type=person",
-    "/briefs?brief=brief:ben-sample",
-    "/briefs?brief=nope",
 ]
 FRAGMENTS = [
     "/sync/runs",

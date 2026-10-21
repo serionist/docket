@@ -1,15 +1,21 @@
-"""The Briefs page: `/briefs` is always a whole page, and its links are plain links (DR-0557); `/briefs/decision` is
-the user's click on a decision, which writes its status as `docket decision set` does (DR-0603, DR-0566).
+"""The Briefs page's routes under /api/web (DR-0709, DR-0780, DR-0781): the page its URL names, and the owner's
+click on a decision, which writes its status as `docket decision set` does (DR-0782).
 
-`GET` reads the stale report, the brief, the raw its lines cite and the entity's decisions in this process, through
-`docket.briefs`, `docket.decisions` and recall's own reads, and writes nothing. The report reads the index, so the page
-waits for an update as a search does.
+| Route | What |
+|---|---|
+| `GET /briefs` | the list, or a brief with its open line's raw, and the entity's decisions; the canonical URL |
+| `POST /briefs/decision` | a pick on a waiting decision, at the rev the page showed: what it did, or why not |
 
-The click is a plain form post the Guard checks (DR-0152), as the Settings page's are. It runs on the service's writer
-thread through `DocStore.decide`, carries the rev the page showed, and answers a 303 back to the page with `done`; a
-decision that moved since, or one that replaces or contradicts a decision no longer current, writes nothing and answers
-409 with the page as it stands now. A value the URL or the form can't hold, or a `DocketError`, is the page's own error
-state; anything else is logged as its type and frames and answered with the error page, as on the other pages (DR-0170).
+The read takes the stale report, the brief, the raw its lines cite and the entity's decisions in this process, through
+`docket.briefs`, `docket.decisions` and recall's own reads, and writes nothing. The report reads the index, so the read
+waits for an update as a search does, and an index still being built answers `waiting`.
+
+The click is a JSON write with the browser's session only, as every /api/web write: the Guard's same-origin check,
+the token refused, the body checked before any route reads it (DR-0709). It runs on the service's writer thread
+through `DocStore.decide` with the rev the page showed; a decision that moved since, or one that replaces or
+contradicts a decision no longer current, writes nothing and answers 409 with why, and the page reads again. A value
+the URL or the body can't hold, or a `DocketError`, answers 400 with its words; anything else is logged as its type
+and frames and answers 500 with no detail.
 """
 
 from __future__ import annotations
@@ -18,11 +24,12 @@ import asyncio
 from collections import Counter
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Request
-from starlette.responses import RedirectResponse, Response
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict
+from starlette.responses import Response
 
 from docket import briefs, decisions, recall
 from docket.errors import DocketError
@@ -33,14 +40,43 @@ from docket.vault.docstore import DocStore
 from docket.vault.entities import Entity, load_entities
 from docket.vault.neverstore import slug_listed
 from docket.vault.vault import Vault
-from docket.web import templating
-from docket.web.briefs_state import BriefsState, BriefsStateError
+from docket.web.briefs_state import BriefsState
 from docket.web.briefs_view import BriefsView, Facts, build
+from docket.web.day_api import Refused, safely
 from docket.web.decisions_view import DONE, DecisionDoc, DecisionsPart, part
-from docket.web.shell import shell
 
-# The words a refused click names its field with.
-REV = "rev is the rev of the decision the page showed"
+
+class BriefsRead(BaseModel):
+    # The URL as the server writes it, which the app puts in the address bar as it is (DR-0704); never `done`.
+    canonical: str
+    # None while the index is being built.
+    view: BriefsView | None
+    # The entity's decisions, for a brief or an entity of a project, topic or stream.
+    decisions: DecisionsPart | None
+    # What a click did, for a URL from before the app that still names it.
+    notice: str | None
+    # Why the index can't answer yet; the page asks again in 5 s.
+    waiting: str
+
+
+class Decide(BaseModel):
+    """A pick on a waiting decision: the page's brief, the decision, the rev the page showed and the pick."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    brief: str
+    decision: str
+    rev: int
+    pick: str
+
+
+class Decided(BaseModel):
+    decision: str
+    pick: str
+    # What the pick did, in the words the page says it with.
+    notice: str
+    # The decision's rev after the pick.
+    rev: int
 
 
 def gather(vault: Vault, state: BriefsState, now: datetime) -> Facts:
@@ -122,77 +158,41 @@ def read_page(vault: Vault, state: BriefsState, now: datetime) -> tuple[Facts, D
     return facts, decisions_of(vault, state.brief.partition(":")[2])
 
 
-def _page(
-    context: dict[str, Any], view: BriefsView | None, state: BriefsState, problem: str = "", *, status: int = 200
-) -> Response:
-    page = {"warning": "", "done": ""} | context | {"view": view, "state": state, "problem": problem}
-    return templating.page("briefs/page.html", page, status=status, referrer=templating.POSTS_FORMS)
-
-
 def router(service: Service) -> APIRouter:
-    web = APIRouter()
+    api = APIRouter()
 
-    async def whole(request: Request, state: BriefsState, *, status: int = 200, warning: str = "") -> Response:
-        """The page for a state, or its error state, with what the last click did or why it wrote nothing."""
-        context = shell(service, request, "Briefs", current="briefs")
-        context |= {"warning": warning, "done": DONE.get(state.done or "", "")}
+    async def read(request: Request) -> BriefsRead:
+        state = BriefsState.read(request.query_params)
+        notice = DONE[state.done] if state.done is not None else None
         try:
             await service.updater.fresh()
             facts, decided = await asyncio.to_thread(read_page, service.vault(), state, datetime.now(UTC))
         except IndexBuildingError as e:
-            return _page(context, None, state, str(e), status=503)
-        except DocketError as e:
-            return _page(context, None, state, str(e), status=400)
-        view = build(facts, state.but(done=None))
-        view.decisions = decided
-        if view.mode != "list":
-            context["title"] = f"{view.title} - Briefs"
-        return _page(context, view, state, status=404 if view.mode == "missing" else status)
+            return BriefsRead(canonical=state.url(), view=None, decisions=None, notice=notice, waiting=str(e))
+        view = build(facts, state)
+        return BriefsRead(canonical=state.url(), view=view, decisions=decided, notice=notice, waiting="")
 
-    def failed(request: Request) -> Response:
-        context = shell(None, request, "Something failed", current="briefs")
-        return templating.page("error.html", context, status=500)
+    async def decide(body: Decide) -> Response | Decided:
+        state = BriefsState.read({"brief": body.brief})
+        if state.brief is None:
+            raise DocketError("brief is the page the decision is on")
+        doc_id, pick, subject = body.decision.strip(), body.pick.strip(), state.brief.partition(":")[2]
+        try:
+            put = await service.writer.run(lambda: DocStore(service.vault()).decide(doc_id, body.rev, pick, subject))
+        except decision_form.MovedError as e:
+            return JSONResponse(Refused(error=str(e)).model_dump(mode="json"), status_code=409)
+        return Decided(decision=doc_id, pick=pick, notice=DONE[pick], rev=put.rev)
 
-    def refused(request: Request, state: BriefsState, problem: str) -> Response:
-        return _page(shell(service, request, "Briefs", current="briefs"), None, state, problem, status=400)
+    @api.get("/briefs", response_model=BriefsRead, responses={400: {"model": Refused}})
+    async def briefs_read(request: Request) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
+        return await safely(request, lambda: read(request))
 
-    @web.get("/briefs", include_in_schema=False)
-    async def briefs_page(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
-        async def answer() -> Response:
-            try:
-                state = BriefsState.read(request.query_params)
-            except BriefsStateError as e:
-                return refused(request, BriefsState(), str(e))
-            return await whole(request, state)
+    @api.post(
+        "/briefs/decision",
+        response_model=Decided,
+        responses={400: {"model": Refused}, 409: {"model": Refused}},
+    )
+    async def briefs_decision(request: Request, body: Decide) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
+        return await safely(request, lambda: decide(body))
 
-        return await templating.safely(request, "/briefs", answer, lambda: failed(request))
-
-    @web.post("/briefs/decision", include_in_schema=False)
-    async def decide(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
-        async def answer() -> Response:
-            form = await templating.read_form(request)
-            if isinstance(form, Response):
-                return form
-            try:
-                state = BriefsState.read({"brief": form.get("brief") or "", "type": form.get("type") or ""})
-            except BriefsStateError as e:
-                return refused(request, BriefsState(), str(e))
-            if state.brief is None:
-                return refused(request, state, "brief is the page the decision is on")
-            rev = (form.get("rev") or "").strip()
-            doc_id, pick = (form.get("decision") or "").strip(), (form.get("pick") or "").strip()
-            subject = state.brief.partition(":")[2]
-            try:
-                if not rev.isascii() or not rev.isdigit():
-                    raise DocketError(REV)
-                shown = int(rev)
-                await service.writer.run(lambda: DocStore(service.vault()).decide(doc_id, shown, pick, subject))
-            except decision_form.MovedError as e:
-                return await whole(request, state, status=409, warning=str(e))
-            except DocketError as e:
-                return await whole(request, state, status=400, warning=str(e))
-            return RedirectResponse(state.but(done=pick).url(), status_code=303)
-
-        return await templating.safely(request, "/briefs/decision", answer, lambda: failed(request))
-
-    return web
+    return api

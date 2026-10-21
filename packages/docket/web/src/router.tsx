@@ -6,6 +6,7 @@
 import { createRootRoute, createRoute, createRouter, type RouterHistory } from "@tanstack/react-router";
 import { NotFound, Shell } from "@/components/shell/shell";
 import { parseSearch, type Search, stringifySearch } from "@/lib/search";
+import { BriefsPage } from "@/pages/briefs";
 import { DesignPage } from "@/pages/design";
 import { LedgerPage } from "@/pages/ledger";
 import { MeetingsPage } from "@/pages/meetings";
@@ -65,6 +66,13 @@ export const recordingRoute = createRoute({
   validateSearch: (search: Record<string, unknown>): Search => search as Search,
 });
 
+export const briefsRoute = createRoute({
+  getParentRoute: () => root,
+  path: "/briefs",
+  component: BriefsPage,
+  validateSearch: (search: Record<string, unknown>): Search => search as Search,
+});
+
 export const routeTree = root.addChildren([
   designRoute,
   todayRoute,
@@ -73,6 +81,7 @@ export const routeTree = root.addChildren([
   meetingsRoute,
   searchRoute,
   recordingRoute,
+  briefsRoute,
 ]);
 
 export function createAppRouter(history?: RouterHistory) {

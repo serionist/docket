@@ -1,4 +1,4 @@
-"""The Briefs page's Decisions part (DR-0566): an entity's decisions, newest first, as the report gives them.
+"""The Briefs page's Decisions part (DR-0781): an entity's decisions, newest first, as the report gives them.
 
 | Part | Shows |
 |---|---|
@@ -6,25 +6,29 @@
 | Decided | each current decision, what it superseded folded under it, and a rejected candidate that contradicted it |
 | Rejected | folded |
 
-A proposed decision is only ever under Waiting, never among the decided (DR-0565). The buttons post to
-`/briefs/decision`, one of the two callers of a decision's one writer (DR-0603): Confirm and Reject, or for a candidate
-that contradicts a decision, the three picks. A line a never-store list now names is shown as hidden, and the report
-already leaves out a decision a list holds (DR-0558). `part` takes what was read and does no I/O.
+A proposed decision is only ever under Waiting, never among the decided (DR-0565). Its picks are the app's JSON write
+`POST /api/web/briefs/decision`, one of the two callers of a decision's one writer (DR-0782): Confirm and Reject, or
+for a candidate that contradicts a decision, the three picks. A line a never-store list now names is shown as hidden,
+and the report already leaves out a decision a list holds (DR-0558). `part` takes what was read and does no I/O, and
+its models are what the read answers (DR-0709).
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
+from typing import Literal, cast
+
+from pydantic import BaseModel
 
 from docket.decisions import DecisionsReport, DecisionState
 from docket.vault.anchors import trailing_anchors
-from docket.web.briefs_view import HIDDEN_LINE, Link, anchor_link, doc_link
+from docket.web.briefs_view import HIDDEN_LINE, BriefLink, anchor_link, doc_link
 from docket.web.panel import Style, anchored_rid, line_parts
 from docket.web.state import SearchState
 
-# What each click said it did, once, on the page it lands on.
+# What each click did, as its answer and a URL from before the app say it.
 DONE = {
     "confirm": "Confirmed: it is a decision now.",
     "reject": "Rejected: it stays, marked rejected, and isn't proposed again.",
@@ -32,6 +36,9 @@ DONE = {
     "stand": "The decision stands; the candidate is rejected and the contradiction kept on record.",
     "unrelated": "Confirmed beside the decision it seemed to contradict; both stand.",
 }
+
+
+Standing = Literal["current", "superseded", "proposed", "rejected"]
 
 
 @dataclass(frozen=True)
@@ -44,62 +51,62 @@ class DecisionDoc:
     hidden: frozenset[int] = frozenset()
 
 
-@dataclass(frozen=True)
-class DecisionLine:
+class DecisionLine(BaseModel):
     n: int
     body: str
     style: Style
-    anchors: list[Link]
-    refs: list[Link]
+    anchors: list[BriefLink]
+    refs: list[BriefLink]
     hidden: bool
 
 
-@dataclass(frozen=True)
-class Pick:
+class Pick(BaseModel):
     value: str
     label: str
     primary: bool = False
 
 
-@dataclass
-class Card:
+class Card(BaseModel):
     id: str
     title: str
-    standing: str
+    standing: Standing
     said: str
+    # The rev the page shows, which a pick carries back (DR-0782).
     rev: int
     by: str
     verify: str
-    lines: list[DecisionLine] = field(default_factory=list[DecisionLine])
-    picks: list[Pick] = field(default_factory=list[Pick])
-    against: list[Card] = field(default_factory=list["Card"])
-    folded: list[Card] = field(default_factory=list["Card"])
-    contradicted: list[Card] = field(default_factory=list["Card"])
+    lines: list[DecisionLine] = []
+    picks: list[Pick] = []
+    # What a candidate contradicts or would replace, beside it.
+    against: list[Card] = []
+    # What it superseded, folded under it.
+    folded: list[Card] = []
+    # A rejected candidate that contradicted it, folded under it.
+    contradicted: list[Card] = []
     note: str = ""
 
 
-@dataclass
-class DecisionsPart:
-    waiting: list[Card] = field(default_factory=list[Card])
-    current: list[Card] = field(default_factory=list[Card])
-    rejected: list[Card] = field(default_factory=list[Card])
+class DecisionsPart(BaseModel):
+    waiting: list[Card] = []
+    current: list[Card] = []
+    rejected: list[Card] = []
     hidden_note: str = ""
     empty: str = ""
 
 
-PLAIN = [Pick("confirm", "Confirm", primary=True), Pick("reject", "Reject")]
+PLAIN = [Pick(value="confirm", label="Confirm", primary=True), Pick(value="reject", label="Reject")]
 THREE = [
-    Pick("replace", "The new one replaces it", primary=True),
-    Pick("stand", "The old one stands"),
-    Pick("unrelated", "Not a contradiction"),
+    Pick(value="replace", label="The new one replaces it", primary=True),
+    Pick(value="stand", label="The old one stands"),
+    Pick(value="unrelated", label="Not a contradiction"),
 ]
 
 
-def standing(one: DecisionState) -> str:
+def standing(one: DecisionState) -> Standing:
     """Where a decision stands, as its badge says: current, superseded, proposed or rejected."""
     if one.status == "confirmed":
         return "current" if one.current else "superseded"
-    return one.status
+    return cast("Standing", one.status)
 
 
 def _said(doc_id: str) -> str:
@@ -114,14 +121,14 @@ def _lines(found: DecisionDoc | None) -> list[DecisionLine]:
     out: list[DecisionLine] = []
     for n, text in found.lines:
         if n in found.hidden:
-            out.append(DecisionLine(n, HIDDEN_LINE, "text", [], [], hidden=True))
+            out.append(DecisionLine(n=n, body=HIDDEN_LINE, style="text", anchors=[], refs=[], hidden=True))
             continue
         style, body, anchors = line_parts(text)
         if style == "blank":
             continue
         links = [anchor_link(anchored_rid(a, list(found.covers)), a) for a in anchors]
         refs = [doc_link(r.doc, r.line) for r in trailing_anchors(text).refs]
-        out.append(DecisionLine(n, body, style, links, refs, hidden=False))
+        out.append(DecisionLine(n=n, body=body, style=style, anchors=links, refs=refs, hidden=False))
     return out
 
 
@@ -142,7 +149,7 @@ def part(report: DecisionsReport, docs: Mapping[str, DecisionDoc], name: str) ->
             note=one.note or "",
         )
         if depth == 0 and one.status == "proposed":
-            found.picks = THREE if one.contradicts else PLAIN
+            found.picks = list(THREE if one.contradicts else PLAIN)
             targets = [*one.contradicts, *one.replaces]
             found.against = [card(by_id[t], depth=1, children=False) for t in targets if t in by_id]
         if not children:

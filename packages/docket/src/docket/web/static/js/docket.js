@@ -1,7 +1,7 @@
 /* Docket's own script: the keys, the theme and keys switches, focus around the panel, copying a locator, and the
    reload into the sign-in page when a session ends. Loaded as a file under the page CSP: no inline script, no eval.
    The keys are the ones docket/web/pages.py lists; the page works without this script, by its links and forms alone.
-   The day pages, Search and the Recording page are the React app's (packages/docket/web). */
+   The day pages, Search, the Recording page and Briefs are the React app's (packages/docket/web). */
 (() => {
   "use strict";
 

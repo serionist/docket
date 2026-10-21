@@ -1,17 +1,17 @@
-"""The Briefs page's URL (DR-0557): which brief is open, which of its lines, and which entity type the list shows.
+"""The Briefs page's URL (DR-0780): which brief is open, which of its lines, and which entity type the list shows.
 
 | Parameter | What | Default |
 |---|---|---|
 | `brief` | a brief's id, `brief:<entity id>` | none: the list |
 | `line` | a line of that brief, by its number in the file | none: no line open |
 | `type` | an entity type, or `orphaned`: the list shows only those briefs | none: every brief |
-| `done` | what the last click on a decision did: one of the picks | none |
+| `done` | what a click on a decision did: one of the picks, from a URL before the app | none |
 
-One canonical form: this order, defaults left out; `done` is said once, and no link on the page carries it. Unknown
-parameters are ignored, so an old bookmark still opens; the parameters only gain optional ones whose default keeps
-today's meaning. `line` is read only with a brief, and `type`
-stays beside one so the way back to the list keeps it. A link that sets `line` ends in `#raw`, the id of the part
-that shows the line's raw, so the browser scrolls to it without JavaScript.
+One canonical form: this order, defaults left out, never `done`, whose notice the page says once. Unknown parameters
+are ignored, so an old bookmark still opens; the parameters only gain optional ones whose default keeps today's
+meaning. `line` is read only with a brief, and `type` stays beside one so the way back to the list keeps it. A link
+that sets `line` ends in `#raw`, the id of the part that shows the line's raw, which the app scrolls to once its read
+answers.
 """
 
 from __future__ import annotations
@@ -83,9 +83,9 @@ class BriefsState:
         return BriefsState(found, line_n, _type(kind) if kind else None, _done(done) if done else None)
 
     def url(self) -> str:
-        """This state's canonical URL."""
+        """This state's canonical URL, which never holds what a click did."""
         line = str(self.line) if self.line is not None else None
-        named = (("brief", self.brief), ("line", line), ("type", self.type), ("done", self.done))
+        named = (("brief", self.brief), ("line", line), ("type", self.type))
         pairs = [(name, v) for name, v in named if v]
         return urls.link(PATH, pairs)
 

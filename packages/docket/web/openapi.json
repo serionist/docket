@@ -285,6 +285,416 @@
         "title": "Body",
         "type": "object"
       },
+      "BriefGroup": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/BriefRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "rows"
+        ],
+        "title": "BriefGroup",
+        "type": "object"
+      },
+      "BriefLine": {
+        "properties": {
+          "anchors": {
+            "items": {
+              "$ref": "#/components/schemas/BriefLink"
+            },
+            "title": "Anchors",
+            "type": "array"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "flagged": {
+            "title": "Flagged",
+            "type": "boolean"
+          },
+          "hidden": {
+            "title": "Hidden",
+            "type": "boolean"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "open": {
+            "title": "Open",
+            "type": "boolean"
+          },
+          "refs": {
+            "items": {
+              "$ref": "#/components/schemas/BriefLink"
+            },
+            "title": "Refs",
+            "type": "array"
+          },
+          "style": {
+            "enum": [
+              "heading",
+              "bullet",
+              "text",
+              "blank"
+            ],
+            "title": "Style",
+            "type": "string"
+          },
+          "unconfirmed": {
+            "default": false,
+            "title": "Unconfirmed",
+            "type": "boolean"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "n",
+          "body",
+          "style",
+          "url",
+          "anchors",
+          "refs",
+          "flagged",
+          "hidden",
+          "open"
+        ],
+        "title": "BriefLine",
+        "type": "object"
+      },
+      "BriefLink": {
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "url"
+        ],
+        "title": "BriefLink",
+        "type": "object"
+      },
+      "BriefRow": {
+        "properties": {
+          "age": {
+            "title": "Age",
+            "type": "string"
+          },
+          "flagged": {
+            "title": "Flagged",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "new": {
+            "title": "New",
+            "type": "integer"
+          },
+          "orphan": {
+            "title": "Orphan",
+            "type": "string"
+          },
+          "rev": {
+            "title": "Rev",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "stale",
+              "current",
+              "orphaned"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "why": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Why"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "url",
+          "state",
+          "rev",
+          "age",
+          "new",
+          "flagged",
+          "why",
+          "orphan"
+        ],
+        "title": "BriefRow",
+        "type": "object"
+      },
+      "BriefsRead": {
+        "properties": {
+          "canonical": {
+            "title": "Canonical",
+            "type": "string"
+          },
+          "decisions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DecisionsPart"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notice"
+          },
+          "view": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BriefsView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "waiting": {
+            "title": "Waiting",
+            "type": "string"
+          }
+        },
+        "required": [
+          "canonical",
+          "view",
+          "decisions",
+          "notice",
+          "waiting"
+        ],
+        "title": "BriefsRead",
+        "type": "object"
+      },
+      "BriefsView": {
+        "properties": {
+          "back": {
+            "default": "",
+            "title": "Back",
+            "type": "string"
+          },
+          "choose": {
+            "default": "",
+            "title": "Choose",
+            "type": "string"
+          },
+          "empty": {
+            "default": "",
+            "title": "Empty",
+            "type": "string"
+          },
+          "empty_how": {
+            "default": "",
+            "title": "Empty How",
+            "type": "string"
+          },
+          "groups": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BriefGroup"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "hidden_note": {
+            "default": "",
+            "title": "Hidden Note",
+            "type": "string"
+          },
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "ledger": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BriefLink"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lines": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BriefLine"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "link": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BriefLink"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "default": "",
+            "title": "Message",
+            "type": "string"
+          },
+          "meta": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Meta",
+            "type": "array"
+          },
+          "mode": {
+            "enum": [
+              "list",
+              "brief",
+              "entity",
+              "hidden",
+              "missing"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "new": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BriefLink"
+            },
+            "title": "New",
+            "type": "array"
+          },
+          "notices": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Notices",
+            "type": "array"
+          },
+          "raw": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RawView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "stale",
+                  "current",
+                  "orphaned"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          },
+          "title": {
+            "default": "Briefs",
+            "title": "Title",
+            "type": "string"
+          },
+          "to_decide": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BriefLink"
+            },
+            "title": "To Decide",
+            "type": "array"
+          },
+          "types": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/TypeChoice"
+            },
+            "title": "Types",
+            "type": "array"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "BriefsView",
+        "type": "object"
+      },
       "Button": {
         "description": "A verdict's button, with the key that presses it. It carries what it writes, decided before the post by the old\ntasks app's bulk rule: `writes` is its verdict, or None when every row it acts on holds it already, so pressing it\nagain clears it and no write toggles (DR-0710).",
         "properties": {
@@ -329,6 +739,100 @@
           "pressed"
         ],
         "title": "Button",
+        "type": "object"
+      },
+      "Card": {
+        "properties": {
+          "against": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Card"
+            },
+            "title": "Against",
+            "type": "array"
+          },
+          "by": {
+            "title": "By",
+            "type": "string"
+          },
+          "contradicted": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Card"
+            },
+            "title": "Contradicted",
+            "type": "array"
+          },
+          "folded": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Card"
+            },
+            "title": "Folded",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "lines": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/DecisionLine"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          },
+          "picks": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Pick"
+            },
+            "title": "Picks",
+            "type": "array"
+          },
+          "rev": {
+            "title": "Rev",
+            "type": "integer"
+          },
+          "said": {
+            "title": "Said",
+            "type": "string"
+          },
+          "standing": {
+            "enum": [
+              "current",
+              "superseded",
+              "proposed",
+              "rejected"
+            ],
+            "title": "Standing",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "verify": {
+            "title": "Verify",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "standing",
+          "said",
+          "rev",
+          "by",
+          "verify"
+        ],
+        "title": "Card",
         "type": "object"
       },
       "Changed": {
@@ -395,6 +899,66 @@
           "url"
         ],
         "title": "Chosen",
+        "type": "object"
+      },
+      "CitedLine": {
+        "description": "A doc line the open line was built from, as it reads now, with its own raw.",
+        "properties": {
+          "doc": {
+            "title": "Doc",
+            "type": "string"
+          },
+          "hidden": {
+            "title": "Hidden",
+            "type": "boolean"
+          },
+          "link": {
+            "$ref": "#/components/schemas/BriefLink"
+          },
+          "n": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N"
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem"
+          },
+          "spans": {
+            "items": {
+              "$ref": "#/components/schemas/RawSpan"
+            },
+            "title": "Spans",
+            "type": "array"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "doc",
+          "n",
+          "link",
+          "text",
+          "hidden",
+          "problem",
+          "spans"
+        ],
+        "title": "CitedLine",
         "type": "object"
       },
       "Day": {
@@ -475,6 +1039,154 @@
           "more_items"
         ],
         "title": "DayMeetingLine",
+        "type": "object"
+      },
+      "Decide": {
+        "additionalProperties": false,
+        "description": "A pick on a waiting decision: the page's brief, the decision, the rev the page showed and the pick.",
+        "properties": {
+          "brief": {
+            "title": "Brief",
+            "type": "string"
+          },
+          "decision": {
+            "title": "Decision",
+            "type": "string"
+          },
+          "pick": {
+            "title": "Pick",
+            "type": "string"
+          },
+          "rev": {
+            "title": "Rev",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "brief",
+          "decision",
+          "rev",
+          "pick"
+        ],
+        "title": "Decide",
+        "type": "object"
+      },
+      "Decided": {
+        "properties": {
+          "decision": {
+            "title": "Decision",
+            "type": "string"
+          },
+          "notice": {
+            "title": "Notice",
+            "type": "string"
+          },
+          "pick": {
+            "title": "Pick",
+            "type": "string"
+          },
+          "rev": {
+            "title": "Rev",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decision",
+          "pick",
+          "notice",
+          "rev"
+        ],
+        "title": "Decided",
+        "type": "object"
+      },
+      "DecisionLine": {
+        "properties": {
+          "anchors": {
+            "items": {
+              "$ref": "#/components/schemas/BriefLink"
+            },
+            "title": "Anchors",
+            "type": "array"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "hidden": {
+            "title": "Hidden",
+            "type": "boolean"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "refs": {
+            "items": {
+              "$ref": "#/components/schemas/BriefLink"
+            },
+            "title": "Refs",
+            "type": "array"
+          },
+          "style": {
+            "enum": [
+              "heading",
+              "bullet",
+              "text",
+              "blank"
+            ],
+            "title": "Style",
+            "type": "string"
+          }
+        },
+        "required": [
+          "n",
+          "body",
+          "style",
+          "anchors",
+          "refs",
+          "hidden"
+        ],
+        "title": "DecisionLine",
+        "type": "object"
+      },
+      "DecisionsPart": {
+        "properties": {
+          "current": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Card"
+            },
+            "title": "Current",
+            "type": "array"
+          },
+          "empty": {
+            "default": "",
+            "title": "Empty",
+            "type": "string"
+          },
+          "hidden_note": {
+            "default": "",
+            "title": "Hidden Note",
+            "type": "string"
+          },
+          "rejected": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Card"
+            },
+            "title": "Rejected",
+            "type": "array"
+          },
+          "waiting": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Card"
+            },
+            "title": "Waiting",
+            "type": "array"
+          }
+        },
+        "title": "DecisionsPart",
         "type": "object"
       },
       "DocChoice": {
@@ -2225,6 +2937,29 @@
         "title": "Person",
         "type": "object"
       },
+      "Pick": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "primary": {
+            "default": false,
+            "title": "Primary",
+            "type": "boolean"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label"
+        ],
+        "title": "Pick",
+        "type": "object"
+      },
       "Piece": {
         "description": "A stretch of a snippet's text, marked when it is one of the query's words.",
         "properties": {
@@ -2472,6 +3207,94 @@
           "notice"
         ],
         "title": "Queue",
+        "type": "object"
+      },
+      "RawSpan": {
+        "properties": {
+          "link": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BriefLink"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "span": {
+            "$ref": "#/components/schemas/SpanView"
+          }
+        },
+        "required": [
+          "span",
+          "link"
+        ],
+        "title": "RawSpan",
+        "type": "object"
+      },
+      "RawView": {
+        "properties": {
+          "body": {
+            "default": "",
+            "title": "Body",
+            "type": "string"
+          },
+          "cited": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CitedLine"
+            },
+            "title": "Cited",
+            "type": "array"
+          },
+          "close": {
+            "default": "",
+            "title": "Close",
+            "type": "string"
+          },
+          "empty": {
+            "default": "",
+            "title": "Empty",
+            "type": "string"
+          },
+          "flags": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Flags",
+            "type": "array"
+          },
+          "hidden": {
+            "default": false,
+            "title": "Hidden",
+            "type": "boolean"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "problems": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "spans": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RawSpan"
+            },
+            "title": "Spans",
+            "type": "array"
+          }
+        },
+        "required": [
+          "n"
+        ],
+        "title": "RawView",
         "type": "object"
       },
       "RecordingRead": {
@@ -3638,6 +4461,35 @@
         "title": "TranscriptView",
         "type": "object"
       },
+      "TypeChoice": {
+        "description": "A tab narrowing the list to one entity type, or to every brief; `name` is \"All\" for every brief.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "on": {
+            "title": "On",
+            "type": "boolean"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "count",
+          "url",
+          "on"
+        ],
+        "title": "TypeChoice",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -3805,6 +4657,92 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/web/briefs": {
+      "get": {
+        "operationId": "briefs_read_api_web_briefs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BriefsRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "Briefs Read"
+      }
+    },
+    "/api/web/briefs/decision": {
+      "post": {
+        "operationId": "briefs_decision_api_web_briefs_decision_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Decide"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Decided"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Briefs Decision"
+      }
+    },
     "/api/web/ledger": {
       "get": {
         "operationId": "ledger_api_web_ledger_get",
