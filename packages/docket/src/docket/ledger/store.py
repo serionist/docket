@@ -2263,9 +2263,12 @@ def pending(vault: Vault) -> list[str]:
     """Op files a write or a forget's apply that stopped before its commit left: new ones, tracked ones that only
     grew, and lines changed to their masks, their op ids listed (DR-0696). One that lost or changed a committed line
     otherwise refuses the write, since its commit would make the change for good. Both lists come from one status
-    call (DR-0764)."""
+    call (DR-0764); before a refusal the diff against HEAD says which files changed, as it did: the status also marks
+    a file whose bytes changed but whose content git reads the same, as a CRLF save under eol=lf leaves it."""
     changed, outside = vault.git.against_head(OPS_DIR)
     listed = forgotten.load(vault.root, vault.home).ops if changed else frozenset[str]()
+    if not all(check.committed_kept(vault, rel, listed) for rel in changed):
+        changed = vault.git.changed_against_head(OPS_DIR)
     for rel in changed:
         if not check.committed_kept(vault, rel, listed):
             raise LedgerError(

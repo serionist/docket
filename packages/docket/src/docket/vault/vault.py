@@ -424,7 +424,7 @@ class Vault:
         # A line that doesn't read as a record is kept, as the apply keeps it: only a listed line leaves a run file.
         left = [
             line
-            for line in lines_of(self.git.blob_out(f"HEAD:./{rel}"))
+            for line in lines_of(self.git.blob_out(self.git.at_head(rel)))
             if not (line.strip() and (record := record_of(line)) is not None and reading.skips(record))
         ]
         return "".join(left) == path.read_bytes().decode("utf-8", errors="replace")

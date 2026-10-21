@@ -7,8 +7,9 @@ commits, and sync's fetch and rebase, run no hooks; a push runs them (DR-0260, D
 
 What the git dir's files hold is read from them, with no git call: whether HEAD is on a branch, HEAD's commit id
 (DR-0765). A question is asked once while its answer can't change (DR-0529). A commit is an add and a commit: the
-staged check and git's identity are asked only when the commit fails (DR-0764). A Git's blob reads share one `git
-cat-file --batch`, which an opened vault owns for one command or one call of the service (DR-0766).
+staged check is asked only when the commit fails, and git's identity once per repo and process (DR-0764). A Git's
+blob reads share one `git cat-file --batch`, which an opened vault owns for one command or one call of the service
+(DR-0766).
 """
 
 from __future__ import annotations
@@ -42,8 +43,9 @@ HOOKS_OFF_TEXT = (
     "Docket points core.hooksPath at this file for its own commits and sync's rebase, so no hook runs for them. It is\n"
     "a file, not a folder, because git-lfs writes its hooks into any folder there.\n"
 )
-# A commit takes git's identity only from its config and environment, never one git guesses from the host's name, so
-# a machine with none fails the commit and Docket commits again with the owner's (DR-0764).
+# A commit that takes git's identity takes it only from git's config and environment, never one git guesses from
+# the host's name: where a config file the kept answer doesn't follow lost it, the commit fails and Docket asks again
+# (DR-0764).
 STRICT_IDENTITY = ("-c", "user.useConfigOnly=true")
 # How long a closing batch reader gets to exit on its own once its input is closed.
 _BATCH_EXIT_SECONDS = 5.0
@@ -83,8 +85,8 @@ class Git:
         self.home = home
         self.prefix = home.prefix if home is not None else ""
         self.git_dir = home.git_dir if home is not None else root / ".git"
-        # Asked at most once for this Git's life, one command or one call of the service: by sync's rebase before it
-        # runs, by a commit only once it failed (DR-0764).
+        # Whether git has an identity, kept for this Git's life, one command or one call of the service, from the
+        # answer kept for the process (DR-0764).
         self._identity: bool | None = None
         # HEAD's blobs by commit id and path: a commit's content never changes.
         self._blobs: dict[tuple[str, str], str] = {}
@@ -181,8 +183,12 @@ class Git:
         return bool(found.get("user.name") and found.get("user.email"))
 
     def _has_identity_once(self) -> bool:
+        """`has_identity`, asked once per repo and process while git's config files keep their size and time and the
+        GIT_AUTHOR_ and GIT_COMMITTER_ variables are the same (DR-0764), and kept for this Git's life."""
         if self._identity is None:
-            self._identity = self.has_identity()
+            env = sorted((k, v) for k, v in os.environ.items() if k.startswith(("GIT_AUTHOR_", "GIT_COMMITTER_")))
+            top = self.home.top if self.home is not None else self.root
+            self._identity = configured(top, f"identity {env}", self.has_identity)
         return self._identity
 
     def on_branch(self) -> bool:
@@ -216,6 +222,13 @@ class Git:
         if key is not None:
             self._blobs[key] = text
         return text
+
+    def at_head(self, rel: str) -> str:
+        """A vault file's name at HEAD, `<id>:./<rel>`, HEAD's id read from the git dir's files: the batch reader
+        resolves an id the same way however often the refs moved, where `HEAD` goes by a packed-refs file a git that
+        sees whole seconds may think unchanged. `HEAD:./<rel>` where the files can't say."""
+        head = gitfiles.head_id(self.git_dir)
+        return f"{head if isinstance(head, str) else 'HEAD'}:./{rel}"
 
     def blob_text(self, spec: str) -> str | None:
         """A blob's text as `git cat-file blob <spec>` with check=False gives it: None where that call fails. From
@@ -324,22 +337,24 @@ class Git:
         return commit
 
     def _commit(self, paths: list[str], spec: str, message: str) -> bool:
-        """The commit after the add; False when the paths hold nothing new. It runs at once, taking git's identity
-        only from git's config and environment. Two questions wait until it fails (DR-0764): whether the paths staged
-        anything, since a commit with nothing new fails and is None as before; then whether git has an identity, and
-        with none the commit runs again with the owner's, which this Git passes from then on."""
+        """The commit after the add; False when the paths hold nothing new. The owner's identity goes in where git has
+        none, as before, by git's answer kept for the process (DR-0764); otherwise the commit takes git's identity
+        from its config and environment only. The staged check waits until the commit fails: a commit with nothing new
+        fails, and is None as before. A commit that took git's identity and failed asks again whether git has one,
+        since a config file the kept answer doesn't follow may have changed, and with none commits with the owner's."""
         args = ("commit", "-q", "--only", *_PATHSPEC, "-m", message)
-        known = self.fallback is not None and self._identity is False
-        strict = self.fallback is not None and not known
-        proc = self.run(*args, check=False, identity=known, strict=strict, stdin=spec, hooks=False)
+        owner = self.fallback is not None and not self._has_identity_once()
+        strict = self.fallback is not None and not owner
+        proc = self.run(*args, check=False, identity=owner, strict=strict, stdin=spec, hooks=False)
         if proc.returncode == 0:
             return True
         # `-- .` and the prefix, not --relative: that crashes git 2.47.0.windows.2 while a stash pop conflicts.
         staged = {p for p in self.out("diff", "--cached", "--name-only", "-z", "--", ".").split("\0") if p}
         if not staged & {self.prefix + Path(p).as_posix() for p in paths}:
             return False
-        if not strict or self._has_identity_once():
+        if not strict or self.has_identity():
             raise self._failed(proc, args)
+        self._identity = False
         self.run(*args, identity=True, stdin=spec, hooks=False)
         return True
 

@@ -158,7 +158,7 @@ class DocStore:
     def committed_text(self, doc_id: str) -> str | None:
         """The doc's text as HEAD holds it, or None when HEAD doesn't."""
         rel = self.path(doc_id).as_posix()
-        return self.vault.git.blob_text(f"HEAD:./{rel}")
+        return self.vault.git.blob_text(self.vault.git.at_head(rel))
 
     def committed_texts(self, rels: list[str]) -> dict[str, str | None]:
         """Several docs' texts as HEAD holds them, by their paths in the vault: one listing of HEAD's tree for their

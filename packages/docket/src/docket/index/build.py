@@ -513,7 +513,7 @@ class Indexer:
     def _committed(self, rel: str) -> str | None:
         """A decision's text at HEAD, read once per build."""
         if rel not in self._head:
-            self._head[rel] = self.vault.git.blob_text(f"HEAD:./{rel}")
+            self._head[rel] = self.vault.git.blob_text(self.vault.git.at_head(rel))
         return self._head[rel]
 
     def _decision(self, rel: str, doc: ProcessedDoc, data: bytes) -> ProcessedDoc:

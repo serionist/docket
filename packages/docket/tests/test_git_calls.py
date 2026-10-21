@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 from docket_testkit import (
     COMMIT_CALLS,
+    FIRST_COMMIT_CALLS,
     entity_vault,
     fixture_vault,
     folder_vault,
@@ -90,14 +91,14 @@ def test_a_doc_put_in_a_folder_vault_makes_the_same_calls(tmp_path: Path, monkey
 def test_a_promote_makes_four_git_calls(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     vault = staging_vault(tmp_path)
     # The first commit stages nothing, yet still asks about run files and reads the unmerged paths from the index, so a
-    # write during a conflict refuses as it always did.
-    assert promote(vault, monkeypatch) == [COMMIT_CALLS[0], *COMMIT_CALLS]
+    # write during a conflict refuses as it always did. The vault's first commit in this process asks git's identity.
+    assert promote(vault, monkeypatch) == [COMMIT_CALLS[0], *FIRST_COMMIT_CALLS]
 
 
 def test_a_promote_in_a_folder_vault_makes_the_same_calls(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     vault = folder_vault(tmp_path)
     Gate(vault).stage([make_record(1)])
-    assert promote(vault, monkeypatch) == [COMMIT_CALLS[0], *COMMIT_CALLS]
+    assert promote(vault, monkeypatch) == [COMMIT_CALLS[0], *FIRST_COMMIT_CALLS]
 
 
 CHANGES = """\
@@ -119,7 +120,7 @@ def test_a_curate_add_makes_five_git_calls(tmp_path: Path, monkeypatch: pytest.M
     assert calls == [
         "diff --name-only -z HEAD -- entities",
         "ls-files -z --others -- entities",
-        *COMMIT_CALLS,
+        *FIRST_COMMIT_CALLS,
     ]
 
 
@@ -304,6 +305,26 @@ def test_a_ledger_write_makes_four_git_calls(tmp_path: Path, monkeypatch: pytest
     assert calls == [STATUS_OPS, *COMMIT_CALLS]
 
 
+def test_an_op_file_saved_with_crlf_alone_still_lets_the_next_write_through(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = fixture_vault(tmp_path)
+    ledger_store.write(vault, [ADD])
+    # An editor's save: the same lines, CRLF. Under eol=lf git reads the content as HEAD's, so the diff against HEAD
+    # lists nothing, while the status marks the file changed by its size.
+    for path in (vault.root / OPS).glob("*.jsonl"):
+        path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
+    assert vault.git.against_head(OPS)[0]
+    assert vault.git.changed_against_head(OPS) == []
+    head = vault.git.head_id()
+    with git_calls(monkeypatch) as calls:
+        written = ledger_store.write(vault, [dict(ADD, fields=dict(ADD_FIELDS, title="Second item"))])
+    assert written.commit is not None and written.commit != head
+    # The diff answers before anything is refused, as the two calls did.
+    assert calls[0] == STATUS_OPS
+    assert f"diff --name-only -z HEAD -- {OPS}" in calls
+
+
 @pytest.mark.parametrize("storage", ["repo", "folder"])
 def test_one_status_lists_what_the_diff_and_the_status_listed(
     storage: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -463,6 +484,28 @@ def test_no_batch_reader_outlives_its_command_or_its_service_call(tmp_path: Path
     with signed_in(vault) as client:
         assert client.get("/staging").status_code == 200
     assert open_batches() == []
+
+
+def test_a_file_at_head_is_read_by_head_s_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The batch reader resolves an id the same way however often the refs moved; `HEAD` it reads by a packed-refs
+    file that a git seeing whole seconds can take for unchanged."""
+    vault = fixture_vault(tmp_path)
+    head = vault.git.head_id()
+    assert vault.git.at_head("vault.yaml") == f"{head}:./vault.yaml"
+    asked: list[str] = []
+    real = Git.blob
+
+    def recording(self: Git, spec: str) -> bytes | gitfiles.Unknown | None:
+        asked.append(spec)
+        return real(self, spec)
+
+    monkeypatch.setattr(Git, "blob", recording)
+    assert DocStore(vault).committed_text(DOCS[0]) is None
+    assert asked == [f"{head}:./{DOC_PATH}"]
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    git(fresh, "init", "-q", "-b", "main")
+    assert Git(fresh).at_head("a.md") == "HEAD:./a.md"
 
 
 def test_a_command_s_reads_share_its_one_batch_reader(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

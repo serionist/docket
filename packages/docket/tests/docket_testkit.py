@@ -124,12 +124,14 @@ def git_command(args: list[str]) -> str:
 
 # What every commit of Docket's asks git, as `git_calls` lists it: run files git holds but HEAD doesn't, then the add
 # and the commit. The unmerged paths come from the index file and the new commit's id from the branch's ref file
-# (DR-0765), the staged check and git's identity only after a commit that failed (DR-0764).
+# (DR-0765), the staged check only after a commit that failed, and git's identity once per repo and process, at the
+# first commit, while git's config files stand (DR-0764).
 COMMIT_CALLS = [
     "status --porcelain=v1 -z --untracked-files=all --ignored=traditional -- raw",
     "add --pathspec-from-file=- --pathspec-file-nul",
     "commit -q --only --pathspec-from-file=- --pathspec-file-nul -m",
 ]
+FIRST_COMMIT_CALLS = [*COMMIT_CALLS[:2], "config --get-regexp ^user[.](name|email)$", COMMIT_CALLS[2]]
 
 
 @contextmanager
