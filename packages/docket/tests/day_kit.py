@@ -101,6 +101,7 @@ def meetings_week() -> list[dict[str, Any]]:
             90,
             organiser="Ben Sample",
             event="cal:evt-budget",
+            series="cal:series-budget",
             response="tentative",
             attendees=["Ben Sample", "Ada Example", "ben@northwind.example", "Dora Nobody"],
             where="Room 2",

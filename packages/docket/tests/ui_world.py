@@ -14,7 +14,9 @@ Invented people only: Ada Example, Ben Sample and Cleo Example.
 
 from __future__ import annotations
 
+import os
 import sys
+import time
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -206,6 +208,11 @@ def build(folder: Path, world: str) -> Vault:
         (notes / "plan.md").write_text(PLAN_TEXT, encoding="utf-8", newline="\n")
         (notes / "costs.xlsx").write_bytes(b"PK\x03\x04 invented")
         meetings(vault)
+        # The op files an hour old, as files no write just wrote are, so the index takes them as settled and a read
+        # finds nothing to catch up.
+        hour_ago = time.time_ns() - 3600 * 10**9
+        for path in (vault.root / ops.OPS_DIR).iterdir():
+            os.utime(path, ns=(hour_ago, hour_ago))
         index_build.rebuild(vault)
     return vault
 

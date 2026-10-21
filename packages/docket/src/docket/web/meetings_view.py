@@ -18,7 +18,7 @@ from pydantic import BaseModel
 
 from docket.ledger.views import Detail, LedgerRead, MeetingRow, PointRow
 from docket.plaintext import fold, words
-from docket.vault.anchors import AnchorError, parse_locator
+from docket.vault.anchors import parse_locator
 from docket.vault.processed import DOC_TYPES
 from docket.web import day_view
 from docket.web.briefs_state import BriefsState
@@ -279,10 +279,8 @@ def material_link(ref: str, label: str | None, sources: Iterable[str]) -> Link:
     link = day_view.link_of(ref, label, sources)
     if link.kind != "record" or (label or "").strip().casefold() != RECORDING:
         return link
-    try:
-        found = parse_locator(ref.strip(), DOC_TYPES)
-    except AnchorError:
-        return link
+    # link_of read it already, as a record of the vault's sources or a doc: only a record is a recording.
+    found = parse_locator(ref.strip(), DOC_TYPES)
     if found.kind != "record":
         return link
     return Link(ref=ref, label=link.label, kind="recording", href=RecordingState(rid=found.value).link())

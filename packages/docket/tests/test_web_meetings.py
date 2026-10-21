@@ -24,6 +24,7 @@ from docket.ledger import ops as ledger_ops
 from docket.ledger import store, views
 from docket.vault.vault import Vault
 from docket.web import day as day_routes
+from docket.web.day_state import DayState
 
 API = "/api/web/meetings"
 WRITE = "/api/web/ledger/write"
@@ -193,10 +194,14 @@ def test_the_panel_links_its_people_to_their_briefs_and_its_recording(client: Te
     ]
     assert (budget["where"], budget["response"], budget["response_words"]) == ("Room 2", "tentative", "tentative")
     assert (budget["keyless"], budget["over"], budget["rolls"]) == (False, False, "")
+    assert budget["facts"] == "added by claude; one of a series"
+    # A doc labelled recording is no recording: it stays a link to its doc on the Search page.
+    note = {"op": "material", "item": "M-0004", "ref": "recording-note:2026-10-07-supplier-call", "label": "recording"}
+    store.write(vault, [note], by="claude", via="cli")
     supplier = panel(client, f"open={ref_of(found, 'Supplier call')}")
     assert [(r["kind"], r["href"]) for r in supplier["recordings"]] == [("recording", f"/recording?rid={RECORDING}")]
-    # The recording is a material too, linked the same way, beside the plan.
-    assert [m["kind"] for m in supplier["materials"]] == ["recording", "text"]
+    # The recording is a material too, linked the same way, beside the plan and the note.
+    assert [m["kind"] for m in supplier["materials"]] == ["recording", "text", "record"]
     assert supplier["keyless"] and supplier["over"]
     assert (
         supplier["rolls"]
@@ -255,6 +260,12 @@ def test_the_panel_lists_its_items_and_once_asked_the_items_worth_raising(client
 def test_a_panel_that_can_t_open_says_why(client: TestClient, query: str, said: str) -> None:
     found = read(client, f"{API}/panel?{query}")
     assert (found["panel"], found["missing"]) == (None, said)
+
+
+def test_a_stream_s_id_opens_no_panel_on_any_day_page(client: TestClient, vault: Vault) -> None:
+    stream = next(o for o in ops(vault) if o["op"] == "stream")["id"]
+    for path in (f"{API}/panel", "/api/web/ledger/panel"):
+        assert read(client, f"{path}?open={stream}")["missing"] == f"{stream} is a stream; a stream has no panel yet."
 
 
 # -- the points' buttons (DR-0667) ----------------------------------------------------------------------------------
@@ -352,6 +363,9 @@ def test_a_suggestion_raised_takes_its_item_s_whole_title(client: TestClient, va
         ({"op": "point_set", "point": "STRANGER", "fields": {}}, "point_set takes a field: text, state, answer"),
         ({"op": "remove", "points": []}, "remove names the points to remove"),
         ({"op": "point", "fields": {"item": "A-0099"}}, "A-0099 isn't an item to raise"),
+        ({"op": "point", "items": [], "fields": {"text": "x"}}, "point takes one meeting"),
+        ({"op": "remove", "items": ["M-0099"], "points": ["01M5ET802AE7YNG13XVSJN0PRP"]}, "no meeting M-0099"),
+        ({"op": "remove", "items": ["A-0002"], "points": ["01M5ET802AE7YNG13XVSJN0PRP"]}, "A-0002 isn't a meeting"),
     ],
 )
 def test_a_point_button_the_page_can_t_send_is_refused_and_writes_nothing(
@@ -391,6 +405,19 @@ def test_a_meeting_s_outcome_and_notes_save_on_change_with_its_line_and_panel(cl
         {"notes": "Ben brings the keys."},
     ]
     assert ops(vault)[-1]["via"] == "page"
+
+
+def test_a_save_whose_meeting_is_gone_by_its_read_says_so(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    real = day_routes.gather
+
+    def gone(vault: Vault, state: DayState, **keys: Any) -> day_routes.Facts:
+        found = real(vault, state, **keys)
+        found.held, found.missing = None, "M-0001 was undone"
+        return found
+
+    monkeypatch.setattr(day_routes, "gather", gone)
+    answer = post(client, {"op": "set", "items": ["M-0001"], "fields": {"outcome": "x"}}, SAVE, status=400)
+    assert answer["error"] == "M-0001 was undone"
 
 
 @pytest.mark.parametrize(
