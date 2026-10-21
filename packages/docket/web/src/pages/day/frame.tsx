@@ -3,7 +3,8 @@
  * with the URL's query string and the canonical URL written back, one selection the panel follows, the writes with
  * their notice and Undo, a save's versions, the 5 s poll that holds while the owner is mid-change, the guard on
  * unsaved text, the text viewer, and the keys that move, open, undo and find. The Ledger and the Queue add their
- * items' ticks and calls on top (page.tsx), Meetings its points (pages/meetings); none of this is forked.
+ * items' ticks and calls on top (page.tsx, items.tsx), Meetings its points (pages/meetings), and Today both
+ * (pages/today); none of this is forked.
  */
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useBlocker, useNavigate, useRouter, useRouterState, useSearch } from "@tanstack/react-router";
@@ -30,6 +31,7 @@ export const PATHS = {
   ledger: "/ledger",
   queue: "/queue",
   meetings: "/meetings",
+  today: "/today",
 } as const satisfies Record<DayPageName, string>;
 export type Change = Partial<Record<Param, string | undefined>>;
 
@@ -192,7 +194,7 @@ export function useDayFrame<L extends FrameList, P extends { canonical: string }
 
   usePoll({
     version: () => now.current.version,
-    ask: calls.changed,
+    ask: (version) => calls.changed(version, page),
     hold: () => now.current.pending || holding(latest.current.ticked?.() ?? 0),
     changed: refetch,
     stale: () => {

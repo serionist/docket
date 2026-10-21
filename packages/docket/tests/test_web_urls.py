@@ -28,6 +28,7 @@ READERS: dict[str, Callable[[QueryParams], Any]] = {
     "/ledger": DayState.read,
     "/queue": lambda params: DayState.read(params, "queue"),
     "/meetings": lambda params: DayState.read(params, "meetings"),
+    "/today": lambda params: DayState.read(params, "today"),
     "/staging": StagingState.read,
     "/curate": CurateState.read,
     "/sync": SyncState.read,
@@ -74,6 +75,20 @@ def test_meetings_takes_the_shared_q_and_stream_and_its_own_suggest_and_leaves_t
     asked = QueryParams("kind=bogus&who=Ada&k=0&suggest=1&state=nope")
     assert DayState.read(asked, "meetings").url() == "/meetings"
     assert DayState.read(QueryParams("open=M-0002&suggest=1"), "ledger").url() == "/ledger?open=M-0002"
+
+
+def test_today_takes_no_filter_drop_with_an_item_and_suggest_with_a_meeting() -> None:
+    order = json.loads(CANONICAL.read_text(encoding="utf-8"))["order"]["/today"]
+    item = DayState(page="today", open="A-0002", at="A-0001", drop=True, text="a.md")
+    assert [name for name, _ in item.pairs()] == [k for k in order if k != "suggest"]
+    meeting = DayState(page="today", open="M-0002", text="a.md", suggest=True)
+    assert [name for name, _ in meeting.pairs()] == ["open", "text", "suggest"]
+    # Every filter is left out, never refused, and drop and suggest go only with the panel that takes them.
+    asked = QueryParams("q=x&stream=ops&kind=bogus&who=Ada&k=0&state=nope&group=x&archived=2")
+    assert DayState.read(asked, "today").url() == "/today"
+    assert DayState.read(QueryParams("open=M-0002&drop=1"), "today").url() == "/today?open=M-0002"
+    assert DayState.read(QueryParams("open=A-0002&suggest=1"), "today").url() == "/today?open=A-0002"
+    assert DayState.read(QueryParams("at=A-0001&suggest=1"), "today").url() == "/today?at=A-0001"
 
 
 def test_the_rule_keeps_ascii_letters_digits_and_url_safe_and_encodes_the_rest() -> None:

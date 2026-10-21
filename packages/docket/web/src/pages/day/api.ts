@@ -1,6 +1,7 @@
 /**
  * The day pages' calls to /api/web (DR-0709, DR-0710): each page's list and panel under its own path, and what they
- * share under /api/web/ledger: the viewer's text, the poll, the names the who fields suggest and the writes. A read
+ * share under /api/web/ledger: the viewer's text, the poll, the names the who fields suggest and the writes. Today's
+ * panel is an item's or a meeting's, whichever its open names (DR-0773). A read
  * sends the page's query string as it is, so the server's own parser reads it, and answers the canonical URL with
  * what it read. A write answers its notice; a refusal throws an HttpError whose body is the Refused model. A save
  * answers an item's row and panel, or on Meetings the meeting's line and panel (DR-0770).
@@ -11,7 +12,7 @@ import { HttpError } from "@/lib/query";
 
 type Schemas = components["schemas"];
 /** The day pages built so far, as a write's body and the routes name them. */
-export type DayPageName = "ledger" | "queue" | "meetings";
+export type DayPageName = "ledger" | "queue" | "meetings" | "today";
 export type Ledger = Schemas["Ledger"];
 export type Queue = Schemas["Queue"];
 /** A day page's list read: the Queue answers in the Ledger's shape. */
@@ -45,6 +46,13 @@ export type PointLine = Schemas["PointLine"];
 export type Linked = Schemas["Linked"];
 export type Attendee = Schemas["Attendee"];
 export type Refused = Schemas["Refused"];
+export type Today = Schemas["Today"];
+export type TodayList = Schemas["TodayList"];
+export type TodayPanel = Schemas["TodayPanel"];
+export type DayMeetingLine = Schemas["DayMeetingLine"];
+export type MeetingGroup = Schemas["MeetingGroup"];
+export type Prep = Schemas["Prep"];
+export type SyncLine = Schemas["SyncLine"];
 
 /** What a read answered, with the query string it was asked with, so the app writes back only a current canonical. */
 export type Read<T> = T & { asked: string };
@@ -79,6 +87,16 @@ export async function readMeeting(query: string): Promise<Read<MeetingRead>> {
   return data ? { ...data, asked: query } : nothing("meeting's read");
 }
 
+export async function readToday(query: string): Promise<Read<Today>> {
+  const { data } = await api.GET("/api/web/today", { querySerializer: () => query });
+  return data ? { ...data, asked: query } : nothing("day's read");
+}
+
+export async function readTodayPanel(query: string): Promise<Read<TodayPanel>> {
+  const { data } = await api.GET("/api/web/today/panel", { querySerializer: () => query });
+  return data ? { ...data, asked: query } : nothing("panel's read");
+}
+
 export async function readText(query: string): Promise<Viewer> {
   const { data } = await api.GET("/api/web/ledger/text", { querySerializer: () => query });
   return data ?? nothing("viewer's read");
@@ -89,8 +107,10 @@ export async function readWho(): Promise<Person[]> {
   return data?.people ?? nothing("names' read");
 }
 
-export async function changed(version: string): Promise<{ changed: boolean; version: string }> {
-  const { data } = await api.GET("/api/web/ledger/changed", { params: { query: { v: version } } });
+/** Whether the page's version moved; Today's takes the cursor files and the runs open too (DR-0711). */
+export async function changed(version: string, page?: DayPageName): Promise<{ changed: boolean; version: string }> {
+  const query = page === "today" ? { v: version, page } : { v: version };
+  const { data } = await api.GET("/api/web/ledger/changed", { params: { query } });
   return data ?? nothing("poll");
 }
 

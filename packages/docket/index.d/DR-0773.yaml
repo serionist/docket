@@ -1,0 +1,18 @@
+decisions:
+  - id: DR-0773
+    title: "Today reads the day as docket ledger day does: the next meeting and its prep first, then the items due, then the rest, with the last sync per source"
+    status: proposed
+    at: "2026-10-21"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#206", "#252"]
+    description: "Today, the start page (DR-0669), reads the day as docket ledger day reads it: ledger.day.build over the snapshot from today to the next working day, Monday to Friday in the owner's zone, so the page and the session start's lines agree. It lists, in the order the morning reads them: the next meeting, under way now or the first still to start today, else the next working day's first, with its start set large, where it is, who is in it from its show, and its prep whole, its open points (one Claude proposed drawn in pencil and named so) and the open items on it; then the items overdue, due today and back from a snooze, as the Ledger's due groups and rows with their ticks, quick buttons, Select all and the act bar, at most the Ledger's first 100 rows across them, each group counting all and the rest one link away on the Ledger; then the rest of today's meetings and the next working day's, never cancelled or declined, each Meetings' row with its open points cut to four and its items to three, as docket ledger day cuts them, and how many more on its panel; then the items done or dropped today. A bar under the header says the day in words and its counts in one line, a part with nothing in it in words, and each live source's last sync as a time that never counts down (synced 09:10, yesterday 17:40, Sun 18 Oct, never), the machine in its title, linking to /sync?source=<name>; a source no machine synced in a day carries the sidebar's own due mark, from the same sync_marks, and one with a run open says it is syncing and is never due. Today takes no filter: its canonical URL keeps open, at, drop with an item open, text, and suggest with a meeting open, and leaves every other parameter out, never refusing it. GET /api/web/today answers the list with the act bar's verdicts and snooze choices; GET /api/web/today/panel answers the item's panel as the Ledger's or the meeting's as Meetings', whichever open names, from one read. Its writes are the shared ledger/write and ledger/save with page today: a save on a meeting, named by its M- number or by an id the read finds to be a meeting's, sets its outcome or notes as on Meetings (DR-0770), any other an item's field. Today's version hashes every machine's cursor file by name, size and time and the sources with a run open beside the op files, and its poll asks GET /api/web/ledger/changed with page=today, so a sync from this clone, another clone or the service shows in place (DR-0711). The list says when it goes out of date with no write: a listed meeting starts or ends, a sync falls due a day after its mark, or the owner's day turns."
+    binds:
+      - Today and docket ledger day list the same meetings and items due, by one build.
+      - A sync's due mark on Today is the sidebar's.
+      - Today takes no filter, and its poll sees a sync as it sees a write.
+    not_chosen:
+      - "A countdown to the next meeting, in 25 min: it goes stale every minute, where the start time and a refetch when it passes never do."
+      - "Every due row on the page: a vault thousands of items behind would draw them all, where the Ledger pages them by 100."
+      - "Two panel reads the app picks between by the ref's A- or M-: an id names either, and the server already knows which."
+      - "Filters on Today: the day is short enough to read whole, and the Ledger and Queue filter."

@@ -20,6 +20,7 @@ from docket.ledger import store
 from docket.service.app import create_app
 from docket.service.sessions import COOKIE, Sessions
 from docket.service.state import Settings
+from docket.vault.config import VaultConfig
 from docket.vault.vault import Vault
 
 ZONE = ZoneInfo("Europe/Budapest")
@@ -126,8 +127,8 @@ def meetings_week() -> list[dict[str, Any]]:
     ]
 
 
-def day_vault(tmp_path: Path) -> Vault:
-    vault = empty_vault(tmp_path, make_config())
+def day_vault(tmp_path: Path, config: VaultConfig | None = None) -> Vault:
+    vault = empty_vault(tmp_path, config or make_config())
     store.write(vault, seed(), by="claude", via="cli")
     notes = vault.home.top / "notes"
     notes.mkdir(exist_ok=True)

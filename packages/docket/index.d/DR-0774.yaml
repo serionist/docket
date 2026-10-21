@@ -1,0 +1,12 @@
+decisions:
+  - id: DR-0774
+    title: docket open with no page lands on Today, and a sign-in page for Search names Search
+    status: proposed
+    at: "2026-10-21"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#206", "#252"]
+    description: "With Today the start page (DR-0669), / answers 303 to /today, and docket open with no page signs in to / and so lands on Today. The sign-in and used-link pages name the command for the page asked for: docket open alone for / and /today, and docket open \"/search\" for Search, which until now shared the bare command as the start page. Every older link keeps working: Claude's links and the tasks skill name their page, /queue among them, and a link to / or to /search opens what it opened before or the start page. The app's sidebar lists Today first among the day pages (DR-0708), and the brand links to / on both the app and the server's own pages, so a bookmark of the brand follows the start page."
+    binds: [A sign-in page's command opens the page it was asked for.]
+    not_chosen:
+      - "docket open alone still naming Search: it would land on Today, not the page the sign-in page was for."

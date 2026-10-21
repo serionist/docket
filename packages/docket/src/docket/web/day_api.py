@@ -5,11 +5,12 @@ material opened on the owner's desktop.
 
 | Route | What |
 |---|---|
-| `GET /ledger`, `/queue`, `/meetings` | the page's list, read with its query string as it is, and its canonical URL |
+| `GET /ledger`, `/queue`, `/meetings`, `/today` | the list, read by its query string as it is, and its canonical URL |
 | `GET /ledger/panel`, `GET /queue/panel` | the item `open` names, or why no panel opens |
 | `GET /meetings/panel` | the meeting `open` names, its suggestions with `suggest=1`, or why no panel opens |
+| `GET /today/panel` | the item or the meeting `open` names, as the Ledger's or Meetings' panel, or why none opens |
 | `GET /ledger/text` | the text material `text` names, at most its first 256 KB |
-| `GET /ledger/changed` | whether the op files moved since the version `v` |
+| `GET /ledger/changed` | whether the op files moved since `v`; with `page=today`, the cursor files and runs too |
 | `GET /ledger/who` | the names the who fields suggest, the most used first (DR-0714) |
 | `POST /ledger/write` | one batch, by user, via page: a call, a bulk through a dry run, a point; the notice and Undo |
 | `POST /ledger/save` | a field saved on change: the row, or on Meetings the meeting's line, the panel, the versions |
@@ -26,7 +27,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
-from typing import cast
+from typing import Any, cast
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -39,11 +40,12 @@ from docket.ledger.store import RefusedError
 from docket.ledger.views import LedgerRead
 from docket.service.state import Service
 from docket.vault.vault import Vault
-from docket.web import day, day_view, meetings_view
+from docket.web import day, day_view, meetings_view, today_view
 from docket.web.day_state import DayState, DayStateError, is_meeting, ref_of
 from docket.web.day_view import ItemPanel, LedgerList, Notice, Row
 from docket.web.display import FAILED
 from docket.web.meetings_view import MeetingLine, MeetingPanel, MeetingsList
+from docket.web.today_view import TodayList
 
 log = logging.getLogger("docket.service.web")
 
@@ -107,6 +109,23 @@ class Meetings(BaseModel):
     notice: Notice | None
 
 
+class Today(BaseModel):
+    """Today's list (DR-0773): the next meeting with its prep, the items due, the rest of the day's meetings, the
+    items closed today and the last sync per source, with what the act bar and the panels need."""
+
+    canonical: str
+    # The op files', the cursor files' and the open runs' version (DR-0711).
+    version: str
+    today: str
+    list: TodayList
+    # The kinds an item made from a point, or a new item, may take.
+    kinds: list[str]
+    verdicts: list[day_view.Button]
+    snooze: list[day_view.Snooze]
+    tomorrow: str
+    notice: Notice | None
+
+
 class Person(BaseModel):
     name: str
     # How many items name it; 0 for a person of the vault's entities no item names yet.
@@ -130,6 +149,16 @@ class MeetingRead(BaseModel):
     canonical: str
     panel: MeetingPanel | None
     # Why no panel opens, such as a meeting that doesn't stand or an item's number.
+    missing: str
+
+
+class TodayPanel(BaseModel):
+    """Today's panel: the item's, as the Ledger's, or the meeting's, as Meetings', whichever `open` names."""
+
+    canonical: str
+    item: ItemPanel | None
+    meeting: MeetingPanel | None
+    # Why no panel opens, such as a ref that doesn't stand or a stream's.
     missing: str
 
 
@@ -212,8 +241,18 @@ def router(service: Service) -> APIRouter:
     def vault() -> Vault:
         return service.vault()
 
+    def running() -> tuple[str, ...]:
+        return tuple(sorted({run.source for run in service.runs.snapshot()}))
+
+    def page_write(changes: list[dict[str, Any]], *, bulk: bool, page: str) -> day.Wrote:
+        """The changes written on the writer thread, answering the versions the page's own read takes: Today's with
+        the cursor files and the open runs (DR-0711)."""
+        today = page == "today"
+        return day.write(vault(), changes, bulk=bulk, syncs=today, running=running() if today else ())
+
     async def gather(state: DayState, *, whole: bool = True, alikes: tuple[str, ...] = ()) -> day.Facts:
-        return await asyncio.to_thread(lambda: day.gather(vault(), state, whole=whole, alikes=alikes))
+        busy = running() if state.page == "today" else ()
+        return await asyncio.to_thread(lambda: day.gather(vault(), state, whole=whole, alikes=alikes, running=busy))
 
     async def listed(request: Request, page: str) -> Ledger:
         state = DayState.read(request.query_params, page)
@@ -263,6 +302,43 @@ def router(service: Service) -> APIRouter:
             notice=day_view.build_notice(state, found.lines),
         )
 
+    async def today_listed(request: Request) -> Today:
+        state = DayState.read(request.query_params, "today")
+        found = await gather(state)
+        # A whole read always lists.
+        listing = cast(LedgerRead, found.listing)
+        today = listing.today
+        return Today(
+            canonical=state.url(),
+            version=found.version,
+            today=today.isoformat(),
+            list=today_view.build_today(
+                listing,
+                found.closed,
+                found.lead,
+                at=found.at,
+                tz=found.tz,
+                syncs=found.syncs,
+                sync_problem=found.sync_problem,
+                running=found.running,
+            ),
+            kinds=list(ops.KINDS),
+            verdicts=day_view.verdict_buttons([]),
+            snooze=day_view.snooze_choices(today),
+            tomorrow=(today + timedelta(days=1)).isoformat(),
+            notice=day_view.build_notice(state, found.lines),
+        )
+
+    async def today_paneled(request: Request) -> TodayPanel:
+        state = DayState.read(request.query_params, "today")
+        found = await gather(state, whole=False)
+        item = None
+        if found.shown is not None:
+            item = day_view.build_panel(found.shown, found.meeting, found.sources, found.tz)
+        meeting = meeting_panel(found) if found.held is not None else None
+        missing = "" if item is not None or meeting is not None else found.missing
+        return TodayPanel(canonical=state.url(), item=item, meeting=meeting, missing=missing)
+
     def meeting_panel(found: day.Facts) -> MeetingPanel:
         held = cast(LedgerRead, found.held)
         return meetings_view.build_meeting_panel(
@@ -298,6 +374,14 @@ def router(service: Service) -> APIRouter:
     @api.get("/meetings", response_model=Meetings, responses={400: {"model": Refused}})
     async def meetings(request: Request) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
         return await safely(request, lambda: meetings_listed(request))
+
+    @api.get("/today", response_model=Today, responses={400: {"model": Refused}})
+    async def today(request: Request) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
+        return await safely(request, lambda: today_listed(request))
+
+    @api.get("/today/panel", response_model=TodayPanel, responses={400: {"model": Refused}})
+    async def today_panel(request: Request) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
+        return await safely(request, lambda: today_paneled(request))
 
     @api.get("/meetings/panel", response_model=MeetingRead, responses={400: {"model": Refused}})
     async def meetings_panel(request: Request) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
@@ -335,12 +419,17 @@ def router(service: Service) -> APIRouter:
         return await safely(request, answer)
 
     @api.get("/ledger/changed", response_model=Changed)
-    async def ledger_changed(request: Request, v: str = "") -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
+    async def ledger_changed(request: Request, v: str = "", page: str = "") -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
         given = v.strip()
+        # Today's version takes the cursor files and the runs open too (DR-0711).
+        syncs = page.strip() == "today"
 
         async def answer() -> Changed:
             root = service.settings.vault
-            now = await asyncio.to_thread(lambda: day.version(root)) if root is not None else given
+            busy = running() if syncs else ()
+            if root is None:
+                return Changed(changed=False, version=given)
+            now = await asyncio.to_thread(lambda: day.version(root, syncs=syncs, running=busy))
             return Changed(changed=now != given, version=now)
 
         try:
@@ -360,7 +449,8 @@ def router(service: Service) -> APIRouter:
             given = day.posted(body, day.local_now(vault()))
             post = await asyncio.to_thread(lambda: day.prepared(vault(), given))
             try:
-                wrote = await service.writer.run(lambda: day.write(vault(), post.changes, bulk=post.bulk))
+                page = day.page_of(body.page)
+                wrote = await service.writer.run(lambda: page_write(post.changes, bulk=post.bulk, page=page))
             except RefusedError as e:
                 if not e.refs:
                     raise
@@ -386,15 +476,16 @@ def router(service: Service) -> APIRouter:
 
         return await safely(request, answer)
 
-    async def meeting_saved(post: day.Posted) -> Response | SavedMeeting:
-        """A meeting's outcome or notes, saved on change from Meetings: checked to be a meeting's before it writes."""
+    async def meeting_saved(post: day.Posted, page: str) -> Response | SavedMeeting:
+        """A meeting's outcome or notes, saved on change from Meetings or Today: checked to be a meeting's before it
+        writes."""
         change = post.changes[0]
         if post.op != "set" or not set(change["fields"]) <= set(day.MEETING_FIELDS):
-            raise DayStateError("a save on Meetings sets a meeting's outcome or notes")
+            raise DayStateError("a save on a meeting sets its outcome or notes")
         meeting = str(change["item"])
         if not is_meeting(meeting) and (await gather(DayState(open=meeting), whole=False)).held is None:
             raise DayStateError(f"{meeting} isn't a meeting")
-        wrote = await service.writer.run(lambda: day.write(vault(), post.changes, bulk=False))
+        wrote = await service.writer.run(lambda: page_write(post.changes, bulk=False, page=page))
         found = await gather(DayState(page="meetings", open=meeting), whole=False)
         if found.held is None:
             return refused(found.missing)
@@ -409,6 +500,16 @@ def router(service: Service) -> APIRouter:
             version=wrote.version,
         )
 
+    async def names_meeting(post: day.Posted) -> bool:
+        """Whether a save from Today is a meeting's: an M- number says so, and an id is read; Today's panel saves an
+        item's fields or a meeting's outcome and notes (DR-0773)."""
+        ref = str(post.changes[0].get("item", "")) if post.changes else ""
+        if is_meeting(ref):
+            return True
+        if not ops.ULID.fullmatch(ref):
+            return False
+        return (await gather(DayState(open=ref), whole=False)).held is not None
+
     @api.post(
         "/ledger/save",
         response_model=Saved | SavedMeeting,
@@ -417,13 +518,14 @@ def router(service: Service) -> APIRouter:
     async def ledger_save(request: Request, body: day.Body) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
         async def answer() -> Response | Saved | SavedMeeting:
             post = day.posted(body, day.local_now(vault()))
-            if day.page_of(body.page) == "meetings":
-                return await meeting_saved(post)
+            page = day.page_of(body.page)
+            if page == "meetings" or (page == "today" and await names_meeting(post)):
+                return await meeting_saved(post, page)
             if post.op not in ("set", "notes"):
                 raise DayStateError("a save sets a field of an item")
             if is_meeting(str(post.changes[0]["item"])):
                 raise DayStateError("a save here sets an item's field; a meeting's are saved on Meetings")
-            wrote = await service.writer.run(lambda: day.write(vault(), post.changes, bulk=False))
+            wrote = await service.writer.run(lambda: page_write(post.changes, bulk=False, page=page))
             item = str(post.changes[0]["item"])
             found = await gather(DayState(open=item), whole=False)
             if found.shown is None:

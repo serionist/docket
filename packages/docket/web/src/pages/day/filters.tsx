@@ -39,7 +39,10 @@ function useDraft(value: string): [string, (next: string) => void] {
   return [draft, setDraft];
 }
 
-const FIND_IN: Record<DayPageName, string> = {
+/** The pages with a filter bar: Today has none (DR-0773). */
+type FilteredPage = Exclude<DayPageName, "today">;
+
+const FIND_IN: Record<FilteredPage, string> = {
   ledger: "Find in titles, people, notes, history",
   queue: "Find in titles, people, notes, history",
   meetings: "Find in subjects, people, points, notes",
@@ -56,7 +59,7 @@ export function Filters({
   hrefOf,
   onChange,
 }: {
-  page: DayPageName;
+  page: FilteredPage;
   filters: Filtered;
   counts: string;
   chips: Chip[];

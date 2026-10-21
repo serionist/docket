@@ -9,6 +9,9 @@ it (its own config and state folders, the failing keyring), which is where the f
 | | its materials name, staging_kit's three records waiting, a live source due a sync; meetings around today, |
 | | one under way, a recording, a point rolled on, and Ben's entity and brief |
 | `meetings` | the week with its index built, so a meeting's people link to their briefs from the first read |
+| `today` | the meetings world with a second live source, mail, both synced this morning, a follow-up later today |
+| | and an item on the meeting under way, so Today's next meeting has prep of both kinds |
+| `stale` | today's world with chat synced three days ago and mail never, so both are due a sync |
 
 Invented people only: Ada Example, Ben Sample and Cleo Example.
 """
@@ -33,11 +36,14 @@ from docket import recall
 from docket.index import build as index_build
 from docket.ledger import ops, store
 from docket.service.token import Tokens
+from docket.vault import cursors
 from docket.vault.config import SourceConfig, VaultConfig
 from docket.vault.gate import Gate
 from docket.vault.vault import Vault
 
-WORLDS = ("empty", "week", "meetings")
+WORLDS = ("empty", "week", "meetings", "today", "stale")
+# The worlds Today is shot on: the meetings world, a second live source and the day's syncs.
+DAYS = ("today", "stale")
 MACHINE = "ui-box"
 PLAN_TEXT = """# The plan
 
@@ -49,12 +55,15 @@ Book the room first, then the caterer.
 """
 
 
-def config() -> VaultConfig:
+def config(world: str = "week") -> VaultConfig:
     made = make_config()
     made.primary_machine = MACHINE
     # A live source: one the capture hook posts for, so the Sync page and the sidebar mark it due until it syncs.
     made.sources["chat"] = SourceConfig(tools=["read_channel"])
     made.sources["memo"] = SourceConfig()
+    if world in DAYS:
+        # Today's bar names each live source's last sync: two of them read as a working vault's.
+        made.sources["mail"] = SourceConfig(tools=["read_mail"])
     return made
 
 
@@ -195,11 +204,29 @@ def meetings(vault: Vault) -> None:
     recall.doc_put(vault, brief("ben-sample", "Ben Sample", [said.rid], lines))
 
 
+def the_day(vault: Vault, world: str) -> None:
+    """Today's worlds: a follow-up later today with a point Claude proposed, an item on the budget review under way,
+    and each live source's last sync, this morning's for `today`, three days back and never for `stale`."""
+    now = datetime.now(UTC).astimezone(ZONE).replace(minute=0, second=0, microsecond=0)
+    changes = [
+        meeting("follow", "Supplier follow-up", now + timedelta(hours=3), 30, event="cal:follow", stream="pilot"),
+        point("follow", "The written offer", proposed=True),
+        add("numbers", "task", "Bring the spring numbers", "Ben Sample", "ops", due=day(0), meeting="M-0003"),
+    ]
+    store.write(vault, changes, by="claude", via="cli")
+    clock = datetime.now(UTC)
+    marks = {"chat": clock - timedelta(minutes=40), "mail": clock - timedelta(hours=3)}
+    if world == "stale":
+        marks = {"chat": clock - timedelta(days=3)}
+    for source, mark in marks.items():
+        cursors.save(vault, source, cursors.Cursor(mark=mark))
+
+
 def build(folder: Path, world: str) -> Vault:
     if world not in WORLDS:
         raise ValueError(f"no world {world!r}; the worlds are {', '.join(WORLDS)}")
-    vault = Vault.init(folder, config(), MACHINE)
-    if world in ("week", "meetings"):
+    vault = Vault.init(folder, config(world), MACHINE)
+    if world in ("week", "meetings", *DAYS):
         Gate(vault).stage([transcript(), mail(), memo()])
         store.write(vault, seed(), by="claude", via="cli")
         store.write(vault, busier(), by="claude", via="cli")
@@ -209,7 +236,9 @@ def build(folder: Path, world: str) -> Vault:
         (notes / "plan.md").write_text(PLAN_TEXT, encoding="utf-8", newline="\n")
         (notes / "costs.xlsx").write_bytes(b"PK\x03\x04 invented")
         meetings(vault)
-    if world == "meetings":
+    if world in DAYS:
+        the_day(vault, world)
+    if world in ("meetings", *DAYS):
         # The op files an hour old, as files no write just wrote are, so the index takes them as settled and a read
         # finds nothing to catch up.
         hour_ago = time.time_ns() - 3600 * 10**9

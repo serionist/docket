@@ -158,14 +158,16 @@ def test_the_sign_in_page_names_the_command_for_the_page_asked_for(guarded: Test
         "&amp;sources=calls&quot;"
     )
     assert command in page.text
-    assert "docket open</code>" in guarded.get("/search").text
+    # Today is the start page, which `docket open` lands on with no page named (DR-0669).
+    assert "docket open</code>" in guarded.get("/today").text
 
 
 @pytest.mark.parametrize(
     ("wanted", "command"),
     [
         ("/", "docket open"),
-        ("/search", "docket open"),
+        ("/today", "docket open"),
+        ("/search", 'docket open "/search"'),
         ("//evil.example", "docket open"),
         ("/search?query=a+b&hit=r:calls:rec-0100@02:30", 'docket open "/search?query=a+b&hit=r:calls:rec-0100@02:30"'),
         ("/search?query=Árvíz", 'docket open "/search?query=%C3%81rv%C3%ADz"'),

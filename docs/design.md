@@ -737,7 +737,7 @@ change lands on whoever uses that vendor, while the core still checks every rid 
 | Ledger | items by due or by stream, kind, who or meeting, the open one beside them with its source and materials one click away; every button one batch, with Undo | 3 |
 | Queue | the open items to work through: the untriaged first, then by call, each by due; the Ledger's keys, act bar and panel | 3 |
 | Meetings | meetings by day from today, then the earlier days: each with its talking points, outcome, notes, items and suggestions; its people one click from their briefs and its recording from the Recording page | 3 |
-| Today | the day: meetings with briefs and points | 3 |
+| Today | the start page: the next meeting with its prep, then the items overdue and due today, then the rest of the day's and the next working day's meetings, what closed today and the last sync per source | 3 |
 | Outbox | drafts waiting for a click | 3 |
 
 Every page has the actions that belong on it. An action runs in the service, runs Claude headless, or hands the job
@@ -762,7 +762,9 @@ How it is built (DR-0170 to DR-0175, DR-0546), and where it is going (#252, DR-0
   page refetches in place (DR-0709 to DR-0711). The Queue is the same day page over `/api/web/queue`; each kind of
   item is a tab in a hue of its own (DR-0715), and who suggests the names the ledger uses (DR-0714). Meetings shares
   the day pages' frame, its reads, selection, writes, poll and guard, over `/api/web/meetings` and its own panel; its
-  point buttons and its outcome and notes write through the same routes (DR-0768 to DR-0770).
+  point buttons and its outcome and notes write through the same routes (DR-0768 to DR-0770). Today, the start page
+  `/` goes to, reads the day as `docket ledger day` does over `/api/web/today`, with the items' calls on its due rows
+  and either panel; its poll sees a sync as it sees a write (DR-0773, DR-0774).
 - A page not moved yet is its Jinja page, as below.
 - Pages rendered by the service with Jinja2, parts of them swapped by htmx; every state is a URL that renders without
   JavaScript, and the navigation shows every page above with its phase.
@@ -809,7 +811,7 @@ How it is built (DR-0170 to DR-0175, DR-0546), and where it is going (#252, DR-0
   what it contradicts, then what is decided, superseded ones folded. Its buttons post to `/briefs/decision`,
   which writes a decision's status as `docket decision set` does, on the writer thread and checked against the rev
   the page showed (DR-0603, DR-0566).
-- The day pages, the Ledger, the Queue and Meetings so far, are the React app's. They read the ledger beside the writer through the `ledger`
+- The day pages, Today, the Queue, the Ledger and Meetings, are the React app's. They read the ledger beside the writer through the `ledger`
   tool's reads and two of their own, `matching` and `batch_lines`, and write only through the ledger's writer: each
   button one batch, by user, via page, answered with a notice with Undo, a bulk through a dry run, a refusal shown
   with the writer's words and the text as typed (DR-0710). The old tasks app's keys act on the ticked rows or the one

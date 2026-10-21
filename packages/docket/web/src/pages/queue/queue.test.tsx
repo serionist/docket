@@ -200,14 +200,14 @@ describe("the Queue", () => {
     expect(screen.getByText(/^5 open: 3 untriaged/)).toBeTruthy();
   });
 
-  it("puts the Queue first among the day pages in the sidebar, with its untriaged count", async () => {
+  it("puts the Queue after Today among the day pages in the sidebar, with its untriaged count", async () => {
     await open("/queue");
     const pages = screen.getByRole("navigation", { name: "Pages" });
-    // The brand comes first, then the day pages.
+    // The brand comes first, then the day pages, Today leading them (DR-0669).
     const links = within(pages).getAllByRole("link");
-    expect(links.slice(1, 3).map((l) => l.getAttribute("href"))).toEqual(["/queue", "/ledger"]);
-    expect(links[1]?.getAttribute("aria-current")).toBe("page");
-    await waitFor(() => expect(links[1]?.textContent).toContain("3 untriaged"));
+    expect(links.slice(1, 4).map((l) => l.getAttribute("href"))).toEqual(["/today", "/queue", "/ledger"]);
+    expect(links[2]?.getAttribute("aria-current")).toBe("page");
+    await waitFor(() => expect(links[2]?.textContent).toContain("3 untriaged"));
   });
 
   it("moves down the queue across its groups with j, and a verdict's key writes as page queue and moves on", async () => {

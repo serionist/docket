@@ -4,7 +4,7 @@ package, served under `/static/` (DR-0171), and every page carries a CSP stricte
 
 The pages move one by one into the React app (#252): its build is served under `/static/app/` and its document for
 each route its `routes.json` lists, the day pages and `/design` so far, beside its JSON routes under `/api/web`
-(`frontend`, `webapi`, `day_api`).
+(`frontend`, `webapi`, `day_api`). `/` answers 303 to Today, the start page (DR-0669).
 
 `install` mounts it on the service's FastAPI app; `sign_in_page` and `used_link_page` are the pages the service shows
 a browser without a session, in the bare layout that names neither the vault nor the machine.
@@ -76,8 +76,8 @@ def install(app: FastAPI, service: Service) -> None:
 
     @app.get("/", include_in_schema=False)
     def start() -> Response:  # pyright: ignore[reportUnusedFunction]
-        # Search is the first page; Today takes this in phase 3.
-        return RedirectResponse("/search", status_code=303)
+        # Today is the start page (DR-0669); a link to / or to `docket open`'s landing goes there.
+        return RedirectResponse("/today", status_code=303)
 
     async def not_found(request: Request, error: Exception) -> Response:
         path = request.url.path

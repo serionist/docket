@@ -338,6 +338,55 @@
         "title": "Day",
         "type": "object"
       },
+      "DayMeetingLine": {
+        "description": "A meeting of the day: its line as Meetings shows it, where and with whom, and its prep, the open points and the\nopen items on it, each to the count the list shows and how many more.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Row"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "line": {
+            "$ref": "#/components/schemas/MeetingLine"
+          },
+          "more_items": {
+            "title": "More Items",
+            "type": "integer"
+          },
+          "more_points": {
+            "title": "More Points",
+            "type": "integer"
+          },
+          "people": {
+            "title": "People",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/Prep"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "where": {
+            "title": "Where",
+            "type": "string"
+          }
+        },
+        "required": [
+          "line",
+          "where",
+          "people",
+          "points",
+          "more_points",
+          "items",
+          "more_items"
+        ],
+        "title": "DayMeetingLine",
+        "type": "object"
+      },
       "Due": {
         "properties": {
           "text": {
@@ -710,6 +759,24 @@
         "title": "ItemPanel",
         "type": "object"
       },
+      "Lead": {
+        "description": "The next meeting: under way now, or the first still to start today, else the next working day's first.",
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "meeting": {
+            "$ref": "#/components/schemas/DayMeetingLine"
+          }
+        },
+        "required": [
+          "label",
+          "meeting"
+        ],
+        "title": "Lead",
+        "type": "object"
+      },
       "Ledger": {
         "description": "The Ledger's list (DR-0666), as the page shows it, with what its bars need.",
         "properties": {
@@ -936,6 +1003,32 @@
           "points"
         ],
         "title": "MeetingBox",
+        "type": "object"
+      },
+      "MeetingGroup": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "meetings": {
+            "items": {
+              "$ref": "#/components/schemas/DayMeetingLine"
+            },
+            "title": "Meetings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "meetings"
+        ],
+        "title": "MeetingGroup",
         "type": "object"
       },
       "MeetingLine": {
@@ -1673,6 +1766,35 @@
         "title": "PointLine",
         "type": "object"
       },
+      "Prep": {
+        "description": "An open talking point as the list shows it: read only, its buttons on the meeting's panel.",
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "proposed": {
+            "title": "Proposed",
+            "type": "boolean"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "answer",
+          "proposed"
+        ],
+        "title": "Prep",
+        "type": "object"
+      },
       "Queue": {
         "description": "The Queue's list (DR-0666), in the Ledger's shape: its groups by call, no state chips, and the Ledger's own\nfilters, state, group and archived, at their defaults.",
         "properties": {
@@ -2040,6 +2162,241 @@
         "title": "Snooze",
         "type": "object"
       },
+      "SyncLine": {
+        "description": "A live source's last sync: when, in words that never count down, and whether it is due one, as the sidebar's\nSync mark says (DR-0304); one with a run open is syncing, never due.",
+        "properties": {
+          "due": {
+            "title": "Due",
+            "type": "boolean"
+          },
+          "href": {
+            "title": "Href",
+            "type": "string"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          },
+          "said": {
+            "title": "Said",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "said",
+          "title",
+          "due",
+          "running",
+          "href"
+        ],
+        "title": "SyncLine",
+        "type": "object"
+      },
+      "Today": {
+        "description": "Today's list (DR-0773): the next meeting with its prep, the items due, the rest of the day's meetings, the\nitems closed today and the last sync per source, with what the act bar and the panels need.",
+        "properties": {
+          "canonical": {
+            "title": "Canonical",
+            "type": "string"
+          },
+          "kinds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Kinds",
+            "type": "array"
+          },
+          "list": {
+            "$ref": "#/components/schemas/TodayList"
+          },
+          "notice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Notice"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "snooze": {
+            "items": {
+              "$ref": "#/components/schemas/Snooze"
+            },
+            "title": "Snooze",
+            "type": "array"
+          },
+          "today": {
+            "title": "Today",
+            "type": "string"
+          },
+          "tomorrow": {
+            "title": "Tomorrow",
+            "type": "string"
+          },
+          "verdicts": {
+            "items": {
+              "$ref": "#/components/schemas/Button"
+            },
+            "title": "Verdicts",
+            "type": "array"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "canonical",
+          "version",
+          "today",
+          "list",
+          "kinds",
+          "verdicts",
+          "snooze",
+          "tomorrow",
+          "notice"
+        ],
+        "title": "Today",
+        "type": "object"
+      },
+      "TodayList": {
+        "properties": {
+          "closed": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Group"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "counts": {
+            "title": "Counts",
+            "type": "string"
+          },
+          "day": {
+            "title": "Day",
+            "type": "string"
+          },
+          "due": {
+            "items": {
+              "$ref": "#/components/schemas/Group"
+            },
+            "title": "Due",
+            "type": "array"
+          },
+          "empty": {
+            "title": "Empty",
+            "type": "string"
+          },
+          "lead": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Lead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "meetings": {
+            "items": {
+              "$ref": "#/components/schemas/MeetingGroup"
+            },
+            "title": "Meetings",
+            "type": "array"
+          },
+          "streams": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Streams",
+            "type": "array"
+          },
+          "sync_problem": {
+            "title": "Sync Problem",
+            "type": "string"
+          },
+          "syncs": {
+            "items": {
+              "$ref": "#/components/schemas/SyncLine"
+            },
+            "title": "Syncs",
+            "type": "array"
+          },
+          "until": {
+            "title": "Until",
+            "type": "string"
+          }
+        },
+        "required": [
+          "day",
+          "lead",
+          "due",
+          "meetings",
+          "closed",
+          "syncs",
+          "sync_problem",
+          "counts",
+          "empty",
+          "streams",
+          "until"
+        ],
+        "title": "TodayList",
+        "type": "object"
+      },
+      "TodayPanel": {
+        "description": "Today's panel: the item's, as the Ledger's, or the meeting's, as Meetings', whichever `open` names.",
+        "properties": {
+          "canonical": {
+            "title": "Canonical",
+            "type": "string"
+          },
+          "item": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemPanel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "meeting": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeetingPanel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "missing": {
+            "title": "Missing",
+            "type": "string"
+          }
+        },
+        "required": [
+          "canonical",
+          "item",
+          "meeting",
+          "missing"
+        ],
+        "title": "TodayPanel",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -2212,6 +2569,16 @@
             "schema": {
               "default": "",
               "title": "V",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Page",
               "type": "string"
             }
           }
@@ -2605,6 +2972,62 @@
           }
         },
         "summary": "Shell"
+      }
+    },
+    "/api/web/today": {
+      "get": {
+        "operationId": "today_api_web_today_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Today"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "Today"
+      }
+    },
+    "/api/web/today/panel": {
+      "get": {
+        "operationId": "today_panel_api_web_today_panel_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodayPanel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "Today Panel"
       }
     }
   }

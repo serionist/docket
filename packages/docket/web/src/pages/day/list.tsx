@@ -25,10 +25,10 @@ const TONE: Record<string, string> = {
   "": "text-ink-muted",
 };
 
-export interface ListProps {
+/** What an item's row and its group take: the list's state and the calls a row's ticks and buttons make. */
+export interface RowProps {
   /** The page's own path, which a row's link opens its panel on. */
   path: string;
-  data: DayList;
   search: Search;
   selected: string | undefined;
   open: string | undefined;
@@ -41,6 +41,10 @@ export interface ListProps {
   onTick: (refs: string[], on: boolean) => void;
   onCall: (row: Row, body: Partial<Body>) => void;
   onDrop: (row: Row) => void;
+}
+
+export interface ListProps extends RowProps {
+  data: DayList;
   onMore: (k: number) => void;
   onNew: () => void;
 }
@@ -131,8 +135,8 @@ function Quick({
 }: {
   row: Row;
   pending: boolean;
-  onCall: ListProps["onCall"];
-  onDrop: ListProps["onDrop"];
+  onCall: RowProps["onCall"];
+  onDrop: RowProps["onDrop"];
   className?: string;
 }) {
   const small = "tap grid size-6 shrink-0 cursor-default place-items-center rounded-sm border text-xs";
@@ -201,7 +205,7 @@ function RowLine({
   tabbable,
 }: {
   row: Row;
-  props: ListProps;
+  props: RowProps;
   /** The row Tab reaches: the selected one, or the first while none is. */
   tabbable: boolean;
 }) {
@@ -306,7 +310,8 @@ function RowLine({
   );
 }
 
-function GroupBlock({ group, props, tab }: { group: Group; props: ListProps; tab: string | undefined }) {
+/** A group of item rows under its sticky head, with its count and Select all: the Ledger's, the Queue's and Today's. */
+export function GroupBlock({ group, props, tab }: { group: Group; props: RowProps; tab: string | undefined }) {
   const id = `group-${group.key}`;
   const callable = group.rows.filter((r) => r.callable).map((r) => r.ref);
   return (

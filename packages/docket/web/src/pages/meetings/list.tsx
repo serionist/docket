@@ -12,14 +12,18 @@ import { cn } from "@/lib/utils";
 import type { Day, MeetingLine, Meetings } from "@/pages/day/api";
 import { ListRow, rowHref } from "@/pages/day/list";
 
-export interface MeetingRowsProps {
+/** What a meeting's row takes: the list's state, and what selecting and opening it do. */
+export interface MeetingRowProps {
   path: string;
-  data: Meetings;
   search: Search;
   selected: string | undefined;
   open: string | undefined;
   onSelect: (ref: string) => void;
   onOpen: (ref: string) => void;
+}
+
+export interface MeetingRowsProps extends MeetingRowProps {
+  data: Meetings;
 }
 
 /** A meeting's response as its badge: what changes whether the owner goes. */
@@ -39,7 +43,7 @@ export function ResponseBadge({ response, className }: { response: string; class
 }
 
 /** A meeting under way. */
-function Now() {
+export function Now() {
   return (
     <span className="inline-flex h-5 shrink-0 items-center rounded-sm bg-green px-1 text-xs leading-none font-semibold text-on-green">
       now
@@ -77,7 +81,18 @@ function Count({
   );
 }
 
-function MeetingRow({ m, props, tabbable }: { m: MeetingLine; props: MeetingRowsProps; tabbable: boolean }) {
+/** A meeting as a ruled row, Meetings' and Today's; `below` stands under its line, such as Today's prep. */
+export function MeetingRow({
+  m,
+  props,
+  tabbable,
+  below,
+}: {
+  m: MeetingLine;
+  props: MeetingRowProps;
+  tabbable: boolean;
+  below?: React.ReactNode;
+}) {
   const points = m.points_open === m.points ? `${m.points} open` : `${m.points_open} of ${m.points} open`;
   return (
     <ListRow
@@ -89,6 +104,7 @@ function MeetingRow({ m, props, tabbable }: { m: MeetingLine; props: MeetingRows
       href={rowHref(props.path, props.search, m.ref)}
       onSelect={props.onSelect}
       onOpen={props.onOpen}
+      below={below}
     >
       <span
         className={cn("w-[5.75rem] shrink-0 pl-1.5 text-xs whitespace-nowrap tabular-nums", m.over && "text-ink-muted")}

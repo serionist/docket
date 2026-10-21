@@ -833,7 +833,7 @@ runs its writes one at a time; the commands above keep writing directly, under t
 | `docket service stop` | stops it until the next `install` |
 | `docket service uninstall` | stops it and removes the registration; the token and the config stay |
 | `docket service token [--header] [--rotate]` | prints the token, or the header Claude Code's `headersHelper` reads; `--rotate` makes a new one and restarts the service |
-| `docket open [PATH]` | opens the web app through a link good once and for a minute, and prints the link; with a path, such as the one its sign-in page names, it lands there |
+| `docket open [PATH]` | opens the web app through a link good once and for a minute, and prints the link; it lands on Today, or with a path, such as the one its sign-in page names, there |
 | `docket serve [--vault] [--port]` | runs the service in the foreground, where install can't register it (WSL without systemd) |
 
 - Install from a tool environment (`uv tool install`), not a development checkout: the service runs whatever code
@@ -879,11 +879,12 @@ What the service refuses, and what it doesn't:
 
 ## The web app
 
-`docket open` signs your browser in to the service's own pages. In this version that is the Queue, the Ledger,
-Meetings, Search, Recording, Briefs, Sync, Staging, Curate and Settings; the navigation shows the pages still to come, with the
-phase each arrives in.
+`docket open` signs your browser in to the service's own pages and lands on Today. In this version that is Today, the
+Queue, the Ledger, Meetings, Search, Recording, Briefs, Sync, Staging, Curate and Settings; the navigation shows the
+pages still to come, with the phase each arrives in.
 
-The pages are moving, one by one, into a new app built in React; the Queue, the Ledger and Meetings are its first. Its shell is the sidebar with
+The pages are moving, one by one, into a new app built in React; the day pages, Today, the Queue, the Ledger and
+Meetings, are its first. Its shell is the sidebar with
 what waits at the gate and whether a sync is due, the theme and keys switches at its foot, the list and the open item
 beside it; `/design` shows its parts on invented data. It comes built with Docket; nothing to install.
 
@@ -945,6 +946,23 @@ when you ask Claude; the page's one write is your click on a decision (DR-0566).
 - A brief whose entity a never-store list now holds shows only that it is hidden, and is counted on the list; a
   line a list now names shows only that it is hidden, and opens nothing.
 - Keys: `?`.
+
+### The Today page
+
+`/today` is the start page: `/` goes there, and so does `docket open` with no page. It reads your day as `docket ledger
+day` does, in the order a morning reads it (DR-0773).
+
+| Part | Shows |
+|---|---|
+| The next meeting | under way now, or the next to start today, else the next working day's first: its start, where and with whom, its open points and the items on it |
+| Due | the items overdue, due today and back from a snooze, as the Ledger's rows: tick them for the act bar, or use the quick buttons and keys; the first 100, the rest on the Ledger |
+| The rest | today's later meetings and the next working day's, never cancelled or declined ones, each with its first open points and items; then what you closed today |
+| The bar | the day and its counts, and each live source's last sync, a due one marked as in the sidebar; each links to its runs on the Sync page |
+
+- An item's row opens its panel as on the Ledger, a meeting's its panel as on Meetings; its URL holds `open`, `at`,
+  `drop`, `text` and `suggest`, and no filter.
+- It updates in place when the ledger changes or a sync closes, and when a meeting starts or ends or a sync falls due.
+- Keys: the Ledger's, `j` and `k` through the meetings and items alike; the items' keys never act on a meeting.
 
 ### The Queue page
 

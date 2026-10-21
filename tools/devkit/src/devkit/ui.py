@@ -208,6 +208,31 @@ PAGES: dict[str, Page] = {
             State("empty", "/meetings", world="empty"),
         ),
     ),
+    # ui_world's today: the budget review under way (M-0003) leads with its points and an item on it, then the week's
+    # items overdue (A-0008 four days late first), due today and back from a snooze, the follow-up later today and the
+    # Pilot sync tomorrow; chat and mail synced this morning. The stale world has chat three days back, mail never.
+    "today": Page(
+        world="today",
+        states=(
+            State("day", "/today"),
+            State("meeting", "/today?open=M-0003"),
+            State("item", "/today?open=A-0008"),
+            State(
+                "written",
+                "/today",
+                (("press", "j"), ("press", "j"), ("press", "2"), ("wait", "role=status")),
+                after=(("press", "u"),),
+            ),
+            State(
+                "refused",
+                "/today?open=A-0008&drop=1",
+                (("click", '#close-A-0008 >> text="Drop"'),),
+                expects=(REFUSED,),
+            ),
+            State("empty", "/today", world="empty"),
+            State("stale", "/today", world="stale"),
+        ),
+    ),
 }
 
 CHECKS = ("axe", "console", "csp", "sideways", "targets")
