@@ -275,8 +275,9 @@ def counts_of(day: ledger_day.Day, overdue: Sequence[ItemRow]) -> str:
     """The day in one line: what is overdue and due today, the meetings left today and on the next working day, and
     the snoozes that ended; a part with nothing in it says so in words, never as a row of noughts."""
     today = day.today
-    late = sum(1 for r in overdue if r.due is not None and r.due < today)
-    due_today = sum(1 for r in overdue if r.due == today)
+    # A snooze that ended is its own group, whatever its due: the counts say what the groups hold.
+    late = sum(1 for r in overdue if not r.woke and r.due is not None and r.due < today)
+    due_today = sum(1 for r in overdue if not r.woke and r.due == today)
     due = f"{late} overdue, {due_today} due today" if late or due_today else "nothing due"
     left = sum(len(d.meetings) for d in day.meetings if d.day == today)
     meetings = f"{_plural(left, 'meeting', 'meetings')} left today" if left else "no meeting left today"

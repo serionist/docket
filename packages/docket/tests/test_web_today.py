@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 import ui_world
-from day_kit import SAME, add, at, day_vault, meeting, meetings_week, signed_in, today
+from day_kit import SAME, add, at, day, day_vault, meeting, meetings_week, signed_in, today
 from docket_testkit import empty_vault, make_config
 from starlette.testclient import TestClient
 
@@ -225,6 +225,17 @@ def test_the_counts_say_the_day_in_one_line(client: TestClient) -> None:
     assert counts.endswith("; 1 snooze ended")
 
 
+def test_an_item_back_from_a_snooze_counts_as_ended_not_overdue(client: TestClient, vault: Vault) -> None:
+    """A snooze that ended is its own group whatever its due, and the counts say what the groups hold."""
+    permit = next(g for g in read(client, API)["list"]["due"] if g["key"] == "woke")["rows"][0]["ref"]
+    store.write(vault, [{"op": "set", "item": permit, "fields": {"due": day(-3)}}], by="user", via="cli")
+    found = read(client, API)["list"]
+    assert next(r for g in found["due"] for r in g["rows"] if r["ref"] == permit)["due"]["text"] == "snooze ended"
+    groups = {g["key"]: [r["title"] for r in g["rows"]] for g in found["due"]}
+    assert groups["woke"] == ["Renew the parking permit"] and "Renew the parking permit" not in groups["overdue"]
+    assert found["counts"].startswith("1 overdue, 1 due today;") and found["counts"].endswith("; 1 snooze ended")
+
+
 # -- the syncs --------------------------------------------------------------------------------------------------------
 
 
@@ -338,6 +349,26 @@ def test_today_saves_an_item_s_field_and_a_meeting_s_outcome(client: TestClient,
     assert post(client, {"op": "set", "items": ["M-0003"], "fields": {"title": "x"}}, SAVE, 400)["error"]
     written = [o for o in ops(vault) if o.get("via") == "page"]
     assert all(o["by"] == "user" for o in written) and len(written) == 3
+
+
+def test_today_s_own_writes_answer_its_version_so_its_poll_stays_quiet(client: TestClient) -> None:
+    """A save and a write from Today answer the version Today's read and poll take, cursor files and runs in it: a
+    save that is the only change since the read refetches nothing, and a write that changes nothing leaves the poll
+    quiet (DR-0710, DR-0711)."""
+    version = read(client, API)["version"]
+    saved = post(client, {"op": "set", "items": ["A-0002"], "fields": {"notes": "Room 2 is free"}}, SAVE)
+    assert saved["before"] == version
+    assert saved["version"] == read(client, API)["version"]
+    meeting = post(client, {"op": "set", "items": ["M-0003"], "fields": {"notes": "Bring the numbers"}}, SAVE)
+    assert meeting["before"] == saved["version"]
+    # No call yet on A-0002, so taking its call away writes nothing.
+    nothing = post(client, {"op": "triage", "items": ["A-0002"], "verdict": None})
+    assert nothing["notice"]["text"] == "Nothing changed."
+    assert read(client, f"{CHANGED}?v={nothing['version']}&page=today")["changed"] is False
+    # The Ledger's own write answers the op files' version, as its read does.
+    ledger = client.post(WRITE, json={"page": "ledger", "op": "triage", "items": ["A-0002"], "verdict": None},
+                         headers=SAME).json()  # fmt: skip
+    assert ledger["version"] == read(client, "/api/web/ledger")["version"]
 
 
 # -- an empty day -----------------------------------------------------------------------------------------------------

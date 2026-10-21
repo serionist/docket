@@ -27,7 +27,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
-from typing import cast
+from typing import Any, cast
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -244,6 +244,12 @@ def router(service: Service) -> APIRouter:
     def running() -> tuple[str, ...]:
         return tuple(sorted({run.source for run in service.runs.snapshot()}))
 
+    def page_write(changes: list[dict[str, Any]], *, bulk: bool, page: str) -> day.Wrote:
+        """The changes written on the writer thread, answering the versions the page's own read takes: Today's with
+        the cursor files and the open runs (DR-0711)."""
+        today = page == "today"
+        return day.write(vault(), changes, bulk=bulk, syncs=today, running=running() if today else ())
+
     async def gather(state: DayState, *, whole: bool = True, alikes: tuple[str, ...] = ()) -> day.Facts:
         busy = running() if state.page == "today" else ()
         return await asyncio.to_thread(lambda: day.gather(vault(), state, whole=whole, alikes=alikes, running=busy))
@@ -443,7 +449,8 @@ def router(service: Service) -> APIRouter:
             given = day.posted(body, day.local_now(vault()))
             post = await asyncio.to_thread(lambda: day.prepared(vault(), given))
             try:
-                wrote = await service.writer.run(lambda: day.write(vault(), post.changes, bulk=post.bulk))
+                page = day.page_of(body.page)
+                wrote = await service.writer.run(lambda: page_write(post.changes, bulk=post.bulk, page=page))
             except RefusedError as e:
                 if not e.refs:
                     raise
@@ -469,7 +476,7 @@ def router(service: Service) -> APIRouter:
 
         return await safely(request, answer)
 
-    async def meeting_saved(post: day.Posted) -> Response | SavedMeeting:
+    async def meeting_saved(post: day.Posted, page: str) -> Response | SavedMeeting:
         """A meeting's outcome or notes, saved on change from Meetings or Today: checked to be a meeting's before it
         writes."""
         change = post.changes[0]
@@ -478,7 +485,7 @@ def router(service: Service) -> APIRouter:
         meeting = str(change["item"])
         if not is_meeting(meeting) and (await gather(DayState(open=meeting), whole=False)).held is None:
             raise DayStateError(f"{meeting} isn't a meeting")
-        wrote = await service.writer.run(lambda: day.write(vault(), post.changes, bulk=False))
+        wrote = await service.writer.run(lambda: page_write(post.changes, bulk=False, page=page))
         found = await gather(DayState(page="meetings", open=meeting), whole=False)
         if found.held is None:
             return refused(found.missing)
@@ -513,12 +520,12 @@ def router(service: Service) -> APIRouter:
             post = day.posted(body, day.local_now(vault()))
             page = day.page_of(body.page)
             if page == "meetings" or (page == "today" and await names_meeting(post)):
-                return await meeting_saved(post)
+                return await meeting_saved(post, page)
             if post.op not in ("set", "notes"):
                 raise DayStateError("a save sets a field of an item")
             if is_meeting(str(post.changes[0]["item"])):
                 raise DayStateError("a save here sets an item's field; a meeting's are saved on Meetings")
-            wrote = await service.writer.run(lambda: day.write(vault(), post.changes, bulk=False))
+            wrote = await service.writer.run(lambda: page_write(post.changes, bulk=False, page=page))
             item = str(post.changes[0]["item"])
             found = await gather(DayState(open=item), whole=False)
             if found.shown is None:
