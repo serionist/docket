@@ -16,8 +16,8 @@ from typing import Any
 
 import pytest
 from briefs_kit import brief
-from day_kit import LONG, RECORDING, SAME, OnTheDay, at, meeting, meetings_week, signed_in, today
-from docket_testkit import empty_vault, indexed, make_config, make_record, read_only
+from day_kit import LONG, RECORDING, SAME, OnTheDay, at, meeting, meetings_week, read_today, signed_in, today
+from docket_testkit import empty_vault, make_config, make_record
 from starlette.testclient import TestClient
 
 from docket import recall
@@ -54,10 +54,11 @@ def client(vault: Vault) -> Iterator[TestClient]:
         yield found
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def seen(tmp_path_factory: pytest.TempPathFactory) -> Vault:
-    """One copy, its index built, for the tests that only read: a write into it fails the run (DR-0531)."""
-    return Vault.open(read_only(indexed(tmp_path_factory, MEETINGS.template(tmp_path_factory))))
+    """The worker's shared copy of today's Meetings vault, its index built, for the tests that only read: a write into
+    it fails the run (DR-0531), and past midnight it is the next day's."""
+    return read_today(tmp_path_factory, MEETINGS.template(tmp_path_factory))
 
 
 @pytest.fixture

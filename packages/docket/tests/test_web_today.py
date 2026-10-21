@@ -17,8 +17,8 @@ from typing import Any
 
 import pytest
 import ui_world
-from day_kit import SAME, OnTheDay, add, at, day, meeting, meetings_week, signed_in, today
-from docket_testkit import empty_vault, indexed, make_config, read_only
+from day_kit import SAME, OnTheDay, add, at, day, meeting, meetings_week, read_today, signed_in, today
+from docket_testkit import empty_vault, make_config
 from starlette.testclient import TestClient
 
 from docket.ledger import day as ledger_day
@@ -92,10 +92,11 @@ def client(vault: Vault) -> Iterator[TestClient]:
         yield found
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def seen(tmp_path_factory: pytest.TempPathFactory) -> Vault:
-    """One copy, its index built, for the tests that only read: a write into it fails the run (DR-0531)."""
-    return Vault.open(read_only(indexed(tmp_path_factory, TODAY.template(tmp_path_factory))))
+    """The worker's shared copy of today's Today vault, its index built, for the tests that only read: a write into it
+    fails the run (DR-0531), and past midnight it is the next day's."""
+    return read_today(tmp_path_factory, TODAY.template(tmp_path_factory))
 
 
 @pytest.fixture

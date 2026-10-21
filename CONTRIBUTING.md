@@ -62,7 +62,8 @@ Three more of the kit's rules save setup without changing what a test sees (DR-0
 - A setup every test of a file repeats is a template too, built once per session and copied.
 - Tests that only read a vault share one copy in a module-scoped fixture, `read_only(template)`, or
   `read_only(indexed(factory, template))` where the first read would build the index; a write into it fails the run,
-  as a write into a template does.
+  as a write into a template does. A vault dated from today is shared per test through `read_today` in `day_kit.py`,
+  so a run past midnight reads the next day's.
 - The kit's own `sh()` and `git()` commit, merge and check out with the hooks off, as Docket's own commits do; a
   push keeps them, since git-lfs's pre-push sends the media, and a test about the user's hooks passes `hooks=True`.
 

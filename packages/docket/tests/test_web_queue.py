@@ -11,9 +11,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import day_kit
 import pytest
-from day_kit import SAME, ZONE, day, day_template, day_vault, signed_in, today
-from docket_testkit import empty_vault, indexed, make_config, read_only
+from day_kit import SAME, ZONE, day, day_template, day_vault, read_today, signed_in, today
+from docket_testkit import empty_vault, make_config
 from ledger_kit import ADD_FIELDS, op, write_ops
 from starlette.testclient import TestClient
 
@@ -41,11 +42,11 @@ def client(vault: Vault) -> Iterator[TestClient]:
         yield found
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def seen(tmp_path_factory: pytest.TempPathFactory) -> Vault:
-    """One copy of the day vault, its index built, for the tests that only read: a write into it fails the run
-    (DR-0531)."""
-    return Vault.open(read_only(indexed(tmp_path_factory, day_template(tmp_path_factory))))
+    """The worker's shared copy of today's day vault, its index built, for the tests that only read: a write into it
+    fails the run (DR-0531), and past midnight it is the next day's."""
+    return read_today(tmp_path_factory, day_template(tmp_path_factory))
 
 
 @pytest.fixture
@@ -88,6 +89,21 @@ def ops(vault: Vault) -> list[dict[str, Any]]:
 
 def write(vault: Vault, *changes: dict[str, Any]) -> store.Written:
     return store.write(vault, list(changes), by="user", via="cli")
+
+
+def test_past_midnight_a_reading_test_gets_the_next_day_s_shared_copy(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = read_today(tmp_path_factory, day_template(tmp_path_factory))
+    assert read_today(tmp_path_factory, day_template(tmp_path_factory)).root == first.root
+    after = today() + timedelta(days=1)
+    monkeypatch.setattr(day_kit, "today", lambda: after)
+    later = read_today(tmp_path_factory, day_template(tmp_path_factory))
+    assert later.root != first.root
+    # Its seed is dated from the new day, so the room is due on it, as a copy made that day has it.
+    for vault, on in ((first, after - timedelta(days=1)), (later, after)):
+        [room] = [o for o in ops(vault) if o["op"] == "add" and o["fields"]["title"] == "Book the room"]
+        assert room["fields"]["due"] == on.isoformat()
 
 
 # -- the list --------------------------------------------------------------------------------------------------------

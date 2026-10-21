@@ -14,7 +14,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
-from docket_testkit import copied, digest, empty_vault, make_config, shared
+from docket_testkit import copied, digest, empty_vault, indexed, make_config, read_only, shared
 from docket_webkit import OURS, PORT, TOKEN, parse
 from starlette.testclient import TestClient
 
@@ -163,6 +163,20 @@ class OnTheDay:
         vault = day_vault(folder, self.config())
         self.then(vault)
         return vault.root
+
+
+# The worker's read-only copy of each day's template, by the indexed template it copies.
+_READ_TODAY: dict[Path, Path] = {}
+
+
+def read_today(factory: pytest.TempPathFactory, template: Path) -> Vault:
+    """The worker's one read-only copy, its index built, of a day template, which the tests that only read share: a
+    write into it fails the run (DR-0531, DR-0779). Each test asks for it with the day's template, so a run that crosses
+    midnight reads the next day's, as a test's own copy takes the next day's template."""
+    made = indexed(factory, template)
+    if made not in _READ_TODAY:
+        _READ_TODAY[made] = read_only(made)
+    return Vault.open(_READ_TODAY[made])
 
 
 def _day_key(config: VaultConfig) -> str:
