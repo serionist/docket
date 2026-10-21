@@ -268,6 +268,19 @@ def test_the_self_check_leaves_a_port_that_answers_and_forgives_one_miss() -> No
     assert (check.failed, stopped, ended) == (False, [], [])
 
 
+def test_a_miss_after_serve_ended_stops_nothing() -> None:
+    def reach(_port: int, _timeout: float) -> bool:
+        check.close()
+        return False
+
+    stopped: list[str] = []
+    ended: list[int] = []
+    check = a_check(free_port(), stopped, ended, misses=1, reach=reach)
+    check.start()
+    check.thread.join(30)
+    assert (check.failed, stopped, ended) == (False, [], [])
+
+
 def test_the_self_check_reaches_a_listening_port_and_misses_a_closed_one() -> None:
     with socket.socket() as listening:
         listening.bind(("127.0.0.1", 0))
