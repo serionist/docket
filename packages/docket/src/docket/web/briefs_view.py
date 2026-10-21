@@ -55,7 +55,7 @@ class Facts:
     hidden_refs: frozenset[int] = frozenset()
     # A Decisions line citing no confirmed decision, from a brief stored before decisions came (DR-0565).
     unconfirmed: frozenset[int] = frozenset()
-    # A project, topic or stream with decisions and no brief: its name (DR-0566).
+    # A project, topic or stream with decisions and no brief: its name (DR-0781).
     entity_name: str | None = None
     # The list's waiting decisions: (entity id, name, how many), by name.
     waiting: tuple[tuple[str, str, int], ...] = ()

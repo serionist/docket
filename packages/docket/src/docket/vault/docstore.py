@@ -51,7 +51,7 @@ from docket.vault.spans import RawLookup, problem
 from docket.vault.vault import UnmergedError, Vault
 
 log = logging.getLogger(__name__)
-# A final decision's committed text, by its blob id: what every read of it takes (DR-0603), read once a process.
+# A final decision's committed text, by its blob id: what every read of it takes (DR-0782), read once a process.
 _BLOBS: dict[str, str] = {}
 BLOBS_KEPT = 1000
 # Docs' histories by the repo, its HEAD and its shallow mark, and the docs asked for: what git's log says for a commit
@@ -150,7 +150,7 @@ class DocStore:
 
     def get(self, doc_id: str) -> ProcessedDoc | None:
         """The doc as it is on disk, read leniently; None when there is no file. A decision as every read takes it: a
-        final one whole from its last commit, a proposed one with its status and links from it (DR-0603)."""
+        final one whole from its last commit, a proposed one with its status and links from it (DR-0782)."""
         path = self.file(doc_id)
         if not path.is_file():
             return None
@@ -192,7 +192,7 @@ class DocStore:
     def decide(
         self, doc_id: str, shown: int, pick: str, subject: str | None = None, *, via: Literal["page", "cli"] = "page"
     ) -> PutResult:
-        """The user's click on the Briefs page, or `docket decision set` on the owner's yes (DR-0603, DR-0566), and the
+        """The user's click on the Briefs page, or `docket decision set` on the owner's yes (DR-0782, DR-0781), and the
         only writer of a decision's status: the candidate's next rev, confirmed or rejected as `pick` says, written and
         committed under the vault's lock, its `by` and its commit saying who and where.
         Refused when it isn't a proposed decision, its file says otherwise than its last commit, or a never-store list
@@ -665,7 +665,7 @@ class DocStore:
     def _hand_edit(self, edited: ProcessedDoc, text: str, last: str | None) -> derived.HandEdit:
         """A hand edit as `derived.hand_edit` reads it, and for a brief or a decision its own stops too: one that names
         a listed person stays on disk, as one that says a keyword does (DR-0558), and so does one that changes a
-        decision's status or links, or a confirmed or rejected decision at all (DR-0603), or one that adds a brief's
+        decision's status or links, or a confirmed or rejected decision at all (DR-0782), or one that adds a brief's
         Decisions line no current decision backs (DR-0565)."""
         edit = derived.hand_edit(edited.meta.type, text, last, self.redactor, self.lists)
         if edited.meta.type == "brief":

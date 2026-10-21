@@ -244,7 +244,7 @@ same result on any day.
 | Feature | How it works | Phase |
 |---|---|---|
 | Briefs | a processed doc per entity, `brief:<entity id>`: what changed, the last conversations, the decisions, in three fixed sections, every line cited (DR-0555); stale when its entity's records sit in run files its last rev's tree lacks, or a line is flagged (DR-0556); never for a listed entity, never naming a listed person (DR-0558); rebuilt by the brief skill when the user asks. Open items wait for the ledger, and a brief before each meeting for the calendar's meetings (phase 3) | 2 |
-| Decision log | a processed doc per decision, `decision:<yyyy-mm-dd>-<words>`, on a project, topic or stream entity (DR-0563): Claude proposes candidates with the decision skill; only the user confirms or rejects one, by their click on the Briefs page or their word in chat, which Claude writes with `docket decision set`, and every read takes a decision's status from git (DR-0603); a proposed one never reads as decided, and a brief's Decisions cite current decisions only (DR-0565); a contradiction is marked, never resolved by the machine; a later decision supersedes an earlier one, and history stays | 2 |
+| Decision log | a processed doc per decision, `decision:<yyyy-mm-dd>-<words>`, on a project, topic or stream entity (DR-0563): Claude proposes candidates with the decision skill; only the user confirms or rejects one, by their click on the Briefs page or their word in chat, which Claude writes with `docket decision set`, and every read takes a decision's status from git (DR-0782); a proposed one never reads as decided, and a brief's Decisions cite current decisions only (DR-0565); a contradiction is marked, never resolved by the machine; a later decision supersedes an earlier one, and history stays | 2 |
 | Own documents | the work folder and attachments, read-only, so search covers what was written next to what was said: `docket scan` reads a folder source's docx, xlsx, pptx, pdf, md and txt as text, by page, slide and sheet (DR-0480) | 1 |
 | Highlights | a recorder's highlight button and later a hotkey; marked stretches go to the top of the minutes | 1 |
 | Secrets | never in the vault; a keychain-backed `docket secret`, never indexed or sent to a model unless asked for by name | 2 |
@@ -774,6 +774,15 @@ How it is built (DR-0170 to DR-0175, DR-0546), and where it is going (#252, DR-0
   page scrolls to, and Search's transcript hits link to it (DR-0776). With the audio stored a line's time plays it
   from there, by byte range from `/api/web/recording/audio` for the browser's session only, and Whisper's transcript
   sits beside the recorder's; with none it says why (DR-0777).
+- The Briefs page lists the briefs by entity type with their state, rev, age, flagged lines and new records, the
+  entities with decisions waiting first, over `/api/web/briefs`; a brief opens with its lines, and a line's raw opens
+  in the panel beside it, the doc lines it cites followed one level. Its URL holds `brief`, `line` and `type`, and a
+  link that sets `line` ends in `#raw` (DR-0780). A brief a never-store list now holds answers hidden, and a line a
+  list now names opens nothing (DR-0558). A project's, topic's or stream's page shows its decisions: what waits with
+  what it contradicts, then what is decided, superseded ones folded. A pick is the app's JSON write to
+  `/api/web/briefs/decision`, which writes a decision's status as `docket decision set` does, on the writer thread
+  and checked against the rev the page showed; a decision that moved since is refused with 409 and the page reads
+  itself again (DR-0781, DR-0782).
 - A page not moved yet is its Jinja page, as below.
 - Pages rendered by the service with Jinja2, parts of them swapped by htmx; every state is a URL that renders without
   JavaScript, and the navigation shows every page above with its phase.
@@ -806,13 +815,6 @@ How it is built (DR-0170 to DR-0175, DR-0546), and where it is going (#252, DR-0
   already stored holds it, the second adds it if `vault.yaml` is still the file the view counted; the value travels
   in the posts' bodies only (DR-0508, DR-0509, DR-0602).
   The Claude API key and a spend cap come with the features they set.
-- The Briefs page lists the briefs by entity type with their state, rev, age, flagged lines and new records, and
-  opens one beside the raw its chosen line cites, the doc lines it cites followed one level (DR-0557). Its URL
-  holds `brief`, `line` and `type`. A brief a never-store list now holds answers hidden, and a line a list now
-  names opens nothing (DR-0558). A project's, topic's or stream's page shows its decisions: what waits beside
-  what it contradicts, then what is decided, superseded ones folded. Its buttons post to `/briefs/decision`,
-  which writes a decision's status as `docket decision set` does, on the writer thread and checked against the rev
-  the page showed (DR-0603, DR-0566).
 - The day pages, Today, the Queue, the Ledger and Meetings, are the React app's. They read the ledger beside the writer through the `ledger`
   tool's reads and two of their own, `matching` and `batch_lines`, and write only through the ledger's writer: each
   button one batch, by user, via page, answered with a notice with Undo, a bulk through a dry run, a refusal shown

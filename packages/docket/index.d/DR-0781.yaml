@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0781
+    title: The Briefs page shows an entity's decisions and takes the owner's pick as a JSON write at the rev shown, refused with 409 when the decision moved
+    status: proposed
+    at: "2026-10-21"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#252", "#162"]
+    supersedes: [DR-0566]
+    description: "DR-0566's part, in the app (#252). A brief's page for a project, topic or stream entity shows its decisions newest first: Waiting for you, the proposed ones, those that contradict a decision first, each with the decision it contradicts or would replace under it; Decided, each current one with what it superseded folded under it and a rejected candidate that contradicted it; Rejected, folded. A proposed decision is never among the decided (DR-0565). An entity with decisions and no brief opens at its brief URL with them (No brief yet); one with neither says there is no brief, unless DR-0558's rule answers it hidden. The list names each entity with decisions waiting. Each candidate's picks are buttons: Confirm and Reject, or for one that contradicts a decision the three picks, the new one replaces it, the old one stands, or not a contradiction. A pick is a JSON write, POST /api/web/briefs/decision, with the browser's session only: a request carrying Authorization refused, the body checked before any route reads it, the write the Guard's same-origin one (DR-0709, DR-0152). Its body is the page's brief, the decision's id, the rev the page showed and the pick, and nothing else. It runs on the writer thread through DocStore.decide, which checks again that the decision is proposed, on the page's entity, unedited on disk, at the rev shown, with every replaces and contradicts target still confirmed and current, and writes the candidate's next rev by the owner on the Briefs page (DR-0782). It answers the pick, the words the page says at the list's foot and the new rev; a moved decision or target writes nothing and answers 409 with why, a pick DocStore refuses answers 400 with its words, and either way the page reads itself again, so it shows the decision as it stands: of two candidates replacing one decision the first pick wins, and a pick another tab made first is refused, not written over. The buttons wait for the answer, and the focus goes to the Decisions heading."
+    binds:
+      - The route POST /api/web/briefs/decision, its body's four keys and the URL parameter done join the page's door (DR-0780).
+      - "The token never picks: the route refuses Authorization."
+    not_chosen:
+      - "A same-origin form post answered 303, as DR-0566 had: the page is the app's now, and its writes are JSON (DR-0709)."
+      - "The page as it stands in a 409's answer: the page reads itself again after every pick, so one read builds it."

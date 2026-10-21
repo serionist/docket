@@ -884,7 +884,7 @@ Queue, the Ledger, Meetings, Search, Recording, Briefs, Sync, Staging, Curate an
 pages still to come, with the phase each arrives in.
 
 The pages are moving, one by one, into a new app built in React; the day pages, Today, the Queue, the Ledger and
-Meetings, are its first, then Search and the Recording page. Its shell is the sidebar with
+Meetings, are its first, then Search, the Recording page and Briefs. Its shell is the sidebar with
 what waits at the gate and whether a sync is due, the theme and keys switches at its foot, the list and the open item
 beside it; `/design` shows its parts on invented data. It comes built with Docket; nothing to install.
 
@@ -928,24 +928,26 @@ beside it; `/design` shows its parts on invented data. It comes built with Docke
 
 ### The Briefs page
 
-`/briefs` lists the briefs, and opens one beside the raw its lines cite (DR-0557). The `brief` skill writes briefs
-when you ask Claude; the page's one write is your click on a decision (DR-0566).
+`/briefs` lists the briefs, and opens one with the raw its lines cite beside it (DR-0780). The `brief` skill writes
+briefs when you ask Claude; the page's one write is your pick on a decision (DR-0781).
 
 | Part | Shows |
 |---|---|
-| The list | the briefs by entity type: each one's state (stale, current or orphaned), rev, how long since, flagged lines and new records; an orphan with the entity that holds its name now |
+| The list | the decisions waiting for you first, then the briefs by entity type: each one's state (stale, current or orphaned), rev, how long since, flagged lines and new records; an orphan with the entity that holds its name now |
 | A brief | its lines, a flagged one marked, each line that cites something a link; its anchors open the Recording page at their time, or the Search page |
-| A line | the raw it cites, and the doc lines it was built from as they read now, with their own raw |
-| Decisions | for a project, topic or stream: what waits for you, each beside a decision it contradicts, with its buttons; then what is decided, newest first, what it replaced folded under it; then what you rejected |
+| A line | in the panel beside the brief: the raw it cites, and the doc lines it was built from as they read now, with their own raw |
+| Decisions | for a project, topic or stream: what waits for you, each with a decision it contradicts, and its buttons; then what is decided, newest first, what it replaced folded under it; then what you rejected |
 
 - Its URL holds `brief` (`brief:<entity id>`), `line` and `type` (an entity type, or `orphaned`). A link that sets
-  `line` lands on its raw, without JavaScript.
+  `line` ends in `#raw` and opens the line's raw.
 - A decision's buttons: Confirm or Reject; for one that contradicts a decision, the new one replaces it, the old
-  one stands, or not a contradiction. Each is a plain form post: the page as it was when you clicked is what
-  counts, so a decision that changed since, or one whose earlier decision was replaced meanwhile, writes nothing.
+  one stands, or not a contradiction. The decision as the page showed it is what counts: one that changed since,
+  such as one you settled in another tab, or one whose earlier decision was replaced meanwhile, writes nothing, says
+  why, and shows as it stands now. Only your session picks: the token never does.
 - A brief whose entity a never-store list now holds shows only that it is hidden, and is counted on the list; a
   line a list now names shows only that it is hidden, and opens nothing.
-- Keys: `?`.
+- Keys: `j` and `k` through the briefs, or a brief's lines that cite, the open raw following; `o` opens; `Esc`
+  closes the raw; `?`.
 
 ### The Today page
 

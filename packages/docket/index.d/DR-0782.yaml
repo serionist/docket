@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0782
+    title: A decision's status changes through DocStore.decide, from the Briefs page's pick or from docket decision set, run by the owner or by Claude after the owner's OK
+    status: proposed
+    at: "2026-10-21"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#252", "#191"]
+    supersedes: [DR-0603]
+    description: "docket decision set <id> <pick> --rev <n> [--vault], the pick confirm, reject, replace, stand or unrelated, calls DocStore.decide as the Briefs page's pick does (DR-0781), with the same checks: a proposed decision, unedited on disk, at the rev given, every replaces and contradicts target still confirmed and current, its subject not held by a never-store list. Its by is \"<owner>, Briefs page\" from the page, \"<owner>, command line\" from the owner's terminal and \"Claude, with <owner>'s OK\" from Claude Code's shell; the commit Decision: <id> <status> carries DR-0599's line. The decision skill asks for the pick in chat and runs the command on the owner's word, or gives the page's link. The page's pick is the app's JSON write, which takes the browser's session only, as every /api/web write does (DR-0709), so the token's way to a pick is the command. The rest of DR-0564 stands: doc_put refuses any status but proposed and refuses supersedes; the take-in refuses a hand edit of a status or a link; a final decision is read from its last commit; DocStore.decide is the only writer of a status, called only by the page's route and the command, which a test scans for."
+    not_chosen:
+      - "A new MCP tool or parameter: the decisions tool is a door (DR-0565), and the CLI does it."
+      - "A status through doc_put: it would skip the rev and target checks decide makes."
+      - "The page's write taking the token, as DR-0603 let the form post: the command is the token's way, and a page's route takes the session only (DR-0709)."
