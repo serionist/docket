@@ -765,14 +765,20 @@ How it is built (DR-0170 to DR-0175, DR-0546), and where it is going (#252, DR-0
   point buttons and its outcome and notes write through the same routes (DR-0768 to DR-0770). Today, the start page
   `/` goes to, reads the day as `docket ledger day` does over `/api/web/today`, with the items' calls on its due rows
   and either panel; its poll sees a sync as it sees a write (DR-0773, DR-0774).
+- Search reads its results and the open hit's panel apart, over `/api/web/search` and its panel, so a hit opened or
+  moved asks no new search; its URL holds the `search` tool's parameters under their names, so Claude can link to its
+  hits, and its keys and live region are as they were (DR-0174, DR-0775). A hit opens beside the results, its raw read
+  with `around` above the summary covering it, and verify pairs each line with its raw.
+- The Recording page puts a recording's summary beside its transcript, each anchor a link that marks the lines it
+  points at (DR-0545). Its URL holds `rid`, `doc` and `at`; a link that sets `at` lands on the marked line, which the
+  page scrolls to, and Search's transcript hits link to it (DR-0776). With the audio stored a line's time plays it
+  from there, by byte range from `/api/web/recording/audio` for the browser's session only, and Whisper's transcript
+  sits beside the recorder's; with none it says why (DR-0777).
 - A page not moved yet is its Jinja page, as below.
 - Pages rendered by the service with Jinja2, parts of them swapped by htmx; every state is a URL that renders without
   JavaScript, and the navigation shows every page above with its phase.
 - htmx, the fonts and the icons are files in the package, served under `/static/`; nothing comes from the network,
   so the app works offline, under a CSP that allows no inline script or style and no eval.
-- The Search page's URL holds the `search` tool's parameters under their names, so Claude can link to its hits; a
-  hit opens beside the results, its summary next to its raw, read with `around`, and verify pairs each line with its
-  raw.
 - The user's words stay out of the browser's storage: pages aren't cached, and the browser keeps only the theme and
   the keys switch.
 - The Sync page only reads (DR-0300): what needs a Claude session or the user first, by `run_open`'s own checks and
@@ -800,10 +806,6 @@ How it is built (DR-0170 to DR-0175, DR-0546), and where it is going (#252, DR-0
   already stored holds it, the second adds it if `vault.yaml` is still the file the view counted; the value travels
   in the posts' bodies only (DR-0508, DR-0509, DR-0602).
   The Claude API key and a spend cap come with the features they set.
-- The Recording page puts a recording's summary beside its transcript, each anchor a link that marks the lines it
-  points at (DR-0545). Its URL holds `rid`, `doc` and `at`; its links are plain links that land on the marked line,
-  so it works without JavaScript, and Search's transcript hits link to it (DR-0544). With no audio it says why; the
-  player and the second transcript's column come with media (#42) and Whisper (#158).
 - The Briefs page lists the briefs by entity type with their state, rev, age, flagged lines and new records, and
   opens one beside the raw its chosen line cites, the doc lines it cites followed one level (DR-0557). Its URL
   holds `brief`, `line` and `type`. A brief a never-store list now holds answers hidden, and a line a list now

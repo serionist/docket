@@ -1,4 +1,4 @@
-"""The Recording page's URL (DR-0544): which recording, which doc beside it, and where in it.
+"""The Recording page's URL (DR-0776): which recording, which doc beside it, and where in it.
 
 | Parameter | What | Default |
 |---|---|---|

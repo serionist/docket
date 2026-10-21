@@ -124,7 +124,7 @@ class HitPanel(BaseModel):
     verify: str | None = None
     verify_label: str = ""
     error: str = ""
-    # The open recording or transcript on the Recording page, at the hit's time (DR-0544).
+    # The open recording or transcript on the Recording page, at the hit's time (DR-0776).
     recording: str | None = None
 
 

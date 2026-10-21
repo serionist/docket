@@ -1,11 +1,12 @@
 decisions:
   - id: DR-0544
     title: The Recording page's URL holds rid, doc and at, and its links are plain links that land on the line at marks
-    status: proposed
+    status: superseded
     at: "2026-10-17"
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#159"]
+    superseded_by: [DR-0776]
     description: "/recording takes rid (a recording's or a transcript's rid; a locator such as r:<rid>@02:30 reads too, its time read as at), doc (the doc shown as the summary, by its id; by default the summary search attaches, else a legacy note covering the recording) and at (a time or a stretch as an anchor writes it after the @: 02:30, 02:30-03:20). One canonical form: that order, defaults left out, unknown parameters ignored; without a rid the page is its start, a form that takes a rid or a locator. A malformed value is the page's own error with 400; a rid the raw log doesn't hold, or a record that isn't a recording, is 404; a held rid says so with 200. Every link on the page is a plain link: a summary line's anchor and a transcript line's time open the same page with at, and a link that sets at ends in #at, the id the page gives the first line at marks, so the browser scrolls there without JavaScript. The Search page's transcript hits, and its panel on a recording or a transcript, link here at the hit's stretch. Medium: Claude's links and bookmarks depend on it."
     binds:
       - Parameters only gain optional ones whose default keeps today's meaning, so a bookmark or a link from Claude keeps opening.

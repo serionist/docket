@@ -109,7 +109,7 @@ class HitLine(BaseModel):
     also: list[str]
     # The search with this hit open beside the results.
     url: str
-    # A transcript hit opens on the Recording page too, at its stretch (DR-0544).
+    # A transcript hit opens on the Recording page too, at its stretch (DR-0776).
     recording: str | None = None
 
 

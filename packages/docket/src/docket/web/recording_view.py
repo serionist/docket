@@ -37,7 +37,7 @@ from docket.web.recording_state import RecordingState, time_at
 from docket.web.state import SearchState
 
 Mode = Literal["start", "recording", "held", "missing", "other"]
-# The player's source: the stored audio, by byte range, for the browser's session only (DR-0576, DR-0709).
+# The player's source: the stored audio, by byte range, for the browser's session only (DR-0777, DR-0709).
 AUDIO_PATH = "/api/web/recording/audio"
 
 # Why there is no audio to play, each with the sentence the page says: the media reader's states (DR-0551), and

@@ -1,5 +1,5 @@
 /**
- * /recording (DR-0544's URL kept, DR-0545, DR-0776): a recording's summary beside its transcript. The URL holds the
+ * /recording (DR-0545, DR-0776): a recording's summary beside its transcript. The URL holds the
  * rid, the doc shown and the time `at` marks; a link that sets `at` ends in #at, and the page scrolls to the line it
  * marks. A summary line's anchor marks the lines it points at; a line's time plays the stored audio from there, which
  * the player fetches by byte range for the browser's session only (DR-0777). A held recording shows only that it is

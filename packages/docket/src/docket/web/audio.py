@@ -1,4 +1,4 @@
-"""The Recording page's audio (#159, DR-0576): the stored file, decrypted through the one reader (DR-0551) and served
+"""The Recording page's audio (#159, DR-0777): the stored file, decrypted through the one reader (DR-0551) and served
 with byte ranges, so the browser's player seeks to a line's time.
 
 | Request | Answer |

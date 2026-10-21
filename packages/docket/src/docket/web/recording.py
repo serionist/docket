@@ -1,5 +1,5 @@
 """The Recording page's reads under /api/web (DR-0709): the recording its URL names, and its stored audio for the
-page's player (DR-0576).
+page's player (DR-0777).
 
 | Route | What |
 |---|---|
@@ -171,7 +171,7 @@ def router(service: Service) -> APIRouter:
 
     @api.api_route("/recording/audio", methods=["GET", "HEAD"], include_in_schema=False)
     async def recording_audio(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
-        """The recording's stored audio for the page's player (#159, DR-0576): only while the reader says ok, read
+        """The recording's stored audio for the page's player (#159, DR-0777): only while the reader says ok, read
         again on every request; decrypted through it, kept a minute for the next range; served by byte range with no
         caching. The browser's session only, as every /api/web route: the token never fetches it. Nothing of it is
         logged."""

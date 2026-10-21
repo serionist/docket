@@ -302,6 +302,10 @@ Unreleased in the same PR.
 
 ### Changed
 
+- Search and the Recording page move into the web app's shell. Search keeps its box, its URL, so Claude's links and
+  your bookmarks open as before, and its keys; its facets are menus over the results, the words it found are
+  highlighted, and with a hit open `j` and `k` carry it along. The Recording page plays a line from its time as
+  before, keeps the address on the line, and scrolls to the line a link marks. Both pages now need JavaScript.
 - A write starts about half the git processes it did, which on Windows is most of its time: a commit is the add and
   the commit, the unmerged paths come from git's index file, the committed files a command reads come through one
   `git cat-file --batch`, and a ledger write asks one status. Whether git has your identity is asked once a command,
