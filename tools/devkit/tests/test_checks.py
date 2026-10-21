@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import platform
+import re
 import tempfile
 import threading
 from collections.abc import Callable
@@ -145,16 +146,37 @@ def test_a_floor_below_the_base_s_needs_a_decided_decision_that_sets_it() -> Non
     assert coverage.guard({"kit": 85}, base, named, {LOWERS: _decision("proposed", sets)}) == [
         f"{lowered}, and {LOWERS} is proposed, not decided: only the owner lowers a floor"
     ]
-    # A decided decision passes only when it says the module and the number it sets.
-    for other in ("app at 85%", "kit at 88%", "kit at 185%", "kit at 0.85%"):
+    # A decided decision passes only when it says the module's new floor: the module and a number apart set none.
+    apart = "fewer kit processes in the tests, and the floor comes down only for a cut of 85% or more"
+    for other in ("app at 85%", "kit at 88%", "kit at 185%", "kit at 0.85%", apart):
         assert coverage.guard({"kit": 85}, base, named, {LOWERS: _decision("decided", other)}) == [
             f"{lowered}, and {LOWERS} doesn't say kit at 85%"
         ]
     assert coverage.guard({"kit": 85}, base, named, {LOWERS: _decision("decided", sets)}) == []
-    binds = {**_decision("decided", "the reader goes"), "binds": ["kit's floor is 85%."]}
+    binds = {**_decision("decided", "the reader goes"), "binds": ["The kit's floor to 85%."]}
     assert coverage.guard({"kit": 85}, base, named, {LOWERS: binds}) == []
+    # The base's own $lowered covers its own lowering, not another: a gain earned since can't go back unseen.
+    assert coverage.guard({"kit": 85}, base, named, {LOWERS: _decision("decided", sets)}, named) == [
+        f"{lowered}, and {LOWERS} lowered it before: name the decided decision that sets it now"
+    ]
     # Without a base, as on main itself, nothing is held.
     assert coverage.guard({"kit": 85}, None, {}, {}) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "said"),
+    [
+        ("{", "isn't valid JSON"),
+        ("[90]", "holds an object"),
+        ('{"kit": "90"}', "kit's floor is a whole percentage, not '90'"),
+        ('{"kit": true}', "kit's floor is a whole percentage, not True"),
+        ('{"kit": 90, "$lowered": "DR-nnnn"}', "$lowered maps a module to the decision"),
+        ('{"kit": 90, "$lowered": {"kit": 7}}', "$lowered maps a module to the decision"),
+    ],
+)
+def test_a_floors_file_in_another_shape_fails_as_a_gate_line(text: str, said: str) -> None:
+    with pytest.raises(KitError, match=re.escape(said)):
+        coverage.parse(text)
 
 
 def test_the_floors_are_held_to_the_merge_base_s_and_the_decision_read_from_the_docs(
@@ -169,7 +191,7 @@ def test_the_floors_are_held_to_the_merge_base_s_and_the_decision_read_from_the_
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "Floors")
     base = git(repo, "rev-parse", "HEAD").strip()
-    assert coverage.base_floors(repo, base) == {"app": 100, "kit": 90}
+    assert coverage.base_floors(repo, base) == ({"app": 100, "kit": 90}, {})
     floors.write_text(json.dumps({"app": 100, "kit": 95}), encoding="utf-8")
     assert coverage.check_lowered(repo, base) == []
     floors.write_text(json.dumps({"app": 100, "kit": 85}), encoding="utf-8")
@@ -181,7 +203,7 @@ def test_the_floors_are_held_to_the_merge_base_s_and_the_decision_read_from_the_
     entry = repo / "tools" / "devkit" / "index.d" / f"{LOWERS}.yaml"
     entry.parent.mkdir()
     text = (
-        f"decisions:\n  - id: {LOWERS}\n    title: The kit's floor comes down to 85%\n    status: {{status}}\n"
+        f"decisions:\n  - id: {LOWERS}\n    title: The kit's floor to 85%\n    status: {{status}}\n"
         '    at: "2026-10-21"\n    by: Ada Example\n    cost: cheap\n    description: The old reader goes.\n'
     )
     entry.write_text(text.format(status="proposed"), encoding="utf-8")

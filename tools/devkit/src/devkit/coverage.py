@@ -13,7 +13,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from devkit.regime import Regime
 from devkit.repo import KitError, git
@@ -96,34 +96,53 @@ def missing(report: dict[str, Any], modules: set[str]) -> list[str]:
     return out
 
 
-def parse(text: str) -> tuple[dict[str, int], dict[str, str]]:
-    """(the floors per module, the decision `$lowered` names per module) from the file's text."""
-    data: Any = json.loads(text)
-    floors = {str(k): int(v) for k, v in data.items() if not str(k).startswith("$")}
-    named: Any = data.get(LOWERED) or {}
-    return floors, {str(k): str(v) for k, v in named.items()}
+def parse(text: str, where: str = FLOORS) -> tuple[dict[str, int], dict[str, str]]:
+    """(the floors per module, the decision `$lowered` names per module) from the file's text. A file in another shape
+    fails as a gate line, not a traceback."""
+    try:
+        data: Any = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise KitError(f"{where} isn't valid JSON: {e}") from e
+    if not isinstance(data, dict):
+        raise KitError(f"{where} holds an object: each module's floor, in whole percent")
+    items = cast(dict[str, Any], data)
+    floors: dict[str, int] = {}
+    for module, value in items.items():
+        if module.startswith("$"):
+            continue
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise KitError(f"{where}: {module}'s floor is a whole percentage, not {value!r}")
+        floors[module] = value
+    named: Any = items.get(LOWERED, {})
+    if not isinstance(named, dict) or not all(isinstance(v, str) for v in cast(dict[str, Any], named).values()):
+        raise KitError(
+            f'{where}: {LOWERED} maps a module to the decision that lowered its floor, as {{"devkit": "DR-nnnn"}}'
+        )
+    return floors, dict(cast(dict[str, str], named))
 
 
 def load_floors(root: Path) -> dict[str, int]:
     return parse((root / FLOORS).read_text(encoding="utf-8"))[0]
 
 
-def base_floors(root: Path, base: str) -> dict[str, int] | None:
-    """The floors as the merge base has them, or None before the file existed. A base this clone can't read fails:
-    a shallow checkout would otherwise pass every lowered floor."""
+def base_floors(root: Path, base: str) -> tuple[dict[str, int], dict[str, str]] | None:
+    """The floors and `$lowered` as the merge base has them, or None before the file existed. A base this clone can't
+    read fails: a shallow checkout would otherwise pass every lowered floor."""
     if not git(root, "rev-parse", "--verify", "--quiet", f"{base}^{{commit}}", check=False).strip():
         raise KitError(f"can't read the merge base {base}, whose floors these are held against: fetch its history")
     if not git(root, "ls-tree", "--name-only", base, "--", FLOORS, check=False).strip():
         return None
-    return parse(git(root, "show", f"{base}:{FLOORS}"))[0]
+    return parse(git(root, "show", f"{base}:{FLOORS}"), f"{FLOORS} at {base}")
 
 
 def sets(entry: Mapping[str, Any], module: str, floor: int) -> bool:
-    """Whether a decision's text names the module and the floor as a percentage, as `devkit at 85%`."""
+    """Whether a decision's title, description or binds say the module's new floor in so many words: `devkit at 85%`,
+    or `devkit's floor at 85%` or `to 85%`. A module and a number apart, as a cut of 80% beside docket's processes,
+    set no floor."""
     binds: list[Any] = list(entry.get("binds") or [])
     text = " ".join([str(entry.get("title") or ""), str(entry.get("description") or ""), *map(str, binds)])
-    named = re.search(rf"\b{re.escape(module)}\b", text) is not None
-    return named and re.search(rf"(?<![\d.]){floor}%", text) is not None
+    said = rf"\b{re.escape(module)}\b(?:['\u2019]s floor)?\s+(?:at|to)\s+{floor}%"
+    return re.search(said, text) is not None
 
 
 def guard(
@@ -131,9 +150,11 @@ def guard(
     base: dict[str, int] | None,
     named: dict[str, str],
     decisions: Mapping[str, Mapping[str, Any]],
+    base_named: dict[str, str] | None = None,
 ) -> list[str]:
     """A failure for each floor below the base's whose module `$lowered` doesn't name a decided decision that sets
-    the new number: only the owner decides one, so only the owner lowers a floor."""
+    the new number: only the owner decides one, so only the owner lowers a floor. The base's own `$lowered` doesn't
+    cover another lowering, so a gain earned since can't be given back unseen."""
     out: list[str] = []
     for module, floor in sorted(floors.items()):
         old = (base or {}).get(module)
@@ -144,6 +165,8 @@ def guard(
         entry = decisions.get(ident) if ident else None
         if ident is None:
             out.append(f"{lowered}; name the decided decision that sets it under {LOWERED} in {FLOORS} (DR-0755)")
+        elif ident == (base_named or {}).get(module):
+            out.append(f"{lowered}, and {ident} lowered it before: name the decided decision that sets it now")
         elif entry is None:
             out.append(f"{lowered}, and {ident}, which {LOWERED} names, isn't a decision")
         elif entry.get("status") != "decided":
@@ -158,8 +181,8 @@ def check_lowered(root: Path, base: str | None) -> list[str]:
     if base is None:
         return []
     floors, named = parse((root / FLOORS).read_text(encoding="utf-8"))
-    old = base_floors(root, base)
-    if old is None or all(floors.get(m, f) >= f for m, f in old.items()):
+    then = base_floors(root, base)
+    if then is None or all(floors.get(m, f) >= f for m, f in then[0].items()):
         return []
     decisions = {loc.key: loc.entry for loc in Store.load(Regime.load(root)).entries("decisions")}
-    return guard(floors, old, named, decisions)
+    return guard(floors, then[0], named, decisions, then[1])
