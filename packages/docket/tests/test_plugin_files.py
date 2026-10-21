@@ -455,7 +455,7 @@ def test_every_agent_goes_through_the_open_items_its_people_are_in_for_evidence_
         assert "a message sent, a call held, a file or a link shared, an answer given" in step, name
         assert "plan or a promise to do it isn't evidence" in step, name
         assert "Evidence found: a CLOSES line, `done`, or `moot`" in step and "None found: nothing" in step, name
-        assert "| CLOSES | the open or snoozed items the closes pass, step" in prompt, name
+        assert "| CLOSES | the open or snoozed items the closes pass finds done or moot |" in prompt, name
     assert "This call is itself the evidence for an item asking for it to be held" in texts["recording.md"]
     skill = texts["SKILL.md"]
     assert skill.count("for evidence they were done") == 2

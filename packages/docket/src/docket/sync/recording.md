@@ -51,7 +51,7 @@ Its meetings by time: {MEETINGS}.
 |---|---|
 | OWED | each ask of the owner since {OWED_SINCE} where the ball is in their court: a question, a review, a decision, a file, an intro, a promise they made; left out when they answered it in the call. A promise whose speaker is a guess says so |
 | WAITING | what the owner asked others for and still waits on |
-| CLOSES | the open or snoozed items the closes pass, step 3, finds done or moot |
+| CLOSES | the open or snoozed items the closes pass finds done or moot |
 | STREAMS | where a stream stands, its next step or its deadline, when the call changed that |
 | MINUTES | its meeting's open points the call answers, each by its point id |
 | OUTCOME | its meeting's outcome: what was decided, who does what |

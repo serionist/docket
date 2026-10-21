@@ -122,14 +122,18 @@ def legacy(slug: str, covers: list[str]) -> str:
 
 def test_a_legacy_note_counts_as_a_recording_s_note_and_the_summary_names_a_sync_s_note_first(vault: Vault) -> None:
     """A note from before Docket, tied to the recording by its import, is its note: the fourth rehearsal read two such
-    recordings again (#286). Where an agent's note covers it too, that note is the one the summary names."""
+    recordings again (#286). One on a record under the recording counts as one on the recording does. Where an agent's
+    note covers it too, that note is the one the summary names."""
+    vault.write_run("plaud", call(CALL, "Sensor quote", CALL_SAID, 19, "transaction_polish"))
     recall.doc_put(vault, legacy("pilot-weekly", [WEEKLY]))
-    recall.doc_put(vault, legacy("pilot-kickoff", [f"{NOTED}/transaction_polish"]))
+    recall.doc_put(vault, legacy("sensor-quote", [f"{CALL}/transaction_polish"]))
+    recall.doc_put(vault, legacy("pilot-kickoff", [NOTED]))
     started = start.start(vault, [], NOW)
     wave = recordings.recordings(vault, started.info.sync, "plaud", AT)
     assert (wave.given, recordings.lines(wave)) == ([], ["no recording of plaud to read now"])
-    assert index_build.noted(vault, [WEEKLY, NOTED]) == {
-        WEEKLY: "legacy-note:pilot-weekly", NOTED: "recording-note:2026-10-18-pilot-kickoff",
+    assert index_build.noted(vault, [WEEKLY, CALL, NOTED]) == {
+        WEEKLY: "legacy-note:pilot-weekly", CALL: "legacy-note:sensor-quote",
+        NOTED: "recording-note:2026-10-18-pilot-kickoff",
     }  # fmt: skip
 
 

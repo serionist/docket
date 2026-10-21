@@ -90,7 +90,7 @@ recording; its recordings' agents do.
 | OWED | each ask of the owner since {OWED_SINCE} where the ball is in their court: a question, a review, a decision, a file, an intro, a promise they made; left out when they answered it, here or anywhere else you can see. A promise whose speaker is a guess says so |
 | INVITES | an invite still waiting for the owner's answer, only when it matters: a new series since the window's start, a customer's meeting, or a clash with a meeting the owner accepted, never with focus time or the owner's own blocks, whose organiser is the owner. A calendar reports such an event with no response; mail adds the invite mails that matter. No response alone is the normal state for an owner who rarely answers, and gets no line |
 | WAITING | what the owner asked others for and still waits on |
-| CLOSES | the open or snoozed items the closes pass, step 6, finds done or moot |
+| CLOSES | the open or snoozed items the closes pass finds done or moot |
 | MEETINGS | a meeting's `response` and `attendees`, and `start` and `end` for a move seen only in mail; a calendar's records make and move meetings themselves |
 | STREAMS | where a stream stands, its next step or its deadline, when that changed |
 | LEARNED | what differs from the source's `SKILL.md` (the route) or `sync.md` (the rest), for next time |
