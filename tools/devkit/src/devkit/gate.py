@@ -400,15 +400,15 @@ def step_tests(ctx: Ctx) -> Outcome:
         # Windows and macOS run what can differ by system, the smoke set and the timed tests on every PR, and the rest
         # nightly (DR-0754). The selection comes before the share, so the shares split the selected files.
         pytest.append("--select=system")
-    # The timed tests on big vaults and the tests that build those vaults wait for the nightly, which passes --all; no
-    # line runs only in them (DR-0757).
-    later = "" if ctx.whole else f" and not {NIGHTLY}"
+    if not ctx.whole:
+        # The timed tests on big vaults and the tests that build those vaults wait for the nightly, which passes --all;
+        # no line runs only in them. A file whose every test waits leaves the split too, the same in both runs of a
+        # share, so the shares balance on what a PR runs (DR-0757).
+        pytest.append(f"--leave-out={NIGHTLY}")
     # One worker per core: most of the time goes to git subprocesses that would otherwise wait on each other.
     cmd = [*pytest, "-n", "auto", f"--durations={SLOWEST}", *_times(ctx, spec, "tests")]
     env: dict[str, str] = {}
     if covered:
-        if later:
-            cmd += ["-m", f"not {NIGHTLY}"]
         # The question set's test writes its numbers there, for the eval floors (DR-0295).
         env[evalfloors.REPORT_ENV] = str(numbers)
         if ctx.shard is not None:
@@ -417,16 +417,18 @@ def step_tests(ctx: Ctx) -> Outcome:
     else:
         # Without coverage the timed tests assert their limits, so they leave the parallel run and run alone after it;
         # under coverage the index's limits are off and they stay in it (DR-0430).
-        cmd += ["-m", f"not {PERF}{later}"]
+        cmd += ["-m", f"not {PERF}"]
         # A folder of the step's own, made empty: one templates folder for both runs, so the timed run finds the vaults
         # the parallel run built and only times, and the timed run's temp folder, so it takes no numbered folder of
         # pytest's and never ends by deleting the parallel run's, as pytest does with a session three back (DR-0492).
         with tempfile.TemporaryDirectory(prefix="docket-tests-", ignore_cleanup_errors=True) as at:
             env[TEMPLATES_ENV] = str(Path(at, "templates"))
-            code, lines = _run(ctx, cmd, env=env)
-            alone = [*pytest, "-m", f"{PERF}{later}", "-raP", f"--basetemp={Path(at, 'timed')}"]
+            # The parallel run lists its files' timed tests, so a share with none starts no second pytest (DR-0780).
+            listed = Path(at, "timed.json")
+            code, lines = _run(ctx, [*cmd, f"--shard-timed={listed}"], env=env)
+            alone = [*pytest, "-m", PERF, "-raP", f"--basetemp={Path(at, 'timed')}"]
             alone += _times(ctx, spec, "timed")
-            return _alone_after(ctx, code, lines, alone, env)
+            return _alone_after(ctx, code, lines, alone, env, listed=_timed_tests(listed))
     code, lines = _run(ctx, cmd, env=env)
     if code != 0:
         return Outcome.fail(*lines[-80:])
@@ -499,13 +501,26 @@ def step_floors(ctx: Ctx) -> Outcome:
     return _floors(ctx, report, f"{n} shares' coverage combined", [])
 
 
-# pytest's exit code when it ran no test: a share whose files hold no timed test has nothing to time.
+# pytest's exit code when it ran no test: a timed run whose files hold no timed test has nothing to time.
 NO_TESTS = 5
 
 
-def _alone_after(ctx: Ctx, code: int, lines: list[str], cmd: list[str], env: dict[str, str]) -> Outcome:
+def _timed_tests(path: Path) -> list[str] | None:
+    from devkit.shard import timed_tests  # noqa: PLC0415 - the plugin imports pytest, which only a run of tests needs
+
+    return timed_tests(path)
+
+
+def _alone_after(
+    ctx: Ctx, code: int, lines: list[str], cmd: list[str], env: dict[str, str], *, listed: list[str] | None
+) -> Outcome:
     """The timed tests after the rest's run, once the lane's other steps are done too, one at a time: no other work
-    shares the CPUs with what they time. -raP adds the passed tests' output, which holds their times, to the summary."""
+    shares the CPUs with what they time. -raP adds the passed tests' output, which holds their times, to the summary.
+    A share whose parallel run listed no timed test in its files starts no second pytest; one with no list does."""
+    if listed == []:
+        if code != 0:
+            return Outcome.fail(*lines[-80:])
+        return Outcome.ok(_summary(lines), "timed alone: none in these files", *slowest(lines))
     ctx.alone.wait()
     timed_code, timed_lines = _run(ctx, cmd, env=env)
     none_timed = timed_code == NO_TESTS

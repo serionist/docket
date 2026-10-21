@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import platform
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +14,8 @@ import pytest
 
 from devkit import shard
 from devkit.repo import KitError
+
+INI = "[pytest]\nmarkers =\n    perf: timed\n    smoke: smoke\n    nightly: nightly\n"
 
 
 def test_a_share_is_k_of_n_and_nothing_else() -> None:
@@ -54,38 +58,6 @@ def test_each_system_has_weights_of_its_own(tmp_path: Path) -> None:
     assert shard.load_weights(path, "Darwin") == {}
 
 
-def collected(folder: Path, *args: str) -> tuple[int, list[str]]:
-    proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "-p", "devkit.shard", "-p", "no:cacheprovider", "--collect-only", "-q", *args],
-        cwd=folder, capture_output=True, text=True, encoding="utf-8", check=False,
-    )  # fmt: skip
-    return proc.returncode, sorted(ln for ln in proc.stdout.splitlines() if "::" in ln)
-
-
-def test_each_run_of_a_share_keeps_the_same_files_whatever_else_filters(tmp_path: Path) -> None:
-    (tmp_path / "pytest.ini").write_text("[pytest]\nmarkers =\n    perf: timed\n", encoding="utf-8")
-    for name in ("a", "b", "c"):
-        body = f"import pytest\n\ndef test_{name}_one():\n    pass\n\n"
-        body += f"@pytest.mark.perf\ndef test_{name}_timed():\n    pass\n"
-        (tmp_path / f"test_{name}.py").write_text(body, encoding="utf-8")
-    code, everything = collected(tmp_path)
-    assert code == 0 and len(everything) == 6
-    _, first = collected(tmp_path, "--shard=1/2")
-    _, second = collected(tmp_path, "--shard=2/2")
-    assert first == [
-        "test_a.py::test_a_one",
-        "test_a.py::test_a_timed",
-        "test_c.py::test_c_one",
-        "test_c.py::test_c_timed",
-    ]
-    assert sorted(first + second) == everything
-    # The timed run of a share takes its timed tests from the same files, though the marker leaves fewer to split.
-    _, timed = collected(tmp_path, "--shard=1/2", "-m", "perf")
-    assert timed == ["test_a.py::test_a_timed", "test_c.py::test_c_timed"]
-    code, _ = collected(tmp_path, "--shard=3/2")
-    assert code != 0
-
-
 def systems_file(root: Path, system: list[str], same: list[str]) -> None:
     """A test-systems.json under the root: these files can differ by system, those run the same everywhere."""
     path = root / "tools" / "devkit" / "test-systems.json"
@@ -94,18 +66,125 @@ def systems_file(root: Path, system: list[str], same: list[str]) -> None:
     path.write_text(json.dumps({"system": listed, "same": same}), encoding="utf-8")
 
 
+def logged(name: str, body: str) -> str:
+    """A test module that notes in the file SHARD_LOG names that it was imported."""
+    note = f"with Path(os.environ['SHARD_LOG']).open('a', encoding='utf-8') as log:\n    log.write('{name}\\n')\n\n"
+    return f"import os\nfrom pathlib import Path\n\nimport pytest\n\n{note}{body}"
+
+
+def two_tests(name: str) -> str:
+    return f"def test_{name}_one():\n    pass\n\n@pytest.mark.perf\ndef test_{name}_timed():\n    pass\n"
+
+
+def pytest_in(folder: Path, *args: str, log: Path | None = None) -> subprocess.CompletedProcess[str]:
+    env = {**os.environ, "SHARD_LOG": str(log or folder / "imports.log")}
+    return subprocess.run(
+        [sys.executable, "-m", "pytest", "-p", "devkit.shard", "-p", "no:cacheprovider", *args],
+        cwd=folder, capture_output=True, text=True, encoding="utf-8", check=False, env=env,
+    )  # fmt: skip
+
+
+def collected(folder: Path, *args: str, log: Path | None = None) -> tuple[int, list[str]]:
+    proc = pytest_in(folder, "--collect-only", "-q", *args, log=log)
+    return proc.returncode, sorted(ln for ln in proc.stdout.splitlines() if "::" in ln)
+
+
+def imports(log: Path) -> set[str]:
+    return set(log.read_text(encoding="utf-8").split()) if log.is_file() else set()
+
+
+def test_a_share_imports_only_its_own_files_and_each_file_is_in_one_share(tmp_path: Path) -> None:
+    (tmp_path / "pytest.ini").write_text(INI, encoding="utf-8")
+    names = ("a", "b", "c", "d")
+    for name in names:
+        (tmp_path / f"test_{name}.py").write_text(logged(f"test_{name}.py", two_tests(name)), encoding="utf-8")
+    systems_file(tmp_path, [], [f"test_{name}.py" for name in names])
+    code, everything = collected(tmp_path, log=tmp_path / "all.log")
+    assert code == 0 and len(everything) == 8
+    _, first = collected(tmp_path, "--shard=1/2", log=tmp_path / "1.log")
+    _, second = collected(tmp_path, "--shard=2/2", log=tmp_path / "2.log")
+    assert first == ["test_a.py::test_a_one", "test_a.py::test_a_timed", "test_c.py::test_c_one",
+                     "test_c.py::test_c_timed"]  # fmt: skip
+    assert sorted(first + second) == everything and not set(first) & set(second)
+    # Each share imported its own files and none of the other's.
+    assert imports(tmp_path / "1.log") == {"test_a.py", "test_c.py"}
+    assert imports(tmp_path / "2.log") == {"test_b.py", "test_d.py"}
+    # The timed run of a share takes its timed tests from the same files, though the marker leaves fewer to split.
+    _, timed = collected(tmp_path, "--shard=1/2", "-m", "perf")
+    assert timed == ["test_a.py::test_a_timed", "test_c.py::test_c_timed"]
+    code, _ = collected(tmp_path, "--shard=3/2")
+    assert code != 0
+
+
+def test_a_test_file_the_list_doesn_t_name_fails_every_share(tmp_path: Path) -> None:
+    (tmp_path / "pytest.ini").write_text(INI, encoding="utf-8")
+    for name in ("a", "b", "new"):
+        (tmp_path / f"test_{name}.py").write_text(f"def test_{name}():\n    pass\n", encoding="utf-8")
+    systems_file(tmp_path, ["test_a.py"], ["test_b.py"])
+    unnamed = "test_new.py: tools/devkit/test-systems.json doesn't name it, so no share holds it: name it there"
+    # In whichever share, found in a folder or given by name: no share would run it, so the run fails.
+    for args in (["--shard=1/2"], ["--shard=2/2"], ["--select=system"], ["test_new.py", "--shard=1/1"]):
+        proc = pytest_in(tmp_path, "-q", *args)
+        assert proc.returncode != 0, args
+        assert unnamed in proc.stdout + proc.stderr, args
+    # Without the plugin's options the run is pytest's own.
+    assert pytest_in(tmp_path, "-q").returncode == 0
+    # A file outside the run's arguments isn't the run's.
+    assert pytest_in(tmp_path, "-q", "test_a.py", "--shard=1/1").returncode == 0
+
+
+def test_a_file_whose_every_test_is_nightly_leaves_the_split_and_isn_t_imported(tmp_path: Path) -> None:
+    (tmp_path / "pytest.ini").write_text(INI, encoding="utf-8")
+    big = "pytestmark = pytest.mark.nightly\n\ndef test_big():\n    pass\n"
+    mixed = "@pytest.mark.nightly\ndef test_mixed_big():\n    pass\n\ndef test_mixed_small():\n    pass\n"
+    for name, body in (("big", big), ("mixed", mixed), ("a", "def test_a():\n    pass\n"),
+                       ("b", "def test_b():\n    pass\n")):  # fmt: skip
+        (tmp_path / f"test_{name}.py").write_text(logged(f"test_{name}.py", body), encoding="utf-8")
+    systems_file(tmp_path, [], ["test_a.py", "test_b.py", "test_big.py", "test_mixed.py"])
+    weights = tmp_path / "weights.json"
+    weighed = {"test_big.py": 100, "test_a.py": 3, "test_mixed.py": 2, "test_b.py": 1}
+    weights.write_text(json.dumps({platform.system(): weighed}), encoding="utf-8")
+    split = f"--shard-weights={weights}"
+    # With every test, as the nightly runs them, the big file takes a share alone.
+    _, first = collected(tmp_path, "--shard=1/2", split)
+    assert first == ["test_big.py::test_big"]
+    # A PR's run leaves it out before the split, so the other files balance: a against mixed and b, 3 and 3.
+    _, first = collected(tmp_path, "--shard=1/2", split, "--leave-out=nightly", log=tmp_path / "1.log")
+    _, second = collected(tmp_path, "--shard=2/2", split, "--leave-out=nightly", log=tmp_path / "2.log")
+    assert first == ["test_a.py::test_a"]
+    assert second == ["test_b.py::test_b", "test_mixed.py::test_mixed_small"]
+    assert "test_big.py" not in imports(tmp_path / "1.log") | imports(tmp_path / "2.log")
+
+
+@pytest.mark.parametrize(
+    ("text", "every"),
+    [
+        ("import pytest\n\npytestmark = pytest.mark.nightly\n", True),
+        ("import pytest\n\npytestmark = [pytest.mark.nightly, pytest.mark.skipif(True, reason='x')]\n", True),
+        ('"""pytestmark = pytest.mark.nightly, said in a docstring."""\nimport pytest\n', False),
+        ("import pytest\n\npytestmark = pytest.mark.skipif(True, reason='not pytest.mark.nightly')\n", False),
+        ("import pytest\n\npytestmark = pytest.mark.nightly\npytestmark = pytest.mark.perf\n", False),
+        ("import pytest\n\npytestmark = [pytest.mark.nightly]\ndel pytestmark\n", False),
+        ("import pytest\n\nif True:\n    pytestmark = pytest.mark.nightly\n", False),
+        ("import pytest\n\n@pytest.mark.nightly\ndef test_one():\n    pass\n", False),
+        ("pytestmark = pytest.mark.nightly(\n", False),
+    ],
+)
+def test_a_module_marks_every_test_only_by_its_one_top_level_pytestmark(text: str, every: bool) -> None:
+    assert shard.marks_every_test(text, "nightly") is every
+
+
 def test_select_system_keeps_the_listed_files_every_smoke_and_timed_test_and_the_shares_split_those(
     tmp_path: Path,
 ) -> None:
-    (tmp_path / "pytest.ini").write_text("[pytest]\nmarkers =\n    perf: timed\n    smoke: smoke\n", encoding="utf-8")
+    (tmp_path / "pytest.ini").write_text(INI, encoding="utf-8")
     for name in ("a", "b", "c", "d"):
-        body = f"import pytest\n\ndef test_{name}_one():\n    pass\n\n"
-        body += f"@pytest.mark.perf\ndef test_{name}_timed():\n    pass\n"
-        (tmp_path / f"test_{name}.py").write_text(body, encoding="utf-8")
-    smoke = "import pytest\n\n@pytest.mark.smoke\ndef test_e_smoke():\n    pass\n\ndef test_e_other():\n    pass\n"
-    (tmp_path / "test_e.py").write_text(smoke, encoding="utf-8")
-    systems_file(tmp_path, ["test_a.py", "test_b.py", "test_c.py"], ["test_d.py", "test_e.py"])
-    code, picked = collected(tmp_path, "--select=system")
+        (tmp_path / f"test_{name}.py").write_text(logged(f"test_{name}.py", two_tests(name)), encoding="utf-8")
+    smoke = "@pytest.mark.smoke\ndef test_e_smoke():\n    pass\n\ndef test_e_other():\n    pass\n"
+    (tmp_path / "test_e.py").write_text(logged("test_e.py", smoke), encoding="utf-8")
+    (tmp_path / "test_f.py").write_text(logged("test_f.py", "def test_f():\n    pass\n"), encoding="utf-8")
+    systems_file(tmp_path, ["test_a.py", "test_b.py", "test_c.py"], ["test_d.py", "test_e.py", "test_f.py"])
+    code, picked = collected(tmp_path, "--select=system", log=tmp_path / "picked.log")
     assert code == 0
     assert picked == [
         "test_a.py::test_a_one",
@@ -118,6 +197,8 @@ def test_select_system_keeps_the_listed_files_every_smoke_and_timed_test_and_the
         "test_d.py::test_d_timed",
         "test_e.py::test_e_smoke",
     ]
+    # A file under same that holds neither isn't imported.
+    assert "test_f.py" not in imports(tmp_path / "picked.log")
     # The shares split the selected files, whole, and the timed run of a share keeps its files.
     _, first = collected(tmp_path, "--select=system", "--shard=1/2")
     _, second = collected(tmp_path, "--select=system", "--shard=2/2")
@@ -131,62 +212,75 @@ def test_select_system_keeps_the_listed_files_every_smoke_and_timed_test_and_the
     assert code != 0
 
 
-def test_the_selection_comes_before_the_share_and_leaves_the_rest_deselected(tmp_path: Path) -> None:
-    systems_file(tmp_path, ["a/test_x.py", "a/test_y.py"], ["b/test_z.py"])
+def test_a_run_fails_on_a_timed_test_its_same_file_doesn_t_show(tmp_path: Path) -> None:
+    (tmp_path / "pytest.ini").write_text(INI, encoding="utf-8")
+    # The mark comes from another module, so the file's text never shows it, and --select would leave the file out.
+    (tmp_path / "marks.py").write_text("import pytest\n\ntimed = pytest.mark.perf\n", encoding="utf-8")
+    hidden = "from marks import timed\n\n@timed\ndef test_hidden():\n    pass\n"
+    (tmp_path / "test_g.py").write_text(hidden, encoding="utf-8")
+    systems_file(tmp_path, [], ["test_g.py"])
+    # Linux's shares run every file, so a PR's run there fails, though Windows' and macOS's never see the file.
+    proc = pytest_in(tmp_path, "-q", "--shard=1/1")
+    assert proc.returncode != 0
+    assert "test_g.py::test_hidden is marked perf, but its file's text shows no pytest.mark.perf" in proc.stderr
+    systems_file(tmp_path, ["test_g.py"], [])
+    assert pytest_in(tmp_path, "-q", "--shard=1/1").returncode == 0
 
-    def item(rel: str, smoke: bool = False) -> Any:
-        marker = object() if smoke else None
-        return SimpleNamespace(path=tmp_path / rel, get_closest_marker=lambda name: marker if name == "smoke" else None)
 
-    items = [item("a/test_x.py"), item("a/test_y.py"), item("b/test_z.py"), item("b/test_z.py", smoke=True)]
-    left: list[Any] = []
-
-    def deselected(*, items: list[Any]) -> None:
-        left.extend(items)
-
-    options: dict[str, str] = {"--select": "system", "--shard": "1/2"}
-    config = SimpleNamespace(
-        rootpath=tmp_path,
-        getoption=lambda name, default=None: options.get(name, default),
-        hook=SimpleNamespace(pytest_deselected=deselected),
-    )
-    found = list(items)
-    shard.pytest_collection_modifyitems(cast(pytest.Config, config), cast(list[pytest.Item], found))
-    # Of the selected files, a/test_x and b/test_z (for its smoke test) go to the first share in path order.
-    assert found == [items[0], items[3]]
-    assert left == [items[1], items[2]]
-    # Neither option leaves every test as it is.
-    options.clear()
-    found = list(items)
-    shard.pytest_collection_modifyitems(cast(pytest.Config, config), cast(list[pytest.Item], found))
-    assert found == items
-    options["--select"] = "system"
-    (tmp_path / "tools" / "devkit" / "test-systems.json").unlink()
-    with pytest.raises(pytest.UsageError, match="is missing: it names each test file"):
-        shard.pytest_collection_modifyitems(cast(pytest.Config, config), cast(list[pytest.Item], found))
+def test_a_share_lists_the_timed_tests_its_timed_run_takes(tmp_path: Path) -> None:
+    (tmp_path / "pytest.ini").write_text(INI, encoding="utf-8")
+    for name in ("a", "b", "c"):
+        (tmp_path / f"test_{name}.py").write_text(f"import pytest\n\n{two_tests(name)}", encoding="utf-8")
+    (tmp_path / "test_d.py").write_text("def test_d():\n    pass\n", encoding="utf-8")
+    systems_file(tmp_path, [], ["test_a.py", "test_b.py", "test_c.py", "test_d.py"])
+    weights = tmp_path / "weights.json"
+    weighed = {"test_d.py": 9, "test_a.py": 3, "test_b.py": 3, "test_c.py": 3}
+    weights.write_text(json.dumps({platform.system(): weighed}), encoding="utf-8")
+    out = tmp_path / "out" / "timed.json"
+    split = [f"--shard-weights={weights}"]
+    # d, the heaviest, holds the first share alone, and no timed test; the second, run on two workers as a CI share
+    # is, holds the rest. Each list is what the share's timed run takes.
+    for spec, workers, listed in (
+        ("1/2", "0", []),
+        ("2/2", "2", ["test_a.py::test_a_timed", "test_b.py::test_b_timed", "test_c.py::test_c_timed"]),
+    ):
+        proc = pytest_in(tmp_path, "-q", "-n", workers, "-m", "not perf", f"--shard={spec}", *split,
+                         f"--shard-timed={out}")  # fmt: skip
+        assert proc.returncode == 0, proc.stdout
+        _, timed = collected(tmp_path, f"--shard={spec}", *split, "-m", "perf")
+        assert shard.timed_tests(out) == timed == listed
+    out.write_text("{}", encoding="utf-8")
+    assert shard.timed_tests(out) is None
+    assert shard.timed_tests(tmp_path / "none.json") is None
 
 
 def test_a_share_splits_by_its_system_s_weights_and_writes_what_its_files_cost(tmp_path: Path) -> None:
+    (tmp_path / "pytest.ini").write_text(INI, encoding="utf-8")
     for name in ("a", "b", "c"):
         (tmp_path / f"test_{name}.py").write_text(f"def test_{name}():\n    pass\n", encoding="utf-8")
+    (tmp_path / "test_d.py").write_text(
+        "import pytest\n\n@pytest.mark.perf\ndef test_d():\n    pass\n", encoding="utf-8"
+    )
+    systems_file(tmp_path, [], ["test_a.py", "test_b.py", "test_c.py", "test_d.py"])
     weights = tmp_path / "weights.json"
-    weights.write_text(json.dumps({platform.system(): {"test_c.py": 5, "test_a.py": 1}}), encoding="utf-8")
+    weighed = {"test_c.py": 9, "test_d.py": 4, "test_a.py": 1}
+    weights.write_text(json.dumps({platform.system(): weighed}), encoding="utf-8")
     times = tmp_path / "out" / "times.json"
-    proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "-p", "devkit.shard", "-p", "no:cacheprovider", "-q", "--shard=1/2",
-         f"--shard-weights={weights}", f"--shard-times={times}"],
-        cwd=tmp_path, capture_output=True, text=True, encoding="utf-8", check=False,
-    )  # fmt: skip
-    assert proc.returncode == 0, proc.stdout
+    run = ["-q", "-m", "not perf", f"--shard-weights={weights}", f"--shard-times={times}"]
+    assert pytest_in(tmp_path, *run, "--shard=1/2").returncode == 0
     record = json.loads(times.read_text(encoding="utf-8"))
-    # c, the heaviest, alone in the first share; a and b, which the median puts at 3, in the second.
+    # c, the heaviest, alone in the first share; b, which the median puts at 4, d and a in the second.
     assert list(record["files"]) == ["test_c.py"]
     assert {k: record[k] for k in ("system", "share", "marks", "workers")} == {
         "system": platform.system(),
         "share": "1/2",
-        "marks": "",
+        "marks": "not perf",
         "workers": 1,
     }
+    assert pytest_in(tmp_path, *run, "--shard=2/2").returncode == 0
+    files = json.loads(times.read_text(encoding="utf-8"))["files"]
+    # d ran nothing in this run: 0, so its weight comes from what its share ran.
+    assert list(files) == ["test_a.py", "test_b.py", "test_d.py"] and files["test_d.py"] == 0
 
 
 def test_a_share_s_times_name_its_failed_tests_and_a_file_that_doesn_t_import(tmp_path: Path) -> None:
@@ -199,25 +293,45 @@ def test_a_share_s_times_name_its_failed_tests_and_a_file_that_doesn_t_import(tm
         "@pytest.mark.parametrize('n', [1, 2])\ndef test_one_case_fails(n):\n    assert n == 1\n"
     )
     (tmp_path / "test_a.py").write_text(body, encoding="utf-8")
+    systems_file(tmp_path, [], ["test_a.py", "test_b.py"])
     times = tmp_path / "out" / "times.json"
     # Two workers, as a CI share runs: the controller gets each worker's reports.
-    run = [sys.executable, "-m", "pytest", "-p", "devkit.shard", "-p", "no:cacheprovider", "-q", "-n", "2",
-           "--shard=1/1", f"--shard-times={times}"]  # fmt: skip
-    proc = subprocess.run(run, cwd=tmp_path, capture_output=True, text=True, encoding="utf-8", check=False)
+    run = ["-q", "-n", "2", "--shard=1/1", f"--shard-times={times}"]
+    proc = pytest_in(tmp_path, *run)
     assert proc.returncode == 1, proc.stdout
     failed = ["test_a.py::test_errors_in_setup", "test_a.py::test_fails", "test_a.py::test_one_case_fails[2]"]
     assert json.loads(times.read_text(encoding="utf-8"))["failed"] == failed
     # A file that doesn't import has no test to fail: its path names it, once though both workers collected it.
     (tmp_path / "test_b.py").write_text("import not_a_module_anywhere\n", encoding="utf-8")
-    proc = subprocess.run(run, cwd=tmp_path, capture_output=True, text=True, encoding="utf-8", check=False)
+    proc = pytest_in(tmp_path, *run)
     assert proc.returncode != 0, proc.stdout
     assert json.loads(times.read_text(encoding="utf-8"))["failed"] == [*failed, "test_b.py"]
 
 
+def fake_config(root: Path, options: dict[str, str], args: list[str] | None = None) -> Any:
+    """What the plugin reads of a pytest config, for a run started at the root with these options."""
+    left: list[Any] = []
+
+    def deselected(*, items: list[Any]) -> None:
+        left.extend(items)
+
+    return SimpleNamespace(
+        rootpath=root,
+        args=args or [str(root)],
+        invocation_params=SimpleNamespace(dir=root),
+        stash=pytest.Stash(),
+        getoption=lambda name, default=None: options.get(name, default),
+        getini=lambda name: ["test_*.py"],
+        hook=SimpleNamespace(pytest_deselected=deselected),
+        option=SimpleNamespace(markexpr=options.get("-m", "")),
+        left=left,
+    )
+
+
 def test_the_times_name_a_failed_test_once_whichever_phase_failed(tmp_path: Path) -> None:
-    options = {"numprocesses": 4, "--shard": "2/3", "--shard-key": "Windows"}
-    config = SimpleNamespace(option=SimpleNamespace(markexpr="not perf"), getoption=lambda n, d=None: options.get(n, d))
-    times = shard.Times(cast(pytest.Config, config), tmp_path / "times.json")
+    systems_file(tmp_path, [], ["a.py", "b.py", "c.py"])
+    options = {"numprocesses": "4", "--shard": "2/3", "--shard-key": "Windows", "-m": "not perf"}
+    times = shard.Times(cast(pytest.Config, fake_config(tmp_path, options)), tmp_path / "times.json")
 
     def ran(nodeid: str, outcome: Any, when: Any = "call") -> None:
         where = (nodeid.split("::", maxsplit=1)[0], 0, nodeid)
@@ -239,6 +353,71 @@ def test_the_times_name_a_failed_test_once_whichever_phase_failed(tmp_path: Path
         "marks": "not perf",
         "workers": 4,
     }
+
+
+def fake_item(root: Path, rel: str, *marks: str) -> Any:
+    return SimpleNamespace(
+        path=root / rel,
+        nodeid=f"{rel}::test_{'_'.join(marks) or 'plain'}",
+        get_closest_marker=lambda name: object() if name in marks else None,
+    )
+
+
+def test_the_hooks_keep_a_share_s_files_and_refuse_a_file_no_share_holds(tmp_path: Path) -> None:
+    for rel, text in (("a/test_x.py", ""), ("a/test_y.py", ""), ("b/test_z.py", "@pytest.mark.smoke\n"),
+                      ("b/test_q.py", ""), ("b/test_n.py", "pytestmark = pytest.mark.nightly\n")):  # fmt: skip
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(f"import pytest\n\n{text}", encoding="utf-8")
+    systems_file(tmp_path, ["a/test_x.py", "a/test_y.py"], ["b/test_z.py", "b/test_q.py", "b/test_n.py"])
+    options = {"--select": "system", "--shard": "1/2", "--leave-out": "nightly", "--shard-timed": str(tmp_path / "t")}
+    config = fake_config(tmp_path, options)
+    found = shard.plan(cast(pytest.Config, config))
+    # q holds neither mark and n is the nightly's whole: of x, y and z, x and z go to the first share in path order.
+    assert found is not None and found.run == {"a/test_x.py", "a/test_y.py", "b/test_z.py"}
+    assert found.mine == {"a/test_x.py", "b/test_z.py"}
+
+    def ignored(rel: str, cfg: Any = config) -> bool | None:
+        return shard.pytest_ignore_collect(tmp_path / rel, cast(pytest.Config, cfg))
+
+    assert [ignored(rel) for rel in ("a/test_x.py", "a/test_y.py", "b/test_q.py", "b/test_n.py", "a/kit.py")] == [
+        None,
+        True,
+        True,
+        True,
+        None,
+    ]
+    with pytest.raises(
+        pytest.Collector.CollectError, match=re.escape("a/test_new.py: tools/devkit/test-systems.json doesn't")
+    ):
+        ignored("a/test_new.py")
+    # A file outside the run's arguments is pytest's to leave, and a run without the plugin's options its own.
+    assert ignored("b/test_new.py", fake_config(tmp_path, options, [str(tmp_path / "a")])) is None
+    assert ignored("a/test_new.py", fake_config(tmp_path, {})) is None
+
+    x, x_timed = fake_item(tmp_path, "a/test_x.py"), fake_item(tmp_path, "a/test_x.py", "perf")
+    x_nightly, y = fake_item(tmp_path, "a/test_x.py", "perf", "nightly"), fake_item(tmp_path, "a/test_y.py", "perf")
+    z_smoke, z_other = fake_item(tmp_path, "b/test_z.py", "smoke"), fake_item(tmp_path, "b/test_z.py")
+    items = [x, x_timed, x_nightly, y, z_smoke, z_other]
+    kept = list(items)
+    shard.pytest_collection_modifyitems(cast(pytest.Config, config), cast(list[pytest.Item], kept))
+    assert kept == [x, x_timed, z_smoke]
+    assert config.left == [x_nightly, y, z_other]
+    # The share's timed tests, for the gate: the nightly's left out with the rest.
+    assert shard.timed_tests(tmp_path / "t") == [x_timed.nodeid]
+    # A file pytest was given by name that no share holds, and a mark the selection can't see, fail the run.
+    for bad, match in (
+        (fake_item(tmp_path, "a/test_new.py"), "a/test_new.py: tools/devkit/test-systems.json doesn't name it"),
+        (fake_item(tmp_path, "b/test_q.py", "perf"), "is marked perf, but its file's text shows no pytest.mark.perf"),
+    ):
+        with pytest.raises(pytest.UsageError, match=re.escape(match)):
+            shard.pytest_collection_modifyitems(cast(pytest.Config, config), cast(list[pytest.Item], [x, bad]))
+    # Without the plugin's options every test stays, and with the selection the list is needed.
+    plain = list(items)
+    shard.pytest_collection_modifyitems(cast(pytest.Config, fake_config(tmp_path, {})), cast(list[pytest.Item], plain))
+    assert plain == items
+    (tmp_path / "tools" / "devkit" / "test-systems.json").unlink()
+    with pytest.raises(pytest.UsageError, match="is missing: it names each test file"):
+        shard.plan(cast(pytest.Config, fake_config(tmp_path, {"--select": "system"})))
 
 
 def times_file(path: Path, run: tuple[str, str, str], files: dict[str, float]) -> None:
@@ -293,6 +472,7 @@ def test_the_times_of_two_runs_or_of_none_are_refused(tmp_path: Path) -> None:
 def test_a_key_of_its_own_reads_its_weights_and_writes_its_times_under_it(tmp_path: Path) -> None:
     for name in ("a", "b", "c"):
         (tmp_path / f"test_{name}.py").write_text(f"def test_{name}():\n    pass\n", encoding="utf-8")
+    systems_file(tmp_path, [], ["test_a.py", "test_b.py", "test_c.py"])
     weights = tmp_path / "weights.json"
     # Under the system's own key c weighs least, so it shares the first share with a; under the browser's, most.
     data = {
@@ -301,11 +481,8 @@ def test_a_key_of_its_own_reads_its_weights_and_writes_its_times_under_it(tmp_pa
     }
     weights.write_text(json.dumps(data), encoding="utf-8")
     times = tmp_path / "out" / "times.json"
-    proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "-p", "devkit.shard", "-p", "no:cacheprovider", "-q", "--shard=1/2",
-         f"--shard-weights={weights}", f"--shard-times={times}", "--shard-key=Linux browser"],
-        cwd=tmp_path, capture_output=True, text=True, encoding="utf-8", check=False,
-    )  # fmt: skip
+    proc = pytest_in(tmp_path, "-q", "--shard=1/2", f"--shard-weights={weights}", f"--shard-times={times}",
+                     "--shard-key=Linux browser")  # fmt: skip
     assert proc.returncode == 0, proc.stdout
     record = json.loads(times.read_text(encoding="utf-8"))
     assert list(record["files"]) == ["test_c.py"]
