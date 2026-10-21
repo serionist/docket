@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import http.client
 import json
 import logging
@@ -206,6 +207,14 @@ def test_serve_runs_until_stopped_and_cleans_up(vault: Path, token: str) -> None
 # -- the self-check ----------------------------------------------------------------------------------------------------
 
 
+@contextlib.contextmanager
+def closed_port() -> Iterator[int]:
+    """A port nothing listens on, held bound for the test, so no other test's server takes it meanwhile."""
+    with socket.socket() as held:
+        held.bind(("127.0.0.1", 0))
+        yield int(held.getsockname()[1])
+
+
 def a_check(port: int, stopped: list[str], ended: list[int], **given: Any) -> server.SelfCheck:
     settings: dict[str, Any] = {"every": 0.01, "timeout": 0.5, "misses": 2, "stop_seconds": 0.05}
     return server.SelfCheck(port, stop=lambda: stopped.append("stop"), end=ended.append, **{**settings, **given})
@@ -215,12 +224,12 @@ def test_the_self_check_stops_the_service_and_ends_it_when_nothing_listens_on_it
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     caplog.set_level(logging.WARNING)
-    port = free_port()
     stopped: list[str] = []
     ended: list[int] = []
-    check = a_check(port, stopped, ended)
-    check.start()
-    check.thread.join(30)
+    with closed_port() as port:
+        check = a_check(port, stopped, ended)
+        check.start()
+        check.thread.join(30)
     assert not check.thread.is_alive()
     assert check.failed
     assert stopped == ["stop"]
@@ -238,10 +247,11 @@ def test_the_self_check_stops_the_service_and_ends_it_when_nothing_listens_on_it
 def test_a_service_that_stops_in_time_is_not_ended() -> None:
     stopped: list[str] = []
     ended: list[int] = []
-    check = a_check(free_port(), stopped, ended, stop_seconds=30)
-    check.stop = check.close
-    check.start()
-    check.thread.join(30)
+    with closed_port() as port:
+        check = a_check(port, stopped, ended, stop_seconds=30)
+        check.stop = check.close
+        check.start()
+        check.thread.join(30)
     assert check.failed
     assert ended == []
 
@@ -275,7 +285,7 @@ def test_a_miss_after_serve_ended_stops_nothing() -> None:
 
     stopped: list[str] = []
     ended: list[int] = []
-    check = a_check(free_port(), stopped, ended, misses=1, reach=reach)
+    check = a_check(4321, stopped, ended, misses=1, reach=reach)
     check.start()
     check.thread.join(30)
     assert (check.failed, stopped, ended) == (False, [], [])
@@ -286,7 +296,8 @@ def test_the_self_check_reaches_a_listening_port_and_misses_a_closed_one() -> No
         listening.bind(("127.0.0.1", 0))
         listening.listen(1)
         assert server.reachable(listening.getsockname()[1], 5)
-    assert not server.reachable(free_port(), 0.5)
+    with closed_port() as port:
+        assert not server.reachable(port, 0.5)
 
 
 def test_serve_exits_with_an_error_when_its_port_stops_listening(vault: Path, token: str) -> None:
