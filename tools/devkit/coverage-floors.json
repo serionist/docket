@@ -1,5 +1,5 @@
 {
-  "$comment": "Line coverage floors per module, in whole percent. Raise one in the change that earns it; never lower one (tools/devkit/src/devkit/coverage.py).",
+  "$comment": "Line coverage floors per module, in whole percent. Raise one in the change that earns it. A floor below the merge base's fails the gate unless $lowered names, for its module, a decided decision that sets the number, as {\"devkit\": \"DR-nnnn\"} (DR-0755, tools/devkit/src/devkit/coverage.py).",
   "docket": 100,
   "devkit": 90
 }

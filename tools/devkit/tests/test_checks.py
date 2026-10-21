@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import platform
+import re
 import tempfile
 import threading
 from collections.abc import Callable
@@ -119,6 +120,102 @@ def test_coverage_floors() -> None:
     # A module under its floor names the lines no test ran.
     floors = {"app": 80, "kit": 60}
     assert coverage.missing(report, coverage.below(measures, floors)) == ["  tools/kit/src/kit/b.py: line 4, 7"]
+
+
+# A decision's id built, so the docs check doesn't read it as a citation.
+LOWERS = "DR-" + "0042"
+
+
+def _decision(status: str, text: str) -> dict[str, Any]:
+    return {"id": LOWERS, "title": "A floor comes down", "status": status, "description": text}
+
+
+def test_a_floor_below_the_base_s_needs_a_decided_decision_that_sets_it() -> None:
+    base = {"app": 100, "kit": 90}
+    # A raised floor, an unchanged one and a module new since the base pass with nothing named.
+    assert coverage.guard({"app": 100, "kit": 92, "new": 50}, base, {}, {}) == []
+    lowered = "kit: floor lowered from 90% to 85%"
+    assert coverage.guard({"app": 100, "kit": 85}, base, {}, {}) == [
+        f"{lowered}; name the decided decision that sets it under $lowered in {coverage.FLOORS} (DR-0755)"
+    ]
+    named = {"kit": LOWERS}
+    assert coverage.guard({"kit": 85}, base, named, {}) == [
+        f"{lowered}, and {LOWERS}, which $lowered names, isn't a decision"
+    ]
+    sets = "kit at 85%: the cut drops the tests of the old reader"
+    assert coverage.guard({"kit": 85}, base, named, {LOWERS: _decision("proposed", sets)}) == [
+        f"{lowered}, and {LOWERS} is proposed, not decided: only the owner lowers a floor"
+    ]
+    # A decided decision passes only when it says the module's new floor: the module and a number apart set none.
+    apart = "fewer kit processes in the tests, and the floor comes down only for a cut of 85% or more"
+    for other in ("app at 85%", "kit at 88%", "kit at 185%", "kit at 0.85%", apart):
+        assert coverage.guard({"kit": 85}, base, named, {LOWERS: _decision("decided", other)}) == [
+            f"{lowered}, and {LOWERS} doesn't say kit at 85%"
+        ]
+    assert coverage.guard({"kit": 85}, base, named, {LOWERS: _decision("decided", sets)}) == []
+    binds = {**_decision("decided", "the reader goes"), "binds": ["The kit's floor to 85%."]}
+    assert coverage.guard({"kit": 85}, base, named, {LOWERS: binds}) == []
+    # The base's own $lowered covers its own lowering, not another: a gain earned since can't go back unseen.
+    assert coverage.guard({"kit": 85}, base, named, {LOWERS: _decision("decided", sets)}, named) == [
+        f"{lowered}, and {LOWERS} lowered it before: name the decided decision that sets it now"
+    ]
+    # Without a base, as on main itself, nothing is held.
+    assert coverage.guard({"kit": 85}, None, {}, {}) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "said"),
+    [
+        ("{", "isn't valid JSON"),
+        ("[90]", "holds an object"),
+        ('{"kit": "90"}', "kit's floor is a whole percentage, not '90'"),
+        ('{"kit": true}', "kit's floor is a whole percentage, not True"),
+        ('{"kit": 90, "$lowered": "DR-nnnn"}', "$lowered maps a module to the decision"),
+        ('{"kit": 90, "$lowered": {"kit": 7}}', "$lowered maps a module to the decision"),
+    ],
+)
+def test_a_floors_file_in_another_shape_fails_as_a_gate_line(text: str, said: str) -> None:
+    with pytest.raises(KitError, match=re.escape(said)):
+        coverage.parse(text)
+
+
+def test_the_floors_are_held_to_the_merge_base_s_and_the_decision_read_from_the_docs(
+    repo: Path, git: Callable[..., str]
+) -> None:
+    floors = repo / coverage.FLOORS
+    floors.parent.mkdir(parents=True)
+    start = git(repo, "rev-parse", "HEAD").strip()
+    floors.write_text(json.dumps({"$comment": "x", "app": 100, "kit": 90}), encoding="utf-8")
+    # A base from before the file existed has no floors to hold.
+    assert coverage.base_floors(repo, start) is None and coverage.check_lowered(repo, start) == []
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "Floors")
+    base = git(repo, "rev-parse", "HEAD").strip()
+    assert coverage.base_floors(repo, base) == ({"app": 100, "kit": 90}, {})
+    floors.write_text(json.dumps({"app": 100, "kit": 95}), encoding="utf-8")
+    assert coverage.check_lowered(repo, base) == []
+    floors.write_text(json.dumps({"app": 100, "kit": 85}), encoding="utf-8")
+    assert coverage.check_lowered(repo, base) == [
+        "kit: floor lowered from 90% to 85%; name the decided decision that sets it under $lowered in "
+        f"{coverage.FLOORS} (DR-0755)"
+    ]
+    assert coverage.check_lowered(repo, None) == []
+    entry = repo / "tools" / "devkit" / "index.d" / f"{LOWERS}.yaml"
+    entry.parent.mkdir()
+    text = (
+        f"decisions:\n  - id: {LOWERS}\n    title: The kit's floor to 85%\n    status: {{status}}\n"
+        '    at: "2026-10-21"\n    by: Ada Example\n    cost: cheap\n    description: The old reader goes.\n'
+    )
+    entry.write_text(text.format(status="proposed"), encoding="utf-8")
+    floors.write_text(json.dumps({"app": 100, "kit": 85, "$lowered": {"kit": LOWERS}}), encoding="utf-8")
+    assert coverage.check_lowered(repo, base) == [
+        f"kit: floor lowered from 90% to 85%, and {LOWERS} is proposed, not decided: only the owner lowers a floor"
+    ]
+    entry.write_text(text.format(status="decided"), encoding="utf-8")
+    assert coverage.check_lowered(repo, base) == []
+    # A base this clone doesn't hold fails, rather than passing every lowered floor.
+    with pytest.raises(KitError, match="can't read the merge base 0123456"):
+        coverage.check_lowered(repo, "0123456")
 
 
 def test_check_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -750,6 +847,29 @@ def test_the_coverage_lane_wants_every_share_of_one_run(
     out = gate.step_floors(gate.Ctx(root=tmp_path, lane="coverage", ci=False, base=None, pr=None))
     assert out.status == "fail" and problem in out.detail[0]
     assert calls == []
+
+
+def test_the_coverage_lane_fails_a_floor_below_the_merge_base_s(
+    repo: Path, git: Callable[..., str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    floors_repo(repo)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "Floors")
+    ctx = gate.Ctx(root=repo, lane="coverage", ci=False, base=git(repo, "rev-parse", "HEAD").strip(), pr=None)
+    (repo / coverage.FLOORS).write_text(json.dumps({"app": 90}), encoding="utf-8")
+    (repo / ".local" / "coverage").mkdir()
+    (repo / ".local" / "coverage" / "share-1-of-1").write_bytes(b"data")
+    _fake_coverage(monkeypatch, covered=9)
+    # The coverage holds the lowered floor; the floor itself doesn't hold against the base's.
+    out = gate.step_floors(ctx)
+    assert out.status == "fail"
+    assert out.detail == [
+        "app: floor lowered from 100% to 90%; name the decided decision that sets it under $lowered in "
+        f"{coverage.FLOORS} (DR-0755)"
+    ]
+    (repo / coverage.FLOORS).write_text(json.dumps({"app": 100}), encoding="utf-8")
+    _fake_coverage(monkeypatch, covered=10)
+    assert gate.step_floors(ctx).status == "ok"
 
 
 def test_a_failed_combine_fails_the_lane(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

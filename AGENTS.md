@@ -69,7 +69,7 @@ You need uv (it brings Python 3.12), git, gitleaks, Claude Code for the full gat
 - `uv run gate full` adds the tests with their coverage floors, the whole history's secrets and the plugin validated
   by Claude Code: the merge rule, which CI runs in shares (DR-0754). Windows and macOS run the types, the smoke set and
   the test files `tools/devkit/test-systems.json` lists under system; every test file is named there (DR-0758).
-- Coverage floors are in `tools/devkit/coverage-floors.json`. Raise one in the change that earns it, never lower one.
+- Coverage floors (`tools/devkit/coverage-floors.json`) rise when earned; only a decided decision lowers one (DR-0755).
 - A test that asserts an elapsed time carries `perf` and asserts a speed as the best of three runs; `gate os`, without
   coverage, runs those after the rest, alone (DR-0430), on vaults an untimed test had the parallel run build (DR-0492).
 - Eval floors, recall at 10 and MRR per kind of question on the invented set, are in `tools/devkit/eval-floors.json`:

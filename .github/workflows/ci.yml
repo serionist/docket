@@ -105,7 +105,8 @@ jobs:
           retention-days: 14
 
   # The check the merge rule names: the full gate's checks, every share, the web job and the browser shares passed, and
-  # the shares' coverage together holds the floors, with the question set's numbers held to theirs.
+  # the shares' coverage together holds the floors, each floor held to the base's (DR-0755), with the question set's
+  # numbers held to theirs.
   gate:
     name: Gate (Linux)
     needs: [checks, linux-shares, web, browser]
@@ -122,7 +123,7 @@ jobs:
         run: test "$CHECKS" = success && test "$SHARES" = success && test "$WEB" = success && test "$BROWSER" = success
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The eval floors are held against the base branch's.
+          # The coverage and eval floors are held against the base branch's, so its commit must be here.
           fetch-depth: 0
           persist-credentials: false
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0

@@ -4,8 +4,9 @@ Lanes:
   quick  the static checks, in seconds: lock file, lint, format, types, docs, the test files' systems
          (test-systems.json, DR-0758), commit messages, private names, secrets, the harness (AGENTS.md, skills, plugin
          manifests), the web app's build and API document. The pre-push hook runs it.
-  full   quick, then the tests with coverage and its floors, the secret scan over the whole history, and the plugin
-         validated by Claude Code itself. finish-work runs it before a PR. CI runs it in parts (DR-0754): `--skip
+  full   quick, then the tests with coverage and its floors, each floor held to the merge base's (a lower one needs a
+         decided decision, DR-0755), the secret scan over the whole history, and the plugin validated by Claude Code
+         itself. finish-work runs it before a PR. CI runs it in parts (DR-0754): `--skip
          tests` once, and `--only tests --shard K/N` on each share, which saves its coverage data instead of holding
          the floors.
   os     types and tests, for the other operating systems CI runs: the test files that can differ by system and the
@@ -422,13 +423,14 @@ def step_tests(ctx: Ctx) -> Outcome:
 
 
 def _floors(ctx: Ctx, report: Path, first: str, extra: list[str]) -> Outcome:
-    """The coverage report held to the floors, each file under one named with its lines, and the question set's
-    numbers to theirs."""
+    """The coverage report held to the floors, each file under one named with its lines, the floors to the merge
+    base's (DR-0755), and the question set's numbers to theirs."""
     data = json.loads(report.read_text(encoding="utf-8"))
     measures = coverage.measure(data)
     floors = coverage.load_floors(ctx.root)
     failures, rise = coverage.judge(measures, floors)
     failures += coverage.missing(data, coverage.below(measures, floors))
+    failures += coverage.check_lowered(ctx.root, ctx.base)
     eval_failures, eval_line = evalfloors.check(ctx.root, ctx.base)
     failures += eval_failures
     if failures:
