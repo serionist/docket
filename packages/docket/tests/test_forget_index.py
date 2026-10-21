@@ -334,12 +334,12 @@ def test_an_update_reads_only_the_docs_it_indexes_and_what_they_cite(
     forget(vault, rids=["chat:C0ELSEWHERE"])
     build.rebuild(vault)
     rel = "processed/recording-note/2026/10/2026-10-14-supplier-sync.md"
-    first = next(sha for n, sha in DocStore(vault).history(NOTE) if n == 1)
     digest = vault.root / "processed/digest/2026/10/2026-10-14-day.md"
-    # Another process: the rebuild's earlier revs aren't kept in this one.
+    # Another process: the rebuild's earlier revs aren't kept in this one, nor its batch reader (DR-0766).
     build._EARLIER.clear()  # pyright: ignore[reportPrivateUsage]
+    vault.close()
     for said, wanted in (
-        ("- By hand.", [f"log --no-show-signature --format=%H%x1f%B%x1e -- {rel}", f"cat-file blob {first}:./{rel}"]),
+        ("- By hand.", [f"log --no-show-signature --format=%H%x1f%B%x1e -- {rel}", "cat-file --batch"]),
         ("- By hand again.", []),
     ):
         digest.write_text(digest.read_text(encoding="utf-8") + f"{said}\n", encoding="utf-8", newline="\n")

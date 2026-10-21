@@ -2262,8 +2262,9 @@ def write_masks(vault: Vault, texts: Mapping[str, str]) -> None:
 def pending(vault: Vault) -> list[str]:
     """Op files a write or a forget's apply that stopped before its commit left: new ones, tracked ones that only
     grew, and lines changed to their masks, their op ids listed (DR-0696). One that lost or changed a committed line
-    otherwise refuses the write, since its commit would make the change for good."""
-    changed = vault.git.changed_against_head(OPS_DIR)
+    otherwise refuses the write, since its commit would make the change for good. Both lists come from one status
+    call (DR-0764)."""
+    changed, outside = vault.git.against_head(OPS_DIR)
     listed = forgotten.load(vault.root, vault.home).ops if changed else frozenset[str]()
     for rel in changed:
         if not check.committed_kept(vault, rel, listed):
@@ -2271,7 +2272,7 @@ def pending(vault: Vault) -> list[str]:
                 f"{rel} lost or changed a committed op line; ops are written once, so put it back from git "
                 "(`docket vault check` names it); nothing written"
             )
-    new = [rel for rel in vault.git.not_in_head(OPS_DIR) if ops.FILE_NAME.fullmatch(Path(rel).name)]
+    new = [rel for rel in outside if ops.FILE_NAME.fullmatch(Path(rel).name)]
     return sorted({*changed, *new})
 
 

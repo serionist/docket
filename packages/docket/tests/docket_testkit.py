@@ -33,11 +33,16 @@ from docket.vault.home import Home
 from docket.vault.records import RawRecord, version
 from docket.vault.vault import Vault, remove_tree
 
-# The tests' global git config: empty but for git's own housekeeping after a commit, a fetch or a push (maintenance,
-# and gc --auto where a git still runs it), which never finds work worth doing in a test repo and, run in the
-# background, could repack a template while a test copies it (DR-0221).
+# The tests' global git config: git's own housekeeping after a commit, a fetch or a push off (maintenance, and gc
+# --auto where a git still runs it), which never finds work worth doing in a test repo and, run in the background,
+# could repack a template while a test copies it (DR-0221).
 # The files ref format pinned, so a git that defaults to reftable (Git 3.0) can't change which git calls a test sees.
-TEST_GITCONFIG = "[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n[init]\n\tdefaultRefFormat = files\n"
+# The fixture owner's identity, the one Docket falls back to: a commit with none fails once before it takes the
+# fallback (DR-0764), which `test_vault.py` holds on a config without this section.
+TEST_GITCONFIG = (
+    "[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n[init]\n\tdefaultRefFormat = files\n"
+    "[user]\n\tname = Ada Example\n\temail = ada@example.invalid\n"
+)
 # The session's own folder, which conftest.py makes before any fixture runs and names here.
 HOME_VAR = "DOCKET_TEST_HOME"
 
@@ -117,35 +122,33 @@ def git_command(args: list[str]) -> str:
     return " ".join(rest)
 
 
-# What every commit of Docket's asks git, as `git_calls` lists it: run files git holds but HEAD doesn't, unmerged paths,
-# then the add, the staged check, git's identity (once per opened vault) and the commit. The new commit's id is read
-# from the branch's ref file (DR-0528 to DR-0530).
+# What every commit of Docket's asks git, as `git_calls` lists it: run files git holds but HEAD doesn't, then the add
+# and the commit. The unmerged paths come from the index file and the new commit's id from the branch's ref file
+# (DR-0765), the staged check and git's identity only after a commit that failed (DR-0764).
 COMMIT_CALLS = [
     "status --porcelain=v1 -z --untracked-files=all --ignored=traditional -- raw",
-    "ls-files -u",
     "add --pathspec-from-file=- --pathspec-file-nul",
-    "diff --cached --name-only -z -- .",
-    "config --get-regexp ^user[.](name|email)$",
     "commit -q --only --pathspec-from-file=- --pathspec-file-nul -m",
 ]
 
 
 @contextmanager
 def git_calls(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[str]]:
-    """The git commands the block starts, in order, as `git_command` shows them (#132)."""
+    """The git processes the block starts, in order, as `git_command` shows them (#132): every one, a batch reader's
+    included, since each is a process start (DR-0766)."""
     calls: list[str] = []
-    real = subprocess.run
+    real = subprocess.Popen.__init__
 
-    def recording(args: Any, *rest: Any, **kwargs: Any) -> Any:
+    def recording(self: subprocess.Popen[Any], args: Any, *rest: Any, **kwargs: Any) -> None:
         if isinstance(args, list) and args and Path(str(args[0])).stem == "git":
             calls.append(git_command(args))
-        return real(args, *rest, **kwargs)
+        real(self, args, *rest, **kwargs)
 
-    monkeypatch.setattr(subprocess, "run", recording)
+    monkeypatch.setattr(subprocess.Popen, "__init__", recording)
     try:
         yield calls
     finally:
-        monkeypatch.setattr(subprocess, "run", real)
+        monkeypatch.setattr(subprocess.Popen, "__init__", real)
 
 
 def cant_place(monkeypatch: pytest.MonkeyPatch) -> None:

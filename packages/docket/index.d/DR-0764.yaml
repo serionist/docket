@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0764
+    title: A Docket commit is the add and the commit; the staged check and git's identity are asked only after a commit that failed
+    status: proposed
+    at: "2026-10-21"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#266", DR-0753]
+    supersedes: [DR-0530]
+    description: "A commit of Docket's is the add and `git commit --only`, with nothing asked between them. The commit passes user.useConfigOnly=true, so git takes an identity from its config and its environment only, never one it guesses from the host's name, the reason DR-0530 asked first. Only when the commit fails are the two questions asked that used to come before every commit: whether the paths staged anything (`diff --cached`), since a commit with nothing new fails and is None as before; then whether git has an identity (user.name and user.email, at any level), and with none the commit runs again with the owner's from vault.yaml, which that Git, one command or one call of the service, passes from its first try after. A failure that isn't the identity's raises git's own error, as before. With the unmerged paths read from the index (DR-0765), a commit makes three git calls where it made six: the run files' status, the add and the commit. A machine with no git identity pays one failed commit, about 40 ms on Windows, and the two questions, once per command or service call. A ledger write asks its op files' state in one status where it asked a diff against HEAD and a status: each code whose path the diff lists the same way (changed in the index or the working tree, deleted from the index, added, added and changed) or the status alone lists (untracked, ignored, added and deleted), and the two calls as before for any code the status can't settle (a file staged and changed again, which may be back to HEAD's bytes; one deleted from the working tree, which may only have been added with -N; a rename or copy, whose pairing weighs the working tree; an unmerged path). A crash leaves what it left before: the add's index, never a commit. Where git's config gives a name but an empty address, or the GIT_AUTHOR_ and GIT_COMMITTER_ variables give part of an identity that config doesn't, git's own answer now stands where the owner's used to, as in the user's own commits."
+    binds:
+      - "A commit holds what it held before: its paths, its message, no hooks, git's identity where git has one and the owner's where it has none."
+    not_chosen:
+      - "Asking for git's identity before each commit, as DR-0530 did: 1,769 calls in the suite and one a command for every user, to spare a machine with none the one failed commit it now pays."
+      - "Reading the failed commit's message for a missing identity instead of asking: git translates its messages, and a wrong guess would commit with the owner's over a user's own."
+      - "A commit without user.useConfigOnly, the owner's passed only on failure: git guesses an identity from the host's name where none is set, so the author would change (DR-0530)."
+      - "Keeping the ledger's two calls: one more git start on every ledger write, for states the status settles the same way."

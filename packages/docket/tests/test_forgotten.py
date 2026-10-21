@@ -285,8 +285,8 @@ def test_head_s_list_is_read_once_per_commit(vault: Vault, monkeypatch: pytest.M
     forgotten._LOADED.clear()  # pyright: ignore[reportPrivateUsage] - another process, with nothing in memory
     with git_calls(monkeypatch) as calls:
         assert listed(vault).whole(PLAUD)
-    head = vault.git.head_id()
-    assert calls == [f"cat-file -e {head}:./{FORGOTTEN}", f"cat-file blob {head}:./{FORGOTTEN}"]
+    # Whether HEAD holds the list and what it says, from one batch read (DR-0766).
+    assert calls == ["cat-file --batch"]
     forgotten._LOADED.clear()  # pyright: ignore[reportPrivateUsage]
     vault.write_run("chat", [make_record(40)])
     with git_calls(monkeypatch) as calls:

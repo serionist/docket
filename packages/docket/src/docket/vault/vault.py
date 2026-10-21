@@ -22,10 +22,10 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from docket.errors import DocketError
-from docket.vault import forgotten, inforce
+from docket.vault import forgotten, gitfiles, inforce
 from docket.vault import machine as machines
 from docket.vault.config import CONFIG_FILE, VaultConfig
-from docket.vault.git import DOC_LINE, Git, Identity, SyncResult
+from docket.vault.git import DOC_LINE, Git, Identity, SyncResult, close_all
 from docket.vault.home import Home, is_git_dir, stopped_convert
 from docket.vault.lock import VaultLock
 from docket.vault.rawlog import RUN_FILE, RawLog, lines_of, parse_run_file, record_of
@@ -157,6 +157,16 @@ class Vault:
         )
         self.rawlog = RawLog(root, self.machine, self.lock, self.home.tmp_dir, self.home)
 
+    def __enter__(self) -> Vault:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Stop the vault's batch reader (DR-0766); the vault stays usable, and its next blob read starts another."""
+        self.git.close()
+
     # -- finding and creating ------------------------------------------------------------------------------------
 
     @staticmethod
@@ -254,7 +264,7 @@ class Vault:
 
     def commit(self, paths: list[str], message: str) -> str | None:
         """Commit locally. Run files left uncommitted by an interrupted run go in too; never a changed raw file. The
-        unmerged paths are asked for right before the add, as close to the commit as the check can sit (DR-0528)."""
+        unmerged paths are asked for right before the add, as close to the commit as the check can sit (DR-0765)."""
         with self.lock:
             self._recover()
             everything = [*paths, *self.uncommitted_runs()]
@@ -283,6 +293,8 @@ class Vault:
         with self.lock:
             self._recover()
             self.refuse_unmerged()
+            # A rebase may repack, and on Windows an open batch reader holds the pack files (DR-0766).
+            close_all()
             return self.git.sync()
 
     @contextmanager
@@ -298,7 +310,7 @@ class Vault:
         """Before writing: undo a rebase a killed sync of ours left behind (its marker says so, and under the lock no
         sync of ours is running), and refuse to touch anything else git is in the middle of, which is the user's. In
         a folder of the user's repo Docket never syncs, so nothing there is ever undone. Each check here reads files,
-        the branch's too, so it runs at every write and every commit (DR-0528)."""
+        the branch's too, so it runs at every write and every commit (DR-0765)."""
         git_dir = self.home.git_dir
         repo = self.home.top
         state = next((git_dir / d for d in ("rebase-merge", "rebase-apply") if (git_dir / d).exists()), None)
@@ -325,15 +337,17 @@ class Vault:
         it is. One plain ls-files -u, vault-wide: it takes no pathspec file, and a backlog of run files named on the
         command line could pass Windows' limit. Each commit asks right before its add; a writer that asks the owner
         something before its first commit, as a release does, asks first too, so a conflict refuses before the
-        question (DR-0528)."""
-        unmerged = sorted({line.split("\t", 1)[-1] for line in self.git.out("ls-files", "-u").splitlines()})
+        question. The paths are read from the index file where it can say, else from git (DR-0765)."""
+        unmerged = gitfiles.unmerged(self.home.git_dir, self.home.prefix)
+        if isinstance(unmerged, gitfiles.Unknown):
+            unmerged = sorted({line.split("\t", 1)[-1] for line in self.git.out("ls-files", "-u").splitlines()})
         if unmerged:
             raise UnmergedError(f"{', '.join(unmerged)} in {self.root} has a conflict; resolve it before Docket writes")
 
     def blocked(self) -> str | None:
         """Why Docket can't change the tree now, asked before a writer changes a tracked file it commits later: a
         rebase, merge, cherry-pick or revert under way, a detached HEAD, or unmerged paths, each the owner's to finish
-        (DR-0528, DR-0597). A rebase a killed sync of ours left is undone first, as every write does. None when it
+        (DR-0765, DR-0597). A rebase a killed sync of ours left is undone first, as every write does. None when it
         can."""
         try:
             self._recover()
@@ -416,7 +430,7 @@ class Vault:
         # A line that doesn't read as a record is kept, as the apply keeps it: only a listed line leaves a run file.
         left = [
             line
-            for line in lines_of(self.git.out("cat-file", "blob", f"HEAD:./{rel}"))
+            for line in lines_of(self.git.blob_out(f"HEAD:./{rel}"))
             if not (line.strip() and (record := record_of(line)) is not None and reading.skips(record))
         ]
         return "".join(left) == path.read_bytes().decode("utf-8", errors="replace")

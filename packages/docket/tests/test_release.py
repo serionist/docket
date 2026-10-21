@@ -242,28 +242,26 @@ def test_a_release_makes_these_git_calls(vault: Vault, folder: Path, monkeypatch
         assert releasing.release(opened, "rec", folder, [cut_01()]).released == ["rec-cut-01"]
     hold, log = "-- state/holds/rec.txt", "-- state/releases/rec.jsonl"
     assert calls == [
-        # A conflict refuses before the screen; then the hold file kept as committed, the mapper found in the project,
-        # the log's first commit.
-        "ls-files -u",
+        # A conflict refuses before the screen, read from the index file (DR-0765); then the hold file kept as
+        # committed, HEAD's .gitattributes from the batch reader (DR-0766), the mapper found in the project (asked of
+        # git at the ingest, DR-0767), the log's first commit.
         f"ls-files -z --others {hold}",
         f"diff --name-only -z HEAD {hold}",
-        "show HEAD:./.gitattributes",
-        "rev-parse --show-toplevel",
+        "cat-file --batch",
         f"ls-files -z --others {log}",
         *COMMIT_CALLS,
-        # The hold's removal, after a commit moved HEAD: asked again, git's identity aside.
+        # The hold's removal, after a commit moved HEAD: asked again, the batch reader still open for .gitattributes.
         f"ls-files -z --others {log}",
         f"diff --name-only -z HEAD {log}",
         f"ls-files -z --others {hold}",
         f"diff --name-only -z HEAD {hold}",
-        "show HEAD:./.gitattributes",
-        *[c for c in COMMIT_CALLS if not c.startswith("config")],
+        *COMMIT_CALLS,
     ]
 
 
 def test_a_release_during_a_conflict_refuses_before_any_screen(vault: Vault, folder: Path) -> None:
     # An unmerged path, as a stash pop that conflicts leaves one: stages 1 to 3 and no *_HEAD file. The release's
-    # commits would refuse it only after its screen and its log line on disk (#132, DR-0528).
+    # commits would refuse it only after its screen and its log line on disk (#132, DR-0765).
     ingest(vault, folder)
     rel = "conflict.txt"
     blob = sh(vault.root, "git", "hash-object", "-w", "--", "vault.yaml").strip()

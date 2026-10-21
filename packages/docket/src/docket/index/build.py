@@ -513,8 +513,7 @@ class Indexer:
     def _committed(self, rel: str) -> str | None:
         """A decision's text at HEAD, read once per build."""
         if rel not in self._head:
-            proc = self.vault.git.run("cat-file", "blob", f"HEAD:./{rel}", check=False)
-            self._head[rel] = proc.stdout if proc.returncode == 0 else None
+            self._head[rel] = self.vault.git.blob_text(f"HEAD:./{rel}")
         return self._head[rel]
 
     def _decision(self, rel: str, doc: ProcessedDoc, data: bytes) -> ProcessedDoc:
@@ -581,8 +580,7 @@ class Indexer:
             sha = next((sha for n, sha in histories.get(doc_id, []) if n == rev), None)
             if sha is None:
                 continue
-            proc = self.vault.git.run("cat-file", "blob", f"{sha}:./{doc_path(doc_id).as_posix()}", check=False)
-            doc = decision_form.committed_doc(proc.stdout if proc.returncode == 0 else None)
+            doc = decision_form.committed_doc(self.vault.git.blob_text(f"{sha}:./{doc_path(doc_id).as_posix()}"))
             if doc is not None:
                 if len(_EARLIER) >= EARLIER_KEPT:
                     _EARLIER.clear()

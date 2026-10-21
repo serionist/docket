@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import empty_vault, make_record, plaud_records, sh
+from docket_testkit import COMMIT_CALLS, TEST_GITCONFIG, empty_vault, git_calls, make_record, plaud_records, sh
 
 from docket.errors import DocketError
 from docket.vault import rawlog
@@ -51,6 +51,7 @@ def test_init_writes_the_layout_and_commits_only_its_own_files(tmp_path: Path, c
             "vault.yaml",
         ]
     )
+    # git's identity, which the tests' config gives as the owner's; a machine with none is held below.
     log = sh(vault.root, "git", "log", "--format=%an <%ae> %s")
     assert log.strip() == "Ada Example <ada@example.invalid> Start the vault"
     assert (vault.root / ".git" / "docket" / "machine").read_text(encoding="utf-8").strip() == "test-box"
@@ -627,7 +628,7 @@ def test_the_identity_check_reads_both_keys_and_git_s_own_precedence(
     assert vault.git.has_identity() is expected
 
 
-def test_a_commit_starts_six_git_processes(
+def test_a_commit_starts_three_git_processes(
     tmp_path: Path, config: VaultConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     vault = new_vault(tmp_path, config)
@@ -641,4 +642,89 @@ def test_a_commit_starts_six_git_processes(
 
     monkeypatch.setattr(subprocess, "run", counting)
     vault.write_run("chat", [make_record(1)], RUN_AT)
-    assert len(started) == 6, started
+    assert len(started) == 3, started
+
+
+# -- the commit's calls after a failure: the staged check and git's identity (DR-0764) --------------------------------
+
+RUN_FILE = "raw/chat/2026/10/2026-10-14T1550-test-box.jsonl"
+STATUS, ADD, COMMIT = COMMIT_CALLS
+STAGED = "diff --cached --name-only -z -- ."
+IDENTITY = "config --get-regexp ^user[.](name|email)$"
+
+
+def no_identity() -> None:
+    """A machine whose git has no identity at any level: the tests' config without its [user]."""
+    Path(os.environ["GIT_CONFIG_GLOBAL"]).write_text(TEST_GITCONFIG.split("[user]")[0], encoding="utf-8")
+
+
+def authors(vault: Vault) -> list[str]:
+    return sh(vault.root, "git", "log", "--format=%an <%ae>|%cn <%ce>", "-2").splitlines()
+
+
+def test_a_commit_with_no_identity_fails_once_then_takes_the_owner_s(
+    tmp_path: Path, config: VaultConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = Vault.open(new_vault(tmp_path, config).root)
+    no_identity()
+    with git_calls(monkeypatch) as calls:
+        vault.write_run("chat", [make_record(1)], RUN_AT)
+    # The commit takes no identity git would guess from the host's name: it fails, the staged check and the identity
+    # are asked, and the commit runs again with the owner's.
+    assert calls == [STATUS, ADD, COMMIT, STAGED, IDENTITY, COMMIT]
+    with git_calls(monkeypatch) as calls:
+        vault.write_run("chat", [make_record(2)], RUN_AT)
+    # This vault's Git knows now: the next commit passes the owner's at once.
+    assert calls == COMMIT_CALLS
+    owner = "Ada Example <ada@example.invalid>"
+    assert authors(vault) == [f"{owner}|{owner}"] * 2
+    assert sh(vault.root, "git", "status", "--porcelain").strip() == ""
+
+
+def test_a_commit_takes_git_s_own_identity_where_there_is_one(
+    tmp_path: Path, config: VaultConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = Vault.open(new_vault(tmp_path, config).root)
+    vault.git.run("config", "user.name", "Ben Sample")
+    vault.git.run("config", "user.email", "ben@example.invalid")
+    with git_calls(monkeypatch) as calls:
+        vault.write_run("chat", [make_record(1)], RUN_AT)
+    assert calls == COMMIT_CALLS
+    assert authors(vault)[0] == "Ben Sample <ben@example.invalid>|Ben Sample <ben@example.invalid>"
+
+
+@pytest.mark.parametrize("identity", [True, False])
+def test_a_commit_of_nothing_new_fails_once_and_is_none(
+    tmp_path: Path, config: VaultConfig, monkeypatch: pytest.MonkeyPatch, identity: bool
+) -> None:
+    vault = Vault.open(new_vault(tmp_path, config).root)
+    if not identity:
+        no_identity()
+    head = vault.git.head_id()
+    with git_calls(monkeypatch) as calls:
+        assert vault.commit(["vault.yaml"], "nothing changed") is None
+    # Nothing new is the staged check's answer, as before, with or without an identity.
+    assert calls == [STATUS, ADD, COMMIT, STAGED]
+    assert vault.git.head_id() == head
+
+
+@pytest.mark.parametrize("identity", [True, False])
+def test_a_commit_that_fails_otherwise_says_git_s_error(
+    tmp_path: Path, config: VaultConfig, monkeypatch: pytest.MonkeyPatch, identity: bool
+) -> None:
+    vault = Vault.open(new_vault(tmp_path, config).root)
+    if not identity:
+        no_identity()
+    # Another git holds the branch: the commit fails whoever makes it.
+    lock = vault.root / ".git" / "refs" / "heads" / "main.lock"
+    lock.write_text("", encoding="utf-8")
+    head = vault.git.head_id()
+    with git_calls(monkeypatch) as calls, pytest.raises(DocketError, match=r"git commit: .*main\.lock"):
+        vault.write_run("chat", [make_record(1)], RUN_AT)
+    # With an identity the error is the commit's own; without one the owner's commit fails the same way.
+    assert calls == [STATUS, ADD, COMMIT, STAGED, IDENTITY, *([] if identity else [COMMIT])]
+    assert vault.git.head_id() == head
+    lock.unlink()
+    # The run file waits, as after any failed commit, and the next commit takes it in.
+    assert vault.commit([], "Raw: the run left") is not None
+    assert sh(vault.root, "git", "status", "--porcelain").strip() == ""

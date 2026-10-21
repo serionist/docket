@@ -147,12 +147,17 @@ _GIT_PLACES = (
 _FOUND: dict[Path, Found] = {}
 
 
+def told_where() -> bool:
+    """Whether a variable tells git where the repo is, so that no answer kept from before may stand for git's."""
+    return any(os.environ.get(name) for name in _GIT_PLACES)
+
+
 def discover(root: Path) -> Found | None:
     """Where git finds the repo around a folder, or None outside one. Git is asked once per folder and process; after
     that its answer stands while a few file checks say git would give it again: the git dir is still a repository and
     no folder between this one and the top holds a .git git would stop at (DR-0532). A folder vault opens on every
     call of the service, and each `git rev-parse` costs a process start."""
-    if not any(os.environ.get(name) for name in _GIT_PLACES):
+    if not told_where():
         found = _FOUND.get(root)
         if found is not None and _stands(root, found):
             return found

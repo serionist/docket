@@ -135,7 +135,12 @@ def test_the_vault_becomes_a_folder_with_its_history(tmp_path: Path) -> None:
     keys = root / ".git" / "docket" / "media" / "keys"
     keys.mkdir(parents=True)
     (keys / f"{'a' * 64}.age").write_bytes(b"a sealed key")
+    # A batch reader running in the vault, as one a command left would be: the convert closes it before it moves the
+    # history, which on Windows it couldn't move from under it (DR-0766).
+    reading = Vault.open(root)
+    reading.git.show_at_head("vault.yaml")
     script = run(root)
+    assert reading.git._batch is None  # pyright: ignore[reportPrivateUsage]
     vault = check_converted(top, root)
     moved = top / ".git" / "docket" / "notes" / "vault" / "media" / "keys" / f"{'a' * 64}.age"
     assert moved.read_bytes() == b"a sealed key"

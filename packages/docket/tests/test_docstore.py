@@ -627,7 +627,7 @@ def stash_a_conflict(vault: Vault) -> None:
 def test_a_stash_pop_conflict_inside_the_lock_hold_is_refused_before_the_add(
     vault: Vault, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The pop lands after writing() began and before the commit asks for unmerged paths (#132, DR-0528).
+    # The pop lands after writing() began and before the commit asks for unmerged paths (#132, DR-0765).
     stash_a_conflict(vault)
     real = DocStore.history
     popped: list[str] = []
@@ -652,7 +652,7 @@ def test_a_stash_pop_conflict_inside_the_lock_hold_is_refused_before_the_add(
 def test_a_stash_pop_conflict_after_the_add_is_committed_as_on_main(
     vault: Vault, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The window the lead accepted (DR-0528): a conflict that lands between Docket's add and its commit, on a path the
+    # The window the lead accepted (DR-0765): a conflict that lands between Docket's add and its commit, on a path the
     # commit names, is committed with its markers, as before #132. Pinned so a change to it is deliberate.
     stash_a_conflict(vault)
     real = Git.run

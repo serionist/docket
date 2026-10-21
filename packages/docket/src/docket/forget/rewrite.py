@@ -42,6 +42,7 @@ from docket.media import layout
 from docket.vault import forgetdocs, forgotten
 from docket.vault.anchors import encode_rid
 from docket.vault.docstore import DocStore
+from docket.vault.git import close_all
 from docket.vault.processed import ProcessedDoc, doc_path, parse_doc
 from docket.vault.spans import RawLookup
 from docket.vault.staging import rid_hash
@@ -294,6 +295,8 @@ def write(vault: Vault, plan: Plan, held: Before, at: datetime) -> Written:
     deleted docs' too, in every commit on every ref, HEAD's before the apply included, read once, and those the bytes
     pre-filter keeps read again to be judged, so a forget whose apply failed or left a doc for its owner still writes
     them; `held` is what HEAD held before the apply."""
+    # The rewrite reads every blob through its own batch reader, so the vault's are closed first (DR-0766).
+    close_all()
     base = vault.home.private / FOLDER
     base.mkdir(parents=True, exist_ok=True)
     folder = base / stamp(at)
@@ -464,6 +467,7 @@ def check(vault: Vault, folder: Path) -> Checked:
     """Each path and line number of HEAD's tree and of each other branch tip the rewrite would change, the repo's whole
     tree as filter-repo rewrites it. A file of a branch whose blob HEAD holds at a place as much the vault's is read
     once, under HEAD. Read-only."""
+    close_all()
     files = _read(folder)
     prefix = vault.git.prefix
     refused: list[str] = []
