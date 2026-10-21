@@ -3,6 +3,7 @@ Invented people and data only: the pilot's ledger of `test_sync_folder.py`, a sy
 
 from __future__ import annotations
 
+import os
 from datetime import timedelta
 from pathlib import Path
 
@@ -206,7 +207,66 @@ def test_only_the_newest_batches_since_the_start_are_read(vault: Vault) -> None:
     ]  # fmt: skip
     lines = summary.lines(summary.summary(vault, started.info.sync, AT + timedelta(minutes=5)))
     assert lines[1:5] == [
-        "1 older batch(es) by sync since the sync started, not listed",
+        "1 older batch(es) by sync in this sync's time, not listed",
         *(f'batch {id_}: 1 lines; undo it whole with {{"op": "undo", "batch": "{id_}"}}' for id_ in ids[1:]),
     ]
     assert "logged 3 on 1 item(s)" in lines
+
+
+def test_a_sync_s_batches_end_where_the_next_sync_of_the_vault_starts(vault: Vault) -> None:
+    """An older sync's summary, read after a later sync wrote, names its own batch alone; the later one's names its
+    own."""
+    first = start.start(vault, [], NOW)
+    mine = batch(vault)
+    later = NOW + timedelta(days=1)
+    second = start.start(vault, [], later)
+    theirs = store.write(vault, [{"op": "log", "item": "A-0003", "note": "Dan: the next day"}], by="sync",
+                         now=later + timedelta(minutes=5)).ops[0].batch  # fmt: skip
+    first_lines = summary.lines(summary.summary(vault, first.info.sync, later + timedelta(minutes=10)))
+    assert [line.split(":")[0] for line in first_lines if line.startswith("batch ")] == [f"batch {mine}"]
+    second_lines = summary.lines(summary.summary(vault, second.info.sync, later + timedelta(minutes=10)))
+    assert [line.split(":")[0] for line in second_lines if line.startswith("batch ")] == [f"batch {theirs}"]
+    assert "logged 1 on 1 item(s)" in second_lines
+
+
+def test_the_calendar_step_s_write_during_the_runs_is_said_as_the_calendar_s_with_no_undo(vault: Vault) -> None:
+    """The calendar step writes meetings by sync as an agent promotes its events, before the reconcile drafts: said
+    apart, with no undo, its lines left out of what the sync closed and added. The sync's own batch, written from the
+    draft, keeps its undo even when it touched meetings alone."""
+    started = start.start(vault, [], NOW)
+    during = store.write(vault, [{"op": "set", "item": "M-0002", "fields": {"where": "Room 4"}}], by="sync",
+                         now=NOW + timedelta(minutes=3)).ops[0].batch  # fmt: skip
+    draft = started.folder / "draft.jsonl"
+    draft.write_text("# docket sync reconcile: drafted\n", encoding="utf-8")
+    drafted = (NOW + timedelta(minutes=5)).timestamp()
+    os.utime(draft, (drafted, drafted))
+    mine = store.write(vault, [{"op": "set", "item": "M-0002", "fields": {"where": "Room 5"}}], by="sync",
+                       now=NOW + timedelta(minutes=6)).ops[0].batch  # fmt: skip
+    lines = summary.lines(summary.summary(vault, started.info.sync, AT))
+    assert lines[1:3] == [
+        f"calendar {during}: 1 meeting lines from the runs' promotions, not the sync's batch",
+        f'batch {mine}: 1 lines; undo it whole with {{"op": "undo", "batch": "{mine}"}}',
+    ]
+    assert "1 set" in lines
+
+
+def test_the_next_sync_is_this_vault_s_next_start_on_this_machine(
+    vault: Vault, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A later sync of another vault, a folder whose sync.json doesn't read, and an earlier sync are passed over; with
+    the folder of sync folders a link, there is none."""
+    first = start.start(vault, [], NOW)
+    start.start(vault, [], NOW - timedelta(hours=1))
+    other = empty_vault(tmp_path / "other", make_config())
+    theirs = folder.make(folder.new_id(NOW + timedelta(hours=1)))
+    info = first.info.model_copy(
+        update={"sync": theirs.name, "vault": str(other.root), "made": NOW + timedelta(hours=1)}
+    )
+    (theirs / folder.INFO).write_text(info.model_dump_json(), encoding="utf-8")
+    broken = folder.make(folder.new_id(NOW + timedelta(hours=2)))
+    (broken / folder.INFO).write_text("{", encoding="utf-8")
+    assert folder.next_start(first.info) is None
+    later = start.start(vault, [], NOW + timedelta(hours=3))
+    assert folder.next_start(first.info) == later.info.made
+    monkeypatch.setattr(folder, "_linked", lambda path: path == folder.root())
+    assert folder.next_start(first.info) is None

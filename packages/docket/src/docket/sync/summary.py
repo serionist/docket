@@ -26,7 +26,8 @@ snapshot, and no write, so the skill pre-approves it.
 
 | Group | What |
 |---|---|
-| batch, closed, added | this sync's batches: each by `sync`, its first op minted after the sync's start (DR-0612) |
+| batch, closed, added | this sync's batches by `sync`: minted after its start, before the vault's next sync (DR-0612) |
+| calendar | a batch of meetings alone written before the draft: the calendar step's (DR-0647), with no undo |
 | meetings and prep | to the fifth working day: each meeting not cancelled or declined, with an open point or item |
 | today and overdue, this week, whenever | what the owner owes: due by today, in the next 7 days, the rest |
 | invites, waiting | the open invites; what the owner waits on |
@@ -54,6 +55,7 @@ from docket.index import build as index_build
 from docket.ledger import day as ledger_day
 from docket.ledger import ops, views
 from docket.sync import block, folder
+from docket.sync.reconcile import DRAFT
 from docket.vault.staging import Staging
 from docket.vault.vault import Vault
 
@@ -69,12 +71,19 @@ CUT = ("whenever", "left over", "added", "waiting", "this week", "invites", "clo
        "today and overdue", "meetings and prep")  # fmt: skip
 # A sync writes one batch, or a few when a write is fixed and made again: the newest this many are read.
 MOST_BATCHES = 3
-# Ops minted since the start, by the ids' index: a batch's ops all have ids from its own on (DR-0612).
+# Ops minted from the sync's start to the next sync's, by the ids' index: a batch's ops have ids from its own on
+# (DR-0612).
 BATCHES = (
-    "SELECT batch FROM item_log WHERE id >= ? AND batch >= ? AND by = 'sync' UNION SELECT batch FROM meeting_log WHERE "
-    "id >= ? AND batch >= ? AND by = 'sync' UNION SELECT batch FROM stream_log WHERE id >= ? AND batch >= ? AND by = "
-    "'sync' ORDER BY batch"
+    "SELECT batch FROM item_log WHERE id >= ? AND batch >= ? AND batch < ? AND by = 'sync' UNION SELECT batch FROM "
+    "meeting_log WHERE id >= ? AND batch >= ? AND batch < ? AND by = 'sync' UNION SELECT batch FROM stream_log WHERE "
+    "id >= ? AND batch >= ? AND batch < ? AND by = 'sync' ORDER BY batch"
 )
+# Whether a batch touched an item or a stream: the calendar step's touches meetings alone.
+TOUCHES = (
+    "SELECT 1 FROM item_log WHERE id >= ? AND batch = ? UNION ALL SELECT 1 FROM stream_log WHERE id >= ? AND batch = ? "
+    "LIMIT 1"
+)
+LAST_ID = ops.encode((1 << 128) - 1)
 
 
 @dataclass
@@ -118,30 +127,53 @@ def summary(vault: Vault, sync: str, at: datetime) -> Summary:
     for _ in range(PREP_DAYS):
         end = ledger_day.next_working_day(end)
     ask = views.Ask(view="snapshot", since=today.isoformat(), until=end.isoformat())
+    draft = path / DRAFT
+    drafted = datetime.fromtimestamp(draft.stat().st_mtime, UTC) if draft.is_file() else None
     with index_build.ledger_tables(vault) as conn:
         snapshot = views.read(conn, ask, tz, at)
-        batches = _batches(conn, info.made)
-        written = {batch: views.batch_lines(conn, batch) for batch in batches[-MOST_BATCHES:]}
+        batches = _batches(conn, info.made, folder.next_start(info))
+        kept = batches[-MOST_BATCHES:]
+        calendar = {batch for batch in kept if _calendar(conn, batch, drafted)}
+        written = {batch: views.batch_lines(conn, batch) for batch in kept}
     local = at.astimezone(tz)
     c = snapshot.counts
     head = (
         f"summary {info.sync}  {ledger_day.WEEKDAYS[local.weekday()]} {local:%Y-%m-%d %H:%M} {info.zone}: "
         f"{c.open} open, {c.snoozed} snoozed, {c.overdue} overdue"
     )
-    groups = _written(written, snapshot, today)
+    groups: list[Group] = []
     if len(batches) > MOST_BATCHES:
         older = len(batches) - MOST_BATCHES
-        groups.insert(0, _Said(f"{older} older batch(es) by sync since the sync started, not listed"))
+        groups.append(_Said(f"{older} older batch(es) by sync in this sync's time, not listed"))
+    groups += [
+        _Said(f"calendar {batch}: {len(written[batch])} meeting lines from the runs' promotions, not the sync's batch")
+        for batch in kept if batch in calendar
+    ]  # fmt: skip
+    groups += _written({b: lines for b, lines in written.items() if b not in calendar}, snapshot, today)
     groups += _owed(snapshot, at, end, today)
     groups += [_runs(path, info), _notes(vault, path, info), _staging(vault)]
     return _fitted(Summary(head, groups))
 
 
-def _batches(conn: sqlite3.Connection, made: datetime) -> list[str]:
-    """The batches written by `sync` since the sync started, oldest first: each first op's id minted after its start
-    (DR-0612). A sync writes one; a ledger that holds more names only the newest few."""
-    floor = ops.encode(int(made.astimezone(UTC).timestamp() * 1000) << ops.RANDOM_BITS)
-    return [str(batch) for (batch,) in conn.execute(BATCHES, (floor,) * 6)]
+def _id_at(moment: datetime) -> str:
+    """The lowest op id minted at a moment (DR-0612)."""
+    return ops.encode(int(moment.astimezone(UTC).timestamp() * 1000) << ops.RANDOM_BITS)
+
+
+def _batches(conn: sqlite3.Connection, made: datetime, until: datetime | None) -> list[str]:
+    """The batches written by `sync` in this sync's time, oldest first: each first op's id minted after its start and
+    before the next sync of the vault started (DR-0612). A sync writes one; a ledger that holds more names the newest
+    few."""
+    floor, ceiling = _id_at(made), LAST_ID if until is None else _id_at(until)
+    return [str(batch) for (batch,) in conn.execute(BATCHES, (floor, floor, ceiling) * 3)]
+
+
+def _calendar(conn: sqlite3.Connection, batch: str, drafted: datetime | None) -> bool:
+    """Whether a batch is the calendar step's (DR-0647), made as an agent's run promoted its events: it touched
+    meetings alone, and was written before the draft was, while the sync's own batch is written from the draft."""
+    if drafted is not None and batch >= _id_at(drafted):
+        return False
+    return conn.execute(TOUCHES, (batch, batch, batch, batch)).fetchone() is None
 
 
 def _row(item: views.ItemRow, today: date) -> str:

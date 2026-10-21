@@ -184,7 +184,7 @@ once and say it in chat; never pull the list out of a snapshot, a block or the d
 
 | Group | What |
 |---|---|
-| the batch | its id, to undo whole with `{"op": "undo", "batch": "<its id>"}`; what it closed and added, the logs counted, the outcomes written |
+| the batch | the sync's own, written from the draft: its id, to undo whole with `{"op": "undo", "batch": "<its id>"}`; what it closed and added, the logs counted, the outcomes written. A `calendar` line is the meetings the runs' promotions made, not the sync's batch, and has no undo |
 | meetings and prep | each meeting to the fifth working day with an open point or item, the proposed points marked |
 | today and overdue, this week, whenever | what the user owes, by its due |
 | invites, waiting | invites waiting for an answer; what the user waits for |
