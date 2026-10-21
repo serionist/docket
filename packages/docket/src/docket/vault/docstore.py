@@ -54,6 +54,10 @@ log = logging.getLogger(__name__)
 # A final decision's committed text, by its blob id: what every read of it takes (DR-0603), read once a process.
 _BLOBS: dict[str, str] = {}
 BLOBS_KEPT = 1000
+# Docs' histories by the repo, its HEAD and its shallow mark, and the docs asked for: what git's log says for a commit
+# never changes, so a read asking again at the same HEAD, such as the Briefs page's, asks git nothing.
+_HISTORIES: dict[tuple[str, str, str, tuple[str, ...]], dict[str, list[tuple[int, str]]]] = {}
+HISTORIES_KEPT = 64
 
 # On Windows another program holding the doc open makes the rename fail for a moment.
 REPLACE_TRIES = 5
@@ -261,6 +265,21 @@ class DocStore:
         isn't the union of the per-file logs, so when one touched those folders, or the batch is too small to gain,
         each doc's log is read on its own; one `rev-list --merges` decides."""
         ids = list(dict.fromkeys(doc_ids))
+        git = self.vault.git
+        head = git.head_id()
+        shallow = git.git_dir / "shallow"
+        mark = f"{shallow.stat().st_mtime_ns}" if shallow.is_file() else ""
+        key = (str(git.git_dir), head, mark, tuple(ids)) if head else None
+        if key is not None and key in _HISTORIES:
+            return {doc_id: list(revs) for doc_id, revs in _HISTORIES[key].items()}
+        found = self._histories(ids)
+        if key is not None:
+            if len(_HISTORIES) >= HISTORIES_KEPT:
+                _HISTORIES.clear()
+            _HISTORIES[key] = {doc_id: list(revs) for doc_id, revs in found.items()}
+        return found
+
+    def _histories(self, ids: list[str]) -> dict[str, list[tuple[int, str]]]:
         if len(ids) < BATCHED_HISTORIES:
             return {doc_id: self.history(doc_id) for doc_id in ids}
         rels = {self.path(doc_id).as_posix(): doc_id for doc_id in ids}

@@ -2,7 +2,8 @@
 
 A brief is stale when records that mention its entity sit in run files its last rev's commit didn't have, or when a
 line of it cites a doc line that changed since (#166's flags). Which run files a brief could have seen is read from
-git: the tree of that commit, `git ls-tree` over `raw/`, cached by commit, never fetched (`GIT_NO_LAZY_FETCH`). No
+git: the tree of that commit, `git ls-tree` over `raw/`, read once a process for each commit, since a commit's tree
+never changes, and never fetched (`GIT_NO_LAZY_FETCH`). No
 clock is compared, so a record written elsewhere before the brief and pulled after it still counts. A brief whose
 commit or tree isn't on this clone is stale, its history not here, never current. A brief whose entity is gone is
 orphaned, and names the entity that holds its name now when exactly one does. A brief a never-store list holds by its
@@ -35,6 +36,12 @@ HISTORY_NOT_HERE = "its history isn't here"
 NEWEST = 5
 # Git never reaches for a missing object over the network while Docket asks what a commit holds.
 NO_FETCH = {"GIT_NO_LAZY_FETCH": "1"}
+# Each commit's run files under raw/, by its id: a commit's tree never changes, so each is read once a process, which
+# keeps the Briefs page's read from one git call a brief. A tree that didn't read isn't kept: a pull may bring it.
+_TREES: dict[str, frozenset[str]] = {}
+TREES_KEPT = 2000
+# Each commit's time, by its id, which never changes either.
+_TIMES: dict[str, str] = {}
 
 
 class NewRecords(BaseModel):
@@ -102,7 +109,7 @@ def report(
     commits = {d.meta.id: histories[d.meta.id][0][1] for d in shown if histories.get(d.meta.id)}
     times = commit_times(git, sorted(set(commits.values())))
     standing = decision_form.standings(store.decisions())
-    trees: dict[str, set[str] | None] = {}
+    trees: dict[str, frozenset[str] | None] = {}
     conn = open_index(vault)
     try:
         reader = _Reader(by_id, known, languages, commits, times, trees, git, conn, flags.from_index(conn), standing)
@@ -150,9 +157,20 @@ def _holders(doc: ProcessedDoc, entity_id: str, known: list[Entity]) -> list[Ent
 
 
 def commit_times(git: Git, commits: list[str]) -> dict[str, str]:
-    """Each commit's time (UTC, ISO), one call for all, or one each when some aren't on this clone."""
-    if not commits:
-        return {}
+    """Each commit's time (UTC, ISO), one call for all that aren't known yet, or one each when some aren't on this
+    clone."""
+    known = {commit: _TIMES[commit] for commit in commits if commit in _TIMES}
+    asked = [commit for commit in commits if commit not in known]
+    if asked:
+        found = _times(git, asked)
+        if len(_TIMES) + len(found) > TREES_KEPT:
+            _TIMES.clear()
+        _TIMES.update(found)
+        known |= found
+    return known
+
+
+def _times(git: Git, commits: list[str]) -> dict[str, str]:
     proc = git.run("log", "--no-walk=unsorted", "--format=%H%x1f%cI", *commits, check=False, env=NO_FETCH)
     if proc.returncode != 0:
         found: dict[str, str] = {}
@@ -173,11 +191,18 @@ def _parse_times(out: str) -> dict[str, str]:
     return found
 
 
-def _tree(git: Git, commit: str, trees: dict[str, set[str] | None]) -> set[str] | None:
+def _tree(git: Git, commit: str, trees: dict[str, frozenset[str] | None]) -> frozenset[str] | None:
     """The run files a commit's tree holds under raw/, as vault paths; None when it can't be read here."""
     if commit not in trees:
-        proc = git.run("ls-tree", "-r", "--name-only", commit, "--", "raw/", check=False, env=NO_FETCH)
-        trees[commit] = set(proc.stdout.splitlines()) if proc.returncode == 0 else None
+        kept = _TREES.get(commit)
+        if kept is None:
+            proc = git.run("ls-tree", "-r", "--name-only", commit, "--", "raw/", check=False, env=NO_FETCH)
+            if proc.returncode == 0:
+                kept = frozenset(proc.stdout.splitlines())
+                if len(_TREES) >= TREES_KEPT:
+                    _TREES.clear()
+                _TREES[commit] = kept
+        trees[commit] = kept
     return trees[commit]
 
 
@@ -199,7 +224,7 @@ class _Reader:
     languages: list[str]
     commits: dict[str, str]
     times: dict[str, str]
-    trees: dict[str, set[str] | None]
+    trees: dict[str, frozenset[str] | None]
     git: Git
     conn: sqlite3.Connection
     found: list[flags.Flag]
