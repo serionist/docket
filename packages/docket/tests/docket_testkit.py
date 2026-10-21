@@ -105,7 +105,37 @@ class FakePrompt:
         return self.answers.pop(0) if self.answers else osprompt.Refused("the script ran out")
 
 
-def sh(cwd: Path, *args: str, check: bool = True) -> str:
+# The git commands whose hooks a test repo's git-lfs installs (post-commit, post-checkout, post-merge), each a process
+# of its own, about a second on Windows. Not push: git-lfs's pre-push is what sends media to a remote.
+HOOKED = frozenset({"commit", "merge", "pull", "checkout", "switch", "rebase", "cherry-pick", "revert", "am"})
+HOOKS_OFF = "hooks-off"
+
+
+def hooks_off() -> Path | None:
+    """The file the kit points core.hooksPath at for its own setup commits, as Docket does for its own: a file, since
+    git-lfs writes its hooks into any folder there. None outside a test session, where the hooks run as before."""
+    home = os.environ.get(HOME_VAR)
+    if not home:
+        return None
+    path = Path(home) / HOOKS_OFF
+    if not path.is_file():
+        path.write_text("The test kit's setup commits run no hooks from here.\n", encoding="utf-8")
+    return path
+
+
+def git_verb(args: tuple[str, ...]) -> str:
+    """The git command a call list runs: what follows git's own options, `-c` and `-C` with their values."""
+    rest = list(args[1:])
+    while rest and rest[0].startswith("-"):
+        del rest[: 2 if rest[0] in ("-c", "-C") else 1]
+    return rest[0] if rest else ""
+
+
+def sh(cwd: Path, *args: str, check: bool = True, hooks: bool = False) -> str:
+    """A command in cwd, its output; a failure fails the test unless check is off. The kit's own commits, merges and
+    checkouts run no hooks, as Docket's own don't: a test about the user's own hooks passes hooks=True."""
+    if not hooks and args[:1] == ("git",) and git_verb(args) in HOOKED and (off := hooks_off()) is not None:
+        args = ("git", "-c", f"core.hooksPath={off.as_posix()}", *args[1:])
     proc = subprocess.run(list(args), cwd=cwd, capture_output=True, text=True, encoding="utf-8", check=False)
     if check and proc.returncode != 0:
         raise AssertionError(f"{args}: {proc.stderr or proc.stdout}")
@@ -359,6 +389,31 @@ def copied(tmp_path: Path, build: Callable[[Path], Path], key: str) -> Path:
     return tmp_path / rel
 
 
+_READ_ONLY: list[Path] = []
+
+
+def read_only(made: Path, ready: Callable[[Path], object] | None = None) -> Path:
+    """A copy of a template for the tests of a module that only read it: made once per module and worker, beside the
+    templates, and held to a manifest as they are, so a run whose test wrote into it fails (DR-0531). `ready` runs on
+    the copy first, under a template build's isolation, for what the tests' first read would write; then the manifest
+    is taken. A test that writes takes a copy of its own."""
+    templates = templates_folder(_FACTORY[0])
+    folder = templates / made.resolve().relative_to(templates.resolve()).parts[0]
+    name = f"{folder.name}.read-{os.getpid()}-{len(_READ_ONLY)}"
+    copy = templates / name
+    _READ_ONLY.append(copy)
+    shutil.copytree(folder, copy)
+    for repo in _repos(folder):
+        _fit(folder, copy / repo.relative_to(folder), copy)
+    found = copy / made.resolve().relative_to(folder.resolve())
+    if ready is not None:
+        with pytest.MonkeyPatch.context() as mp:
+            isolated_git(mp, templates / f"{name}.home")
+            ready(found)
+    (templates / f"{name}.manifest.json").write_text(json.dumps(manifest(copy)), encoding="utf-8")
+    return found
+
+
 # Where a file media key store keeps its seal: Docket's state folder, outside the vault (KeyStore._seal_file).
 SEALS = "media-stores"
 # A template build's state folder, under its home (isolated_git).
@@ -551,9 +606,10 @@ def copy_project(template: Path, tmp_path: Path) -> Vault:
     return Vault.open(target / "vault")
 
 
-def git(cwd: Path, *args: str) -> str:
-    """git as the user of a host repo: an invented identity, the user's own commits."""
-    return sh(cwd, "git", "-c", "user.name=Ada Example", "-c", "user.email=ada@example.invalid", *args)
+def git(cwd: Path, *args: str, hooks: bool = False) -> str:
+    """git as the user of a host repo: an invented identity, the user's own commits; their hooks only with hooks=True,
+    for a test about them."""
+    return sh(cwd, "git", "-c", "user.name=Ada Example", "-c", "user.email=ada@example.invalid", *args, hooks=hooks)
 
 
 def commit_config(root: Path) -> None:

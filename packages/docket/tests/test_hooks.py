@@ -48,6 +48,11 @@ def hooks_of(vault: Vault) -> Path:
     return vault.home.git_dir / "hooks"
 
 
+def own(cwd: Path, *args: str) -> str:
+    """git as the user runs it, hooks and all: the kit's own setup commits run none."""
+    return git(cwd, *args, hooks=True)
+
+
 @pytest.mark.parametrize("storage", ["repo", "folder"])
 def test_docket_s_commits_run_no_hook_and_the_user_s_own_still_do(tmp_path: Path, storage: str) -> None:
     vault = vault_of(tmp_path, storage)
@@ -63,9 +68,9 @@ def test_docket_s_commits_run_no_hook_and_the_user_s_own_still_do(tmp_path: Path
     assert vault.home.hooks_off.is_file()
     # The user's own commit runs them: commit-msg refuses it, and without that rule post-commit runs.
     with pytest.raises(AssertionError):
-        git(top, "commit", "--allow-empty", "-qm", "mine")
+        own(top, "commit", "--allow-empty", "-qm", "mine")
     (hooks / "commit-msg").unlink()
-    git(top, "commit", "--allow-empty", "-qm", "mine")
+    own(top, "commit", "--allow-empty", "-qm", "mine")
     assert ran(log) == ["post-commit"]
 
 
@@ -139,7 +144,7 @@ def test_sync_rebases_past_a_refusing_pre_rebase_and_runs_no_hook(tmp_path: Path
     # The user's own rebase is refused.
     vault.git.run("fetch", "-q", "origin")
     with pytest.raises(AssertionError, match="pre-rebase"):
-        git(vault.root, "rebase", "-q", "origin/main")
+        own(vault.root, "rebase", "-q", "origin/main")
     result = vault.sync()
     assert result.rebased, result.message
     assert subjects(vault.root) == ["Raw: chat, 1 record(s) from test-box", "theirs", "Start the vault"]

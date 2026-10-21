@@ -4,6 +4,7 @@ written by a test, and copied so that a copy behaves as a fresh build would (DR-
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -14,7 +15,7 @@ from typing import Any, cast
 
 import docket_testkit as kit
 import pytest
-from docket_testkit import empty_vault, folder_vault, git, host_repo, make_record, users_work
+from docket_testkit import empty_vault, folder_vault, git, host_repo, make_record, sh, users_work
 
 from docket.vault.config import VaultConfig
 
@@ -40,6 +41,50 @@ def build(folder: Path) -> Path:
 
 
 print(kit.shared(build, "two-workers", Factory()))
+"""
+# A run of its own with the app tests' conftest.py and the one above them that checks the templates (DR-0531).
+READ_ONLY_CONFTEST = """
+import importlib.util
+import sys
+from pathlib import Path
+
+TESTS = Path({tests!r})
+
+
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+
+
+load("kit_app_conftest", TESTS / "conftest.py")
+load("kit_template_check", TESTS.parents[1] / "conftest.py")
+pytest_plugins = ["kit_app_conftest", "kit_template_check"]
+"""
+READ_ONLY_TESTS = """
+from pathlib import Path
+
+import docket_testkit as kit
+import pytest
+
+
+def build(folder):
+    (folder / "kept.txt").write_text("kept", encoding="utf-8")
+    return folder
+
+
+@pytest.fixture(scope="module")
+def seen(tmp_path_factory):
+    return kit.read_only(kit.shared(build, "kept", tmp_path_factory))
+
+
+def test_reads(seen):
+    assert (seen / "kept.txt").read_text(encoding="utf-8") == "kept"
+
+
+def test_writes(seen):
+    (seen / "kept.txt").write_text("written", encoding="utf-8")
 """
 
 
@@ -71,6 +116,24 @@ def test_two_workers_asking_at_once_build_a_template_once(tmp_path: Path) -> Non
     assert [w.returncode for w in workers] == [0, 0]
     assert outputs[0] == outputs[1]
     assert (tmp_path / "builds.txt").read_text(encoding="utf-8") == "built\n"
+
+
+def test_a_run_whose_test_writes_into_a_read_only_copy_fails(tmp_path: Path) -> None:
+    tests = Path(kit.__file__).parent
+    (tmp_path / "conftest.py").write_text(READ_ONLY_CONFTEST.format(tests=str(tests)), encoding="utf-8")
+    (tmp_path / "test_read_only.py").write_text(READ_ONLY_TESTS, encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if k not in ("PYTEST_XDIST_WORKER", kit.TEMPLATES_ENV, kit.HOME_VAR)}
+    env["PYTHONPATH"] = str(tests)
+    args = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "--basetemp", str(tmp_path / "base")]
+    run = subprocess.run(
+        [*args, str(tmp_path)], cwd=tmp_path, env=env, capture_output=True, text=True, encoding="utf-8", check=False
+    )
+    out = run.stdout + run.stderr
+    # Both tests pass; the run fails on what one wrote, named in the copy the module's tests share.
+    assert run.returncode == 1, out
+    assert "2 passed" in out
+    assert "tests wrote into shared templates" in out
+    assert re.search(r"kept-\w+\.read-\d+-0/kept\.txt: changed", out), out
 
 
 def test_a_failed_build_is_cleared_and_the_next_gives_its_own_result(factory: pytest.TempPathFactory) -> None:
@@ -168,6 +231,27 @@ def test_a_copied_host_pushes_to_its_own_origin(tmp_path: Path) -> None:
     assert git(tmp_path / "origin.git", "log", "-1", "--format=%s", "main").strip() == "New"
     template = kit.shared(kit._build_host_repo, "host-repo")  # pyright: ignore[reportPrivateUsage]
     assert git(template.parent / "origin.git", "log", "-1", "--format=%s", "main").strip() == "Host start"
+
+
+def test_the_kit_s_commits_run_no_hook_where_its_pushes_and_a_test_about_hooks_do(tmp_path: Path) -> None:
+    sh(tmp_path, "git", "init", "-q", "--bare", "-b", "main", "origin.git")
+    top, log = tmp_path / "repo", tmp_path / "ran.log"
+    top.mkdir()
+    git(top, "init", "-q", "-b", "main")
+    git(top, "remote", "add", "origin", str(tmp_path / "origin.git"))
+    for name in ("post-commit", "post-checkout", "pre-push"):
+        hook = top / ".git" / "hooks" / name
+        hook.write_text(f'#!/bin/sh\necho {name} >> "{log.as_posix()}"\n', encoding="utf-8", newline="\n")
+        hook.chmod(0o755)
+    git(top, "commit", "--allow-empty", "-qm", "Setup")
+    sh(top, "git", *kit.ADA, "commit", "--allow-empty", "-qm", "Two")
+    git(top, "checkout", "-q", "-b", "side")
+    assert not log.exists()
+    assert Path(os.environ[kit.HOME_VAR], kit.HOOKS_OFF).is_file()
+    # git-lfs's pre-push is what sends media, so a push keeps its hooks; so does a test about the user's own.
+    git(top, "push", "-q", "origin", "side")
+    git(top, "commit", "--allow-empty", "-qm", "Mine", hooks=True)
+    assert log.read_text(encoding="utf-8").split() == ["pre-push", "post-commit"]
 
 
 def test_a_copied_folder_vault_holds_the_user_s_work_and_a_settled_index(tmp_path: Path) -> None:
