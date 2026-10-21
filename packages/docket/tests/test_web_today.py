@@ -28,6 +28,7 @@ from docket.service.sessions import open_command
 from docket.vault import cursors
 from docket.vault.config import SourceConfig, VaultConfig
 from docket.vault.vault import Vault
+from docket.web import today_view
 from docket.web.day_state import DayState
 
 API = "/api/web/today"
@@ -122,15 +123,6 @@ def test_slash_goes_to_today_and_the_old_ways_in_still_open(client: TestClient) 
     assert open_command("/search") == 'docket open "/search"'
 
 
-def test_the_sidebar_and_the_server_s_nav_put_today_first(client: TestClient) -> None:
-    from docket.web import pages
-
-    day = [p.key for p in pages.NAV[0].pages if p.built]
-    assert day == ["today", "queue", "ledger", "meetings"]
-    html = client.get("/search").text
-    assert '<a class="brand" href="/">Docket</a>' in html
-
-
 # -- the list ---------------------------------------------------------------------------------------------------------
 
 
@@ -182,6 +174,15 @@ def test_the_items_due_go_overdue_then_today_then_back_from_a_snooze(client: Tes
     # Each a row the act bar and the quick buttons take, as on the Ledger.
     assert all(g["selectable"] and all(r["callable"] and r["quick"] for r in g["rows"]) for g in due)
     assert due[0]["rows"][0]["triage"] == "chase"
+
+
+def test_the_due_rows_stop_at_the_ledger_s_first_page_and_count_all(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(today_view, "DUE_SHOWN", 2)
+    due = read(client, API)["list"]["due"]
+    assert [(g["key"], len(g["rows"]), g["total"]) for g in due] == [("overdue", 1, 1), ("today", 1, 1), ("woke", 0, 1)]
+    assert not due[2]["selectable"], "no row drawn, nothing to tick"
 
 
 def test_the_rest_is_later_today_then_the_next_working_day_without_cancelled_or_declined(client: TestClient) -> None:

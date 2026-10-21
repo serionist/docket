@@ -7,7 +7,7 @@
  */
 import { ListTodoIcon, PlusIcon } from "lucide-react";
 import { Link } from "@tanstack/react-router";
-import type * as React from "react";
+import * as React from "react";
 import { KindTab } from "@/components/kind";
 import { Empty } from "@/components/shell/page";
 import { Button } from "@/components/ui/button";
@@ -243,7 +243,17 @@ export function TodayRows(props: TodayRowsProps) {
         </section>
       )}
       {list.due.map((group) => (
-        <GroupBlock key={group.key} group={group} props={props} tab={tab} />
+        <React.Fragment key={group.key}>
+          <GroupBlock group={group} props={props} tab={tab} />
+          {group.rows.length < group.total && (
+            <p className="border-b border-rule px-3 py-1 text-xs text-ink-muted sm:px-4">
+              {group.total - group.rows.length} more:{" "}
+              <InLink href="/ledger" className="tap inline-flex h-6 items-center">
+                the rest on the Ledger
+              </InLink>
+            </p>
+          )}
+        </React.Fragment>
       ))}
       {list.meetings.map((group) => (
         <MeetingBlock key={group.key} group={group} props={props} tab={tab} />

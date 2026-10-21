@@ -106,7 +106,7 @@ def test_the_checks_pass_on_the_shell_and_catch_what_they_look_for(client: TestC
     assert html_problems(planted) == ["an asset from elsewhere: https://cdn.example/x.css"]
     planted = page.replace('<link rel="icon"', '<link rel="stylesheet" href="/static/gone.css"><link rel="icon"')
     assert html_problems(planted) == ["an asset that isn't served: /static/gone.css"]
-    planted = page.replace('<a class="brand" href="/search">Docket</a>', '<a class="brand" href="/search"></a>')
+    planted = page.replace('<a class="brand" href="/">Docket</a>', '<a class="brand" href="/"></a>')
     assert any("a link without a name" in p for p in a11y_problems(planted))
     planted = page.replace('<label class="visually-hidden" for="query">', '<label class="visually-hidden">')
     assert any("a field without a label" in p for p in a11y_problems(planted))

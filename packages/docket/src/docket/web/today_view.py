@@ -25,6 +25,7 @@ from docket.ledger.day import DayMeeting, SyncMark
 from docket.ledger.views import ItemRow, LedgerRead, PointRow
 from docket.vault.cursors import DUE_AFTER
 from docket.web import day_view, meetings_view
+from docket.web.day_state import DEFAULT_K
 from docket.web.day_view import Group, Row, Tone
 from docket.web.meetings_view import MeetingLine
 from docket.web.sync_view import SyncState
@@ -34,6 +35,8 @@ POINTS_SHOWN = ledger_day.POINTS_A_MEETING
 ITEMS_SHOWN = ledger_day.ITEMS_A_MEETING
 # The due groups in the order the morning reads them: late first, then today's, then those back from a snooze.
 DUE_GROUPS = ("overdue", "today", "woke")
+# The most due rows the list draws, across its groups, as the Ledger's first page; the rest are on the Ledger.
+DUE_SHOWN = DEFAULT_K
 
 
 class Prep(BaseModel):
@@ -175,19 +178,21 @@ def _meeting_line(
     )
 
 
-def due_groups(rows: Sequence[ItemRow], today: date) -> list[Group]:
+def due_groups(rows: Sequence[ItemRow], today: date, shown: int | None = None) -> list[Group]:
     """The Ledger's due groups for the items `docket ledger day` lists as overdue or due today, in the morning's order,
-    each with its quick buttons and Select all."""
+    each with its quick buttons and Select all; at most `shown` rows across them, each group's total over all."""
     grouped: dict[str, tuple[str, Tone, list[ItemRow]]] = {
         key: (label, tone, members) for key, label, tone, members in day_view.due_groups(rows, today)
     }
     out: list[Group] = []
+    left = DUE_SHOWN if shown is None else shown
     for key in DUE_GROUPS:
         label, tone, members = grouped[key]
+        drawn = [day_view.row_of(r, today) for r in members[: max(left, 0)]]
+        left -= len(drawn)
         if members:
-            shown = [day_view.row_of(r, today) for r in members]
-            out.append(Group(key=key, label=label, tone=tone, rows=shown, total=len(shown),
-                             selectable=any(r.callable for r in shown)))  # fmt: skip
+            out.append(Group(key=key, label=label, tone=tone, rows=drawn, total=len(members),
+                             selectable=any(r.callable for r in drawn)))  # fmt: skip
     return out
 
 

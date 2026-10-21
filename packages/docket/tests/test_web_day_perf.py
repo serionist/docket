@@ -3,16 +3,17 @@ with 20,000 point ops, the index rebuilt. Each read is asked once before the clo
 running service's is, then timed as the best of three runs: the Ledger's list, the list with q, the Queue's list, an
 item's panel and the who fields' names are each held to a quarter second, the poll to a hundredth, a button's write
 on one item, its notice's lines with it, to a tenth and a bulk of 50 to a quarter second, each on its own; Meetings'
-list and a meeting's panel to a quarter second, a point's write to a tenth. A write is timed through its route with
-the commit left out, as the ledger's own timed write is dry: git's commit isn't the page's to time. Wall time is
-asserted only when no tracer runs. The pages in Chrome, from the sidebar to their rows with the keys live, are the
-test_web_browser_*.py files'."""
+list and a meeting's panel to a quarter second, a point's write to a tenth; Today's list and panel to a quarter
+second, its poll to a hundredth. A write is timed through its route with the commit left out, as the ledger's own
+timed write is dry: git's commit isn't the page's to time. Wall time is asserted only when no tracer runs. The pages
+in Chrome, from the sidebar to their rows with the keys live, are the test_web_browser_*.py files'."""
 
 from __future__ import annotations
 
 import os
 import time
 from collections.abc import Callable, Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +24,7 @@ from ledger_kit import ITEMS, MEETINGS, build
 from starlette.testclient import TestClient
 
 from docket.index import build as index_build
-from docket.ledger import ops, store
+from docket.ledger import ops, store, views
 from docket.vault.vault import Vault
 
 PAGE_SECONDS = 0.25
@@ -159,6 +160,40 @@ def test_meetings_and_a_meeting_s_panel_answer_within_their_budgets(client: Test
         assert page_s < PAGE_SECONDS, f"Meetings took {page_s:.3f} s, over {PAGE_SECONDS} s"
         assert panel_s < PAGE_SECONDS, f"a meeting's panel took {panel_s:.3f} s, over {PAGE_SECONDS} s"
         assert write_s < WRITE_SECONDS, f"a point's write took {write_s:.3f} s, over {WRITE_SECONDS} s"
+
+
+@pytest.mark.perf
+def test_today_its_panel_and_its_poll_answer_within_their_budgets(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Today reads the snapshot to the next working day, the items closed today, the next meeting's show and the
+    cursor marks. On 2 December every one of the perf ledger's items, due the 1st, is overdue: the list draws the
+    first 100 and counts them all. Its list and a meeting's panel are held to a quarter second, its poll, which hashes
+    the cursor files too, to a hundredth."""
+    monkeypatch.setattr(views, "now", lambda: datetime(2026, 12, 2, 8, tzinfo=UTC))
+    listed = timed(lambda: client.get("/api/web/today"))
+    page, page_s = listed.result, listed.seconds
+    assert page.status_code == 200, page.text
+    found = page.json()
+    overdue = found["list"]["due"][0]
+    assert (overdue["key"], len(overdue["rows"]), overdue["total"]) == ("overdue", 100, ITEMS)
+    lead = found["list"]["lead"]["meeting"]["line"]["ref"]
+    opened = timed(lambda: client.get(f"/api/web/today/panel?open={lead}"))
+    panel, panel_s = opened.result, opened.seconds
+    assert panel.json()["meeting"]["ref"] == lead
+    version = found["version"]
+    polled = timed(lambda: client.get(f"/api/web/ledger/changed?v={version}&page=today"))
+    poll, poll_s = polled.result, polled.seconds
+    assert poll.json()["changed"] is False
+    print(
+        f"Today on {ITEMS:,} items overdue and {MEETINGS:,} meetings: list {page_s * 1000:.0f} ms "
+        f"({listed.runs('ms')}), a meeting's panel {panel_s * 1000:.0f} ms ({opened.runs('ms')}), the poll "
+        f"{poll_s * 1000:.1f} ms ({polled.runs('ms')})"
+    )
+    if not traced():
+        assert page_s < PAGE_SECONDS, f"Today took {page_s:.3f} s, over {PAGE_SECONDS} s"
+        assert panel_s < PAGE_SECONDS, f"a meeting's panel on Today took {panel_s:.3f} s, over {PAGE_SECONDS} s"
+        assert poll_s < POLL_SECONDS, f"Today's poll took {poll_s:.4f} s, over {POLL_SECONDS} s"
 
 
 def test_the_perf_ledger_s_builder_writes_its_files_under_the_root(tmp_path: Path) -> None:

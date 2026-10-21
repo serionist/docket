@@ -517,9 +517,9 @@ def test_a_save_whose_meeting_is_gone_by_its_read_says_so(client: TestClient, mo
     [
         (
             {"op": "set", "items": ["M-0001"], "fields": {"title": "x"}},
-            "a save on Meetings sets a meeting's outcome or notes",
+            "a save on a meeting sets its outcome or notes",
         ),
-        ({"op": "notes", "items": ["M-0001"], "notes": "x"}, "a save on Meetings sets a meeting's outcome or notes"),
+        ({"op": "notes", "items": ["M-0001"], "notes": "x"}, "a save on a meeting sets its outcome or notes"),
         ({"op": "set", "items": ["A-0002"], "fields": {"outcome": "x"}}, "A-0002 isn't a meeting"),
     ],
 )

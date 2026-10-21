@@ -8,6 +8,10 @@ Unreleased in the same PR.
 
 ### Added
 
+- The Today page, now the start page that `docket open` lands on: the next meeting with its open points and items
+  first, then what is overdue or due today, with the Ledger's keys, quick buttons and act bar, then the rest of
+  today's meetings and the next working day's, and what you closed today. A bar above says each source's last sync
+  and marks the ones due one. Either panel opens beside it, an item's or a meeting's; a sync shows in place.
 - The Meetings page, `docket open /meetings`: your meetings from today on, then the earlier days, each with its
   talking points open and its items; cancelled, declined and empty ones dimmed. Open one to answer, edit, drop or
   reopen its points, keep or remove the ones Claude proposed, turn a point into an item, add the items worth raising

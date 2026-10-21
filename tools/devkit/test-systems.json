@@ -226,6 +226,7 @@
     "packages/docket/tests/test_web_browser_ledger.py",
     "packages/docket/tests/test_web_browser_meetings.py",
     "packages/docket/tests/test_web_browser_queue.py",
+    "packages/docket/tests/test_web_browser_today.py",
     "packages/docket/tests/test_web_curate.py",
     "packages/docket/tests/test_web_curate_view.py",
     "packages/docket/tests/test_web_day_perf.py",
@@ -247,6 +248,7 @@
     "packages/docket/tests/test_web_state.py",
     "packages/docket/tests/test_web_sync.py",
     "packages/docket/tests/test_web_sync_view.py",
+    "packages/docket/tests/test_web_today.py",
     "packages/docket/tests/test_web_urls.py",
     "packages/docket/tests/test_web_webapi.py",
     "packages/docket/tests/test_whisper_follow.py",
@@ -259,6 +261,7 @@
     "packages/docket/tests/test_web_browser_ledger.py": "ages the perf ledger's op files an hour, as on every system; the browser smoke loads its page on all three every PR",
     "packages/docket/tests/test_web_browser_meetings.py": "ages the perf ledger's op files an hour, as on every system; the browser smoke loads its page on all three every PR",
     "packages/docket/tests/test_web_browser_queue.py": "ages the perf ledger's op files an hour, as on every system; the browser smoke loads its page on all three every PR",
+    "packages/docket/tests/test_web_browser_today.py": "ages the perf ledger's op files an hour, as on every system; the browser smoke loads its page on all three every PR",
     "packages/docket/tests/test_web_day_perf.py": "ages the op files an hour so the index takes them as settled, as on every system; its budgets run nightly on all three"
   }
 }

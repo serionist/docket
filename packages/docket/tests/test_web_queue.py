@@ -211,9 +211,9 @@ def test_a_save_from_the_queue_answers_the_row_and_the_panel(client: TestClient)
 
 def test_a_write_naming_no_day_page_is_refused(client: TestClient, vault: Vault) -> None:
     before = len(ops(vault))
-    answer = client.post(WRITE, json={"page": "today", "op": "triage", "items": ["A-0002"]}, headers=SAME)
+    answer = client.post(WRITE, json={"page": "outbox", "op": "triage", "items": ["A-0002"]}, headers=SAME)
     assert answer.status_code == 400
-    assert answer.json()["error"] == "page is one of ledger, queue, meetings, not 'today'"
+    assert answer.json()["error"] == "page is one of ledger, queue, meetings, today, not 'outbox'"
     assert len(ops(vault)) == before
 
 
