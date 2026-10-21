@@ -81,7 +81,7 @@ def load(root: Path, home: Home) -> Settings:
 def committed_text(root: Path, home: Home) -> str:
     """HEAD's vault.yaml, from the cache when HEAD is the commit it was read at, else by `git show <id>:` with the id
     read first, so a commit landing between the two reads never files one commit's text under another's id. HEAD's id
-    comes from the git dir's files (DR-0528), or from git where they can't say, such as a linked worktree."""
+    comes from the git dir's files (DR-0765), or from git where they can't say, such as a linked worktree."""
     git = Git(root, home=home)
     commit = git.head_id()
     if commit is None:

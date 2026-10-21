@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Literal
 
 from docket.childproc import console_flags
-from docket.vault.git import Git
+from docket.vault.git import Git, configured
 from docket.vault.vault import ignored
 
 Visibility = Literal["public", "unknown", "local"]
@@ -105,15 +105,19 @@ def probe_remote(url: str) -> Probe:
 
 def remote_urls(top: Path) -> list[str]:
     """Every fetch and push URL of every remote, as git will use them: `get-url` expands insteadOf and
-    pushInsteadOf."""
-    git = Git(top)
-    urls: list[str] = []
-    for name in git.out("remote").split():
-        for flags in (("--all",), ("--push", "--all")):
-            for url in git.run("remote", "get-url", *flags, name, check=False).stdout.splitlines():
-                if url and url not in urls:
-                    urls.append(url)
-    return urls
+    pushInsteadOf. Kept for the process while the config files are (DR-0767)."""
+
+    def ask() -> tuple[str, ...]:
+        git = Git(top)
+        urls: list[str] = []
+        for name in git.out("remote").split():
+            for flags in (("--all",), ("--push", "--all")):
+                for url in git.run("remote", "get-url", *flags, name, check=False).stdout.splitlines():
+                    if url and url not in urls:
+                        urls.append(url)
+        return tuple(urls)
+
+    return list(configured(top, "remote urls", ask))
 
 
 def others(top: Path, own: Iterable[str]) -> list[str]:
@@ -172,11 +176,15 @@ class Lfs:
 
 def hooks_dir(top: Path) -> tuple[Path, bool]:
     """The repo's hooks folder, and whether it is in its own tree (core.hooksPath, such as husky's .husky), where
-    every hook is a file the user tracks."""
-    git = Git(top)
-    hooks = Path(git.out("rev-parse", "--path-format=absolute", "--git-path", "hooks").strip()).resolve()
-    git_dir = Path(git.out("rev-parse", "--absolute-git-dir").strip()).resolve()
-    return hooks, hooks.is_relative_to(top.resolve()) and not hooks.is_relative_to(git_dir)
+    every hook is a file the user tracks. Kept for the process while the config files are (DR-0767)."""
+
+    def ask() -> tuple[Path, bool]:
+        git = Git(top)
+        hooks = Path(git.out("rev-parse", "--path-format=absolute", "--git-path", "hooks").strip()).resolve()
+        git_dir = Path(git.out("rev-parse", "--absolute-git-dir").strip()).resolve()
+        return hooks, hooks.is_relative_to(top.resolve()) and not hooks.is_relative_to(git_dir)
+
+    return configured(top, "hooks", ask)
 
 
 def new_hooks(top: Path) -> list[str]:
@@ -191,7 +199,11 @@ def new_hooks(top: Path) -> list[str]:
 def lfs_state(top: Path) -> Lfs:
     git = Git(top)
     installed = shutil.which("git-lfs") is not None
-    filter_set = bool(git.run("config", "--get", "filter.lfs.process", check=False).stdout.strip())
+    filter_set = configured(
+        top,
+        "filter.lfs.process",
+        lambda: bool(git.run("config", "--get", "filter.lfs.process", check=False).stdout.strip()),
+    )
     hooks, in_tree = hooks_dir(top)
     pre_push = hooks / "pre-push"
     text = pre_push.read_text(encoding="utf-8", errors="replace") if pre_push.is_file() else ""

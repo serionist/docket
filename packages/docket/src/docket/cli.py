@@ -63,6 +63,7 @@ from docket.vault.config import MAX_LOOKBACK_DAYS
 from docket.vault.docstore import DocStore
 from docket.vault.entitystore import EntityStore, RefusedError, Written, load_changes
 from docket.vault.gate import Gate, Label
+from docket.vault.git import close_all
 from docket.vault.processed import STATUSES, DocRefusedError
 from docket.vault.records import RawRecord, source_name_problem
 from docket.vault.spans import WINDOW
@@ -2492,4 +2493,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     except SystemExit as e:
         return e.code if isinstance(e.code, int) else (0 if e.code is None else 1)
+    finally:
+        # No batch reader outlives its command (DR-0766).
+        close_all()
     return 0  # pragma: no cover - Typer's standalone mode always ends in SystemExit

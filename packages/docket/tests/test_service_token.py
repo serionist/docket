@@ -282,3 +282,24 @@ def test_where_names_the_store() -> None:
     assert tokens().where() == "nowhere yet"
     assert tokens().where("keyring") == "the system keychain"
     assert tokens().where("file") == str(Tokens.file())
+
+
+def test_the_sid_is_asked_once_a_process_and_only_through_the_default_runner(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A process's user never changes, so its SID is kept; a runner passed in is asked each time, and its answer is
+    never handed to another runner (DR-0767)."""
+    monkeypatch.setattr(system, "_SID", [])
+    asked: list[str] = []
+
+    def whoami(args: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        asked.append(args[0])
+        return subprocess.CompletedProcess(args, 0, FAKE_WHOAMI[1], "")
+
+    monkeypatch.setattr(subprocess, "run", whoami)
+    ours = "S-1-5-21-1111111111-2222222222-3333333333-1001"
+    assert system.windows_sid() == system.windows_sid() == ours
+    assert asked == ["whoami"]
+    other = Commands({"whoami": (0, '"EXAMPLE\\ben","S-1-5-21-4444444444-5555555555-6666666666-1002"\n')})
+    assert system.windows_sid(other) == system.windows_sid(other) == "S-1-5-21-4444444444-5555555555-6666666666-1002"
+    assert len(other.calls) == 2
+    assert system.windows_sid() == ours
+    assert asked == ["whoami"]

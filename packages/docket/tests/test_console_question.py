@@ -400,7 +400,7 @@ def test_turning_credentials_off_during_a_conflict_refuses_before_any_question(
     vault: Vault, owner: Callable[..., AtConsole]
 ) -> None:
     """An unmerged path, as a stash pop that conflicts leaves one: the write refuses before the owner is asked
-    (DR-0528)."""
+    (DR-0765)."""
     blob = sh(vault.root, "git", "hash-object", "-w", "--", CONFIG_FILE).strip()
     info = "".join(f"100644 {blob} {n}\tconflict.txt\n" for n in (1, 2, 3))
     proc = subprocess.run(

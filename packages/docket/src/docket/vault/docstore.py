@@ -158,8 +158,7 @@ class DocStore:
     def committed_text(self, doc_id: str) -> str | None:
         """The doc's text as HEAD holds it, or None when HEAD doesn't."""
         rel = self.path(doc_id).as_posix()
-        proc = self.vault.git.run("cat-file", "blob", f"HEAD:./{rel}", check=False)
-        return proc.stdout if proc.returncode == 0 else None
+        return self.vault.git.blob_text(self.vault.git.at_head(rel))
 
     def committed_texts(self, rels: list[str]) -> dict[str, str | None]:
         """Several docs' texts as HEAD holds them, by their paths in the vault: one listing of HEAD's tree for their
@@ -182,7 +181,7 @@ class DocStore:
             if sha not in _BLOBS:
                 if len(_BLOBS) >= BLOBS_KEPT:
                     _BLOBS.clear()
-                _BLOBS[sha] = self.vault.git.out("cat-file", "blob", sha)
+                _BLOBS[sha] = self.vault.git.blob_out(sha)
             out[rel] = _BLOBS[sha]
         return out
 
@@ -291,7 +290,7 @@ class DocStore:
     def _blob(self, sha: str, doc_id: str) -> str:
         # Not `git show`: it also tries its argument as a file path, which fails past 260 characters on Windows. The
         # ./ makes git read the path from the vault's folder, not the top of a host repo the vault is a folder of.
-        return self.vault.git.out("cat-file", "blob", f"{sha}:./{self.path(doc_id).as_posix()}")
+        return self.vault.git.blob_out(f"{sha}:./{self.path(doc_id).as_posix()}")
 
     def earlier(self, doc_id: str, before: int) -> Iterator[tuple[int, ProcessedDoc]]:
         """The doc's revs before `before`, newest first, each as its commit left it, read one at a time."""

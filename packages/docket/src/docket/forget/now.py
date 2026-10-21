@@ -63,7 +63,7 @@ def forget(vault: Vault, kind: Kind, rids: list[str], source: str | None = None)
     """Forget for good, at the owner's console only, after the OS prompt's yes or, where this machine has none, the
     code they type back. Refused before anything is read without the owner at a console."""
     refuse()
-    # What a crash left reaches git first, and a conflict refuses here, before the screen (DR-0528).
+    # What a crash left reaches git first, and a conflict refuses here, before the screen (DR-0765).
     with vault.writing():
         vault.refuse_unmerged()
         forgotten.commit_pending(vault)

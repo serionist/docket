@@ -17,8 +17,9 @@ from forget_kit import AT, KEY, forget, line, stored
 
 from docket.documents import records as documents
 from docket.errors import DocketError
-from docket.vault import forgotten, releaselog
+from docket.vault import forgotten, gitfiles, releaselog
 from docket.vault.forgotten import FORGOTTEN, Forget, Forgotten, Version
+from docket.vault.git import Git
 from docket.vault.records import canonical_json
 from docket.vault.releaselog import Kept, LoggedCut, Release
 from docket.vault.vault import Vault
@@ -285,14 +286,31 @@ def test_head_s_list_is_read_once_per_commit(vault: Vault, monkeypatch: pytest.M
     forgotten._LOADED.clear()  # pyright: ignore[reportPrivateUsage] - another process, with nothing in memory
     with git_calls(monkeypatch) as calls:
         assert listed(vault).whole(PLAUD)
-    head = vault.git.head_id()
-    assert calls == [f"cat-file -e {head}:./{FORGOTTEN}", f"cat-file blob {head}:./{FORGOTTEN}"]
+    # Whether HEAD holds the list and what it says, from one batch read (DR-0766).
+    assert calls == ["cat-file --batch"]
     forgotten._LOADED.clear()  # pyright: ignore[reportPrivateUsage]
     vault.write_run("chat", [make_record(40)])
     with git_calls(monkeypatch) as calls:
         assert listed(vault).whole(PLAUD)
     # A commit of Docket's that didn't name the list moves the cache with it.
     assert calls == []
+
+
+def test_head_s_list_is_read_by_git_s_two_calls_where_the_batch_can_t_vouch(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    forget(vault, rids=[PLAUD])
+    head = vault.git.head_id()
+    assert head is not None
+    cache = vault.home.private / forgotten.CACHE
+    cache.unlink(missing_ok=True)
+    batched = forgotten.committed_text(vault.root, vault.home, head)
+    assert batched
+    cache.unlink()
+    monkeypatch.setattr(Git, "blob", lambda _self, _spec: gitfiles.UNKNOWN)
+    with git_calls(monkeypatch) as calls:
+        assert forgotten.committed_text(vault.root, vault.home, head) == batched
+    assert calls == [f"cat-file -e {head}:./{FORGOTTEN}", f"cat-file blob {head}:./{FORGOTTEN}"]
 
 
 def test_a_cache_that_doesn_t_read_is_a_miss(vault: Vault) -> None:

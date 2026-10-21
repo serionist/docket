@@ -143,7 +143,7 @@ def rewrite(
             _at_console(UNCOMMITTED_CREDENTIALS_OFF)
         if not (held.credentials_off or change_off):
             return _write(vault, text, updated, _message(message, via, False), held, via=via, edit_confirmed=False)
-        # A conflict refuses before the owner is asked, not after they confirmed (DR-0528).
+        # A conflict refuses before the owner is asked, not after they confirmed (DR-0765).
         vault.refuse_unmerged()
     screen = _screen(held, before, after if change_off else None, warnings)
     answer = console.confirm(

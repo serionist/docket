@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0767
+    title: The repo a folder is in, a repo's answers from its config and Windows' SID are asked once per process, kept while their files stand
+    status: proposed
+    at: "2026-10-21"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#266", DR-0532]
+    description: "A few answers git or the system gives that can't change while their files don't are asked once per process. Which repo a folder is in (`git rev-parse --show-toplevel`, for the vault's neighbours: a mapper's project, the scan's and the media's folders): kept per folder while the files say git would answer the same, for a repo a plain checkout's .git still the nearest above the folder and its config files unchanged, for none no .git anywhere above, as DR-0532 keeps a folder vault's home. A repo's answers from its config (its remotes and their URLs, its hooks path, git-lfs's filter): kept while every config file git reads keeps its size and time, the repo's .git/config, the user's global one (GIT_CONFIG_GLOBAL, else ~/.gitconfig and the XDG one, under git's own home: HOME, else on Windows HOMEDRIVE and HOMEPATH where they name a folder, else USERPROFILE) and the system's where GIT_CONFIG_SYSTEM names it, and the GIT_CONFIG_ variables are the same; the STATUS.md render's own cache of the remotes, which watched .git/config alone, folds into it. With a variable telling git where the repo is (GIT_DIR and the like) git is asked every time, and a repo whose .git is a file, a worktree's or a submodule's, too. Windows' SID for this user (`whoami /user`), which a process's user can't change: kept for the process through the default runner only, so a runner a test passes in is asked every time and never hands another runner's answer on. A config file one of those includes, or the system's own when no variable names it, isn't watched: a change there is seen when the process starts again."
+    binds: ["A kept answer is the one git or the system would give again, or it is asked again."]
+    not_chosen:
+      - "Asking each time, as before: about 2,100 git starts in the suite, three of them on every promote that holds media, and whoami on every private file a process writes."
+      - "Keying a repo's config answers on its .git/config alone, as the STATUS.md render did: git lfs install writes its filter to the user's global config, and a service would go on saying git-lfs isn't set up."
+      - "Keeping a SID asked through any runner: a test's runner could hand its SID to the next caller."

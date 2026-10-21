@@ -10,9 +10,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import empty_vault, make_record, plaud_records, sh
+from docket_testkit import COMMIT_CALLS, TEST_GITCONFIG, empty_vault, git_calls, make_record, plaud_records, sh
 
 from docket.errors import DocketError
+from docket.vault import git as git_module
 from docket.vault import rawlog
 from docket.vault.config import VaultConfig
 from docket.vault.git import sync_marker
@@ -51,6 +52,7 @@ def test_init_writes_the_layout_and_commits_only_its_own_files(tmp_path: Path, c
             "vault.yaml",
         ]
     )
+    # git's identity, which the tests' config gives as the owner's; a machine with none is held below.
     log = sh(vault.root, "git", "log", "--format=%an <%ae> %s")
     assert log.strip() == "Ada Example <ada@example.invalid> Start the vault"
     assert (vault.root / ".git" / "docket" / "machine").read_text(encoding="utf-8").strip() == "test-box"
@@ -627,7 +629,7 @@ def test_the_identity_check_reads_both_keys_and_git_s_own_precedence(
     assert vault.git.has_identity() is expected
 
 
-def test_a_commit_starts_six_git_processes(
+def test_a_commit_starts_three_git_processes(
     tmp_path: Path, config: VaultConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     vault = new_vault(tmp_path, config)
@@ -641,4 +643,126 @@ def test_a_commit_starts_six_git_processes(
 
     monkeypatch.setattr(subprocess, "run", counting)
     vault.write_run("chat", [make_record(1)], RUN_AT)
-    assert len(started) == 6, started
+    # The process's first commit in a repo asks git's identity too; the answer stands while the config files do.
+    assert len(started) == 4, started
+    started.clear()
+    Vault.open(vault.root).write_run("chat", [make_record(2)], RUN_AT)
+    assert len(started) == 3, started
+
+
+# -- git's identity, kept for the process, and the staged check after a failed commit (DR-0764) ----------------------
+
+STATUS, ADD, COMMIT = COMMIT_CALLS
+STAGED = "diff --cached --name-only -z -- ."
+IDENTITY = "config --get-regexp ^user[.](name|email)$"
+OWNER = "Ada Example <ada@example.invalid>"
+
+
+def global_config(user: str | None) -> None:
+    """The tests' config with this [user] section in place of the fixture owner's; None for no identity at all."""
+    kept = TEST_GITCONFIG.split("[user]")[0]
+    Path(os.environ["GIT_CONFIG_GLOBAL"]).write_text(kept + (f"[user]\n{user}" if user else ""), encoding="utf-8")
+
+
+def authors(vault: Vault, n: int = 1) -> list[str]:
+    return sh(vault.root, "git", "log", "--format=%an <%ae>|%cn <%ce>", f"-{n}").splitlines()
+
+
+def test_a_commit_where_git_has_no_identity_takes_the_owner_s(
+    tmp_path: Path, config: VaultConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = Vault.open(new_vault(tmp_path, config).root)
+    global_config(None)
+    with git_calls(monkeypatch) as calls:
+        vault.write_run("chat", [make_record(1)], RUN_AT)
+    # git's identity is asked before the commit, and with none the owner's goes in: git never guesses one.
+    assert calls == [STATUS, ADD, IDENTITY, COMMIT]
+    with git_calls(monkeypatch) as calls:
+        Vault.open(vault.root).write_run("chat", [make_record(2)], RUN_AT)
+    # Another vault object in the same process: the answer stands while the config files do.
+    assert calls == COMMIT_CALLS
+    assert authors(vault, 2) == [f"{OWNER}|{OWNER}"] * 2
+    assert sh(vault.root, "git", "status", "--porcelain").strip() == ""
+
+
+@pytest.mark.parametrize(
+    "user",
+    ["\tname = Cleo Test\n\temail =\n", "\tname = Cleo Test\n[author]\n\temail = cleo@example.invalid\n"],
+    ids=["an empty address", "an author's address alone"],
+)
+def test_a_commit_where_git_has_part_of_an_identity_takes_the_owner_s_as_before(
+    tmp_path: Path, config: VaultConfig, user: str
+) -> None:
+    vault = Vault.open(new_vault(tmp_path, config).root)
+    global_config(user)
+    assert not vault.git.has_identity()
+    vault.write_run("chat", [make_record(1)], RUN_AT)
+    # The owner's name and address in place of git's half, as before; an author's address of its own is git's to apply.
+    author = "Ada Example <cleo@example.invalid>" if "author" in user else OWNER
+    assert authors(vault) == [f"{author}|{OWNER}"]
+
+
+def test_a_commit_takes_git_s_own_identity_where_there_is_one(
+    tmp_path: Path, config: VaultConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = Vault.open(new_vault(tmp_path, config).root)
+    vault.git.run("config", "user.name", "Ben Sample")
+    vault.git.run("config", "user.email", "ben@example.invalid")
+    with git_calls(monkeypatch) as calls:
+        vault.write_run("chat", [make_record(1)], RUN_AT)
+    assert calls == [STATUS, ADD, IDENTITY, COMMIT]
+    assert authors(vault)[0] == "Ben Sample <ben@example.invalid>|Ben Sample <ben@example.invalid>"
+
+
+def test_a_kept_identity_a_config_file_lost_unseen_is_asked_again(
+    tmp_path: Path, config: VaultConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = Vault.open(new_vault(tmp_path, config).root)
+    vault.write_run("chat", [make_record(1)], RUN_AT)
+    # The identity goes from a file the kept answer doesn't follow, such as an included one: the stamp stays.
+    monkeypatch.setattr(git_module, "config_stamp", lambda _top: ("unchanged",))
+    git_module._CONFIGURED.clear()  # pyright: ignore[reportPrivateUsage]
+    Vault.open(vault.root).write_run("chat", [make_record(2)], RUN_AT)
+    global_config(None)
+    with git_calls(monkeypatch) as calls:
+        Vault.open(vault.root).write_run("chat", [make_record(3)], RUN_AT)
+    # The commit takes no guessed identity, fails, and the owner's goes in once git says it has none.
+    assert calls == [STATUS, ADD, COMMIT, STAGED, IDENTITY, COMMIT]
+    assert authors(vault) == [f"{OWNER}|{OWNER}"]
+
+
+@pytest.mark.parametrize("identity", [True, False])
+def test_a_commit_of_nothing_new_fails_once_and_is_none(
+    tmp_path: Path, config: VaultConfig, monkeypatch: pytest.MonkeyPatch, identity: bool
+) -> None:
+    vault = Vault.open(new_vault(tmp_path, config).root)
+    if not identity:
+        global_config(None)
+    head = vault.git.head_id()
+    with git_calls(monkeypatch) as calls:
+        assert vault.commit(["vault.yaml"], "nothing changed") is None
+    # Nothing new is the staged check's answer, as before, with or without an identity.
+    assert calls == [STATUS, ADD, IDENTITY, COMMIT, STAGED]
+    assert vault.git.head_id() == head
+
+
+@pytest.mark.parametrize("identity", [True, False])
+def test_a_commit_that_fails_otherwise_says_git_s_error(
+    tmp_path: Path, config: VaultConfig, monkeypatch: pytest.MonkeyPatch, identity: bool
+) -> None:
+    vault = Vault.open(new_vault(tmp_path, config).root)
+    if not identity:
+        global_config(None)
+    # Another git holds the branch: the commit fails whoever makes it.
+    lock = vault.root / ".git" / "refs" / "heads" / "main.lock"
+    lock.write_text("", encoding="utf-8")
+    head = vault.git.head_id()
+    with git_calls(monkeypatch) as calls, pytest.raises(DocketError, match=r"git commit: .*main\.lock"):
+        vault.write_run("chat", [make_record(1)], RUN_AT)
+    # A commit that took git's identity asks again whether git has one before it says the error; the owner's doesn't.
+    assert calls == [STATUS, ADD, IDENTITY, COMMIT, STAGED, *([IDENTITY] if identity else [])]
+    assert vault.git.head_id() == head
+    lock.unlink()
+    # The run file waits, as after any failed commit, and the next commit takes it in.
+    assert vault.commit([], "Raw: the run left") is not None
+    assert sh(vault.root, "git", "status", "--porcelain").strip() == ""

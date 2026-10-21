@@ -21,6 +21,7 @@ from docket.service.security import Guard
 from docket.service.sessions import COOKIE, Sessions, moving_on, safe_next
 from docket.service.state import Service, Settings
 from docket.service.tools import create_mcp, security
+from docket.vault.git import close_all
 
 
 def create_fastapi(service: Service, lifespan: object = None) -> FastAPI:
@@ -73,10 +74,15 @@ class ServiceApp:
         await self.outer(scope, receive, send)
 
     async def _dispatch(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http" and scope["path"] == "/mcp":
-            await self.mcp(scope, receive, send)
-            return
-        await self.api(scope, receive, send)
+        try:
+            if scope["type"] == "http" and scope["path"] == "/mcp":
+                await self.mcp(scope, receive, send)
+                return
+            await self.api(scope, receive, send)
+        finally:
+            # The call's batch readers end with it (DR-0766): one another call still reads from finishes its read,
+            # and its next read starts a new one.
+            close_all()
 
 
 def create_app(settings: Settings, *, sessions: Sessions | None = None) -> ServiceApp:

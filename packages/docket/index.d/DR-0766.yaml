@@ -1,0 +1,15 @@
+decisions:
+  - id: DR-0766
+    title: A Git's blob reads share one git cat-file --batch, closed at the end of each command and each service call, and before a sync, a convert or a forget's rewrite
+    status: proposed
+    at: "2026-10-21"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#266"]
+    description: "A Git's blob reads go to one `git cat-file --batch`, started at its first read and kept until it is closed: a file at HEAD (show_at_head, a decision's committed text, the index build's), a doc's earlier revs by commit, the blobs a batch of docs reads, the forgotten list at HEAD, a run file at HEAD in the vault check. Each read writes one name and reads the answer whole, under a lock of the Git's, so two threads never interleave. A name the batch says is missing is the answer an old call gave on failure (an empty text, None); anything else it can't vouch for asks git as before: a name that isn't a blob (`git show` lists a folder), a name with a line break, a batch that broke or answered out of form, which is closed and started again at the next read. Text is decoded as a call's output was, UTF-8 with bad bytes replaced and CRLF and CR read as LF. Who closes it: the CLI when its command ends, the service when each call ends (a read another call has running finishes first, under its lock, and that call's next read starts another), and close_all before a sync's rebase, a convert and a forget's rewrite; a Git that is dropped closes its own, and so does the process's exit. On Windows an open batch holds pack files a repack or a move needs, and a folder it runs in can't be deleted. The forgotten list's read, on a Git of its own, opens one and closes it: one call where it made two. The settings in force keep `git show` on a Git of their own, one call a commit they didn't make, as before."
+    binds:
+      - No batch reader outlives the command or the service call that started it, and none is open when a sync, a convert or a forget's rewrite runs.
+    not_chosen:
+      - "One git call per blob, as before: about 1,900 process starts in the suite, and one per decision, doc rev or file at HEAD a call reads."
+      - "A batch reader per call site, closed by each caller: the same lifecycle in a dozen places, each one a leak on Windows when its caller forgets."
+      - "Keeping the reader for the life of the service: an open batch holds pack files a user's repack or gc needs on Windows."

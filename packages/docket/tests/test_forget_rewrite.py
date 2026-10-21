@@ -221,6 +221,15 @@ def test_the_files_hold_no_text_and_leave_head_as_it_is(forgot: Forgot) -> None:
     )
 
 
+def test_the_check_closes_the_vault_s_batch_readers_before_it_reads(forgot: Forgot) -> None:
+    """The check reads every blob through a batch reader of its own (DR-0766)."""
+    vault = forgot.vault
+    vault.git.show_at_head("vault.yaml")
+    assert vault.git._batch is not None  # pyright: ignore[reportPrivateUsage]
+    assert rewrite.check(vault, forgot.second.folder) == rewrite.Checked([], {})
+    assert vault.git._batch is None  # pyright: ignore[reportPrivateUsage]
+
+
 def test_check_refuses_a_head_that_holds_a_blob_the_rewrite_strips(forgot: Forgot) -> None:
     vault = forgot.vault
     stripped = (forgot.second.folder / rewrite.BLOBS).read_text(encoding="utf-8").split()

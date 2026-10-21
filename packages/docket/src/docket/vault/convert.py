@@ -36,7 +36,7 @@ from docket.childproc import console_flags
 from docket.errors import DocketError
 from docket.vault import host
 from docket.vault.config import CONFIG_FILE, VaultConfig
-from docket.vault.git import Git, Identity
+from docket.vault.git import Git, Identity, close_all
 from docket.vault.home import CONVERT_FILE, make_private, rev_parse
 from docket.vault.host import HostReport, Visibility, remote_visibility, same_rule
 from docket.vault.lock import VaultLock
@@ -202,6 +202,8 @@ def survey(where: Where, opts: Options, visibility: Callable[[str], Visibility])
 def convert(
     root: Path, p: Prompter, opts: Options, visibility: Callable[[str], Visibility] = remote_visibility
 ) -> None:
+    # The convert moves the vault's history between repos: on Windows an open batch reader holds its pack files.
+    close_all()
     where = locate(root)
     if opts.abort:
         abort(where, p)

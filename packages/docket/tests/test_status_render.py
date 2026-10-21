@@ -26,6 +26,7 @@ from docket.ledger.fold import load
 from docket.ledger.meetings import Stream
 from docket.ledger.status import Fields
 from docket.ledger.store import Written, write
+from docket.vault import git as git_module
 from docket.vault import rendered, staging
 from docket.vault.config import CONFIG_FILE, RenderedFile, VaultConfig
 from docket.vault.home import Home
@@ -142,7 +143,7 @@ def fresh_process(monkeypatch: pytest.MonkeyPatch) -> None:
     """Each test starts as a new process would: no remote's answer or list kept."""
     monkeypatch.setattr(rendered, "_PROBED", {})
     monkeypatch.setattr(rendered, "_UNREACHED", {})
-    monkeypatch.setattr(rendered, "_REMOTES", {})
+    monkeypatch.setattr(git_module, "_CONFIGURED", {})
 
 
 @pytest.fixture

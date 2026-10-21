@@ -31,7 +31,8 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, Validation
 
 from docket.documents import records as documents
 from docket.errors import DocketError
-from docket.vault.git import Git
+from docket.vault import gitfiles
+from docket.vault.git import Git, as_text
 from docket.vault.home import Home
 from docket.vault.records import RawRecord, canonical_json, version
 from docket.vault.staging import digest, key_of, rid_hash, write_replacing
@@ -376,10 +377,16 @@ def committed_text(root: Path, home: Home, commit: str) -> str:
     cached = _cached(home)
     if cached is not None and cached[0] == commit:
         return cached[1]
-    git = Git(root, home=home)
     blob = f"{commit}:./{FORGOTTEN}"
-    held = git.run("cat-file", "-e", blob, check=False).returncode == 0
-    text = git.out("cat-file", "blob", blob).removeprefix("﻿").replace("\r\n", "\n") if held else ""
+    # One batch read for the two questions, whether HEAD holds the list and what it says (DR-0766).
+    with Git(root, home=home) as git:
+        found = git.blob(blob)
+    if isinstance(found, gitfiles.Unknown):
+        held = git.run("cat-file", "-e", blob, check=False).returncode == 0
+        raw = git.out("cat-file", "blob", blob) if held else ""
+    else:
+        raw = "" if found is None else as_text(found)
+    text = raw.removeprefix("﻿").replace("\r\n", "\n")
     remember(home, commit, text)
     return text
 

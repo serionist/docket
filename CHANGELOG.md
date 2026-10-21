@@ -298,6 +298,11 @@ Unreleased in the same PR.
 
 ### Changed
 
+- A write starts about half the git processes it did, which on Windows is most of its time: a commit is the add and
+  the commit, the unmerged paths come from git's index file, the committed files a command reads come through one
+  `git cat-file --batch`, and a ledger write asks one status. Whether git has your identity is asked once a command,
+  and once by the service while git's config files stay as they are; where git has none, or only part of one, Docket
+  commits with the owner's name from `vault.yaml`, as before.
 - `/docket:sync` finds what closed again, and reads a noted recording no more. Every agent, a recording's too, runs
   on your session's model: on Sonnet a rehearsal closed nothing the evidence showed done and split asks. Before its
   block, each agent goes through the open items whose people it read, by who or by a meeting's attendees, and closes

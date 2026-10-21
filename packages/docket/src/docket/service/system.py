@@ -20,6 +20,8 @@ Runner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
 
 # "Windows", "Darwin" or "Linux".
 SYSTEM = platform.system()
+# This process's SID once `whoami` gave it through the default runner.
+_SID: list[str] = []
 
 
 def run(args: Sequence[str]) -> subprocess.CompletedProcess[str]:
@@ -33,12 +35,19 @@ def run(args: Sequence[str]) -> subprocess.CompletedProcess[str]:
 
 
 def windows_sid(runner: Runner = run) -> str:
-    """The current user's SID, from `whoami /user`: a name can be renamed or carry a domain prefix, a SID can't."""
+    """The current user's SID, from `whoami /user`: a name can be renamed or carry a domain prefix, a SID can't. A
+    process's user never changes, so the default runner's answer is kept for the process; a runner passed in, as a
+    test's, is asked every time and its answer never kept (DR-0767)."""
+    default = runner is run
+    if default and _SID:
+        return _SID[0]
     proc = runner(["whoami", "/user", "/fo", "csv", "/nh"])
     rows = list(csv.reader(io.StringIO(proc.stdout)))
     sid = rows[0][1].strip() if proc.returncode == 0 and rows and len(rows[0]) > 1 else ""
     if not sid.startswith("S-1-"):
         raise DocketError(f"can't find this user's SID (whoami /user exited {proc.returncode})")
+    if default:
+        _SID[:] = [sid]
     return sid
 
 

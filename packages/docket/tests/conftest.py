@@ -53,8 +53,9 @@ def kit_templates(tmp_path_factory: pytest.TempPathFactory) -> None:
 
 @pytest.fixture(autouse=True)
 def isolated(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every test runs git with a config of its own, empty but for auto maintenance, so the developer's identity,
-    signing, hooks or line-ending settings can't change a result, and the user's Docket config is a temp folder."""
+    """Every test runs git with a config of its own, empty but for auto maintenance and the fixture owner's identity,
+    so the developer's identity, signing, hooks or line-ending settings can't change a result, and the user's Docket
+    config is a temp folder."""
     home = tmp_path_factory.mktemp("home")
     gitconfig = home / "gitconfig"
     gitconfig.write_text(TEST_GITCONFIG, encoding="utf-8")

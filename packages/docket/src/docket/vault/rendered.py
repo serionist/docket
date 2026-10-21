@@ -48,9 +48,6 @@ _PROBED: dict[str, Probe] = {}
 # meanwhile (DR-0676).
 _UNREACHED: dict[str, float] = {}
 UNREACHED_FOR = 300.0
-# Each repo's remote URLs, kept for the process while its git config file keeps its size and time: three git calls a
-# render saved, a tenth of a second on Windows, after every ledger write that changes a stream.
-_REMOTES: dict[Path, tuple[tuple[int, int], list[str]]] = {}
 
 
 @dataclass(frozen=True)
@@ -192,19 +189,9 @@ class Remotes:
 
 
 def remotes(repo: Path) -> list[str]:
-    """The repo's remote URLs as git will use them, from this process's memory while `.git/config` keeps its size and
-    time; a repo whose .git is a file, a worktree's, is asked each time."""
-    try:
-        stat = (repo / ".git" / "config").stat()
-    except OSError:
-        return remote_urls(repo)
-    key = (stat.st_size, stat.st_mtime_ns)
-    held = _REMOTES.get(repo)
-    if held is not None and held[0] == key:
-        return list(held[1])
-    urls = remote_urls(repo)
-    _REMOTES[repo] = (key, urls)
-    return list(urls)
+    """The repo's remote URLs as git will use them, from this process's memory while its config files keep their size
+    and time (DR-0767); a repo whose .git is a file, a worktree's, is asked each time."""
+    return remote_urls(repo)
 
 
 def file_bytes(target: Path) -> bytes | None:
