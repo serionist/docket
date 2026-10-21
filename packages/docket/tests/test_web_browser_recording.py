@@ -21,7 +21,7 @@ import pytest
 from browser_kit import AXE, BROWSER, WATCH_CSP, axe, clean, dark, live, opened, sign_in
 from docket_testkit import make_config, make_record, traced
 from playwright.sync_api import Browser, Page, expect, sync_playwright
-from recording_kit import CRANE, HELD, NOTE, TOUR, lines, recording_template, with_audio
+from recording_kit import CRANE, HELD, NOTE, TOUR, lines, recording_template, store_tone, with_audio
 
 from docket import index, recall
 from docket.vault.config import SourceConfig
@@ -183,6 +183,41 @@ def long_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
 @pytest.fixture
 def long_service(long_root: Path) -> Iterator[tuple[int, str]]:
     yield from live(long_root)
+
+
+@pytest.fixture
+def played_service(long_root: Path, tmp_path: Path) -> Iterator[tuple[int, str]]:
+    """The long call in a vault of this test's own, with a tone stored as its audio."""
+    shutil.copytree(long_root, tmp_path / "vault")
+    store_tone(Vault.open(tmp_path / "vault"), LONG, 30.0)
+    yield from live(tmp_path / "vault")
+
+
+def test_playing_a_far_line_keeps_it_in_view(browser: Browser, played_service: tuple[int, str]) -> None:
+    """A page opened at a line, as a link from Search or Claude opens it: playing a line far below keeps that line in
+    view, and the page never jumps back to the line it opened at."""
+    port, token = played_service
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    context.add_init_script(WATCH_CSP)
+    page = context.new_page()
+    errors: list[str] = []
+    page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.on("requestfailed", lambda r: None if seeking(r) else errors.append(f"request failed: {r.url}"))
+    page.goto(sign_in(port, token, f"/recording?rid={LONG}&at=02:20#at"))
+    expect(page.locator("li#at")).to_contain_text("02:20")
+    expect(page.locator("li#at")).to_be_in_viewport()
+    far = page.get_by_role("link", name="1:06:40", exact=True)
+    far.scroll_into_view_if_needed()
+    far.click()
+    expect(page).to_have_url(re.compile(r"&at=1:06:40#at$"))
+    expect(page.locator("li#at")).to_contain_text("1:06:40")
+    expect(page.locator("li[data-playing]")).to_contain_text("1:06:40")
+    page.wait_for_timeout(300)
+    expect(page.locator("li#at")).to_be_in_viewport()
+    expect(page.locator("li", has_text="02:20").first).not_to_be_in_viewport()
+    assert errors == [] and page.evaluate("window.__csp") == []
+    context.close()
 
 
 # From a click on the panel's link to the Recording page to the recording's last line in the page, timed in the page.

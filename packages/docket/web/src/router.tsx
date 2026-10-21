@@ -83,6 +83,9 @@ export function createAppRouter(history?: RouterHistory) {
     stringifySearch,
     defaultPreload: false,
     scrollRestoration: false,
+    // A page scrolls to its own hash once its read answers, as the Recording page does to #at; the router's scroll
+    // came on render, before the read, and found the line the last read had marked.
+    defaultHashScrollIntoView: false,
   });
 }
 

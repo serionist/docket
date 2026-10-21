@@ -30,10 +30,14 @@ export const ICONS: Record<HitLine["icon"], LucideIcon> = {
 
 /** A row of the list: a group's summary or one of its hits, with the URL that opens it beside the results. */
 export interface ResultRow {
-  /** The hit and lines its URL opens, which the open panel's URL shares. */
+  /** The row's own name in the list, unique: two groups may share a summary, which then opens from both. */
   key: string;
+  /** The hit and lines its URL opens, which the open panel's URL shares. */
+  opens: string;
   url: string;
   locator: string;
+  /** The group it stands in, by its place in the answer. */
+  group: number;
   hit?: HitLine;
 }
 
@@ -42,13 +46,24 @@ export function keyOf(url: string): string {
   return hitOf(parseSearch(url.split("?")[1]?.split("#")[0] ?? "")) ?? url;
 }
 
-/** Every row, in the list's order: j and k move through them. */
+/**
+ * Every row, in the list's order: j and k move through them. A row is named by what it opens, and a second row that
+ * opens the same, such as a summary two groups share, by that and its count, so the first is the one the URL names.
+ */
 export function rowsOf(results: Results | null | undefined): ResultRow[] {
   const out: ResultRow[] = [];
-  for (const group of results?.groups ?? []) {
-    if (group.summary) out.push({ key: keyOf(group.summary.url), url: group.summary.url, locator: group.summary.id });
-    for (const hit of group.hits) out.push({ key: keyOf(hit.url), url: hit.url, locator: hit.locator, hit });
-  }
+  const seen = new Map<string, number>();
+  const add = (row: Omit<ResultRow, "key" | "opens">) => {
+    const opens = keyOf(row.url);
+    const before = seen.get(opens) ?? 0;
+    seen.set(opens, before + 1);
+    // A locator and its lines hold no space, so the count after one can't be taken for either.
+    out.push({ ...row, opens, key: before ? `${opens} ${before}` : opens });
+  };
+  (results?.groups ?? []).forEach((group, at) => {
+    if (group.summary) add({ url: group.summary.url, locator: group.summary.id, group: at });
+    for (const hit of group.hits) add({ url: hit.url, locator: hit.locator, group: at, hit });
+  });
   return out;
 }
 
@@ -73,7 +88,7 @@ function Row({
   below?: React.ReactNode;
 }) {
   const selected = state.selected === row.key;
-  const opened = state.open === row.key;
+  const opened = state.open === row.opens;
   return (
     <li
       data-row={row.key}
@@ -158,7 +173,19 @@ function HitBelow({ hit }: { hit: HitLine }) {
   );
 }
 
-function Group({ group, at, rows, state }: { group: HitGroup; at: number; rows: RowState; state: TabState }) {
+function Group({
+  group,
+  at,
+  listed,
+  rows,
+  state,
+}: {
+  group: HitGroup;
+  at: number;
+  listed: ResultRow[];
+  rows: RowState;
+  state: TabState;
+}) {
   const Icon = ICONS[group.icon];
   const id = `group-${at}`;
   return (
@@ -180,32 +207,34 @@ function Group({ group, at, rows, state }: { group: HitGroup; at: number; rows: 
         </span>
       </h2>
       <ul>
-        {group.summary && (
-          <Row
-            row={{ key: keyOf(group.summary.url), url: group.summary.url, locator: group.summary.id }}
-            state={rows}
-            tabbable={state.tabbable(keyOf(group.summary.url))}
-          >
-            <span className="flex min-w-0 items-baseline gap-2">
-              <FileTextIcon aria-hidden className="size-3.5 shrink-0 self-center text-ink-muted" />
-              <span className="shrink-0 text-xs text-ink-muted">summary</span>
-              <span dir="auto" className="min-w-0 truncate font-semibold">
-                {group.summary.title}
-              </span>
-              <span className="ml-auto shrink-0 text-xs text-ink-muted">
-                {group.summary.type}, rev {group.summary.rev}
-              </span>
-            </span>
-          </Row>
-        )}
-        {group.hits.map((hit) => {
-          const row: ResultRow = { key: keyOf(hit.url), url: hit.url, locator: hit.locator, hit };
-          return (
-            <Row key={row.key} row={row} state={rows} tabbable={state.tabbable(row.key)} below={<HitBelow hit={hit} />}>
-              <HitBody hit={hit} />
+        {listed.map((row) =>
+          row.hit ? (
+            <Row
+              key={row.key}
+              row={row}
+              state={rows}
+              tabbable={state.tabbable(row.key)}
+              below={<HitBelow hit={row.hit} />}
+            >
+              <HitBody hit={row.hit} />
             </Row>
-          );
-        })}
+          ) : (
+            group.summary && (
+              <Row key={row.key} row={row} state={rows} tabbable={state.tabbable(row.key)}>
+                <span className="flex min-w-0 items-baseline gap-2">
+                  <FileTextIcon aria-hidden className="size-3.5 shrink-0 self-center text-ink-muted" />
+                  <span className="shrink-0 text-xs text-ink-muted">summary</span>
+                  <span dir="auto" className="min-w-0 truncate font-semibold">
+                    {group.summary.title}
+                  </span>
+                  <span className="ml-auto shrink-0 text-xs text-ink-muted">
+                    {group.summary.type}, rev {group.summary.rev}
+                  </span>
+                </span>
+              </Row>
+            )
+          ),
+        )}
       </ul>
     </section>
   );
@@ -237,7 +266,14 @@ export function ResultGroups({
     <div>
       {results.groups.map((group, at) => (
         // A group's place in the answer is what tells it apart: two groups may share a title.
-        <Group key={`${at}-${group.title}`} group={group} at={at} rows={rows} state={tabs} />
+        <Group
+          key={`${at}-${group.title}`}
+          group={group}
+          at={at}
+          listed={order.filter((row) => row.group === at)}
+          rows={rows}
+          state={tabs}
+        />
       ))}
     </div>
   );

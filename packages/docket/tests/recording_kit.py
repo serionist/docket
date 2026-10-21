@@ -133,17 +133,24 @@ def tour() -> list[RawRecord]:
     ]
 
 
-def with_audio(vault: Vault) -> None:
-    """The tour's audio stored, cut where its transcript is, and Whisper's transcript of it in raw: a key store in a
-    file of this test's own, so each test that copies the vault does this itself."""
+def store_tone(vault: Vault, rid: str, seconds: float) -> Path:
+    """A tone stored as a plaud recording's audio, through media_put and the gate, with a key store in a file of this
+    vault's own: the stored file."""
     KeyStore(vault.home).init("file")
     cursors.save(vault, "plaud", cursors.Cursor())
     drop = media.drop_folder()
     drop.mkdir(parents=True, exist_ok=True)
-    (drop / "tour.mp3").write_bytes(tone(80.0))
-    media.put(vault, TOUR, path=str(drop / "tour.mp3"))
+    (drop / "tone.mp3").write_bytes(tone(seconds))
+    media.put(vault, rid, path=str(drop / "tone.mp3"))
     Gate(vault).promote()
-    [stored] = layout.stored_files(vault.root, TOUR)
+    [stored] = layout.stored_files(vault.root, rid)
+    return stored
+
+
+def with_audio(vault: Vault) -> None:
+    """The tour's audio stored, cut where its transcript is, and Whisper's transcript of it in raw: a key store in a
+    file of this test's own, so each test that copies the vault does this itself."""
+    stored = store_tone(vault, TOUR, 80.0)
     under = {"source": "plaud", "container": TOUR, "thread": TOUR, "author": None}
     heard = [{"start_ms": s, "end_ms": e, "text": text} for s, e, text in HEARD]
     whisper = make_record(

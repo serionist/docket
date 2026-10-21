@@ -379,6 +379,39 @@ describe("the keys", () => {
     await waitFor(() => expect(where(router)).toContain("&around=0"));
   });
 
+  it("walk through two groups that share a summary, each row once, and open it from either", async () => {
+    const [first] = RESULTS.groups;
+    if (!first) throw new Error("the fixture has a group");
+    const thread = {
+      ...first,
+      kind: "thread",
+      icon: "thread" as const,
+      title: "The supplier thread",
+      hits: [
+        hit("r:chat:C0OPS/1.000100", " in the thread", {
+          icon: "thread",
+          url: "/search?query=Nortwin&sources=calls&hit=r:chat:C0OPS/1.000100",
+        }),
+      ],
+    };
+    results = () => json({ ...READ, results: { ...RESULTS, groups: [first, thread], hits: 3 } });
+    const router = await open("/search?query=Nortwin&sources=calls");
+    const walked: (string | undefined)[] = [];
+    for (let n = 0; n < 6; n++) {
+      key("j", document.activeElement ?? document.body);
+      walked.push(current());
+    }
+    const summary = "minutes:2026-10-07-supplier-call";
+    expect(walked).toEqual([summary, CALL, NOTE, summary, "r:chat:C0OPS/1.000100", "r:chat:C0OPS/1.000100"]);
+    expect(document.querySelectorAll('li[aria-current="true"]')).toHaveLength(1);
+    // The second summary opens the doc, its row staying the selected one.
+    key("k");
+    key("Enter");
+    await waitFor(() => expect(where(router)).toBe(`/search?query=Nortwin&sources=calls&hit=${summary}`));
+    const selected = document.querySelector('li[aria-current="true"]') as HTMLElement;
+    expect(selected.closest("section")?.textContent).toContain("The supplier thread");
+  });
+
   it("copy the selected hit's locator with c", async () => {
     const writeText = vi.fn(async () => undefined);
     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });

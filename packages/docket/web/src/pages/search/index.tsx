@@ -113,11 +113,12 @@ export function SearchPage() {
 
   const results = data?.results;
   const order = React.useMemo(() => rowsOf(results), [results]);
+  // One selection: a URL that opens a hit selects its row, the first that opens it unless the selected one does too.
   const [selected, setSelected] = React.useState<string | undefined>(open);
   const [seenOpen, setSeenOpen] = React.useState(open);
   if (open !== seenOpen) {
     setSeenOpen(open);
-    if (open !== undefined) setSelected(open);
+    if (open !== undefined && order.find((row) => row.key === selected)?.opens !== open) setSelected(open);
   }
   const now = React.useRef({ selected, open, order });
   React.useLayoutEffect(() => {
@@ -152,7 +153,7 @@ export function SearchPage() {
 
   const closePanel = () => {
     const closed = panel.data?.panel?.close ?? `${PATH}${listQuery}`;
-    const back = now.current.open ?? now.current.selected;
+    const back = now.current.selected ?? now.current.open;
     wanted.current = back ?? null;
     go(closed);
   };
@@ -160,7 +161,7 @@ export function SearchPage() {
   const move = (by: 1 | -1) => {
     const next = step(now.current.order, now.current.selected, by);
     if (next === undefined) return;
-    if (now.current.open !== undefined && next.key !== now.current.open) openRow(next, "row");
+    if (now.current.open !== undefined && next.opens !== now.current.open) openRow(next, "row");
     else {
       setSelected(next.key);
       focusRow(next.key);
