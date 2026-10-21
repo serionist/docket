@@ -169,17 +169,13 @@ def test_control_characters_are_printed_escaped(vault: Vault, capsys: pytest.Cap
     assert printable("ok\x7f\x00\n") == "ok\\x7f\\x00\n"
 
 
-def test_the_doc_commands_speak_utf8_through_a_pipe(vault: Vault) -> None:
-    env = {**os.environ, "PYTHONUTF8": "0", "PYTHONIOENCODING": ""}
+def test_the_doc_commands_speak_utf8_through_a_pipe(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
     text = note(lines=["- Árvíztűrő tükörfúrógép, said Ben. @12:08"])
-    put = subprocess.run(
-        [sys.executable, "-m", "docket", "doc", "put", "-"],
-        input=text.encode("utf-8"),
-        capture_output=True,
-        env=env,
-        check=False,
-    )
-    assert put.returncode == 0, put.stderr.decode("utf-8", "replace")
+    # The put is setup, so it runs in process, its stdin in the ANSI code page as a Windows pipe gives it: the put
+    # reads the bytes. The read through a pipe is the process under test (DR-0756).
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(text.encode("utf-8")), encoding="cp1252"))
+    assert main(["doc", "put", "-"]) == 0
+    env = {**os.environ, "PYTHONUTF8": "0", "PYTHONIOENCODING": ""}
     read = subprocess.run(
         [sys.executable, "-m", "docket", "doc", "read", NOTE_ID], capture_output=True, env=env, check=False
     )

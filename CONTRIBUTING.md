@@ -31,6 +31,9 @@ A test that needs a vault takes a copy from `packages/docket/tests/docket_testki
 every worker, and a run fails if a test wrote into one. A template is built when a test first asks for it, so a test
 that patches something builds its copy before patching. Tests about `Vault.init` itself call it.
 
+A test runs the CLI in process, `main([...])` from `docket.cli`. It starts a `python -m docket` only where the process
+is what it tests: its streams, its arguments, its hash seed or the server; its setup still runs in process (DR-0756).
+
 A test that asserts how long something took carries `@pytest.mark.perf`: `gate os`, which runs without coverage, runs
 those after the rest, alone and one at a time, and prints what they print, so the other tests' workers never decide a
 time limit. `gate full` keeps them in its one run, since under coverage the index's limits are off (DR-0430). A vault
