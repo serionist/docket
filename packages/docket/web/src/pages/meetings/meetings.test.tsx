@@ -68,6 +68,7 @@ const LIST: Meetings = {
     shown: 4,
     empty: "",
     streams: ["ops", "pilot"],
+    until: "2099-01-01T00:00:00+00:00",
   },
   filters: { q: "", stream: "", kind: "", who: "", k: 100, state: "open", group: "due", archived: false },
   kinds: ["reply", "decision", "task", "invite", "waiting"],

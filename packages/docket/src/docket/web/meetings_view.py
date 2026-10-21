@@ -82,6 +82,9 @@ class MeetingsList(BaseModel):
     empty: str
     # The ledger's streams, for the filter and a point's item.
     streams: list[str]
+    # When the list goes out of date with no write: the next start or end of a meeting it lists, or the owner's next
+    # midnight, whichever comes first; now, over and the days' names change then.
+    until: str
 
 
 class Attendee(BaseModel):
@@ -208,7 +211,9 @@ def line_of(row: MeetingRow, points: Sequence[PointRow], today: date, at: dateti
     )
 
 
-def build_meetings(found: LedgerRead, state: DayState, matched: set[str] | None, at: datetime) -> MeetingsList:
+def build_meetings(
+    found: LedgerRead, state: DayState, matched: set[str] | None, at: datetime, tz: ZoneInfo
+) -> MeetingsList:
     """Meetings' list (DR-0666): the snapshot's meetings, those `q` matches and in `stream`, by day from today, then
     the earlier days, newest first, each day by start."""
     today = found.today
@@ -246,7 +251,15 @@ def build_meetings(found: LedgerRead, state: DayState, matched: set[str] | None,
     if not chosen:
         empty = "Nothing here matches." if narrowed else "No meetings in these four weeks."
     streams = sorted({s.name for s in found.streams} | {i.stream for i in found.items})
-    return MeetingsList(days=days, counts=counts, shown=shown, empty=empty, streams=streams)
+    until = next_change(chosen, at, today, tz)
+    return MeetingsList(days=days, counts=counts, shown=shown, empty=empty, streams=streams, until=until.isoformat())
+
+
+def next_change(meetings: Iterable[MeetingRow], at: datetime, today: date, tz: ZoneInfo) -> datetime:
+    """The first moment after `at` the list reads differently with no write: a listed meeting starts or ends, or the
+    owner's day turns, which renames the days."""
+    midnight = datetime(today.year, today.month, today.day, tzinfo=tz) + timedelta(days=1)
+    return min([*(t for m in meetings for t in (m.start, m.end) if t > at), midnight])
 
 
 # -- the panel --------------------------------------------------------------------------------------------------------
@@ -359,7 +372,8 @@ def build_meeting_panel(
         ],
         points=points,
         open_points=len(open_points),
-        proposed=sum(1 for p in points if p.proposed and p.state != "rolled"),
+        # The open ones Claude proposed, which Keep and Remove take; a dropped one is settled.
+        proposed=sum(1 for p in points if p.proposed and p.state == "open"),
         agenda=agenda,
         outcome=detail.outcome or "",
         notes=detail.notes or "",

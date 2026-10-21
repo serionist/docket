@@ -1344,6 +1344,10 @@
             },
             "title": "Streams",
             "type": "array"
+          },
+          "until": {
+            "title": "Until",
+            "type": "string"
           }
         },
         "required": [
@@ -1351,7 +1355,8 @@
           "counts",
           "shown",
           "empty",
-          "streams"
+          "streams",
+          "until"
         ],
         "title": "MeetingsList",
         "type": "object"

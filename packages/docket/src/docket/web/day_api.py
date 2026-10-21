@@ -257,7 +257,7 @@ def router(service: Service) -> APIRouter:
             canonical=state.url(),
             version=found.version,
             today=listing.today.isoformat(),
-            list=meetings_view.build_meetings(listing, state, found.matched, found.at),
+            list=meetings_view.build_meetings(listing, state, found.matched, found.at, found.tz),
             filters=filters_of(state),
             kinds=list(ops.KINDS),
             notice=day_view.build_notice(state, found.lines),
@@ -421,6 +421,8 @@ def router(service: Service) -> APIRouter:
                 return await meeting_saved(post)
             if post.op not in ("set", "notes"):
                 raise DayStateError("a save sets a field of an item")
+            if is_meeting(str(post.changes[0]["item"])):
+                raise DayStateError("a save here sets an item's field; a meeting's are saved on Meetings")
             wrote = await service.writer.run(lambda: day.write(vault(), post.changes, bulk=False))
             item = str(post.changes[0]["item"])
             found = await gather(DayState(open=item), whole=False)

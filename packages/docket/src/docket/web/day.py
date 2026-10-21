@@ -480,8 +480,9 @@ def point_of(given: str | None) -> str:
 
 def _point_changes(name: str, meeting: str, body: Body) -> list[dict[str, Any]]:
     """A point button's changes on its meeting (DR-0667): an add, with text or a suggested item; a change of text,
-    state or answer, "" clearing an answer; a keep of one proposed point or of them all; a removal, an undo of each
-    point's own op; and an item made from a point, its stream, kind and who blank for the writer's default."""
+    state or answer, "" clearing an answer; a keep of one proposed point or of them all; a removal, which `prepared`
+    makes an undo of each point's own op or a drop of a carried one; and an item made from a point, its stream, kind
+    and who blank for the writer's default."""
     if name == "point":
         fields: dict[str, Any] = {}
         if text := _text(body.fields.get("text")):
@@ -511,8 +512,10 @@ def _point_changes(name: str, meeting: str, body: Body) -> list[dict[str, Any]]:
 
 def prepared(vault: Vault, post: Posted) -> Posted:
     """A point op made ready with what only the ledger knows, read beside the writer: a suggestion raised with no text
-    takes its item's whole title, and a removal names only points its meeting holds, so it never undoes another op;
-    the undo's own change keeps the batch's keys alone."""
+    takes its item's whole title, and a removal names only points its meeting holds, so it never undoes another op.
+    A point a roll carried in is dropped, its proposal with it, rather than undone: undoing a copy undoes its roll
+    too (DR-0624), which would open the point again on a meeting that is over, and the next rollover would carry it
+    back. A rolled point is refused, as the writer refuses any change to one (DR-0770)."""
     first = post.changes[0] if post.changes else {}
     raising = post.op == "point" and "text" not in first["fields"]
     if not raising and post.op != "remove":
@@ -536,11 +539,22 @@ def prepared(vault: Vault, post: Posted) -> Posted:
             raise DayStateError(str(e)) from None
         if shown.detail is None or shown.detail.kind != "meeting":
             raise DayStateError(f"{meeting} isn't a meeting")
-        held = {p.id for p in shown.points}
+        held = {p.id: p for p in shown.points}
+    label = shown.meetings[0].ref
     stray = [str(c["of"]) for c in post.changes if c["of"] not in held]
     if stray:
-        raise DayStateError(f"{shown.meetings[0].ref} has no point {stray[0]}")
-    post.changes = [{"op": "undo", "of": c["of"]} for c in post.changes]
+        raise DayStateError(f"{label} has no point {stray[0]}")
+    changes: list[dict[str, Any]] = []
+    for change in post.changes:
+        point = held[str(change["of"])]
+        if point.state == "rolled":
+            raise DayStateError(f"{point.ref} rolled on; change it on the meeting it rolled to")
+        if point.from_ is None:
+            changes.append({"op": "undo", "of": point.id})
+        else:
+            changes.append({"op": "point_set", "item": meeting, "point": point.id,
+                            "fields": {"state": "dropped", "proposed": None}})  # fmt: skip
+    post.changes = changes
     return post
 
 

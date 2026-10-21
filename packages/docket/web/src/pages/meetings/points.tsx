@@ -1,8 +1,9 @@
 /**
  * A meeting's talking points (DR-0667), each named by its id, never its n: its mark ticks it answered or open again;
  * an open point is answered, edited, dropped or made an item; an answered or dropped one opens again; a rolled one
- * shows where it went and takes no button, since only an undo changes it. A point Claude proposed is drawn in pencil,
- * a dashed rule, until it is kept or removed, one at a time or all of them. Every button is one write with its notice
+ * shows where it went and takes no button, since only an undo changes it. An open point Claude proposed is drawn in
+ * pencil, a dashed rule, until it is kept or removed, one at a time or all of them; one a roll carried in is dropped
+ * when removed, so the next rollover leaves it (DR-0770). Every button is one write with its notice
  * and Undo; an answer or a text being typed is unsaved until it is sent, so the guard asks before it goes.
  */
 import { CheckIcon, CircleCheckIcon, CircleIcon, CircleSlashIcon, CopyIcon, CornerDownRightIcon } from "lucide-react";
@@ -311,7 +312,7 @@ function Point({
 }) {
   const { pending } = useActions();
   const live = !meeting.archived && point.state !== "rolled";
-  const pencil = point.proposed && point.state !== "rolled";
+  const pencil = point.proposed && point.state === "open";
   const set = (fields: Record<string, string>) => onWrite({ op: "point_set", point: point.id, fields });
   const sent = async (body: Partial<Body> & { op: string }) => {
     const ok = await onWrite(body);
@@ -464,7 +465,7 @@ export function Points({ meeting }: { meeting: MeetingPanel }) {
     if (typed && !mayLeave(draftKey(meeting.ref, `point:${editing.point}:`))) return;
     setEditing(what ? { point, what } : null);
   };
-  const proposed = meeting.points.filter((p) => p.proposed && p.state !== "rolled").map((p) => p.id);
+  const proposed = meeting.points.filter((p) => p.proposed && p.state === "open").map((p) => p.id);
   const id = `points-${meeting.ref}`;
   return (
     <section aria-labelledby={id} className="grid gap-2">

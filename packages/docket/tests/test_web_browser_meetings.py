@@ -142,6 +142,42 @@ def test_at_phone_width_an_open_meeting_takes_the_screen_and_its_notice_shows_at
     clean(page, errors)
 
 
+# Whether the notice's Undo is where a click lands: inside the panel when the panel covers the list's foot.
+UNDO_REACHED = """() => {
+  const bar = document.querySelector('[role=status]');
+  const undo = bar && [...bar.querySelectorAll('button')].find(b => /Undo|Redo/.test(b.textContent));
+  if (!undo) return {undo: false};
+  const box = undo.getBoundingClientRect();
+  const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+  return {undo: true, inPanel: Boolean(bar.closest('[data-slot=panel]')), reached: Boolean(hit && undo.contains(hit))};
+}"""
+
+
+@pytest.mark.parametrize(
+    ("path", "write"),
+    [
+        ("/meetings?open=M-0001", ("click", 'role=button[name="Keep: Who books the room"]')),
+        ("/ledger?open=A-0001", ("press", "2")),
+    ],
+)
+def test_below_1024_px_a_write_s_notice_sits_at_the_panel_s_foot_where_its_undo_is_reached(
+    browser: Browser, day_service: tuple[int, str], path: str, write: tuple[str, str]
+) -> None:
+    """From 768 to 1023 px the panel lies over the list's right side, the notice's Undo under it: the notice sits at
+    the panel's foot there, as on a phone, on every day page."""
+    port, token = day_service
+    page, errors = opened(browser, port, token, path, viewport={"width": 900, "height": 800})
+    expect(page.get_by_role("complementary")).to_be_visible()
+    verb, target = write
+    if verb == "click":
+        page.click(target)
+    else:
+        page.keyboard.press(target)
+    expect(page.get_by_role("status")).to_be_visible()
+    assert page.evaluate(UNDO_REACHED) == {"undo": True, "inPanel": True, "reached": True}
+    clean(page, errors)
+
+
 # -- the page on the perf ledger (DR-0668, DR-0712) -----------------------------------------------------------------
 
 

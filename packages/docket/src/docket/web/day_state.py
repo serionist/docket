@@ -162,7 +162,7 @@ class DayState:
             state=state,
             group=group,
             archived=flag("archived") if ledger else False,
-            drop=flag("drop"),
+            drop=flag("drop") if items else False,
             text=text,
             done=done,
             said=said,

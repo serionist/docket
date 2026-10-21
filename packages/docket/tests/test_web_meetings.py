@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
-from datetime import UTC
+from datetime import UTC, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -126,6 +126,45 @@ def test_meetings_go_by_day_from_today_then_the_earlier_days_newest_first(client
     assert found["list"]["counts"].startswith("7 meetings from ")
     assert found["list"]["counts"].endswith("; 5 points open")
     assert found["list"]["streams"] == ["ops", "pilot"]
+    # It goes out of date when the budget review under way ends, with no write.
+    assert found["list"]["until"] == at(0, 12, 30).isoformat()
+
+
+def test_the_list_s_time_runs_to_the_next_start_or_end_or_to_midnight(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(views, "now", lambda: at(0, 13).astimezone(UTC))
+    # Nothing starts or ends before tomorrow's Pilot sync: the day turns first, which renames Today and Tomorrow.
+    assert meetings(client)["list"]["until"] == at(1, 0).isoformat()
+
+
+def test_a_meeting_set_in_another_offset_goes_by_the_owner_s_day(client: TestClient, vault: Vault) -> None:
+    # 23:30 at UTC-07:00 today is 08:30 tomorrow in the owner's zone.
+    start = at(0, 12).astimezone(timezone(timedelta(hours=-7))).replace(hour=23, minute=30)
+    span = {"subject": "Far call", "start": start.isoformat(), "end": (start + timedelta(minutes=30)).isoformat()}
+    store.write(vault, [{"op": "meeting", "fields": span}], by="claude", via="cli")
+    found = meetings(client)
+    day, line = next((d, m) for d in found["list"]["days"] for m in d["meetings"] if m["subject"] == "Far call")
+    assert (day["label"].split(",")[0], line["time"]) == ("Tomorrow", "08:30-09:00")
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "kind=bogus",
+        f"who={'x' * 500}",
+        "k=abc",
+        "state=bogus",
+        "group=zzz",
+        "archived=7",
+        "drop=7",
+        "suggest=1",
+        "zzz=1",
+    ],
+)
+def test_the_items_parameters_and_unknown_ones_are_left_out_of_meetings_url(client: TestClient, query: str) -> None:
+    # Meetings takes q, stream and suggest with a meeting open; the rest is never refused there (DR-0768).
+    assert meetings(client, query)["canonical"] == "/meetings"
 
 
 @pytest.mark.parametrize(
@@ -136,8 +175,6 @@ def test_meetings_go_by_day_from_today_then_the_earlier_days_newest_first(client
         ("q=dora+nobody", [["Budget review"]], "/meetings?q=dora+nobody"),
         ("q=spring+numbers", [["Budget review"]], "/meetings?q=spring+numbers"),
         ("stream=pilot", [["Pilot sync"], ["Supplier call"]], "/meetings?stream=pilot"),
-        # The items' kind, who and k are never refused here, and the canonical URL leaves them out (DR-0768).
-        ("kind=bogus&who=Ada&k=0&state=closed", None, "/meetings"),
         ("q=zeppelin", [], "/meetings?q=zeppelin"),
     ],
 )
@@ -210,6 +247,51 @@ def test_the_panel_links_its_people_to_their_briefs_and_its_recording(client: Te
     assert supplier["agenda"] == f"Supplier call, {supplier['when']}\n- The offer in writing"
     # A meeting's own add takes no Undo, as an item's never does.
     assert [(h["line"], h["button"]) for h in supplier["history"]][-1] == ("added", None)
+
+
+def test_a_carried_proposed_point_removed_stays_away_and_its_old_meeting_stays_closed(
+    client: TestClient, vault: Vault
+) -> None:
+    # A proposal on yesterday's call, its outcome, and next week's call: the sync rolls the proposal on.
+    changes = [
+        {"op": "point", "item": "M-0004", "fields": {"text": "Ask about parking", "proposed": True}},
+        meeting("next", "Supplier call", 6, 15),
+        {"op": "set", "item": "M-0004", "fields": {"outcome": "Agreed"}},
+    ]
+    store.write(vault, changes, by="claude", via="cli")
+    store.write(vault, [{"op": "rollover"}], by="sync", via="tool")
+    later = next(
+        m["ref"]
+        for d in meetings(client)["list"]["days"]
+        for m in d["meetings"]
+        if m["subject"] == "Supplier call" and m["ref"] != "M-0004"
+    )
+    copy = next(p for p in panel(client, f"open={later}")["points"] if p["text"] == "Ask about parking")
+    assert copy["proposed"] and copy["came_from"]["ref"] == "M-0004"
+    # Removed on next week's call, as the page's Remove sends it: a drop, never the copy's undo, which would undo its
+    # roll and open the point again on the call that is over.
+    removed = post(client, {"op": "remove", "items": [later], "points": [copy["id"]]})
+    assert [(o["op"], o.get("fields")) for o in batch(vault, removed)] == [
+        ("point_set", {"state": "dropped", "proposed": None})
+    ]
+    assert removed["notice"]["lines"] == [f"{later}: point dropped"]
+    old = panel(client, "open=M-0004")
+    assert [(p["text"], p["state"]) for p in old["points"]] == [
+        ("The offer in writing", "rolled"),
+        ("Ask about parking", "rolled"),
+    ]
+    assert (old["open_points"], old["rolls"]) == (0, "")
+    # The next sync's rollover carries nothing back.
+    store.write(vault, [{"op": "rollover"}], by="sync", via="tool")
+    shown = panel(client, f"open={later}")
+    assert [(p["text"], p["state"], p["proposed"]) for p in shown["points"] if p["text"] == "Ask about parking"] == [
+        ("Ask about parking", "dropped", False)
+    ]
+    assert shown["proposed"] == 0
+    # A point that rolled on takes no removal: it changes on the meeting it rolled to.
+    gone = next(p for p in old["points"] if p["text"] == "Ask about parking")
+    refused = post(client, {"op": "remove", "items": ["M-0004"], "points": [gone["id"]]}, status=400)
+    assert refused["error"] == f"{gone['ref']} rolled on; change it on the meeting it rolled to"
 
 
 def test_a_rolled_point_takes_no_button_and_each_end_of_the_roll_links_the_other(
@@ -405,6 +487,16 @@ def test_a_meeting_s_outcome_and_notes_save_on_change_with_its_line_and_panel(cl
         {"notes": "Ben brings the keys."},
     ]
     assert ops(vault)[-1]["via"] == "page"
+
+
+def test_the_ledger_s_save_refuses_a_meeting_before_it_writes(client: TestClient, vault: Vault) -> None:
+    before = len(ops(vault))
+    answer = client.post(
+        SAVE, json={"page": "ledger", "op": "set", "items": ["M-0001"], "fields": {"notes": "x"}}, headers=SAME
+    )
+    assert answer.status_code == 400
+    assert answer.json()["error"] == "a save here sets an item's field; a meeting's are saved on Meetings"
+    assert len(ops(vault)) == before
 
 
 def test_a_save_whose_meeting_is_gone_by_its_read_says_so(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

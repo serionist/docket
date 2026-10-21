@@ -23,6 +23,7 @@ import { MeetingHead, MeetingPanelBody } from "./panel";
 const TITLE = "Meetings";
 const orderOf = (data: Meetings): string[] => data.list.days.flatMap((d) => d.meetings.map((m) => m.ref));
 const suggestOf = (search: Search): string => one(search, "suggest") ?? "";
+const untilOf = (data: Meetings): string => data.list.until;
 
 export function MeetingsPage() {
   useTitle(TITLE);
@@ -35,6 +36,7 @@ export function MeetingsPage() {
     readPanel: calls.readMeeting,
     orderOf,
     panelKey: suggestOf,
+    staleAt: untilOf,
   });
   const { path, search, open, data, selected, setSelected, pending, write, go, hrefOf, openRow } = frame;
   const suggest = one(search, "suggest") === "1";

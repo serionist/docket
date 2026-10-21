@@ -52,6 +52,8 @@ export interface FrameOptions<L extends FrameList, P extends { canonical: string
   panelKey?: (search: Search) => string;
   /** How many rows are ticked now, which holds the poll. */
   ticked?: () => number;
+  /** When the list read goes out of date with no write, as an ISO time; the poll refetches once it has passed. */
+  staleAt?: (list: L) => string | null | undefined;
 }
 
 export const refused = (error: unknown): { ok: false; error: string; alikes: Row[] } => ({
@@ -155,14 +157,22 @@ export function useDayFrame<L extends FrameList, P extends { canonical: string }
   const [ask, setAsk] = React.useState<Ask | null>(null);
 
   // What async work and the poll read as it stands now, not as the render that started them saw it.
-  const now = React.useRef({ selected, open, pending: false, version: undefined as string | undefined });
+  const now = React.useRef({
+    selected,
+    open,
+    pending: false,
+    version: undefined as string | undefined,
+    until: undefined as string | null | undefined,
+  });
   React.useLayoutEffect(() => {
     now.current.selected = selected;
     now.current.open = open;
     now.current.pending = pending;
   });
   React.useEffect(() => {
-    if (data) now.current.version = data.version;
+    if (!data) return;
+    now.current.version = data.version;
+    now.current.until = latest.current.staleAt?.(data);
   }, [data]);
   const asks = React.useRef(0);
   const wanted = React.useRef<string | null>(null);
@@ -185,6 +195,10 @@ export function useDayFrame<L extends FrameList, P extends { canonical: string }
     ask: calls.changed,
     hold: () => now.current.pending || holding(latest.current.ticked?.() ?? 0),
     changed: refetch,
+    stale: () => {
+      const until = now.current.until;
+      return typeof until === "string" && Date.now() >= Date.parse(until);
+    },
   });
 
   // Leaving the page, or the panel's item, with text typed and unsaved asks first, once any save in flight is done.
@@ -344,8 +358,10 @@ export function useDayFrame<L extends FrameList, P extends { canonical: string }
   } satisfies Record<string, KeyCommand>;
 
   // The notice after a write, with its Undo, and a refusal of a row's call or an undo: at the list's foot, or at the
-  // panel's while an open row takes a phone's screen and hides the list.
-  const covered = useBand() === "narrow" && open !== undefined;
+  // panel's while an open row covers the list's foot: it takes a phone's screen, and below 1024 px it lies over the
+  // list's right side, where the Undo sits.
+  const band = useBand();
+  const covered = open !== undefined && (band === "narrow" || band === "small");
   const foot = (
     <>
       {rowProblem && <Refusal className="mx-3 my-2 sm:mx-4">{rowProblem}</Refusal>}
