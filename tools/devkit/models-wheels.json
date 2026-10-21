@@ -5,9 +5,9 @@
    "sha256:6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101": "anyio-4.15.1-py3-none-any.whl",
    "sha256:9f28306018cbd6d329e64a36d58256edff76dd996fe423bc957326e578b82a94": "anyio-4.15.1.tar.gz"
   },
-  "certifi==2026.7.22": {
-   "sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775": "certifi-2026.7.22-py3-none-any.whl",
-   "sha256:741e2c3b351ddf169a738da9f2c048608ff7f2c5cc02f1ebc6b118bb090d5d55": "certifi-2026.7.22.tar.gz"
+  "certifi==2026.10.19": {
+   "sha256:035c1e85572b141bf1c3a3eff0e33a8eb74917522f2559075ff8d2fea780a1ae": "certifi-2026.10.19.tar.gz",
+   "sha256:42d35340cc5b9ba78e818ddbff0c5b1c2b779de448a340fd1b989f5fa8670e1b": "certifi-2026.10.19-py3-none-any.whl"
   },
   "click==8.5.0": {
    "sha256:255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360": "click-8.5.0-py3-none-any.whl",
@@ -251,9 +251,9 @@
    "sha256:6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101": "anyio-4.15.1-py3-none-any.whl",
    "sha256:9f28306018cbd6d329e64a36d58256edff76dd996fe423bc957326e578b82a94": "anyio-4.15.1.tar.gz"
   },
-  "certifi==2026.7.22": {
-   "sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775": "certifi-2026.7.22-py3-none-any.whl",
-   "sha256:741e2c3b351ddf169a738da9f2c048608ff7f2c5cc02f1ebc6b118bb090d5d55": "certifi-2026.7.22.tar.gz"
+  "certifi==2026.10.19": {
+   "sha256:035c1e85572b141bf1c3a3eff0e33a8eb74917522f2559075ff8d2fea780a1ae": "certifi-2026.10.19.tar.gz",
+   "sha256:42d35340cc5b9ba78e818ddbff0c5b1c2b779de448a340fd1b989f5fa8670e1b": "certifi-2026.10.19-py3-none-any.whl"
   },
   "click==8.5.0": {
    "sha256:255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360": "click-8.5.0-py3-none-any.whl",
@@ -552,9 +552,9 @@
    "sha256:e1f70b1bda35588aff5fc526500376afe143e33cfce5d7e30d368170c38717db": "av-19.0.1-cp314-cp314t-win_arm64.whl",
    "sha256:e9e1b0cae6cebd2adc2c5c6691fc890112f8f6c846b76a9135307617db1e32e9": "av-19.0.1-cp312-abi3-win_arm64.whl"
   },
-  "certifi==2026.7.22": {
-   "sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775": "certifi-2026.7.22-py3-none-any.whl",
-   "sha256:741e2c3b351ddf169a738da9f2c048608ff7f2c5cc02f1ebc6b118bb090d5d55": "certifi-2026.7.22.tar.gz"
+  "certifi==2026.10.19": {
+   "sha256:035c1e85572b141bf1c3a3eff0e33a8eb74917522f2559075ff8d2fea780a1ae": "certifi-2026.10.19.tar.gz",
+   "sha256:42d35340cc5b9ba78e818ddbff0c5b1c2b779de448a340fd1b989f5fa8670e1b": "certifi-2026.10.19-py3-none-any.whl"
   },
   "click==8.5.0": {
    "sha256:255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360": "click-8.5.0-py3-none-any.whl",
@@ -844,9 +844,9 @@
    "sha256:e1f70b1bda35588aff5fc526500376afe143e33cfce5d7e30d368170c38717db": "av-19.0.1-cp314-cp314t-win_arm64.whl",
    "sha256:e9e1b0cae6cebd2adc2c5c6691fc890112f8f6c846b76a9135307617db1e32e9": "av-19.0.1-cp312-abi3-win_arm64.whl"
   },
-  "certifi==2026.7.22": {
-   "sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775": "certifi-2026.7.22-py3-none-any.whl",
-   "sha256:741e2c3b351ddf169a738da9f2c048608ff7f2c5cc02f1ebc6b118bb090d5d55": "certifi-2026.7.22.tar.gz"
+  "certifi==2026.10.19": {
+   "sha256:035c1e85572b141bf1c3a3eff0e33a8eb74917522f2559075ff8d2fea780a1ae": "certifi-2026.10.19.tar.gz",
+   "sha256:42d35340cc5b9ba78e818ddbff0c5b1c2b779de448a340fd1b989f5fa8670e1b": "certifi-2026.10.19-py3-none-any.whl"
   },
   "click==8.5.0": {
    "sha256:255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360": "click-8.5.0-py3-none-any.whl",

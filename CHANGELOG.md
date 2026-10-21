@@ -484,3 +484,10 @@ Unreleased in the same PR.
   instead of about 160 ms, so a doc put, a promote or a curate decision through the service is several times faster.
 - On Windows, a command run from a shell with a console but no window (as Claude Code's is) starts git without
   the no-window flag again: each git call takes about 110 ms there instead of about 180 ms.
+
+### Security
+
+- The models' and speech environments take certifi 2026.10.19, which drops the emSign ECC Root CA - G3 root: eight
+  intermediate CAs under it had their private keys compromised, so a client trusting it could have its TLS
+  intercepted (GHSA-6q48-6c7w-9gw2). After the upgrade, Docket asks for `docket models install`, and
+  `--speech` for speech, once, which builds each environment again with it.

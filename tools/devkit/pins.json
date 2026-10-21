@@ -1,0 +1,6 @@
+{
+  "$comment": "Pins taken before the week a release waits (DR-0157), each for the published security advisory it fixes, by its GitHub id: {\"name==version\": \"GHSA-xxxx-xxxx-xxxx\"} (DR-0763). devkit models-lock takes such a pin exactly, past its cutoff, and the gate lets uv.lock gain it. An entry without an advisory's id fails both, and one nothing pins fails the gate: remove an entry once its pin is a week old.",
+  "security": {
+    "certifi==2026.10.19": "GHSA-6q48-6c7w-9gw2"
+  }
+}

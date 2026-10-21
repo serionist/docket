@@ -122,9 +122,8 @@ def cmd_board(args: argparse.Namespace) -> int:
 
 
 # The models' worker environments' requirements (DR-0332), compiled with hashes from versions Dependabot's cooldown
-# would take: at least a week old (DR-0157).
+# would take: at least a week old (DR-0157), but for a pin exempt by a security advisory (DR-0763).
 MODELS = pins.MODELS
-COOLDOWN_DAYS = 7
 # Each round leaves out at least one release that lacks a wheel, so this bounds a resolution that never settles.
 LOCK_ROUNDS = 20
 WHEELS_COMMENT = (
@@ -138,12 +137,13 @@ def _today() -> date:
     return date.today()
 
 
-def _compile(source: Path, cutoff: str, constraints: Sequence[Path], out: Path) -> None:
+def _compile(source: Path, cutoff: str, early: Sequence[str], constraints: Sequence[Path], out: Path) -> None:
     held = [a for c in constraints for a in ("-c", str(c))]
+    sooner = [a for e in early for a in ("--exclude-newer-package", e)]
     proc = subprocess.run(
         [
             "uv", "pip", "compile", str(source), "--universal", "--generate-hashes", "--python-version", "3.12",
-            "--exclude-newer", cutoff, "--no-header", "--no-annotate", *held, "-o", str(out),
+            "--exclude-newer", cutoff, *sooner, "--no-header", "--no-annotate", *held, "-o", str(out),
         ],
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
     )  # fmt: skip
@@ -151,19 +151,20 @@ def _compile(source: Path, cutoff: str, constraints: Sequence[Path], out: Path) 
         raise KitError(f"uv pip compile {source.name}: {proc.stderr.strip() or proc.stdout.strip()}")
 
 
-def _lock_one(source: Path, cutoff: str) -> dict[str, dict[str, str]]:
+def _lock_one(source: Path, cutoff: str, exempt: Sequence[str], early: Sequence[str]) -> dict[str, dict[str, str]]:
     """Compile one requirements file, leaving out each release that has no wheel for a system its marker names until
-    every pin has one, and return each pin's files by sha256 from a pylock.toml of the same resolution."""
+    every pin has one, and return each pin's files by sha256 from a pylock.toml of the same resolution. An exempt pin
+    is taken exactly: its package's cutoff is lifted, and no other version of it comes in sooner."""
     target = source.with_suffix(".txt")
     left_out: list[str] = []
     with tempfile.TemporaryDirectory(prefix="docket-models-lock-") as tmp:
         constraints, lock = Path(tmp) / "constraints.txt", Path(tmp) / "pylock.models.toml"
         for _ in range(LOCK_ROUNDS):
-            constraints.write_text("".join(f"{c}\n" for c in left_out), encoding="utf-8")
+            constraints.write_text("".join(f"{c}\n" for c in [*exempt, *left_out]), encoding="utf-8")
             # uv keeps an output file's pins where it can, so the .txt moves only as far as it must; the pylock, a new
             # file each round, is held to the .txt's pins to describe the same resolution.
-            _compile(source, cutoff, [constraints], target)
-            _compile(source, cutoff, [constraints, target], lock)
+            _compile(source, cutoff, early, [constraints], target)
+            _compile(source, cutoff, early, [constraints, target], lock)
             files = pins.lock_files(lock.read_text(encoding="utf-8"))
             pinned = pins.compiled(target.read_text(encoding="utf-8"))
             apart = sorted({p.key for p in pinned} ^ set(files))
@@ -182,14 +183,22 @@ def cmd_models_lock(_: argparse.Namespace) -> int:
     """Compile each requirements-<device>.in beside the models' worker into its .txt, with hashes, for every system,
     and write each pin's files to tools/devkit/models-wheels.json for the gate's pins check."""
     root = repo_root()
-    cutoff = (_today() - timedelta(days=COOLDOWN_DAYS)).isoformat()
+    exempt, wrong = pins.exemptions(root)
+    if wrong:
+        raise KitError("\n".join(wrong))
+    cutoff = (_today() - pins.COOLDOWN).isoformat()
+    # Tomorrow is past every upload so far, so an exempt package has no cutoff; its constraint holds the version.
+    tomorrow = (_today() + timedelta(days=1)).isoformat()
+    early = [f"{pin.partition('==')[0]}={tomorrow}" for pin in sorted(exempt)]
     sources = sorted((root / MODELS).glob("requirements-*.in"))
     if not sources:
         raise KitError(f"no requirements-*.in in {MODELS}")
     files: dict[str, object] = {"$comment": WHEELS_COMMENT}
     for source in sources:
-        files[source.stem.removeprefix("requirements-")] = _lock_one(source, cutoff)
+        files[source.stem.removeprefix("requirements-")] = _lock_one(source, cutoff, sorted(exempt), early)
         print(f"{source.with_suffix('.txt').relative_to(root).as_posix()}: from versions published before {cutoff}")
+    for pin, advisory in sorted(exempt.items()):
+        print(f"{pin}: taken before its week for {advisory}, and held there while {pins.EXEMPT} exempts it")
     (root / pins.WHEELS).write_text(json.dumps(files, indent=1, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     print(f"{pins.WHEELS}: each pin's files, for the gate's pins check")
     return 0
