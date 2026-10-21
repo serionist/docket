@@ -192,6 +192,7 @@ def test_a_write_into_a_template_is_named_and_a_reader_s_cache_is_not(
     (made / "sub" / "__pycache__").mkdir()
     (made / "sub" / "__pycache__" / "m.cpython-312.pyc").write_bytes(b"")
     (made / "index.sqlite-wal").write_bytes(b"")
+    (made / "sub" / "docket.lock").write_bytes(b"")
     assert [line.split("/", 1)[1] for line in kit.template_changes(tmp_path / "templates")] == [
         "a.txt: changed",
         "b.txt: removed",

@@ -313,8 +313,9 @@ def fixture_vault(tmp_path: Path) -> Vault:
 
 # -- templates built once per session ---------------------------------------------------------------------------------
 
-# Copies of a template are what tests write; a reader's caches in a template are not a write.
-_CACHES = re.compile(r"(-wal|-shm|-journal|\.pyc)$")
+# Copies of a template are what tests write; a reader's caches in a template are not a write, nor is a lock a reader
+# takes, as the index's: on Linux and macOS filelock truncates its file at each take and leaves it.
+_CACHES = re.compile(r"(-wal|-shm|-journal|\.pyc|\.lock)$")
 _FACTORY: list[pytest.TempPathFactory] = []
 # The folder the gate names for both pytest runs of a lane without coverage, so the timed run finds the templates the
 # parallel run built and only times (DR-0492). The gate makes it empty for each run, so no template outlives the code
@@ -828,6 +829,27 @@ def template_with(factory: pytest.TempPathFactory, make: Callable[[Path], Vault]
 def index_template(factory: pytest.TempPathFactory) -> Path:
     """The index fixture, built once per session; tests copy it."""
     return template_with(factory, build_index_vault)
+
+
+def indexed(factory: pytest.TempPathFactory, template: Path) -> Path:
+    """A template's vault with its index built from scratch, once per session: a copy's index is current, since a
+    copy keeps each file's size and time, which is all the index checks of a run file. The build waits until every
+    file is older than the index's racy window, so no op file is kept as one to hash again, which a reader of a
+    read-only copy would write."""
+    from docket import index
+    from docket.index.ledger import RACY_NS
+
+    def build(base: Path) -> Path:
+        vault = copy_vault(template, base)
+        files = [p for p in vault.root.rglob("*") if ".git" not in p.parts and p.is_file()]
+        newest = max((p.stat().st_mtime_ns for p in files), default=0)
+        wait = (newest + RACY_NS - time.time_ns()) / 1e9
+        if wait > 0:
+            time.sleep(wait + 0.05)
+        index.rebuild(vault)
+        return vault.root
+
+    return shared(build, "indexed-" + digest(str(template.resolve())), factory)
 
 
 # The name vault: a vault about one customer, where two invented names are in most chunks. Acme's stems differ from it

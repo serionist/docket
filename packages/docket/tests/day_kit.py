@@ -5,14 +5,16 @@ signed-in client of the service over it. Invented people only: Ada Example and B
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from docket_testkit import empty_vault, make_config
+import pytest
+from docket_testkit import copied, digest, empty_vault, make_config, shared
 from docket_webkit import OURS, PORT, TOKEN, parse
 from starlette.testclient import TestClient
 
@@ -127,14 +129,55 @@ def meetings_week() -> list[dict[str, Any]]:
     ]
 
 
+def day_template(factory: pytest.TempPathFactory, config: VaultConfig | None = None) -> Path:
+    """The day vault, built once per session and day: tests copy it, or share one copy that they only read."""
+    made = config or make_config()
+    return shared(lambda folder: _build_day_vault(folder, made), _day_key(made), factory)
+
+
 def day_vault(tmp_path: Path, config: VaultConfig | None = None) -> Vault:
-    vault = empty_vault(tmp_path, config or make_config())
+    """A copy of the day vault for this config."""
+    made = config or make_config()
+    return Vault.open(copied(tmp_path, lambda folder: _build_day_vault(folder, made), _day_key(made)))
+
+
+@dataclass(frozen=True)
+class OnTheDay:
+    """A page's own vault: the day vault for this config with `then` run on it, built once per session and day as the
+    day vault is. Tests copy it, or share one copy that they only read."""
+
+    name: str
+    then: Callable[[Vault], object]
+    config: Callable[[], VaultConfig] = make_config
+
+    def copy(self, tmp_path: Path) -> Vault:
+        return Vault.open(copied(tmp_path, self._build, self._key()))
+
+    def template(self, factory: pytest.TempPathFactory) -> Path:
+        return shared(self._build, self._key(), factory)
+
+    def _key(self) -> str:
+        return f"{self.name}-{_day_key(self.config())}"
+
+    def _build(self, folder: Path) -> Path:
+        vault = day_vault(folder, self.config())
+        self.then(vault)
+        return vault.root
+
+
+def _day_key(config: VaultConfig) -> str:
+    # The seed is dated from today, so a run that crosses midnight builds the next day's.
+    return f"day-vault-{today().isoformat()}-" + digest(config.dump())
+
+
+def _build_day_vault(folder: Path, config: VaultConfig) -> Path:
+    vault = empty_vault(folder, config)
     store.write(vault, seed(), by="claude", via="cli")
     notes = vault.home.top / "notes"
     notes.mkdir(exist_ok=True)
     (notes / "plan.md").write_text("# The plan\n\nBook the room first.\n", encoding="utf-8")
     (notes / "costs.xlsx").write_bytes(b"PK\x03\x04 invented")
-    return vault
+    return vault.root
 
 
 @contextmanager
