@@ -21,7 +21,7 @@
       },
       "Body": {
         "additionalProperties": false,
-        "description": "A write's or a save's JSON body: one op of a batch's (DR-0639), the items it acts on and that op's keys. `items`\nholds one ref, or the ticked rows of a bulk; `bulk` says the act bar sent it, so one ticked row runs as a bulk too.\n`at` names the row the selection goes to after a call, which the answer gives back. A point op names its meeting\nin `items`, its point by id in `point`, and a removal its points in `points` (DR-0667, DR-0766).",
+        "description": "A write's or a save's JSON body: one op of a batch's (DR-0639), the items it acts on and that op's keys. `items`\nholds one ref, or the ticked rows of a bulk; `bulk` says the act bar sent it, so one ticked row runs as a bulk too.\n`at` names the row the selection goes to after a call, which the answer gives back. A point op names its meeting\nin `items`, its point by id in `point`, and a removal its points in `points` (DR-0667, DR-0770).",
         "properties": {
           "at": {
             "anyOf": [
@@ -1267,7 +1267,7 @@
         "type": "object"
       },
       "Meetings": {
-        "description": "Meetings' list (DR-0666, DR-0764): the meetings by day, with what its bars need.",
+        "description": "Meetings' list (DR-0666, DR-0768): the meetings by day, with what its bars need.",
         "properties": {
           "canonical": {
             "title": "Canonical",
@@ -1890,7 +1890,7 @@
         "type": "object"
       },
       "SavedMeeting": {
-        "description": "A meeting's outcome or notes saved: its line and panel after it, and the versions before and after its write,\nas `Saved` answers them for an item (DR-0710, DR-0766).",
+        "description": "A meeting's outcome or notes saved: its line and panel after it, and the versions before and after its write,\nas `Saved` answers them for an item (DR-0710, DR-0770).",
         "properties": {
           "before": {
             "title": "Before",

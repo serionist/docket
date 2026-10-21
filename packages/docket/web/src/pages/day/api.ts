@@ -3,7 +3,7 @@
  * share under /api/web/ledger: the viewer's text, the poll, the names the who fields suggest and the writes. A read
  * sends the page's query string as it is, so the server's own parser reads it, and answers the canonical URL with
  * what it read. A write answers its notice; a refusal throws an HttpError whose body is the Refused model. A save
- * answers an item's row and panel, or on Meetings the meeting's line and panel (DR-0766).
+ * answers an item's row and panel, or on Meetings the meeting's line and panel (DR-0770).
  */
 import type { components } from "@/api/schema";
 import { api } from "@/lib/api";

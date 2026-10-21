@@ -94,7 +94,7 @@ class Queue(Ledger):
 
 
 class Meetings(BaseModel):
-    """Meetings' list (DR-0666, DR-0764): the meetings by day, with what its bars need."""
+    """Meetings' list (DR-0666, DR-0768): the meetings by day, with what its bars need."""
 
     canonical: str
     version: str
@@ -171,7 +171,7 @@ class Saved(BaseModel):
 
 class SavedMeeting(BaseModel):
     """A meeting's outcome or notes saved: its line and panel after it, and the versions before and after its write,
-    as `Saved` answers them for an item (DR-0710, DR-0766)."""
+    as `Saved` answers them for an item (DR-0710, DR-0770)."""
 
     line: MeetingLine
     panel: MeetingPanel

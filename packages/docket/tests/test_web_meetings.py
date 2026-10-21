@@ -1,4 +1,4 @@
-"""Meetings' JSON routes, signed in (DR-0666, DR-0667, DR-0709 to DR-0711, DR-0764 to DR-0766): the meetings by day from
+"""Meetings' JSON routes, signed in (DR-0666, DR-0667, DR-0709 to DR-0711, DR-0768 to DR-0770): the meetings by day from
 today, then the earlier days newest first, each by start, the dimmed ones and their badges; q and stream, and the
 items' filters left out; the panel with its people's briefs, the recording, the points, the suggestions and the items
 on it; each point button one batch naming the point by its id; a meeting's outcome and notes saved on change; and its
@@ -136,7 +136,7 @@ def test_meetings_go_by_day_from_today_then_the_earlier_days_newest_first(client
         ("q=dora+nobody", [["Budget review"]], "/meetings?q=dora+nobody"),
         ("q=spring+numbers", [["Budget review"]], "/meetings?q=spring+numbers"),
         ("stream=pilot", [["Pilot sync"], ["Supplier call"]], "/meetings?stream=pilot"),
-        # The items' kind, who and k are never refused here, and the canonical URL leaves them out (DR-0764).
+        # The items' kind, who and k are never refused here, and the canonical URL leaves them out (DR-0768).
         ("kind=bogus&who=Ada&k=0&state=closed", None, "/meetings"),
         ("q=zeppelin", [], "/meetings?q=zeppelin"),
     ],
@@ -386,7 +386,7 @@ def test_a_removal_takes_only_its_meeting_s_points_so_it_undoes_nothing_else(cli
     assert len(ops(vault)) == before
 
 
-# -- the outcome and notes, saved on change (DR-0710, DR-0766) ------------------------------------------------------
+# -- the outcome and notes, saved on change (DR-0710, DR-0770) ------------------------------------------------------
 
 
 def test_a_meeting_s_outcome_and_notes_save_on_change_with_its_line_and_panel(client: TestClient, vault: Vault) -> None:

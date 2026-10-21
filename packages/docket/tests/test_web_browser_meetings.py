@@ -1,4 +1,4 @@
-"""Meetings in a real browser (DR-0666, DR-0667, DR-0710 to DR-0712, DR-0764 to DR-0766): the days from today, then the
+"""Meetings in a real browser (DR-0666, DR-0667, DR-0710 to DR-0712, DR-0768 to DR-0770): the days from today, then the
 earlier ones; j and Enter open a meeting, a point's mark answers it with its notice, and u undoes it; an answer being
 typed holds the poll, and a write from the CLI shows in place once it is sent; at phone width an open meeting takes
 the screen and a write's notice shows at its foot; axe in both themes; and on the perf ledger, the page opened from

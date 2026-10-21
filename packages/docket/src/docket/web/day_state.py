@@ -1,7 +1,7 @@
 """The day pages' URL (DR-0664 to DR-0666, DR-0704): one state for the Ledger, the Queue, Meetings and Today, the
 shared parameters first, then each page's own, in one canonical form with the defaults left out. The Queue takes the
 shared ones; `state`, `group` and `archived` are the Ledger's alone, and its canonical URL leaves them out. Meetings
-takes `q` and `stream` of the shared filters, `kind`, `who` and `k` being the items' (DR-0764), and `suggest` of its
+takes `q` and `stream` of the shared filters, `kind`, `who` and `k` being the items' (DR-0768), and `suggest` of its
 own.
 
 | Parameter | What | Default |

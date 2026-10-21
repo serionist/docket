@@ -1,5 +1,5 @@
 decisions:
-  - id: DR-0765
+  - id: DR-0769
     title: A meeting's people link to their briefs by name, alias or address, and its recording is the material the sync labelled recording, on the Recording page
     status: proposed
     at: "2026-10-21"

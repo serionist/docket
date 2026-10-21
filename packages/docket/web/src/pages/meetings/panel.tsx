@@ -1,5 +1,5 @@
 /**
- * The open meeting's panel (DR-0667, DR-0765): when and where, who, each attendee one click from their brief and the
+ * The open meeting's panel (DR-0667, DR-0769): when and where, who, each attendee one click from their brief and the
  * recording from the Recording page; the talking points; the items worth raising, once asked for, each added as a
  * point in one click; the outcome and notes saved on change; the items on it, each one click from its panel on the
  * Ledger; its materials and its history, the item panel's own parts. A meeting that is over with open points says

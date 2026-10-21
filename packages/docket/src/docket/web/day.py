@@ -2,7 +2,7 @@
 the writer, a material's checks and its launch, a write's changes from its body, and the write itself.
 
 Meetings reads the snapshot over its window, and its panel the meeting's show, its suggestions and the briefs its
-people have (DR-0764, DR-0765); its buttons write a meeting's points through the same write (DR-0667, DR-0766).
+people have (DR-0768, DR-0769); its buttons write a meeting's points through the same write (DR-0667, DR-0770).
 
 Reads run beside the writer, as the `ledger` tool's do: `ledger_tables`, then `views.read` and its two siblings,
 `views.matching` and `views.batch_lines`, and nothing else of the ledger (DR-0616). Every write goes through
@@ -109,7 +109,7 @@ class Facts:
     # The meeting `open` names, shown whole: Meetings' panel, and what a meeting's materials are checked against.
     held: LedgerRead | None = None
     suggested: LedgerRead | None = None
-    # Each folded name or address a person with a brief goes by, and that person's entity (DR-0765).
+    # Each folded name or address a person with a brief goes by, and that person's entity (DR-0769).
     briefs: dict[str, str] = field(default_factory=dict[str, str])
     missing: str = ""
     lines: list[BatchLine] = field(default_factory=list[BatchLine])
@@ -164,7 +164,7 @@ def gather(vault: Vault, state: DayState, *, whole: bool = True, alikes: tuple[s
     return found
 
 
-# A person's brief, by each name and plain alias of theirs and each address the entity names (DR-0765): only a person
+# A person's brief, by each name and plain alias of theirs and each address the entity names (DR-0769): only a person
 # whose brief the index holds.
 BRIEF_NAMES = """SELECT a.text, a.entity FROM aliases a JOIN entities e ON e.id = a.entity JOIN docs d
 ON d.id = 'brief:' || a.entity WHERE e.type = 'person' AND e.status != 'archived' AND a.kind IN ('name', 'plain')"""
@@ -367,7 +367,7 @@ class Body(BaseModel):
     """A write's or a save's JSON body: one op of a batch's (DR-0639), the items it acts on and that op's keys. `items`
     holds one ref, or the ticked rows of a bulk; `bulk` says the act bar sent it, so one ticked row runs as a bulk too.
     `at` names the row the selection goes to after a call, which the answer gives back. A point op names its meeting
-    in `items`, its point by id in `point`, and a removal its points in `points` (DR-0667, DR-0766)."""
+    in `items`, its point by id in `point`, and a removal its points in `points` (DR-0667, DR-0770)."""
 
     model_config = ConfigDict(extra="forbid")
 

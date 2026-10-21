@@ -1,7 +1,7 @@
 /**
  * A day page's filter bar (DR-0665, DR-0666): the Ledger's states with their counts, or the Queue's and Meetings'
  * counts alone, then the words to find and the list view's own filters, the Ledger's grouping and archived among
- * them; Meetings has no kind or who, which are the items' (DR-0764). The words apply with Enter, who with Enter or a
+ * them; Meetings has no kind or who, which are the items' (DR-0768). The words apply with Enter, who with Enter or a
  * name taken from its list (DR-0714), a choice as it is made; the URL holds each.
  */
 import { ListFilterIcon, SearchIcon } from "lucide-react";

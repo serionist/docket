@@ -1,5 +1,5 @@
 decisions:
-  - id: DR-0764
+  - id: DR-0768
     title: Meetings reads the snapshot 14 days either side of today and takes q, stream and its own suggest, never the items' kind, who and k
     status: proposed
     at: "2026-10-21"

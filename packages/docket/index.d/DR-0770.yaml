@@ -1,5 +1,5 @@
 decisions:
-  - id: DR-0766
+  - id: DR-0770
     title: Meetings writes its points through ledger/write and its outcome and notes through ledger/save, which answers the meeting's line and panel
     status: proposed
     at: "2026-10-21"

@@ -1,4 +1,4 @@
-"""The Meetings page's parts (DR-0666, DR-0667, DR-0764, DR-0765): the list by day and the meeting panel, each a model
+"""The Meetings page's parts (DR-0666, DR-0667, DR-0768, DR-0769): the list by day and the meeting panel, each a model
 the app's JSON reads answer as it is (DR-0709).
 
 Each builder takes what the ledger's views read (the snapshot, a meeting's show, its suggest) and the briefs its
@@ -86,7 +86,7 @@ class MeetingsList(BaseModel):
 
 class Attendee(BaseModel):
     name: str
-    # The person's brief, or "" when no person with a brief goes by the name (DR-0765).
+    # The person's brief, or "" when no person with a brief goes by the name (DR-0769).
     href: str
 
 

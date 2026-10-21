@@ -1,7 +1,7 @@
 /**
  * A day page's URL (DR-0704, DR-0669): the server's day_state.py reads it and answers its canonical form, which the
  * page writes back; the Queue's leaves out the Ledger's own state, group and archived, and Meetings' the items' kind,
- * who and k, with suggest its own (DR-0764). A change the page makes itself
+ * who and k, with suggest its own (DR-0768). A change the page makes itself
  * keeps the keys in the canonical order, so the address bar holds the server's URL without waiting for a read;
  * src/test/canonical.json holds this order to the server's.
  */
