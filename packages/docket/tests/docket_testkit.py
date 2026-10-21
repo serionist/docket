@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import gc
 import hashlib
+import itertools
 import json
 import os
 import random
@@ -390,29 +391,22 @@ def copied(tmp_path: Path, build: Callable[[Path], Path], key: str) -> Path:
     return tmp_path / rel
 
 
-_READ_ONLY: list[Path] = []
+_READ_ONLY = itertools.count()
 
 
-def read_only(made: Path, ready: Callable[[Path], object] | None = None) -> Path:
+def read_only(made: Path) -> Path:
     """A copy of a template for the tests of a module that only read it: made once per module and worker, beside the
-    templates, and held to a manifest as they are, so a run whose test wrote into it fails (DR-0531). `ready` runs on
-    the copy first, under a template build's isolation, for what the tests' first read would write; then the manifest
-    is taken. A test that writes takes a copy of its own."""
+    templates, and held to a manifest as they are, so a run whose test wrote into it fails (DR-0531). A test that
+    writes takes a copy of its own; a vault whose first read builds the index is shared from `indexed`."""
     templates = templates_folder(_FACTORY[0])
     folder = templates / made.resolve().relative_to(templates.resolve()).parts[0]
-    name = f"{folder.name}.read-{os.getpid()}-{len(_READ_ONLY)}"
+    name = f"{folder.name}.read-{os.getpid()}-{next(_READ_ONLY)}"
     copy = templates / name
-    _READ_ONLY.append(copy)
     shutil.copytree(folder, copy)
     for repo in _repos(folder):
         _fit(folder, copy / repo.relative_to(folder), copy)
-    found = copy / made.resolve().relative_to(folder.resolve())
-    if ready is not None:
-        with pytest.MonkeyPatch.context() as mp:
-            isolated_git(mp, templates / f"{name}.home")
-            ready(found)
     (templates / f"{name}.manifest.json").write_text(json.dumps(manifest(copy)), encoding="utf-8")
-    return found
+    return copy / made.resolve().relative_to(folder.resolve())
 
 
 # Where a file media key store keeps its seal: Docket's state folder, outside the vault (KeyStore._seal_file).
