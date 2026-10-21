@@ -270,6 +270,18 @@ describe("the results", () => {
     expect(within(nav).getByRole("link", { name: "Search" }).getAttribute("aria-current")).toBe("page");
   });
 
+  it("are asked again when the page opens again, so a search kept from before isn't stale", async () => {
+    const router = await open("/search?query=Nortwin&sources=calls");
+    await act(async () => {
+      await router.navigate({ to: "/design" });
+    });
+    await act(async () => {
+      router.history.back();
+    });
+    await waitFor(() => expect(document.querySelector("[data-row]")).toBeTruthy());
+    await waitFor(() => expect(asked("/api/web/search")).toHaveLength(2));
+  });
+
   it("put the words found under the highlighter and keep a record's markup as text", async () => {
     await open("/search?query=Nortwin&sources=calls");
     const row = document.querySelector(`[data-locator="${CALL}"]`) as HTMLElement;
