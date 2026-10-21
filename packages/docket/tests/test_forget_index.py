@@ -340,8 +340,10 @@ def test_an_update_reads_only_the_docs_it_indexes_and_what_they_cite(
     build._EARLIER.clear()  # pyright: ignore[reportPrivateUsage]
     docstore._HISTORIES.clear()  # pyright: ignore[reportPrivateUsage]
     vault.close()
+    # A history is read from the commit HEAD is at, as the keep files it under.
+    head = vault.git.head_id()
     for said, wanted in (
-        ("- By hand.", [f"log --no-show-signature --format=%H%x1f%B%x1e -- {rel}", "cat-file --batch"]),
+        ("- By hand.", [f"log --no-show-signature --format=%H%x1f%B%x1e {head} -- {rel}", "cat-file --batch"]),
         ("- By hand again.", []),
     ):
         digest.write_text(digest.read_text(encoding="utf-8") + f"{said}\n", encoding="utf-8", newline="\n")

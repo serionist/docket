@@ -54,9 +54,10 @@ log = logging.getLogger(__name__)
 # A final decision's committed text, by its blob id: what every read of it takes (DR-0782), read once a process.
 _BLOBS: dict[str, str] = {}
 BLOBS_KEPT = 1000
-# Docs' histories by the repo, its HEAD and its shallow mark, and the docs asked for: what git's log says for a commit
-# never changes, so a read asking again at the same HEAD, such as the Briefs page's, asks git nothing.
-_HISTORIES: dict[tuple[str, str, str, tuple[str, ...]], dict[str, list[tuple[int, str]]]] = {}
+# Docs' histories by the vault, its repo, the commit read at and the repo's shallow mark, and the docs asked for: what
+# git's log says from a commit never changes, so a read asking again at the same HEAD, such as the Briefs page's, asks
+# git nothing. The vault is in the key, as two folder vaults of one host repo share its git dir and its HEAD.
+_HISTORIES: dict[tuple[str, str, str, str, tuple[str, ...]], dict[str, list[tuple[int, str]]]] = {}
 HISTORIES_KEPT = 64
 
 # On Windows another program holding the doc open makes the rename fail for a moment.
@@ -116,6 +117,14 @@ class RedactReport(BaseModel):
             for rule, n in doc.redactions.items():
                 total[rule] = total.get(rule, 0) + n
         return dict(sorted(total.items()))
+
+
+def _shallow_mark(git_dir: Path) -> str:
+    """When the repo's shallow file last changed, "" with none: a fetch that deepens the history changes it."""
+    try:
+        return str((git_dir / "shallow").stat().st_mtime_ns)
+    except OSError:
+        return ""
 
 
 class DocStore:
@@ -246,13 +255,15 @@ class DocStore:
         folder = self.root / "processed" / "decision"
         return self.at_paths(sorted(folder.rglob("*.md")) if folder.is_dir() else [])
 
-    def history(self, doc_id: str) -> list[tuple[int, str]]:
-        """The doc's revs, newest commit first: (rev, commit) for every commit whose message has its `Doc:` line."""
+    def history(self, doc_id: str, at: str | None = None) -> list[tuple[int, str]]:
+        """The doc's revs, newest commit first: (rev, commit) for every commit whose message has its `Doc:` line; from
+        HEAD, or from the commit `at` names."""
         if self._known is not None and doc_id in self._known:
             return self._known[doc_id]
         # Signature lines a user's log.showSignature adds would read as commit ids.
         rel = self.path(doc_id).as_posix()
-        out = self.vault.git.out("log", "--no-show-signature", "--format=%H%x1f%B%x1e", "--", rel)
+        start = [at] if at else []
+        out = self.vault.git.out("log", "--no-show-signature", "--format=%H%x1f%B%x1e", *start, "--", rel)
         revs: list[tuple[int, str]] = []
         for entry in out.split("\x1e"):
             sha, _, message = entry.strip("\n").partition("\x1f")
@@ -267,32 +278,40 @@ class DocStore:
         ids = list(dict.fromkeys(doc_ids))
         git = self.vault.git
         head = git.head_id()
-        shallow = git.git_dir / "shallow"
-        mark = f"{shallow.stat().st_mtime_ns}" if shallow.is_file() else ""
-        key = (str(git.git_dir), head, mark, tuple(ids)) if head else None
+        key = (str(self.root), str(git.git_dir), head, _shallow_mark(git.git_dir), tuple(ids)) if head else None
         # One look-up: another thread may clear the keep between a check and a read.
         kept = _HISTORIES.get(key) if key is not None else None
         if kept is not None:
             return {doc_id: list(revs) for doc_id, revs in kept.items()}
-        found = self._histories(ids)
+        # The log reads from the commit the key names, never HEAD again: HEAD may move in between.
+        found = self._histories(ids, head)
         if key is not None:
             if len(_HISTORIES) >= HISTORIES_KEPT:
                 _HISTORIES.clear()
             _HISTORIES[key] = {doc_id: list(revs) for doc_id, revs in found.items()}
         return found
 
-    def _histories(self, ids: list[str]) -> dict[str, list[tuple[int, str]]]:
+    def _histories(self, ids: list[str], head: str | None) -> dict[str, list[tuple[int, str]]]:
         if len(ids) < BATCHED_HISTORIES:
-            return {doc_id: self.history(doc_id) for doc_id in ids}
+            return {doc_id: self.history(doc_id, head) for doc_id in ids}
         rels = {self.path(doc_id).as_posix(): doc_id for doc_id in ids}
         folders = sorted({f"processed/{doc_id.partition(':')[0]}" for doc_id in ids})
         git = self.vault.git
-        merges = git.run("rev-list", "--merges", "-1", "HEAD", "--", *folders, check=False)
+        merges = git.run("rev-list", "--merges", "-1", head or "HEAD", "--", *folders, check=False)
         if merges.returncode != 0 or merges.stdout.strip():
-            return {doc_id: self.history(doc_id) for doc_id in ids}
+            return {doc_id: self.history(doc_id, head) for doc_id in ids}
         # NUL between names, so no name is quoted; names from the repo's top, so the prefix comes off.
+        start = [head] if head else []
         out = git.out(
-            "log", "-z", "--no-renames", "--no-show-signature", "--format=%x1e%H%x1f%B", "--name-only", "--", *folders
+            "log",
+            "-z",
+            "--no-renames",
+            "--no-show-signature",
+            "--format=%x1e%H%x1f%B",
+            "--name-only",
+            *start,
+            "--",
+            *folders,
         )
         revs: dict[str, list[tuple[int, str]]] = {doc_id: [] for doc_id in ids}
         sha, message = "", ""

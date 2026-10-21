@@ -129,6 +129,8 @@ def test_an_import_of_notes_makes_one_history_call_for_the_batch(
 ) -> None:
     vault = fixture_vault(tmp_path)
     folder = make_notes_repo(tmp_path)
+    # The histories are read from the commit HEAD was at, never from HEAD again.
+    head = vault.git.head_id()
     with git_calls(monkeypatch) as calls:
         run(vault, "import", "notes", str(folder))
     legacy = "-- processed/legacy-note"
@@ -141,8 +143,8 @@ def test_an_import_of_notes_makes_one_history_call_for_the_batch(
         f"diff --name-only -z HEAD {legacy}",
         f"ls-files -z --others --exclude-standard {legacy}",
         # Every note's history in one log, no merge being in it, instead of one log per note.
-        f"rev-list --merges -1 HEAD {legacy}",
-        f"log -z --no-renames --no-show-signature --format=%x1e%H%x1f%B --name-only {legacy}",
+        f"rev-list --merges -1 {head} {legacy}",
+        f"log -z --no-renames --no-show-signature --format=%x1e%H%x1f%B --name-only {head} {legacy}",
         *COMMIT_CALLS,
     ]
 
@@ -229,11 +231,12 @@ def test_one_log_reads_the_revs_each_doc_s_log_reads(tmp_path: Path, monkeypatch
     git(vault.root, "rm", "-q", "--", third)
     git(vault.root, "commit", "-qm", "Drop a doc")
     recall.doc_put(vault, note(DOCS[2], rev="1", lines=["- Ben put it at 11 million. @12:08"]))
+    head = vault.git.head_id()
     with git_calls(monkeypatch) as calls:
         batched = store.histories(DOCS)
     assert calls == [
-        f"rev-list --merges -1 HEAD {FOLDER}",
-        f"log -z --no-renames --no-show-signature --format=%x1e%H%x1f%B --name-only {FOLDER}",
+        f"rev-list --merges -1 {head} {FOLDER}",
+        f"log -z --no-renames --no-show-signature --format=%x1e%H%x1f%B --name-only {head} {FOLDER}",
     ]
     assert batched == per_doc(store)
     assert [n for n, _ in batched[DOCS[2]]] == [2, 1]
@@ -261,11 +264,12 @@ def test_a_merge_in_the_folder_s_history_reads_each_doc_s_log(tmp_path: Path, mo
     git(vault.root, "checkout", "-q", "main")
     recall.doc_put(vault, note(DOCS[1], rev="1", lines=["- Ben put it at 12 million. @12:08"]))
     git(vault.root, "merge", "-q", "--no-ff", "-m", "Merge the side", "side")
+    head = vault.git.head_id()
     with git_calls(monkeypatch) as calls:
         batched = store.histories(DOCS)
     assert calls == [
-        f"rev-list --merges -1 HEAD {FOLDER}",
-        *(f"log --no-show-signature --format=%H%x1f%B%x1e -- {rel}" for rel in paths),
+        f"rev-list --merges -1 {head} {FOLDER}",
+        *(f"log --no-show-signature --format=%H%x1f%B%x1e {head} -- {rel}" for rel in paths),
     ]
     assert batched == per_doc(store)
     assert [n for n, _ in batched[DOCS[1]]] == [2, 1]
@@ -293,6 +297,52 @@ def test_the_histories_at_one_head_are_asked_once_and_a_new_commit_asks_again(
     with git_calls(monkeypatch) as calls:
         assert store.histories(DOCS) == again
     assert calls, "a keep of one holds the last docs asked for only"
+
+
+def test_histories_are_read_from_the_head_they_are_kept_under(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Another process moves HEAD while the log runs and moves it back, as a rebase and its abort do: the histories
+    kept for the HEAD read first are that HEAD's, since the log reads from it and never from HEAD again."""
+    monkeypatch.setattr(docstore, "_HISTORIES", {})
+    vault = fixture_vault(tmp_path)
+    store = put_all(vault)
+    branch = git(vault.root, "branch", "--show-current").strip()
+    git(vault.root, "checkout", "-q", "-b", "upstream")
+    recall.doc_put(vault, note(DOCS[1], rev="1", lines=["- Ben put it at 12 million. @12:08"]))
+    git(vault.root, "checkout", "-q", branch)
+    here = per_doc(DocStore(vault))
+    real = DocStore._histories  # pyright: ignore[reportPrivateUsage]
+
+    def racing(self: DocStore, *args: Any) -> dict[str, list[tuple[int, str]]]:
+        git(vault.root, "checkout", "-q", "--detach", "upstream")
+        try:
+            return real(self, *args)
+        finally:
+            git(vault.root, "checkout", "-q", branch)
+
+    monkeypatch.setattr(DocStore, "_histories", racing)
+    store.histories(DOCS)
+    monkeypatch.setattr(DocStore, "_histories", real)
+    assert DocStore(vault).histories(DOCS) == here
+    assert [n for n, _ in here[DOCS[1]]] == [1]
+
+
+def test_two_folder_vaults_of_one_host_repo_keep_their_own_histories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two folder vaults share their host repo's git dir and HEAD; each keeps its own histories, by its folder."""
+    monkeypatch.setattr(docstore, "_HISTORIES", {})
+    top = host_repo(tmp_path)
+    vaults = []
+    for name in ("a", "b"):
+        vault = Vault.init(top / "notes" / name, make_config("folder"), "test-box")
+        write_raw(vault.root)
+        vault.commit([], "Raw: the fixture")
+        recall.doc_put(vault, note(DOCS[0]))
+        vaults.append(vault)
+    a, b = vaults
+    recall.doc_put(b, note(DOCS[0], rev="1", lines=["- Ben put it at 12 million. @12:08"]))
+    assert [n for n, _ in DocStore(a).histories(DOCS[:1])[DOCS[0]]] == [1]
+    assert [n for n, _ in DocStore(b).histories(DOCS[:1])[DOCS[0]]] == [2, 1]
 
 
 # -- a ledger write: one status answers for its op files as the diff against HEAD and the status did (DR-0764) --------
