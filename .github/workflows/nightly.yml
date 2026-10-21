@@ -1,10 +1,12 @@
 # The whole suite on all three systems, on top of ci.yml's run (DR-0754): nightly on main, on demand, on a pull request
 # labelled full-matrix (when the label goes on, and on each push while it is on) and on a v* tag, which a release will
 # need green. Linux runs it uncovered, so its timed tests hold their limits as gate os does on the other two; Windows and
-# macOS run every test file (`gate os --all`), where a PR runs only those that can differ by system and the smoke set,
-# and every page in the system's own Chrome; Windows also runs the service's accept tests on the newest CPython. A red
-# night opens an issue per distinct set of failing tests, labelled nightly, or comments on the open issue for the same
-# set; a run on demand, on a label or on a tag shows its result where it was asked for.
+# macOS run every test file (`gate os --all`), where a PR runs only those that can differ by system, the smoke set and
+# the timed tests, and every page in the system's own Chrome; Windows also runs the service's accept tests on the newest
+# CPython. `--all` also runs the tests marked nightly, on all three: the timed tests on big vaults and the tests that
+# build those vaults, which no PR runs (DR-0757). A red night opens an issue per distinct set of failing tests,
+# labelled nightly, or comments on the open issue for the same set; a run on demand, on a label or on a tag shows its
+# result where it was asked for.
 name: Nightly
 
 on:
