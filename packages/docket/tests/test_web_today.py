@@ -8,6 +8,7 @@ Invented people only."""
 from __future__ import annotations
 
 import json
+import shutil
 from collections.abc import Iterator
 from datetime import UTC, timedelta
 from pathlib import Path
@@ -161,6 +162,16 @@ def test_with_no_meeting_left_today_the_next_working_day_s_first_leads(
     assert not any(g["label"] == "Later today" for g in found["meetings"])
 
 
+def test_once_the_meeting_under_way_ends_the_next_one_today_leads_alone_on_its_day(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(views, "now", lambda: at(0, 13).astimezone(UTC))
+    found = read(client, API)["list"]
+    assert (found["lead"]["label"], found["lead"]["meeting"]["line"]["subject"]) == ("Next", "Supplier follow-up")
+    # It was today's last, so no Later today: the next working day's meetings come next.
+    assert [g["key"] for g in found["meetings"]] == [(today() + timedelta(days=next_day())).isoformat()]
+
+
 def test_the_items_due_go_overdue_then_today_then_back_from_a_snooze(client: TestClient) -> None:
     due = read(client, API)["list"]["due"]
     assert [(g["key"], g["label"], g["tone"]) for g in due] == [
@@ -291,6 +302,17 @@ def test_today_s_version_moves_with_a_cursor_file_and_a_run_where_the_others_don
     assert read(client, f"{CHANGED}?v={ledger}")["changed"] is False
     monkeypatch.setattr(Runs, "snapshot", lambda _self: [SimpleNamespace(source="chat")])
     assert read(client, f"{CHANGED}?v={moved['version']}&page=today")["changed"] is True
+
+
+def test_a_vault_with_no_state_folder_reads_and_polls(client: TestClient, vault: Vault) -> None:
+    """No machine's cursor file, not even the folder they live in: every live source is due, and the version holds."""
+    shutil.rmtree(vault.root / cursors.STATE)
+    found = read(client, API)
+    assert [(s["source"], s["said"], s["due"]) for s in found["list"]["syncs"]] == [
+        ("chat", "never synced", True),
+        ("mail", "never synced", True),
+    ]
+    assert read(client, f"{CHANGED}?v={found['version']}&page=today")["changed"] is False
 
 
 # -- the URL and the panel --------------------------------------------------------------------------------------------
