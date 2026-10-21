@@ -4,6 +4,7 @@ the user's yes; a crash at any step is finished by a second run, or undone befor
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -170,6 +171,20 @@ def test_the_vault_becomes_a_folder_with_its_history(tmp_path: Path) -> None:
     # A .gitignore edit undone by hand: check says what it is.
     (top / ".gitignore").write_text("/notes/vault/\n", encoding="utf-8")
     assert "commit that edit" in str(vault.check()[0])
+
+
+def test_the_folder_commit_is_git_s_identity_or_else_the_owner_s(tmp_path: Path) -> None:
+    _, root = nested(tmp_path)
+    where = cv.locate(root)
+    git(where.top, "config", "user.name", "Ben Sample")
+    git(where.top, "config", "user.email", "ben@example.invalid")
+    assert cv._identity(where).startswith(b"Ben Sample <ben@example.invalid> ")  # pyright: ignore[reportPrivateUsage]
+    # A machine whose git has none, and won't guess one from the host's name.
+    git(where.top, "config", "--unset", "user.name")
+    git(where.top, "config", "--unset", "user.email")
+    Path(os.environ["GIT_CONFIG_GLOBAL"]).write_text("[user]\n\tuseConfigOnly = true\n", encoding="utf-8")
+    owner = cv._identity(where)  # pyright: ignore[reportPrivateUsage]
+    assert owner.startswith(b"Ada Example <ada@example.invalid> ") and owner.endswith(b" +0000")
 
 
 def test_a_pull_rebase_after_the_convert_keeps_the_vault_a_folder(tmp_path: Path) -> None:

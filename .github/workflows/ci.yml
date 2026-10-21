@@ -69,13 +69,13 @@ jobs:
   # share saves its coverage data, and the one that runs the question set its numbers, for Gate (Linux); every share
   # saves what its files cost, for the weights.
   linux-shares:
-    name: Tests (Linux, ${{ matrix.share }} of 4)
+    name: Tests (Linux, ${{ matrix.share }} of 3)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        share: [1, 2, 3, 4]
+        share: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -87,7 +87,7 @@ jobs:
       - name: Install
         run: uv sync --locked
       - name: Tests under coverage
-        run: uv run gate full --only tests --shard ${{ matrix.share }}/4
+        run: uv run gate full --only tests --shard ${{ matrix.share }}/3
       - name: Keep the coverage data
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

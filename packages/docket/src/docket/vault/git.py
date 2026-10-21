@@ -548,24 +548,23 @@ def config_stamp(top: Path) -> Stamp | None:
     process restarts."""
     if not is_git_dir(top / ".git"):
         return None
-    home = Path.home()
+    # git's own home: HOME where it is set, Git for Windows' too.
+    home = Path(os.environ.get("HOME") or Path.home())
     xdg = os.environ.get("XDG_CONFIG_HOME") or str(home / ".config")
     named = os.environ.get("GIT_CONFIG_GLOBAL")
     files = [
         top / ".git" / "config",
         *([Path(named)] if named else [home / ".gitconfig", Path(xdg) / "git" / "config"]),
+        *([Path(os.environ["GIT_CONFIG_SYSTEM"])] if os.environ.get("GIT_CONFIG_SYSTEM") else []),
     ]
-    if os.environ.get("GIT_CONFIG_SYSTEM"):
-        files.append(Path(os.environ["GIT_CONFIG_SYSTEM"]))
     stamp: list[object] = [*sorted((k, v) for k, v in os.environ.items() if k.startswith("GIT_CONFIG"))]
     for path in files:
         try:
             found = path.stat()
-        except FileNotFoundError:
+        except OSError:
+            # Missing, or not there to read: as a file git doesn't read, until one is.
             stamp.append(None)
             continue
-        except OSError:
-            return None
         stamp.append((found.st_size, found.st_mtime_ns))
     return tuple(stamp)
 

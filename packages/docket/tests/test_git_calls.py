@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
+import weakref
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -37,10 +39,10 @@ from docket.cli import main
 from docket.errors import DocketError
 from docket.ledger import store as ledger_store
 from docket.vault import git as git_module
-from docket.vault import host
+from docket.vault import gitfiles, host
 from docket.vault.docstore import DocStore
 from docket.vault.gate import Gate
-from docket.vault.git import Git, toplevel
+from docket.vault.git import Git, config_stamp, toplevel
 from docket.vault.home import repo_at
 from docket.vault.vault import Vault, remove_tree
 
@@ -548,3 +550,81 @@ def test_a_repo_s_answers_from_its_config_stand_while_its_config_files_do(
     # The repo's own: a remote added.
     git(top, "remote", "add", "mirror", str(tmp_path / "mirror.git"))
     assert len(host.remote_urls(top)) == len(first[1]) + 1
+
+
+def fake_batch(reader: Git, script: str) -> subprocess.Popen[bytes]:
+    """A process standing in for the reader's batch, answering as `script` says."""
+    proc = subprocess.Popen([sys.executable, "-c", script], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    reader._batch = proc  # pyright: ignore[reportPrivateUsage]
+    reader._closer = weakref.finalize(reader, git_module._shut, proc)  # pyright: ignore[reportPrivateUsage]
+    return proc
+
+
+@pytest.mark.parametrize(
+    "answer",
+    ["sys.stdout.write('HEAD:./vault.yaml ambiguous\\n')", "sys.stdout.write('0123 blob 10\\nabc')"],
+    ids=["out of form", "ended part way"],
+)
+def test_a_batch_answer_out_of_form_closes_it_and_git_answers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, answer: str
+) -> None:
+    vault = fixture_vault(tmp_path)
+    reader = vault.git
+    proc = fake_batch(reader, f"import sys; sys.stdin.readline(); {answer}; sys.stdout.flush()")
+    assert reader.blob("HEAD:./vault.yaml") is gitfiles.UNKNOWN
+    assert reader._batch is None  # pyright: ignore[reportPrivateUsage]
+    assert proc.poll() is not None
+    with git_calls(monkeypatch) as calls:
+        assert reader.blob("HEAD:./vault.yaml\nraw") is gitfiles.UNKNOWN
+        assert reader.blob_text("HEAD:./vault.yaml") == (vault.root / "vault.yaml").read_text(encoding="utf-8")
+    # A name with a line break never goes to the batch; the next read starts a real one.
+    assert calls == ["cat-file --batch"]
+
+
+def test_a_batch_that_won_t_exit_is_killed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(git_module, "_BATCH_EXIT_SECONDS", 0.2)
+    stuck = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"], stdin=subprocess.PIPE, stdout=subprocess.PIPE
+    )
+    git_module._shut(stuck)  # pyright: ignore[reportPrivateUsage]
+    assert stuck.returncode is not None
+
+
+def test_one_status_before_the_first_commit_lists_nothing_changed(tmp_path: Path) -> None:
+    top = tmp_path / "fresh"
+    top.mkdir()
+    git(top, "init", "-q", "-b", "main")
+    (top / "staged.md").write_text("staged\n", encoding="utf-8")
+    (top / "loose.md").write_text("loose\n", encoding="utf-8")
+    git(top, "add", "staged.md")
+    fresh = Git(top)
+    changed, new = fresh.against_head(".")
+    assert (changed, sorted(new)) == ([], ["loose.md", "staged.md"])
+    assert (changed, sorted(new)) == (fresh.changed_against_head("."), sorted(fresh.not_in_head(".")))
+
+
+def test_a_config_stamp_follows_each_file_git_reads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    top = host_repo(tmp_path)
+    home = tmp_path / "user"
+    home.mkdir()
+    system = tmp_path / "system.gitconfig"
+    system.write_text("", encoding="utf-8")
+    monkeypatch.delenv("GIT_CONFIG_GLOBAL")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / "xdg"))
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(system))
+    seen = [config_stamp(top)]
+    assert seen[0] is not None and config_stamp(top) == seen[0]
+    # The user's own, the XDG one appearing, the system's that a variable names, the repo's: each changes it.
+    (home / ".gitconfig").write_text("[docket]\n\ttest = 1\n", encoding="utf-8")
+    seen.append(config_stamp(top))
+    (home / "xdg" / "git").mkdir(parents=True)
+    (home / "xdg" / "git" / "config").write_text("[docket]\n\ttest = 22\n", encoding="utf-8")
+    seen.append(config_stamp(top))
+    system.write_text("[docket]\n\ttest = 333\n", encoding="utf-8")
+    seen.append(config_stamp(top))
+    git(top, "config", "docket.test", "4444")
+    seen.append(config_stamp(top))
+    assert len(set(seen)) == len(seen)
+    # A folder that isn't a plain checkout's top keeps nothing.
+    assert config_stamp(home) is None

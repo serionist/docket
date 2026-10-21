@@ -157,12 +157,6 @@ class Vault:
         )
         self.rawlog = RawLog(root, self.machine, self.lock, self.home.tmp_dir, self.home)
 
-    def __enter__(self) -> Vault:
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        self.close()
-
     def close(self) -> None:
         """Stop the vault's batch reader (DR-0766); the vault stays usable, and its next blob read starts another."""
         self.git.close()

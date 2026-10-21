@@ -297,6 +297,9 @@ def test_unmerged_paths_read_from_each_index_version_as_git_lists_them(tmp_path:
 
 def test_an_index_of_names_whole_and_compressed_reads_every_entry(tmp_path: Path) -> None:
     top = repo(tmp_path / "r")
+    # A name of 128 bytes before a short one: version 4 strips it in a varint of two bytes.
+    for name in ("a" * 128, "b.md"):
+        (top / name).write_text(f"{name}\n", encoding="utf-8")
     for n in range(300):
         name = top / "raw" / "chat" / "2026" / f"{n % 12 + 1:02d}" / f"2026-10-14T{n:04d}-test-box.jsonl"
         name.parent.mkdir(parents=True, exist_ok=True)
@@ -412,3 +415,52 @@ def test_a_vault_refuses_a_conflict_the_index_shows_and_asks_git_where_it_can_t(
     with git_calls(monkeypatch) as calls, pytest.raises(UnmergedError, match=f"{rel} in .* has a conflict"):
         vault.refuse_unmerged()
     assert calls == ["ls-files -u"]
+
+
+def entry(name: bytes, stage: int = 0, *, v4: bool = False, extended: bool = False, length: int | None = None) -> bytes:
+    """An index entry as git writes one: its stat data and object id zeroed, its flags, its name whole (padded with
+    NULs to eight bytes) or, in version 4, after a strip of 0 from the name before."""
+    flags = (stage << 12) | (len(name) if length is None else length) | (0x4000 if extended else 0)
+    fixed = bytes(40 + 20) + flags.to_bytes(2, "big") + (bytes(2) if extended else b"")
+    if v4:
+        return fixed + b"\0" + name + b"\0"
+    size = (len(fixed) + len(name) + 8) & ~7
+    return fixed + name + bytes(size - len(fixed) - len(name))
+
+
+def index(version: int, *entries: bytes, count: int | None = None, tail: bytes = b"") -> bytes:
+    held = len(entries) if count is None else count
+    return resigned(b"DIRC" + version.to_bytes(4, "big") + held.to_bytes(4, "big") + b"".join(entries) + tail)
+
+
+def test_an_index_as_git_writes_one_reads_each_entry_s_stage() -> None:
+    assert gitfiles._stages(index(2, entry(b"a"), entry(b"b", 2)), 20) == [(b"a", 0), (b"b", 2)]  # pyright: ignore[reportPrivateUsage]
+    assert gitfiles._stages(index(3, entry(b"a", 1, extended=True)), 20) == [(b"a", 1)]  # pyright: ignore[reportPrivateUsage]
+    assert gitfiles._stages(index(4, entry(b"a", 3, v4=True)), 20) == [(b"a", 3)]  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"DIRC" + bytes(8),
+        resigned(b"DIRX" + (2).to_bytes(4, "big") + bytes(4)),
+        index(2, entry(b"a", extended=True)),
+        index(4, b"".join([bytes(60), (1).to_bytes(2, "big"), b"\x05a\0"])),
+        index(2, entry(b"ab", length=1)),
+        index(4, entry(b"abc", v4=True, length=2)),
+        index(2, entry(b"a"), count=3),
+        index(2, entry(b"a"), tail=b"TREE" + (99).to_bytes(4, "big")),
+    ],
+    ids=[
+        "too short",
+        "not an index",
+        "version 2 with extended flags",
+        "a strip past the name before",
+        "a name past its length",
+        "a name of another length",
+        "fewer entries than it says",
+        "an extension past the end",
+    ],
+)
+def test_an_index_git_wouldn_t_write_is_unknown(data: bytes) -> None:
+    assert gitfiles._stages(data, 20) is None  # pyright: ignore[reportPrivateUsage]
