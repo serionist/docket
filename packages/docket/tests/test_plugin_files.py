@@ -203,7 +203,7 @@ def test_setup_adds_each_source_on_the_user_s_yes_and_leaves_the_key_to_them() -
     assert "Then commit `vault.yaml`" in plaud
 
 
-# -- the sync skill (DR-0685, DR-0690, DR-0722, DR-0746 to DR-0751) ----------------------------------------------------
+# -- the sync skill (DR-0685, DR-0690, DR-0722, DR-0746 to DR-0750, DR-0771, DR-0772) ----------------------------------
 
 SYNC = PLUGIN / "skills" / "sync"
 PROMPTS = REPO / "packages" / "docket" / "src" / "docket" / "sync"

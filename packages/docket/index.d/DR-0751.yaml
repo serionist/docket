@@ -1,11 +1,12 @@
 decisions:
   - id: DR-0751
     title: The recording agents run on Sonnet, a trial decided by rerunning each missed recording on the default model
-    status: proposed
+    status: superseded
     at: "2026-10-20"
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#267"]
+    superseded_by: [DR-0771]
     description: "The sync skill launches each recording agent with model: sonnet. The next rehearsal changes the design and the model at once, so for each ask the old sync found from a recording that the rehearsal misses, that recording's prompt runs again on the default model on a fresh copy of the vault: when the default finds the ask, the recording agents go back to the default."
     not_chosen:
       - "The default model untried: a recording agent's work is one recording's read and its note, and the sync's cost is part of its measure."

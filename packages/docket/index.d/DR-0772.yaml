@@ -1,0 +1,22 @@
+decisions:
+  - id: DR-0772
+    title: Each sync agent looks for evidence on the open items its people are in, and a legacy note counts as a recording's note
+    status: proposed
+    at: "2026-10-21"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#286"]
+    supersedes: [DR-0759]
+    description: "DR-0759 as it stands, but: the recording agents too are launched with no model, on the session's model (DR-0771). Before writing its block, each agent, a source's or a recording's, makes a closes pass: it goes through the open and snoozed items in context.md whose people are in what it read, the item's who, or for an item on a meeting that meeting's organiser or attendees, and only those; for each it looks in what it read for evidence the item was done, a message sent, a call held, a file shared, an answer given, and writes a CLOSES line with the evidence's locator, or nothing. docket sync reconcile's report says when the sync's blocks hold no CLOSES line at all: no source reported a close. A recording's note, which keeps docket sync recordings from giving it an agent, is a current minutes, recording note, thread summary or legacy note covering the recording, a record under it or a record of its thread: a legacy note the import tied to the recording counts, and a digest, a brief or a correction doesn't."
+    binds:
+      - An agent reads its source only inside a run, so what it reports is what Docket keeps.
+      - "A line rests only on records in raw after the source agent's promotion, or docs in the vault: never a pending, private, dropped or held record, and never a stretch a cut took."
+      - "Every locator an agent reports is one it read: a source agent's in one read with more, a recording agent's in its files, read whole."
+      - A run that can't open or stops short leaves its mark, the other sources go on, and the summary says so.
+      - "No ledger op names a note: a meeting's link is its recording's rid (DR-0651)."
+      - "An agent's prompt names all it needs: it reads nothing of the session that started it."
+      - "Nothing closes without evidence: a CLOSES line names the locator that shows the item done or moot."
+    not_chosen:
+      - "Every open item checked by every agent: a ledger of hundreds of items, each searched for in every source, for closes that come from the people an agent read."
+      - "Closes found by the reconcile from the asks' locators: a close is a message sent or a call held, which no ask line names."
+      - "A legacy note left out of the count: the rehearsal read two such recordings again and re-added asks the ledger held under their old paths."

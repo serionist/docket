@@ -1,12 +1,13 @@
 decisions:
   - id: DR-0759
     title: The sync's source agents start fresh, general-purpose on the session's model, their prompt naming the owner
-    status: proposed
+    status: superseded
     at: "2026-10-20"
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#272"]
     supersedes: [DR-0747]
+    superseded_by: [DR-0772]
     description: "DR-0747 as it stands, but: the sync skill launches each source's agent with subagent_type general-purpose and no model, never a fork, so it starts with none of the main session's context and keeps the session's model for its judgment, the classify and the asks it finds; its prompt is its file. agent.md says that prompt and the files it names are all the agent needs, and that another agent may share its browser, a tab each. agent.md and recording.md gain {OWNER}, the owner's name and addresses from vault.yaml, which docket sync start and docket sync recordings fill, so a fresh agent knows whose asks to find. The recording agents stay general-purpose with model sonnet (DR-0751)."
     binds:
       - An agent reads its source only inside a run, so what it reports is what Docket keeps.

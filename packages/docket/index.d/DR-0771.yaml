@@ -1,0 +1,13 @@
+decisions:
+  - id: DR-0771
+    title: "Every sync agent runs on the session's model: on Sonnet the fourth rehearsal closed nothing and missed asks"
+    status: proposed
+    at: "2026-10-21"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#286"]
+    supersedes: [DR-0751]
+    description: "The sync skill launches every agent, each source's and each recording's, with subagent_type general-purpose and no model, so each runs on the session's model. DR-0751's trial is decided: the fourth rehearsal, on 21 Oct with every agent on Sonnet, took 11.7 minutes against the old sync's 19.5, but its blocks held no CLOSES line where the old sync closed five items on evidence (a folder sent, ten invites sent, two calls held, a repo released, two of them from recordings), it missed three asks the old sync found, and about 5 of its 18 adds were doubles or one ask split in several. A sync that closes nothing and splits asks costs the owner more than the minutes it saves."
+    not_chosen:
+      - "Sonnet for the recording agents alone: two of the five closes came from recordings, and the asks it missed and split did too."
+      - "Each missed recording rerun on the default before deciding, as DR-0751 planned: the closes were missed from mail and the calendar as well, where no rerun of a recording could tell the model from the design."
