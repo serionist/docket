@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from docket_testkit import entity_vault, folder_vault, git
+from docket_testkit import copied, entity_vault, folder_vault, git
 
 from docket.cli import main
 from docket.errors import DocketError
@@ -78,17 +78,23 @@ def fresh_probes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(rendered, "_UNREACHED", {})
 
 
-@pytest.fixture
-def vault(tmp_path: Path) -> Vault:
+def _build_vault(folder: Path) -> Path:
     made = set_rendered(
-        folder_vault(tmp_path),
+        folder_vault(folder),
         RenderedFile(kind="people", path="people.md"),
         RenderedFile(kind="glossary", path="glossary.md"),
     )
-    changes = tmp_path / "changes.yaml"
+    changes = folder / "changes.yaml"
     changes.write_text(CHANGES, encoding="utf-8", newline="\n")
     EntityStore(made).apply(load_changes(changes))
-    return made
+    return made.root
+
+
+@pytest.fixture
+def vault(tmp_path: Path) -> Vault:
+    """A folder vault rendering the people and the glossary from four entities: a copy of one built once per
+    session."""
+    return Vault.open(copied(tmp_path, _build_vault, f"{__name__}.vault"))
 
 
 def body(path: Path) -> str:

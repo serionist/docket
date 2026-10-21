@@ -7,9 +7,9 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from docket_testkit import CALL, PARENT, copy_vault, index_template, make_record
+from docket_testkit import CALL, PARENT, copy_vault, index_template, indexed, make_record
 
-from docket.index import build, rebuild, update
+from docket.index import build, update
 from docket.index.lookup import ReadIndex, open_read
 from docket.vault.legacy import OldPath
 from docket.vault.vault import Vault
@@ -20,14 +20,13 @@ LEGACY = "processed/legacy-note/old-northwind-notes.md"
 
 @pytest.fixture(scope="module")
 def template(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    return index_template(tmp_path_factory)
+    """The index fixture with its index built, once per session; tests copy it."""
+    return indexed(tmp_path_factory, index_template(tmp_path_factory))
 
 
 @pytest.fixture
 def vault(template: Path, tmp_path: Path) -> Vault:
-    v = copy_vault(template, tmp_path)
-    rebuild(v)
-    return v
+    return copy_vault(template, tmp_path)
 
 
 def open_current(vault: Vault) -> ReadIndex | None:

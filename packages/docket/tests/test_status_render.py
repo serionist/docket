@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 import yaml
-from docket_testkit import best_of, empty_vault, folder_vault, git, host_repo, make_config, sh, traced
+from docket_testkit import best_of, copied, empty_vault, folder_vault, git, host_repo, make_config, sh, traced
 from ledger_kit import NOW
 
 from docket.cli import main
@@ -146,11 +146,16 @@ def fresh_process(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(git_module, "_CONFIGURED", {})
 
 
+def _build_vault(folder: Path) -> Path:
+    made = folder_vault(folder)
+    (top(made) / "projects" / "pilot").mkdir(parents=True)
+    return with_files(made, status_file()).root
+
+
 @pytest.fixture
 def vault(tmp_path: Path) -> Vault:
-    made = folder_vault(tmp_path)
-    (top(made) / "projects" / "pilot").mkdir(parents=True)
-    return with_files(made, status_file())
+    """A folder vault rendering the pilot's STATUS.md: a copy of one built once per session."""
+    return Vault.open(copied(tmp_path, _build_vault, f"{__name__}.vault"))
 
 
 def the_file(vault: Vault) -> Path:

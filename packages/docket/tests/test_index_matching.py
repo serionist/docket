@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from docket_testkit import copy_vault, empty_vault, index_config, make_record, template_with
+from docket_testkit import copy_vault, empty_vault, index_config, indexed, make_record, read_only, template_with
 
 from docket.index import build, matching, rebuild, search
 from docket.index.languages import hungarian_cases, resolve
@@ -94,14 +94,13 @@ def make_matching_vault(root: Path) -> Vault:
 
 @pytest.fixture(scope="module")
 def template(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    return template_with(tmp_path_factory, make_matching_vault)
+    """The matching vault with its index built, once per session; tests copy it."""
+    return indexed(tmp_path_factory, template_with(tmp_path_factory, make_matching_vault))
 
 
 @pytest.fixture
 def vault(template: Path, tmp_path: Path) -> Vault:
-    v = copy_vault(template, tmp_path)
-    rebuild(v)
-    return v
+    return copy_vault(template, tmp_path)
 
 
 def query(vault: Vault, sql: str, *args: object) -> list[tuple[Any, ...]]:
@@ -197,10 +196,8 @@ def make_one_customer_vault(root: Path) -> Vault:
 
 @pytest.fixture(scope="module")
 def one_customer(tmp_path_factory: pytest.TempPathFactory) -> Vault:
-    template = template_with(tmp_path_factory, make_one_customer_vault)
-    v = copy_vault(template, tmp_path_factory.mktemp("one-customer"))
-    rebuild(v)
-    return v
+    """One copy, its index built, for the tests that only read it: a write into it fails the run (DR-0531)."""
+    return Vault.open(read_only(indexed(tmp_path_factory, template_with(tmp_path_factory, make_one_customer_vault))))
 
 
 def mentions_of(vault: Vault, entity: str) -> set[int]:
@@ -329,10 +326,8 @@ def make_team_vault(root: Path) -> Vault:
 
 @pytest.fixture(scope="module")
 def team(tmp_path_factory: pytest.TempPathFactory) -> Vault:
-    template = template_with(tmp_path_factory, make_team_vault)
-    v = copy_vault(template, tmp_path_factory.mktemp("team"))
-    rebuild(v)
-    return v
+    """One copy, its index built, for the tests that only read it: a write into it fails the run (DR-0531)."""
+    return Vault.open(read_only(indexed(tmp_path_factory, template_with(tmp_path_factory, make_team_vault))))
 
 
 def test_an_english_word_stemming_like_a_name_is_no_mention(team: Vault) -> None:
@@ -400,10 +395,8 @@ def make_crowded_vault(root: Path) -> Vault:
 
 @pytest.fixture(scope="module")
 def crowded(tmp_path_factory: pytest.TempPathFactory) -> Vault:
-    template = template_with(tmp_path_factory, make_crowded_vault)
-    v = copy_vault(template, tmp_path_factory.mktemp("crowded"))
-    rebuild(v)
-    return v
+    """One copy, its index built, for the tests that only read it: a write into it fails the run (DR-0531)."""
+    return Vault.open(read_only(indexed(tmp_path_factory, template_with(tmp_path_factory, make_crowded_vault))))
 
 
 def test_a_case_form_counts_beside_the_stem_form_it_is_cut_to_while_a_common_word_crowds_that_out(
@@ -468,10 +461,8 @@ def make_common_words_vault(root: Path) -> Vault:
 
 @pytest.fixture(scope="module")
 def common_words(tmp_path_factory: pytest.TempPathFactory) -> Vault:
-    template = template_with(tmp_path_factory, make_common_words_vault)
-    v = copy_vault(template, tmp_path_factory.mktemp("common-words"))
-    rebuild(v)
-    return v
+    """One copy, its index built, for the tests that only read it: a write into it fails the run (DR-0531)."""
+    return Vault.open(read_only(indexed(tmp_path_factory, template_with(tmp_path_factory, make_common_words_vault))))
 
 
 def test_a_case_form_far_commoner_than_a_rare_name_counts_as_a_word(common_words: Vault) -> None:
