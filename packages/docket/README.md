@@ -842,6 +842,9 @@ runs its writes one at a time; the commands above keep writing directly, under t
   files open, and the upgrade can't replace them.
 - Run `docket service install` again after your PATH changes: the service runs with the PATH of the shell that
   installed it, so it finds the git and git-lfs you use.
+- The service checks its own port every 30 seconds. When nothing answers there it says so in its log and exits, and
+  its registration starts it again: within 5 minutes on Windows, in seconds on macOS and Linux, at your next logon
+  under the Run key (DR-0762).
 - macOS: a vault under `~/Documents`, `~/Desktop`, `~/Downloads` or iCloud Drive needs the Python the service runs to
   have the Files and Folders permission (or Full Disk Access) in System Settings, Privacy & Security. Install names the
   Python when it can't read the vault; or move the vault elsewhere.

@@ -2,9 +2,9 @@
 # labelled full-matrix (when the label goes on, and on each push while it is on) and on a v* tag, which a release will
 # need green. Linux runs it uncovered, so its timed tests hold their limits as gate os does on the other two; Windows and
 # macOS run every test file (`gate os --all`), where a PR runs only those that can differ by system and the smoke set,
-# and every page in the system's own Chrome. A red night opens an issue per distinct set of failing tests, labelled
-# nightly, or comments on the open issue for the same set; a run on demand, on a label or on a tag shows its result
-# where it was asked for.
+# and every page in the system's own Chrome; Windows also runs the service's accept tests on the newest CPython. A red
+# night opens an issue per distinct set of failing tests, labelled nightly, or comments on the open issue for the same
+# set; a run on demand, on a label or on a tag shows its result where it was asked for.
 name: Nightly
 
 on:
@@ -171,13 +171,56 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
+  # The service's loop on Windows leans on CPython's proactor (DR-0762), and a uv tool install takes the newest CPython,
+  # which the suite's 3.12 never meets: the accept tests and their pins run there each night. The version moves when a
+  # newer CPython ships.
+  accepts:
+    name: Accepts (Windows, Python 3.14)
+    if: >-
+      github.event_name != 'pull_request' || github.event.label.name == 'full-matrix' ||
+      (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'full-matrix'))
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+      - name: The accept tests on Python 3.14
+        shell: bash
+        run: >-
+          uv run --python 3.14 --locked pytest packages/docket/tests/test_service_accepts.py -v -rsP -p no:cacheprovider
+          --shard 1/1 --shard-key "Windows accepts" --shard-times .local/times/accepts.json
+      - name: The failing tests
+        if: failure() || cancelled()
+        shell: bash
+        env:
+          SYSTEM: Windows
+          JOB: Accepts (Windows, Python 3.14)
+          LIST: .local/failing/Windows-accepts.txt
+        run: |
+          mkdir -p .local/failing
+          jq -r --arg system "$SYSTEM" '.failed[]? | "\($system): \(.)"' .local/times/*.json \
+            | sort -u > "$LIST" || true
+          [ -s "$LIST" ] || echo "$JOB: red, no test named" > "$LIST"
+      - name: Keep the failing tests
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nightly-failing-Windows-accepts
+          path: .local/failing/
+          include-hidden-files: true
+          retention-days: 7
+
   # A red scheduled run only: the set is every red job's failing tests, each under its system, and a red job that
   # named none stands for itself. Its key, the first 12 hex of the sorted set's sha256, sits in the issue's body, so a
   # night that fails the same set comments on the open issue instead of opening another. A share past its timeout may
   # end cancelled rather than failed, and a hung night is red too; a night cancelled by hand opens nothing.
   issue:
     name: Issue for a red night
-    needs: [tests, browser]
+    needs: [tests, browser, accepts]
     if: >-
       !cancelled() && github.event_name == 'schedule' &&
       (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))

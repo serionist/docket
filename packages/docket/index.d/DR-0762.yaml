@@ -1,0 +1,19 @@
+decisions:
+  - id: DR-0762
+    title: On Windows the service keeps its listening socket after a failed accept, and everywhere a self-check ends a service that can't reach its own port
+    status: proposed
+    at: "2026-10-21"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#275"]
+    description: "On Windows the service runs on asyncio's proactor loop with a proactor of its own, KeepAccepting in docket.service.accepts, given to uvicorn as its loop: an accept that fails with an OSError is logged and tried again on the same listening socket, a tenth of a second later, up to 10 times in a row; a closed socket's error, and the tenth, go on to asyncio as they are. asyncio itself closes the listening socket on any such error, which left the service alive and deaf after a client went mid-accept at logon. The loop leaves out asyncio's \"Task exception was never retrieved\" for the task IocpProactor.accept starts beside each accept, whose OSError is that accept's own, logged once already; every other report goes on. macOS and Linux keep uvicorn's own loop. Everywhere, a self-check thread connects to the service's own port every 30 seconds, 5 seconds given; two misses in a row log, stop the server, and make serve end with a DocketError, exit 2; a server that hasn't stopped 30 seconds later is ended with exit 2. Once the server is stopping for any other reason (a signal, a stop it was asked for), which closes the port first, the self-check checks no more. Each registration starts the service again after that exit (DR-0154): the Windows task's time trigger within 5 minutes, launchd's KeepAlive, systemd's Restart=on-failure; under the Run key nothing does. test_service_accepts pins the CPython behaviour this relies on, and the nightly runs it on the newest CPython too."
+    binds:
+      - The fix is the proactor's accept tried again, not a copy of asyncio's _start_serving; a test fails when CPython stops closing the socket or stops accepting through the proactor.
+      - The self-check is a TCP connect closed at once, so it logs no request and never waits on a slow handler.
+      - The self-check stands down once the server is stopping, so a slow clean stop is never cut short or reported as a failure.
+    not_chosen:
+      - "A copy of BaseProactorEventLoop._start_serving with the close taken out: forty lines of CPython to keep in step with each release."
+      - "The selector loop on Windows: it doesn't close the socket, but it moves every connection to another I/O path, capped at 512 sockets by select(), to fix one rare error."
+      - "An HTTP request as the self-check: a line in the log every 30 seconds, and a long synchronous request could end a busy service."
+      - "Retrying forever: a socket that fails every accept would log ten lines a second and, still listening, pass the self-check."
+      - "A shorter Windows time trigger than 5 minutes: DR-0154's, and the accept's retry makes the self-check's exit rare."

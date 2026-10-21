@@ -16,7 +16,7 @@ from docket_testkit import empty_vault
 
 from docket import userconfig
 from docket.errors import DocketError
-from docket.service import client, install
+from docket.service import client, install, server
 from docket.service.install import ServiceStatus
 from docket.service.platforms import (
     Launch,
@@ -334,6 +334,34 @@ def test_a_failing_systemctl_step_is_refused(tmp_path: Path) -> None:
 
 
 # -- what install captures and writes ----------------------------------------------------------------------------------
+
+
+# -- every system ------------------------------------------------------------------------------------------------------
+
+
+def test_every_registration_starts_the_service_again_after_the_self_check_ends_it() -> None:
+    """The self-check ends a service that can't reach its own port with a non-zero exit (DR-0762); each system's
+    registration starts it again after one."""
+    assert server.UNREACHABLE_EXIT != 0
+    # Windows: the restart setting for a failed start, and the time trigger that starts a service that ran and ended,
+    # never a second one beside it.
+    xml = task_xml(launch(f"C:\\Users\\{HOME}", "venv\\Scripts\\pythonw.exe"), SID, datetime(2026, 10, 15, 9, 30))
+    root = ET.fromstring(xml.split("\n", 1)[1])  # noqa: S314 - the task Docket itself wrote
+    assert root.findtext("t:Settings/t:RestartOnFailure/t:Interval", namespaces=TASK_NS) == "PT1M"
+    assert root.findtext("t:Settings/t:RestartOnFailure/t:Count", namespaces=TASK_NS) == "3"
+    assert root.findtext("t:Settings/t:MultipleInstancesPolicy", namespaces=TASK_NS) == "IgnoreNew"
+    every = root.find("t:Triggers/t:TimeTrigger", TASK_NS)
+    assert every is not None
+    assert every.findtext("t:Enabled", namespaces=TASK_NS) == "true"
+    assert every.findtext("t:Repetition/t:Interval", namespaces=TASK_NS) == "PT5M"
+    assert every.findtext("t:Repetition/t:StopAtDurationEnd", namespaces=TASK_NS) == "false"
+    assert every.find("t:Repetition/t:Duration", TASK_NS) is None
+    # macOS: launchd starts the agent again after any exit but a clean one.
+    assert plistlib.loads(agent_plist(launch(f"/Users/{HOME}")))["KeepAlive"] == {"SuccessfulExit": False}
+    # Linux: systemd starts the unit again after a non-zero exit.
+    unit = user_unit(launch(f"/home/{HOME}")).splitlines()
+    assert "Restart=on-failure" in unit
+    assert "RestartSec=5" in unit
 
 
 def test_the_environment_captured_from_the_installing_shell() -> None:
