@@ -169,8 +169,9 @@ export function AppSidebar({ current }: { current?: string }) {
   return (
     <Sidebar label="Pages">
       <SidebarHeader className="flex-row items-center justify-between gap-1 group-data-[state=collapsed]:flex-col group-data-[state=collapsed]:px-1.5">
+        {/* The start page, Today (DR-0669), through the service's / so an old bookmark and the brand agree. */}
         <a
-          href="/search"
+          href="/"
           className="tap flex h-8 min-w-0 items-center gap-2 rounded-sm px-2 text-sm font-semibold group-data-[state=collapsed]:sr-only"
         >
           <span aria-hidden className="grid size-5 place-items-center rounded-sm bg-green text-xs text-on-green">

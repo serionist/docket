@@ -323,7 +323,8 @@ def _order(row: ItemRow) -> tuple[date, date, int, str]:
 Grouped = list[tuple[str, str, Tone, list[ItemRow]]]
 
 
-def _due_groups(rows: Sequence[ItemRow], today: date) -> Grouped:
+def due_groups(rows: Sequence[ItemRow], today: date) -> Grouped:
+    """The open items by due: snooze ended, overdue, today, this week, later, none; Today takes the first three."""
     week = today + timedelta(days=SOON)
     buckets: list[tuple[str, str, Tone, Callable[[ItemRow], bool]]] = [
         ("woke", "Snooze ended", "today", lambda r: r.woke),
@@ -393,7 +394,7 @@ def _grouped(rows: Sequence[ItemRow], state: DayState, today: date) -> Grouped:
     awake = [r for r in rows if r.state == "open" or r.woke]
     asleep = [r for r in rows if r.state == "snoozed" and not r.woke]
     closed = [r for r in rows if r.state in ("done", "dropped")]
-    return _due_groups(awake, today) + _snoozed_groups(asleep, today) + _closed_groups(closed, today)
+    return due_groups(awake, today) + _snoozed_groups(asleep, today) + _closed_groups(closed, today)
 
 
 def build_list(found: LedgerRead, state: DayState, matched: set[str] | None) -> LedgerList:

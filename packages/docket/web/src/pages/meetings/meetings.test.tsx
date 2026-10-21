@@ -297,8 +297,8 @@ describe("the meetings list", () => {
     expect(document.querySelector('[data-row="M-0002"]')?.getAttribute("data-dim")).toBe("1");
     const pages = screen.getByRole("navigation", { name: "Pages" });
     const links = within(pages).getAllByRole("link");
-    expect(links.slice(1, 4).map((l) => l.getAttribute("href"))).toEqual(["/queue", "/ledger", "/meetings"]);
-    expect(links[3]?.getAttribute("aria-current")).toBe("page");
+    expect(links.slice(1, 5).map((l) => l.getAttribute("href"))).toEqual(["/today", "/queue", "/ledger", "/meetings"]);
+    expect(links[4]?.getAttribute("aria-current")).toBe("page");
     expect(sent.some((s) => s.path === "/api/web/meetings")).toBe(true);
   });
 

@@ -3,6 +3,8 @@ the writer, a material's checks and its launch, a write's changes from its body,
 
 Meetings reads the snapshot over its window, and its panel the meeting's show, its suggestions and the briefs its
 people have (DR-0768, DR-0769); its buttons write a meeting's points through the same write (DR-0667, DR-0770).
+Today reads the day as `docket ledger day` does, the items closed today, the next meeting's show and the live
+sources' cursor marks; its version hashes the cursor files and the open runs too (DR-0711, DR-0773).
 
 Reads run beside the writer, as the `ledger` tool's do: `ledger_tables`, then `views.read` and its two siblings,
 `views.matching` and `views.batch_lines`, and nothing else of the ledger (DR-0616). Every write goes through
@@ -17,7 +19,7 @@ import os
 import sqlite3
 import subprocess
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -28,12 +30,15 @@ from pydantic import BaseModel, ConfigDict
 
 from docket.errors import DocketError
 from docket.index.build import ledger_tables
+from docket.ledger import day as ledger_day
 from docket.ledger import ops, store, views
+from docket.ledger.day import SyncMark
 from docket.ledger.store import RefusedError
 from docket.ledger.views import Ask, BatchLine, ItemRow, LedgerRead
+from docket.vault import cursors
 from docket.vault.vault import Vault
 from docket.web import day_view
-from docket.web.day_state import PATHS, DayState, DayStateError, ref_of
+from docket.web.day_state import MEETING_PANELS, PATHS, DayState, DayStateError, ref_of
 from docket.web.meetings_view import folded_name
 
 # What a material may open with its own app (DR-0664): documents, images and media; none that runs or carries macros.
@@ -67,18 +72,27 @@ NO_DISPLAY = "The service runs with no display here, so it can't open an app; op
 # -- the version the poll compares --------------------------------------------------------------------------------
 
 
-def version(root: Path) -> str:
+def version(root: Path, *, syncs: bool = False, running: Iterable[str] = ()) -> str:
     """The op files under a vault's root as they stand, by name, size and modification time (DR-0711): any write, a
-    pull and another clone's sync change it. No lock, and no file's content read."""
+    pull and another clone's sync change it. No lock, and no file's content read. Today's, with `syncs`, takes every
+    machine's cursor file the same way and the sources with a run open, so a sync that starts or closes shows."""
     digest = hashlib.sha256()
     try:
         entries = sorted(os.scandir(ops.folder(root)), key=lambda e: e.name)
     except (FileNotFoundError, DocketError):
         # No op folder yet, or one that is a link, which no read folds: nothing to compare.
         entries = []
+    if syncs:
+        try:
+            marks = [e for e in os.scandir(root / cursors.STATE) if cursors.FILE.match(e.name) and e.is_file()]
+        except (FileNotFoundError, NotADirectoryError):
+            marks = []
+        entries += sorted(marks, key=lambda e: e.name)
     for entry in entries:
         stat = entry.stat()
         digest.update(f"{entry.name}\0{stat.st_size}\0{stat.st_mtime_ns}\n".encode())
+    if syncs:
+        digest.update(("running\0" + "\0".join(sorted(set(running)))).encode())
     return digest.hexdigest()[:16]
 
 
@@ -115,19 +129,38 @@ class Facts:
     lines: list[BatchLine] = field(default_factory=list[BatchLine])
     alikes: list[ItemRow] = field(default_factory=list[ItemRow])
     viewer: Viewer | None = None
+    # Today's: the items closed today, the next meeting's show, the live sources' marks, and the runs open.
+    closed: list[ItemRow] = field(default_factory=list[ItemRow])
+    lead: LedgerRead | None = None
+    syncs: list[SyncMark] = field(default_factory=list[SyncMark])
+    sync_problem: str | None = None
+    running: tuple[str, ...] = ()
 
     def opened(self) -> LedgerRead | None:
         """The item or meeting `open` names, whose materials the viewer and the launcher check against."""
         return self.shown or self.held
 
 
-def gather(vault: Vault, state: DayState, *, whole: bool = True, alikes: tuple[str, ...] = ()) -> Facts:
+def gather(
+    vault: Vault,
+    state: DayState,
+    *,
+    whole: bool = True,
+    alikes: tuple[str, ...] = (),
+    running: tuple[str, ...] = (),
+) -> Facts:
     """A read's facts: the list whole with `q`'s matches, the Queue's the queue view, Meetings' the snapshot over its
-    window; the open item with the meeting it hangs on, or the open meeting with its suggestions and its people's
-    briefs; the lines of the batch `done` names, the items an add looks like, and a material in the viewer. The
-    version is taken first, so a write during the read is seen by the next poll rather than never."""
+    window, Today's the day (`running` naming the sources with a run open); the open item with the meeting it hangs
+    on, or the open meeting with its suggestions and its people's briefs; the lines of the batch `done` names, the
+    items an add looks like, and a material in the viewer. The version is taken first, so a write during the read is
+    seen by the next poll rather than never."""
+    today_page = state.page == "today"
     found = Facts(
-        ZoneInfo(vault.config.owner.time_zone), sorted(vault.config.sources), version(vault.root), views.now()
+        ZoneInfo(vault.config.owner.time_zone),
+        sorted(vault.config.sources),
+        version(vault.root, syncs=today_page, running=running),
+        views.now(),
+        running=running,
     )
     at = found.at
     with ledger_tables(vault) as conn:
@@ -145,6 +178,8 @@ def gather(vault: Vault, state: DayState, *, whole: bool = True, alikes: tuple[s
             since, until = today - timedelta(days=MEETINGS_DAYS), today + timedelta(days=MEETINGS_DAYS)
             found.listing = read(Ask(view="snapshot", since=since.isoformat(), until=until.isoformat()))
             found.matched = views.matching(conn, state.q) if state.q else None
+        elif whole and today_page:
+            _today(read, found)
         elif whole:
             ask = Ask(view="list", state="all", stream=state.stream, kind=state.kind, who=state.who, k=None)
             found.listing = read(ask)
@@ -154,14 +189,31 @@ def gather(vault: Vault, state: DayState, *, whole: bool = True, alikes: tuple[s
             found.lines = views.batch_lines(conn, state.done)
         if state.open is not None:
             found.shown, found.meeting, found.held, found.missing = _open(read, state.open)
-        if found.held is not None and state.page == "meetings":
+        if found.held is not None and state.page in MEETING_PANELS:
             if state.suggest:
                 found.suggested = read(Ask(view="suggest", ref=found.held.meetings[0].id))
             found.briefs = briefs(conn)
+    if whole and today_page:
+        found.syncs, found.sync_problem = ledger_day.sync_marks(vault, at, running)
     opened = found.opened()
     if opened is not None and state.text is not None:
         found.viewer = view_text(vault, opened, state.text)
     return found
+
+
+def _today(read: Callable[[Ask], LedgerRead], found: Facts) -> None:
+    """Today's reads: the snapshot `docket ledger day` reads, today to the next working day; the items done or dropped,
+    for those closed today; and the next meeting's show, for where it is and who is in it."""
+    today = found.at.astimezone(found.tz).date()
+    after = ledger_day.next_working_day(today)
+    found.listing = read(Ask(view="snapshot", since=today.isoformat(), until=after.isoformat()))
+    found.closed = [
+        row for state in ("done", "dropped") for row in read(Ask(view="list", state=state, k=None)).items
+        if row.closed == today
+    ]  # fmt: skip
+    day = ledger_day.build(found.listing, found.at)
+    if day.meetings:
+        found.lead = _shown(read, day.meetings[0].meetings[0].meeting.id)
 
 
 # A person's brief, by each name and plain alias of theirs and each address the entity names (DR-0769): only a person

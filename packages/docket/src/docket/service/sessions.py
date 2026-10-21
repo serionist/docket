@@ -72,11 +72,11 @@ def safe_next(target: str | None) -> str:
 
 
 def open_command(wanted: str) -> str:
-    """The command that opens a page after signing in: `docket open "<path>"`, or `docket open` for the start page.
-    The path is double-quoted, and whatever a shell could act on inside the quotes (`$`, a backquote, `!`, `"`, a
+    """The command that opens a page after signing in: `docket open "<path>"`, or `docket open` for the start page,
+    Today (DR-0669). The path is double-quoted, and whatever a shell could act on inside the quotes (`$`, a backquote, `!`, `"`, a
     backslash) is percent-encoded, as is anything else a URL path or query wouldn't carry as it is."""
     path = safe_next(wanted)
-    if path in ("/", "/search"):
+    if path in ("/", "/today"):
         return "docket open"
     encoded = "".join(ch if ch in OPEN_SAFE else "".join(f"%{b:02X}" for b in ch.encode()) for ch in path)
     return f'docket open "{encoded}"'

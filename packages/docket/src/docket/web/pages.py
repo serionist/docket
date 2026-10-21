@@ -31,10 +31,10 @@ NAV: tuple[Group, ...] = (
         "The day",
         (
             # Built pages come first in their group (DR-0546); each day page's PR marks it built (DR-0669).
+            Page("today", "Today", "/today", 3, "the day: the next meeting and its prep, what's due", built=True),
             Page("queue", "Queue", "/queue", 3, "triage, then the items one at a time", built=True),
             Page("ledger", "Ledger", "/ledger", 3, "items with their raw source one click away", built=True),
             Page("meetings", "Meetings", "/meetings", 3, "meetings with their briefs, points and minutes", built=True),
-            Page("today", "Today", "/today", 3, "the day: meetings with their briefs and points"),
             Page("outbox", "Outbox", "/outbox", 3, "drafts waiting for a click"),
         ),
     ),

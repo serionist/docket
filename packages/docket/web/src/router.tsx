@@ -10,6 +10,7 @@ import { DesignPage } from "@/pages/design";
 import { LedgerPage } from "@/pages/ledger";
 import { MeetingsPage } from "@/pages/meetings";
 import { QueuePage } from "@/pages/queue";
+import { TodayPage } from "@/pages/today";
 
 const root = createRootRoute({ component: Shell, notFoundComponent: NotFound });
 
@@ -17,6 +18,13 @@ export const designRoute = createRoute({
   getParentRoute: () => root,
   path: "/design",
   component: DesignPage,
+  validateSearch: (search: Record<string, unknown>): Search => search as Search,
+});
+
+export const todayRoute = createRoute({
+  getParentRoute: () => root,
+  path: "/today",
+  component: TodayPage,
   validateSearch: (search: Record<string, unknown>): Search => search as Search,
 });
 
@@ -41,7 +49,7 @@ export const meetingsRoute = createRoute({
   validateSearch: (search: Record<string, unknown>): Search => search as Search,
 });
 
-export const routeTree = root.addChildren([designRoute, queueRoute, ledgerRoute, meetingsRoute]);
+export const routeTree = root.addChildren([designRoute, todayRoute, queueRoute, ledgerRoute, meetingsRoute]);
 
 export function createAppRouter(history?: RouterHistory) {
   return createRouter({
