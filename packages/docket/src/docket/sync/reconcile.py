@@ -77,6 +77,11 @@ LAST = 120
 QUOTE = 1_000
 # A MINUTES line's point given by its number, as `1` or `#1`, instead of its id.
 POINT_NUMBER = re.compile(r"^#?(\d{1,3})$")
+# A NOTES line's local time and a meeting's ref, read off a line that left out its note's id.
+NOTE_TIME = re.compile(r"^\d{1,2}:\d{2}$")
+MEETING_REF = re.compile(r"^M-\d{4,}$")
+# A doc's id: its type, lowercase words joined by hyphens, a colon, its name.
+DOC_ID = re.compile(r"^(?P<kind>[a-z][a-z-]*):\S+$")
 
 
 @dataclass(frozen=True)
@@ -264,22 +269,46 @@ def _is_day(text: str) -> bool:
 
 def read_blocks(path: Path, info: folder.Info) -> tuple[list[Found], list[str]]:
     """Every block's lines, each source's and then its recordings', in the sources' order, and each block file that
-    isn't there, said."""
+    isn't there, said. A recording's NOTES line that left out its note's id is read from its block's file, which names
+    the recording, and said."""
     out: list[Found] = []
     said: list[str] = []
     for source in info.sources:
-        files = [(f"{folder.BLOCKS}/{source.source}.txt", source.source)]
+        files: list[tuple[str, str, str | None]] = [(f"{folder.BLOCKS}/{source.source}.txt", source.source, None)]
         files += [
-            (f"{folder.BLOCKS}/{source.source}/{r.key}.txt", f"{r.rid}'s agent")
+            (f"{folder.BLOCKS}/{source.source}/{r.key}.txt", f"{r.rid}'s agent", r.rid)
             for r in folder.recordings(path, source.source)
         ]
-        for rel, whose in files:
+        for rel, whose, recording in files:
             file = path / rel
             if not file.is_file():
                 said.append(f"{rel} isn't there: no block from {whose}")
                 continue
-            out += [Found(rel, line) for line in block.parse(file.read_bytes().decode("utf-8", "replace"))]
+            for line in block.parse(file.read_bytes().decode("utf-8", "replace")):
+                found = Found(rel, line)
+                if recording is not None and line.label == "NOTES" and not _note_id(line.fields[0], recording):
+                    said.append(
+                        f"{found.quoted}: no note id, so the link is drafted from {recording}, the block's recording; "
+                        "the note's id is missing from the line"
+                    )
+                    found = Found(rel, _noted(line, recording))
+                out.append(found)
     return out, said
+
+
+def _note_id(text: str, recording: str) -> bool:
+    """Whether a NOTES line's first field is a note's id, `recording-note:...`, not the recording, a time or a ref."""
+    found = DOC_ID.match(text)
+    return found is not None and found["kind"] not in ("r", recording.partition(":")[0])
+
+
+def _noted(line: block.Line, recording: str) -> block.Line:
+    """A recording's NOTES line with no note id, as DR-0722 shapes it: no id, the block's recording, the line's times
+    in order, and its M- ref."""
+    times = [f for f in line.fields if NOTE_TIME.match(f)]
+    ref = next((f for f in line.fields if MEETING_REF.match(f)), None)
+    fields = [NONE, recording, *[*times, NONE, NONE][:2], *([ref] if ref else [])]
+    return block.Line(label=line.label, fields=fields, n=line.n)
 
 
 def reconcile(vault: Vault, sync: str, at: datetime) -> Reconciled:

@@ -93,8 +93,10 @@ LEARNED:  SKILL.md / sync.md | <what differs from it, for next time>
 - `<stream>` is a stream {CONTEXT} lists, else `-`. The due is a day the ask names; "today" is {TODAY}; "this week"
   without a day is `-`.
 - `who` is the name the ledger already uses for the person, as {CONTEXT} writes it, else the name the call gives.
-- NOTES: the note's id, {RECORDING}, its local start and end as `HH:MM`, and the M- ref of the meeting its content
-  names when it has two.
+- NOTES: the note's id first, then {RECORDING}, its local start and end as `HH:MM`, and the M- ref of the meeting
+  its content names when it has two. Choose the id now, by step 4's rule, `recording-note:{DAY}-<slug>`, and put the
+  note under it: a line such as `NOTES:    recording-note:{DAY}-pilot-weekly | {RECORDING} | 10:01 | 10:58`. Five
+  fields when its content names one of two meetings, four otherwise; never the rid first.
 
 ## 4. Put the note
 
