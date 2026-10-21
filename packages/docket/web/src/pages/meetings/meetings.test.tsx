@@ -399,6 +399,29 @@ describe("the open meeting's points", () => {
     expect(writes()[0]).toMatchObject({ op: "point", items: ["M-0001"], fields: { item: "A-0002" } });
   });
 
+  it("keeps a point being typed when the suggestions are asked for, the panel staying as it was until they come", async () => {
+    await open("/meetings?open=M-0001");
+    const side = await panel();
+    fireEvent.change(within(side).getByLabelText("Add a point"), { target: { value: "budget for Q3" } });
+    fireEvent.click(within(side).getByRole("button", { name: "Suggest items" }));
+    await within(side).findByRole("button", { name: "Add as a point: A-0002" });
+    expect((within(side).getByLabelText("Add a point") as HTMLInputElement).value).toBe("budget for Q3");
+  });
+
+  it("asks before another point's editor takes the place of an answer being typed", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+    await open("/meetings?open=M-0001");
+    const side = await panel();
+    fireEvent.click(within(side).getByRole("button", { name: "Answer: The venue's dates" }));
+    fireEvent.change(within(side).getByLabelText("The answer"), { target: { value: "the 12th" } });
+    fireEvent.click(within(side).getByRole("button", { name: "Answer: Ask about parking" }));
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect((within(side).getByLabelText("The answer") as HTMLTextAreaElement).value).toBe("the 12th");
+    fireEvent.click(within(side).getByRole("button", { name: "Answer: Ask about parking" }));
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect((within(side).getByLabelText("The answer") as HTMLTextAreaElement).value).toBe("");
+  });
+
   it("saves the outcome on leaving it as a set on the meeting, the suggestions shown kept", async () => {
     await open("/meetings?open=M-0001&suggest=1");
     const side = await panel();

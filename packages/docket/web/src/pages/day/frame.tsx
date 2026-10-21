@@ -99,6 +99,9 @@ export function useDayFrame<L extends FrameList, P extends { canonical: string }
     queryKey: [...DAY, page, "panel", open, panelKey?.(search) ?? ""],
     queryFn: () => readPanel(searchStr),
     enabled: open !== undefined,
+    // The same row's panel read again for more, such as Meetings' suggestions, stays as it was until the read answers,
+    // so nothing typed in it goes; another row's never shows in its place.
+    placeholderData: (previous, query) => (query?.queryKey[3] === open ? previous : undefined),
   });
   const viewerQuery = useQuery({
     queryKey: [...DAY, "text", open, text],

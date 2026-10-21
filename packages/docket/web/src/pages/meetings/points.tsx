@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { useUnsaved } from "@/lib/drafts";
+import { mayLeave, useUnsaved } from "@/lib/drafts";
 import { cn } from "@/lib/utils";
 import type { Body, MeetingPanel, PointLine } from "@/pages/day/api";
 import { refusal, useActions } from "@/pages/day/context";
@@ -458,6 +458,12 @@ export function Points({ meeting }: { meeting: MeetingPanel }) {
   const add = async () => {
     if (await onWrite("")({ op: "point", fields: { text } })) setText("");
   };
+  /** One editor at a time: another point's takes its place once what is typed in it may go. */
+  const edit = (point: string, what: What | null) => {
+    const typed = editing !== null && editing.point !== point && what !== null;
+    if (typed && !mayLeave(draftKey(meeting.ref, `point:${editing.point}:`))) return;
+    setEditing(what ? { point, what } : null);
+  };
   const proposed = meeting.points.filter((p) => p.proposed && p.state !== "rolled").map((p) => p.id);
   const id = `points-${meeting.ref}`;
   return (
@@ -478,7 +484,7 @@ export function Points({ meeting }: { meeting: MeetingPanel }) {
               point={point}
               editing={editing?.point === point.id ? editing.what : null}
               problem={problem?.point === point.id ? problem.words : ""}
-              onEdit={(what) => setEditing(what ? { point: point.id, what } : null)}
+              onEdit={(what) => edit(point.id, what)}
               onWrite={onWrite(point.id)}
             />
           ))}
