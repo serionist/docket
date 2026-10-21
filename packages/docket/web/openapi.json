@@ -1108,11 +1108,16 @@
                 "type": "null"
               }
             ]
+          },
+          "waiting": {
+            "title": "Waiting",
+            "type": "string"
           }
         },
         "required": [
           "canonical",
-          "panel"
+          "panel",
+          "waiting"
         ],
         "title": "HitRead",
         "type": "object"

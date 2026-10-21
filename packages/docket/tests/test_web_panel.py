@@ -4,6 +4,7 @@ panel's own errors. Each link is the Search page's URL for the state it opens.""
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,6 +18,8 @@ from starlette.testclient import TestClient
 
 from docket import recall
 from docket.documents import records
+from docket.service.app import ServiceApp
+from docket.service.writer import IndexUpdater
 from docket.vault.processed import DocMeta, ProcessedDoc
 from docket.vault.records import RawRecord
 from docket.vault.vault import Vault
@@ -192,6 +195,22 @@ def test_a_locator_that_doesnt_resolve_is_the_panel_s_own_error(client: TestClie
     results = client.get("/api/web/search?query=Nortwin&hit=r:calls:rec-9999@00:10").json()["results"]
     assert results["groups"]
     assert "no record calls:rec-9999" in panel(client, "r:calls:rec-9999@00:10")["error"]
+
+
+def test_the_index_being_built_is_a_state_the_panel_waits_out(client: TestClient) -> None:
+    """While an index update runs past the updater's wait, the panel says so, as the results do, and the page asks
+    again; it never answers the wait as the hit's own error, which the page would keep."""
+    app = client.app
+    assert isinstance(app, ServiceApp)
+    app.service.updater = IndexUpdater(lambda: time.sleep(0.5), wait_seconds=0.01)
+    answer = client.get(f"{API}?query=Nortwin&hit={quote(CALL)}")
+    assert answer.status_code == 200, answer.text
+    found = answer.json()
+    assert found["panel"] is None
+    assert "the index is being built" in found["waiting"]
+    assert found["canonical"] == f"/search?query=Nortwin&hit={CALL}"
+    # A bad value is still refused, whatever the index is doing.
+    assert client.get(f"{API}?hit={quote(CALL)}&around=99").status_code == 400
 
 
 def test_a_record_with_two_versions_says_the_latest_is_shown(client: TestClient, tmp_path: Path) -> None:

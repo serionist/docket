@@ -175,9 +175,10 @@ export function RawSpan({ span, onCopy }: { span: SpanView; onCopy: (locator: st
       {span.note && <Note>{span.note}</Note>}
       {span.segments.length > 0 && (
         <ol className="grid">
-          {span.segments.map((seg) => (
+          {span.segments.map((seg, at) => (
             <li
-              key={seg.locator}
+              // Two lines may start in the same second, and so share a locator; their order never changes.
+              key={`${at}-${seg.locator}`}
               data-mark={seg.mark ? "1" : undefined}
               className={cn(
                 "grid grid-cols-[3.25rem_minmax(0,1fr)] gap-x-2 rounded-sm px-1 py-0.5",

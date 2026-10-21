@@ -26,6 +26,7 @@ from docket.errors import DocketError
 from docket.recall import DocView
 from docket.service import calls
 from docket.service.state import Service
+from docket.service.writer import IndexBuildingError
 from docket.vault.anchors import Anchor, AnchorError, format_anchor, paragraphs, parse_locator, trailing_anchors
 from docket.vault.processed import DOC_TYPES
 from docket.vault.spans import Span
@@ -227,7 +228,8 @@ def _around(state: SearchState, kind: str, view: HitPanel) -> None:
 
 
 async def build(service: Service, state: SearchState, tz: ZoneInfo) -> HitPanel:
-    """The panel for the open locator; a locator that doesn't resolve is the panel's own error."""
+    """The panel for the open locator; a locator that doesn't resolve is the panel's own error. An index still being
+    built is no error of the hit's: it goes to the caller, which says the page waits."""
     target = state.open_hit or ""
     view = HitPanel(mode="raw", locator=target, close=state.search_only().url())
     try:
@@ -240,6 +242,8 @@ async def build(service: Service, state: SearchState, tz: ZoneInfo) -> HitPanel:
             await _record(service, state, locator.value, locator.anchor, view=view, tz=tz)
     except AnchorError as e:
         view.mode, view.error = "error", str(e)
+    except IndexBuildingError:
+        raise
     except DocketError as e:
         view.mode, view.error = "error", str(e)
     return view

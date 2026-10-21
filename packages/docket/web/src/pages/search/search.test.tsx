@@ -178,6 +178,8 @@ interface Sent {
 
 let sent: Sent[] = [];
 let results: (query: URLSearchParams) => Response = () => json(READ);
+// How many panel reads answer that the index is being built before one answers the hit.
+let panelWaits = 0;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -190,7 +192,11 @@ async function serve(request: Request): Promise<Response> {
   if (url.pathname === "/api/web/search") return results(url.searchParams);
   if (url.pathname === "/api/web/search/panel") {
     const shown = url.searchParams.get("hit") ?? url.searchParams.get("query") ?? "";
-    return json({ canonical: `/search${url.search}`, panel: panelOf(shown) });
+    if (panelWaits > 0) {
+      panelWaits -= 1;
+      return json({ canonical: `/search${url.search}`, panel: null, waiting: "the index is being built" });
+    }
+    return json({ canonical: `/search${url.search}`, panel: panelOf(shown), waiting: "" });
   }
   if (url.pathname === "/api/web/recording") {
     return json({ canonical: `/recording${url.search}`, view: { mode: "start" }, waiting: "" });
@@ -253,6 +259,7 @@ beforeAll(() => installKeys());
 beforeEach(() => {
   sent = [];
   results = () => json(READ);
+  panelWaits = 0;
 });
 
 afterEach(() => {
@@ -324,6 +331,24 @@ describe("the results", () => {
     await open(`/search?query=${CALL}`, "#panel-title");
     expect(asked("/api/web/search/panel")).toEqual([`?query=${CALL}`]);
     expect(screen.getByText(/is a locator, so its words aren't searched/)).toBeTruthy();
+  });
+
+  it("keep asking for the open hit while the index is being built, then show it", async () => {
+    panelWaits = 1;
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      await open(`/search?query=Nortwin&sources=calls&hit=${CALL}`, "#panel-title");
+      const panel = screen.getByRole("complementary", { name: /The open hit/ });
+      await waitFor(() => expect(within(panel).getByRole("status").textContent).toMatch(/being built/));
+      expect(asked("/api/web/search/panel")).toHaveLength(1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      await waitFor(() => expect(within(panel).getByText("Raw")).toBeTruthy());
+      expect(asked("/api/web/search/panel")).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

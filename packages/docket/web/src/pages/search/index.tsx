@@ -95,6 +95,8 @@ export function SearchPage() {
     queryFn: () => readHit(searchStr),
     enabled: panelOpen,
     refetchOnMount: "always",
+    // The index still being built: ask again until it answers, as the results do.
+    refetchInterval: (q) => (q.state.data?.waiting ? WAIT_MS : false),
     // The same hit read again, wider or verified, stays as it was until the read answers; another hit's never shows.
     placeholderData: (previous) => (previous && hitOf(parseSearch(previous.asked)) === open ? previous : undefined),
   });
@@ -350,6 +352,10 @@ export function SearchPage() {
           </div>
         ) : shown ? (
           <HitBody panel={shown} onCopy={copy} />
+        ) : panel.data?.waiting ? (
+          <p role="status" className="p-4 text-sm">
+            {panel.data.waiting}. This panel asks again every few seconds.
+          </p>
         ) : (
           <p className="p-4 text-sm text-ink-muted">Reading the hit.</p>
         )}

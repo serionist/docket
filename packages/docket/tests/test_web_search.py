@@ -91,7 +91,7 @@ def test_the_page_is_the_app_s_and_each_read_answers_its_canonical_url(client: T
     assert opened["canonical"] == f"/search?query=Nortwin&hit={hit}"
     assert opened["panel"]["close"] == "/search?query=Nortwin"
     closed = read(client, "query=Nortwin", path=f"{API}/panel")
-    assert closed == {"canonical": "/search?query=Nortwin", "panel": None}
+    assert closed == {"canonical": "/search?query=Nortwin", "panel": None, "waiting": ""}
 
 
 def test_the_facets_narrow_by_source_and_time_and_favour_people_and_entities(client: TestClient) -> None:

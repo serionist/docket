@@ -7,7 +7,8 @@ panel beside them, each answering the canonical URL for what it read (DR-0174, D
 | `GET /search/panel` | the panel `hit` opens, or the one a query that is one locator opens |
 
 A value the URL can't hold answers 400 naming every one that didn't read. An index still being built answers
-`waiting` with why, and the page asks again in 5 s; a locator that doesn't resolve is the panel's own error. Anything
+`waiting` with why, from either read, and the page asks again in 5 s; a locator that doesn't resolve is the panel's
+own error. Anything
 else is logged as its type and frames and answers 500 with no detail.
 """
 
@@ -49,8 +50,10 @@ class SearchRead(BaseModel):
 
 class HitRead(BaseModel):
     canonical: str
-    # None when the URL opens nothing.
+    # None when the URL opens nothing, or while the index is being built.
     panel: HitPanel | None
+    # Why the index can't answer yet; the page asks again in 5 s, as for the results.
+    waiting: str
 
 
 def router(service: Service) -> APIRouter:
@@ -93,8 +96,11 @@ def router(service: Service) -> APIRouter:
 
     async def hit(request: Request) -> HitRead:
         state = SearchState.read(request.query_params)
-        built = await panel.build(service, state, zone()) if state.open_hit else None
-        return HitRead(canonical=state.url(), panel=built)
+        try:
+            built = await panel.build(service, state, zone()) if state.open_hit else None
+        except IndexBuildingError as e:
+            return HitRead(canonical=state.url(), panel=None, waiting=str(e))
+        return HitRead(canonical=state.url(), panel=built, waiting="")
 
     @api.get("/search", response_model=SearchRead, responses={400: {"model": Refused}})
     async def search(request: Request) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
