@@ -7,7 +7,8 @@ it (its own config and state folders, the failing keyring), which is where the f
 | `empty` | a new vault: no items, nothing staged, a live source never synced |
 | `week` | a working week: day_kit's ledger and more items beside it, one whose snooze ended yesterday, the files |
 | | its materials name, staging_kit's three records waiting, a live source due a sync; meetings around today, |
-| | one under way, a recording, a point rolled on, Ben's brief, and the index built over it all |
+| | one under way, a recording, a point rolled on, and Ben's entity and brief |
+| `meetings` | the week with its index built, so a meeting's people link to their briefs from the first read |
 
 Invented people only: Ada Example, Ben Sample and Cleo Example.
 """
@@ -36,7 +37,7 @@ from docket.vault.config import SourceConfig, VaultConfig
 from docket.vault.gate import Gate
 from docket.vault.vault import Vault
 
-WORLDS = ("empty", "week")
+WORLDS = ("empty", "week", "meetings")
 MACHINE = "ui-box"
 PLAN_TEXT = """# The plan
 
@@ -198,7 +199,7 @@ def build(folder: Path, world: str) -> Vault:
     if world not in WORLDS:
         raise ValueError(f"no world {world!r}; the worlds are {', '.join(WORLDS)}")
     vault = Vault.init(folder, config(), MACHINE)
-    if world == "week":
+    if world in ("week", "meetings"):
         Gate(vault).stage([transcript(), mail(), memo()])
         store.write(vault, seed(), by="claude", via="cli")
         store.write(vault, busier(), by="claude", via="cli")
@@ -208,6 +209,7 @@ def build(folder: Path, world: str) -> Vault:
         (notes / "plan.md").write_text(PLAN_TEXT, encoding="utf-8", newline="\n")
         (notes / "costs.xlsx").write_bytes(b"PK\x03\x04 invented")
         meetings(vault)
+    if world == "meetings":
         # The op files an hour old, as files no write just wrote are, so the index takes them as settled and a read
         # finds nothing to catch up.
         hour_ago = time.time_ns() - 3600 * 10**9

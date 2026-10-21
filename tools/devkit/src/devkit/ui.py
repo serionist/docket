@@ -176,7 +176,7 @@ PAGES: dict[str, Page] = {
     # ui_world's meetings: M-0001 the Pilot sync tomorrow, M-0003 the budget review under way, M-0004 yesterday's
     # supplier call with its recording and its point rolled on, M-0008 the retro with no stream.
     "meetings": Page(
-        world="week",
+        world="meetings",
         states=(
             State("list", "/meetings"),
             State("panel", "/meetings?open=M-0003"),
