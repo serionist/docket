@@ -74,6 +74,10 @@ SYLLABLES = [
 ]  # fmt: skip
 
 
+# A timed test on a big vault and the tests that build it run nightly, and with gate os or gate full --all (DR-0757).
+pytestmark = pytest.mark.nightly
+
+
 def vocabulary(rng: random.Random, size: int) -> list[str]:
     words: set[str] = set()
     while len(words) < size:

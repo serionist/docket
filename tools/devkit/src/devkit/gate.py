@@ -9,9 +9,9 @@ Lanes:
          itself. finish-work runs it before a PR. CI runs it in parts (DR-0754): `--skip
          tests` once, and `--only tests --shard K/N` on each share, which saves its coverage data instead of holding
          the floors.
-  os     types and tests, for the other operating systems CI runs: the test files that can differ by system and the
-         smoke set (DR-0754), and with `--all` every test file, as the nightly runs them; `--shard K/N` runs share K
-         of N of those files, so one system's tests run on several runners.
+  os     types and tests, for the other operating systems CI runs: the test files that can differ by system, the
+         smoke set and the timed tests (DR-0754), and with `--all` every test file, as the nightly runs them; `--shard
+         K/N` runs share K of N of those files, so one system's tests run on several runners.
   coverage  every share's coverage data combined and held to the floors, with the question set's numbers: the
          full lane's floors, for a CI run whose shares ran on runners of their own.
 
@@ -19,7 +19,9 @@ In a lane with tests, the tests start first and the other steps run beside them;
 lane without coverage (os) the timed tests (marked `perf`) run after the rest, alone and one at a time, once the other
 steps are done, and the run prints what they printed: their times. The two runs share one templates folder, so the
 timed run reuses the vaults the parallel run built, and the timed run has a temp folder of its own. Under coverage the
-index's time limits are off, so the full lane keeps them in its one run. A share writes what each of its files cost to
+index's time limits are off, so the full lane keeps them in its one run. The tests marked `nightly`, the timed tests on
+big vaults and the tests that build those vaults, run only with `--all`, in the os lane or the full lane: the nightly
+passes it (DR-0757). A share writes what each of its files cost to
 `.local/times/`, and `gate weights <folder>` folds a CI run's into the weights the shares split by. On GitHub Actions a
 tests step past 4.5 minutes prints a warning the PR shows.
 
@@ -86,7 +88,8 @@ class Ctx:
     alone: threading.Event = field(default_factory=lambda: _set(threading.Event()))
     # K/N: the tests step runs share K of N of the test files (DR-0754); None runs them all.
     shard: str | None = None
-    # The os lane's tests: every test file, not only those that can differ by system and the smoke set (DR-0754).
+    # --all: the tests marked nightly too (DR-0757), and in the os lane every test file, not only those that can differ
+    # by system, the smoke set and the timed tests (DR-0754).
     whole: bool = False
 
 
@@ -332,6 +335,8 @@ def slow_tests_warning(step: str, took: float) -> str | None:
 
 # The marker of a test that asserts an elapsed time (DR-0430).
 PERF = "perf"
+# The marker of a timed test on a big vault, and of a test that builds one for it: only `--all` runs them (DR-0757).
+NIGHTLY = "nightly"
 # Where the app's test kit builds its shared templates, named for both runs of a lane without coverage (DR-0492).
 TEMPLATES_ENV = "DOCKET_TEST_TEMPLATES"
 # pytest's rules: "==== PASSES ====" opens a section, "____ test ____" and "---- Captured stdout call ----" its parts.
@@ -392,13 +397,18 @@ def step_tests(ctx: Ctx) -> Outcome:
         # Both runs keep the same share of the test files, so the timed run finds what its share's parallel run built.
         pytest += [f"--shard={spec}", f"--shard-weights={ctx.root / WEIGHTS}"]
     if ctx.lane == "os" and not ctx.whole:
-        # Windows and macOS run what can differ by system on every PR, and the rest nightly (DR-0754). The selection
-        # comes before the share, so the shares split the selected files.
+        # Windows and macOS run what can differ by system, the smoke set and the timed tests on every PR, and the rest
+        # nightly (DR-0754). The selection comes before the share, so the shares split the selected files.
         pytest.append("--select=system")
+    # The timed tests on big vaults and the tests that build those vaults wait for the nightly, which passes --all; no
+    # line runs only in them (DR-0757).
+    later = "" if ctx.whole else f" and not {NIGHTLY}"
     # One worker per core: most of the time goes to git subprocesses that would otherwise wait on each other.
     cmd = [*pytest, "-n", "auto", f"--durations={SLOWEST}", *_times(ctx, spec, "tests")]
     env: dict[str, str] = {}
     if covered:
+        if later:
+            cmd += ["-m", f"not {NIGHTLY}"]
         # The question set's test writes its numbers there, for the eval floors (DR-0295).
         env[evalfloors.REPORT_ENV] = str(numbers)
         if ctx.shard is not None:
@@ -407,14 +417,15 @@ def step_tests(ctx: Ctx) -> Outcome:
     else:
         # Without coverage the timed tests assert their limits, so they leave the parallel run and run alone after it;
         # under coverage the index's limits are off and they stay in it (DR-0430).
-        cmd += ["-m", f"not {PERF}"]
+        cmd += ["-m", f"not {PERF}{later}"]
         # A folder of the step's own, made empty: one templates folder for both runs, so the timed run finds the vaults
         # the parallel run built and only times, and the timed run's temp folder, so it takes no numbered folder of
         # pytest's and never ends by deleting the parallel run's, as pytest does with a session three back (DR-0492).
         with tempfile.TemporaryDirectory(prefix="docket-tests-", ignore_cleanup_errors=True) as at:
             env[TEMPLATES_ENV] = str(Path(at, "templates"))
             code, lines = _run(ctx, cmd, env=env)
-            alone = [*pytest, "-m", PERF, "-raP", f"--basetemp={Path(at, 'timed')}", *_times(ctx, spec, "timed")]
+            alone = [*pytest, "-m", f"{PERF}{later}", "-raP", f"--basetemp={Path(at, 'timed')}"]
+            alone += _times(ctx, spec, "timed")
             return _alone_after(ctx, code, lines, alone, env)
     code, lines = _run(ctx, cmd, env=env)
     if code != 0:
@@ -579,8 +590,8 @@ def run(
     *,
     whole: bool = False,
 ) -> int:
-    if whole and lane != "os":
-        raise KitError("--all widens the os lane's tests to every test file; the full lane runs every one already")
+    if whole and lane not in ("os", "full"):
+        raise KitError("--all widens the tests of the os and full lanes to the nightly's; this lane runs none")
     if shard is not None:
         from devkit.shard import parse  # noqa: PLC0415 - the plugin imports pytest, which only a sharded run needs
 
@@ -687,7 +698,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--all",
         action="store_true",
         dest="whole",
-        help="os lane: every test file, not only those that can differ by system and the smoke set (DR-0754)",
+        help="os and full lanes: the tests marked nightly too (DR-0757); in os every test file, not only those that "
+        "can differ by system, the smoke set and the timed tests (DR-0754)",
     )
     args = p.parse_args(argv)
     try:

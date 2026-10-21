@@ -39,6 +39,10 @@ WORDS = [
 KEY = "service-search-folder-vault"
 
 
+# A timed test on a big vault and the tests that build it run nightly, and with gate os or gate full --all (DR-0757).
+pytestmark = pytest.mark.nightly
+
+
 def build(folder: Path) -> Path:
     """A folder vault in a host repo of the user's, with a few months of messages, indexed."""
     top = folder / "host"

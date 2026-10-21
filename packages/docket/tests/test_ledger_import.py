@@ -846,6 +846,7 @@ def big_export() -> Export:
     return e
 
 
+@pytest.mark.nightly
 @pytest.mark.perf
 def test_a_ledger_the_perf_ledger_s_size_dry_runs_and_imports_in_time(vault: Vault) -> None:
     text = big_export().text()

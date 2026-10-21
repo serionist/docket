@@ -9,8 +9,9 @@ builds in the parallel run (DR-0492), never cross to another runner. The share i
 parallel run and the timed run of one share keep the same files.
 
 With `--select system` the run keeps only the test files tools/devkit/test-systems.json lists under system, and every
-test marked smoke wherever it lives: what Windows and macOS run on every PR (DR-0754). The selection comes before the
-share, so the shares split the selected files.
+test marked smoke or perf wherever it lives: what Windows and macOS run on every PR (DR-0754), the small timed tests
+among them; the gate leaves out those marked nightly (DR-0757). The selection comes before the share, so the shares
+split the selected files.
 
 With `--shard-times=<file>` the run writes what each of its files cost, its tests' time over the run's workers, and
 the tests that failed; `gate weights` folds a CI run's files into the weights. Each system's files have weights of
@@ -115,7 +116,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--select",
         default=None,
         choices=["system"],
-        help="keep only the test files test-systems.json lists under system, and the tests marked smoke (DR-0754)",
+        help="keep only the test files test-systems.json lists under system, and the tests marked smoke or perf",
     )
     parser.addoption("--shard-weights", default=None, metavar="FILE", help="split the files by these weights")
     parser.addoption("--shard-times", default=None, metavar="FILE", help="write what each file cost this run")
@@ -140,11 +141,13 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 def selected(items: list[pytest.Item], root: Path, listed: systems.Systems) -> list[pytest.Item]:
-    """The tests in a file listed under system, and every test marked smoke."""
+    """The tests in a file listed under system, and every test marked smoke or perf: a timed test runs on every
+    system whatever file holds it, as a system's speed is the system's own (DR-0757)."""
     return [
         item
         for item in items
-        if item.path.relative_to(root).as_posix() in listed.system or item.get_closest_marker(systems.SMOKE)
+        if item.path.relative_to(root).as_posix() in listed.system
+        or any(item.get_closest_marker(mark) for mark in systems.EVERY_SYSTEM)
     ]
 
 

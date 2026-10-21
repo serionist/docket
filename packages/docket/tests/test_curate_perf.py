@@ -42,6 +42,10 @@ SYLLABLES = ["ka", "lo", "mi", "ter", "sza", "ne", "ro", "bel", "fa", "gyo", "an
 NOW = datetime(2026, 10, 14, 8, 0, tzinfo=UTC)
 
 
+# A timed test on a big vault and the tests that build it run nightly, and with gate os or gate full --all (DR-0757).
+pytestmark = pytest.mark.nightly
+
+
 def _word(rng: random.Random, low: int, high: int) -> str:
     return "".join(rng.choice(SYLLABLES) for _ in range(rng.randint(low, high)))
 
