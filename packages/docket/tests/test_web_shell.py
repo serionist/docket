@@ -15,6 +15,7 @@ from docket.service.app import create_app
 from docket.service.sessions import Sessions
 from docket.service.state import Settings
 from docket.web import pages, panel
+from docket.web.display import FAILED
 from docket.web.templating import PAGE_CSP
 
 # The vault's folder, named so a page that names it can't miss it; the template is built on the machine "test-box".
@@ -62,12 +63,12 @@ def test_the_start_moves_on_to_today(client: TestClient) -> None:
 
 
 def test_the_navigation_has_a_slot_for_every_page_and_links_the_built_ones(client: TestClient) -> None:
-    page = parse(client.get("/search").text)
+    page = parse(client.get("/sync").text)
     nav = page.find("nav", class_="nav")
     links = nav.find_all("a")
     built = [p for p in pages.PAGES if p.built]
     assert [(a.attrs["href"], a.attrs.get("aria-current")) for a in links] == [
-        (p.path, "page" if p.key == "search" else None) for p in built
+        (p.path, "page" if p.key == "sync" else None) for p in built
     ]
     slots = nav.find_all("span", class_="nav-slot")
     assert len(slots) == len(pages.PAGES) - len(built)
@@ -95,10 +96,6 @@ def test_the_navigation_has_a_slot_for_every_page_and_links_the_built_ones(clien
 @pytest.mark.parametrize(
     "path",
     [
-        "/search",
-        "/search?query=fleet",
-        "/search/results?query=fleet",
-        "/search/panel",
         "/sync",
         "/sync/runs",
         "/staging",
@@ -106,8 +103,6 @@ def test_the_navigation_has_a_slot_for_every_page_and_links_the_built_ones(clien
         "/curate",
         "/curate/panel",
         "/settings",
-        "/recording",
-        "/recording?rid=calls:rec-0100",
         "/briefs",
     ],
 )
@@ -128,10 +123,10 @@ def test_a_page_that_isnt_there_is_html_and_the_api_keeps_json(client: TestClien
     api = client.get("/api/nope")
     assert api.status_code == 404
     assert api.json() == {"detail": "Not Found"}
-    assert client.post("/search", headers={"Origin": OURS}).status_code == 405
+    assert client.post("/sync", headers={"Origin": OURS}).status_code == 405
 
 
-def test_a_failure_answers_the_error_page_and_the_log_keeps_no_words(
+def test_a_failure_answers_500_with_no_words_and_the_log_keeps_none(
     client: TestClient, log_file: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def broken(*_args: object, **_kwargs: object) -> object:
@@ -141,34 +136,23 @@ def test_a_failure_answers_the_error_page_and_the_log_keeps_no_words(
             raise RuntimeError("Kovács Ödön") from e
 
     monkeypatch.setattr(calls, "search", broken)
-    page = client.get("/search?query=fleet")
-    assert page.status_code == 500
-    assert page.text.startswith("<!doctype html>")
-    assert "Something failed in Docket" in page.text
-    # A fragment answers with a fragment: its own notice, never a whole page swapped into the results.
-    fragment = client.get("/search/results?query=fleet&sources=chat&since=2026-10-01")
-    assert fragment.status_code == 500
-    assert "<html" not in fragment.text
-    assert "Something failed in Docket" in parse(fragment.text).find("div", class_="error").text()
-    carried = {(i.attrs["name"], i.attrs["value"]) for i in parse(fragment.text).find_all("input", form="search-form")}
-    assert {("sources", "chat"), ("since", "2026-10-01")} <= carried
+    results = client.get("/api/web/search?query=fleet&sources=chat&since=2026-10-01")
     monkeypatch.setattr(panel, "build", broken)
-    in_panel = client.get("/search/panel?hit=r:calls:rec-0100")
-    assert in_panel.status_code == 500
-    assert "<html" not in in_panel.text
-    assert "Something failed in Docket" in parse(in_panel.text).find("section", class_="panel").text()
-    for answer in (page, fragment, in_panel):
+    in_panel = client.get("/api/web/search/panel?hit=r:calls:rec-0100")
+    for answer in (results, in_panel):
+        assert (answer.status_code, answer.json()) == (500, {"error": FAILED})
         assert "Ödön" not in answer.text
     logged = log_file.read_text(encoding="utf-8")
     assert "builtins.RuntimeError" in logged
     assert "builtins.KeyError" in logged
-    assert "GET /search/results failed" in logged
+    assert "GET /api/web/search failed" in logged
+    assert "GET /api/web/search/panel failed" in logged
     assert "Ödön" not in logged
 
 
 def test_the_footer_names_the_vault_and_the_machine_and_the_index(client: TestClient) -> None:
-    client.get("/search?query=fleet")
-    footer = parse(client.get("/search").text).find("footer").text()
+    client.get("/api/web/search?query=fleet")
+    footer = parse(client.get("/sync").text).find("footer").text()
     assert f"vault on {MACHINE}" in footer
     assert "chunks from 22 records and 7 docs" in footer
 
@@ -180,14 +164,15 @@ def test_without_a_vault_the_page_says_so(tmp_path: Path) -> None:
         started = sessions.redeem(sessions.new_code())
         assert started is not None
         client.cookies.set("docket_session", started)
-        page = client.get("/search?query=fleet")
-        assert page.status_code == 400
-        assert "the service has no vault" in page.text
+        found = client.get("/api/web/search?query=fleet")
+        assert found.status_code == 400
+        assert "the service has no vault" in found.json()["error"]
+        page = client.get("/sync")
         assert "no vault" in parse(page.text).find("footer").text()
         assert "the index is being brought up to date" in page.text
-        panel = client.get("/search/panel?hit=r:calls:rec-0100")
-        assert panel.status_code == 400
-        assert "the service has no vault" in panel.text
+        opened = client.get("/api/web/search/panel?hit=r:calls:rec-0100")
+        assert opened.status_code == 400
+        assert "the service has no vault" in opened.json()["error"]
 
 
 def test_the_pages_a_stranger_reaches_name_neither_the_vault_nor_the_machine(
@@ -201,7 +186,7 @@ def test_the_pages_a_stranger_reaches_name_neither_the_vault_nor_the_machine(
     assert stranger.get("/static/nope.css").text == "not found"
     with signed_in(template, tmp_path / "other") as client:
         missing = client.get("/outbox")
-        shell = client.get("/search")
+        shell = client.get("/sync")
     for answer in (sign_in, used, missing):
         assert FOLDER not in answer.text
         assert "vault" not in answer.text.lower()

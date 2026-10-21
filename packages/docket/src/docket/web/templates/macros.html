@@ -1,16 +1,8 @@
 {# The components, one macro each; a component's CSS class is its name. Every value is escaped: text from records and
    docs is data. #}
 
-{% macro swap(link, target) -%}
-href="{{ link.url }}" hx-get="{{ link.fragment }}" hx-target="{{ target }}"
-{%- endmacro %}
-
 {% macro notice(kind, message) %}
 <div class="notice {{ kind }}" role="{{ 'alert' if kind == 'error' else 'status' }}">{{ icon('problem' if kind == 'error' else 'info') }}<p>{{ message }}</p></div>
-{% endmacro %}
-
-{% macro chip(c) %}
-<a class="chip" {{ swap(c.link, '#workspace') }}>{{ c.label }}<span class="chip-x">{{ icon('close') }}<span class="visually-hidden">: remove</span></span></a>
 {% endmacro %}
 
 {% macro locator(value) %}
@@ -26,16 +18,6 @@ href="{{ link.url }}" hx-get="{{ link.fragment }}" hx-target="{{ target }}"
 
 {% macro copy(value) %}
 <button type="button" class="icon-button" data-action="copy" data-locator="{{ value }}" title="Copy {{ value }}">{{ icon('copy') }}<span class="visually-hidden">Copy the locator {{ value }}</span></button>
-{% endmacro %}
-
-{% macro line(l) %}
-<div class="line {{ l.style }}{% if l.cited %} cited{% endif %}" data-line="{{ l.n }}">
-  <span class="n" aria-hidden="true">{{ l.n }}</span>
-  <span class="body" dir="auto">{{ l.body }}{% if l.cited %}<span class="visually-hidden"> (points at this hit)</span>{% endif %}</span>
-  {% for a in l.anchors %}
-  {% if a.link %}<a class="anchor" {{ swap(a.link, '#panel') }} title="Open the raw at {{ a.text }}">{{ a.text }}</a>{% else %}<span class="anchor">{{ a.text }}</span>{% endif %}
-  {% endfor %}
-</div>
 {% endmacro %}
 
 {% macro span(s) %}

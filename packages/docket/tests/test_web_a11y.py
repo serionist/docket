@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import re
 from collections.abc import Iterator
 from pathlib import Path
-from urllib.parse import quote
 
 import pytest
 from docket_testkit import index_template
@@ -13,15 +11,6 @@ from starlette.testclient import TestClient
 from docket.web import assets, pages
 
 PAGES = [
-    "/search",
-    "/search?query=Nortwin",
-    "/search?query=deadline+with+Ben&people=ben-sample&since=2026-10-01&until=2026-10-31",
-    "/search?query=zeppelin&sources=chat",
-    "/search?query=fleet&since=soon",
-    f"/search?query=Nortwin&hit={quote('r:calls:rec-0100@01:50-03:20')}",
-    f"/search?query=Nortwin&hit={quote('r:calls:rec-0100@01:50-03:20')}&verify=1",
-    "/search?query=fleet&hit=recording-note:2026-10-13-fleet-review&lines=12",
-    "/search?hit=r:calls:rec-9999",
     "/sync",
     "/sync?source=calls&k=40",
     "/sync?run=run-20261015T000000-ffffffffffffffff",
@@ -36,23 +25,12 @@ PAGES = [
     "/settings",
     "/settings?show=lists",
     "/settings?show=nope",
-    "/recording",
-    "/recording?rid=calls:rec-0100",
-    f"/recording?rid=calls:rec-0100&at={quote('01:50-03:20')}",
-    "/recording?rid=calls:rec-0100-second&doc=recording-note:2026-10-07-supplier-call",
-    "/recording?rid=calls:rec-0101",
-    "/recording?rid=calls:rec-9999",
-    f"/recording?rid={quote('mail:<offer-1@northwind.example>')}",
-    "/recording?rid=not+a+rid",
     "/briefs",
     "/briefs?type=person",
     "/briefs?brief=brief:ben-sample",
     "/briefs?brief=nope",
 ]
 FRAGMENTS = [
-    "/search/results?query=pallet+labels",
-    f"/search/panel?hit={quote('r:mail:<offer-1@northwind.example>#1-4')}",
-    "/search/panel?hit=legacy-note:old-northwind-notes",
     "/sync/runs",
     "/sync/runs?k=0",
     "/staging/panel",
@@ -81,7 +59,6 @@ def test_every_page_state_passes_the_checks(client: TestClient, path: str) -> No
     assert not a11y_problems(html), path
     assert not html_problems(html), path
     tree = parse(html)
-    assert tree.find("p", id="announce").attrs["aria-live"] == "polite"
     assert tree.find("main").attrs["id"] == "main"
     assert tree.find("nav").attrs["aria-label"] == "Pages"
 
@@ -91,13 +68,6 @@ def test_every_fragment_passes_the_checks(client: TestClient, path: str) -> None
     html = client.get(path).text
     assert not a11y_problems(html, whole=False), path
     assert not html_problems(html), path
-
-
-def test_the_results_say_what_came_back_for_the_live_region(client: TestClient) -> None:
-    results = parse(client.get("/search?query=Nortwin").text).find("section", class_="results")
-    assert re.fullmatch(r"\d+ hits in \d+ groups", results.attrs["data-announce"])
-    single = parse(client.get("/search?query=cold-rated+model&k=1").text).find("section", class_="results")
-    assert single.attrs["data-announce"] == "1 hit in 1 group"
 
 
 @pytest.mark.parametrize("page", sorted(pages.PAGE_KEYS))

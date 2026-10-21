@@ -22,7 +22,6 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from urllib.parse import urlsplit
 
 from starlette.datastructures import QueryParams
 
@@ -33,6 +32,7 @@ from docket.vault.anchors import AnchorError, parse_locator
 from docket.vault.processed import DOC_TYPES
 from docket.web import urls
 
+PATH = "/search"
 DEFAULT_K = 20
 MORE = 20
 DEFAULT_AROUND = 1
@@ -156,17 +156,6 @@ class SearchState:
                 problems.append(str(e))
         return cls(**values), problems  # pyright: ignore[reportArgumentType]
 
-    @classmethod
-    def from_url(cls, url: str) -> SearchState | None:
-        """The state of a Search page URL, such as htmx's `HX-Current-URL`; None for another page or a bad value."""
-        parts = urlsplit(url)
-        if parts.path != "/search":
-            return None
-        try:
-            return cls.read(QueryParams(parts.query))
-        except StateError:
-            return None
-
     def pairs(self) -> list[tuple[str, str]]:
         out: list[tuple[str, str]] = []
         if self.query:
@@ -186,9 +175,9 @@ class SearchState:
             out.append(("verify", "1"))
         return out
 
-    def url(self, path: str = "/search") -> str:
-        """This state's canonical URL on a path: the page itself, or one of its fragments."""
-        return urls.link(path, self.pairs())
+    def url(self) -> str:
+        """This state's canonical URL, which the app writes back as the server wrote it (DR-0704)."""
+        return urls.link(PATH, self.pairs())
 
     def but(self, **changes: object) -> SearchState:
         return replace(self, **changes)  # pyright: ignore[reportArgumentType]

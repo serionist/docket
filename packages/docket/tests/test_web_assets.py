@@ -36,7 +36,7 @@ def test_each_vendored_file_is_the_one_pinned_with_its_licence(path: str) -> Non
 
 
 def test_the_htmx_script_carries_its_pin_as_integrity_and_its_config(client: TestClient) -> None:
-    page = parse(client.get("/search").text)
+    page = parse(client.get("/sync").text)
     script = page.find("script", src=f"/static/{assets.HTMX}")
     assert script.attrs["integrity"] == assets.integrity(assets.HTMX)
     assert script.attrs["integrity"].startswith("sha256-")

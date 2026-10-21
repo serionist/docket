@@ -1,0 +1,72 @@
+/* The list and the panel beside it, which the server's pages share: Staging, Curate and Briefs. */
+@layer pages {
+  main { min-width: 0; padding: var(--space-3) var(--space-4) var(--space-4); }
+
+  .chips { margin-top: var(--space-2); }
+
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-4);
+    margin-top: var(--space-3);
+    align-items: start;
+  }
+  .layout:has(.panel) { grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); }
+  .panel-slot:not(:has(.panel)) { display: none; }
+
+  /* -- the list's groups and rows -------------------------------------------------------------------------------- */
+  .groups { display: grid; gap: var(--space-3); }
+  .group {
+    padding: var(--space-3);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--kind, var(--line-strong));
+    border-radius: var(--radius-lg);
+  }
+  .group.kind-recording { --kind: var(--k-recording); }
+  .group.kind-thread { --kind: var(--k-thread); }
+  .group.kind-record { --kind: var(--k-record); }
+  .group.kind-doc { --kind: var(--k-doc); }
+  .hit { padding: var(--space-2); border-radius: var(--radius); }
+  .hit:has(.hit-link:focus-visible), .hit.open { background: var(--accent-soft); }
+  .hit-link { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px var(--space-2); color: var(--ink); }
+  .hit-link .icon { color: var(--muted); }
+  .hit-link:hover .locator { text-decoration: underline; }
+  .hit .meta { display: flex; flex-wrap: wrap; gap: 2px var(--space-2); font-size: var(--text-xs); }
+  .snippet { margin-top: 2px; overflow-wrap: anywhere; }
+  .more { margin-top: var(--space-3); }
+
+  /* -- the panel ---------------------------------------------------------------------------------------------- */
+  .panel-slot { position: sticky; top: 64px; max-height: calc(100dvh - 120px); overflow-y: auto; }
+  .panel {
+    padding: var(--space-3) var(--space-4) var(--space-4);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+  }
+  .panel-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px var(--space-2); align-items: start; }
+  /* The heading takes the focus when the panel opens, for screen readers; it isn't a control, so no ring. */
+  .panel-head h2:focus { outline: none; }
+  .panel-locator { grid-column: 1 / -1; display: flex; gap: 4px; align-items: center; }
+  .columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-3); margin-top: var(--space-2); }
+  .column h3 { font-size: var(--text-xs); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+  .column > .meta { font-size: var(--text-xs); margin-bottom: 4px; }
+  .empty-note { color: var(--muted); font-style: normal; }
+  .doc { display: grid; gap: 1px; }
+
+  @media (max-width: 1100px) {
+    .columns { grid-template-columns: minmax(0, 1fr); }
+  }
+
+  @media (max-width: 900px) {
+    .layout, .layout:has(.panel) { grid-template-columns: minmax(0, 1fr); }
+    .layout:has(.panel) .results { display: none; }
+    .panel-slot { position: static; max-height: none; }
+  }
+
+  @media (max-width: 600px) {
+    .topbar { flex-wrap: wrap; }
+    .nav { order: 3; width: 100%; }
+    .statusbar .hints { display: none; }
+  }
+}

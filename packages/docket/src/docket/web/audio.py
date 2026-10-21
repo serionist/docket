@@ -82,11 +82,6 @@ def refused(why: str) -> Response:
     return PlainTextResponse(f"no audio: {why}", status_code=404, headers={"Cache-Control": "no-store"})
 
 
-def token_refused() -> Response:
-    """The token is Docket's API, Claude's too: the audio plays in the browser, with its session (DR-0576)."""
-    return PlainTextResponse("the audio plays in the browser, with its session", status_code=403)
-
-
 class Plain:
     """One stored file's decrypted bytes, kept in memory a short while: one file at most, keyed by its path and its
     modification time, and dropped `seconds` after its last request."""

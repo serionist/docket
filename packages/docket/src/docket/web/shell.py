@@ -35,7 +35,7 @@ def index_line(service: Service) -> str:
     return f"{chunks:,} chunks from {records:,} records and {docs:,} docs, updated {last.at.astimezone():%H:%M}"
 
 
-def shell(service: Service | None, request: Request, title: str, current: str = "search") -> dict[str, Any]:
+def shell(service: Service | None, request: Request, title: str, current: str) -> dict[str, Any]:
     context: dict[str, Any] = {"title": title, "current": current, "vault_name": "", "machine": "", "index_line": ""}
     context |= {"page_keys": pages.PAGE_KEYS[current], "hints": pages.HINTS[current]}
     context |= prefs(request)

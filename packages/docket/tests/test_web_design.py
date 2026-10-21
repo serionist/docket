@@ -85,15 +85,16 @@ def test_the_two_cookies_render_on_the_page(
 ) -> None:
     for name, value in cookies.items():
         client.cookies.set(name, value)
-    page = parse(client.get("/search").text).find("html")
+    page = parse(client.get("/sync").text).find("html")
     assert page.attrs.get("data-theme") == theme
     assert page.attrs["data-keys"] == keys
-    switch = parse(client.get("/search").text).find("input", data_action="keys-switch")
+    switch = parse(client.get("/sync").text).find("input", data_action="keys-switch")
     assert ("checked" in switch.attrs) == (keys == "on")
 
 
 def test_the_checks_pass_on_the_shell_and_catch_what_they_look_for(client: TestClient) -> None:
-    page = client.get("/search").text
+    # Settings: the shell around a page with a labelled field.
+    page = client.get("/settings").text
     assert not html_problems(page)
     assert not a11y_problems(page)
     planted = page.replace('<main id="main"', '<main id="main" style="color: red" onclick="go()"')
@@ -108,10 +109,10 @@ def test_the_checks_pass_on_the_shell_and_catch_what_they_look_for(client: TestC
     assert html_problems(planted) == ["an asset that isn't served: /static/gone.css"]
     planted = page.replace('<a class="brand" href="/">Docket</a>', '<a class="brand" href="/"></a>')
     assert any("a link without a name" in p for p in a11y_problems(planted))
-    planted = page.replace('<label class="visually-hidden" for="query">', '<label class="visually-hidden">')
+    planted = page.replace('<label for="add-', '<label data-for="add-', 1)
     assert any("a field without a label" in p for p in a11y_problems(planted))
-    planted = page.replace('<h1 class="visually-hidden">Search</h1>', "").replace('lang="en"', "")
+    planted = page.replace("<h1>Settings</h1>", "").replace('lang="en"', "")
     assert {"the page has no lang", "the page has 0 h1 elements"} <= set(a11y_problems(planted))
     planted = page.replace('aria-hidden="true" focusable="false"', "", 1).replace('href="#main"', 'href="#nowhere"')
     assert len(a11y_problems(planted)) == 2
-    assert a11y_problems(page + '<p id="announce"></p>') == ["the id 'announce' appears twice"]
+    assert a11y_problems(page + '<p id="toast"></p>') == ["the id 'toast' appears twice"]

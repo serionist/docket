@@ -6,6 +6,7 @@
  */
 import { CheckIcon, CopyIcon, ExternalLinkIcon, FileTextIcon, FolderOpenIcon, XIcon } from "lucide-react";
 import * as React from "react";
+import { AppLink } from "@/components/app-link";
 import { DatePicker } from "@/components/date-picker";
 import { KindTab } from "@/components/kind";
 import { Refusal } from "@/components/shell/page";
@@ -108,9 +109,9 @@ export function Linked({ link, children }: { link: Link; children: React.ReactNo
   }
   if (link.kind === "record" || link.kind === "recording" || link.kind === "query") {
     return (
-      <a href={link.href} className="text-green underline-offset-4 hover:underline" dir="auto">
+      <AppLink href={link.href} className="text-green underline-offset-4 hover:underline" dir="auto">
         {children}
-      </a>
+      </AppLink>
     );
   }
   return <span dir="auto">{children}</span>;

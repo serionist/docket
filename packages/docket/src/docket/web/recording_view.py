@@ -1,6 +1,7 @@
 """What the Recording page shows, worked out from what the raw log and the docs hold (DR-0545): the recording's summary
 beside its transcript, each summary line's anchors linked to the transcript lines they point at, and why there is no
-audio to play, or the player, starting at the line the URL marks.
+audio to play, or the player, starting at the line the URL marks. Each part is a model the app's JSON read answers
+(DR-0709).
 
 | The rid | Shows |
 |---|---|
@@ -11,15 +12,17 @@ audio to play, or the player, starting at the line the URL marks.
 | nothing the raw log holds | that there is no such recording |
 
 `build` takes the facts and does no I/O, so every rule here is tested on what the facts hold. Text from records and
-docs is data: the templates escape it, and no link is made from it.
+docs is data: the app shows it as text, and no link is made from it.
 """
 
 from __future__ import annotations
 
 import bisect
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal
 from zoneinfo import ZoneInfo
+
+from pydantic import BaseModel
 
 from docket.recall import DocView
 from docket.vault.anchors import Anchor, format_anchor, format_time
@@ -29,11 +32,13 @@ from docket.vault.segments import Segment, segments
 from docket.vault.spans import problem
 from docket.web import urls
 from docket.web.display import at as local_time
-from docket.web.panel import Style, anchored_rid, frontmatter_end, line_parts
+from docket.web.panel import AnchorLink, SummaryDoc, SummaryLine, anchored_rid, frontmatter_end, line_parts, title_of
 from docket.web.recording_state import RecordingState, time_at
 from docket.web.state import SearchState
 
 Mode = Literal["start", "recording", "held", "missing", "other"]
+# The player's source: the stored audio, by byte range, for the browser's session only (DR-0576, DR-0709).
+AUDIO_PATH = "/api/web/recording/audio"
 
 # Why there is no audio to play, each with the sentence the page says: the media reader's states (DR-0551), and
 # `stored` while the page has no player. A closed list, so every reason has its words and its test.
@@ -89,81 +94,46 @@ class Facts:
     speech: str | None = None
 
 
-@dataclass(frozen=True)
-class Audio:
+class Audio(BaseModel):
     why: NoAudio
+    message: str
     speech: str | None = None
 
-    @property
-    def message(self) -> str:
-        return NO_AUDIO[self.why]
 
-
-@dataclass(frozen=True)
-class AnchorView:
-    """An anchor as a link: on the transcript shown, its time alone, since the rid is the page's; else as written."""
-
-    text: str
-    url: str | None
-    title: str = ""
-
-
-@dataclass(frozen=True)
-class SummaryLine:
-    n: int
-    body: str
-    style: Style
-    anchors: list[AnchorView]
-    cited: bool
-
-
-@dataclass(frozen=True)
-class SummaryView:
-    id: str
-    type: str
-    rev: int
-    lines: list[SummaryLine]
-
-
-@dataclass(frozen=True)
-class DocChoice:
+class DocChoice(BaseModel):
     id: str
     url: str
     on: bool
 
 
-@dataclass(frozen=True)
-class SegmentView:
+class TranscriptLine(BaseModel):
     at: str
     url: str
     speaker: str
     text: str
     mark: bool
-    # The first line `at` marks carries the id every link setting `at` names.
+    # The first line `at` marks: the page scrolls to it, and every link setting `at` names it (#at).
     target: bool = False
     # Where the player starts for this line, in seconds; none for a cut stretch, which is silent.
-    start: str | None = None
+    start: float | None = None
     cut: bool = False
 
 
-@dataclass(frozen=True)
-class TranscriptView:
+class TranscriptView(BaseModel):
     rid: str
     meta: str
-    segments: list[SegmentView]
+    lines: list[TranscriptLine]
     problem: str | None
 
 
-@dataclass(frozen=True)
-class PairRow:
+class PairRow(BaseModel):
     """One stretch of time: the recorder's lines in it, and Whisper's whose middle falls in them."""
 
-    left: list[SegmentView]
-    right: list[SegmentView]
+    left: list[TranscriptLine]
+    right: list[TranscriptLine]
 
 
-@dataclass(frozen=True)
-class PairView:
+class TranscriptPair(BaseModel):
     """The recorder's transcript and Whisper's side by side, aligned by time (DR-0570)."""
 
     left: TranscriptView
@@ -171,34 +141,33 @@ class PairView:
     rows: list[PairRow]
 
 
-@dataclass(frozen=True)
-class OtherTranscript:
+class OtherTranscript(BaseModel):
     rid: str
     url: str
 
 
-@dataclass
-class RecordingView:
+class RecordingView(BaseModel):
     mode: Mode
     rid: str = ""
     title: str = ""
-    meta: str = ""
+    # The source, when and how long, each a part of the line under the title.
+    meta: list[str] = []
     locator: str = ""
     message: str = ""
     link: str | None = None
     link_label: str = ""
     audio: Audio | None = None
-    summary: SummaryView | None = None
+    summary: SummaryDoc | None = None
     no_summary: str = ""
     note: str = ""
-    docs: list[DocChoice] = field(default_factory=list[DocChoice])
-    transcripts: list[TranscriptView] = field(default_factory=list[TranscriptView])
-    others: list[OtherTranscript] = field(default_factory=list[OtherTranscript])
+    docs: list[DocChoice] = []
+    transcripts: list[TranscriptView] = []
+    others: list[OtherTranscript] = []
     no_transcript: str = ""
-    problems: list[str] = field(default_factory=list[str])
+    problems: list[str] = []
     # The player's source, with the line `at` marks as its start (`#t=`), when the audio reads ok.
     player: str | None = None
-    pair: PairView | None = None
+    pair: TranscriptPair | None = None
 
 
 def is_recording(record: RawRecord, transcripts: tuple[RawRecord, ...]) -> bool:
@@ -251,13 +220,13 @@ def build(facts: Facts, state: RecordingState) -> RecordingView:
         rid=facts.rid,
         title=head.title or (shown.title if shown is not None else None) or facts.rid,
         locator=_locator(facts.rid, state.at),
-        audio=Audio(facts.audio, facts.speech),
+        audio=Audio(why=facts.audio, message=NO_AUDIO[facts.audio], speech=facts.speech),
         problems=list(facts.problems),
     )
     parts = [head.source, local_time(head.ts, facts.tz)]
     if segs:
         parts.append(f"{format_time(-(-max(s.end_ms for s in segs) // 1000))} long")
-    view.meta = " \N{MIDDLE DOT} ".join(parts)
+    view.meta = parts
     if shown is None:
         view.no_transcript = "No transcript of this recording is in the raw log yet."
     else:
@@ -268,7 +237,9 @@ def build(facts: Facts, state: RecordingState) -> RecordingView:
             view.pair = _pair(page, shown, partner)
         paired = {shown.rid, *([partner.rid] if partner is not None else [])}
         view.others = [
-            OtherTranscript(t.rid, state.but(rid=t.rid).link()) for t in facts.transcripts if t.rid not in paired
+            OtherTranscript(rid=t.rid, url=state.but(rid=t.rid).link())
+            for t in facts.transcripts
+            if t.rid not in paired
         ]
     if facts.audio == "stored" and facts.recording is not None:
         view.player = _player(facts.recording.rid, segs, page.marked)
@@ -292,8 +263,8 @@ def _partner(facts: Facts, shown: RawRecord) -> RawRecord | None:
 
 
 def _player(rid: str, segs: list[Segment], marked: set[int]) -> str:
-    """The audio's URL, starting at the first line `at` marks, so playing starts there without JavaScript too."""
-    url = urls.link("/recording/audio", [("rid", rid)])
+    """The audio's URL, starting at the first line `at` marks (`#t=`), so the player starts there."""
+    url = urls.link(AUDIO_PATH, [("rid", rid)])
     first = min(marked, default=None)
     return url if first is None else f"{url}#t={_seconds(segs[first].start_ms)}"
 
@@ -345,17 +316,17 @@ def _absent(facts: Facts) -> RecordingView:
     )
 
 
-def _line(state: RecordingState, s: Segment, *, mark: bool, target: bool, named: bool = True) -> SegmentView:
+def _line(state: RecordingState, s: Segment, *, mark: bool, target: bool, named: bool = True) -> TranscriptLine:
     """A transcript line; `named` false for Whisper's, which names no speaker (there is no diarization)."""
     cut = s.text == CUT_MARKER
-    return SegmentView(
+    return TranscriptLine(
         at=format_time(s.start_ms // 1000),
         url=state.but(at=time_at(s.start_ms // 1000)).link(),
         speaker="" if cut or not named else s.speaker or "?",
         text=s.text,
         mark=mark,
         target=target,
-        start=None if cut else _seconds(s.start_ms),
+        start=None if cut else s.start_ms / 1000,
         cut=cut,
     )
 
@@ -364,7 +335,7 @@ def _transcript(page: _Shown, shown: RawRecord) -> TranscriptView:
     state, segs, marked = page.state, page.segs, page.marked
     first = min(marked, default=None)
     lines = [_line(state, s, mark=i in marked, target=i == first) for i, s in enumerate(segs)]
-    return TranscriptView(shown.rid, _meta(shown, segs), lines, _outside(state, shown, marked))
+    return TranscriptView(rid=shown.rid, meta=_meta(shown, segs), lines=lines, problem=_outside(state, shown, marked))
 
 
 def _meta(record: RawRecord, segs: list[Segment]) -> str:
@@ -380,7 +351,7 @@ def _outside(state: RecordingState, shown: RawRecord, marked: set[int]) -> str |
     )
 
 
-def _pair(page: _Shown, shown: RawRecord, partner: RawRecord) -> PairView:
+def _pair(page: _Shown, shown: RawRecord, partner: RawRecord) -> TranscriptPair:
     """The two side by side, the recorder's on the left: each row a line of the left with the right's lines whose
     middle falls in it; a right line in a gap of the left's gets a row of its own. A cut stretch sits in one row, cut
     in both, as Whisper's `[cut]` spans the stretch the recorder's was cut at."""
@@ -393,7 +364,7 @@ def _pair(page: _Shown, shown: RawRecord, partner: RawRecord) -> PairView:
     second = min(rmarks, default=None) if first is None else None
     lines = [_line(state, s, mark=i in lmarks, target=i == first) for i, s in enumerate(lsegs)]
     other = [_line(state, s, mark=j in rmarks, target=j == second, named=False) for j, s in enumerate(rsegs)]
-    rows: list[tuple[int, list[SegmentView], list[SegmentView]]] = [
+    rows: list[tuple[int, list[TranscriptLine], list[TranscriptLine]]] = [
         (s.start_ms, [lines[i]], []) for i, s in enumerate(lsegs)
     ]
     starts = [s.start_ms for s in lsegs]
@@ -405,10 +376,10 @@ def _pair(page: _Shown, shown: RawRecord, partner: RawRecord) -> PairView:
         else:
             rows.append((s.start_ms, [], [other[j]]))
     rows.sort(key=lambda r: r[0])
-    return PairView(
-        TranscriptView(left.rid, _meta(left, lsegs), [], _outside(state, left, lmarks)),
-        TranscriptView(right.rid, _meta(right, rsegs), [], None),
-        [PairRow(a, b) for _, a, b in rows],
+    return TranscriptPair(
+        left=TranscriptView(rid=left.rid, meta=_meta(left, lsegs), lines=[], problem=_outside(state, left, lmarks)),
+        right=TranscriptView(rid=right.rid, meta=_meta(right, rsegs), lines=[], problem=None),
+        rows=[PairRow(left=a, right=b) for _, a, b in rows],
     )
 
 
@@ -422,7 +393,7 @@ def _summary(page: _Shown, view: RecordingView) -> None:
     default = facts.attached or (facts.legacy[0] if facts.legacy else None)
     for doc in (*facts.docs, *facts.legacy):
         on = chosen is not None and doc == chosen.id
-        view.docs.append(DocChoice(doc, state.but(doc=None if doc == default else doc).link(), on))
+        view.docs.append(DocChoice(id=doc, url=state.but(doc=None if doc == default else doc).link(), on=on))
     if chosen is None:
         if not view.problems:
             view.no_summary = "No summary covers this recording yet."
@@ -433,24 +404,26 @@ def _summary(page: _Shown, view: RecordingView) -> None:
         if line.n <= start:
             continue
         style, body, anchors = line_parts(line.text)
-        links: list[AnchorView] = []
+        links: list[AnchorLink] = []
         cited = False
         for anchor in anchors:
             link, on = _anchor(page, anchor, chosen.covers)
             links.append(link)
             cited = cited or on
-        lines.append(SummaryLine(line.n, body, style, links, cited))
-    view.summary = SummaryView(chosen.id, chosen.type, chosen.rev, lines)
+        lines.append(SummaryLine(n=line.n, body=body, style=style, anchors=links, cited=cited))
+    view.summary = SummaryDoc(
+        id=chosen.id, type=chosen.type, rev=chosen.rev, title=title_of(lines, chosen.id), lines=lines
+    )
     if chosen.type == "legacy-note":
         view.note = "A legacy note has no anchors, so its lines don't point into the transcript."
 
 
-def _anchor(page: _Shown, anchor: Anchor, covers: list[str]) -> tuple[AnchorView, bool]:
+def _anchor(page: _Shown, anchor: Anchor, covers: list[str]) -> tuple[AnchorLink, bool]:
     """Where a summary line's anchor links, and whether it points at what `at` marks. A time on this recording opens
     here; anything else opens on the Search page."""
     rid = anchored_rid(anchor, covers)
     if rid is None:
-        return AnchorView(anchor.token, None), False
+        return AnchorLink(text=anchor.token), False
     facts, shown = page.facts, page.transcript
     target = next((t for t in facts.transcripts if t.rid == rid), None)
     if target is None and facts.recording is not None and rid == facts.recording.rid:
@@ -458,10 +431,14 @@ def _anchor(page: _Shown, anchor: Anchor, covers: list[str]) -> tuple[AnchorView
         target = shown
     if target is None or anchor.kind == "part":
         hit = format_anchor(rid, anchor.kind, anchor.start, anchor.end)[1:-1]
-        return AnchorView(anchor.token, SearchState(hit=hit).url(), f"Open {hit} on the Search page"), False
+        return AnchorLink(
+            text=anchor.token, url=SearchState(hit=hit).url(), title=f"Open {hit} on the Search page"
+        ), False
     at = time_at(anchor.start, anchor.end) if anchor.kind == "time" else None
     here = shown is not None and target.rid == shown.rid
     url = page.state.but(rid=page.state.rid if here else target.rid, at=at).link()
     text = format_anchor(None, "time", at.start, at.end) if here and at is not None else anchor.token
     title = f"{anchor.token}: the transcript" + (" at this time" if at is not None else "")
-    return AnchorView(text, url, title), here and at is not None and bool(_marks(page.segs, at) & page.marked)
+    return AnchorLink(text=text, url=url, title=title), here and at is not None and bool(
+        _marks(page.segs, at) & page.marked
+    )

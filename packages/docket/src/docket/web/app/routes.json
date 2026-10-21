@@ -3,5 +3,7 @@
   "/today",
   "/queue",
   "/ledger",
-  "/meetings"
+  "/meetings",
+  "/search",
+  "/recording"
 ]
